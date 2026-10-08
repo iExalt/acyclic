@@ -1,0 +1,14 @@
+[tools]
+rust = "1.98.1"
+python = "3.14.7"
+uv = "0.12.13"
+ruff = "0.16.7"
+"cargo:cargo-edit" = "0.13.13"
+"cargo:cargo-generate" = "0.24.0"
+"cargo:cargo-nextest" = "0.9.144"
+
+[env]
+UV_PROJECT_ENVIRONMENT = "{{ env.HOME }}/.virtualenvs/{{ config_root | basename }}"
+
+[settings]
+python.uv_venv_auto = "create|source"
