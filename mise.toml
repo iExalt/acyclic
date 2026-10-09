@@ -8,7 +8,11 @@ ruff = "0.16.7"
 "cargo:cargo-nextest" = "0.9.144"
 
 [env]
+# Keep uv project environments outside the checkout so repository moves do not relocate them.
 UV_PROJECT_ENVIRONMENT = "{{ env.HOME }}/.virtualenvs/{{ config_root | basename }}"
+# Create and activate a seeded central environment so Python and pip both resolve inside it.
+_.python.venv = { path = "{{ env.HOME }}/.virtualenvs/{{ config_root | basename }}", create = true, uv_create_args = ["--seed"] }
 
 [settings]
-python.uv_venv_auto = "create|source"
+# Disable Mise auto-venv creation, which can recreate a checkout-local .venv.
+python.uv_venv_auto = false
