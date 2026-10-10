@@ -1,59 +1,23 @@
-# Rust Workspace Template
+# acyclic
 
-A reusable GitHub and `cargo-generate` template for Rust projects organized as a Cargo workspace.
+A decentralized, Git-native issue tracker and project management tool for one person and many agents.
 
-## Create a workspace
+Early days: nothing here works yet.
 
-Choose either creation method.
+## North star
 
-### GitHub
+- Decentralized and Git-native: every machine keeps its own replica and works offline; replicas merge through Git.
+- Workstreams and projects are represented as a DAG, with different types of edges: hard and soft dependencies,
+  relationships and more.
+- "Automatic" (well, model- or agent-assisted) placement and connection of new bugs, issues and feature requests as
+  leaves in the DAG.
+- [Paseo](https://github.com/getpaseo/paseo) integration: spawn one or more projects or worktrees to tackle an issue,
+  a workstream, or a whole (sub)tree of issues.
+- A CLI for agents and terminal interaction, and explicitly no MCP.
+- A web UI for browsing, editing and adding issues.
 
-Select **Use this template** on GitHub and create a repository from
-[`iExalt/rust-workspace`](https://github.com/iExalt/rust-workspace).
+The [glossary](GLOSSARY.md) defines the vocabulary.
 
-### cargo-generate
+## Licence
 
-```sh
-cargo generate \
-  --git https://github.com/iExalt/rust-workspace.git \
-  --name my-project
-```
-
-Then prepare the generated repository:
-
-1. Update this README.
-2. Add project-specific metadata, such as `authors` and `repository`, to
-   `[workspace.package]` in `Cargo.toml`.
-3. Update the copyright holder in `LICENSE` when needed.
-4. Install the pinned development tools:
-
-   ```sh
-   mise trust
-   mise install
-   ```
-
-## Add a crate
-
-Generate a library crate from the included template:
-
-```sh
-mise exec -- cargo generate \
-  --path workspace/template \
-  --destination workspace \
-  --name my-crate \
-  --vcs none
-```
-
-Crates created directly under `workspace/` are included in the Cargo workspace automatically.
-Generated crates inherit their version, Rust edition, and license from the workspace manifest.
-
-## Develop
-
-After adding a crate, run the standard workspace checks through the Rust toolchain managed by
-`mise`:
-
-```sh
-mise exec -- cargo fmt --all --check
-mise exec -- cargo clippy --workspace --all-targets --all-features -- -D warnings
-mise exec -- cargo test --workspace --all-features
-```
+[MIT](LICENSE).
