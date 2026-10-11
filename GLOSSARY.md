@@ -1,7 +1,7 @@
 # acyclic
 
 acyclic is a Git-native issue tracker for one person and many agents, where work forms a graph and agents pick up
-coherent pieces of it.
+coherent pieces of it, plus the app and the agent runs that carry that work out.
 
 ## Work
 
@@ -36,35 +36,53 @@ _Avoid_: recon, research task
 ## Execution
 
 **Readiness**:
-Whether an item or workstream can start now, given its dependencies, claims and resources.
+Whether an item or thread can start now, given its dependencies, claims and resources.
 _Avoid_: status (for this), unblocked
 
 **Placement**:
-Choosing where a new item belongs: its parent, its links and its workstream.
+Choosing where a new item belongs: its parent, its links and its thread.
 _Avoid_: triage, filing
 
 **Split**:
-Dividing a set of items into workstreams, or one workstream into several.
+Dividing a set of items into threads, or one thread into several.
 _Avoid_: partition, breakdown
 
-**Workstream**:
-A bounded piece of work that one agent chat works through from start to finish, approved as a unit.
-_Avoid_: thread (the planning skills' word for the same thing), track, lane, operation
+**Thread**:
+A bounded piece of work that one continuing agent conversation works through from start to finish, approved as a
+unit.
+_Avoid_: workstream, track, lane, operation
 
-**Provisional workstream**:
-A workstream acyclic or an agent proposed that the user has not yet approved.
-_Avoid_: draft workstream, suggested workstream
+**Provisional thread**:
+A thread acyclic or an agent proposed that the user has not yet approved.
+_Avoid_: draft thread, suggested thread
 
 **Proposed member**:
-An item added to an approved or running workstream that waits for the user's approval.
+An item added to an approved or running thread that waits for the user's approval.
+
+**Run**:
+One stretch of an agent working on a thread, from launch to stop; a thread's runs happen one at a time, each
+continuing the same conversation.
+_Avoid_: session, job, deployment
 
 **Brief**:
-What an agent receives when a workstream is deployed: the work, its context and its gates.
+What an agent receives when a thread is deployed: the work, its context and its gates.
 _Avoid_: orders, prompt (for the whole brief)
 
 **Claim**:
-An agent's time-limited hold on an item or workstream it is working on.
+An agent's time-limited hold on an item or thread it is working on.
 _Avoid_: lock, assignment
+
+**Dispatcher**:
+The part of acyclic that starts runs of approved, ready threads on its own, within limits the user sets.
+_Avoid_: scheduler, project manager
+
+**Intake**:
+Adding work by describing it to an agent in a chat, which files it, places it and splits it.
+_Avoid_: triage, inbox
+
+**Unfiled chat**:
+An agent conversation that belongs to no thread yet; filing it makes it an item.
+_Avoid_: loose chat, orphan
 
 **Resource**:
 Something only one holder may use at a time, such as a file area, a GPU, a host or the user's attention.
@@ -74,7 +92,8 @@ _Avoid_: mutex, exclusion
 The state of finished code work whose commit is not yet on its repository's default branch.
 
 **Needs-you list**:
-Everything waiting on the user: approvals, conflicts nobody resolved, and new blockers on approved work.
+Everything waiting on the user: approvals, agents' questions and permission prompts, conflicts nobody resolved, and new
+blockers on approved work.
 _Avoid_: inbox, notifications
 
 ## Relationships between items
@@ -107,8 +126,9 @@ _Avoid_: instance, node
 ## Relationships
 
 - A **Tracker** holds one **Trust domain**'s **Items**; each machine has one **Replica** of it
-- An **Item** has at most one parent **Item**, and at most one **Workstream**
-- A **Workstream** may hold **Items** from different branches of the outcome tree
+- An **Item** has at most one parent **Item**, and at most one **Thread**
+- A **Thread** may hold **Items** from different branches of the outcome tree
+- A **Thread** has one **Run** at a time; each **Run** continues the thread's conversation
 - A **Goal** is an **Item** whose **Gate** must pass before it is done
 - **Hard dependencies** and **Soft dependencies** together never form a cycle
 
@@ -118,4 +138,6 @@ _Avoid_: instance, node
   is a **Goal**; "campaign" stays the skills' word.
 - "project": a top-level **Item** in acyclic, but a registered checkout in Paseo. Resolved: "project" means the
   acyclic sense here; say "Paseo project" for the other.
-- "thread" and "workstream": the planning skills say thread. Resolved: **Workstream**.
+- "thread" and "workstream": earlier drafts said workstream. Resolved: **Thread**, the planning skills' word too.
+- "thread" and a chat: in chat apps a thread is one conversation. Here a **Thread** is one continuing conversation
+  across its **Runs**, so the two senses agree.
