@@ -57,7 +57,19 @@ A thread acyclic or an agent proposed that the user has not yet approved.
 _Avoid_: draft thread, suggested thread
 
 **Proposed member**:
-An item added to an approved or running thread that waits for the user's approval.
+An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes and
+a project-management agent's apply at once.
+
+**Project-management agent**:
+An agent the user deployed to change the graph's structure, whose edits apply like the user's.
+
+**Card**:
+A one-shot task the intake chat suggests, which the user starts, keeps or dismisses with a tap.
+_Avoid_: suggestion, ticket
+
+**Autonomy level**:
+The rule for what reaches the user from runs, set globally and overridable per thread.
+_Avoid_: trust level, mode (for this)
 
 **Run**:
 One stretch of an agent working on a thread, from launch to stop; a thread's runs happen one at a time, each
@@ -88,6 +100,10 @@ _Avoid_: loose chat, orphan
 Something only one holder may use at a time, such as a file area, a GPU, a host or the user's attention.
 _Avoid_: mutex, exclusion
 
+**Archived**:
+A finished subtree hidden from the graph, readiness and the dispatcher by default; archiving hides, never deletes.
+_Avoid_: closed, deleted
+
 **In review**:
 The state of finished code work whose commit is not yet on its repository's default branch.
 
@@ -113,8 +129,16 @@ _Avoid_: relates_to, see also
 ## Where the data lives
 
 **Tracker**:
-The repository that holds one trust domain's items and history.
+The repository that holds one trust domain's items and their changes; it is not where project knowledge is kept.
 _Avoid_: board, project (for the repository)
+
+**Record**:
+A dated Markdown document of history (a decision, an experiment, an outcome), only ever added to.
+_Avoid_: log, ADR (for the general idea)
+
+**Current-state document**:
+A short Markdown document describing how things are now, rewritten in place rather than appended to.
+_Avoid_: living doc, wiki page
 
 **Trust domain**:
 A set of projects whose items may share a tracker because the same people may see all of them.
