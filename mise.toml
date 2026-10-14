@@ -6,6 +6,8 @@ ruff = "0.16.7"
 "cargo:cargo-edit" = "0.13.13"
 "cargo:cargo-generate" = "0.24.0"
 "cargo:cargo-nextest" = "0.9.144"
+# Podman runs agent containers on macOS (roadmap 3.3); its machine helpers arrive with that step.
+podman = { version = "6.1.4", os = ["macos"] }
 
 [env]
 # Keep uv project environments outside the checkout so repository moves do not relocate them.
