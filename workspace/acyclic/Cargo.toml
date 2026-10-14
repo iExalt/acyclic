@@ -1,0 +1,9 @@
+[package]
+name = "acyclic"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true
+
+[dependencies]
+acyclic-cli.workspace = true

@@ -9,3 +9,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+acyclic-cli = { path = "workspace/acyclic-cli" }
+acyclic-core = { path = "workspace/acyclic-core" }
+acyclic-guard = { path = "workspace/acyclic-guard" }
+tempfile = "3.27.0"

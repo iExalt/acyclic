@@ -1,0 +1,11 @@
+[package]
+name = "acyclic-guard"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile.workspace = true

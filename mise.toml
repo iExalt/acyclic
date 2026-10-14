@@ -6,8 +6,29 @@ ruff = "0.16.7"
 "cargo:cargo-edit" = "0.13.13"
 "cargo:cargo-generate" = "0.24.0"
 "cargo:cargo-nextest" = "0.9.144"
+# The pre-push guard's secret scanner (roadmap 1.1).
+"aqua:gitleaks/gitleaks" = "8.30.1"
 # Podman runs agent containers on macOS (roadmap 3.3); its machine helpers arrive with that step.
 podman = { version = "6.1.4", os = ["macos"] }
+
+[tasks.check]
+description = "Routine check: format, Clippy and every crate's unit tests (budget: 60 seconds on a warm cache)"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo nextest run --workspace --lib --bins --locked --no-tests=pass",
+  "sh scripts/check-doc-fences.sh",
+  # Outside CI, a clone without the pre-push guard fails the check, so it never pushes unguarded.
+  '[ -n "${CI:-}" ] || [ "$(git config core.hooksPath)" = .githooks ] || { echo "the pre-push guard is not installed: run mise run hooks:install" >&2; exit 1; }',
+]
+
+[tasks."check:integration"]
+description = "Integration tests (budget: 3 minutes)"
+run = "cargo nextest run --workspace --test '*' --locked --no-tests=pass"
+
+[tasks."hooks:install"]
+description = "Install the pre-push guard for this clone"
+run = "git config core.hooksPath .githooks"
 
 [env]
 # Keep uv project environments outside the checkout so repository moves do not relocate them.

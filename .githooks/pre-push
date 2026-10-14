@@ -1,0 +1,3 @@
+#!/bin/sh
+# The publication guard (workspace/acyclic-guard). Any failure, including a build failure, blocks the push.
+exec mise exec -- cargo run --quiet --locked --package acyclic-guard -- pre-push "$@"

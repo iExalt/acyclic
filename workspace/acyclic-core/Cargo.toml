@@ -1,0 +1,6 @@
+[package]
+name = "acyclic-core"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true
