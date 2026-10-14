@@ -201,14 +201,30 @@ fn find(list: &DenyList, text: &str, channel: Channel, object: &str) -> Vec<Find
 /// Gitleaks's exit code for a leak. Its own errors exit with 1, so a leak needs a distinct code.
 const GITLEAKS_LEAK_EXIT: i32 = 10;
 
+/// Gitleaks's built-in rules, passed explicitly so that a `.gitleaks.toml` in the pushed tree can't replace them.
+const GITLEAKS_CONFIG: &str = "[extend]\nuseDefault = true\n";
+
 /// Runs Gitleaks over the outgoing commits; `true` when it found a leak.
+///
+/// Nothing in the pushed content can weaken the scan: the configuration is ours, `gitleaks:allow` comments are
+/// ignored, and the ignore file is looked up in an empty private directory.
 fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
+    let dir = PrivateDir::new()?;
+    let config = dir.0.join("gitleaks.toml");
+    std::fs::write(&config, GITLEAKS_CONFIG)
+        .map_err(|err| Error(format!("can't write gitleaks' configuration: {err}")))?;
     let output = Command::new("gitleaks")
-        .args(["git", "--no-banner", "--redact", "--exit-code"])
+        .args(["git", "--no-banner", "--redact", "--ignore-gitleaks-allow", "--exit-code"])
         .arg(GITLEAKS_LEAK_EXIT.to_string())
+        .arg("--config")
+        .arg(&config)
+        .arg("--gitleaks-ignore-path")
+        .arg(&dir.0)
         .arg("--log-opts")
         .arg(range.join(" "))
         .arg(repo)
+        .env_remove("GITLEAKS_CONFIG")
+        .env_remove("GITLEAKS_CONFIG_TOML")
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -218,6 +234,28 @@ fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
         Some(0) => Ok(false),
         Some(GITLEAKS_LEAK_EXIT) => Ok(true),
         _ => Err(Error(format!("gitleaks failed: {}", output.status))),
+    }
+}
+
+/// A fresh, empty directory, removed on drop.
+struct PrivateDir(std::path::PathBuf);
+
+impl PrivateDir {
+    fn new() -> Result<Self, Error> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let path =
+            std::env::temp_dir().join(format!("acyclic-guard-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&path)
+            .map_err(|err| Error(format!("can't create {}: {err}", path.display())))?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for PrivateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

@@ -20,7 +20,8 @@ the remote's tracking refs:
 - the text of annotated tags.
 
 Reports name the commit, the channel and the deny-list line that matched, never the term itself. Gitleaks then scans
-the same commits; a leak or a Gitleaks error blocks the push. A push to a URL rather than a named remote has no
+the same commits with its default rules, ignoring any `.gitleaks.toml`, `.gitleaksignore` or `gitleaks:allow` in the
+pushed content; a leak or a Gitleaks error blocks the push. A push to a URL rather than a named remote has no
 tracking refs to compare against, so the whole history is scanned.
 
 Install the hook with `mise run hooks:install`. Never bypass it; if it blocks, fix the content.

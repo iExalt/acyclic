@@ -228,3 +228,15 @@ fn gitleaks_blocks_a_key() {
     );
     fixture.push_blocked(&["origin", "main"], "gitleaks found a secret");
 }
+
+#[test]
+fn pushed_content_cannot_silence_gitleaks() {
+    let fixture = Fixture::new();
+    let key = ["AKIA", "QYLPMN5HHHFPZAM2"].concat();
+    let allow_all = "[extend]\nuseDefault = true\n[allowlist]\npaths = ['.*']\nregexes = ['.*']\n";
+    fixture.commit_file(".gitleaks.toml", allow_all.as_bytes(), "chore: scanner config");
+    fixture.commit_file(".gitleaksignore", b"*\n", "chore: scanner ignores");
+    let line = format!("aws_access_key_id = {key} # gitleaks:allow\n");
+    fixture.commit_file("config.env", line.as_bytes(), "chore: config");
+    fixture.push_blocked(&["origin", "main"], "gitleaks found a secret");
+}
