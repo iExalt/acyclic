@@ -11,6 +11,8 @@ pub mod import;
 pub mod locate;
 pub mod model;
 pub mod needs;
+#[doc(hidden)]
+pub mod probe;
 pub mod ready;
 pub mod schema;
 pub mod scope;

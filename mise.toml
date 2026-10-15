@@ -29,8 +29,12 @@ description = "Integration tests (budget: 3 minutes)"
 run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
 [tasks."bench:store"]
-description = "Times the CLI against a synthetic tracker (default 3,500 items); not part of any check"
-run = "cargo run --quiet --release --locked -p acyclic-cli --example bench_store --"
+description = "Times the binary against trackers of several sizes; not part of any check"
+run = "cargo bench --quiet --locked -p acyclic --bench store --"
+
+[tasks."bench:store:phases"]
+description = "Like bench:store, with timing marks splitting each command into phases"
+run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
 
 [tasks."hooks:install"]
 description = "Install the pre-push guard for this clone"

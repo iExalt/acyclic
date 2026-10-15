@@ -387,7 +387,9 @@ impl Tracker {
         })?;
         let id = ReplicaId::new(id)?;
         let unused = setting(UNUSED_CONFIG) == Some(id.as_str());
+        crate::probe::mark("open: git config");
         let tip = git.resolve(&state_ref(&id))?;
+        crate::probe::mark("open: git rev-parse");
         let tracker = |git, replica, unused, tip| Self {
             git,
             replica,
@@ -445,7 +447,11 @@ impl Tracker {
         if let Some(state) = cache.read(&tip) {
             return Ok((Some(tip), state));
         }
-        let state = read_own_state(&self.git, &tip)?;
+        let files = read_files(&self.git, &tip)?;
+        crate::probe::mark("load: git ls-tree and cat-file");
+        let state = State::from_own_files(&files)?;
+        drop(files);
+        crate::probe::mark("load: parse files");
         cache.write(&tip, &state);
         Ok((Some(tip), state))
     }
@@ -531,6 +537,7 @@ impl Tracker {
         apply: impl Fn(&mut Replica, Millis) -> Result<(), E>,
         hooks: &Hooks,
     ) -> Result<Outcome, BatchError<E>> {
+        crate::probe::mark("before the batch");
         let _lock = self.lock()?;
         let started = Instant::now();
         let mut retries = 0;
@@ -563,15 +570,22 @@ impl Tracker {
     ) -> Result<Option<String>, BatchError<E>> {
         // The state's tip and the log's segments in one process.
         let state = state_ref(&self.replica);
+        crate::probe::mark("batch: lock");
         let refs = self.git.refs_under(&[&state, &format!("refs/heads/log/{}/", self.replica)])?;
+        crate::probe::mark("batch: git for-each-ref");
         let (tip, before) = self.load_at(refs.get(&state).cloned())?;
         let mut replica = Replica::open(self.replica.clone(), before.clone());
+        crate::probe::mark("batch: clone state");
         let at = replica.stamp(now, allow_clock_step).map_err(StoreError::State)?;
         apply(&mut replica, at).map_err(BatchError::Apply)?;
-        if replica.state == before {
+        crate::probe::mark("batch: apply command");
+        let unchanged = replica.state == before;
+        crate::probe::mark("batch: compare");
+        if unchanged {
             return Ok(None);
         }
         let state_files = state_changes(&before, &replica.state);
+        crate::probe::mark("batch: changed files");
         let event_actor = actor_record(&replica.state, &meta.actor);
         let changes = diff(&before, &replica.state, root_of);
         let month = month_of(at);
@@ -579,10 +593,12 @@ impl Tracker {
         let (segment, segment_tip) = self.segment_in(&refs, "log", &month);
         let mut files = BTreeMap::new();
         let paths: Vec<String> = changes.keys().map(|root| log_path(root, &day)).collect();
+        crate::probe::mark("batch: log diff");
         let existing = match &segment_tip {
             Some(tip) => self.git.read_paths(tip, &paths)?,
             None => BTreeMap::new(),
         };
+        crate::probe::mark("batch: git cat-file for the log");
         for (root, writes) in changes {
             let event = Event {
                 at,
@@ -598,6 +614,7 @@ impl Tracker {
             content.push(b'\n');
             files.insert(path, Some(content));
         }
+        crate::probe::mark("batch: log events");
         let seconds = at.div_euclid(1_000);
         let commit = |scratch, parent, files, message| NewCommit {
             scratch,
@@ -612,6 +629,7 @@ impl Tracker {
             commit(SCRATCH_LOG, segment_tip.as_deref(), &files, "events"),
         ])?;
         let [commit, log_commit] = [&ids[0], &ids[1]].map(String::clone);
+        crate::probe::mark("batch: git fast-import");
 
         if let Some(hook) = &hooks.after_objects {
             hook();
@@ -624,8 +642,10 @@ impl Tracker {
             hook();
         }
         transaction.commit()?;
+        crate::probe::mark("batch: git update-ref");
         self.cache()?.write(&commit, &replica.state);
         self.maintain();
+        crate::probe::mark("batch: upkeep");
         if self.unused.swap(false, Ordering::Relaxed) {
             // Another worktree may have cleared it already; the state ref now vouches for the id either way.
             let _ = self.git.run(["config", "--unset", UNUSED_CONFIG], None, &[]);
@@ -1012,15 +1032,9 @@ fn months_between(from: &str, to: &str) -> u32 {
     u32::try_from((index(to) - index(from)).max(0)).unwrap_or(u32::MAX)
 }
 
-/// Reads the state held in a commit's tree.
 /// Reads a state from a commit's tree, refusing files that aren't in canonical form.
 fn read_state(git: &Git, commit: &str) -> Result<State, StoreError> {
     Ok(State::from_files(&read_files(git, commit)?)?)
-}
-
-/// Reads a state this replica wrote, skipping the canonical-form check.
-fn read_own_state(git: &Git, commit: &str) -> Result<State, StoreError> {
-    Ok(State::from_own_files(&read_files(git, commit)?)?)
 }
 
 fn read_files(git: &Git, commit: &str) -> Result<BTreeMap<String, String>, StoreError> {

@@ -7,6 +7,10 @@ name = "acyclic"
 version = "0.1.0"
 dependencies = [
  "acyclic-cli",
+ "acyclic-core",
+ "acyclic-fixtures",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

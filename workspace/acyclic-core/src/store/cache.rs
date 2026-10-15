@@ -35,13 +35,20 @@ impl Cache {
 
     /// The state cached for `tip`, if this build wrote it.
     pub(crate) fn read(&self, tip: &str) -> Option<State> {
-        let text = std::fs::read_to_string(&self.path).ok()?;
-        let (header, snapshot) = text.split_once('\n')?;
-        let header: Header = serde_json::from_str(header).ok()?;
-        if header != Self::header(tip) {
+        let text = std::fs::read_to_string(&self.path).ok();
+        crate::probe::mark("cache: read file");
+        let snapshot = text.as_deref().and_then(|text| {
+            let (header, snapshot) = text.split_once('\n')?;
+            let header: Header = serde_json::from_str(header).ok()?;
+            (header == Self::header(tip)).then_some(snapshot)
+        });
+        let Some(snapshot) = snapshot else {
+            crate::probe::mark("cache: miss");
             return None;
-        }
-        State::from_snapshot(snapshot).ok()
+        };
+        let state = State::from_snapshot(snapshot).ok();
+        crate::probe::mark("cache: parse");
+        state
     }
 
     /// Caches `state` as the one at `tip`. Best effort: a failure only means the next read goes to Git.
@@ -52,6 +59,7 @@ impl Cache {
         }
         let header = serde_json::to_string(&Self::header(tip)).expect("a header serializes");
         let text = format!("{header}\n{}", state.to_snapshot());
+        crate::probe::mark("cache: serialize");
         let temporary = dir.join(format!(
             ".{}.{}.{}",
             self.path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
@@ -65,6 +73,7 @@ impl Cache {
         {
             let _ = std::fs::remove_file(&temporary);
         }
+        crate::probe::mark("cache: write file");
     }
 
     #[cfg(test)]

@@ -12,6 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
+[features]
+probe = ["acyclic-core/probe"]
+
 [dev-dependencies]
 acyclic-fixtures.workspace = true
 insta.workspace = true

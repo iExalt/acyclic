@@ -7,3 +7,17 @@ license.workspace = true
 
 [dependencies]
 acyclic-cli.workspace = true
+
+[features]
+# Timing marks in the binary, for `mise run bench:store:phases`.
+probe = ["acyclic-cli/probe"]
+
+[dev-dependencies]
+acyclic-core.workspace = true
+acyclic-fixtures.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "store"
+harness = false

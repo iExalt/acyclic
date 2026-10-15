@@ -42,6 +42,7 @@ impl Env {
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     let (code, output) = execute(args, &Env::from_process());
     print!("{output}");
+    acyclic_core::probe::mark("print output");
     ExitCode::from(code)
 }
 
@@ -49,6 +50,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
 /// `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`; only `--help`,
 /// `--version` and `prime` print text.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> (u8, String) {
+    acyclic_core::probe::mark("start");
     let cli = match args::Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(err) => {
@@ -62,8 +64,14 @@ pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> (u8, Stri
             return (usage.exit, render(&usage.envelope()));
         },
     };
-    match commands::run(&cli, env) {
-        Ok(commands::Output::Json(data)) => (exit::OK, render(&json!({"ok": true, "data": data}))),
+    let result = commands::run(&cli, env);
+    acyclic_core::probe::mark("command");
+    match result {
+        Ok(commands::Output::Json(data)) => {
+            let output = render(&json!({"ok": true, "data": data}));
+            acyclic_core::probe::mark("render output");
+            (exit::OK, output)
+        },
         Ok(commands::Output::Text(text)) => (exit::OK, text),
         Err(err) => (err.exit, render(&err.envelope())),
     }

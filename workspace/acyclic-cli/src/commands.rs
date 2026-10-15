@@ -237,6 +237,7 @@ impl<'a> Session<'a> {
     fn read(&self) -> Result<(State, Model), CliError> {
         let (_, state) = self.tracker.load()?;
         let model = Model::read(&state)?;
+        acyclic_core::probe::mark("model read");
         Ok((state, model))
     }
 
@@ -250,6 +251,7 @@ impl<'a> Session<'a> {
         let meta = Meta { actor: self.actor.clone(), run: None };
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
+            acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
@@ -286,8 +288,9 @@ impl<'a> Session<'a> {
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let ready: Vec<Json> = readiness
-            .ready(include_archived)?
+        let ready = readiness.ready(include_archived)?;
+        acyclic_core::probe::mark("readiness");
+        let ready: Vec<Json> = ready
             .into_iter()
             .map(|(id, rank)| json!({"item": id, "rank": rank, "title": model.items[&id].title}))
             .collect();
