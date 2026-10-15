@@ -6,7 +6,8 @@ use std::process::Command;
 use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model};
 use acyclic_core::ready::{GitAncestry, Readiness, Status, Wait};
 use acyclic_core::schema::{item, kind, repository};
-use acyclic_core::state::{Key, ReplicaId};
+use acyclic_core::scope::{self, ScopeEdit};
+use acyclic_core::state::{Error, Key, ReplicaId};
 use acyclic_core::store::{self, Meta, Tracker};
 use tempfile::TempDir;
 
@@ -52,8 +53,10 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
             model::set(replica, &record, repository::DEFAULT_BRANCH, Some(&"main"), by)
                 .map_err(state_error)?;
             for (id, thread) in [("dep", "t1"), ("same", "t1"), ("other", "t2")] {
-                let key = model::add_item(replica, id, id, by).map_err(state_error)?;
-                model::set(replica, &key, item::THREAD, Some(&thread), by).map_err(state_error)?;
+                model::add_item(replica, id, id, by).map_err(state_error)?;
+                let member =
+                    ScopeEdit::Member { item: id.to_owned(), thread: Some(thread.to_owned()) };
+                scope::edit(replica, &member, by).map_err(|e| Error::Format(e.to_string()))?;
             }
             for id in ["same", "other"] {
                 model::link(replica, id, "dep", LinkKind::Blocks, by).map_err(state_error)?;

@@ -185,13 +185,13 @@ fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() 
     let (mut a, mut b) = pair(&["x", "y"]);
     let thread_key = |id| Key::new(kind::THREAD, id).unwrap();
     set(&mut a, &thread_key("t1"), thread::TITLE, Some(&"one"), by(2)).unwrap();
-    set_element(&mut a, &thread_key("t1"), set::REPOSITORY, "docs", true, by(2)).unwrap();
+    put_element(&mut a, &thread_key("t1"), set::REPOSITORY, "docs", true, by(2)).unwrap();
     for (id, repo) in [("x", "code"), ("y", "infra")] {
-        set_element(&mut a, &item_key(id).unwrap(), set::REPOSITORY, repo, true, by(2)).unwrap();
+        put_element(&mut a, &item_key(id).unwrap(), set::REPOSITORY, repo, true, by(2)).unwrap();
     }
-    set(&mut a, &item_key("x").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
-    set(&mut a, &item_key("y").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
-    set(&mut b, &item_key("y").unwrap(), field::THREAD, Some(&"t2"), by(2)).unwrap();
+    put(&mut a, &item_key("x").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
+    put(&mut a, &item_key("y").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
+    put(&mut b, &item_key("y").unwrap(), field::THREAD, Some(&"t2"), by(2)).unwrap();
     a.join(&b.state).unwrap();
     let m = model(&a);
     assert_eq!(m.members("t1"), vec!["x"]);
@@ -267,6 +267,17 @@ fn fields_with_invariants_need_their_checked_writes() {
     let run = Key::new(kind::RUN, "r1").unwrap();
     assert!(matches!(
         set(&mut r, &run, run::THREAD, Some(&"t"), by(2)),
+        Err(WriteError::Checked { .. })
+    ));
+    let thread = Key::new(kind::THREAD, "t").unwrap();
+    for (key, prefix) in [(&x, set::REPOSITORY), (&thread, set::REPOSITORY)] {
+        assert!(matches!(
+            set_element(&mut r, key, prefix, "code", true, by(2)),
+            Err(WriteError::Checked { .. })
+        ));
+    }
+    assert!(matches!(
+        set(&mut r, &x, field::THREAD, Some(&"t"), by(2)),
         Err(WriteError::Checked { .. })
     ));
     set(&mut r, &x, field::NOTES, Some(&"fine"), by(2)).unwrap();

@@ -18,9 +18,10 @@ use crate::state::{Error, Key, Millis, Replica, State};
 pub const MAX_ID_LEN: usize = 64;
 
 /// A field's current value: unset, one value, or several written concurrently.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Value<T> {
     /// Unset.
+    #[default]
     None,
     /// One value, or several equal ones.
     One(T),
@@ -150,6 +151,26 @@ impl RunState {
     }
 }
 
+/// An autonomy level: which agents' questions reach the needs-you list (plan D61). Blockers always do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Level {
+    /// Ask about everything.
+    Everything,
+    /// Ask about scope changes and irreversible actions.
+    ScopeAndIrreversible,
+    /// Ask only about blockers: the default.
+    Blockers,
+}
+
+/// What reopening recorded on an item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reopened {
+    /// Whether it was archived, so its dependents stay unblocked and are only flagged.
+    pub archived: bool,
+}
+
 /// An item's role, derived from its place in the tree (plan D14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -193,6 +214,8 @@ pub struct Item {
     pub areas: BTreeSet<String>,
     /// Ids of the repositories the item touches.
     pub repositories: BTreeSet<String>,
+    /// Set while a reopened item is open again.
+    pub reopened: Value<Reopened>,
     /// Named resources the item holds while worked on.
     pub resources: BTreeSet<String>,
 }
@@ -239,6 +262,8 @@ pub struct Thread {
     pub pm_flag: Value<bool>,
     /// Repositories added explicitly, beyond those of its items.
     pub repositories: BTreeSet<String>,
+    /// The thread's autonomy level, overriding the global one.
+    pub autonomy: Value<Level>,
 }
 
 impl Thread {
@@ -305,6 +330,8 @@ pub struct Model {
     pub repositories: BTreeMap<String, Repository>,
     /// Runs by id.
     pub runs: BTreeMap<String, Run>,
+    /// The global autonomy level.
+    pub autonomy: Value<Level>,
     children: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -349,6 +376,7 @@ impl Model {
                         approved: value(state, key, thread::APPROVED)?,
                         pm_flag: value(state, key, thread::PM_FLAG)?,
                         repositories: elements(state, key, set::REPOSITORY),
+                        autonomy: value(state, key, thread::AUTONOMY)?,
                     };
                     model.threads.insert(key.id.clone(), thread);
                 },
@@ -370,6 +398,9 @@ impl Model {
                         state: value(state, key, run::STATE)?,
                     };
                     model.runs.insert(key.id.clone(), record);
+                },
+                kind::SETTINGS if key.id == crate::schema::GLOBAL => {
+                    model.autonomy = value(state, key, crate::schema::settings::AUTONOMY)?;
                 },
                 _ => {},
             }
@@ -523,6 +554,18 @@ impl Model {
         graph::cycles(&edges)
     }
 
+    /// A thread's autonomy level: its own, else the global one, else asking only about blockers. A conflicted level
+    /// counts as the one that asks most.
+    #[must_use]
+    pub fn level(&self, thread: Option<&str>) -> Level {
+        let own = thread.and_then(|t| self.threads.get(t)).map(|t| &t.autonomy);
+        let chosen = match own {
+            Some(level) if *level != Value::None => level,
+            _ => &self.autonomy,
+        };
+        chosen.all().into_iter().min().copied().unwrap_or(Level::Blockers)
+    }
+
     /// Phase 1's liveness for claims without a time lease: a run's claim holds unless its record shows the run
     /// ended; any other holder's does.
     #[must_use]
@@ -660,7 +703,9 @@ fn to_json<T: Serialize>(value: &T) -> Json {
 }
 
 /// The fields only a checked write may set, with the write to use instead.
-const CHECKED: [(&str, &str, &str); 5] = [
+const CHECKED: [(&str, &str, &str); 7] = [
+    (kind::ITEM, field::THREAD, "scope::edit"),
+    (kind::ITEM, field::REOPENED, "archive::reopen"),
     (kind::ITEM, field::PARENT, "set_parent"),
     (kind::ITEM, field::STATE, "set_state"),
     (kind::LINK, "", "link or unlink"),
@@ -690,7 +735,7 @@ pub fn set<T: Serialize>(
     put(replica, key, name, value, by)
 }
 
-fn put<T: Serialize>(
+pub(crate) fn put<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
     name: &str,
@@ -701,12 +746,32 @@ fn put<T: Serialize>(
     Ok(())
 }
 
-/// Adds an element to a set field, or removes it.
+/// Adds an element to a set field, or removes it. Repositories on items and threads are scope edits: use
+/// `scope::edit`.
 ///
 /// # Errors
 ///
-/// Fails on an invalid element name or when the state layer refuses.
+/// Fails on a repository of an item or thread, an invalid element name, or when the state layer refuses.
 pub fn set_element(
+    replica: &mut Replica,
+    key: &Key,
+    prefix: &str,
+    element: &str,
+    present: bool,
+    by: By<'_>,
+) -> Result<(), WriteError> {
+    let scope =
+        prefix == set::REPOSITORY && [kind::ITEM, kind::THREAD].contains(&key.kind.as_str());
+    if scope {
+        return Err(WriteError::Checked {
+            field: format!("{prefix}{element}"),
+            write: "scope::edit",
+        });
+    }
+    put_element(replica, key, prefix, element, present, by)
+}
+
+pub(crate) fn put_element(
     replica: &mut Replica,
     key: &Key,
     prefix: &str,
@@ -751,6 +816,9 @@ pub fn set_state(
     let key = existing(&replica.state, id)?;
     if value::<ItemState>(&replica.state, &key, field::STATE)? == Value::One(state) {
         return Ok(());
+    }
+    if state == ItemState::Done && replica.state.field(&key, field::REOPENED).is_some() {
+        put::<Reopened>(replica, &key, field::REOPENED, None, by)?;
     }
     put(replica, &key, field::STATE, Some(&state), by)
 }
@@ -879,7 +947,7 @@ pub fn set_run_state(
     put(replica, &key, run::STATE, Some(&state), by)
 }
 
-fn existing(state: &State, id: &str) -> Result<Key, WriteError> {
+pub(crate) fn existing(state: &State, id: &str) -> Result<Key, WriteError> {
     let key = item_key(id)?;
     if state.entity(&key).is_none() {
         return Err(WriteError::NoItem(id.to_owned()));
@@ -910,11 +978,12 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         areas: elements(state, key, set::AREA),
         repositories: elements(state, key, set::REPOSITORY),
         resources: elements(state, key, set::RESOURCE),
+        reopened: value(state, key, field::REOPENED)?,
     })
 }
 
 /// Reads a field as a [`Value`]; equal concurrent values read as one.
-fn value<T: DeserializeOwned + PartialEq>(
+pub(crate) fn value<T: DeserializeOwned + PartialEq>(
     state: &State,
     key: &Key,
     name: &str,

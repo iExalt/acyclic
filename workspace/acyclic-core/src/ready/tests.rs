@@ -58,7 +58,7 @@ fn done_with(r: &mut Replica, id: &str, commit: Option<&str>) {
 }
 
 fn thread(r: &mut Replica, id: &str, thread: &str) {
-    set(r, &item_key(id).unwrap(), field::THREAD, Some(&thread), by(2)).unwrap();
+    model::put(r, &item_key(id).unwrap(), field::THREAD, Some(&thread), by(2)).unwrap();
 }
 
 fn status(r: &Replica, ancestry: &dyn Ancestry, id: &str) -> Status {

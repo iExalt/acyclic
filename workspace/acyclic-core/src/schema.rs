@@ -17,6 +17,8 @@ pub mod kind {
     pub const REPOSITORY: &str = "repository";
     /// A proposed edit awaiting a decision.
     pub const PROPOSAL: &str = "proposal";
+    /// An agent's question for the user.
+    pub const QUESTION: &str = "question";
     /// Settings; the global ones have the id [`super::GLOBAL`].
     pub const SETTINGS: &str = "settings";
 }
@@ -44,6 +46,30 @@ pub mod item {
     pub const EVIDENCE: &str = "evidence";
     /// The thread the item belongs to; at most one, since it is a single field.
     pub const THREAD: &str = "thread";
+    /// Set when the item is reopened, until it is done again; flags its dependents.
+    pub const REOPENED: &str = "reopened";
+}
+
+/// Proposal fields.
+pub mod proposal {
+    /// The proposed scope edit.
+    pub const EDIT: &str = "edit";
+    /// Who proposed it.
+    pub const ACTOR: &str = "actor";
+    /// The user's decision: keep or drop.
+    pub const DECISION: &str = "decision";
+}
+
+/// Question fields.
+pub mod question {
+    /// The thread asking.
+    pub const THREAD: &str = "thread";
+    /// What kind of question it is, for the autonomy filter.
+    pub const CLASS: &str = "class";
+    /// The question.
+    pub const TEXT: &str = "text";
+    /// Whether it still awaits an answer.
+    pub const OPEN: &str = "open";
 }
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.

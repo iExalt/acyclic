@@ -118,9 +118,10 @@ pub fn winner_with(
 ///
 /// # Errors
 ///
-/// Fails when a holder other than a run claims without a time lease, when the item has children, when another holder wins the item in this replica's view (so a claim never
-/// silently replaces one it has seen; only claims made without seeing each other contest), when another holder's
-/// winning claim on another item holds one of this item's named resources, or on an unreadable claim.
+/// Fails when a holder other than a run claims without a time lease, when the item has children, when another
+/// holder wins the item in this replica's view (so a claim never silently replaces one it has seen; only claims made
+/// without seeing each other contest), when another holder's winning claim on another item holds one of this item's
+/// named resources, or on an unreadable claim.
 pub fn claim(
     replica: &mut Replica,
     item: &Key,

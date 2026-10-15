@@ -348,6 +348,10 @@ impl<'a> Readiness<'a> {
         if self.is_archived(dependency) {
             return None;
         }
+        // Reopening archived work flags its dependents but never blocks them again.
+        if item.reopened.all().iter().any(|r| r.archived) {
+            return None;
+        }
         if !item.is_done() {
             return Some(Wait::Open);
         }
