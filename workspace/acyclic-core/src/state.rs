@@ -1,0 +1,637 @@
+//! Stored state: entities of fields, each field a multi-value register of dotted values, with a causal context.
+//!
+//! A replica's state is the whole current state; joining two states is commutative, associative and idempotent, so
+//! any order of syncs gives the same result. Concurrent writes to a field keep every value until a later write that
+//! has seen them supersedes them. The layer doesn't interpret entities or fields, so unknown ones pass through
+//! unchanged; the model gives them meaning.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value as Json;
+
+/// The newest state format this build reads.
+pub const FORMAT_VERSION: u32 = 1;
+
+/// How far a writer's clock may step back before a write is refused, in milliseconds.
+pub const CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
+
+/// Milliseconds since the Unix epoch.
+pub type Millis = i64;
+
+/// A long-lived writer of state: the Mac's replica or a server's. Runs are not replicas.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ReplicaId(String);
+
+impl ReplicaId {
+    /// A replica id of ASCII letters, digits and `-`.
+    ///
+    /// # Errors
+    ///
+    /// Fails on an empty id or any other character.
+    pub fn new(id: &str) -> Result<Self, Error> {
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+            return Err(Error::InvalidName(id.to_owned()));
+        }
+        Ok(Self(id.to_owned()))
+    }
+
+    /// The id as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ReplicaId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A write's identity: the replica that applied it and that replica's counter.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Dot(pub ReplicaId, pub u64);
+
+/// An entity's address: its kind, such as `item`, and its id.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Key {
+    /// The entity's kind.
+    pub kind: String,
+    /// The entity's id within its kind.
+    pub id: String,
+}
+
+impl Key {
+    /// A key whose kind and id are safe as path segments: ASCII letters, digits, `-`, `_` and `.`, not starting with
+    /// `.`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the kind or id is empty or unsafe.
+    pub fn new(kind: &str, id: &str) -> Result<Self, Error> {
+        for part in [kind, id] {
+            let safe = !part.is_empty()
+                && !part.starts_with('.')
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+            if !safe {
+                return Err(Error::InvalidName(part.to_owned()));
+            }
+        }
+        Ok(Self { kind: kind.to_owned(), id: id.to_owned() })
+    }
+
+    /// The entity's file path, fanned out by the id's first two characters.
+    #[must_use]
+    pub fn path(&self) -> String {
+        let fan: String = self.id.chars().chain(std::iter::repeat('_')).take(2).collect();
+        format!("{}/{fan}/{}.json", self.kind, self.id)
+    }
+}
+
+/// One value of a field, with who wrote it and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stamped {
+    /// The actor behind the write: a person, an agent or a run (`run/<id>`).
+    pub actor: String,
+    /// When the writer applied it.
+    pub at: Millis,
+    /// The value. Numbers must be integers.
+    pub value: Json,
+}
+
+/// A field: every current value, by the dot that wrote it. More than one value is a conflict.
+pub type Register = BTreeMap<Dot, Stamped>;
+
+/// An entity: its fields by name.
+pub type Entity = BTreeMap<String, Register>;
+
+/// What a replica has seen: for each writer, the dots `1..=n`, and the writer's latest timestamp.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Context {
+    /// The highest counter seen from each writer; every lower one was seen too.
+    pub seen: BTreeMap<ReplicaId, u64>,
+    /// The latest timestamp seen from each writer.
+    pub clocks: BTreeMap<ReplicaId, Millis>,
+}
+
+impl Context {
+    /// Whether this context has seen a dot.
+    #[must_use]
+    pub fn covers(&self, dot: &Dot) -> bool {
+        self.seen.get(&dot.0).is_some_and(|&n| dot.1 <= n)
+    }
+
+    fn join(&mut self, other: &Self) {
+        for (replica, &n) in &other.seen {
+            let entry = self.seen.entry(replica.clone()).or_default();
+            *entry = (*entry).max(n);
+        }
+        for (replica, &at) in &other.clocks {
+            let entry = self.clocks.entry(replica.clone()).or_insert(at);
+            *entry = (*entry).max(at);
+        }
+    }
+}
+
+/// A replica's whole state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct State {
+    /// What the state has seen.
+    pub context: Context,
+    entities: BTreeMap<Key, Entity>,
+}
+
+/// Why a write, an operation or a read failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// A name that isn't safe as an id or path segment.
+    InvalidName(String),
+    /// A value holding a non-integer number.
+    InvalidValue,
+    /// The writer's clock stepped back by more than [`CLOCK_SKEW_MS`].
+    ClockJump {
+        /// The clock's reading.
+        now: Millis,
+        /// The writer's latest recorded timestamp.
+        last: Millis,
+    },
+    /// A rebuilt replica tried to write before its own entry was restored, which could reuse its dots.
+    NotContinuous(ReplicaId),
+    /// A run operation skipped a sequence number.
+    Gap {
+        /// The run.
+        run: String,
+        /// The sequence number expected next.
+        expected: u64,
+        /// The sequence number received.
+        got: u64,
+    },
+    /// A run operation reached a replica other than the one applying the run.
+    WrongReplica {
+        /// The run.
+        run: String,
+        /// The replica applying it.
+        applied_by: String,
+    },
+    /// The item already has a live claim in the writer's view.
+    Claimed(Key),
+    /// A state file that couldn't be read.
+    Format(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidName(name) => write!(f, "{name:?} is not a valid name"),
+            Self::InvalidValue => write!(f, "values may hold integers but no other numbers"),
+            Self::ClockJump { now, last } => {
+                write!(
+                    f,
+                    "the clock reads {now} but this replica last wrote at {last}; it stepped back"
+                )
+            },
+            Self::NotContinuous(replica) => {
+                write!(f, "replica {replica} was rebuilt and hasn't recovered its own writes yet")
+            },
+            Self::Gap { run, expected, got } => {
+                write!(f, "run {run} sent operation {got} but {expected} comes next")
+            },
+            Self::WrongReplica { run, applied_by } => {
+                write!(f, "run {run} is applied by replica {applied_by}")
+            },
+            Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
+            Self::Format(message) => write!(f, "unreadable state: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+fn check_value(value: &Json) -> Result<(), Error> {
+    match value {
+        Json::Number(n) if !(n.is_i64() || n.is_u64()) => Err(Error::InvalidValue),
+        Json::Array(items) => items.iter().try_for_each(check_value),
+        Json::Object(fields) => fields.values().try_for_each(check_value),
+        _ => Ok(()),
+    }
+}
+
+fn join_registers(a: &Register, a_seen: &Context, b: &Register, b_seen: &Context) -> Register {
+    let keep =
+        |mine: &Register, theirs: &Register, their_context: &Context| -> Vec<(Dot, Stamped)> {
+            mine.iter()
+                .filter(|(dot, _)| theirs.contains_key(dot) || !their_context.covers(dot))
+                .map(|(dot, value)| (dot.clone(), value.clone()))
+                .collect()
+        };
+    keep(a, b, b_seen).into_iter().chain(keep(b, a, a_seen)).collect()
+}
+
+impl State {
+    /// An empty state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An entity, if any of its fields has a value.
+    #[must_use]
+    pub fn entity(&self, key: &Key) -> Option<&Entity> {
+        self.entities.get(key)
+    }
+
+    /// A field's current values; empty when unset.
+    #[must_use]
+    pub fn field(&self, key: &Key, field: &str) -> Option<&Register> {
+        self.entities.get(key).and_then(|entity| entity.get(field))
+    }
+
+    /// Every entity, in key order.
+    pub fn entities(&self) -> impl Iterator<Item = (&Key, &Entity)> {
+        self.entities.iter()
+    }
+
+    /// Joins another state into this one.
+    pub fn join(&mut self, other: &Self) {
+        let keys: BTreeSet<&Key> = self.entities.keys().chain(other.entities.keys()).collect();
+        let empty = Entity::new();
+        let mut joined = BTreeMap::new();
+        for key in keys {
+            let mine = self.entities.get(key).unwrap_or(&empty);
+            let theirs = other.entities.get(key).unwrap_or(&empty);
+            let names: BTreeSet<&String> = mine.keys().chain(theirs.keys()).collect();
+            let mut entity = Entity::new();
+            for name in names {
+                let none = Register::new();
+                let register = join_registers(
+                    mine.get(name).unwrap_or(&none),
+                    &self.context,
+                    theirs.get(name).unwrap_or(&none),
+                    &other.context,
+                );
+                if !register.is_empty() {
+                    entity.insert(name.clone(), register);
+                }
+            }
+            if !entity.is_empty() {
+                joined.insert(key.clone(), entity);
+            }
+        }
+        self.entities = joined;
+        self.context.join(&other.context);
+    }
+
+    /// Checks that every stored dot is covered by the state's own context, so `seen` means `1..=n` for each writer.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a dot beyond its writer's entry.
+    pub fn check(&self) -> Result<(), Error> {
+        for (key, entity) in &self.entities {
+            for (name, register) in entity {
+                if let Some(dot) = register.keys().find(|dot| !self.context.covers(dot)) {
+                    return Err(Error::Format(format!(
+                        "{}/{} field {name} holds dot {}:{} beyond the context",
+                        key.kind, key.id, dot.0, dot.1
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn set(&mut self, key: &Key, field: &str, register: Register) {
+        if register.is_empty() {
+            if let Some(entity) = self.entities.get_mut(key) {
+                entity.remove(field);
+                if entity.is_empty() {
+                    self.entities.remove(key);
+                }
+            }
+        } else {
+            self.entities.entry(key.clone()).or_default().insert(field.to_owned(), register);
+        }
+    }
+}
+
+/// Whether a replica may mint dots: only once its own entry is known to be its true highest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Continuity {
+    /// The replica's own state is intact, so its entry is its highest; it may write offline.
+    Intact,
+    /// The replica was rebuilt without its own state; it may write once it has joined a state holding its entry, or
+    /// it must take a new id.
+    Rebuilt,
+}
+
+/// A replica writing to its state.
+#[derive(Debug, Clone)]
+pub struct Replica {
+    id: ReplicaId,
+    continuity: Continuity,
+    /// The replica's state.
+    pub state: State,
+}
+
+/// An operation from a run, applied by the replica that runs it under the replica's own dot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Op {
+    /// The run's id.
+    pub run: String,
+    /// The run's sequence number for this operation, from 1.
+    pub seq: u64,
+    /// The entity written.
+    pub key: Key,
+    /// The field written.
+    pub field: String,
+    /// The new value, or `None` to clear the field.
+    pub value: Option<Json>,
+    /// The dots of the field's values the run had seen; they are superseded, and others survive as conflicts.
+    pub seen: Vec<Dot>,
+}
+
+/// What applying a run operation did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Applied {
+    /// Applied under this dot.
+    Applied(Dot),
+    /// Already applied; nothing changed.
+    Duplicate,
+}
+
+/// The run entity's field holding the last applied sequence number.
+pub const RUN_APPLIED_SEQ: &str = "applied-seq";
+/// The run entity's field naming the replica that applies the run.
+pub const RUN_APPLIED_BY: &str = "applied-by";
+
+impl Replica {
+    /// A replica whose own state is intact.
+    #[must_use]
+    pub fn open(id: ReplicaId, state: State) -> Self {
+        Self { id, continuity: Continuity::Intact, state }
+    }
+
+    /// A replica rebuilt without its own state, from whatever it could fetch.
+    #[must_use]
+    pub fn rebuilt(id: ReplicaId, state: State) -> Self {
+        let mut replica = Self { id, continuity: Continuity::Rebuilt, state };
+        replica.restore_continuity();
+        replica
+    }
+
+    /// The replica's id.
+    #[must_use]
+    pub fn id(&self) -> &ReplicaId {
+        &self.id
+    }
+
+    /// Joins another state, restoring continuity if it holds this replica's entry.
+    pub fn join(&mut self, other: &State) {
+        self.state.join(other);
+        self.restore_continuity();
+    }
+
+    fn restore_continuity(&mut self) {
+        if self.state.context.seen.contains_key(&self.id) {
+            self.continuity = Continuity::Intact;
+        }
+    }
+
+    /// The timestamp for a write now: never earlier than this replica's last, and refused when the clock stepped back
+    /// by more than [`CLOCK_SKEW_MS`] unless `allow_clock_step` is set.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a backward step beyond the skew.
+    pub fn stamp(&self, now: Millis, allow_clock_step: bool) -> Result<Millis, Error> {
+        let last = self.state.context.clocks.get(&self.id).copied().unwrap_or(Millis::MIN);
+        if now < last.saturating_sub(CLOCK_SKEW_MS) && !allow_clock_step {
+            return Err(Error::ClockJump { now, last });
+        }
+        Ok(now.max(last))
+    }
+
+    fn mint(&mut self, at: Millis) -> Result<Dot, Error> {
+        if self.continuity == Continuity::Rebuilt {
+            return Err(Error::NotContinuous(self.id.clone()));
+        }
+        let counter = self.state.context.seen.entry(self.id.clone()).or_default();
+        *counter += 1;
+        let dot = Dot(self.id.clone(), *counter);
+        let clock = self.state.context.clocks.entry(self.id.clone()).or_insert(at);
+        *clock = (*clock).max(at);
+        Ok(dot)
+    }
+
+    /// Writes a field, superseding every value this replica has seen. `None` clears it.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a non-integer number or when the replica can't mint dots yet.
+    pub fn write(
+        &mut self,
+        key: &Key,
+        field: &str,
+        actor: &str,
+        at: Millis,
+        value: Option<Json>,
+    ) -> Result<Option<Dot>, Error> {
+        if let Some(value) = &value {
+            check_value(value)?;
+        }
+        let Some(value) = value else {
+            self.state.set(key, field, Register::new());
+            return Ok(None);
+        };
+        let dot = self.mint(at)?;
+        let stamped = Stamped { actor: actor.to_owned(), at, value };
+        self.state.set(key, field, Register::from([(dot.clone(), stamped)]));
+        Ok(Some(dot))
+    }
+
+    /// Applies a run's operation. Sequence numbers must arrive in order from 1: a repeat is a duplicate and a gap is
+    /// refused. The new value supersedes the values the run saw and the run's own earlier values; values it didn't
+    /// see survive beside it as a conflict.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a gap, on a run applied by another replica, on a non-integer number, or when the replica can't mint.
+    pub fn apply(&mut self, op: &Op, at: Millis) -> Result<Applied, Error> {
+        let run = Key::new("run", &op.run)?;
+        let applied_by = self
+            .state
+            .field(&run, RUN_APPLIED_BY)
+            .and_then(|r| r.values().find_map(|v| v.value.as_str().map(str::to_owned)));
+        if let Some(applied_by) = applied_by
+            && applied_by != self.id.as_str()
+        {
+            return Err(Error::WrongReplica { run: op.run.clone(), applied_by });
+        }
+        let last = self
+            .state
+            .field(&run, RUN_APPLIED_SEQ)
+            .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
+            .unwrap_or(0);
+        if op.seq <= last {
+            return Ok(Applied::Duplicate);
+        }
+        if op.seq != last + 1 {
+            return Err(Error::Gap { run: op.run.clone(), expected: last + 1, got: op.seq });
+        }
+        if let Some(value) = &op.value {
+            check_value(value)?;
+        }
+
+        let actor = format!("run/{}", op.run);
+        let seen: BTreeSet<&Dot> = op.seen.iter().collect();
+        let mut register: Register = self
+            .state
+            .field(&op.key, &op.field)
+            .into_iter()
+            .flatten()
+            .filter(|(dot, value)| !seen.contains(dot) && value.actor != actor)
+            .map(|(dot, value)| (dot.clone(), value.clone()))
+            .collect();
+        let dot = self.mint(at)?;
+        if let Some(value) = op.value.clone() {
+            register.insert(dot.clone(), Stamped { actor: actor.clone(), at, value });
+        }
+        self.state.set(&op.key, &op.field, register);
+        let system = format!("replica/{}", self.id);
+        self.write(&run, RUN_APPLIED_SEQ, &system, at, Some(Json::from(op.seq)))?;
+        if self.state.field(&run, RUN_APPLIED_BY).is_none() {
+            self.write(&run, RUN_APPLIED_BY, &system, at, Some(Json::from(self.id.as_str())))?;
+        }
+        Ok(Applied::Applied(dot))
+    }
+}
+
+/// A state's `state.json`: its format version and context.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Header {
+    format_version: u32,
+    context: Context,
+}
+
+/// An entity file.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityFile {
+    kind: String,
+    id: String,
+    fields: BTreeMap<String, Vec<ValueFile>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValueFile {
+    dot: Dot,
+    actor: String,
+    at: Millis,
+    value: Json,
+}
+
+/// The path of the state's header file.
+pub const HEADER_PATH: &str = "state.json";
+
+/// Serializes `value` with object keys sorted, whatever `serde_json`'s features.
+fn canonical<T: Serialize>(value: &T) -> String {
+    fn sort(value: Json) -> Json {
+        match value {
+            Json::Object(map) => {
+                let sorted: BTreeMap<String, Json> =
+                    map.into_iter().map(|(k, v)| (k, sort(v))).collect();
+                Json::Object(sorted.into_iter().collect())
+            },
+            Json::Array(items) => Json::Array(items.into_iter().map(sort).collect()),
+            other => other,
+        }
+    }
+    let value = serde_json::to_value(value).expect("state always serializes");
+    let mut text = serde_json::to_string_pretty(&sort(value)).expect("state always serializes");
+    text.push('\n');
+    text
+}
+
+impl State {
+    /// The state as files: [`HEADER_PATH`] and one file per entity at [`Key::path`], in canonical JSON.
+    #[must_use]
+    pub fn to_files(&self) -> BTreeMap<String, String> {
+        let mut files = BTreeMap::new();
+        let header = Header { format_version: FORMAT_VERSION, context: self.context.clone() };
+        files.insert(HEADER_PATH.to_owned(), canonical(&header));
+        for (key, entity) in &self.entities {
+            let fields = entity
+                .iter()
+                .map(|(name, register)| {
+                    let values = register
+                        .iter()
+                        .map(|(dot, v)| ValueFile {
+                            dot: dot.clone(),
+                            actor: v.actor.clone(),
+                            at: v.at,
+                            value: v.value.clone(),
+                        })
+                        .collect();
+                    (name.clone(), values)
+                })
+                .collect();
+            let file = EntityFile { kind: key.kind.clone(), id: key.id.clone(), fields };
+            files.insert(key.path(), canonical(&file));
+        }
+        files
+    }
+
+    /// Reads a state from its files.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a missing or newer header, a malformed file, a file at the wrong path, or a dot beyond the context.
+    pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
+        let header =
+            files.get(HEADER_PATH).ok_or_else(|| Error::Format("no state.json".to_owned()))?;
+        let header: serde_json::Value =
+            serde_json::from_str(header).map_err(|e| Error::Format(format!("state.json: {e}")))?;
+        let version = header.get("format_version").and_then(Json::as_u64).unwrap_or(0);
+        if version == 0 || version > u64::from(FORMAT_VERSION) {
+            return Err(Error::Format(format!(
+                "format version {version} is not supported; this build reads 1 to {FORMAT_VERSION}"
+            )));
+        }
+        let header: Header = serde_json::from_value(header)
+            .map_err(|e| Error::Format(format!("state.json: {e}")))?;
+        let mut state = Self { context: header.context, entities: BTreeMap::new() };
+        for (path, text) in files.iter().filter(|(path, _)| path.as_str() != HEADER_PATH) {
+            let file: EntityFile =
+                serde_json::from_str(text).map_err(|e| Error::Format(format!("{path}: {e}")))?;
+            let key = Key::new(&file.kind, &file.id)?;
+            if key.path() != *path {
+                return Err(Error::Format(format!("{path} holds {}", key.path())));
+            }
+            let mut entity = Entity::new();
+            for (name, values) in file.fields {
+                let register: Register = values
+                    .into_iter()
+                    .map(|v| (v.dot, Stamped { actor: v.actor, at: v.at, value: v.value }))
+                    .collect();
+                if !register.is_empty() {
+                    entity.insert(name, register);
+                }
+            }
+            if !entity.is_empty() {
+                state.entities.insert(key, entity);
+            }
+        }
+        state.check()?;
+        Ok(state)
+    }
+}
+
+#[cfg(test)]
+mod tests;

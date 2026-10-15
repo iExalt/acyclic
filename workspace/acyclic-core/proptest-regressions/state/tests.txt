@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 15c0a45779c94251dbfeb8a67513727c2edc35c3a41acdad04b8f25f368a2699 # shrinks to steps = [Write { replica: 1, entity: 0, field: 0, value: Some(0) }, Join { into: 0, from: 1 }, Write { replica: 1, entity: 0, field: 0, value: Some(0) }]
