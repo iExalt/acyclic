@@ -1,0 +1,682 @@
+//! The import format: a whole plan as one JSON document with symbolic keys.
+//!
+//! The format is versioned and kept apart from the model, so the model can change without breaking documents
+//! written against an earlier version. `acyclic import` maps a validated document into the model.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+/// The value of the document's `format` field.
+pub const FORMAT: &str = "acyclic-import";
+
+/// The newest version this build reads.
+pub const VERSION: u32 = 1;
+
+/// A plan to import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Import {
+    /// Always [`FORMAT`].
+    pub format: String,
+    /// The format version, at most [`VERSION`].
+    pub version: u32,
+    /// Code repositories that items name.
+    #[serde(default)]
+    pub repositories: Vec<Repository>,
+    /// Items, in any order.
+    #[serde(default)]
+    pub items: Vec<Item>,
+    /// Links between items.
+    #[serde(default)]
+    pub links: Vec<Link>,
+    /// Threads grouping items.
+    #[serde(default)]
+    pub threads: Vec<Thread>,
+}
+
+/// A code repository record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Repository {
+    /// The symbolic key items use.
+    pub key: String,
+    /// The owner, such as an organization.
+    pub owner: String,
+    /// The repository's name.
+    pub name: String,
+    /// Whether the repository is public.
+    pub public: bool,
+    /// The default branch.
+    pub default_branch: String,
+}
+
+/// An item's state. "In review" and readiness are derived on read, never imported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum State {
+    /// Not started.
+    Backlog,
+    /// Set aside on purpose.
+    Parked,
+    /// Being worked on.
+    InProgress,
+    /// Finished.
+    Done,
+}
+
+/// A rough size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Size {
+    /// Extra small.
+    Xs,
+    /// Small.
+    S,
+    /// Medium.
+    M,
+    /// Large.
+    L,
+    /// Extra large.
+    Xl,
+}
+
+/// What shows a done item was done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Evidence {
+    /// The commit that completed the item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// The repository holding the commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    /// A free-form note, such as where a record lives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// A work item at any depth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Item {
+    /// The symbolic key links, parents and threads use.
+    pub key: String,
+    /// A short title.
+    pub title: String,
+    /// Design notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// The exit check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<String>,
+    /// The item's state.
+    pub state: State,
+    /// The parent item's key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// Area tags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub areas: Vec<String>,
+    /// Keys of the repositories the item touches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repositories: Vec<String>,
+    /// Named resources the item holds while worked on, so items sharing one never run at once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<String>,
+    /// A rough size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<Size>,
+    /// Whether this done subtree's root is archived.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+    /// Evidence of completion, for done items only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Evidence>,
+}
+
+/// A link's kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LinkKind {
+    /// A hard dependency: `from` waits for `to`.
+    Blocks,
+    /// A soft dependency: `from` prefers to follow `to`.
+    After,
+    /// Context only.
+    Relates,
+}
+
+/// A link between two items: `from` depends on, follows or relates to `to`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Link {
+    /// The dependent item's key.
+    pub from: String,
+    /// The key of the item it depends on.
+    pub to: String,
+    /// The link's kind.
+    pub kind: LinkKind,
+}
+
+/// A thread: items for one continuing agent conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Thread {
+    /// The thread's symbolic key.
+    pub key: String,
+    /// A short title.
+    pub title: String,
+    /// The brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
+    /// Member items' keys.
+    pub items: Vec<String>,
+    /// Repositories added explicitly, beyond those of its items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repositories: Vec<String>,
+    /// Whether the thread's scope is approved. Whether an import may set it depends on who imports.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approved: bool,
+}
+
+/// Why a document couldn't be read.
+#[derive(Debug)]
+pub enum ParseError {
+    /// Not JSON, or not shaped like an import.
+    Json(serde_json::Error),
+    /// The `format` field is missing or wrong.
+    NotAnImport,
+    /// Written by a newer version than this build reads.
+    UnsupportedVersion {
+        /// The document's version.
+        found: u64,
+    },
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(err) => write!(f, "not a valid import document: {err}"),
+            Self::NotAnImport => write!(f, "not an import document: `format` must be {FORMAT:?}"),
+            Self::UnsupportedVersion { found } => {
+                write!(
+                    f,
+                    "import version {found} is not supported; this build reads up to {VERSION}"
+                )
+            },
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+/// The kind of thing a key names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeyKind {
+    /// A repository.
+    Repository,
+    /// An item.
+    Item,
+    /// A thread.
+    Thread,
+}
+
+impl fmt::Display for KeyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Repository => "repository",
+            Self::Item => "item",
+            Self::Thread => "thread",
+        })
+    }
+}
+
+/// A rule a parsed document breaks.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ValidationError {
+    /// A key is empty.
+    EmptyKey(KeyKind),
+    /// Two records of one kind share a key.
+    DuplicateKey(KeyKind, String),
+    /// A reference names no record of the expected kind.
+    UnknownReference {
+        /// Where the reference is, such as `item a1, parent`.
+        at: String,
+        /// The kind it should name.
+        kind: KeyKind,
+        /// The missing key.
+        key: String,
+    },
+    /// Following parents from this item leads back to it.
+    ParentCycle(String),
+    /// A link joins an item to itself.
+    SelfLink(String),
+    /// Hard and soft dependencies among these items form a cycle.
+    DependencyCycle(Vec<String>),
+    /// An item is a member of several threads.
+    ItemInSeveralThreads {
+        /// The item.
+        item: String,
+        /// The threads claiming it.
+        threads: Vec<String>,
+    },
+    /// An archived item that isn't a wholly done subtree.
+    ArchivedNotDone(String),
+    /// Evidence on an item that isn't done.
+    EvidenceNotDone(String),
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyKey(kind) => write!(f, "a {kind} has an empty key"),
+            Self::DuplicateKey(kind, key) => write!(f, "{kind} key {key:?} is used twice"),
+            Self::UnknownReference { at, kind, key } => {
+                write!(f, "{at} names unknown {kind} {key:?}")
+            },
+            Self::ParentCycle(item) => write!(f, "item {item:?} is its own ancestor"),
+            Self::SelfLink(item) => write!(f, "item {item:?} links to itself"),
+            Self::DependencyCycle(items) => {
+                write!(f, "dependencies form a cycle through {}", items.join(", "))
+            },
+            Self::ItemInSeveralThreads { item, threads } => {
+                write!(f, "item {item:?} is in several threads: {}", threads.join(", "))
+            },
+            Self::ArchivedNotDone(item) => {
+                write!(f, "item {item:?} is archived but it or a descendant isn't done")
+            },
+            Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+impl Import {
+    /// An empty document of the current version.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            format: FORMAT.to_owned(),
+            version: VERSION,
+            repositories: Vec::new(),
+            items: Vec::new(),
+            links: Vec::new(),
+            threads: Vec::new(),
+        }
+    }
+
+    /// Reads a document, checking its format and version before its shape.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the text isn't JSON, isn't an import, is from a newer version, or has unknown or missing fields.
+    pub fn from_json(text: &str) -> Result<Self, ParseError> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(ParseError::Json)?;
+        if value.get("format").and_then(serde_json::Value::as_str) != Some(FORMAT) {
+            return Err(ParseError::NotAnImport);
+        }
+        if let Some(found) = value.get("version").and_then(serde_json::Value::as_u64)
+            && found > u64::from(VERSION)
+        {
+            return Err(ParseError::UnsupportedVersion { found });
+        }
+        serde_json::from_value(value).map_err(ParseError::Json)
+    }
+
+    /// Writes the document as pretty-printed JSON.
+    ///
+    /// # Panics
+    ///
+    /// Never: the document holds only strings, numbers and booleans.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("an import always serializes")
+    }
+
+    /// Checks every rule and returns each broken one, sorted.
+    #[must_use]
+    pub fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let repositories =
+            keys(KeyKind::Repository, self.repositories.iter().map(|r| &r.key), &mut errors);
+        let items = keys(KeyKind::Item, self.items.iter().map(|i| &i.key), &mut errors);
+        keys(KeyKind::Thread, self.threads.iter().map(|t| &t.key), &mut errors);
+
+        let mut check = |at: String, kind: KeyKind, key: &str, known: &HashSet<&str>| {
+            if !known.contains(key) {
+                errors.push(ValidationError::UnknownReference { at, kind, key: key.to_owned() });
+            }
+        };
+        for item in &self.items {
+            if let Some(parent) = &item.parent {
+                check(format!("item {:?}, parent", item.key), KeyKind::Item, parent, &items);
+            }
+            for repository in &item.repositories {
+                let at = format!("item {:?}, repositories", item.key);
+                check(at, KeyKind::Repository, repository, &repositories);
+            }
+            if let Some(repository) = item.evidence.as_ref().and_then(|e| e.repository.as_ref()) {
+                let at = format!("item {:?}, evidence", item.key);
+                check(at, KeyKind::Repository, repository, &repositories);
+            }
+        }
+        for link in &self.links {
+            check(
+                format!("link {:?} to {:?}", link.from, link.to),
+                KeyKind::Item,
+                &link.from,
+                &items,
+            );
+            check(
+                format!("link {:?} to {:?}", link.from, link.to),
+                KeyKind::Item,
+                &link.to,
+                &items,
+            );
+        }
+        for thread in &self.threads {
+            for item in &thread.items {
+                check(format!("thread {:?}, items", thread.key), KeyKind::Item, item, &items);
+            }
+            for repository in &thread.repositories {
+                let at = format!("thread {:?}, repositories", thread.key);
+                check(at, KeyKind::Repository, repository, &repositories);
+            }
+        }
+
+        self.check_parents(&mut errors);
+        self.check_links(&mut errors);
+        self.check_threads(&mut errors);
+        self.check_done(&mut errors);
+        errors.sort();
+        errors.dedup();
+        errors
+    }
+
+    fn check_parents(&self, errors: &mut Vec<ValidationError>) {
+        let parents: HashMap<&str, &str> = self
+            .items
+            .iter()
+            .filter_map(|item| item.parent.as_deref().map(|parent| (item.key.as_str(), parent)))
+            .collect();
+        for item in &self.items {
+            let mut seen = HashSet::new();
+            let mut current = item.key.as_str();
+            while let Some(&parent) = parents.get(current) {
+                if parent == item.key {
+                    errors.push(ValidationError::ParentCycle(item.key.clone()));
+                    break;
+                }
+                if !seen.insert(parent) {
+                    break; // A cycle above this item, reported for its members.
+                }
+                current = parent;
+            }
+        }
+    }
+
+    fn check_links(&self, errors: &mut Vec<ValidationError>) {
+        let mut edges: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for link in &self.links {
+            if link.from == link.to {
+                errors.push(ValidationError::SelfLink(link.from.clone()));
+            } else if link.kind != LinkKind::Relates {
+                edges.entry(link.from.as_str()).or_default().push(link.to.as_str());
+            }
+        }
+        // Kahn's algorithm: whatever can't be ordered lies on or behind a cycle.
+        let mut indegree: BTreeMap<&str, usize> = BTreeMap::new();
+        for (&from, targets) in &edges {
+            indegree.entry(from).or_default();
+            for &to in targets {
+                *indegree.entry(to).or_default() += 1;
+            }
+        }
+        let mut queue: VecDeque<&str> =
+            indegree.iter().filter(|&(_, &n)| n == 0).map(|(&k, _)| k).collect();
+        while let Some(node) = queue.pop_front() {
+            indegree.remove(node);
+            for &to in edges.get(node).into_iter().flatten() {
+                if let Some(n) = indegree.get_mut(to) {
+                    *n -= 1;
+                    if *n == 0 {
+                        queue.push_back(to);
+                    }
+                }
+            }
+        }
+        if !indegree.is_empty() {
+            let stuck = indegree.keys().map(|&key| key.to_owned()).collect();
+            errors.push(ValidationError::DependencyCycle(stuck));
+        }
+    }
+
+    fn check_threads(&self, errors: &mut Vec<ValidationError>) {
+        let mut owners: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for thread in &self.threads {
+            for item in &thread.items {
+                owners.entry(item.as_str()).or_default().insert(thread.key.as_str());
+            }
+        }
+        for (item, threads) in owners.into_iter().filter(|(_, threads)| threads.len() > 1) {
+            errors.push(ValidationError::ItemInSeveralThreads {
+                item: item.to_owned(),
+                threads: threads.into_iter().map(str::to_owned).collect(),
+            });
+        }
+    }
+
+    fn check_done(&self, errors: &mut Vec<ValidationError>) {
+        let mut children: HashMap<&str, Vec<&Item>> = HashMap::new();
+        for item in &self.items {
+            if let Some(parent) = &item.parent {
+                children.entry(parent.as_str()).or_default().push(item);
+            }
+        }
+        for item in &self.items {
+            if item.evidence.is_some() && item.state != State::Done {
+                errors.push(ValidationError::EvidenceNotDone(item.key.clone()));
+            }
+            if item.archived {
+                let mut stack = vec![item];
+                let mut seen = HashSet::new();
+                while let Some(node) = stack.pop() {
+                    if !seen.insert(node.key.as_str()) {
+                        continue;
+                    }
+                    if node.state != State::Done {
+                        errors.push(ValidationError::ArchivedNotDone(item.key.clone()));
+                        break;
+                    }
+                    stack.extend(children.get(node.key.as_str()).into_iter().flatten());
+                }
+            }
+        }
+    }
+}
+
+impl Default for Import {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn keys<'a>(
+    kind: KeyKind,
+    keys: impl Iterator<Item = &'a String>,
+    errors: &mut Vec<ValidationError>,
+) -> HashSet<&'a str> {
+    let mut seen = HashSet::new();
+    for key in keys {
+        if key.is_empty() {
+            errors.push(ValidationError::EmptyKey(kind));
+        } else if !seen.insert(key.as_str()) {
+            errors.push(ValidationError::DuplicateKey(kind, key.clone()));
+        }
+    }
+    seen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(key: &str, state: State, parent: Option<&str>) -> Item {
+        Item {
+            key: key.to_owned(),
+            title: format!("Item {key}"),
+            notes: None,
+            gate: None,
+            state,
+            parent: parent.map(str::to_owned),
+            areas: Vec::new(),
+            repositories: Vec::new(),
+            resources: Vec::new(),
+            size: None,
+            archived: false,
+            evidence: None,
+        }
+    }
+
+    fn link(from: &str, to: &str, kind: LinkKind) -> Link {
+        Link { from: from.to_owned(), to: to.to_owned(), kind }
+    }
+
+    fn thread(key: &str, items: &[&str]) -> Thread {
+        Thread {
+            key: key.to_owned(),
+            title: format!("Thread {key}"),
+            brief: None,
+            items: items.iter().map(|&i| i.to_owned()).collect(),
+            repositories: Vec::new(),
+            approved: false,
+        }
+    }
+
+    fn valid() -> Import {
+        let mut import = Import::new();
+        import.repositories.push(Repository {
+            key: "r".to_owned(),
+            owner: "example".to_owned(),
+            name: "code".to_owned(),
+            public: false,
+            default_branch: "main".to_owned(),
+        });
+        import.items = vec![
+            item("goal", State::Backlog, None),
+            item("a", State::Backlog, Some("goal")),
+            item("b", State::Done, Some("goal")),
+        ];
+        import.items[1].repositories.push("r".to_owned());
+        import.items[2].evidence = Some(Evidence {
+            commit: Some("abc".to_owned()),
+            repository: Some("r".to_owned()),
+            note: None,
+        });
+        import.links = vec![link("a", "b", LinkKind::Blocks), link("b", "a", LinkKind::Relates)];
+        import.threads = vec![thread("t", &["a", "b"])];
+        import
+    }
+
+    #[test]
+    fn a_valid_document_round_trips() {
+        let import = valid();
+        assert_eq!(import.validate(), vec![]);
+        let json = import.to_json();
+        assert_eq!(Import::from_json(&json).unwrap(), import);
+    }
+
+    #[test]
+    fn format_version_and_unknown_fields_are_checked() {
+        assert!(matches!(Import::from_json("[]"), Err(ParseError::NotAnImport)));
+        assert!(matches!(
+            Import::from_json("{\"format\":\"other\",\"version\":1}"),
+            Err(ParseError::NotAnImport)
+        ));
+        let newer = format!("{{\"format\":\"{FORMAT}\",\"version\":{}}}", VERSION + 1);
+        assert!(matches!(
+            Import::from_json(&newer),
+            Err(ParseError::UnsupportedVersion { found: 2 })
+        ));
+        let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":1,\"itmes\":[]}}");
+        assert!(matches!(Import::from_json(&unknown), Err(ParseError::Json(_))));
+        let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":1}}");
+        assert_eq!(Import::from_json(&minimal).unwrap(), Import::new());
+    }
+
+    #[test]
+    fn keys_must_be_unique_non_empty_and_resolve() {
+        let mut import = valid();
+        import.items.push(item("a", State::Backlog, Some("nowhere")));
+        import.items.push(item("", State::Backlog, None));
+        import.threads.push(thread("t", &["ghost"]));
+        import.links.push(link("a", "missing", LinkKind::After));
+        let errors = import.validate();
+        assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Item, "a".to_owned())));
+        assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Thread, "t".to_owned())));
+        assert!(errors.contains(&ValidationError::EmptyKey(KeyKind::Item)));
+        let mut unknown: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| match e {
+                ValidationError::UnknownReference { key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        unknown.sort_unstable();
+        assert_eq!(unknown, vec!["ghost", "missing", "nowhere"]);
+    }
+
+    #[test]
+    fn parent_cycles_are_refused() {
+        let mut import = valid();
+        import.items[0].parent = Some("a".to_owned());
+        let errors = import.validate();
+        assert!(errors.contains(&ValidationError::ParentCycle("goal".to_owned())));
+        assert!(errors.contains(&ValidationError::ParentCycle("a".to_owned())));
+        assert!(
+            !errors.contains(&ValidationError::ParentCycle("b".to_owned())),
+            "b is below the cycle"
+        );
+    }
+
+    #[test]
+    fn hard_and_soft_links_together_must_be_acyclic() {
+        let mut import = valid();
+        import.links.push(link("b", "a", LinkKind::After));
+        assert_eq!(
+            import.validate(),
+            vec![ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()])]
+        );
+        import.links.pop();
+        import.links.push(link("a", "a", LinkKind::Relates));
+        assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
+    }
+
+    #[test]
+    fn an_item_belongs_to_one_thread() {
+        let mut import = valid();
+        import.threads.push(thread("u", &["a"]));
+        assert_eq!(
+            import.validate(),
+            vec![ValidationError::ItemInSeveralThreads {
+                item: "a".to_owned(),
+                threads: vec!["t".to_owned(), "u".to_owned()],
+            }]
+        );
+    }
+
+    #[test]
+    fn archive_and_evidence_need_done() {
+        let mut import = valid();
+        import.items[2].archived = true;
+        assert_eq!(import.validate(), vec![]);
+        import.items.push(item("c", State::Backlog, Some("b")));
+        assert_eq!(import.validate(), vec![ValidationError::ArchivedNotDone("b".to_owned())]);
+        import.items[1].evidence =
+            Some(Evidence { commit: None, repository: None, note: Some("n".to_owned()) });
+        assert!(import.validate().contains(&ValidationError::EvidenceNotDone("a".to_owned())));
+    }
+}

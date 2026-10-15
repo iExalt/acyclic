@@ -11,5 +11,8 @@ license = "MIT"
 [workspace.dependencies]
 acyclic-cli = { path = "workspace/acyclic-cli" }
 acyclic-core = { path = "workspace/acyclic-core" }
+acyclic-fixtures = { path = "workspace/acyclic-fixtures" }
 acyclic-guard = { path = "workspace/acyclic-guard" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 tempfile = "3.27.0"
