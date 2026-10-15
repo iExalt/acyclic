@@ -186,9 +186,9 @@ fn a_cycle_through_an_existing_thread_is_named_not_merged() {
 #[test]
 fn ids_fit_and_titles_name_a_shared_area() {
     let long = "x".repeat(MAX_ID_LEN);
-    let id = draft_id(&long, &BTreeSet::from(["a".to_owned()]));
+    let id = draft_id(&long, &BTreeSet::from(["a".to_owned()]), 0);
     assert!(id.len() <= MAX_ID_LEN && id.starts_with("s-xxx"));
-    assert_ne!(id, draft_id(&long, &BTreeSet::from(["b".to_owned()])));
+    assert_ne!(id, draft_id(&long, &BTreeSet::from(["b".to_owned()]), 0));
     let mut r = two_groups(2, 0);
     for leaf in ["g1-00", "g1-01"] {
         crate::model::set_element(
@@ -377,4 +377,48 @@ fn splits_keep_their_promises(tc: TestCase) {
         }
     }
     assert_eq!(plan(&model(&r), None), Vec::<Draft>::new(), "(g) a second split found work");
+}
+
+fn at(at: i64) -> By<'static> {
+    By { actor: USER.actor, at }
+}
+
+#[test]
+fn concurrent_splits_on_two_replicas_converge_after_one_more() {
+    let mut a = two_groups(2, 0);
+    let mut b = replica_named("pi");
+    b.join(a.state()).unwrap();
+    add_item(&mut a, "mine", "Mine", at(2)).unwrap();
+    set_parent(&mut a, "mine", Some("g1"), at(2)).unwrap();
+    add_item(&mut b, "yours", "Yours", at(2)).unwrap();
+    set_parent(&mut b, "yours", Some("g1"), at(2)).unwrap();
+    apply(&mut a, None, at(3)).unwrap();
+    apply(&mut b, None, at(3)).unwrap();
+    a.join(b.state()).unwrap();
+    b.join(a.state()).unwrap();
+    assert!(model(&a).items["g1-00"].thread.is_conflict(), "each replica placed the shared leaves");
+    // Both heal at once, to the same draft, so their writes agree.
+    let healed = apply(&mut a, None, at(4)).unwrap();
+    assert_eq!(apply(&mut b, None, at(5)).unwrap(), healed);
+    a.join(b.state()).unwrap();
+    let m = model(&a);
+    assert_eq!(plan(&m, None), Vec::<Draft>::new());
+    for leaf in ["g1-00", "g1-01"] {
+        assert_eq!(m.thread_of(leaf), Some(healed[0].id.as_str()), "{leaf}");
+    }
+    assert!(m.thread_of("mine").is_some() && m.thread_of("yours").is_some());
+}
+
+#[test]
+fn a_draft_never_writes_into_a_thread_that_exists() {
+    let mut r = two_groups(2, 0);
+    let first = plan(&model(&r), None);
+    let taken = Key::new(kind::THREAD, &first[0].id).unwrap();
+    write(&mut r, &taken, thread::TITLE, json!("Emptied"));
+    write(&mut r, &taken, thread::APPROVED, json!(true));
+    let applied = apply(&mut r, None, USER).unwrap();
+    assert_eq!(applied[0].members, first[0].members);
+    assert_ne!(applied[0].id, first[0].id);
+    assert_eq!(model(&r).members(&first[0].id), Vec::<&str>::new());
+    assert_eq!(model(&r).threads[&applied[0].id].title.one().map(String::as_str), Some("Title p"));
 }

@@ -2,7 +2,7 @@
 //! contests, clashes, proposals, new blockers on approved work, reopened work, dangling references) always appears;
 //! agents' questions are filtered by the thread's autonomy level (plan D61), and blockers always pass.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,7 @@ use crate::model::{self, Level, Model, Value};
 use crate::ready::{Readiness, Status, Wait};
 use crate::schema::{kind, link, question, set, thread};
 use crate::scope;
+use crate::split;
 use crate::state::{Error, Key, Millis, State};
 
 /// What kind of question an agent asks; the exact classes are settled with the app's mockups.
@@ -49,6 +50,17 @@ pub enum Entry {
         id: String,
         /// The field.
         field: String,
+    },
+    /// A thread with members waits for the user to approve its scope.
+    AwaitingApproval {
+        /// The thread.
+        thread: String,
+        /// How many open, unarchived items it holds.
+        members: usize,
+        /// Whether that is more than a split would put in one thread.
+        over_cap: bool,
+        /// Threads it waits on in a cycle through `blocks` links, so not all of them can finish as they stand.
+        waits_with: Vec<String>,
     },
     /// Links of blocks and after kinds form a cycle.
     LinkCycle {
@@ -195,6 +207,7 @@ pub fn needs_you(
         }
     }
     new_blockers(state, model, readiness, &mut entries)?;
+    awaiting_approval(model, &mut entries);
     reopened_and_early(model, &mut entries);
     dangling(model, &mut entries);
     for (id, item) in &model.items {
@@ -211,6 +224,37 @@ pub fn needs_you(
     }
     questions(state, model, &mut entries)?;
     Ok(entries.into_iter().collect())
+}
+
+/// Unapproved threads with open work, each with the threads it would deadlock with. Finished or archived members
+/// need no decision, since no run will take them.
+fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
+    let mut members: BTreeMap<&str, usize> = BTreeMap::new();
+    for item in model.items.values().filter(|item| !item.is_done() && !model.is_archived(&item.id))
+    {
+        if let Some(thread) = item.thread.one() {
+            *members.entry(thread).or_default() += 1;
+        }
+    }
+    let cycles = split::thread_cycles(model);
+    for (id, thread) in &model.threads {
+        let Some(&count) = members.get(id.as_str()) else { continue };
+        if thread.is_approved() {
+            continue;
+        }
+        let waits_with: BTreeSet<&String> = cycles
+            .iter()
+            .filter(|cycle| cycle.contains(id))
+            .flatten()
+            .filter(|other| *other != id)
+            .collect();
+        entries.insert(Entry::AwaitingApproval {
+            thread: id.clone(),
+            members: count,
+            over_cap: count > split::CAP,
+            waits_with: waits_with.into_iter().cloned().collect(),
+        });
+    }
 }
 
 /// Fields with differing values, except claims (contests) and set elements (always `true`).

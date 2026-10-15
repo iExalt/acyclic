@@ -22,7 +22,10 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 
-use crate::model::{LinkKind, MAX_ID_LEN, Model, Thread, Value};
+use crate::model::{self, By, LinkKind, MAX_ID_LEN, Model, Thread, Value};
+use crate::schema::{kind, thread};
+use crate::scope::{self, ScopeEdit, ScopeError};
+use crate::state::{Key, Replica};
 
 /// The most leaves a draft holds, unless a cycle merged it.
 pub const CAP: usize = 25;
@@ -99,14 +102,23 @@ pub fn plan(model: &Model, root: Option<&str>) -> Vec<Draft> {
     }
     let drafts = split.merge_cycles(drafts);
     let waits = split.waits_with(&drafts);
+    let mut taken: BTreeSet<String> = model.threads.keys().cloned().collect();
     drafts
         .into_iter()
         .zip(waits)
         .map(|((root, group, merged_cycle), waits_with)| {
             let tops: BTreeSet<&str> = group.iter().map(|leaf| split.top[leaf]).collect();
             let members: BTreeSet<String> = group.into_iter().map(str::to_owned).collect();
+            // A taken id is a thread emptied since, or a collision: either way, never written into.
+            let mut salt = 0;
+            let mut id = draft_id(&root, &members, salt);
+            while taken.contains(&id) {
+                salt += 1;
+                id = draft_id(&root, &members, salt);
+            }
+            taken.insert(id.clone());
             Draft {
-                id: draft_id(&root, &members),
+                id,
                 title: title(model, &root, &members),
                 root,
                 members,
@@ -348,19 +360,8 @@ impl<'a> Split<'a> {
                 draft_of.insert(member, i);
             }
         }
-        let mut memo = BTreeMap::new();
-        let mut edges = Vec::new();
-        for link in self.model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
-            let to = self.waiters(&link.to, &draft_of, &mut memo);
-            let from = self.waiters(&link.from, &draft_of, &mut memo);
-            for to in &to {
-                for from in from.iter().filter(|from| *from != to) {
-                    edges.push((*to, *from));
-                }
-            }
-        }
         let mut out = vec![BTreeSet::new(); drafts.len()];
-        for cycle in crate::graph::cycles(&edges) {
+        for cycle in self.wait_cycles(&draft_of) {
             let threads: BTreeSet<String> = cycle
                 .iter()
                 .filter_map(|node| match node {
@@ -375,6 +376,22 @@ impl<'a> Split<'a> {
             }
         }
         out
+    }
+
+    /// The cycles that `blocks` links make among drafts, by `draft_of`, and existing threads.
+    fn wait_cycles(&self, draft_of: &BTreeMap<&str, usize>) -> Vec<Vec<Waiter<'a>>> {
+        let mut memo = BTreeMap::new();
+        let mut edges = Vec::new();
+        for link in self.model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+            let to = self.waiters(&link.to, draft_of, &mut memo);
+            let from = self.waiters(&link.from, draft_of, &mut memo);
+            for to in &to {
+                for from in from.iter().filter(|from| *from != to) {
+                    edges.push((*to, *from));
+                }
+            }
+        }
+        crate::graph::cycles(&edges)
     }
 
     /// The drafts and threads that hold open items under `id`, it included.
@@ -427,10 +444,56 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
-/// `s-<root>-<hash>`: the root's id, cut to fit, and 24 bits of an FNV-1a hash of the sorted members.
-fn draft_id(root: &str, members: &BTreeSet<String>) -> String {
+/// The existing threads that `blocks` links make wait on each other, one set per cycle: work in them can't all
+/// finish until a link or a member moves.
+#[must_use]
+pub fn thread_cycles(model: &Model) -> Vec<BTreeSet<String>> {
+    let split = Split { model, under: BTreeMap::new(), top: BTreeMap::new() };
+    split
+        .wait_cycles(&BTreeMap::new())
+        .into_iter()
+        .map(|cycle| {
+            cycle
+                .into_iter()
+                .filter_map(|node| match node {
+                    Waiter::Thread(thread) => Some(thread.to_owned()),
+                    Waiter::Draft(_) => None,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Splits as [`plan`] does and writes the drafts: each a new thread with its title, holding its members. A draft is
+/// only ever written into a thread id no thread has, so no existing thread, approved or not, gains members.
+///
+/// # Errors
+///
+/// Fails when the state layer refuses.
+pub fn apply(
+    replica: &mut Replica,
+    root: Option<&str>,
+    by: By<'_>,
+) -> Result<Vec<Draft>, ScopeError> {
+    let model = Model::read(replica.state())?;
+    let drafts = plan(&model, root);
+    for draft in &drafts {
+        let key = Key::new(kind::THREAD, &draft.id)?;
+        model::put(replica, &key, thread::TITLE, Some(&draft.title), by)?;
+        for member in &draft.members {
+            let change = ScopeEdit::Member { item: member.clone(), thread: Some(draft.id.clone()) };
+            scope::edit_in(replica, &model, &change, by)?;
+        }
+    }
+    Ok(drafts)
+}
+
+/// `s-<root>-<hash>`: the root's id, cut to fit, and 24 bits of an FNV-1a hash of the sorted members, salted when an
+/// unsalted id is taken.
+fn draft_id(root: &str, members: &BTreeSet<String>, salt: u32) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for member in members {
+    let salt = (salt > 0).then(|| salt.to_string());
+    for member in members.iter().chain(salt.as_ref()) {
         for byte in member.bytes().chain(std::iter::once(b'\n')) {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0100_0000_01b3);

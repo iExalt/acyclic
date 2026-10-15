@@ -191,3 +191,63 @@ fn the_state_puts_its_problems_on_the_list() {
     });
     assert!(entries.iter().any(|e| matches!(e, Entry::Unverified { item, repository, .. } if item == "dep" && repository == "nowhere")));
 }
+
+#[test]
+fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
+    let mut r = replica("a");
+    let by = user(1);
+    for (item, thread) in [("x", "t"), ("x2", "t"), ("y", "u"), ("y2", "u")] {
+        add_item(&mut r, item, item, by).unwrap();
+        edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(thread.into()) }, by)
+            .unwrap();
+    }
+    for (thread, title) in [("t", "T"), ("u", "U"), ("empty", "E")] {
+        model::set(
+            &mut r,
+            &Key::new(kind::THREAD, thread).unwrap(),
+            thread::TITLE,
+            Some(&title),
+            by,
+        )
+        .unwrap();
+    }
+    // `t` waits on `u` and `u` on `t`: neither can finish as they stand.
+    link(&mut r, "x", "y", LinkKind::Blocks, by).unwrap();
+    link(&mut r, "y2", "x2", LinkKind::Blocks, by).unwrap();
+    let awaiting = |r: &Replica| -> Vec<Entry> {
+        list(r).into_iter().filter(|e| matches!(e, Entry::AwaitingApproval { .. })).collect()
+    };
+    let entry = |thread: &str, other: &str| Entry::AwaitingApproval {
+        thread: thread.into(),
+        members: 2,
+        over_cap: false,
+        waits_with: vec![other.into()],
+    };
+    model::set(&mut r, &Key::new(kind::THREAD, "finished").unwrap(), thread::TITLE, Some(&"F"), by)
+        .unwrap();
+    add_item(&mut r, "f", "f", by).unwrap();
+    edit(&mut r, &ScopeEdit::Member { item: "f".into(), thread: Some("finished".into()) }, by)
+        .unwrap();
+    model::set_state(&mut r, "f", ItemState::Done, by).unwrap();
+    assert_eq!(
+        awaiting(&r),
+        vec![entry("t", "u"), entry("u", "t")],
+        "an empty thread, or one with only finished work, awaits nothing"
+    );
+    let t = Key::new(kind::THREAD, "t").unwrap();
+    model::set(&mut r, &t, thread::APPROVED, Some(&true), user(2)).unwrap();
+    assert_eq!(awaiting(&r), vec![entry("u", "t")]);
+    let big = Key::new(kind::THREAD, "big").unwrap();
+    model::set(&mut r, &big, thread::TITLE, Some(&"Big"), by).unwrap();
+    for i in 0..=split::CAP {
+        let item = format!("z{i}");
+        add_item(&mut r, &item, &item, by).unwrap();
+        edit(&mut r, &ScopeEdit::Member { item, thread: Some("big".into()) }, by).unwrap();
+    }
+    assert!(awaiting(&r).contains(&Entry::AwaitingApproval {
+        thread: "big".into(),
+        members: split::CAP + 1,
+        over_cap: true,
+        waits_with: vec![],
+    }));
+}

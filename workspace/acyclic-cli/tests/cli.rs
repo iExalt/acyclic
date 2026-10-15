@@ -117,6 +117,20 @@ fn a_journey_through_the_contract() {
     let (code, unlinked) = sh.output("link remove a2 blocks a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
+    // a2 left t1, so a split drafts a thread for it; the user then sees it awaiting approval.
+    let (code, dry) = sh.output("thread split --dry-run", AGENT);
+    assert_eq!((code, dry["data"]["drafts"][0]["members"][0].as_str()), (0, Some("a2")));
+    assert_eq!(sh.run("thread split nope", AGENT), 3);
+    let (code, split) = sh.output("thread split", AGENT);
+    let drafted = &dry["data"]["drafts"][0]["thread"];
+    assert_eq!((code, &split["data"]["drafts"][0]["thread"]), (0, drafted), "as the dry run said");
+    assert_eq!(sh.run("needs", AGENT), 0);
+    let (code, again) = sh.output("thread split", AGENT);
+    assert_eq!(
+        (code, again["data"]["changed"].as_bool()),
+        (0, Some(false)),
+        "nothing left to split"
+    );
     insta::assert_snapshot!(sh.transcript);
 }
 

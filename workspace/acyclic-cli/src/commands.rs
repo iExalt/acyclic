@@ -16,6 +16,7 @@ use acyclic_core::schema::{
     GLOBAL, item as field, kind, link as link_field, repository, settings, thread,
 };
 use acyclic_core::scope::{self, Outcome as ScopeOutcome, ScopeEdit};
+use acyclic_core::split;
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
@@ -212,6 +213,9 @@ impl<'a> Session<'a> {
             }),
             Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
             Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
+            Command::Thread(ThreadCommand::Split { root, dry_run }) => {
+                self.split(root.as_deref(), *dry_run)
+            },
             Command::Level { level, thread: id } => self.write(|replica, by| {
                 let (key, name) = match id {
                     Some(id) => (Key::new(kind::THREAD, id)?, thread::AUTONOMY),
@@ -464,6 +468,51 @@ impl<'a> Session<'a> {
             }));
         }
         Ok(Json::Array(shown))
+    }
+
+    /// Splits unthreaded leaves into draft threads, or with `dry_run` only reports them.
+    fn split(&self, root: Option<&str>, dry_run: bool) -> Result<Json, CliError> {
+        let report = |drafts: Vec<split::Draft>| -> Json {
+            let drafts: Vec<Json> = drafts
+                .into_iter()
+                .map(|draft| {
+                    let review = if dry_run {
+                        format!("acyclic graph --open --root {}", draft.root)
+                    } else {
+                        format!("acyclic graph --open --thread {}", draft.id)
+                    };
+                    json!({
+                        "thread": draft.id,
+                        "title": draft.title,
+                        "root": draft.root,
+                        "size": draft.members.len(),
+                        "members": draft.members,
+                        "merged_cycle": draft.merged_cycle,
+                        "cross_top": draft.cross_top,
+                        "waits_with": draft.waits_with,
+                        "review": review,
+                    })
+                })
+                .collect();
+            json!({"cap": split::CAP, "drafts": drafts, "dry_run": dry_run})
+        };
+        if dry_run {
+            let (_, model) = self.read()?;
+            if let Some(root) = root
+                && !model.items.contains_key(root)
+            {
+                return Err(not_found(root));
+            }
+            let mut data = report(split::plan(&model, root));
+            data["changed"] = json!(false);
+            return Ok(data);
+        }
+        self.write(|replica, by| {
+            if let Some(root) = root {
+                existing(replica, root)?;
+            }
+            Ok(report(split::apply(replica, root, by)?))
+        })
     }
 
     fn needs(&self) -> Result<Json, CliError> {

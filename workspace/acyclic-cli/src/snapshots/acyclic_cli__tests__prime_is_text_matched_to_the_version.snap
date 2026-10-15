@@ -42,10 +42,6 @@ older copy.
    standard output.
 5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic <group> --help`
    lists a group's commands.
-
-## Scope
-
-- Edits to an approved thread's membership or repositories become proposals for the user, reported as
-  `"outcome": "proposed"`. Carry on with other work; don't retry them.
-- Approving threads, setting autonomy levels and deciding proposals are the user's. `acyclic needs` lists what is
-  waiting on the user.
+6. `acyclic thread split` groups open leaves that no thread holds into draft threads of up to 25 items, unless
+   linked work must stay together; `--dry-run` shows them first. Improve a draft's title and brief, and leave
+   approving it to the user.

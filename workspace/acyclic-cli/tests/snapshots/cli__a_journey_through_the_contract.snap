@@ -500,3 +500,95 @@ $ ACYCLIC_ACTOR=actor/user acyclic ready
   },
   "ok": false
 }
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread split --dry-run
+# exit 0
+{
+  "data": {
+    "cap": 25,
+    "changed": false,
+    "drafts": [
+      {
+        "cross_top": false,
+        "members": [
+          "a2"
+        ],
+        "merged_cycle": false,
+        "review": "acyclic graph --open --root a2",
+        "root": "a2",
+        "size": 1,
+        "thread": "s-a2-b75370",
+        "title": "Second",
+        "waits_with": []
+      }
+    ],
+    "dry_run": true
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread split nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item nope"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread split
+# exit 0
+{
+  "data": {
+    "cap": 25,
+    "changed": true,
+    "drafts": [
+      {
+        "cross_top": false,
+        "members": [
+          "a2"
+        ],
+        "merged_cycle": false,
+        "review": "acyclic graph --open --thread s-a2-b75370",
+        "root": "a2",
+        "size": 1,
+        "thread": "s-a2-b75370",
+        "title": "Second",
+        "waits_with": []
+      }
+    ],
+    "dry_run": false
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic needs
+# exit 0
+{
+  "data": {
+    "needs": [
+      {
+        "entry": "awaiting-approval",
+        "members": 1,
+        "over_cap": false,
+        "thread": "s-a2-b75370",
+        "waits_with": []
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread split
+# exit 0
+{
+  "data": {
+    "cap": 25,
+    "changed": false,
+    "drafts": [],
+    "dry_run": false
+  },
+  "ok": true
+}
