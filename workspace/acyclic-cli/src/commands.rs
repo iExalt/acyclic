@@ -109,7 +109,7 @@ impl<'a> Session<'a> {
             }),
             Command::Parent { id, parent } => self.write(|replica, by| {
                 let key = existing(replica, id)?;
-                if single(replica.state.field(&key, field::PARENT))
+                if single(replica.state().field(&key, field::PARENT))
                     != parent.as_ref().map(|p| json!(p))
                 {
                     model::set_parent(replica, id, parent.as_deref(), by)?;
@@ -118,14 +118,14 @@ impl<'a> Session<'a> {
             }),
             Command::Link { from, kind, to } => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
-                if replica.state.field(&key, link_field::PRESENT).is_none() {
+                if replica.state().field(&key, link_field::PRESENT).is_none() {
                     model::link(replica, from, to, *kind, by)?;
                 }
                 Ok(json!({"from": from, "kind": kind, "to": to}))
             }),
             Command::Unlink { from, kind, to } => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
-                if replica.state.field(&key, link_field::PRESENT).is_some() {
+                if replica.state().field(&key, link_field::PRESENT).is_some() {
                     model::unlink(replica, from, to, *kind, by)?;
                 }
                 Ok(json!({"from": from, "kind": kind, "to": to}))
@@ -223,7 +223,7 @@ impl<'a> Session<'a> {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
                 self.write(|replica, by| {
-                    let model = Model::read(&replica.state)?;
+                    let model = Model::read(replica.state())?;
                     let item = model.items.get(id).ok_or_else(|| not_found(id))?;
                     if !item.is_archived_root() {
                         archive::archive(replica, &ancestry, id, by)?;
@@ -270,7 +270,7 @@ impl<'a> Session<'a> {
         already: impl Fn(&Model) -> bool,
     ) -> Result<Json, CliError> {
         self.write(|replica, by| {
-            let model = Model::read(&replica.state)?;
+            let model = Model::read(replica.state())?;
             if already(&model) {
                 return Ok(json!({"edit": change, "outcome": "unchanged"}));
             }
@@ -342,8 +342,8 @@ impl<'a> Session<'a> {
     fn add(&self, id: &str, title: &str, parent: Option<&str>) -> Result<Json, CliError> {
         self.write(|replica, by| {
             let key = model::item_key(id)?;
-            if replica.state.entity(&key).is_some() {
-                if single(replica.state.field(&key, field::TITLE)) != Some(json!(title)) {
+            if replica.state().entity(&key).is_some() {
+                if single(replica.state().field(&key, field::TITLE)) != Some(json!(title)) {
                     return Err(CliError::refused(
                         "already-exists",
                         format!("item {id} exists with another title"),
@@ -353,7 +353,7 @@ impl<'a> Session<'a> {
                 model::add_item(replica, id, title, by)?;
             }
             if let Some(parent) = parent
-                && single(replica.state.field(&key, field::PARENT)) != Some(json!(parent))
+                && single(replica.state().field(&key, field::PARENT)) != Some(json!(parent))
             {
                 model::set_parent(replica, id, Some(parent), by)?;
             }
@@ -392,8 +392,8 @@ impl<'a> Session<'a> {
         self.write(|replica, by| {
             let key = existing(replica, id)?;
             if !force {
-                let model = Model::read(&replica.state)?;
-                let status = Readiness::new(&replica.state, &model, by.at, &ancestry).of(id)?;
+                let model = Model::read(replica.state())?;
+                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).of(id)?;
                 if !may_claim(status.as_ref(), by.actor) {
                     return Err(CliError::refused(
                         "not-ready",
@@ -403,9 +403,9 @@ impl<'a> Session<'a> {
                 }
             }
             claim::claim(replica, &key, by.actor, by.at, lease, MAX_LEASE)?;
-            let model = Model::read(&replica.state)?;
+            let model = Model::read(replica.state())?;
             let alive = |holder: &str| model.run_alive(holder);
-            let held = claim::winner_with(&replica.state, &key, by.at, &alive)?;
+            let held = claim::winner_with(replica.state(), &key, by.at, &alive)?;
             Ok(json!({"item": id, "claim": held}))
         })
     }
@@ -433,7 +433,7 @@ fn not_found(id: &str) -> CliError {
 
 fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     let key = model::item_key(id)?;
-    if replica.state.entity(&key).is_none() {
+    if replica.state().entity(&key).is_none() {
         return Err(not_found(id));
     }
     Ok(key)
@@ -457,7 +457,7 @@ fn set_if<T: Serialize>(
 ) -> Result<(), CliError> {
     let Some(value) = value else { return Ok(()) };
     let json = serde_json::to_value(value).expect("model values serialize");
-    if single(replica.state.field(key, name)) != Some(json) {
+    if single(replica.state().field(key, name)) != Some(json) {
         model::set(replica, key, name, Some(value), by)?;
     }
     Ok(())
@@ -473,7 +473,7 @@ fn element_if(
     by: By<'_>,
 ) -> Result<(), CliError> {
     let field = format!("{}{name}", set.prefix());
-    if replica.state.field(key, &field).is_some() != present {
+    if replica.state().field(key, &field).is_some() != present {
         model::set_element(replica, key, set, name, present, by)?;
     }
     Ok(())

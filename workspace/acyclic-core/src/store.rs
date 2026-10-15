@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value as Json;
 
-use crate::state::{self, Dot, Key, Millis, Replica, ReplicaId, State};
-use cache::Cache;
+use crate::state::{self, Dot, Journal, Key, Millis, Replica, ReplicaId, State};
+use cache::{Cache, Found};
 use git::{Git, NewCommit};
 
 /// How long a batch keeps retrying lost races.
@@ -254,13 +254,9 @@ fn log_path(root: &str, day: &str) -> String {
 const SCRATCH_STATE: &str = "refs/acyclic/scratch/state";
 const SCRATCH_LOG: &str = "refs/acyclic/scratch/log";
 
-/// The changed state files as bytes, for a commit.
-fn state_changes(before: &State, after: &State) -> BTreeMap<String, Option<Vec<u8>>> {
-    after
-        .changed_files(before)
-        .into_iter()
-        .map(|(path, content)| (path, content.map(String::into_bytes)))
-        .collect()
+/// Changed state files as bytes, for a commit.
+fn file_bytes(files: BTreeMap<String, Option<String>>) -> BTreeMap<String, Option<Vec<u8>>> {
+    files.into_iter().map(|(path, content)| (path, content.map(String::into_bytes))).collect()
 }
 
 /// The UTC calendar date of a time: year, month and day.
@@ -307,34 +303,44 @@ struct WrittenValue {
     value: Json,
 }
 
-/// The changed fields between two states, by project root.
-fn diff(before: &State, after: &State, root_of: RootOf<'_>) -> BTreeMap<String, Vec<Write>> {
-    let keys: BTreeSet<&Key> =
-        before.entities().map(|(k, _)| k).chain(after.entities().map(|(k, _)| k)).collect();
+/// The changed fields since the journal began, by project root. An entity's root is found in the state after the
+/// batch, or failing that in the state before it, which a swap with the journal restores for the moment.
+fn diff(
+    after: &mut State,
+    journal: &mut Journal,
+    root_of: RootOf<'_>,
+) -> BTreeMap<String, Vec<Write>> {
+    let keys: Vec<Key> = journal.keys().cloned().collect();
+    let mut roots: Vec<Option<String>> = keys.iter().map(|key| root_of(after, key)).collect();
+    if roots.iter().any(Option::is_none) {
+        after.swap(journal);
+        for (key, root) in keys.iter().zip(&mut roots).filter(|(_, root)| root.is_none()) {
+            *root = root_of(after, key);
+        }
+        after.swap(journal);
+    }
     let mut by_root: BTreeMap<String, Vec<Write>> = BTreeMap::new();
-    for key in keys {
-        let old = before.entity(key);
+    for (key, root) in keys.iter().zip(roots) {
+        let old = journal.before(key);
         let new = after.entity(key);
         let fields: BTreeSet<&String> = old
             .into_iter()
             .flat_map(|e| e.keys())
             .chain(new.into_iter().flat_map(|e| e.keys()))
             .collect();
+        let root = root.unwrap_or_else(|| NO_PROJECT.to_owned());
         for field in fields {
-            let was = before.field(key, field);
-            let now = after.field(key, field);
+            let was = old.and_then(|entity| entity.get(field));
+            let now = new.and_then(|entity| entity.get(field));
             if was == now {
                 continue;
             }
-            let root = root_of(after, key)
-                .or_else(|| root_of(before, key))
-                .unwrap_or_else(|| NO_PROJECT.to_owned());
             let values = now
                 .into_iter()
                 .flatten()
                 .map(|(dot, v)| WrittenValue { dot: dot.clone(), value: v.value.clone() })
                 .collect();
-            by_root.entry(root).or_default().push(Write {
+            by_root.entry(root.clone()).or_default().push(Write {
                 kind: key.kind.clone(),
                 id: key.id.clone(),
                 field: field.clone(),
@@ -435,25 +441,26 @@ impl Tracker {
             Some(OpenedTip(tip)) => tip,
             None => self.git.resolve(&state_ref(&self.replica))?,
         };
-        self.load_at(tip)
+        let (tip, state, _) = self.load_at(tip)?;
+        Ok((tip, state))
     }
 
-    /// The state at `tip`, from the cache when it holds that tip.
-    fn load_at(&self, tip: Option<String>) -> Result<(Option<String>, State), StoreError> {
+    /// The state at `tip`, from the cache when it holds that tip, and what the cache held then.
+    fn load_at(&self, tip: Option<String>) -> Result<(Option<String>, State, Found), StoreError> {
         let Some(tip) = tip else {
-            return Ok((None, State::new()));
+            return Ok((None, State::new(), Found::default()));
         };
         let cache = self.cache()?;
-        if let Some(state) = cache.read(&tip) {
-            return Ok((Some(tip), state));
+        if let Some((state, found)) = cache.read(&tip) {
+            return Ok((Some(tip), state, found));
         }
         let files = read_files(&self.git, &tip)?;
         crate::probe::mark("load: git ls-tree and cat-file");
         let state = State::from_own_files(&files)?;
         drop(files);
         crate::probe::mark("load: parse files");
-        cache.write(&tip, &state);
-        Ok((Some(tip), state))
+        let found = cache.write(&tip, &state);
+        Ok((Some(tip), state, found))
     }
 
     /// Like [`Tracker::load`], but always from Git and refusing files that aren't in canonical form, as a check of
@@ -569,25 +576,27 @@ impl Tracker {
         hooks: &Hooks,
     ) -> Result<Option<String>, BatchError<E>> {
         // The state's tip and the log's segments in one process.
-        let state = state_ref(&self.replica);
+        let state_name = state_ref(&self.replica);
         crate::probe::mark("batch: lock");
-        let refs = self.git.refs_under(&[&state, &format!("refs/heads/log/{}/", self.replica)])?;
+        let log_prefix = format!("refs/heads/log/{}/", self.replica);
+        let refs = self.git.refs_under(&[&state_name, &log_prefix])?;
         crate::probe::mark("batch: git for-each-ref");
-        let (tip, before) = self.load_at(refs.get(&state).cloned())?;
-        let mut replica = Replica::open(self.replica.clone(), before.clone());
-        crate::probe::mark("batch: clone state");
+        let (tip, state, found) = self.load_at(refs.get(&state_name).cloned())?;
+        let mut replica = Replica::open(self.replica.clone(), state);
+        // Recording starts before the stamp, so a stamp alone is no change.
+        replica.state.record();
         let at = replica.stamp(now, allow_clock_step).map_err(StoreError::State)?;
         apply(&mut replica, at).map_err(BatchError::Apply)?;
         crate::probe::mark("batch: apply command");
-        let unchanged = replica.state == before;
-        crate::probe::mark("batch: compare");
-        if unchanged {
+        let mut state = replica.into_state();
+        let mut journal = state.take_journal().expect("the batch records");
+        if state.unchanged_since(&journal) {
             return Ok(None);
         }
-        let state_files = state_changes(&before, &replica.state);
+        let state_files = file_bytes(state.changed_files_since(&journal));
         crate::probe::mark("batch: changed files");
-        let event_actor = actor_record(&replica.state, &meta.actor);
-        let changes = diff(&before, &replica.state, root_of);
+        let event_actor = actor_record(&state, &meta.actor);
+        let changes = diff(&mut state, &mut journal, root_of);
         let month = month_of(at);
         let day = day_of(at);
         let (segment, segment_tip) = self.segment_in(&refs, "log", &month);
@@ -635,7 +644,7 @@ impl Tracker {
             hook();
         }
         let mut transaction = self.git.transaction()?;
-        transaction.update(&state_ref(&self.replica), &commit, tip.as_deref())?;
+        transaction.update(&state_name, &commit, tip.as_deref())?;
         transaction.update(&segment, &log_commit, segment_tip.as_deref())?;
         transaction.prepare()?;
         if let Some(hook) = &hooks.after_prepare {
@@ -643,7 +652,7 @@ impl Tracker {
         }
         transaction.commit()?;
         crate::probe::mark("batch: git update-ref");
-        self.cache()?.write(&commit, &replica.state);
+        self.cache()?.write_after(&found, &commit, &state, journal.keys());
         self.maintain();
         crate::probe::mark("batch: upkeep");
         if self.unused.swap(false, Ordering::Relaxed) {
@@ -681,7 +690,7 @@ impl Tracker {
         at: Millis,
         message: &str,
     ) -> Result<String, StoreError> {
-        let files = state_changes(before, after);
+        let files = file_bytes(after.changed_files(before));
         let commit = NewCommit {
             scratch: SCRATCH_STATE,
             parent: tip,
@@ -953,7 +962,7 @@ impl Tracker {
         let seconds = self.git.text(["show", "-s", "--format=%ct", &tip])?.parse().unwrap_or(0);
         let commit = self.git.commit(&tree, None, self.replica.as_str(), seconds, "squash")?;
         let cache = self.cache()?;
-        let state = cache.read(&tip);
+        let state = cache.read(&tip).map(|(state, _)| state);
         let mut transaction = self.git.transaction()?;
         transaction.update(&state_ref(&self.replica), &commit, Some(&tip))?;
         transaction.prepare()?;
@@ -1094,6 +1103,37 @@ mod tests {
         assert_eq!(months_between("2025-12", "2026-01"), 1);
         assert_eq!(months_between("2026-10", "2026-10"), 0);
         assert_eq!(months_between("2026-11", "2026-10"), 0);
+    }
+
+    #[test]
+    fn a_log_entry_falls_back_to_the_root_before_the_batch() {
+        use serde_json::json;
+        // The root is a field of the entity itself, so clearing it leaves only the earlier state to name it.
+        let root_of = |state: &State, key: &Key| {
+            let register = state.field(key, "root")?;
+            register.values().find_map(|v| v.value.as_str().map(str::to_owned))
+        };
+        let (moved, gone) = (Key::new("item", "a1").unwrap(), Key::new("item", "a2").unwrap());
+        let mut replica = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+        for key in [&moved, &gone] {
+            replica.write(key, "root", "actor/user", 1, Some(json!("p1"))).unwrap();
+        }
+        replica.state.record();
+        replica.write(&moved, "root", "actor/user", 2, Some(json!("p2"))).unwrap();
+        replica.write(&gone, "root", "actor/user", 2, None).unwrap();
+        let mut state = replica.into_state();
+        let mut journal = state.take_journal().unwrap();
+        let after = state.clone();
+        let logged: BTreeMap<String, Vec<(String, usize)>> =
+            diff(&mut state, &mut journal, &root_of)
+                .into_iter()
+                .map(|(root, writes)| {
+                    (root, writes.into_iter().map(|w| (w.id, w.values.len())).collect())
+                })
+                .collect();
+        let expected = [("p1", vec![("a2".to_owned(), 0)]), ("p2", vec![("a1".to_owned(), 1)])];
+        assert_eq!(logged, expected.map(|(root, writes)| (root.to_owned(), writes)).into());
+        assert_eq!(state, after, "and the state is as the batch left it");
     }
 
     #[test]

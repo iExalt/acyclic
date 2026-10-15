@@ -452,10 +452,28 @@ fn steps(tc: &TestCase) -> Vec<Step> {
 /// Runs the steps; each run is applied by replica `run % 3`, with a random subset of the field's current dots as
 /// what it saw, so many runs are stale.
 fn play(steps: &[Step]) -> Vec<Replica> {
-    let mut replicas: Vec<Replica> = REPLICAS.iter().map(|name| replica(name)).collect();
-    let mut seqs = [0u64; 4];
-    for (at, step) in steps.iter().enumerate() {
-        let at = Millis::try_from(at).unwrap();
+    let mut play = Play::new();
+    for step in steps {
+        play.step(step);
+    }
+    play.replicas
+}
+
+/// Three replicas part way through a list of steps.
+struct Play {
+    replicas: Vec<Replica>,
+    seqs: [u64; 4],
+    at: Millis,
+}
+
+impl Play {
+    fn new() -> Self {
+        Self { replicas: REPLICAS.iter().map(|name| replica(name)).collect(), seqs: [0; 4], at: 0 }
+    }
+
+    fn step(&mut self, step: &Step) {
+        let Self { replicas, seqs, at } = self;
+        let at = std::mem::replace(at, *at + 1);
         match step {
             Step::Write { replica, entity, field, value } => {
                 let item = key("item", &format!("e{entity}"));
@@ -493,7 +511,6 @@ fn play(steps: &[Step]) -> Vec<Replica> {
             },
         }
     }
-    replicas
 }
 
 fn joined(states: &[&State]) -> State {
@@ -557,6 +574,36 @@ fn changed_files_turn_one_states_files_into_anothers(tc: TestCase) {
         };
     }
     assert_eq!(files, after.to_files());
+}
+
+/// A journal started part way through any steps records exactly what changed: its files are the whole-state
+/// comparison's, swapping turns the state back into the earlier one and forward again, and the replica's change
+/// counter moved whenever an entity changed.
+#[hegel::test(test_cases = 256)]
+fn a_journal_records_exactly_what_changed(tc: TestCase) {
+    let (first, then) = (steps(&tc), steps(&tc));
+    let mut play = Play::new();
+    for step in &first {
+        play.step(step);
+    }
+    let recorded = below(&tc, 3);
+    let before = play.replicas[recorded].state.clone();
+    let changes = play.replicas[recorded].changes();
+    play.replicas[recorded].state.record();
+    for step in &then {
+        play.step(step);
+    }
+    let mut after = play.replicas[recorded].state.clone();
+    let mut journal = after.take_journal().unwrap();
+    // Not the converse: an entity written and cleared again moved the counter but is unchanged.
+    assert!(journal.keys().next().is_none() || play.replicas[recorded].changes() != changes);
+    assert_eq!(after.changed_files_since(&journal), after.changed_files(&before));
+    assert_eq!(after.unchanged_since(&journal), after == before);
+    let later = after.clone();
+    after.swap(&mut journal);
+    assert_eq!(after, before);
+    after.swap(&mut journal);
+    assert_eq!(after, later);
 }
 
 /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.

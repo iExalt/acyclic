@@ -401,7 +401,22 @@ fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
         let (tip, cached) = tracker.load().unwrap();
         assert_eq!((tip, cached), tracker.load_strict().unwrap());
     };
-    write(&tracker, "a1", "f", json!(1));
+    // Enough state that a small batch's changes make a delta smaller than a sixteenth of the base.
+    tracker
+        .batch(&meta(), NOW, false, &no_project, |replica, at| {
+            (0..40).try_for_each(|n| {
+                let value = json!("x".repeat(100));
+                replica
+                    .write(&item(&format!("b{n}")), "f", "actor/user", at, Some(value))
+                    .map(|_| ())
+            })
+        })
+        .unwrap();
+    agree(&tracker);
+    // Later batches extend the cache with a delta rather than rewriting it.
+    write(&tracker, "a2", "f", json!(2));
+    write(&tracker, "a1", "f", json!(3));
+    assert!(path.join(".git/acyclic/cache/mac.delta.json").exists());
     agree(&tracker);
     tracker.squash().unwrap().unwrap();
     agree(&tracker);

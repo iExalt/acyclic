@@ -153,11 +153,42 @@ impl Context {
 }
 
 /// A replica's whole state.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct State {
     /// What the state has seen.
     pub context: Context,
     entities: BTreeMap<Key, Entity>,
+    /// While recording, what the state was before each change: see [`State::record`].
+    journal: Option<Journal>,
+}
+
+/// Two states are equal when they hold the same context and entities, whatever either is recording.
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.context == other.context && self.entities == other.entities
+    }
+}
+
+impl Eq for State {}
+
+/// A state's changes since it began recording: the context then, and each entity changed since as it was then
+/// (`None` where it was absent). A batch commits, logs and caches only these, rather than comparing whole states.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Journal {
+    context: Context,
+    entities: BTreeMap<Key, Option<Entity>>,
+}
+
+impl Journal {
+    /// The keys of the entities that changed.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &Key> {
+        self.entities.keys()
+    }
+
+    /// A changed entity as it was before; `None` when it was absent.
+    pub(crate) fn before(&self, key: &Key) -> Option<&Entity> {
+        self.entities.get(key).and_then(Option::as_ref)
+    }
 }
 
 /// Why a write, an operation or a read failed.
@@ -308,6 +339,7 @@ impl State {
 
     /// Joins another state into this one, reporting whether any entity changed.
     pub fn join(&mut self, other: &Self) -> bool {
+        let journal = &mut self.journal;
         let keys: BTreeSet<&Key> = self.entities.keys().chain(other.entities.keys()).collect();
         let empty = Entity::new();
         let mut joined = BTreeMap::new();
@@ -329,7 +361,15 @@ impl State {
                     entity.insert(name.clone(), register);
                 }
             }
-            changed |= *mine != entity;
+            if *mine != entity {
+                changed = true;
+                if let Some(journal) = journal {
+                    journal
+                        .entities
+                        .entry(key.clone())
+                        .or_insert_with(|| self.entities.get(key).cloned());
+                }
+            }
             if !entity.is_empty() {
                 joined.insert(key.clone(), entity);
             }
@@ -360,20 +400,54 @@ impl State {
 
     /// Sets a field, reporting whether its values changed.
     fn set(&mut self, key: &Key, field: &str, register: Register) -> bool {
+        let current = self.field(key, field);
+        if current.map_or(register.is_empty(), |current| *current == register) {
+            return false;
+        }
+        if let Some(journal) = &mut self.journal {
+            journal.entities.entry(key.clone()).or_insert_with(|| self.entities.get(key).cloned());
+        }
         if register.is_empty() {
-            let Some(entity) = self.entities.get_mut(key) else { return false };
-            let removed = entity.remove(field).is_some();
-            if entity.is_empty() {
-                self.entities.remove(key);
+            if let Some(entity) = self.entities.get_mut(key) {
+                entity.remove(field);
+                if entity.is_empty() {
+                    self.entities.remove(key);
+                }
             }
-            removed
         } else {
-            let entity = self.entities.entry(key.clone()).or_default();
-            if entity.get(field) == Some(&register) {
-                return false;
-            }
-            entity.insert(field.to_owned(), register);
-            true
+            self.entities.entry(key.clone()).or_default().insert(field.to_owned(), register);
+        }
+        true
+    }
+
+    /// Starts recording changes afresh, for [`State::take_journal`].
+    pub(crate) fn record(&mut self) {
+        self.journal = Some(Journal { context: self.context.clone(), entities: BTreeMap::new() });
+    }
+
+    /// Stops recording and returns the changes since [`State::record`], leaving out entities changed back.
+    pub(crate) fn take_journal(&mut self) -> Option<Journal> {
+        let mut journal = self.journal.take()?;
+        journal.entities.retain(|key, before| self.entities.get(key) != before.as_ref());
+        Some(journal)
+    }
+
+    /// Whether nothing changed since the journal began.
+    pub(crate) fn unchanged_since(&self, journal: &Journal) -> bool {
+        journal.entities.is_empty() && journal.context == self.context
+    }
+
+    /// Swaps the journal's earlier context and entities with the current ones, turning this state into the one it
+    /// was when recording began and the journal into a record of the later one; swapping again turns both back.
+    /// Costs only the changed entities.
+    pub(crate) fn swap(&mut self, journal: &mut Journal) {
+        std::mem::swap(&mut self.context, &mut journal.context);
+        for (key, other) in &mut journal.entities {
+            let current = match other.take() {
+                Some(entity) => self.entities.insert(key.clone(), entity),
+                None => self.entities.remove(key),
+            };
+            *other = current;
         }
     }
 }
@@ -395,8 +469,9 @@ pub struct Replica {
     continuity: Continuity,
     /// How many writes and joins changed an entity.
     changes: u64,
-    /// The replica's state.
-    pub state: State,
+    /// Read-only outside the crate: a batch records the changes made through the replica's own methods, and
+    /// replacing the state wholesale would hide them.
+    pub(crate) state: State,
 }
 
 /// An operation from a run, applied by the replica that runs it under the replica's own dot.
@@ -433,14 +508,28 @@ pub const RUN_APPLIED_BY: &str = "applied-by";
 impl Replica {
     /// A replica whose own state is intact.
     #[must_use]
-    pub fn open(id: ReplicaId, state: State) -> Self {
+    pub fn open(id: ReplicaId, mut state: State) -> Self {
+        state.journal = None;
         Self { id, continuity: Continuity::Intact, changes: 0, state }
     }
 
     /// A replica rebuilt without its own state, from whatever it could fetch.
     #[must_use]
-    pub fn rebuilt(id: ReplicaId, state: State) -> Self {
+    pub fn rebuilt(id: ReplicaId, mut state: State) -> Self {
+        state.journal = None;
         Self { id, continuity: Continuity::Rebuilt, changes: 0, state }
+    }
+
+    /// The replica's state.
+    #[must_use]
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    /// The replica's state, taken out of it.
+    #[must_use]
+    pub fn into_state(self) -> State {
+        self.state
     }
 
     /// Marks a rebuilt replica as holding its true highest counter again. Call it only after joining every state ref
@@ -620,6 +709,15 @@ struct Snapshot {
     entities: Vec<EntityFile>,
 }
 
+/// Changed entities for the cache's delta: the whole context, each changed entity, and each removed one's key.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Delta {
+    context: Context,
+    entities: Vec<EntityFile>,
+    removed: Vec<Key>,
+}
+
 /// An entity file.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -693,6 +791,22 @@ impl State {
             files.insert(key.path(), entity_file(key, entity));
         }
         files
+    }
+
+    /// The files changed since the journal began, as [`State::changed_files`] gives them; costs only the changes.
+    pub(crate) fn changed_files_since(
+        &self,
+        journal: &Journal,
+    ) -> BTreeMap<String, Option<String>> {
+        let mut changes = BTreeMap::new();
+        if self.context != journal.context {
+            changes.insert(HEADER_PATH.to_owned(), Some(self.header_file()));
+        }
+        for key in journal.keys() {
+            let file = self.entities.get(key).map(|entity| entity_file(key, entity));
+            changes.insert(key.path(), file);
+        }
+        changes
     }
 
     /// The files that differ from `before`'s: `Some` content for each new or changed file, `None` for each removed
@@ -794,27 +908,10 @@ impl State {
         context: Context,
         files: impl Iterator<Item = Result<(Option<&'a str>, EntityFile), Error>>,
     ) -> Result<Self, Error> {
-        let mut state = Self { context, entities: BTreeMap::new() };
+        let mut state = Self { context, ..Self::default() };
         for file in files {
             let (path, file) = file?;
-            let key = Key::new(&file.kind, &file.id)?;
-            let at = path.map_or_else(|| key.path(), str::to_owned);
-            if path.is_some_and(|path| key.path() != path) {
-                return Err(Error::Format(format!("{at} holds {}", key.path())));
-            }
-            for value in file.fields.values().flatten() {
-                check_value(&value.value).map_err(|e| Error::Format(format!("{at}: {e}")))?;
-            }
-            let mut entity = Entity::new();
-            for (name, values) in file.fields {
-                let register: Register = values
-                    .into_iter()
-                    .map(|v| (v.dot, Stamped { actor: v.actor, at: v.at, value: v.value }))
-                    .collect();
-                if !register.is_empty() {
-                    entity.insert(name, register);
-                }
-            }
+            let (key, entity) = read_entity(path, file)?;
             if !entity.is_empty() {
                 state.entities.insert(key, entity);
             }
@@ -822,6 +919,81 @@ impl State {
         state.check()?;
         Ok(state)
     }
+
+    /// The context and the entities at `keys` as one compact document, for the cache's delta: a removed entity
+    /// becomes a tombstone.
+    pub(crate) fn to_delta<'a>(&self, keys: impl Iterator<Item = &'a Key>) -> String {
+        let (mut entities, mut removed) = (Vec::new(), Vec::new());
+        for key in keys {
+            match self.entities.get(key) {
+                Some(entity) => entities.push(entity_record(key, entity)),
+                None => removed.push(key.clone()),
+            }
+        }
+        let delta = Delta { context: self.context.clone(), entities, removed };
+        serde_json::to_string(&delta).expect("state always serializes")
+    }
+
+    /// Applies a document written by [`State::to_delta`], returning the keys it held.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a malformed document or a dot beyond the context; the state is then partly changed.
+    pub(crate) fn apply_delta(&mut self, text: &str) -> Result<BTreeSet<Key>, Error> {
+        let delta: Delta =
+            serde_json::from_str(text).map_err(|e| Error::Format(format!("delta: {e}")))?;
+        let mut keys = BTreeSet::new();
+        self.context = delta.context;
+        for file in delta.entities {
+            let (key, entity) = read_entity(None, file)?;
+            if entity.is_empty() {
+                self.entities.remove(&key);
+            } else {
+                self.entities.insert(key.clone(), entity);
+            }
+            keys.insert(key);
+        }
+        for key in delta.removed {
+            let key = Key::new(&key.kind, &key.id)?;
+            self.entities.remove(&key);
+            keys.insert(key);
+        }
+        // Contexts only grow, so only the delta's own entities can hold a dot beyond the new one.
+        for key in &keys {
+            let dots =
+                self.entities.get(key).into_iter().flat_map(|e| e.values()).flat_map(|r| r.keys());
+            if let Some(dot) = dots.into_iter().find(|dot| !self.context.covers(dot)) {
+                return Err(Error::Format(format!(
+                    "delta: {}/{} holds dot {}:{} beyond the context",
+                    key.kind, key.id, dot.0, dot.1
+                )));
+            }
+        }
+        Ok(keys)
+    }
+}
+
+/// An entity file's key and entity, checking its place (when it has a path) and its values.
+fn read_entity(path: Option<&str>, file: EntityFile) -> Result<(Key, Entity), Error> {
+    let key = Key::new(&file.kind, &file.id)?;
+    let at = path.map_or_else(|| key.path(), str::to_owned);
+    if path.is_some_and(|path| key.path() != path) {
+        return Err(Error::Format(format!("{at} holds {}", key.path())));
+    }
+    for value in file.fields.values().flatten() {
+        check_value(&value.value).map_err(|e| Error::Format(format!("{at}: {e}")))?;
+    }
+    let mut entity = Entity::new();
+    for (name, values) in file.fields {
+        let register: Register = values
+            .into_iter()
+            .map(|v| (v.dot, Stamped { actor: v.actor, at: v.at, value: v.value }))
+            .collect();
+        if !register.is_empty() {
+            entity.insert(name, register);
+        }
+    }
+    Ok((key, entity))
 }
 
 fn check_version(header: &Json) -> Result<(), Error> {
