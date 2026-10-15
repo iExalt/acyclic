@@ -298,7 +298,6 @@ impl Transaction {
     }
 
     /// Deletes `reference`, which must be at `old`.
-    #[allow(dead_code)] // Pruning will use it.
     pub(crate) fn delete(&mut self, reference: &str, old: &str) -> Result<(), StoreError> {
         self.send(&format!("delete {reference} {old}"))
     }

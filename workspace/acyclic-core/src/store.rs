@@ -437,6 +437,142 @@ impl Tracker {
         self.git.commit(&tree, tip, self.replica.as_str(), at.div_euclid(1_000), message)
     }
 
+    /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
+    /// highest generation.
+    fn segments(&self, namespace: &str) -> Result<BTreeMap<String, Segment>, StoreError> {
+        let prefix = format!("refs/heads/{namespace}/{}/", self.replica);
+        let mut segments: BTreeMap<String, Segment> = BTreeMap::new();
+        for (name, tip) in self.git.refs(&prefix)? {
+            let rest = &name[prefix.len()..];
+            let Some((month, generation)) = rest.split_once('/') else { continue };
+            let Ok(generation) = generation.parse::<u32>() else { continue };
+            let newer = segments.get(month).is_none_or(|s| s.generation < generation);
+            if newer {
+                segments
+                    .insert(month.to_owned(), Segment { reference: name.clone(), generation, tip });
+            }
+        }
+        Ok(segments)
+    }
+
+    /// Prunes sealed segments: in each month before `now`'s, a project root's file whose retention (in months) has
+    /// passed is dropped, but only where `archived_ok` confirms the archived subtrees it covers have their records. A
+    /// segment is replaced by the next generation, a parentless commit without the dropped files, so the old events
+    /// become unreachable; a segment left empty is deleted. Every replacement happens in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a lock, a lost race or a git failure; nothing changes then.
+    pub fn prune(
+        &self,
+        now: Millis,
+        retention: &dyn Fn(&str) -> Option<u32>,
+        archived_ok: &dyn Fn(&str, &str) -> bool,
+    ) -> Result<Vec<String>, StoreError> {
+        let _lock = self.lock()?;
+        let current = month_of(now);
+        let mut transaction = None;
+        let mut dropped = Vec::new();
+        for namespace in NAMESPACES {
+            for (month, segment) in
+                self.segments(namespace)?.into_iter().filter(|(month, _)| *month < current)
+            {
+                let files = self.git.read_tree(&segment.tip)?;
+                let expired: Vec<&String> = files
+                    .keys()
+                    .filter(|path| {
+                        let root = path.strip_suffix(".jsonl").unwrap_or(path);
+                        retention(root)
+                            .is_some_and(|months| months_between(&month, &current) >= months)
+                            && archived_ok(root, &month)
+                    })
+                    .collect();
+                if expired.is_empty() {
+                    continue;
+                }
+                let transaction = match &mut transaction {
+                    Some(t) => t,
+                    None => transaction.insert(self.git.transaction()?),
+                };
+                let kept: BTreeMap<String, Option<Vec<u8>>> = files
+                    .iter()
+                    .filter(|(path, _)| !expired.contains(path))
+                    .map(|(path, content)| (path.clone(), Some(content.clone())))
+                    .collect();
+                if !kept.is_empty() {
+                    let tree = self.git.write_tree(None, &kept)?;
+                    let seconds = self
+                        .git
+                        .text(["show", "-s", "--format=%ct", &segment.tip])?
+                        .parse()
+                        .unwrap_or(0);
+                    let commit =
+                        self.git.commit(&tree, None, self.replica.as_str(), seconds, "prune")?;
+                    let next =
+                        segment_ref(namespace, &self.replica, &month, segment.generation + 1);
+                    transaction.update(&next, &commit, None)?;
+                }
+                transaction.delete(&segment.reference, &segment.tip)?;
+                dropped.extend(expired.iter().map(|path| format!("{}:{path}", segment.reference)));
+            }
+        }
+        if let Some(mut transaction) = transaction {
+            transaction.prepare()?;
+            transaction.commit()?;
+        }
+        Ok(dropped)
+    }
+
+    /// Pushes this replica's refs to `remote` in one atomic push: the state ref with a lease on the remote's tip, since
+    /// a squash rewrites it; every log and usage segment that is new or has grown, and the deletion of every segment
+    /// that pruning removed. Segments only ever fast-forward, so a ruleset refusing forced updates to them accepts it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the remote refuses any ref (then none moves), or git fails.
+    pub fn push(&self, remote: &str) -> Result<usize, StoreError> {
+        let mine = format!("refs/heads/state/{}", self.replica);
+        let patterns: Vec<String> = std::iter::once(mine.clone())
+            .chain(NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/*", self.replica)))
+            .collect();
+        let listing = self
+            .git
+            .text(["ls-remote", remote].into_iter().chain(patterns.iter().map(String::as_str)))?;
+        let theirs: BTreeMap<String, String> = listing
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(id, name)| (name.to_owned(), id.to_owned()))
+            .collect();
+        let mut ours = BTreeMap::new();
+        for prefix in std::iter::once(mine.clone())
+            .chain(NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)))
+        {
+            ours.extend(self.git.refs(&prefix)?);
+        }
+        let mut args = vec!["push".to_owned(), "--atomic".to_owned(), "--porcelain".to_owned()];
+        let mut refspecs = Vec::new();
+        for (name, id) in &ours {
+            if theirs.get(name) == Some(id) {
+                continue;
+            }
+            if *name == mine {
+                let lease = theirs.get(name).cloned().unwrap_or_default();
+                args.push(format!("--force-with-lease={name}:{lease}"));
+            }
+            refspecs.push(format!("{name}:{name}"));
+        }
+        for name in theirs.keys().filter(|name| !ours.contains_key(*name)) {
+            refspecs.push(format!(":{name}"));
+        }
+        if refspecs.is_empty() {
+            return Ok(0);
+        }
+        args.push(remote.to_owned());
+        args.extend(refspecs.iter().cloned());
+        self.git.run(&args, None, &[])?;
+        Ok(refspecs.len())
+    }
+
     /// The month's current segment ref (the highest generation, or generation 1 when none) and its tip.
     fn current_segment(
         &self,
@@ -510,6 +646,25 @@ impl Tracker {
     }
 }
 
+/// The namespaces holding monthly segments: audit logs, and usage records from step 2.7 on.
+const NAMESPACES: [&str; 2] = ["log", "usage"];
+
+/// A month's current segment.
+struct Segment {
+    reference: String,
+    generation: u32,
+    tip: String,
+}
+
+/// Whole calendar months from `from` to `to`, both `yyyy-mm`; zero when `to` isn't later.
+fn months_between(from: &str, to: &str) -> u32 {
+    let index = |month: &str| {
+        let (year, month) = month.split_once('-').unwrap_or(("0", "1"));
+        year.parse::<i64>().unwrap_or(0) * 12 + month.parse::<i64>().unwrap_or(1)
+    };
+    u32::try_from((index(to) - index(from)).max(0)).unwrap_or(u32::MAX)
+}
+
 /// Reads the state held in a commit's tree.
 fn read_state(git: &Git, commit: &str) -> Result<State, StoreError> {
     let files = git
@@ -559,6 +714,14 @@ mod tests {
             segment_ref("usage", &replica, "2026-10", 12),
             "refs/heads/usage/mac/2026-10/0012"
         );
+    }
+
+    #[test]
+    fn months_between_counts_calendar_months() {
+        assert_eq!(months_between("2026-07", "2026-10"), 3);
+        assert_eq!(months_between("2025-12", "2026-01"), 1);
+        assert_eq!(months_between("2026-10", "2026-10"), 0);
+        assert_eq!(months_between("2026-11", "2026-10"), 0);
     }
 
     #[test]

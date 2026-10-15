@@ -348,3 +348,153 @@ fn a_backward_clock_is_refused() {
     });
     assert!(matches!(result, Err(StoreError::State(acyclic_core::state::Error::ClockJump { .. }))));
 }
+
+/// A batch at `at` writing one field of an item in project `p0` and one in no project.
+fn write_month(tracker: &Tracker, at: Millis, value: i64) {
+    let root_of = |_: &State, key: &Key| (key.id.starts_with('p')).then(|| "p0".to_owned());
+    tracker
+        .batch(&meta(), at, false, &root_of, |replica, at| {
+            replica.write(&item("p1"), "f", "actor/user", at, Some(json!(value)))?;
+            replica.write(&item("x1"), "f", "actor/user", at, Some(json!(value)))?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+const JULY: Millis = 1_783_296_000_000; // 2026-07-06
+const AUGUST: Millis = 1_786_060_800_000; // 2026-08-07
+const SEPTEMBER: Millis = 1_788_739_200_000; // 2026-09-07
+
+fn log_refs(path: &Path) -> String {
+    git(path, &["for-each-ref", "--format=%(refname)", "refs/heads/log/"])
+}
+
+#[test]
+fn pruning_replaces_expired_segments_with_a_new_generation() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write_month(&tracker, JULY, 1);
+    write_month(&tracker, AUGUST, 2);
+    // September holds only the project's file.
+    let root_of = |_: &State, _: &Key| Some("p0".to_owned());
+    tracker
+        .batch(&meta(), SEPTEMBER, false, &root_of, |replica, at| {
+            replica.write(&item("p1"), "f", "actor/user", at, Some(json!(3))).map(|_| ())
+        })
+        .unwrap();
+    write(&tracker, "x1", "f", json!(4)); // October, the current month
+
+    let retention = |root: &str| (root == "p0").then_some(1);
+    // August's archived subtrees have no records yet, so it stays whole.
+    let archived_ok = |_: &str, month: &str| month != "2026-08";
+    let dropped = tracker.prune(NOW, &retention, &archived_ok).unwrap();
+    assert_eq!(dropped.len(), 2, "{dropped:?}");
+    assert_eq!(
+        log_refs(&path),
+        "refs/heads/log/mac/2026-07/0002\nrefs/heads/log/mac/2026-08/0001\nrefs/heads/log/mac/2026-10/0001"
+    );
+    let july = "refs/heads/log/mac/2026-07/0002";
+    assert_eq!(git(&path, &["ls-tree", "--name-only", july]), "_.jsonl");
+    assert_eq!(
+        git(&path, &["rev-list", "--count", july]),
+        "1",
+        "the new generation has no history"
+    );
+    assert_eq!(log_lines(&path, july, "_.jsonl").len(), 1);
+    assert!(
+        tracker.prune(NOW, &retention, &archived_ok).unwrap().is_empty(),
+        "pruning again changes nothing"
+    );
+}
+
+/// A bare remote whose pre-receive hook refuses forced updates to log and usage segments, like the tracker's ruleset.
+fn remote_with_ruleset(dir: &TempDir) -> PathBuf {
+    let remote = dir.path().join("remote.git");
+    git(dir.path(), &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    let hook = remote.join("hooks/pre-receive");
+    std::fs::write(
+        &hook,
+        r#"#!/bin/sh
+zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/log/*|refs/heads/usage/*)
+      if [ "$old" != "$zero" ] && [ "$new" != "$zero" ] && ! git merge-base --is-ancestor "$old" "$new"; then
+        echo "ruleset: $ref may not be force-pushed" >&2
+        exit 1
+      fi ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    remote
+}
+
+fn remote_refs(remote: &Path) -> String {
+    git(remote, &["for-each-ref", "--format=%(refname) %(objectname)"])
+}
+
+#[test]
+fn pushes_are_atomic_and_pass_the_ruleset() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let remote = remote_with_ruleset(&dir);
+    let remote_url = remote.to_str().unwrap();
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write_month(&tracker, JULY, 1);
+    write(&tracker, "x1", "f", json!(2));
+    assert_eq!(tracker.push(remote_url).unwrap(), 3, "state and two segments");
+    assert_eq!(tracker.push(remote_url).unwrap(), 0, "nothing new");
+
+    // A squash rewrites the state ref; the lease lets it through.
+    tracker.squash().unwrap();
+    write(&tracker, "x1", "f", json!(3));
+    assert_eq!(tracker.push(remote_url).unwrap(), 2);
+
+    // Pruning deletes one generation and creates the next: both pass the ruleset.
+    let pruned = tracker.prune(NOW, &|_| Some(1), &|_, _| true).unwrap();
+    assert!(!pruned.is_empty());
+    tracker.push(remote_url).unwrap();
+    let local = git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"]);
+    assert_eq!(remote_refs(&remote), local);
+}
+
+#[test]
+fn a_forced_rewrite_of_a_segment_is_refused_and_moves_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let remote = remote_with_ruleset(&dir);
+    let remote_url = remote.to_str().unwrap();
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "x1", "f", json!(1));
+    write(&tracker, "x1", "f", json!(2));
+    tracker.push(remote_url).unwrap();
+    let before = remote_refs(&remote);
+
+    // Rewind the log segment locally and write again: the segment no longer fast-forwards.
+    let segment = "refs/heads/log/mac/2026-10/0001";
+    git(&path, &["update-ref", segment, &format!("{segment}~1")]);
+    write(&tracker, "x1", "f", json!(3));
+    // The store never forces a segment, so git refuses it before sending, and the atomic push moves nothing.
+    assert!(tracker.push(remote_url).is_err());
+    assert_eq!(remote_refs(&remote), before, "the state ref didn't move either");
+    // Forced by hand, the remote's ruleset refuses it.
+    let forced = Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["push", "--force", remote_url, &format!("{segment}:{segment}")])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(!forced.status.success());
+    assert!(String::from_utf8_lossy(&forced.stderr).contains("may not be force-pushed"));
+    assert_eq!(remote_refs(&remote), before);
+}
