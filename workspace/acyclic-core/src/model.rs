@@ -550,6 +550,15 @@ pub enum WriteError {
     ParentCycle(String),
     /// The link would close a cycle of blocks and after links, through these items.
     LinkCycle(Vec<String>),
+    /// The field has invariants: write it with its checked write.
+    Checked {
+        /// The field.
+        field: String,
+        /// The checked write to use.
+        write: &'static str,
+    },
+    /// An item can't link to itself.
+    SelfLink(String),
     /// The thread already has an active run.
     RunActive {
         /// The thread.
@@ -572,6 +581,10 @@ impl fmt::Display for WriteError {
             Self::LinkCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
             },
+            Self::Checked { field, write } => {
+                write!(f, "{field} has invariants: write it with {write}")
+            },
+            Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
             },
@@ -628,12 +641,38 @@ fn to_json<T: Serialize>(value: &T) -> Json {
     serde_json::to_value(value).expect("model values always serialize")
 }
 
-/// Writes a field of any entity, or clears it with `None`.
+/// The fields only a checked write may set, with the write to use instead.
+const CHECKED: [(&str, &str, &str); 5] = [
+    (kind::ITEM, field::PARENT, "set_parent"),
+    (kind::ITEM, field::STATE, "set_state"),
+    (kind::LINK, "", "link or unlink"),
+    (kind::RUN, run::THREAD, "start_run"),
+    (kind::RUN, run::STATE, "set_run_state"),
+];
+
+/// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent and state, a
+/// link's fields, a run's thread and state) are refused: use their checked writes.
 ///
 /// # Errors
 ///
-/// Fails when the state layer refuses.
+/// Fails on a checked field or when the state layer refuses.
 pub fn set<T: Serialize>(
+    replica: &mut Replica,
+    key: &Key,
+    name: &str,
+    value: Option<&T>,
+    by: By<'_>,
+) -> Result<(), WriteError> {
+    let checked = CHECKED
+        .iter()
+        .find(|(kind, field, _)| key.kind == *kind && (field.is_empty() || name == *field));
+    if let Some((_, _, write)) = checked {
+        return Err(WriteError::Checked { field: name.to_owned(), write });
+    }
+    put(replica, key, name, value, by)
+}
+
+fn put<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
     name: &str,
@@ -674,8 +713,8 @@ pub fn add_item(
     by: By<'_>,
 ) -> Result<Key, WriteError> {
     let key = item_key(id)?;
-    set(replica, &key, field::TITLE, Some(&title), by)?;
-    set(replica, &key, field::STATE, Some(&ItemState::Backlog), by)?;
+    put(replica, &key, field::TITLE, Some(&title), by)?;
+    put(replica, &key, field::STATE, Some(&ItemState::Backlog), by)?;
     Ok(key)
 }
 
@@ -695,7 +734,7 @@ pub fn set_state(
     if value::<ItemState>(&replica.state, &key, field::STATE)? == Value::One(state) {
         return Ok(());
     }
-    set(replica, &key, field::STATE, Some(&state), by)
+    put(replica, &key, field::STATE, Some(&state), by)
 }
 
 /// Moves an item under `parent`, or to the top level with `None`.
@@ -718,7 +757,7 @@ pub fn set_parent(
             return Err(WriteError::ParentCycle(id.to_owned()));
         }
     }
-    set(replica, &key, field::PARENT, parent.map(str::to_owned).as_ref(), by)
+    put(replica, &key, field::PARENT, parent.map(str::to_owned).as_ref(), by)
 }
 
 /// Adds a link from `from` to `to`.
@@ -736,6 +775,9 @@ pub fn link(
 ) -> Result<Key, WriteError> {
     existing(&replica.state, from)?;
     existing(&replica.state, to)?;
+    if from == to {
+        return Err(WriteError::SelfLink(from.to_owned()));
+    }
     let key = link_key(from, to, kind)?;
     if kind.orders()
         && let Some(path) = Model::read(&replica.state)?.ordering_path(to, from)
@@ -743,11 +785,11 @@ pub fn link(
         return Err(WriteError::LinkCycle(path));
     }
     if replica.state.field(&key, link::FROM).is_none() {
-        set(replica, &key, link::FROM, Some(&from), by)?;
-        set(replica, &key, link::TO, Some(&to), by)?;
-        set(replica, &key, link::KIND, Some(&kind), by)?;
+        put(replica, &key, link::FROM, Some(&from), by)?;
+        put(replica, &key, link::TO, Some(&to), by)?;
+        put(replica, &key, link::KIND, Some(&kind), by)?;
     }
-    set(replica, &key, link::PRESENT, Some(&true), by)?;
+    put(replica, &key, link::PRESENT, Some(&true), by)?;
     Ok(key)
 }
 
@@ -764,7 +806,7 @@ pub fn unlink(
     by: By<'_>,
 ) -> Result<(), WriteError> {
     let key = link_key(from, to, kind)?;
-    set::<bool>(replica, &key, link::PRESENT, None, by)
+    put::<bool>(replica, &key, link::PRESENT, None, by)
 }
 
 /// Records a run starting on a thread.
@@ -787,9 +829,24 @@ pub fn start_run(
         return Err(WriteError::RunActive { thread: thread.to_owned(), run: active.id.clone() });
     }
     let key = Key::new(kind::RUN, name(id)?)?;
-    set(replica, &key, run::THREAD, Some(&thread), by)?;
-    set(replica, &key, run::STATE, Some(&RunState::Starting), by)?;
+    put(replica, &key, run::THREAD, Some(&thread), by)?;
+    put(replica, &key, run::STATE, Some(&RunState::Starting), by)?;
     Ok(key)
+}
+
+/// Sets a run's state.
+///
+/// # Errors
+///
+/// Fails on an invalid id or when the state layer refuses.
+pub fn set_run_state(
+    replica: &mut Replica,
+    id: &str,
+    state: RunState,
+    by: By<'_>,
+) -> Result<(), WriteError> {
+    let key = Key::new(kind::RUN, name(id)?)?;
+    put(replica, &key, run::STATE, Some(&state), by)
 }
 
 fn existing(state: &State, id: &str) -> Result<Key, WriteError> {

@@ -110,10 +110,9 @@ fn ordering_links_never_close_a_cycle_locally() {
     // Hard and soft links count together.
     let err = link(&mut r, "c", "a", LinkKind::Blocks, by(3)).unwrap_err();
     assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
-    assert!(matches!(
-        link(&mut r, "a", "a", LinkKind::After, by(3)),
-        Err(WriteError::LinkCycle(_))
-    ));
+    for kind in [LinkKind::Blocks, LinkKind::After, LinkKind::Relates] {
+        assert_eq!(link(&mut r, "a", "a", kind, by(3)), Err(WriteError::SelfLink("a".into())));
+    }
     // Context links don't order anything.
     link(&mut r, "c", "a", LinkKind::Relates, by(3)).unwrap();
     assert!(model(&r).link_cycles().is_empty());
@@ -233,8 +232,7 @@ fn a_thread_runs_one_run_at_a_time() {
         model(&a).run_clashes(),
         BTreeMap::from([("t1".into(), vec!["r1".into(), "r3".into()])])
     );
-    let r1 = Key::new(kind::RUN, "r1").unwrap();
-    set(&mut a, &r1, run::STATE, Some(&RunState::Done), by(3)).unwrap();
+    set_run_state(&mut a, "r1", RunState::Done, by(3)).unwrap();
     assert!(model(&a).run_clashes().is_empty());
 }
 
@@ -248,4 +246,28 @@ fn equal_concurrent_values_read_as_one_and_unreadable_ones_fail() {
     assert_eq!(model(&a).items["x"].size, Value::One(Size::M));
     a.write(&key, field::STATE, "actor/user", 3, Some(json!("from-the-future"))).unwrap();
     assert!(matches!(Model::read(&a.state), Err(Error::Format(_))));
+}
+
+#[test]
+fn fields_with_invariants_need_their_checked_writes() {
+    let mut r = replica("a");
+    items(&mut r, &["x", "y"]);
+    let x = item_key("x").unwrap();
+    for name in [field::PARENT, field::STATE] {
+        assert!(matches!(
+            set(&mut r, &x, name, Some(&"y"), by(2)),
+            Err(WriteError::Checked { .. })
+        ));
+    }
+    let link = link_key("x", "y", LinkKind::Blocks).unwrap();
+    assert!(matches!(
+        set(&mut r, &link, link::FROM, Some(&"x"), by(2)),
+        Err(WriteError::Checked { .. })
+    ));
+    let run = Key::new(kind::RUN, "r1").unwrap();
+    assert!(matches!(
+        set(&mut r, &run, run::THREAD, Some(&"t"), by(2)),
+        Err(WriteError::Checked { .. })
+    ));
+    set(&mut r, &x, field::NOTES, Some(&"fine"), by(2)).unwrap();
 }
