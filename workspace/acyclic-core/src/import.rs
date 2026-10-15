@@ -8,6 +8,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+mod apply;
+
+pub use apply::{ApplyError, Report, apply};
+
 /// The value of the document's `format` field.
 pub const FORMAT: &str = "acyclic-import";
 
@@ -268,6 +272,14 @@ pub enum ValidationError {
     ArchivedNotDone(String),
     /// Evidence on an item that isn't done.
     EvidenceNotDone(String),
+    /// A key or name that isn't a valid id: at most 64 lowercase letters, digits, `-`, `_` or `.`, not starting
+    /// with `.`.
+    InvalidName {
+        /// Where it is, such as `item a1, areas`.
+        at: String,
+        /// The name.
+        name: String,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -293,6 +305,10 @@ impl fmt::Display for ValidationError {
                 write!(f, "link {:?} to {:?} ({:?}) appears twice", link.from, link.to, link.kind)
             },
             Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
+            Self::InvalidName { at, name } => write!(
+                f,
+                "{at}: {name:?} isn't a valid name (at most 64 lowercase letters, digits, '-', '_' or '.')"
+            ),
         }
     }
 }
@@ -392,6 +408,7 @@ impl Import {
             }
         }
 
+        self.check_names(&mut errors);
         self.check_parents(&mut errors);
         self.check_links(&mut errors);
         self.check_threads(&mut errors);
@@ -399,6 +416,28 @@ impl Import {
         errors.sort();
         errors.dedup();
         errors
+    }
+
+    fn check_names(&self, errors: &mut Vec<ValidationError>) {
+        let mut check = |at: String, name: &str| {
+            if !name.is_empty() && crate::model::item_key(name).is_err() {
+                errors.push(ValidationError::InvalidName { at, name: name.to_owned() });
+            }
+        };
+        for repository in &self.repositories {
+            check("repository key".to_owned(), &repository.key);
+        }
+        for item in &self.items {
+            check("item key".to_owned(), &item.key);
+            for (field, names) in [("areas", &item.areas), ("resources", &item.resources)] {
+                for name in names {
+                    check(format!("item {:?}, {field}", item.key), name);
+                }
+            }
+        }
+        for thread in &self.threads {
+            check("thread key".to_owned(), &thread.key);
+        }
     }
 
     fn check_parents(&self, errors: &mut Vec<ValidationError>) {
@@ -513,7 +552,7 @@ fn keys<'a>(
 mod tests {
     use super::*;
 
-    fn item(key: &str, state: State, parent: Option<&str>) -> Item {
+    pub(super) fn item(key: &str, state: State, parent: Option<&str>) -> Item {
         Item {
             key: key.to_owned(),
             title: format!("Item {key}"),
@@ -530,11 +569,11 @@ mod tests {
         }
     }
 
-    fn link(from: &str, to: &str, kind: LinkKind) -> Link {
+    pub(super) fn link(from: &str, to: &str, kind: LinkKind) -> Link {
         Link { from: from.to_owned(), to: to.to_owned(), kind }
     }
 
-    fn thread(key: &str, items: &[&str]) -> Thread {
+    pub(super) fn thread(key: &str, items: &[&str]) -> Thread {
         Thread {
             key: key.to_owned(),
             title: format!("Thread {key}"),
@@ -545,7 +584,7 @@ mod tests {
         }
     }
 
-    fn valid() -> Import {
+    pub(super) fn valid() -> Import {
         let mut import = Import::new();
         import.repositories.push(Repository {
             key: "r".to_owned(),

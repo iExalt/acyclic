@@ -176,11 +176,30 @@ impl From<Error> for ScopeError {
 /// Fails when the model layer refuses, such as for an unknown item or an invalid name.
 pub fn edit(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<Outcome, ScopeError> {
     let model = Model::read(&replica.state)?;
+    edit_in(replica, &model, change, by)
+}
+
+/// Like [`edit`], deciding against `model`, a view the caller already read, so many edits share one read.
+pub(crate) fn edit_in(
+    replica: &mut Replica,
+    model: &Model,
+    change: &ScopeEdit,
+    by: By<'_>,
+) -> Result<Outcome, ScopeError> {
     validate(&replica.state, change)?;
-    let protected = !change.approved_threads(&model).is_empty();
-    if !protected || classify(&model, by.actor) != Actor::Agent {
+    let protected = !change.approved_threads(model).is_empty();
+    if !protected || classify(model, by.actor) != Actor::Agent {
         apply(replica, change, by)?;
         return Ok(Outcome::Applied);
+    }
+    // The same agent asking again gets its undecided proposal back, so a repeated command files nothing new.
+    let pending = proposals(&replica.state)?.into_values().find(|p| {
+        p.decision == Value::None
+            && p.edit.one() == Some(change)
+            && p.actor.one().map(String::as_str) == Some(by.actor)
+    });
+    if let Some(pending) = pending {
+        return Ok(Outcome::Proposed(pending.id));
     }
     let next = replica.state.context.seen.get(replica.id()).copied().unwrap_or(0) + 1;
     let id = format!("{}-{next}", replica.id());

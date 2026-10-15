@@ -79,6 +79,13 @@ fn an_agents_edit_to_approved_scope_waits_and_others_apply() {
     let model = Model::read(&r.state).unwrap();
     assert_eq!(model.members("ok"), vec!["x"], "nothing applied");
     assert_eq!(proposals(&r.state).unwrap().len(), 5);
+    // Asking again gets the pending proposal back; another agent's ask is its own.
+    let first = proposals(&r.state).unwrap().into_keys().collect::<Vec<_>>();
+    let again = edit(&mut r, &member("x", None), agent).unwrap();
+    assert!(matches!(&again, Outcome::Proposed(id) if first.contains(id)), "{again:?}");
+    let other = edit(&mut r, &member("x", None), by("session/mac", 5)).unwrap();
+    assert!(matches!(&other, Outcome::Proposed(id) if !first.contains(id)), "{other:?}");
+    assert_eq!(proposals(&r.state).unwrap().len(), 6);
     // The user and a project-management agent apply at once.
     assert_eq!(
         edit(&mut r, &member("y", Some("ok")), by("run/boss", 6)).unwrap(),
