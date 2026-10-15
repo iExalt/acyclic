@@ -125,7 +125,19 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     );
     assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
     assert_eq!(import(&mut sh, "")["changed"], true);
+    let refs = |sh: &Shell| {
+        let out = std::process::Command::new("git")
+            .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+            .current_dir(sh.path().join("tracker"))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let before = refs(&sh);
+    assert!(before.contains("refs/heads/state/"), "{before}");
     assert_eq!(import(&mut sh, "")["changed"], false, "a repeat changes nothing");
+    assert_eq!(refs(&sh), before, "and commits nothing");
     plan.items[0].title.push_str(" renamed");
     std::fs::write(&file, plan.to_json()).unwrap();
     let renamed = import(&mut sh, "");
