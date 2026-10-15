@@ -87,12 +87,24 @@ impl Key {
         Ok(Self { kind: kind.to_owned(), id: id.to_owned() })
     }
 
-    /// The entity's file path, fanned out by the id's first two characters.
+    /// The entity's file path, fanned out over 256 directories by a hash of the id, so that no directory grows
+    /// large however ids are chosen: Git rewrites a whole directory's listing for a change to one file in it.
     #[must_use]
     pub fn path(&self) -> String {
-        let fan: String = self.id.chars().chain(std::iter::repeat('_')).take(2).collect();
-        format!("{}/{fan}/{}.json", self.kind, self.id)
+        format!("{}/{:02x}/{}.json", self.kind, fan(&self.id), self.id)
     }
+}
+
+/// 32-bit FNV-1a of the id, folded to a byte. Written out here, since the layout must never change with a library's
+/// hasher.
+fn fan(id: &str) -> u8 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in id.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    let [a, b, c, d] = hash.to_le_bytes();
+    a ^ b ^ c ^ d
 }
 
 /// One value of a field, with who wrote it and when.

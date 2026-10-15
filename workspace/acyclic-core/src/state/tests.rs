@@ -84,14 +84,17 @@ fn files_are_canonical_whatever_the_key_order() {
     a.write(&item, "f", "user", 1, Some(Json::Object(forward))).unwrap();
     b.write(&item, "f", "user", 1, Some(Json::Object(backward))).unwrap();
     assert_eq!(a.state.to_files(), b.state.to_files());
-    let text = &a.state.to_files()["item/a1/a1.json"];
+    let text = &a.state.to_files()["item/27/a1.json"];
     assert!(text.find("alpha").unwrap() < text.find("gamma").unwrap());
 }
 
 #[test]
-fn files_fan_out_by_id_and_reject_unsafe_names() {
-    assert_eq!(key("item", "x").path(), "item/x_/x.json");
-    assert_eq!(key("item", "abc").path(), "item/ab/abc.json");
+fn files_fan_out_by_a_hash_of_the_id_and_reject_unsafe_names() {
+    // Pinned: a change to the hash moves every file.
+    assert_eq!(key("item", "x").path(), "item/26/x.json");
+    assert_eq!(key("item", "a1").path(), "item/27/a1.json");
+    assert_eq!(key("item", "a2").path(), "item/b9/a2.json");
+    assert_eq!(key("link", "abc").path(), "link/bf/abc.json");
     for bad in ["", "../x", ".hidden", "a/b", "a b", "Upper"] {
         assert!(Key::new("item", bad).is_err(), "{bad:?}");
     }
@@ -113,7 +116,7 @@ fn reading_refuses_newer_formats_and_bad_files() {
     assert!(matches!(State::from_files(&newer), Err(Error::Format(m)) if m.contains("version 2")));
 
     let mut moved = files.clone();
-    let text = moved.remove("item/a1/a1.json").unwrap();
+    let text = moved.remove("item/27/a1.json").unwrap();
     moved.insert("item/zz/a1.json".to_owned(), text);
     assert!(State::from_files(&moved).is_err());
 
@@ -363,7 +366,7 @@ fn reading_refuses_floats_and_non_canonical_files() {
     a.write(&key("item", "a1"), "f", "user", 1, Some(json!(1))).unwrap();
     let files = a.state.to_files();
     assert_eq!(State::from_files(&files).unwrap(), a.state);
-    let path = "item/a1/a1.json";
+    let path = "item/27/a1.json";
     let mut float = files.clone();
     float.insert(path.to_owned(), files[path].replace("\"value\": 1", "\"value\": 1.5"));
     assert!(State::from_files(&float).is_err());
