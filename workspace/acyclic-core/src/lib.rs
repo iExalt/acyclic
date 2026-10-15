@@ -17,6 +17,7 @@ pub mod probe;
 pub mod ready;
 pub mod schema;
 pub mod scope;
+pub mod split;
 pub mod state;
 pub mod store;
 pub mod time;
