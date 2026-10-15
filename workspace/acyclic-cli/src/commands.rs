@@ -7,6 +7,7 @@ use std::process::Command as Process;
 
 use acyclic_core::archive;
 use acyclic_core::claim;
+use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model, SetField};
 use acyclic_core::needs;
 use acyclic_core::ready::{GitAncestry, Readiness, Status};
@@ -29,7 +30,6 @@ pub enum Output {
     /// The envelope's data.
     Json(Json),
     /// Plain text.
-    #[expect(dead_code, reason = "prime prints text; it lands with the agent block")]
     Text(String),
 }
 
@@ -43,6 +43,9 @@ const MAX_LEASE: Millis = 8 * LEASE;
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Init { path, replica } = &cli.command {
         return init(&env.cwd.join(path), replica).map(Output::Json);
+    }
+    if let Command::Prime = &cli.command {
+        return Ok(Output::Text(prime()));
     }
     let session = Session::open(cli, env)?;
     session.dispatch(&cli.command).map(Output::Json)
@@ -70,7 +73,7 @@ impl<'a> Session<'a> {
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
     fn dispatch(&self, command: &Command) -> Result<Json, CliError> {
         match command {
-            Command::Init { .. } => unreachable!("handled before a session opens"),
+            Command::Init { .. } | Command::Prime => unreachable!("handled before a session opens"),
             Command::Ready { include_archived } => self.ready(*include_archived),
             Command::Show { item } => self.show(item),
             Command::Needs => self.needs(),
@@ -215,6 +218,7 @@ impl<'a> Session<'a> {
                 set_if(replica, &key, name, Some(level), by)?;
                 Ok(json!({"thread": id, "level": level}))
             }),
+            Command::Import { file, dry_run } => self.import(file, *dry_run),
             Command::Archive { id } => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
@@ -296,7 +300,8 @@ impl<'a> Session<'a> {
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let claims = claim::live(&state, &model::item_key(id)?, self.now)?;
+        let alive = |holder: &str| model.run_alive(holder);
+        let claims = claim::live_with(&state, &model::item_key(id)?, self.now, &alive)?;
         Ok(json!({
             "item": item,
             "role": model.role(id),
@@ -352,6 +357,25 @@ impl<'a> Session<'a> {
         })
     }
 
+    fn import(&self, file: &Path, dry_run: bool) -> Result<Json, CliError> {
+        let path = self.env.cwd.join(file);
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
+        })?;
+        let doc = Import::from_json(&text)?;
+        if dry_run {
+            let (_, state) = self.tracker.load()?;
+            let mut replica = Replica::open(self.tracker.replica().clone(), state);
+            let at = replica.stamp(self.now, false)?;
+            let report = import::apply(&doc, &mut replica, By { actor: &self.actor, at })?;
+            return Ok(json!({"report": report, "dry_run": true, "changed": false}));
+        }
+        self.write(|replica, by| {
+            let report = import::apply(&doc, replica, by)?;
+            Ok(json!({"report": report, "dry_run": false}))
+        })
+    }
+
     fn claim(&self, id: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
         let is_run = self.actor.starts_with("run/");
         let lease = match (lease, is_run) {
@@ -366,9 +390,7 @@ impl<'a> Session<'a> {
             if !force {
                 let model = Model::read(&replica.state)?;
                 let status = Readiness::new(&replica.state, &model, by.at, &ancestry).of(id)?;
-                let renewal =
-                    matches!(&status, Some(Status::Claimed { holder }) if *holder == by.actor);
-                if !renewal && !matches!(status, Some(Status::Ready { .. })) {
+                if !may_claim(status.as_ref(), by.actor) {
                     return Err(CliError::refused(
                         "not-ready",
                         format!("item {id} isn't ready to claim"),
@@ -377,10 +399,28 @@ impl<'a> Session<'a> {
                 }
             }
             claim::claim(replica, &key, by.actor, by.at, lease, MAX_LEASE)?;
-            let held = claim::winner(&replica.state, &key, by.at)?;
+            let model = Model::read(&replica.state)?;
+            let alive = |holder: &str| model.run_alive(holder);
+            let held = claim::winner_with(&replica.state, &key, by.at, &alive)?;
             Ok(json!({"item": id, "claim": held}))
         })
     }
+}
+
+/// Whether `actor` may claim an item in `status` without forcing: when it's ready, or when what stands in the way is
+/// the actor's own claim, as winner of a contest or as holder of a shared resource. Core allows the same.
+pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
+    match status {
+        Some(Status::Ready { .. }) => true,
+        Some(Status::Claimed { holder } | Status::ResourceBusy { holder, .. }) => holder == actor,
+        Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
+        _ => false,
+    }
+}
+
+/// The agent block, with this build's version.
+pub(crate) fn prime() -> String {
+    include_str!("prime.md").replace("{version}", acyclic_core::VERSION)
 }
 
 fn not_found(id: &str) -> CliError {

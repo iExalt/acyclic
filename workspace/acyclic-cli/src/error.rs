@@ -3,6 +3,7 @@
 use std::fmt;
 
 use acyclic_core::archive::ArchiveError;
+use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
 use acyclic_core::scope::ScopeError;
@@ -164,6 +165,29 @@ impl From<ArchiveError> for CliError {
             },
             ArchiveError::NotDone(_) => Self::refused("not-done", message),
             ArchiveError::NotAllowed(_) => Self::refused("not-allowed", message),
+        }
+    }
+}
+
+impl From<ParseError> for CliError {
+    fn from(err: ParseError) -> Self {
+        Self::refused("invalid-import", err.to_string())
+    }
+}
+
+impl From<ApplyError> for CliError {
+    fn from(err: ApplyError) -> Self {
+        let message = err.to_string();
+        match err {
+            ApplyError::Write(err) => err.into(),
+            ApplyError::Invalid(errors) => {
+                let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
+                Self::refused("invalid-import", message).with(json!({"errors": errors}))
+            },
+            ApplyError::UserOnly(_) => Self::refused("user-only", message),
+            ApplyError::Cycles(cycles) => {
+                Self::refused("import-cycle", message).with(json!({"cycles": cycles}))
+            },
         }
     }
 }

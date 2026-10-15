@@ -41,6 +41,8 @@ pub enum Command {
         #[arg(long)]
         replica: String,
     },
+    /// Prints conventions for agents, matched to this version, as text.
+    Prime,
     /// Lists ready leaves, best first.
     Ready {
         /// Judge archived work as if it weren't archived.
@@ -241,5 +243,13 @@ pub enum Command {
     Archive {
         /// The subtree's root.
         id: String,
+    },
+    /// Imports a plan: adds and updates what the document names, and never deletes.
+    Import {
+        /// The import document.
+        file: PathBuf,
+        /// Report what would change without writing it.
+        #[arg(long)]
+        dry_run: bool,
     },
 }

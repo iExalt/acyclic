@@ -105,3 +105,33 @@ fn an_unreadable_state_points_to_doctor() {
     assert_eq!(sh.run("doctor", AGENT), 0);
     insta::assert_snapshot!(sh.transcript);
 }
+
+#[test]
+fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let mut plan = acyclic_fixtures::generate(350, 7);
+    let file = sh.path().join("plan.json");
+    std::fs::write(&file, plan.to_json()).unwrap();
+    let import = |sh: &mut Shell, extra: &str| {
+        let (code, out) = sh.output(&format!("import plan.json --as-user{extra}"), &[]);
+        assert_eq!(code, 0, "{out}");
+        out["data"].clone()
+    };
+    let dry = import(&mut sh, " --dry-run");
+    assert_eq!(
+        (dry["changed"].as_bool(), dry["report"]["items"].as_u64()),
+        (Some(false), Some(350))
+    );
+    assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
+    assert_eq!(import(&mut sh, "")["changed"], true);
+    assert_eq!(import(&mut sh, "")["changed"], false, "a repeat changes nothing");
+    plan.items[0].title.push_str(" renamed");
+    std::fs::write(&file, plan.to_json()).unwrap();
+    let renamed = import(&mut sh, "");
+    assert_eq!(
+        (renamed["changed"].as_bool(), renamed["report"]["fields"].as_u64()),
+        (Some(true), Some(1))
+    );
+    assert_eq!(sh.run("import missing.json --as-user", &[]), 3);
+}
