@@ -215,9 +215,10 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     // A new top-level item filled to the split budget: the next add under it is timed beside the add before it,
     // which splits nothing. Its first child splits it at once, as a new group, so the fill starts after that.
     let budget = acyclic_core::split::BUDGET;
+    let mut tops = Vec::new();
     let (plain, splitting): (Vec<Sample>, Vec<Sample>) = (0..runs)
         .map(|n| {
-            tracker.run(&format!("item add goal-{n} --title Goal"), false);
+            tops.push(tracker.time(&format!("item add goal-{n} --title Goal"), false));
             for k in 0..budget {
                 tracker
                     .run(&format!("item add goal-{n}-{k} --title Leaf --parent goal-{n}"), false);
@@ -233,6 +234,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             (plain, splitting)
         })
         .unzip();
+    record(&mut row, "add at top", &tops);
     record(&mut row, "add", &plain);
     record(&mut row, "add, splitting", &splitting);
     if batches > 0 {
@@ -347,6 +349,7 @@ fn print_table(rows: &[Row], batches: usize) {
         "claim",
         "claim again",
         "link",
+        "add at top",
         "add",
         "add, splitting",
     ];

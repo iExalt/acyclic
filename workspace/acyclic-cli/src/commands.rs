@@ -19,6 +19,7 @@ use acyclic_core::scope::{self, Outcome as ScopeOutcome, ScopeEdit};
 use acyclic_core::split;
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
+use acyclic_core::suggest;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
@@ -543,12 +544,19 @@ impl<'a> Session<'a> {
                 model::set_parent(replica, id, Some(parent), by)?;
                 placed = true;
             }
-            let placement = if placed {
-                split::place(replica, &[id.to_owned()], Some(split::BUDGET), by)?
+            // Candidates on every add, after placement, so each parent names the thread it would pass down as it
+            // stands now. With a parent given, its rank says whether the words agree with it.
+            let (placement, model) = if placed {
+                split::place_and_read(replica, &[id.to_owned()], Some(split::BUDGET), by)?
             } else {
-                split::Placement::default()
+                (split::Placement::default(), Model::read(replica.state())?)
             };
-            Ok(with_placement(json!({"item": id}), placement, false))
+            let (suggestions, rank) = suggest::suggest(&model, id, parent, suggest::LIMIT);
+            let mut candidates = json!(suggestions);
+            if parent.is_some() {
+                candidates["parent_rank"] = json!(rank);
+            }
+            Ok(with_placement(json!({"item": id, "candidates": candidates}), placement, false))
         })
     }
 

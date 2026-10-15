@@ -592,3 +592,52 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread split
   },
   "ok": true
 }
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
+# exit 0
+{
+  "data": {
+    "candidates": {
+      "parents": [
+        {
+          "accept": "acyclic item move a3 a2",
+          "inherits": "s-a2-b75370",
+          "item": "a2",
+          "score": 0.428,
+          "title": "Second"
+        }
+      ],
+      "related": [],
+      "threads": [
+        {
+          "accept": "acyclic thread add a3 s-a2-b75370",
+          "score": 0.428,
+          "thread": "s-a2-b75370",
+          "title": "Second"
+        }
+      ]
+    },
+    "changed": true,
+    "item": "a3"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --parent a2
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a3",
+    "placed": {
+      "drafts": [],
+      "inherited": [
+        {
+          "item": "a3",
+          "thread": "s-a2-b75370"
+        }
+      ]
+    }
+  },
+  "ok": true
+}

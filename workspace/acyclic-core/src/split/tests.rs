@@ -498,6 +498,15 @@ fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
     write(&mut r, &item_key("c").unwrap(), field::THREAD, json!("own"));
     assert!(place_one(&mut r, "c", Some(BUDGET), "session/mac").is_empty());
     assert_eq!(model(&r).thread_of("c"), Some("own"));
+    // Under a parent in conflict there is no single line to inherit along.
+    let mut other = replica_named("pi");
+    other.join(r.state()).unwrap();
+    add(&mut r, "torn", None);
+    other.join(r.state()).unwrap();
+    set_parent(&mut r, "torn", Some("g1-00"), at(20)).unwrap();
+    set_parent(&mut other, "torn", Some("p"), at(20)).unwrap();
+    r.join(other.state()).unwrap();
+    assert_eq!(inherited_thread(&model(&r), "torn"), None);
 }
 
 #[test]

@@ -626,12 +626,22 @@ fn write(
 /// on its line is in conflict, or there is none.
 #[must_use]
 pub fn inherited_thread<'m>(model: &'m Model, id: &str) -> Option<&'m str> {
-    let threaded = model
-        .ancestors(id)
-        .into_iter()
-        .map(|a| &model.items[a].thread)
-        .find(|t| **t != Value::None);
-    threaded.and_then(Value::one).map(String::as_str)
+    // A parent in conflict has no single line to inherit along.
+    let parent = model.items.get(id).and_then(|item| item.parent.one())?;
+    passed_down(model, parent)
+}
+
+/// The thread a new child of `parent` joins: `parent`'s own, or else its nearest threaded ancestor's; `None` when the
+/// nearest thread on that line is in conflict, or there is none.
+#[must_use]
+pub fn passed_down<'m>(model: &'m Model, parent: &str) -> Option<&'m str> {
+    std::iter::once(parent)
+        .chain(model.ancestors(parent))
+        .filter_map(|id| model.items.get(id))
+        .map(|item| &item.thread)
+        .find(|thread| **thread != Value::None)
+        .and_then(Value::one)
+        .map(String::as_str)
 }
 
 /// An item that joined its nearest threaded ancestor's thread, or asked to.
@@ -677,6 +687,33 @@ pub fn place(
     budget: Option<usize>,
     by: By<'_>,
 ) -> Result<Placement, ScopeError> {
+    Ok(placing(replica, items, budget, by)?.0)
+}
+
+/// Like [`place`], also returning the model as it stands after placing: the one placing read when it wrote no draft,
+/// so a caller that reads next saves a read.
+///
+/// # Errors
+///
+/// Fails when the state layer refuses.
+pub fn place_and_read(
+    replica: &mut Replica,
+    items: &[String],
+    budget: Option<usize>,
+    by: By<'_>,
+) -> Result<(Placement, Model), ScopeError> {
+    let (placement, model) = placing(replica, items, budget, by)?;
+    let model = if placement.drafts.is_empty() { model } else { Model::read(replica.state())? };
+    Ok((placement, model))
+}
+
+/// Places, returning the model read before any draft was written.
+fn placing(
+    replica: &mut Replica,
+    items: &[String],
+    budget: Option<usize>,
+    by: By<'_>,
+) -> Result<(Placement, Model), ScopeError> {
     let mut placement = Placement::default();
     let model = Model::read(replica.state())?;
     for item in items {
@@ -724,7 +761,7 @@ pub fn place(
         .collect();
     placement.drafts = plan_tops(&model, &over, &held);
     write(replica, &model, &placement.drafts, by)?;
-    Ok(placement)
+    Ok((placement, model))
 }
 
 /// `s-<root>-<hash>`: the root's id, cut to fit, and 24 bits of an FNV-1a hash of the sorted members, salted when an

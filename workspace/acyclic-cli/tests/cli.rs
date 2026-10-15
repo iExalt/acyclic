@@ -12,11 +12,13 @@ const NOW: &str = "1792022400000";
 struct Shell {
     dir: TempDir,
     transcript: String,
+    /// Whether the transcript keeps an add's placement candidates; they would churn every add's entry otherwise.
+    candidates: bool,
 }
 
 impl Shell {
     fn new() -> Self {
-        Self { dir: TempDir::new().unwrap(), transcript: String::new() }
+        Self { dir: TempDir::new().unwrap(), transcript: String::new(), candidates: false }
     }
 
     fn env(&self, extra: &[(&str, &str)]) -> Env {
@@ -41,15 +43,23 @@ impl Shell {
         let outcome = execute(args, &self.env(extra));
         let code = outcome.code;
         let output = outcome.stdout.replace(self.dir.path().to_str().unwrap(), "[dir]");
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap_or_default();
+        let mut shown_output = output.clone();
+        if !self.candidates && parsed["data"].get("candidates").is_some() {
+            let mut trimmed = parsed.clone();
+            trimmed["data"].as_object_mut().unwrap().remove("candidates");
+            shown_output = format!("{}\n", serde_json::to_string_pretty(&trimmed).unwrap());
+        }
         let shown: Vec<&str> =
             extra.iter().filter(|(n, _)| *n == "ACYCLIC_ACTOR").map(|(_, v)| *v).collect();
         let prefix =
             shown.first().map(|actor| format!("ACYCLIC_ACTOR={actor} ")).unwrap_or_default();
-        writeln!(self.transcript, "$ {prefix}acyclic {line}\n# exit {code}\n{output}").unwrap();
+        writeln!(self.transcript, "$ {prefix}acyclic {line}\n# exit {code}\n{shown_output}")
+            .unwrap();
         if !outcome.stderr.is_empty() {
             writeln!(self.transcript, "# stderr\n{}", outcome.stderr).unwrap();
         }
-        (code, serde_json::from_str(&output).unwrap_or_default())
+        (code, parsed)
     }
 
     fn path(&self) -> &Path {
@@ -131,6 +141,15 @@ fn a_journey_through_the_contract() {
         (0, Some(false)),
         "nothing left to split"
     );
+    // Every add offers places for the item; one is kept in full here.
+    sh.candidates = true;
+    let (code, added) = sh.output("item add a3 --title Second-follow-up", AGENT);
+    sh.candidates = false;
+    let first = &added["data"]["candidates"]["parents"][0];
+    let shown = (first["item"].as_str(), first["accept"].as_str());
+    assert_eq!((code, shown), (0, (Some("a2"), Some("acyclic item move a3 a2"))));
+    let (_, under) = sh.output("item add a3 --title Second-follow-up --parent a2", AGENT);
+    assert_eq!(under["data"]["candidates"]["parent_rank"], 1, "the parent given ranks first");
     insta::assert_snapshot!(sh.transcript);
 }
 

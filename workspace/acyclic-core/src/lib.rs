@@ -20,4 +20,5 @@ pub mod scope;
 pub mod split;
 pub mod state;
 pub mod store;
+pub mod suggest;
 pub mod time;
