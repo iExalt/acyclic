@@ -225,3 +225,13 @@ fn ready_ranks_leaves_and_checks_each_needed_commit_once() {
     let with_archived = readiness.ready(true).unwrap();
     assert!(with_archived.contains(&("archived-leaf".into(), 0)));
 }
+
+#[test]
+fn git_ancestry_takes_only_commit_ids() {
+    let ancestry = GitAncestry::new(|_: &Repository| Some(PathBuf::from("/nonexistent")));
+    let model = Model::read(&replica("a").state).unwrap();
+    let record = &model.repositories["code"];
+    for bad in ["--foo", "abc", "zzzzzzz", &"a".repeat(65)] {
+        assert_eq!(ancestry.merged(record, bad), Err("not a commit id".to_owned()), "{bad}");
+    }
+}

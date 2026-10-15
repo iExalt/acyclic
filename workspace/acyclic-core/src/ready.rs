@@ -42,6 +42,10 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
 
 impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
     fn merged(&self, repository: &Repository, commit: &str) -> Result<bool, String> {
+        // Evidence is written by agents and synced, so it never reaches git as anything but a commit id.
+        if !(7..=64).contains(&commit.len()) || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("not a commit id".to_owned());
+        }
         let clone = (self.clone_of)(repository).ok_or("no clone of the repository is mapped")?;
         let branch =
             repository.default_branch.one().ok_or("the repository has no single default branch")?;
@@ -61,7 +65,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
                     .is_ok_and(|out| out.status.success())
             })
             .ok_or_else(|| format!("the clone has no {branch} branch"))?;
-        let output = git(&["merge-base", "--is-ancestor", commit, &target])?;
+        let output = git(&["merge-base", "--is-ancestor", "--end-of-options", commit, &target])?;
         match output.status.code() {
             Some(0) => Ok(true),
             Some(1) => Ok(false),
@@ -145,6 +149,9 @@ pub struct Readiness<'a> {
     ancestry: &'a dyn Ancestry,
     merged: RefCell<BTreeMap<(String, String), Result<bool, String>>>,
     cyclic: BTreeSet<String>,
+    /// Blocks and after links by the item they start from.
+    links_from: BTreeMap<String, Vec<(LinkKind, String)>>,
+    archived: RefCell<BTreeMap<String, bool>>,
 }
 
 impl<'a> Readiness<'a> {
@@ -158,7 +165,20 @@ impl<'a> Readiness<'a> {
     ) -> Self {
         let cyclic =
             model.link_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
-        Self { state, model, now, ancestry, merged: RefCell::default(), cyclic }
+        let mut links_from: BTreeMap<String, Vec<(LinkKind, String)>> = BTreeMap::new();
+        for link in model.links.iter().filter(|link| link.kind.orders()) {
+            links_from.entry(link.from.clone()).or_default().push((link.kind, link.to.clone()));
+        }
+        Self {
+            state,
+            model,
+            now,
+            ancestry,
+            merged: RefCell::default(),
+            cyclic,
+            links_from,
+            archived: RefCell::default(),
+        }
     }
 
     /// An item's readiness, or `None` for an unknown item.
@@ -168,7 +188,7 @@ impl<'a> Readiness<'a> {
     /// Fails when a claim can't be read.
     pub fn of(&self, id: &str) -> Result<Option<Status>, Error> {
         let Some(item) = self.model.items.get(id) else { return Ok(None) };
-        if self.model.is_archived(id) {
+        if self.is_archived(id) {
             return Ok(Some(Status::Archived));
         }
         let fields: Vec<String> =
@@ -236,6 +256,8 @@ impl<'a> Readiness<'a> {
                 ancestry: self.ancestry,
                 merged: RefCell::new(self.merged.borrow().clone()),
                 cyclic: self.cyclic.clone(),
+                links_from: self.links_from.clone(),
+                archived: RefCell::default(),
             };
             return unarchived.ready(false);
         }
@@ -254,22 +276,39 @@ impl<'a> Readiness<'a> {
 
     /// The unmet hard dependencies of an item and its ancestors.
     fn waiting(&self, id: &str) -> BTreeMap<String, Wait> {
-        let holders: BTreeSet<&str> = std::iter::once(id).chain(self.model.ancestors(id)).collect();
         let mut waiting = BTreeMap::new();
-        for link in self.model.links.iter().filter(|l| l.kind == LinkKind::Blocks) {
-            if holders.contains(link.from.as_str())
-                && let Some(wait) = self.dependency_wait(id, &link.to)
-            {
-                waiting.insert(link.to.clone(), wait);
+        for to in self.linked_from(id, LinkKind::Blocks) {
+            if let Some(wait) = self.dependency_wait(id, to) {
+                waiting.insert(to.to_owned(), wait);
             }
         }
         waiting
     }
 
+    /// The targets of an item's and its ancestors' links of one kind.
+    fn linked_from(&self, id: &str, kind: LinkKind) -> Vec<&str> {
+        std::iter::once(id)
+            .chain(self.model.ancestors(id))
+            .flat_map(|holder| self.links_from.get(holder).into_iter().flatten())
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, to)| to.as_str())
+            .collect()
+    }
+
+    /// Whether an item is archived, memoized.
+    fn is_archived(&self, id: &str) -> bool {
+        if let Some(&archived) = self.archived.borrow().get(id) {
+            return archived;
+        }
+        let archived = self.model.is_archived(id);
+        self.archived.borrow_mut().insert(id.to_owned(), archived);
+        archived
+    }
+
     /// Why `dependency` doesn't yet satisfy `dependent`, or `None` when it does.
     fn dependency_wait(&self, dependent: &str, dependency: &str) -> Option<Wait> {
         let Some(item) = self.model.items.get(dependency) else { return Some(Wait::Open) };
-        if self.model.is_archived(dependency) {
+        if self.is_archived(dependency) {
             return None;
         }
         if !item.is_done() {
@@ -315,14 +354,10 @@ impl<'a> Readiness<'a> {
 
     /// The number of an item's (and its ancestors') soft predecessors that are still open.
     fn rank(&self, id: &str) -> usize {
-        let holders: BTreeSet<&str> = std::iter::once(id).chain(self.model.ancestors(id)).collect();
-        self.model
-            .links
-            .iter()
-            .filter(|l| l.kind == LinkKind::After && holders.contains(l.from.as_str()))
-            .filter(|l| {
-                !self.model.is_archived(&l.to)
-                    && self.model.items.get(&l.to).is_none_or(|i| !i.is_done())
+        self.linked_from(id, LinkKind::After)
+            .into_iter()
+            .filter(|to| {
+                !self.is_archived(to) && self.model.items.get(*to).is_none_or(|i| !i.is_done())
             })
             .count()
     }
