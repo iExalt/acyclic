@@ -38,13 +38,17 @@ impl Shell {
 
     fn output(&mut self, line: &str, extra: &[(&str, &str)]) -> (u8, serde_json::Value) {
         let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
-        let (code, output) = execute(args, &self.env(extra));
-        let output = output.replace(self.dir.path().to_str().unwrap(), "[dir]");
+        let outcome = execute(args, &self.env(extra));
+        let code = outcome.code;
+        let output = outcome.stdout.replace(self.dir.path().to_str().unwrap(), "[dir]");
         let shown: Vec<&str> =
             extra.iter().filter(|(n, _)| *n == "ACYCLIC_ACTOR").map(|(_, v)| *v).collect();
         let prefix =
             shown.first().map(|actor| format!("ACYCLIC_ACTOR={actor} ")).unwrap_or_default();
         writeln!(self.transcript, "$ {prefix}acyclic {line}\n# exit {code}\n{output}").unwrap();
+        if !outcome.stderr.is_empty() {
+            writeln!(self.transcript, "# stderr\n{}", outcome.stderr).unwrap();
+        }
         (code, serde_json::from_str(&output).unwrap_or_default())
     }
 

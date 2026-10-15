@@ -3,10 +3,12 @@
 use std::path::PathBuf;
 
 use acyclic_core::model::{ItemState, Level, LinkKind, Size};
-use clap::{Parser, Subcommand};
+use std::fmt::Write as _;
+
+use clap::{CommandFactory, Parser, Subcommand};
 use serde::de::DeserializeOwned;
 
-/// The acyclic tracker. Every command prints one JSON document.
+/// The acyclic tracker. Every command that runs prints one JSON document.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, disable_help_subcommand = true, arg_required_else_help = true)]
 pub struct Cli {
@@ -22,6 +24,33 @@ pub struct Cli {
     /// The command.
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// The top level's help sections, in order: what every session uses, the groups, then the rest.
+pub const SECTIONS: [(&str, &[&str]); 3] = [
+    ("Common Commands", &["ready", "list", "show", "claim", "done", "needs"]),
+    ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
+    ("Other Commands", &["init", "prime", "import", "level", "doctor"]),
+];
+
+/// The command line, with its top-level help in [`SECTIONS`] rather than one list.
+pub fn command() -> clap::Command {
+    let command = Cli::command();
+    let width = command.get_subcommands().map(|c| c.get_name().len()).max().unwrap_or(0);
+    let mut template = String::from("{about-with-newline}\n{usage-heading} {usage}\n");
+    for (heading, names) in SECTIONS {
+        write!(template, "\n{heading}:\n").expect("a String takes writes");
+        for name in names {
+            let about = command
+                .find_subcommand(name)
+                .and_then(clap::Command::get_about)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            writeln!(template, "  {name:width$}  {about}").expect("a String takes writes");
+        }
+    }
+    template.push_str("\nOptions:\n{options}\n\nRun 'acyclic <command> --help' for more information on a command.\n");
+    command.help_template(template)
 }
 
 /// Parses a kebab-case name into one of the model's enums.

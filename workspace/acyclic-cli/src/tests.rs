@@ -8,7 +8,10 @@ use acyclic_core::scope::ScopeError;
 use acyclic_core::state::{Error as StateError, Key, ReplicaId};
 use acyclic_core::store::StoreError;
 
+use clap::Parser;
+
 use super::*;
+use crate::error::CliError;
 
 fn env(vars: &[(&str, &str)]) -> Env {
     Env {
@@ -94,24 +97,45 @@ fn every_error_has_a_stable_code_and_exit() {
     insta::assert_snapshot!(table);
 }
 
+fn run(line: &str) -> Outcome {
+    execute(line.split(' ').map(Into::into), &env(&[]))
+}
+
 #[test]
-fn usage_errors_use_the_envelope_and_help_is_text() {
-    let (code, out) = execute(["acyclic", "nonsense"].map(Into::into), &env(&[]));
-    let out: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!((code, out["error"]["code"].as_str()), (exit::USAGE, Some("usage")));
-    let (code, out) = execute(["acyclic", "--version"].map(Into::into), &env(&[]));
+fn usage_errors_and_help_are_text() {
+    // A command line that doesn't parse explains itself on standard error, as other tools do.
+    for line in ["acyclic nonsense", "acyclic show", "acyclic link add a1 sideways a2"] {
+        let out = run(line);
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
+        assert!(
+            out.stderr.starts_with("error: ") && out.stderr.contains("--help"),
+            "{line}: {out:?}"
+        );
+    }
+    let out = run("acyclic --version");
     assert_eq!(
-        (code, out.trim()),
+        (out.code, out.stdout.trim()),
         (exit::OK, format!("acyclic {}", acyclic_core::VERSION).as_str())
     );
-    // The top level holds what every session uses; the rest stays in groups.
-    let (code, out) = execute(["acyclic", "--help"].map(Into::into), &env(&[]));
-    assert_eq!(code, exit::OK);
-    insta::assert_snapshot!(out);
+    // The top level holds what every session uses, apart from the groups and the rest.
+    let help = run("acyclic --help");
+    assert_eq!(help.code, exit::OK);
+    insta::assert_snapshot!(help.stdout);
     // A bare command or group prints its help.
-    assert_eq!(execute(["acyclic"].map(Into::into), &env(&[])), (exit::OK, out));
-    let (code, out) = execute(["acyclic", "item"].map(Into::into), &env(&[]));
-    assert_eq!((code, out.starts_with("Adds, edits")), (exit::OK, true), "{out}");
+    assert_eq!(run("acyclic"), help);
+    let out = run("acyclic item");
+    assert_eq!((out.code, out.stdout.starts_with("Adds, edits")), (exit::OK, true), "{out:?}");
+}
+
+#[test]
+fn the_help_sections_hold_every_command_once() {
+    let mut named: Vec<&str> =
+        args::SECTIONS.iter().flat_map(|(_, names)| names.iter().copied()).collect();
+    named.sort_unstable();
+    let command = args::command();
+    let mut commands: Vec<&str> = command.get_subcommands().map(clap::Command::get_name).collect();
+    commands.sort_unstable();
+    assert_eq!(named, commands);
 }
 
 #[test]
@@ -157,7 +181,7 @@ fn an_actor_may_claim_past_its_own_claims_only() {
 
 #[test]
 fn prime_is_text_matched_to_the_version() {
-    let (code, out) = execute(["acyclic", "prime"].map(Into::into), &env(&[]));
+    let Outcome { code, stdout: out, .. } = run("acyclic prime");
     assert_eq!(code, exit::OK);
     assert!(out.contains(&format!("acyclic {})", acyclic_core::VERSION)));
     insta::assert_snapshot!(out.replace(acyclic_core::VERSION, "[version]"));

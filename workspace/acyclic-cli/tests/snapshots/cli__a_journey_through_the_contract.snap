@@ -409,16 +409,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
 
 $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 # exit 2
-{
-  "error": {
-    "code": "usage",
-    "details": {
-      "help": "error: invalid value 'sideways' for '<KIND>': unknown value \"sideways\"\n\nFor more information, try '--help'.\n"
-    },
-    "message": "invalid value for one of the arguments"
-  },
-  "ok": false
-}
+
+# stderr
+error: invalid value 'sideways' for '<KIND>': unknown value "sideways"
+
+For more information, try '--help'.
 
 $ ACYCLIC_ACTOR=session/mac acyclic link remove a2 blocks a1
 # exit 0

@@ -20,6 +20,8 @@ older copy.
 - Every command but `prime`, `--help`, `--version` and a bare group (which prints its help) prints one JSON
   document: `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Branch on
   `error.code`, not on the message.
+- A command line that doesn't parse prints its error as text on standard error, with exit code 2; run
+  `acyclic <command> --help` to see the command's arguments.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
 - Writes report `changed`. A repeated command changes nothing of its own; it can still commit when a claim's lease

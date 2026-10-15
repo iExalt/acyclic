@@ -12,12 +12,11 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
 use serde_json::json;
 
 use acyclic_core::time::{TIMESTAMP_KEYS, rfc3339};
 
-use crate::error::{CliError, exit};
+use crate::error::exit;
 
 /// What a command sees of its process: environment variables and the working directory.
 #[derive(Debug, Clone, Default)]
@@ -42,34 +41,56 @@ impl Env {
 
 /// Runs the CLI with the process's arguments, the first being the program name, and prints its output.
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
-    let (code, output) = execute(args, &Env::from_process());
-    print!("{output}");
+    let outcome = execute(args, &Env::from_process());
+    print!("{}", outcome.stdout);
+    eprint!("{}", outcome.stderr);
     acyclic_core::probe::mark("print output");
-    ExitCode::from(code)
+    ExitCode::from(outcome.code)
 }
 
-/// Runs a command line and returns its exit code and standard output. Every command prints one JSON document,
-/// `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`; only help, `--version`
-/// and `prime` print text, and times print as RFC 3339 in UTC.
-pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> (u8, String) {
+/// What a command line produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    /// The exit code.
+    pub code: u8,
+    /// Standard output.
+    pub stdout: String,
+    /// Standard error.
+    pub stderr: String,
+}
+
+impl Outcome {
+    fn out(code: u8, stdout: String) -> Self {
+        Self { code, stdout, stderr: String::new() }
+    }
+}
+
+/// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
+/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Help, `--version` and
+/// `prime` print text instead, and a command line that doesn't parse prints its error and usage as text to standard
+/// error, with exit code 2, as other command-line tools do.
+pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
+    use clap::FromArgMatches;
+    use clap::error::ErrorKind;
     acyclic_core::probe::mark("start");
-    let cli = match args::Cli::try_parse_from(args) {
+    let parsed = args::command()
+        .try_get_matches_from(args)
+        .and_then(|matches| args::Cli::from_arg_matches(&matches));
+    let cli = match parsed {
         Ok(cli) => cli,
-        Err(err) => {
-            use clap::error::ErrorKind;
-            // A bare command or group prints its help, as `--help` would.
+        // A bare command or group prints its help, as `--help` would.
+        Err(err)
             if matches!(
                 err.kind(),
                 ErrorKind::DisplayHelp
                     | ErrorKind::DisplayVersion
                     | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            ) {
-                return (exit::OK, err.to_string());
-            }
-            let message = err.kind().as_str().map_or_else(|| err.to_string(), str::to_owned);
-            let usage = CliError::new("usage", exit::USAGE, message)
-                .with(json!({"help": err.render().to_string()}));
-            return (usage.exit, render(&usage.envelope()));
+            ) =>
+        {
+            return Outcome::out(exit::OK, err.to_string());
+        },
+        Err(err) => {
+            return Outcome { code: exit::USAGE, stdout: String::new(), stderr: err.to_string() };
         },
     };
     let result = commands::run(&cli, env);
@@ -78,10 +99,10 @@ pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> (u8, Stri
         Ok(commands::Output::Json(data)) => {
             let output = render(&json!({"ok": true, "data": data}));
             acyclic_core::probe::mark("render output");
-            (exit::OK, output)
+            Outcome::out(exit::OK, output)
         },
-        Ok(commands::Output::Text(text)) => (exit::OK, text),
-        Err(err) => (err.exit, render(&err.envelope())),
+        Ok(commands::Output::Text(text)) => Outcome::out(exit::OK, text),
+        Err(err) => Outcome::out(err.exit, render(&err.envelope())),
     }
 }
 

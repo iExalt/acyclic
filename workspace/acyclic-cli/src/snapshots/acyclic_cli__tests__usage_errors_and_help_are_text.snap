@@ -1,28 +1,32 @@
 ---
 source: workspace/acyclic-cli/src/tests.rs
-expression: out
+expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document
+The acyclic tracker. Every command that runs prints one JSON document
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
-Commands:
-  init      Sets up a tracker clone as a new replica, creating the repository if there is none
-  prime     Prints conventions for agents, matched to this version, as text
+Common Commands:
   ready     Lists ready leaves, best first
   list      Lists every item, by id
   show      Shows items with their role, readiness and claims, as an array in the order given
   claim     Claims a ready leaf, or renews the actor's claim
   done      Marks an item done, with evidence
   needs     Lists what needs the user
-  level     Sets the autonomy level, globally or for a thread (the user's)
-  import    Imports a plan: adds and updates what the document names, and never deletes
-  doctor    Lists entities that can't be read
+
+Command Groups:
   item      Adds, edits, moves, reopens or archives items, or sets their state
   link      Adds or removes links between items
   thread    Creates or edits threads, and puts items in them; agents' edits to approved threads wait as proposals
   repo      Creates or edits repository records, and attaches them to items or threads
   proposal  Keeps or drops proposals (the user's)
+
+Other Commands:
+  init      Sets up a tracker clone as a new replica, creating the repository if there is none
+  prime     Prints conventions for agents, matched to this version, as text
+  import    Imports a plan: adds and updates what the document names, and never deletes
+  level     Sets the autonomy level, globally or for a thread (the user's)
+  doctor    Lists entities that can't be read
 
 Options:
       --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the mapping in ~/.config/acyclic/trackers.toml
@@ -30,3 +34,5 @@ Options:
       --as-user            Act as the user
   -h, --help               Print help
   -V, --version            Print version
+
+Run 'acyclic <command> --help' for more information on a command.
