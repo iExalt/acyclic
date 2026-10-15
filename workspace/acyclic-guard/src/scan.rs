@@ -207,8 +207,10 @@ const GITLEAKS_CONFIG: &str = "[extend]\nuseDefault = true\n";
 /// Runs Gitleaks over the outgoing commits; `true` when it found a leak.
 ///
 /// Nothing in the pushed content can weaken the scan: the configuration is ours, `gitleaks:allow` comments are
-/// ignored, and the ignore file is looked up in an empty private directory.
+/// ignored, and no ignore file in the work tree or the pushed content is read.
 fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
+    // Gitleaks reads `.gitleaksignore` from the directory it scans, so it scans the Git directory, not the work tree.
+    let git_dir = git_text(repo, ["rev-parse", "--absolute-git-dir"])?;
     let dir = PrivateDir::new()?;
     let config = dir.0.join("gitleaks.toml");
     std::fs::write(&config, GITLEAKS_CONFIG)
@@ -222,7 +224,7 @@ fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
         .arg(&dir.0)
         .arg("--log-opts")
         .arg(range.join(" "))
-        .arg(repo)
+        .arg(git_dir.trim())
         .env_remove("GITLEAKS_CONFIG")
         .env_remove("GITLEAKS_CONFIG_TOML")
         .stdin(Stdio::null())
