@@ -38,26 +38,38 @@ impl Claim {
 }
 
 /// Every claim on an item that holds at `now`, in the order that decides a contest: earliest lease, then replica.
-#[must_use]
-pub fn live(state: &State, item: &Key, now: Millis) -> Vec<Claim> {
-    let mut claims: Vec<Claim> = state
-        .field(item, FIELD)
-        .into_iter()
-        .flatten()
-        .filter_map(|(_, value)| serde_json::from_value::<Claim>(value.value.clone()).ok())
-        .filter(|claim| claim.is_live(now))
-        .collect();
+///
+/// # Errors
+///
+/// Fails when a claim value can't be read, such as one from a newer version: hiding it would let anyone claim the
+/// item.
+pub fn live(state: &State, item: &Key, now: Millis) -> Result<Vec<Claim>, Error> {
+    let mut claims = Vec::new();
+    for value in state.field(item, FIELD).into_iter().flatten().map(|(_, v)| &v.value) {
+        let claim: Claim = serde_json::from_value(value.clone()).map_err(|e| {
+            Error::Format(format!("unreadable claim on {} {}: {e}", item.kind, item.id))
+        })?;
+        if claim.is_live(now) {
+            claims.push(claim);
+        }
+    }
     claims.sort_by(|a, b| (a.lease_start, &a.replica).cmp(&(b.lease_start, &b.replica)));
-    claims
+    Ok(claims)
 }
 
-/// The claim that wins at `now`: the same on every replica holding the same state.
-#[must_use]
-pub fn winner(state: &State, item: &Key, now: Millis) -> Option<Claim> {
-    live(state, item, now).into_iter().next()
+/// The claim that wins at `now`: the same on every replica holding the same state. A contest's loser must check this
+/// rather than assume it holds the item.
+///
+/// # Errors
+///
+/// Fails when a claim value can't be read.
+pub fn winner(state: &State, item: &Key, now: Millis) -> Result<Option<Claim>, Error> {
+    Ok(live(state, item, now)?.into_iter().next())
 }
 
-/// Claims an item for `holder`, or renews its own claim. A time lease runs for `lease`, capped at `max_lease`.
+/// Claims an item for `holder`, or renews the claim `holder` already wins. A time lease runs for `lease` from `at`,
+/// capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its write
+/// supersedes the other contestants' values: an ordinary resolving write.
 ///
 /// # Panics
 ///
@@ -65,8 +77,8 @@ pub fn winner(state: &State, item: &Key, now: Millis) -> Option<Claim> {
 ///
 /// # Errors
 ///
-/// Fails when another holder's claim is live in this replica's view, so a claim never silently replaces one it has
-/// seen; only claims made without seeing each other contest.
+/// Fails when another holder wins the item in this replica's view, so a claim never silently replaces one it has
+/// seen; only claims made without seeing each other contest. Also fails on an unreadable claim.
 pub fn claim(
     replica: &mut Replica,
     item: &Key,
@@ -75,13 +87,14 @@ pub fn claim(
     lease: Option<Millis>,
     max_lease: Millis,
 ) -> Result<Dot, Error> {
-    if live(&replica.state, item, at).iter().any(|claim| claim.holder != holder) {
+    let current = winner(&replica.state, item, at)?;
+    if current.as_ref().is_some_and(|claim| claim.holder != holder) {
         return Err(Error::Claimed(item.clone()));
     }
     let claim = Claim {
         holder: holder.to_owned(),
         replica: replica.id().as_str().to_owned(),
-        lease_start: at,
+        lease_start: current.map_or(at, |claim| claim.lease_start),
         lease_expires: lease.map(|lease| at.saturating_add(lease.clamp(0, max_lease))),
     };
     let value = serde_json::to_value(claim).expect("a claim always serializes");

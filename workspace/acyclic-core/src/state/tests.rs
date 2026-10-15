@@ -38,10 +38,10 @@ fn concurrent_writes_conflict_and_a_later_write_supersedes_them() {
     let (mut a, mut b) = (replica("a"), replica("b"));
     a.write(&item, "title", "user", 1, Some(json!("from a"))).unwrap();
     b.write(&item, "title", "user", 1, Some(json!("from b"))).unwrap();
-    a.join(&b.state);
+    a.join(&b.state).unwrap();
     assert_eq!(values(&a.state, &item, "title"), vec![json!("from a"), json!("from b")]);
     a.write(&item, "title", "user", 2, Some(json!("resolved"))).unwrap();
-    b.join(&a.state);
+    b.join(&a.state).unwrap();
     assert_eq!(values(&b.state, &item, "title"), vec![json!("resolved")]);
 }
 
@@ -50,12 +50,12 @@ fn a_clear_survives_a_join_with_the_old_value() {
     let item = key("item", "a1");
     let (mut a, mut b) = (replica("a"), replica("b"));
     a.write(&item, "title", "user", 1, Some(json!("x"))).unwrap();
-    b.join(&a.state);
+    b.join(&a.state).unwrap();
     a.write(&item, "title", "user", 2, None).unwrap();
     assert!(a.state.entity(&item).is_none(), "an entity with no values is absent");
-    a.join(&b.state);
+    a.join(&b.state).unwrap();
     assert!(a.state.field(&item, "title").is_none());
-    b.join(&a.state);
+    b.join(&a.state).unwrap();
     assert!(b.state.field(&item, "title").is_none());
 }
 
@@ -64,7 +64,7 @@ fn unknown_kinds_and_fields_pass_through() {
     let widget = key("widget", "w1");
     let (mut a, mut b) = (replica("a"), replica("b"));
     a.write(&widget, "x-future", "user", 1, Some(json!({"nested": [1, 2]}))).unwrap();
-    b.join(&round_trip(&a.state));
+    b.join(&round_trip(&a.state)).unwrap();
     assert_eq!(values(&round_trip(&b.state), &widget, "x-future"), vec![json!({"nested": [1, 2]})]);
 }
 
@@ -91,10 +91,11 @@ fn files_are_canonical_whatever_the_key_order() {
 fn files_fan_out_by_id_and_reject_unsafe_names() {
     assert_eq!(key("item", "x").path(), "item/x_/x.json");
     assert_eq!(key("item", "abc").path(), "item/ab/abc.json");
-    for bad in ["", "../x", ".hidden", "a/b", "a b"] {
+    for bad in ["", "../x", ".hidden", "a/b", "a b", "Upper"] {
         assert!(Key::new("item", bad).is_err(), "{bad:?}");
     }
     assert!(ReplicaId::new("mac_1").is_err());
+    assert!(ReplicaId::new("Mac").is_err());
 }
 
 #[test]
@@ -158,16 +159,47 @@ fn a_rebuilt_replica_never_reuses_its_dots() {
         a.write(&item, "f", "user", n, Some(json!(n))).unwrap();
     }
     let mut peer = replica("b");
-    peer.join(&a.state);
+    peer.join(&a.state).unwrap();
 
     let mut rebuilt = Replica::rebuilt(id("a"), State::new());
     assert_eq!(
         rebuilt.write(&item, "f", "user", 9, Some(json!(9))),
         Err(Error::NotContinuous(id("a")))
     );
-    rebuilt.join(&peer.state);
+    rebuilt.join(&peer.state).unwrap();
+    assert_eq!(
+        rebuilt.write(&item, "f", "user", 9, Some(json!(9))),
+        Err(Error::NotContinuous(id("a"))),
+        "a peer's entry alone doesn't restore it"
+    );
+    // Only after joining every state ref from the remote may the caller restore it.
+    rebuilt.mark_restored();
     let dot = rebuilt.write(&item, "f", "user", 9, Some(json!(9))).unwrap();
     assert_eq!(dot, Some(Dot(id("a"), 4)));
+}
+
+#[test]
+fn a_join_refuses_a_state_that_saw_more_of_my_writes() {
+    // A stale rebuild, or a second clone writing under the same id: each would reuse dots.
+    let item = key("item", "a1");
+    let mut a = replica("a");
+    a.write(&item, "f", "user", 1, Some(json!(1))).unwrap();
+    let mut stale = replica("p1");
+    stale.join(&a.state).unwrap();
+    for n in 2..=4 {
+        a.write(&item, "f", "user", n, Some(json!(n))).unwrap();
+    }
+    let mut fresh = replica("p2");
+    fresh.join(&a.state).unwrap();
+
+    let mut rebuilt = Replica::rebuilt(id("a"), State::new());
+    rebuilt.join(&stale.state).unwrap();
+    rebuilt.mark_restored(); // wrongly, from a stale peer
+    rebuilt.write(&key("item", "new"), "f", "user", 5, Some(json!("new"))).unwrap();
+    assert_eq!(
+        rebuilt.join(&fresh.state),
+        Err(Error::IdReused { replica: id("a"), mine: 2, theirs: 4 })
+    );
 }
 
 #[test]
@@ -197,7 +229,7 @@ fn a_run_that_saw_the_current_values_replaces_them() {
     let x = server.write(&item, "title", "user", 1, Some(json!("x"))).unwrap().unwrap();
     let mut mac = replica("mac");
     let y = mac.write(&item, "title", "user", 1, Some(json!("y"))).unwrap().unwrap();
-    server.join(&mac.state);
+    server.join(&mac.state).unwrap();
     server.apply(&op("r1", 1, &item, "title", Some(json!("merged")), vec![x, y]), 2).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("merged")]);
 }
@@ -225,7 +257,7 @@ fn a_gap_or_another_replica_is_refused() {
         Err(Error::Gap { run: "r1".to_owned(), expected: 2, got: 3 })
     );
     let mut other = replica("other");
-    other.join(&server.state);
+    other.join(&server.state).unwrap();
     assert_eq!(
         other.apply(&op("r1", 2, &item, "f", Some(json!(2)), vec![]), 3),
         Err(Error::WrongReplica { run: "r1".to_owned(), applied_by: "server".to_owned() })
@@ -238,7 +270,7 @@ fn context_size_does_not_grow_with_runs() {
         let mut server = replica("server");
         let mut mac = replica("mac");
         mac.write(&key("item", "m"), "f", "user", 1, Some(json!(1))).unwrap();
-        server.join(&mac.state);
+        server.join(&mac.state).unwrap();
         for run in 0..runs {
             let item = key("item", &format!("i{}", run % 10));
             server
@@ -262,16 +294,83 @@ fn concurrent_claims_contest_and_a_seen_claim_is_not_stolen() {
     one.join(&server.state);
     let mut two = server.state.clone();
     two.join(&mac.state);
-    assert_eq!(claim::live(&one, &item, 120).len(), 2, "a contest");
+    assert_eq!(claim::live(&one, &item, 120).unwrap().len(), 2, "a contest");
     for now in [120, 200_000] {
-        assert_eq!(claim::winner(&one, &item, now), claim::winner(&two, &item, now));
+        assert_eq!(
+            claim::winner(&one, &item, now).unwrap(),
+            claim::winner(&two, &item, now).unwrap()
+        );
     }
-    assert_eq!(claim::winner(&one, &item, 120).unwrap().holder, "run/r1", "earliest lease wins");
+    assert_eq!(
+        claim::winner(&one, &item, 120).unwrap().unwrap().holder,
+        "run/r1",
+        "earliest lease wins"
+    );
 
-    mac.join(&server.state);
+    mac.join(&server.state).unwrap();
     assert_eq!(
         claim::claim(&mut mac, &item, "session/mac", 130, Some(60_000), 600_000),
         Err(Error::Claimed(item.clone()))
+    );
+}
+
+#[test]
+fn a_contest_winner_renews_and_keeps_winning() {
+    let item = key("item", "a1");
+    let (mut a, mut b) = (replica("a"), replica("b"));
+    claim::claim(&mut a, &item, "ha", 0, Some(100), 1_000).unwrap();
+    claim::claim(&mut b, &item, "hb", 5, Some(100), 1_000).unwrap();
+    a.join(&b.state).unwrap();
+    b.join(&a.state).unwrap();
+    assert_eq!(claim::winner(&a.state, &item, 10).unwrap().unwrap().holder, "ha");
+
+    claim::claim(&mut a, &item, "ha", 50, Some(100), 1_000).unwrap();
+    let renewed = claim::winner(&a.state, &item, 120).unwrap().unwrap();
+    assert_eq!(
+        (renewed.holder.as_str(), renewed.lease_start, renewed.lease_expires),
+        ("ha", 0, Some(150))
+    );
+    assert_eq!(
+        claim::claim(&mut b, &item, "hb", 60, Some(100), 1_000),
+        Err(Error::Claimed(item.clone()))
+    );
+}
+
+#[test]
+fn an_unreadable_claim_is_not_hidden() {
+    let item = key("item", "a1");
+    let mut a = replica("a");
+    a.write(&item, claim::FIELD, "future", 1, Some(json!({"holder": "x", "new-field": 1})))
+        .unwrap();
+    assert!(claim::live(&a.state, &item, 2).is_err());
+    assert!(claim::claim(&mut a, &item, "me", 2, None, 10).is_err());
+}
+
+#[test]
+fn a_write_never_goes_back_in_time() {
+    let item = key("item", "a1");
+    let mut a = replica("a");
+    a.write(&item, "f", "user", 100, Some(json!(1))).unwrap();
+    a.write(&item, "f", "user", 40, Some(json!(2))).unwrap();
+    let register = a.state.field(&item, "f").unwrap();
+    assert_eq!(register.values().next().unwrap().at, 100);
+}
+
+#[test]
+fn reading_refuses_floats_and_non_canonical_files() {
+    let mut a = replica("a");
+    a.write(&key("item", "a1"), "f", "user", 1, Some(json!(1))).unwrap();
+    let files = a.state.to_files();
+    assert_eq!(State::from_files(&files).unwrap(), a.state);
+    let path = "item/a1/a1.json";
+    let mut float = files.clone();
+    float.insert(path.to_owned(), files[path].replace("\"value\": 1", "\"value\": 1.5"));
+    assert!(State::from_files(&float).is_err());
+    let mut compact = files.clone();
+    let value: Json = serde_json::from_str(&files[path]).unwrap();
+    compact.insert(path.to_owned(), serde_json::to_string(&value).unwrap());
+    assert!(
+        matches!(State::from_files(&compact), Err(Error::Format(m)) if m.contains("canonical"))
     );
 }
 
@@ -280,9 +379,9 @@ fn leases_are_capped_and_expire() {
     let item = key("item", "a1");
     let mut mac = replica("mac");
     claim::claim(&mut mac, &item, "session/mac", 0, Some(DAY), 1_000).unwrap();
-    let held = claim::winner(&mac.state, &item, 0).unwrap();
+    let held = claim::winner(&mac.state, &item, 0).unwrap().unwrap();
     assert_eq!(held.lease_expires, Some(1_000));
-    assert!(claim::winner(&mac.state, &item, 1_000).is_none());
+    assert!(claim::winner(&mac.state, &item, 1_000).unwrap().is_none());
     assert!(held.starts_in_future(-CLOCK_SKEW_MS - 1));
     assert!(!held.starts_in_future(0));
 }
@@ -297,7 +396,7 @@ fn thread_and_global_fields_join_like_any_other() {
         a.write(&t, field, "user", 1, Some(json!(field))).unwrap();
     }
     b.write(&global, settings::AUTONOMY, "user", 1, Some(json!("blockers"))).unwrap();
-    a.join(&b.state);
+    a.join(&b.state).unwrap();
     let a = round_trip(&a.state);
     assert_eq!(a.entity(&t).unwrap().len(), 4);
     assert_eq!(values(&a, &global, settings::AUTONOMY), vec![json!("blockers")]);
@@ -342,7 +441,7 @@ fn play(steps: &[Step]) -> Vec<Replica> {
             },
             Step::Join { into, from } => {
                 let other = replicas[*from].state.clone();
-                replicas[*into].join(&other);
+                replicas[*into].join(&other).unwrap();
             },
             Step::RunOp { run, entity, field, value, seen_mask } => {
                 let applier = &mut replicas[run % 3];
@@ -434,7 +533,7 @@ proptest! {
         claim::claim(&mut y, &item, "run/y", starts.1, leases.1, 10_000).unwrap();
         let one = joined(&[&x.state, &y.state]);
         let two = joined(&[&y.state, &x.state]);
-        prop_assert_eq!(claim::winner(&one, &item, now), claim::winner(&two, &item, now));
+        prop_assert_eq!(claim::winner(&one, &item, now).unwrap(), claim::winner(&two, &item, now).unwrap());
     }
 }
 

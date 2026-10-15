@@ -26,13 +26,15 @@ pub type Millis = i64;
 pub struct ReplicaId(String);
 
 impl ReplicaId {
-    /// A replica id of ASCII letters, digits and `-`.
+    /// A replica id of lowercase ASCII letters, digits and `-`.
     ///
     /// # Errors
     ///
     /// Fails on an empty id or any other character.
     pub fn new(id: &str) -> Result<Self, Error> {
-        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        if id.is_empty()
+            || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
             return Err(Error::InvalidName(id.to_owned()));
         }
         Ok(Self(id.to_owned()))
@@ -65,8 +67,8 @@ pub struct Key {
 }
 
 impl Key {
-    /// A key whose kind and id are safe as path segments: ASCII letters, digits, `-`, `_` and `.`, not starting with
-    /// `.`.
+    /// A key whose kind and id are safe as path segments on any file system, case-insensitive ones included:
+    /// lowercase ASCII letters, digits, `-`, `_` and `.`, not starting with `.`.
     ///
     /// # Errors
     ///
@@ -75,9 +77,9 @@ impl Key {
         for part in [kind, id] {
             let safe = !part.is_empty()
                 && !part.starts_with('.')
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+                && part.bytes().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+                });
             if !safe {
                 return Err(Error::InvalidName(part.to_owned()));
             }
@@ -162,6 +164,15 @@ pub enum Error {
     },
     /// A rebuilt replica tried to write before its own entry was restored, which could reuse its dots.
     NotContinuous(ReplicaId),
+    /// A joined state has seen more of this replica's writes than the replica has.
+    IdReused {
+        /// The replica.
+        replica: ReplicaId,
+        /// Its own highest counter.
+        mine: u64,
+        /// The joined state's entry for it.
+        theirs: u64,
+    },
     /// A run operation skipped a sequence number.
     Gap {
         /// The run.
@@ -198,6 +209,11 @@ impl fmt::Display for Error {
             Self::NotContinuous(replica) => {
                 write!(f, "replica {replica} was rebuilt and hasn't recovered its own writes yet")
             },
+            Self::IdReused { replica, mine, theirs } => write!(
+                f,
+                "another writer used replica id {replica} ({theirs} writes seen, this replica has {mine}), or this \
+                 replica lost state; take a new replica id"
+            ),
             Self::Gap { run, expected, got } => {
                 write!(f, "run {run} sent operation {got} but {expected} comes next")
             },
@@ -358,8 +374,8 @@ pub struct Op {
 /// What applying a run operation did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Applied {
-    /// Applied under this dot.
-    Applied(Dot),
+    /// Applied, under this dot unless it cleared the field.
+    Applied(Option<Dot>),
     /// Already applied; nothing changed.
     Duplicate,
 }
@@ -379,9 +395,14 @@ impl Replica {
     /// A replica rebuilt without its own state, from whatever it could fetch.
     #[must_use]
     pub fn rebuilt(id: ReplicaId, state: State) -> Self {
-        let mut replica = Self { id, continuity: Continuity::Rebuilt, state };
-        replica.restore_continuity();
-        replica
+        Self { id, continuity: Continuity::Rebuilt, state }
+    }
+
+    /// Marks a rebuilt replica as holding its true highest counter again. Call it only after joining every state ref
+    /// freshly fetched from the remote, its own pushed ref included: a stale peer's entry for this replica is not
+    /// enough. Otherwise take a new replica id.
+    pub fn mark_restored(&mut self) {
+        self.continuity = Continuity::Intact;
     }
 
     /// The replica's id.
@@ -390,16 +411,22 @@ impl Replica {
         &self.id
     }
 
-    /// Joins another state, restoring continuity if it holds this replica's entry.
-    pub fn join(&mut self, other: &State) {
-        self.state.join(other);
-        self.restore_continuity();
-    }
-
-    fn restore_continuity(&mut self) {
-        if self.state.context.seen.contains_key(&self.id) {
-            self.continuity = Continuity::Intact;
+    /// Joins another state.
+    ///
+    /// # Errors
+    ///
+    /// An intact replica refuses a state that has seen more of its own writes than it has: another clone is writing
+    /// under this replica's id, or this replica lost state. Joining it could reuse dots and lose writes silently.
+    pub fn join(&mut self, other: &State) -> Result<(), Error> {
+        if self.continuity == Continuity::Intact {
+            let mine = self.state.context.seen.get(&self.id).copied().unwrap_or(0);
+            let theirs = other.context.seen.get(&self.id).copied().unwrap_or(0);
+            if theirs > mine {
+                return Err(Error::IdReused { replica: self.id.clone(), mine, theirs });
+            }
         }
+        self.state.join(other);
+        Ok(())
     }
 
     /// The timestamp for a write now: never earlier than this replica's last, and refused when the clock stepped back
@@ -416,7 +443,8 @@ impl Replica {
         Ok(now.max(last))
     }
 
-    fn mint(&mut self, at: Millis) -> Result<Dot, Error> {
+    /// Mints the next dot, with `at` raised to the replica's latest timestamp if it is earlier.
+    fn mint(&mut self, at: Millis) -> Result<(Dot, Millis), Error> {
         if self.continuity == Continuity::Rebuilt {
             return Err(Error::NotContinuous(self.id.clone()));
         }
@@ -425,7 +453,7 @@ impl Replica {
         let dot = Dot(self.id.clone(), *counter);
         let clock = self.state.context.clocks.entry(self.id.clone()).or_insert(at);
         *clock = (*clock).max(at);
-        Ok(dot)
+        Ok((dot, *clock))
     }
 
     /// Writes a field, superseding every value this replica has seen. `None` clears it.
@@ -448,7 +476,7 @@ impl Replica {
             self.state.set(key, field, Register::new());
             return Ok(None);
         };
-        let dot = self.mint(at)?;
+        let (dot, at) = self.mint(at)?;
         let stamped = Stamped { actor: actor.to_owned(), at, value };
         self.state.set(key, field, Register::from([(dot.clone(), stamped)]));
         Ok(Some(dot))
@@ -497,10 +525,14 @@ impl Replica {
             .filter(|(dot, value)| !seen.contains(dot) && value.actor != actor)
             .map(|(dot, value)| (dot.clone(), value.clone()))
             .collect();
-        let dot = self.mint(at)?;
-        if let Some(value) = op.value.clone() {
-            register.insert(dot.clone(), Stamped { actor: actor.clone(), at, value });
-        }
+        let dot = match op.value.clone() {
+            Some(value) => {
+                let (dot, at) = self.mint(at)?;
+                register.insert(dot.clone(), Stamped { actor: actor.clone(), at, value });
+                Some(dot)
+            },
+            None => None,
+        };
         self.state.set(&op.key, &op.field, register);
         let system = format!("replica/{}", self.id);
         self.write(&run, RUN_APPLIED_SEQ, &system, at, Some(Json::from(op.seq)))?;
@@ -614,6 +646,9 @@ impl State {
             if key.path() != *path {
                 return Err(Error::Format(format!("{path} holds {}", key.path())));
             }
+            for value in file.fields.values().flatten() {
+                check_value(&value.value).map_err(|e| Error::Format(format!("{path}: {e}")))?;
+            }
             let mut entity = Entity::new();
             for (name, values) in file.fields {
                 let register: Register = values
@@ -629,6 +664,9 @@ impl State {
             }
         }
         state.check()?;
+        if state.to_files() != *files {
+            return Err(Error::Format("files are not in canonical form".to_owned()));
+        }
         Ok(state)
     }
 }
