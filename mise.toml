@@ -19,13 +19,14 @@ run = [
   '[ -n "${CI:-}" ] || [ "$(git config core.hooksPath)" = .githooks ] || { echo "the pre-push guard is not installed: run mise run hooks:install" >&2; exit 1; }',
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets --locked -- -D warnings",
-  "cargo nextest run --workspace --lib --bins --locked --no-tests=pass",
+  # The pinned nextest by path: cargo would otherwise prefer any copy in ~/.cargo/bin.
+  '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --lib --bins --locked --no-tests=pass',
   "sh scripts/check-doc-fences.sh",
 ]
 
 [tasks."check:integration"]
 description = "Integration tests (budget: 3 minutes)"
-run = "cargo nextest run --workspace --test '*' --locked --no-tests=pass"
+run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
 [tasks."hooks:install"]
 description = "Install the pre-push guard for this clone"
