@@ -3,7 +3,9 @@ use hegel::generators as gs;
 use serde_json::json;
 
 use super::*;
-use crate::model::{By, ItemState, add_item, item_key, link, link_key, set_parent, set_state};
+use crate::model::{
+    By, ItemState, LinkKind, add_item, item_key, link, link_key, set_parent, set_state,
+};
 use crate::schema::{item as field, kind, link as link_field, thread};
 use crate::state::{Key, Replica, ReplicaId, State};
 
@@ -491,7 +493,7 @@ fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
     }
     // Unapproved scope takes anyone's work; a thread an item already has is never changed.
     write(&mut r, &item_key("g1").unwrap(), field::THREAD, json!("loose"));
-    add(&mut r, "b", Some("g1-00"));
+    add(&mut r, "b", Some("g1"));
     let placed = place_one(&mut r, "b", Some(BUDGET), "session/mac");
     assert_eq!(placed.inherited[0].proposal, None);
     add(&mut r, "c", Some("g1-00"));
@@ -517,7 +519,102 @@ fn an_item_gaining_its_first_child_splits_its_subtree() {
     assert_eq!(placed.drafts.len(), 1, "well under the budget, `g1-00` became a group");
     assert_eq!(placed.drafts[0].members, BTreeSet::from(["g1-01".to_owned(), "kid".to_owned()]));
     add(&mut r, "kid2", Some("g1-00"));
-    assert!(place_one(&mut r, "kid2", Some(BUDGET), USER.actor).is_empty(), "a second child isn't");
+    let placed = place_one(&mut r, "kid2", Some(BUDGET), USER.actor);
+    assert_eq!(placed.drafts, Vec::<Draft>::new(), "a second child doesn't split");
+    assert_eq!(placed.inherited[0].thread, placed_thread(&r, "kid"), "it joins its sibling");
+}
+
+fn placed_thread(r: &Replica, id: &str) -> String {
+    model(r).thread_of(id).unwrap().to_owned()
+}
+
+#[test]
+fn a_group_grown_one_child_at_a_time_stays_one_draft() {
+    let mut r = replica();
+    for (group, kids) in
+        [("move", &["boxes", "pack", "van", "keys", "unpack"][..]), ("garden", &["hedge", "bulbs"])]
+    {
+        add(&mut r, group, None);
+        for kid in kids {
+            add(&mut r, kid, Some(group));
+            if *kid == "pack" {
+                link(&mut r, "pack", "boxes", LinkKind::Blocks, USER).unwrap();
+            }
+            let (_, handed) =
+                place_and_read(&mut r, &[(*kid).to_owned()], Some(BUDGET), USER).unwrap();
+            assert_eq!(handed, model(&r), "the model handed back is the state's");
+        }
+    }
+    let m = model(&r);
+    for (group, size) in [("move", 5), ("garden", 2)] {
+        let threads: BTreeSet<&str> =
+            m.children(group).iter().filter_map(|kid| m.thread_of(kid)).collect();
+        let [thread] = threads.into_iter().collect::<Vec<_>>()[..] else {
+            panic!("{group}: {m:?}")
+        };
+        assert_eq!(m.members(thread).len(), size, "{group}");
+    }
+    assert_eq!(m.thread_of("pack"), m.thread_of("boxes"), "no wait across threads");
+    assert_eq!(plan(&m, None), Vec::<Draft>::new(), "nothing left to split");
+}
+
+#[test]
+fn siblings_pass_their_thread_down_only_when_they_agree_and_it_has_room() {
+    let mut r = two_groups(2, 0);
+    let shared = |r: &Replica| passed_down(&model(r), "g1").map(str::to_owned);
+    for leaf in ["g1-00", "g1-01"] {
+        write(&mut r, &item_key(leaf).unwrap(), field::THREAD, json!("t"));
+    }
+    write(&mut r, &item_key("p").unwrap(), field::THREAD, json!("up"));
+    assert_eq!(shared(&r).as_deref(), Some("t"), "nearer than the grandparent's");
+    write(&mut r, &item_key("g1-01").unwrap(), field::THREAD, json!("u"));
+    assert_eq!(shared(&r).as_deref(), Some("up"), "siblings that differ fall through");
+    set_state(&mut r, "g1-01", ItemState::Done, USER).unwrap();
+    assert_eq!(shared(&r).as_deref(), Some("t"), "finished work pulls nothing in");
+    // Siblings in conflict fall through; a parent in conflict stops the walk, however its children agree.
+    let mut other = replica_named("pi");
+    other.join(r.state()).unwrap();
+    other
+        .write(&item_key("g1-00").unwrap(), field::THREAD, USER.actor, 5, Some(json!("v")))
+        .unwrap();
+    r.write(&item_key("g1-00").unwrap(), field::THREAD, USER.actor, 5, Some(json!("t"))).unwrap();
+    r.join(other.state()).unwrap();
+    assert_eq!(shared(&r).as_deref(), Some("up"));
+    write(&mut r, &item_key("g1-00").unwrap(), field::THREAD, json!("t"));
+    other.write(&item_key("g1").unwrap(), field::THREAD, USER.actor, 6, Some(json!("v"))).unwrap();
+    r.write(&item_key("g1").unwrap(), field::THREAD, USER.actor, 6, Some(json!("w"))).unwrap();
+    r.join(other.state()).unwrap();
+    assert_eq!(shared(&r), None);
+    // At the cap, a sibling's thread takes no more, even within one batch.
+    let mut r = two_groups(1, 0);
+    write(&mut r, &item_key("g1-00").unwrap(), field::THREAD, json!("t"));
+    let batch: Vec<String> = (1..=CAP).map(|i| format!("n{i:02}")).collect();
+    for id in &batch {
+        add(&mut r, id, Some("g1"));
+    }
+    let placed = place(&mut r, &batch, Some(BUDGET), USER).unwrap();
+    assert_eq!(placed.inherited.len(), CAP - 1, "{placed:?}");
+    assert_eq!(model(&r).members("t").len(), CAP);
+    let mut r = two_groups(CAP, 0);
+    for i in 0..CAP {
+        write(&mut r, &item_key(&format!("g1-{i:02}")).unwrap(), field::THREAD, json!("t"));
+    }
+    assert_eq!(passed_down(&model(&r), "g1"), None);
+}
+
+#[test]
+fn an_agents_sibling_join_into_approved_scope_is_a_proposal() {
+    let mut r = two_groups(1, 0);
+    let ok = Key::new(kind::THREAD, "ok").unwrap();
+    write(&mut r, &ok, thread::APPROVED, json!(true));
+    write(&mut r, &item_key("g1-00").unwrap(), field::THREAD, json!("ok"));
+    add(&mut r, "late", Some("g1"));
+    let agent = By { actor: "session/mac", at: 9 };
+    let (placed, handed) =
+        place_and_read(&mut r, &["late".to_owned()], Some(BUDGET), agent).unwrap();
+    let [joined] = placed.inherited.as_slice() else { panic!("{placed:?}") };
+    assert_eq!((joined.thread.as_str(), joined.proposal.is_some()), ("ok", true));
+    assert_eq!(handed, model(&r));
 }
 
 #[test]

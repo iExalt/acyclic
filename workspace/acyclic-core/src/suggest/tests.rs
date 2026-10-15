@@ -144,6 +144,8 @@ fn threads_rank_by_their_words_and_parents_name_the_thread_they_pass_down() {
     let (shown, _) = suggest(&model(&r), "wall", None, LIMIT);
     let paint = shown.parents.iter().find(|p| p.item == "paint").unwrap();
     assert_eq!((paint.inherits.as_deref(), paint.note), (Some("diy"), None), "unapproved");
+    let house = shown.parents.iter().find(|p| p.item == "house").unwrap();
+    assert_eq!(house.inherits.as_deref(), Some("diy"), "the thread its children share");
     // A candidate whose own thread is in conflict passes none down, as placing under it would.
     let mut other = Replica::open(ReplicaId::new("pi").unwrap(), State::new());
     other.join(r.state()).unwrap();
