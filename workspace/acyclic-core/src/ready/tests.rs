@@ -138,7 +138,7 @@ fn an_archived_dependency_is_met() {
     set_parent(&mut r, "dep", Some("goal"), by(2)).unwrap();
     link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
-    set(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
+    model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     let unmerged = Fake::with(&[("c1", Ok(false))]);
     assert_eq!(status(&r, &unmerged, "x"), Status::Ready { rank: 0 });
     assert_eq!(status(&r, &unmerged, "dep"), Status::Archived);
@@ -210,7 +210,7 @@ fn ready_ranks_leaves_and_checks_each_needed_commit_once() {
     done_with(&mut r, "dep", Some("c1"));
     done_with(&mut r, "unrelated", Some("c2"));
     set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
-    set(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
+    model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
     set_element(&mut r, &item_key("x").unwrap(), sets::AREA, "ui", true, by(2)).unwrap();
     let ancestry = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     let model = Model::read(&r.state).unwrap();

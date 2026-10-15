@@ -610,6 +610,13 @@ pub enum WriteError {
         /// The checked write to use.
         write: &'static str,
     },
+    /// Only the user sets this field.
+    UserOnly {
+        /// The field.
+        field: String,
+        /// Who tried.
+        actor: String,
+    },
     /// An item can't link to itself.
     SelfLink(String),
     /// A run's state can't move that way.
@@ -644,6 +651,7 @@ impl fmt::Display for WriteError {
             Self::Checked { field, write } => {
                 write!(f, "{field} has invariants: write it with {write}")
             },
+            Self::UserOnly { field, actor } => write!(f, "only the user sets {field}, not {actor}"),
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
             Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
             Self::RunActive { thread, run } => {
@@ -703,8 +711,9 @@ fn to_json<T: Serialize>(value: &T) -> Json {
 }
 
 /// The fields only a checked write may set, with the write to use instead.
-const CHECKED: [(&str, &str, &str); 7] = [
+const CHECKED: [(&str, &str, &str); 8] = [
     (kind::ITEM, field::THREAD, "scope::edit"),
+    (kind::ITEM, field::ARCHIVED, "archive::archive"),
     (kind::ITEM, field::REOPENED, "archive::reopen"),
     (kind::ITEM, field::PARENT, "set_parent"),
     (kind::ITEM, field::STATE, "set_state"),
@@ -713,12 +722,23 @@ const CHECKED: [(&str, &str, &str); 7] = [
     (kind::RUN, run::STATE, "set_run_state"),
 ];
 
-/// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent and state, a
-/// link's fields, a run's thread and state) are refused: use their checked writes.
+/// Fields only the user's batches set: a thread's approval, flags and choices, and every global setting.
+const USER_ONLY: [(&str, &str); 6] = [
+    (kind::THREAD, thread::APPROVED),
+    (kind::THREAD, thread::PM_FLAG),
+    (kind::THREAD, thread::AUTONOMY),
+    (kind::THREAD, thread::LAUNCH),
+    (kind::THREAD, thread::PLACEMENT),
+    (kind::SETTINGS, ""),
+];
+
+/// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
+/// archived flag and reopen flag, a link's fields, a run's thread and state) are refused: use their checked writes.
+/// A thread's approval, flags and choices and the global settings are the user's alone.
 ///
 /// # Errors
 ///
-/// Fails on a checked field or when the state layer refuses.
+/// Fails on a checked field, on a user-only field written by anyone else, or when the state layer refuses.
 pub fn set<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
@@ -731,6 +751,12 @@ pub fn set<T: Serialize>(
         .find(|(kind, field, _)| key.kind == *kind && (field.is_empty() || name == *field));
     if let Some((_, _, write)) = checked {
         return Err(WriteError::Checked { field: name.to_owned(), write });
+    }
+    let user_only = USER_ONLY
+        .iter()
+        .any(|(kind, field)| key.kind == *kind && (field.is_empty() || name == *field));
+    if user_only && by.actor != crate::scope::USER {
+        return Err(WriteError::UserOnly { field: name.to_owned(), actor: by.actor.to_owned() });
     }
     put(replica, key, name, value, by)
 }

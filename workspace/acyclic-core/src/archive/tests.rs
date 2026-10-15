@@ -95,6 +95,11 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
         Err(ArchiveError::Ineligible(_))
     ));
     let now = DAY + GATELESS_WAIT;
+    let agent = By { actor: "run/worker", at: now };
+    assert_eq!(
+        archive(&mut r, &ByName, "g", agent),
+        Err(ArchiveError::NotAllowed("run/worker".into()))
+    );
     archive(&mut r, &ByName, "g", user(now)).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(model.is_archived("a"));
@@ -116,7 +121,7 @@ fn status(r: &Replica, id: &str, now: Millis) -> Status {
 fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
     let mut r = setup();
     link(&mut r, "outside", "a", LinkKind::Blocks, user(2)).unwrap();
-    model::set(&mut r, &item_key("g").unwrap(), field::ARCHIVED, Some(&true), user(3)).unwrap();
+    model::put(&mut r, &item_key("g").unwrap(), field::ARCHIVED, Some(&true), user(3)).unwrap();
     let now = 40 * DAY;
     reopen(&mut r, "a", user(now)).unwrap();
     let model = Model::read(&r.state).unwrap();
@@ -136,7 +141,8 @@ fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     let mut r = setup();
     link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
     assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready { rank: 0 });
-    reopen(&mut r, "b", user(2 * DAY)).unwrap();
+    // Any actor may reopen: an agent may find a defect in finished work.
+    reopen(&mut r, "b", By { actor: "run/worker", at: 2 * DAY }).unwrap();
     assert!(
         matches!(status(&r, "outside", 2 * DAY), Status::Blocked { waiting } if waiting["b"] == Wait::Open)
     );

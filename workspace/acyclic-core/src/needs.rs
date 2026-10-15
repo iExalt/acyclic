@@ -269,7 +269,9 @@ fn claims(
     Ok(())
 }
 
-/// Unmet blocks links from items in approved threads, added after the thread's approval.
+/// Unmet blocks links from items in approved threads, added after the thread's approval. The two are compared by
+/// their writers' stamps, so a blocker added within the clock guard's skew of an approval on another replica may be
+/// misordered; re-approving a thread acknowledges the blockers before it.
 fn new_blockers(
     state: &State,
     model: &Model,

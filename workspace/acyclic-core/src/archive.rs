@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::model::{self, By, ItemState, LinkKind, Model, Reopened, Value, WriteError};
 use crate::ready::{Ancestry, Readiness, Status};
 use crate::schema::item as field;
+use crate::scope;
 use crate::state::{Error, Millis, Replica};
 
 /// How long a root without a gate waits after its last item is done.
@@ -97,6 +98,8 @@ pub enum ArchiveError {
     Ineligible(Vec<Reason>),
     /// Reopening needs a done item.
     NotDone(String),
+    /// Only the user or a project-management run archives.
+    NotAllowed(String),
 }
 
 impl std::fmt::Display for ArchiveError {
@@ -104,6 +107,9 @@ impl std::fmt::Display for ArchiveError {
         match self {
             Self::Write(err) => err.fmt(f),
             Self::Ineligible(reasons) => write!(f, "not eligible to archive: {reasons:?}"),
+            Self::NotAllowed(actor) => {
+                write!(f, "{actor} may not archive; the user or a project manager may")
+            },
             Self::NotDone(id) => write!(f, "{id} isn't done, so there is nothing to reopen"),
         }
     }
@@ -123,11 +129,12 @@ impl From<Error> for ArchiveError {
     }
 }
 
-/// Archives an eligible root, judged against the replica's own view at the write's time.
+/// Archives an eligible root, judged against the replica's own view at the write's time. Archiving takes work out
+/// of `ready` and the graph, so only the user or a project-management run archives; any actor may reopen.
 ///
 /// # Errors
 ///
-/// Fails when it isn't eligible, a value can't be read, or the write is refused.
+/// Fails for any other actor, when it isn't eligible, a value can't be read, or the write is refused.
 pub fn archive(
     replica: &mut Replica,
     ancestry: &dyn Ancestry,
@@ -135,6 +142,9 @@ pub fn archive(
     by: By<'_>,
 ) -> Result<(), ArchiveError> {
     let model = Model::read(&replica.state)?;
+    if scope::classify(&model, by.actor) == scope::Actor::Agent {
+        return Err(ArchiveError::NotAllowed(by.actor.to_owned()));
+    }
     let reasons = {
         let readiness = Readiness::new(&replica.state, &model, by.at, ancestry);
         eligibility(&readiness, &model, root, by.at)?
@@ -143,7 +153,7 @@ pub fn archive(
         return Err(ArchiveError::Ineligible(reasons));
     }
     let key = model::item_key(root)?;
-    model::set(replica, &key, field::ARCHIVED, Some(&true), by)?;
+    model::put(replica, &key, field::ARCHIVED, Some(&true), by)?;
     Ok(())
 }
 
@@ -161,7 +171,7 @@ pub fn reopen(replica: &mut Replica, id: &str, by: By<'_>) -> Result<(), Archive
     let archived = model.is_archived(id);
     for root in std::iter::once(id).chain(model.ancestors(id)) {
         if model.items.get(root).is_some_and(|i| i.archived != Value::None) {
-            model::set::<bool>(replica, &model::item_key(root)?, field::ARCHIVED, None, by)?;
+            model::put::<bool>(replica, &model::item_key(root)?, field::ARCHIVED, None, by)?;
         }
     }
     model::set_state(replica, id, ItemState::InProgress, by)?;

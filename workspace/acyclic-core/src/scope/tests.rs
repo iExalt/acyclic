@@ -89,6 +89,21 @@ fn an_agents_edit_to_approved_scope_waits_and_others_apply() {
 }
 
 #[test]
+fn an_agent_cant_unapprove_its_way_past_a_proposal() {
+    let mut r = setup();
+    let agent = by("run/worker", 5);
+    assert!(matches!(
+        model::set(&mut r, &thread_key("ok"), thread::APPROVED, Some(&false), agent),
+        Err(WriteError::UserOnly { .. })
+    ));
+    assert!(matches!(
+        model::set(&mut r, &thread_key("ok"), thread::PM_FLAG, Some(&true), agent),
+        Err(WriteError::UserOnly { .. })
+    ));
+    assert!(matches!(edit(&mut r, &member("x", None), agent).unwrap(), Outcome::Proposed(_)));
+}
+
+#[test]
 fn the_user_keeps_or_drops_a_proposal_once() {
     let mut r = setup();
     let Outcome::Proposed(kept) =

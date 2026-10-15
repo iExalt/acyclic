@@ -83,7 +83,7 @@ fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
     assert_eq!(m.subtree("x").len(), 2);
     assert_eq!(m.role("x"), Role::Group);
     assert!(!m.is_archived("x"));
-    set(&mut a, &item_key("y").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
+    put(&mut a, &item_key("y").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     assert!(model(&a).is_archived("x"), "inherited through the cycle, and the walk ends");
 }
 
@@ -303,4 +303,35 @@ fn a_run_only_moves_forward() {
             Err(WriteError::RunTransition { .. })
         ));
     }
+}
+
+#[test]
+fn only_the_user_sets_a_threads_approval_flags_and_the_global_settings() {
+    let mut r = replica("a");
+    let t = Key::new(kind::THREAD, "t").unwrap();
+    let global = Key::new(kind::SETTINGS, crate::schema::GLOBAL).unwrap();
+    let fields = [
+        (&t, thread::APPROVED),
+        (&t, thread::PM_FLAG),
+        (&t, thread::AUTONOMY),
+        (&t, thread::LAUNCH),
+        (&t, thread::PLACEMENT),
+        (&global, crate::schema::settings::AUTONOMY),
+    ];
+    for actor in ["run/boss", "run/worker", "session/mac"] {
+        for (key, name) in fields {
+            assert_eq!(
+                set(&mut r, key, name, Some(&true), By { actor, at: 2 }),
+                Err(WriteError::UserOnly { field: name.to_owned(), actor: actor.to_owned() })
+            );
+        }
+    }
+    for (key, name) in fields {
+        set(&mut r, key, name, Some(&true), by(2)).unwrap();
+    }
+    items(&mut r, &["x"]);
+    assert!(matches!(
+        set(&mut r, &item_key("x").unwrap(), field::ARCHIVED, Some(&true), by(3)),
+        Err(WriteError::Checked { .. })
+    ));
 }
