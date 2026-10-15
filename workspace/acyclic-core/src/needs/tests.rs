@@ -1,3 +1,4 @@
+use crate::model::SetField;
 use serde_json::json;
 
 use super::*;
@@ -109,7 +110,8 @@ fn the_state_puts_its_problems_on_the_list() {
     edit(&mut a, &ScopeEdit::Member { item: "work".into(), thread: Some("ok".into()) }, by)
         .unwrap();
     for id in ["gpu1", "gpu2"] {
-        model::set_element(&mut a, &item_key(id).unwrap(), set::RESOURCE, "gpu", true, by).unwrap();
+        model::set_element(&mut a, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by)
+            .unwrap();
     }
     set_parent(&mut a, "kid", Some("p"), by).unwrap();
     model::set_state(&mut a, "p", ItemState::Done, by).unwrap();

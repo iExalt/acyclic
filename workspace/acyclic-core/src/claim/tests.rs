@@ -1,8 +1,9 @@
 use super::*;
+use crate::model::SetField;
 use crate::model::{
     By, RunState, add_item, item_key, set, set_element, set_parent, set_run_state, start_run,
 };
-use crate::schema::{item as field, set as sets};
+use crate::schema::item as field;
 use crate::state::ReplicaId;
 
 const LEASE: Millis = 1_000;
@@ -22,7 +23,7 @@ fn items(r: &mut Replica, ids: &[&str]) {
 }
 
 fn holds(r: &mut Replica, id: &str, resource: &str) {
-    set_element(r, &item_key(id).unwrap(), sets::RESOURCE, resource, true, by("actor/user", 1))
+    set_element(r, &item_key(id).unwrap(), SetField::Resource, resource, true, by("actor/user", 1))
         .unwrap();
 }
 

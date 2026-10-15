@@ -772,6 +772,29 @@ pub(crate) fn put<T: Serialize>(
     Ok(())
 }
 
+/// A set field, stored a field per element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetField {
+    /// Area tags.
+    Area,
+    /// Repositories; on items and threads they are scope edits, made through `scope::edit`.
+    Repository,
+    /// Named resources.
+    Resource,
+}
+
+impl SetField {
+    /// The prefix of the set's fields.
+    #[must_use]
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Area => set::AREA,
+            Self::Repository => set::REPOSITORY,
+            Self::Resource => set::RESOURCE,
+        }
+    }
+}
+
 /// Adds an element to a set field, or removes it. Repositories on items and threads are scope edits: use
 /// `scope::edit`.
 ///
@@ -781,20 +804,18 @@ pub(crate) fn put<T: Serialize>(
 pub fn set_element(
     replica: &mut Replica,
     key: &Key,
-    prefix: &str,
+    set: SetField,
     element: &str,
     present: bool,
     by: By<'_>,
 ) -> Result<(), WriteError> {
-    let scope =
-        prefix == set::REPOSITORY && [kind::ITEM, kind::THREAD].contains(&key.kind.as_str());
-    if scope {
+    if set == SetField::Repository && [kind::ITEM, kind::THREAD].contains(&key.kind.as_str()) {
         return Err(WriteError::Checked {
-            field: format!("{prefix}{element}"),
+            field: format!("{}{element}", set.prefix()),
             write: "scope::edit",
         });
     }
-    put_element(replica, key, prefix, element, present, by)
+    put_element(replica, key, set.prefix(), element, present, by)
 }
 
 pub(crate) fn put_element(

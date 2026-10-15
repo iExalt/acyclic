@@ -1,8 +1,9 @@
+use crate::model::SetField;
 use std::cell::Cell;
 
 use super::*;
 use crate::model::{self, By, add_item, item_key, link, set, set_element, set_parent, set_state};
-use crate::schema::{item as field, kind, repository, set as sets};
+use crate::schema::{item as field, kind, repository};
 use crate::state::{Key, Replica, ReplicaId};
 
 const NOW: Millis = 1_000;
@@ -211,7 +212,7 @@ fn ready_ranks_leaves_and_checks_each_needed_commit_once() {
     done_with(&mut r, "unrelated", Some("c2"));
     set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
-    set_element(&mut r, &item_key("x").unwrap(), sets::AREA, "ui", true, by(2)).unwrap();
+    set_element(&mut r, &item_key("x").unwrap(), SetField::Area, "ui", true, by(2)).unwrap();
     let ancestry = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
@@ -241,7 +242,8 @@ fn a_held_resource_keeps_an_item_waiting_and_a_dead_runs_claim_frees_it() {
     let mut r = replica("a");
     items(&mut r, &["x", "y"]);
     for id in ["x", "y"] {
-        set_element(&mut r, &item_key(id).unwrap(), sets::RESOURCE, "gpu", true, by(2)).unwrap();
+        set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
+            .unwrap();
     }
     model::start_run(&mut r, "r1", "t1", by(2)).unwrap();
     claim::claim(&mut r, &item_key("x").unwrap(), "run/r1", 10, None, 1_000).unwrap();

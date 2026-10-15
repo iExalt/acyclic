@@ -153,13 +153,13 @@ fn link_ids_are_unambiguous() {
 fn set_elements_merge_and_a_concurrent_add_beats_a_removal() {
     let (mut a, mut b) = pair(&["x"]);
     let key = item_key("x").unwrap();
-    set_element(&mut a, &key, set::AREA, "ui", true, by(2)).unwrap();
-    set_element(&mut b, &key, set::AREA, "core", true, by(2)).unwrap();
+    set_element(&mut a, &key, SetField::Area, "ui", true, by(2)).unwrap();
+    set_element(&mut b, &key, SetField::Area, "core", true, by(2)).unwrap();
     a.join(&b.state).unwrap();
     b.join(&a.state).unwrap();
     assert_eq!(model(&a).items["x"].areas, BTreeSet::from(["core".into(), "ui".into()]));
-    set_element(&mut a, &key, set::AREA, "ui", false, by(3)).unwrap();
-    set_element(&mut b, &key, set::AREA, "ui", true, by(3)).unwrap();
+    set_element(&mut a, &key, SetField::Area, "ui", false, by(3)).unwrap();
+    set_element(&mut b, &key, SetField::Area, "ui", true, by(3)).unwrap();
     a.join(&b.state).unwrap();
     assert!(model(&a).items["x"].areas.contains("ui"));
 }
@@ -171,7 +171,7 @@ fn names_follow_the_id_rule() {
     let key = item_key("x").unwrap();
     for bad in ["a/b", "Engine", "", ".hidden"] {
         assert_eq!(
-            set_element(&mut r, &key, set::RESOURCE, bad, true, by(2)),
+            set_element(&mut r, &key, SetField::Resource, bad, true, by(2)),
             Err(WriteError::InvalidName(bad.to_owned()))
         );
     }
@@ -270,12 +270,20 @@ fn fields_with_invariants_need_their_checked_writes() {
         Err(WriteError::Checked { .. })
     ));
     let thread = Key::new(kind::THREAD, "t").unwrap();
-    for (key, prefix) in [(&x, set::REPOSITORY), (&thread, set::REPOSITORY)] {
+    for key in [&x, &thread] {
         assert!(matches!(
-            set_element(&mut r, key, prefix, "code", true, by(2)),
+            set_element(&mut r, key, SetField::Repository, "code", true, by(2)),
             Err(WriteError::Checked { .. })
         ));
     }
+    // Only the set fields can be formed, so no element reaches another field.
+    set_element(&mut r, &x, SetField::Area, "state", true, by(2)).unwrap();
+    set_element(&mut r, &x, SetField::Resource, "approved", true, by(2)).unwrap();
+    let read = Model::read(&r.state).unwrap();
+    assert_eq!(read.items["x"].state, Value::One(ItemState::Backlog));
+    assert!(
+        read.items["x"].areas.contains("state") && read.items["x"].resources.contains("approved")
+    );
     assert!(matches!(
         set(&mut r, &x, field::THREAD, Some(&"t"), by(2)),
         Err(WriteError::Checked { .. })
