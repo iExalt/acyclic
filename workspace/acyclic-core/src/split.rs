@@ -48,7 +48,7 @@ pub struct Draft {
     pub title: String,
     /// Its members.
     pub members: BTreeSet<String>,
-    /// Whether it holds pieces that wait on each other in a cycle, which may take it past the cap.
+    /// Whether it holds leaves that wait on each other in a cycle, which may take it past the cap.
     pub merged_cycle: bool,
     /// Whether it spans top-level items, so `root` holds only some members.
     pub cross_top: bool,
@@ -361,8 +361,8 @@ impl<'a> Split<'a> {
 
     /// Untangles drafts that `blocks` links make wait on each other in a cycle: their leaves are cut again, in an
     /// order that every `blocks` link among them follows, into even drafts that wait on each other only one way.
-    /// Pieces stay whole, so only pieces that wait on each other in a cycle themselves must share a draft, which may
-    /// then pass the cap.
+    /// Pieces stay whole unless they wait on each other in a cycle, and then only leaves that do so themselves must
+    /// share a draft, which may then pass the cap.
     fn untangle(
         &self,
         drafts: Vec<Rooted<'a>>,
@@ -413,12 +413,26 @@ impl<'a> Split<'a> {
     }
 
     /// Cuts `leaves` into even drafts along an order of their pieces that every `blocks` link among them follows,
-    /// earliest in the tree first; pieces that wait on each other in a cycle become one.
+    /// earliest in the tree first. Pieces that wait on each other in a cycle give way to their leaves, and only leaves
+    /// that wait on each other in a cycle become one.
     fn recut(
         &self,
         leaves: &Group<'a>,
         unit_of: &BTreeMap<&'a str, usize>,
     ) -> Vec<(String, Group<'a>, bool)> {
+        let pieces = self.blocks_edges(|leaf: &str| leaves.contains(leaf).then(|| unit_of[leaf]));
+        let tangled: BTreeSet<usize> =
+            crate::graph::cycles(&pieces).into_iter().flatten().collect();
+        // A tangled piece's leaves become units of their own, numbered past every piece.
+        let unit_of: BTreeMap<&'a str, usize> = leaves
+            .iter()
+            .enumerate()
+            .map(|(i, leaf)| {
+                let unit = unit_of[leaf];
+                (*leaf, if tangled.contains(&unit) { unit_of.len() + i } else { unit })
+            })
+            .collect();
+        let unit_of = &unit_of;
         let unit = |leaf: &str| leaves.contains(leaf).then(|| unit_of[leaf]);
         let edges = self.blocks_edges(unit);
         let mut node: BTreeMap<usize, usize> =

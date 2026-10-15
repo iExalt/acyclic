@@ -187,6 +187,36 @@ fn pieces_waiting_on_each_other_share_a_draft_that_says_so() {
 }
 
 #[test]
+fn pieces_waiting_on_each_other_without_a_leaf_cycle_are_cut_along_their_order() {
+    // Two chains of 13, each one piece, that wait on each other only through their ends.
+    let mut r = replica();
+    for top in ["a", "b"] {
+        add(&mut r, top, None);
+        for i in 0..13 {
+            add(&mut r, &format!("{top}{i:02}"), Some(top));
+            if i > 0 {
+                link(
+                    &mut r,
+                    &format!("{top}{i:02}"),
+                    &format!("{top}{:02}", i - 1),
+                    LinkKind::Blocks,
+                    USER,
+                )
+                .unwrap();
+            }
+        }
+    }
+    link(&mut r, "a12", "b00", LinkKind::Blocks, USER).unwrap();
+    link(&mut r, "b12", "a00", LinkKind::Blocks, USER).unwrap();
+    let m = model(&r);
+    let drafts = plan(&m, None);
+    assert_eq!(members(&drafts).iter().map(|(_, n)| n).sum::<usize>(), 26);
+    assert!(drafts.iter().all(|d| !d.merged_cycle && d.members.len() <= CAP), "{drafts:?}");
+    assert_eq!(drafts.len(), 2);
+    assert_no_deadlock(&m, &drafts);
+}
+
+#[test]
 fn a_cycle_through_an_existing_thread_is_named_not_merged() {
     let mut r = replica();
     add(&mut r, "p", None);
@@ -335,6 +365,31 @@ fn components(model: &Model) -> Vec<BTreeSet<String>> {
     groups.into_values().collect()
 }
 
+/// The indexes of `components` that wait on each other in a cycle through `blocks` links, a link on a group counting
+/// for its leaves.
+fn tangled_components(m: &Model, components: &[BTreeSet<String>]) -> BTreeSet<usize> {
+    let mut under: BTreeMap<&str, BTreeSet<usize>> = BTreeMap::new();
+    for (i, component) in components.iter().enumerate() {
+        for leaf in component {
+            for node in std::iter::once(leaf.as_str()).chain(m.ancestors(leaf)) {
+                under.entry(node).or_default().insert(i);
+            }
+        }
+    }
+    let none = BTreeSet::new();
+    let mut edges = Vec::new();
+    for link in m.links.iter().filter(|l| l.kind == LinkKind::Blocks) {
+        for to in under.get(link.to.as_str()).unwrap_or(&none) {
+            for from in under.get(link.from.as_str()).unwrap_or(&none) {
+                if from != to {
+                    edges.push((*to, *from));
+                }
+            }
+        }
+    }
+    crate::graph::cycles(&edges).into_iter().flatten().collect()
+}
+
 /// (a) No draft waits on another in a cycle through `blocks` links, a link on a group counting for its leaves.
 fn assert_no_deadlock(m: &Model, drafts: &[Draft]) {
     let mut drafts_under: BTreeMap<&str, BTreeSet<usize>> = BTreeMap::new();
@@ -385,8 +440,12 @@ fn splits_keep_their_promises(tc: TestCase) {
         }
         assert!(draft.merged_cycle || draft.members.len() <= CAP, "(c) {} over the cap", draft.id);
     }
-    // (d) a component that fits stays in one draft.
-    for component in components(&m).into_iter().filter(|c| c.len() <= CAP) {
+    // (d) a component that fits stays in one draft, unless it waits on others in a cycle.
+    let all = components(&m);
+    let tangled = tangled_components(&m, &all);
+    for (_, component) in
+        all.iter().enumerate().filter(|(i, c)| c.len() <= CAP && !tangled.contains(i))
+    {
         let drafts_of: BTreeSet<&str> = drafts
             .iter()
             .filter(|d| d.members.iter().any(|member| component.contains(member)))
