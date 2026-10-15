@@ -28,6 +28,8 @@ pub enum LocateError {
     Config(String),
     /// The repository has no remote to look up.
     NoRemote,
+    /// Git couldn't read the repository, which may not be one.
+    Git(String),
     /// No prefix matches any of the repository's remotes and there is no default.
     NotMapped(Vec<String>),
 }
@@ -37,6 +39,7 @@ impl fmt::Display for LocateError {
         match self {
             Self::Config(message) => write!(f, "~/{CONFIG_PATH}: {message}"),
             Self::NoRemote => write!(f, "the repository has no remote to find its tracker by"),
+            Self::Git(message) => write!(f, "can't read the repository's remotes: {message}"),
             Self::NotMapped(remotes) => write!(
                 f,
                 "no tracker in ~/{CONFIG_PATH} for {}; add a prefix or a default",
@@ -80,6 +83,11 @@ impl Trackers {
     /// A leading `~/` expands to `home`.
     #[must_use]
     pub fn lookup(&self, remote: &str, home: &Path) -> Option<PathBuf> {
+        self.match_prefix(remote, home).or_else(|| self.default.as_ref().map(|t| expand(t, home)))
+    }
+
+    /// The tracker clone for a remote URL's longest matching prefix, ignoring the default.
+    fn match_prefix(&self, remote: &str, home: &Path) -> Option<PathBuf> {
         let remote = normalize(remote);
         self.prefixes
             .iter()
@@ -90,53 +98,60 @@ impl Trackers {
                 matches.then_some((prefix.len(), tracker))
             })
             .max_by_key(|(len, _)| *len)
-            .map(|(_, tracker)| tracker)
-            .or(self.default.as_ref())
-            .map(|tracker| expand(tracker, home))
+            .map(|(_, tracker)| expand(tracker, home))
     }
 
-    /// The tracker for the code repository at `repo`, by its remotes: `origin` first, then the others by name.
+    /// The tracker for the code repository at `repo`: the first of its remotes, `origin` and then the others by
+    /// name, that a prefix matches, else the default.
     ///
     /// # Errors
     ///
-    /// Fails when the repository has no remote, or none is mapped and there is no default.
+    /// Fails when `repo` isn't a repository, or no remote is mapped and there is no default.
     pub fn for_repo(&self, repo: &Path, home: &Path) -> Result<PathBuf, LocateError> {
-        let remotes = remote_urls(repo);
-        if remotes.is_empty() {
-            return self.default.as_ref().map(|t| expand(t, home)).ok_or(LocateError::NoRemote);
+        let remotes = remote_urls(repo)?;
+        if let Some(tracker) = remotes.iter().find_map(|url| self.match_prefix(url, home)) {
+            return Ok(tracker);
         }
-        remotes.iter().find_map(|url| self.lookup(url, home)).ok_or_else(|| {
-            LocateError::NotMapped(remotes.iter().map(|url| normalize(url)).collect())
-        })
+        match (&self.default, remotes.is_empty()) {
+            (Some(tracker), _) => Ok(expand(tracker, home)),
+            (None, true) => Err(LocateError::NoRemote),
+            (None, false) => {
+                Err(LocateError::NotMapped(remotes.iter().map(|url| normalize(url)).collect()))
+            },
+        }
     }
 }
 
-/// A remote URL reduced to `host/path`, lowercase, without scheme, user, port, `.git` or trailing slashes, so the
-/// HTTPS, SSH and scp-like forms of one repository compare equal.
+/// A remote URL reduced to `host/path`, without scheme, user, port, `.git` or trailing slashes, so the HTTPS, SSH
+/// and scp-like forms of one repository compare equal. Host URLs are lowercased, since hosting services ignore case;
+/// local paths (`/srv/x.git`, `file:///srv/x`, `../x`) keep theirs.
 #[must_use]
 pub fn normalize(url: &str) -> String {
     let url = url.trim();
-    let (rest, scheme) = match url.split_once("://") {
-        Some((_, rest)) => (rest, true),
-        None => (url, false),
+    let tidy = |path: &str| {
+        let path = path.trim_end_matches('/');
+        path.strip_suffix(".git").unwrap_or(path).trim_end_matches('/').to_owned()
     };
-    let rest = rest.rsplit_once('@').map_or(rest, |(_, after)| after);
-    let (host, path) = match rest.split_once('/') {
-        // scp-like `host:path`, or `host:port/path` after a scheme.
-        Some((host, path)) => (host, path),
-        None => (rest, ""),
+    let (authority, path) = if let Some((scheme, rest)) = url.split_once("://") {
+        if scheme.eq_ignore_ascii_case("file") {
+            return tidy(rest);
+        }
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+        // Drop a port.
+        (host.split_once(':').map_or(host, |(host, _)| host), path)
+    } else {
+        // Like git: scp-like `[user@]host:path` only when a colon comes before any slash; otherwise a local path.
+        match url.split_once(':') {
+            Some((authority, path)) if !authority.contains('/') && !authority.is_empty() => {
+                (authority.rsplit_once('@').map_or(authority, |(_, host)| host), path)
+            },
+            _ => return tidy(url),
+        }
     };
-    let (host, path) = match host.split_once(':') {
-        Some((host, port)) if scheme && port.chars().all(|c| c.is_ascii_digit()) => {
-            (host, path.to_owned())
-        },
-        Some((host, first)) => (host, format!("{first}/{path}")),
-        None => (host, path.to_owned()),
-    };
-    let path = path.trim_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let joined = if path.is_empty() { host.to_owned() } else { format!("{host}/{path}") };
-    joined.trim_end_matches('/').to_ascii_lowercase()
+    let path = tidy(path.trim_start_matches('/'));
+    let joined = if path.is_empty() { authority.to_owned() } else { format!("{authority}/{path}") };
+    joined.to_ascii_lowercase()
 }
 
 fn expand(tracker: &str, home: &Path) -> PathBuf {
@@ -147,16 +162,18 @@ fn expand(tracker: &str, home: &Path) -> PathBuf {
 }
 
 /// The repository's remote URLs, `origin` first.
-fn remote_urls(repo: &Path) -> Vec<String> {
+fn remote_urls(repo: &Path) -> Result<Vec<String>, LocateError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["config", "--get-regexp", r"^remote\..*\.url$"])
+        .args(["config", "--local", "--get-regexp", r"^remote\..*\.url$"])
         .env("LC_ALL", "C")
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
+        .output()
+        .map_err(|err| LocateError::Git(format!("git can't run: {err}")))?;
+    // Exit status 1 means no remote matched; anything else, such as not being a repository, is a failure.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(LocateError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+    }
     let mut remotes: Vec<(String, String)> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
@@ -166,7 +183,7 @@ fn remote_urls(repo: &Path) -> Vec<String> {
         })
         .collect();
     remotes.sort_by_key(|(name, _)| (name != "origin", name.clone()));
-    remotes.into_iter().map(|(_, url)| url).collect()
+    Ok(remotes.into_iter().map(|(_, url)| url).collect())
 }
 
 #[cfg(test)]
@@ -185,6 +202,13 @@ mod tests {
             assert_eq!(normalize(url), "github.com/some-org/repo", "{url}");
         }
         assert_eq!(normalize("ssh://git@example.test/a"), "example.test/a");
+        // An @ in the path isn't a user.
+        assert_eq!(normalize("https://host.test/org/repo@v2"), "host.test/org/repo@v2");
+        assert_eq!(normalize("git@host.test:org/repo@v2.git"), "host.test/org/repo@v2");
+        // Local paths keep their case.
+        assert_eq!(normalize("/srv/Repos/X.git"), "/srv/Repos/X");
+        assert_eq!(normalize("file:///srv/Repos/X/"), "/srv/Repos/X");
+        assert_eq!(normalize("../Up/X"), "../Up/X");
     }
 
     fn trackers(text: &str) -> Trackers {
