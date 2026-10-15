@@ -10,6 +10,7 @@ mod git;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -47,6 +48,15 @@ pub enum StoreError {
     State(state::Error),
     /// The tracker isn't set up.
     Config(String),
+    /// The remote's state ref moved since this replica last pushed or fetched it: fetch and join, then push again.
+    RemoteMoved,
+    /// The remote refused a ref, so the atomic push moved nothing.
+    Rejected {
+        /// The refused ref.
+        reference: String,
+        /// Why, as git reports it.
+        reason: String,
+    },
 }
 
 impl fmt::Display for StoreError {
@@ -66,6 +76,12 @@ impl fmt::Display for StoreError {
             },
             Self::State(err) => err.fmt(f),
             Self::Config(message) => write!(f, "tracker not set up: {message}"),
+            Self::RemoteMoved => {
+                write!(f, "the remote's state ref moved since the last sync; fetch and join first")
+            },
+            Self::Rejected { reference, reason } => {
+                write!(f, "the remote refused {reference}: {reason}")
+            },
         }
     }
 }
@@ -119,6 +135,36 @@ pub enum Outcome {
 pub struct Tracker {
     git: Git,
     replica: ReplicaId,
+    /// Whether the id is still marked unused; cleared after the first committed batch.
+    unused: AtomicBool,
+}
+
+/// The git config key naming a new replica id that hasn't written yet.
+pub const UNUSED_CONFIG: &str = "acyclic.replica-unused";
+
+/// Sets up the tracker clone at `path` as a new replica named `id`, marked unused until its first write.
+///
+/// # Errors
+///
+/// Fails when git fails.
+pub fn init_replica(path: &Path, id: &ReplicaId) -> Result<(), StoreError> {
+    let git = Git::new(path);
+    git.run(["config", REPLICA_CONFIG, id.as_str()], None, &[])?;
+    git.run(["config", UNUSED_CONFIG, id.as_str()], None, &[])?;
+    Ok(())
+}
+
+/// Six hex digits that differ between clones and runs.
+fn random_suffix() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    hasher.write_u32(std::process::id());
+    format!("{:06x}", hasher.finish() & 0x00ff_ffff)
 }
 
 /// The ref holding a replica's state.
@@ -232,9 +278,10 @@ fn actor_record(state: &State, actor: &str) -> Option<Json> {
 impl Tracker {
     /// Opens the tracker at `path` as the replica named in its git config.
     ///
-    /// A replica whose own state ref is missing but which other replicas' states remember has lost its state, so it
-    /// takes a new id (`<id>-2`, `-3`, …), records it in the git config and reports the change; reusing the old id
-    /// could reuse its dots.
+    /// A replica id is only trusted while this clone holds its state ref, or while the id is still marked unused by
+    /// [`init_replica`]. Otherwise this clone may be a fresh or rebuilt copy of a replica that wrote before, and
+    /// reusing its id could reuse its dots, which peers would silently drop. So it takes a new id, `<id>-<random>`,
+    /// records it and reports the change.
     ///
     /// # Errors
     ///
@@ -245,27 +292,26 @@ impl Tracker {
             StoreError::Config(format!("no {REPLICA_CONFIG} in {}", path.display()))
         })?;
         let id = ReplicaId::new(&id)?;
+        let unused = git.text(["config", "--get", UNUSED_CONFIG]).is_ok_and(|v| v == id.as_str());
         if git.resolve(&state_ref(&id))?.is_some() {
-            return Ok((Self { git, replica: id }, None));
+            return Ok((Self { git, replica: id, unused: AtomicBool::new(false) }, None));
         }
         let mut remembered = BTreeSet::new();
         for (_, commit) in git.refs("refs/heads/state/")? {
             let state = read_state(&git, &commit)?;
             remembered.extend(state.context.seen.keys().cloned());
         }
-        if !remembered.contains(&id) {
-            return Ok((Self { git, replica: id }, None));
+        if unused && !remembered.contains(&id) {
+            return Ok((Self { git, replica: id, unused: AtomicBool::new(true) }, None));
         }
-        let mut suffix = 2u32;
         let fresh = loop {
-            let candidate = ReplicaId::new(&format!("{id}-{suffix}"))?;
+            let candidate = ReplicaId::new(&format!("{id}-{}", random_suffix()))?;
             if !remembered.contains(&candidate) {
                 break candidate;
             }
-            suffix += 1;
         };
-        git.run(["config", REPLICA_CONFIG, fresh.as_str()], None, &[])?;
-        Ok((Self { git, replica: fresh.clone() }, Some(fresh)))
+        init_replica(path, &fresh)?;
+        Ok((Self { git, replica: fresh.clone(), unused: AtomicBool::new(true) }, Some(fresh)))
     }
 
     /// This replica's id.
@@ -355,8 +401,9 @@ impl Tracker {
         let month = month_of(at);
         let (segment, segment_tip) = self.current_segment("log", &month)?;
         let mut files = BTreeMap::new();
+        let paths: Vec<String> = changes.keys().map(|root| format!("{root}.jsonl")).collect();
         let existing = match &segment_tip {
-            Some(tip) => self.git.read_tree(tip)?,
+            Some(tip) => self.git.read_paths(tip, &paths)?,
             None => BTreeMap::new(),
         };
         for (root, writes) in changes {
@@ -395,6 +442,10 @@ impl Tracker {
             hook();
         }
         transaction.commit()?;
+        if self.unused.swap(false, Ordering::Relaxed) {
+            // Another worktree may have cleared it already; the state ref now vouches for the id either way.
+            let _ = self.git.run(["config", "--unset", UNUSED_CONFIG], None, &[]);
+        }
         Ok(Some(commit))
     }
 
@@ -455,8 +506,8 @@ impl Tracker {
         Ok(segments)
     }
 
-    /// Prunes sealed segments: in each month before `now`'s, a project root's file whose retention (in months) has
-    /// passed is dropped, but only where `archived_ok` confirms the archived subtrees it covers have their records. A
+    /// Prunes sealed segments: a project root's file is dropped once every event in it is older than its retention
+    /// in months, so a month's file with one month's retention goes two months on, but only where `archived_ok` confirms the archived subtrees it covers have their records. A
     /// segment is replaced by the next generation, a parentless commit without the dropped files, so the old events
     /// become unreachable; a segment left empty is deleted. Every replacement happens in one transaction.
     ///
@@ -483,7 +534,7 @@ impl Tracker {
                     .filter(|path| {
                         let root = path.strip_suffix(".jsonl").unwrap_or(path);
                         retention(root)
-                            .is_some_and(|months| months_between(&month, &current) >= months)
+                            .is_some_and(|months| months_between(&month, &current) > months)
                             && archived_ok(root, &month)
                     })
                     .collect();
@@ -513,6 +564,7 @@ impl Tracker {
                     transaction.update(&next, &commit, None)?;
                 }
                 transaction.delete(&segment.reference, &segment.tip)?;
+                transaction.update(&pruned_ref(&segment.reference), &segment.tip, None)?;
                 dropped.extend(expired.iter().map(|path| format!("{}:{path}", segment.reference)));
             }
         }
@@ -523,31 +575,53 @@ impl Tracker {
         Ok(dropped)
     }
 
-    /// Pushes this replica's refs to `remote` in one atomic push: the state ref with a lease on the remote's tip, since
-    /// a squash rewrites it; every log and usage segment that is new or has grown, and the deletion of every segment
-    /// that pruning removed. Segments only ever fast-forward, so a ruleset refusing forced updates to them accepts it.
+    /// Fetches every replica's state ref from `remote` into its remote-tracking refs, ready to join; this
+    /// replica's own one is what the next push leases against.
     ///
     /// # Errors
     ///
-    /// Fails when the remote refuses any ref (then none moves), or git fails.
+    /// Fails when git fails.
+    pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
+        let tracking = tracking_prefix(remote);
+        self.git.run(
+            ["fetch", "--quiet", "--prune", remote, &format!("+refs/heads/state/*:{tracking}*")],
+            None,
+            &[],
+        )?;
+        Ok(())
+    }
+
+    /// Pushes this replica's refs to `remote` in one atomic push: the state ref, every log and usage segment that is
+    /// new or has grown, and the deletion of every segment this replica's own prune removed. A segment the remote
+    /// holds and this clone doesn't is left alone. A squash rewrites the state ref, so it is pushed with a lease on
+    /// the tip this clone last pushed or fetched. Segments only ever fast-forward, so a ruleset refusing forced
+    /// updates to them accepts the push.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::RemoteMoved`] when the remote's state ref moved since this clone last saw it, and
+    /// [`StoreError::Rejected`] when the remote refuses another ref; nothing moves then. Fails too when git fails.
     pub fn push(&self, remote: &str) -> Result<usize, StoreError> {
-        let mine = format!("refs/heads/state/{}", self.replica);
-        let patterns: Vec<String> = std::iter::once(mine.clone())
-            .chain(NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/*", self.replica)))
-            .collect();
-        let listing = self
-            .git
-            .text(["ls-remote", remote].into_iter().chain(patterns.iter().map(String::as_str)))?;
+        let mine = state_ref(&self.replica);
+        let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
+        let segment_prefixes: Vec<String> =
+            NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)).collect();
+        let listing = self.git.text(
+            ["ls-remote", remote, mine.as_str()]
+                .into_iter()
+                .map(str::to_owned)
+                .chain(segment_prefixes.iter().map(|prefix| format!("{prefix}*"))),
+        )?;
         let theirs: BTreeMap<String, String> = listing
             .lines()
             .filter_map(|line| line.split_once('\t'))
             .map(|(id, name)| (name.to_owned(), id.to_owned()))
             .collect();
-        let mut ours = BTreeMap::new();
-        for prefix in std::iter::once(mine.clone())
-            .chain(NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)))
-        {
-            ours.extend(self.git.refs(&prefix)?);
+        let mut ours = self.git.refs(&mine)?;
+        let mut pending = BTreeMap::new();
+        for prefix in &segment_prefixes {
+            ours.extend(self.git.refs(prefix)?);
+            pending.extend(self.git.refs(&pruned_ref(prefix))?);
         }
         let mut args = vec!["push".to_owned(), "--atomic".to_owned(), "--porcelain".to_owned()];
         let mut refspecs = Vec::new();
@@ -556,20 +630,44 @@ impl Tracker {
                 continue;
             }
             if *name == mine {
-                let lease = theirs.get(name).cloned().unwrap_or_default();
+                let lease = self.git.resolve(&tracking)?.unwrap_or_default();
                 args.push(format!("--force-with-lease={name}:{lease}"));
             }
             refspecs.push(format!("{name}:{name}"));
         }
-        for name in theirs.keys().filter(|name| !ours.contains_key(*name)) {
-            refspecs.push(format!(":{name}"));
+        let mut settled = Vec::new();
+        for (marker, tip) in &pending {
+            let name = format!("refs/heads/{}", &marker[PRUNED.len()..]);
+            match theirs.get(&name) {
+                None => settled.push((marker, tip)),
+                // Delete only what this replica wrote: the pruned tip or an earlier push of it.
+                Some(remote_tip)
+                    if self
+                        .git
+                        .run(["merge-base", "--is-ancestor", remote_tip, tip], None, &[])
+                        .is_ok() =>
+                {
+                    args.push(format!("--force-with-lease={name}:{remote_tip}"));
+                    refspecs.push(format!(":{name}"));
+                    settled.push((marker, tip));
+                },
+                Some(_) => {},
+            }
         }
-        if refspecs.is_empty() {
-            return Ok(0);
+        if !refspecs.is_empty() {
+            args.push(remote.to_owned());
+            args.extend(refspecs.iter().cloned());
+            let output = self.git.output(&args)?;
+            if !output.status.success() {
+                return Err(push_failure(&mine, &output));
+            }
         }
-        args.push(remote.to_owned());
-        args.extend(refspecs.iter().cloned());
-        self.git.run(&args, None, &[])?;
+        if let Some(tip) = ours.get(&mine) {
+            self.git.run(["update-ref", &tracking, tip], None, &[])?;
+        }
+        for (marker, tip) in settled {
+            self.git.run(["update-ref", "-d", marker, tip], None, &[])?;
+        }
         Ok(refspecs.len())
     }
 
@@ -646,8 +744,53 @@ impl Tracker {
     }
 }
 
-/// The namespaces holding monthly segments: audit logs, and usage records from step 2.7 on.
+/// The namespaces holding monthly segments: audit logs and usage records.
 const NAMESPACES: [&str; 2] = ["log", "usage"];
+
+/// Where prune records the segments it deleted, until a push deletes them from the remote too.
+const PRUNED: &str = "refs/acyclic/pruned/";
+
+/// The pending-deletion marker for a segment ref (or a prefix of them), holding the segment's last tip.
+fn pruned_ref(segment: &str) -> String {
+    format!("{PRUNED}{}", segment.trim_start_matches("refs/heads/"))
+}
+
+/// The prefix of the remote-tracking state refs for `remote`, a name or a URL.
+fn tracking_prefix(remote: &str) -> String {
+    let name: String = remote
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    format!("refs/remotes/{name}/state/")
+}
+
+/// Classifies a failed push from its porcelain output: a stale lease on the state ref, another refused ref, or a
+/// failure to reach the remote at all.
+fn push_failure(state: &str, output: &std::process::Output) -> StoreError {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let refused = stdout.lines().filter_map(|line| {
+        let mut fields = line.strip_prefix("!\t")?.split('\t');
+        let destination = fields.next()?.rsplit(':').next()?.to_owned();
+        let reason = fields.next().unwrap_or_default().to_owned();
+        Some((destination, reason))
+    });
+    // An atomic push reports every other ref as refused too; the cause is the one refused for itself.
+    let mut cause = None;
+    for (reference, reason) in refused {
+        if !reason.contains("atomic push failed") {
+            cause = Some((reference, reason));
+            break;
+        }
+        cause.get_or_insert((reference, reason));
+    }
+    match cause {
+        Some((reference, reason)) if reference == state && reason.contains("stale info") => {
+            StoreError::RemoteMoved
+        },
+        Some((reference, reason)) => StoreError::Rejected { reference, reason },
+        None => StoreError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
+    }
+}
 
 /// A month's current segment.
 struct Segment {

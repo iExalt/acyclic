@@ -29,6 +29,8 @@ impl Git {
     fn command(&self) -> Command {
         let mut command = Command::new("git");
         command.arg("-C").arg(&self.repo).args(["-c", "core.quotePath=false"]);
+        // Errors are classified by their text, so keep git's messages untranslated.
+        command.env("LC_ALL", "C").env("LANGUAGE", "");
         command
     }
 
@@ -62,6 +64,19 @@ impl Git {
             return check(output);
         }
         check(child.wait_with_output().map_err(|e| StoreError::Git(e.to_string()))?)
+    }
+
+    /// Runs git and returns its output whatever the exit status.
+    pub(crate) fn output<I, S>(&self, args: I) -> Result<std::process::Output, StoreError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.command()
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| StoreError::Git(format!("git can't run: {e}")))
     }
 
     pub(crate) fn text<I, S>(&self, args: I) -> Result<String, StoreError>
@@ -138,6 +153,47 @@ impl Git {
         Ok(files)
     }
 
+    /// The contents of the given paths in a commit's tree; missing paths are left out.
+    pub(crate) fn read_paths(
+        &self,
+        commit: &str,
+        paths: &[String],
+    ) -> Result<BTreeMap<String, Vec<u8>>, StoreError> {
+        if paths.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let request = paths.iter().fold(String::new(), |mut out, path| {
+            let _ = writeln!(out, "{commit}:{path}");
+            out
+        });
+        let output = self.run(["cat-file", "--batch"], Some(request.as_bytes()), &[])?;
+        let mut rest = &output[..];
+        let mut files = BTreeMap::new();
+        for path in paths {
+            let newline = rest
+                .iter()
+                .position(|&b| b == b'\n')
+                .ok_or_else(|| StoreError::Git("bad cat-file".into()))?;
+            let header = String::from_utf8_lossy(&rest[..newline]).into_owned();
+            if header.ends_with(" missing") {
+                rest = &rest[newline + 1..];
+                continue;
+            }
+            let size: usize = header
+                .split_whitespace()
+                .nth(2)
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| StoreError::Git(format!("bad cat-file header: {header}")))?;
+            let start = newline + 1;
+            let content = rest
+                .get(start..start + size)
+                .ok_or_else(|| StoreError::Git("short cat-file".into()))?;
+            files.insert(path.clone(), content.to_vec());
+            rest = &rest[(start + size + 1).min(rest.len())..];
+        }
+        Ok(files)
+    }
+
     /// Writes a tree from `base` (a commit, or none) with `changes` applied: `Some` content adds or replaces a file and
     /// `None` removes it. Uses a private index, so no work tree or shared index is touched.
     pub(crate) fn write_tree(
@@ -146,6 +202,7 @@ impl Git {
         changes: &BTreeMap<String, Option<Vec<u8>>>,
     ) -> Result<String, StoreError> {
         let scratch = tempdir()?;
+        let _cleanup = RemoveOnDrop(scratch.clone());
         let index = scratch.join("index");
         let env = [("GIT_INDEX_FILE", index.as_os_str())];
         match base {
@@ -178,11 +235,8 @@ impl Git {
             let _ = writeln!(info, "0 {zero}\t{path}");
         }
         self.run(["update-index", "--index-info"], Some(info.as_bytes()), &env)?;
-        let tree = self
-            .run(["write-tree"], None, &env)
-            .map(|out| String::from_utf8_lossy(&out).trim().to_owned());
-        let _ = std::fs::remove_dir_all(&scratch);
-        tree
+        self.run(["write-tree"], None, &env)
+            .map(|out| String::from_utf8_lossy(&out).trim().to_owned())
     }
 
     /// The all-zero object id of the repository's hash.
@@ -348,6 +402,15 @@ fn check(output: std::process::Output) -> Result<Vec<u8>, StoreError> {
         Ok(output.stdout)
     } else {
         Err(StoreError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()))
+    }
+}
+
+/// Removes a directory when dropped, on every return path.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

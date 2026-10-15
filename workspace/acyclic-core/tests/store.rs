@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use acyclic_core::state::{Key, Millis, State};
+use acyclic_core::state::{Key, Millis, ReplicaId, State};
 use acyclic_core::store::{self, Hooks, Meta, Outcome, StoreError, Tracker};
 use serde_json::json;
 use tempfile::TempDir;
@@ -28,7 +28,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn tracker(dir: &TempDir, replica: &str) -> PathBuf {
     let path = dir.path().join(replica);
     git(dir.path(), &["init", "-q", path.to_str().unwrap()]);
-    git(&path, &["config", store::REPLICA_CONFIG, replica]);
+    store::init_replica(&path, &ReplicaId::new(replica).unwrap()).unwrap();
     // Durability isn't under test, and fsync makes each write about ten times slower on macOS.
     git(&path, &["config", "core.fsync", "none"]);
     path
@@ -137,45 +137,50 @@ fn a_new_month_starts_a_new_segment() {
     assert_eq!(refs, "refs/heads/log/mac/2026-10/0001\nrefs/heads/log/mac/2026-11/0001");
 }
 
+const WRITERS: usize = 4;
+const BATCHES: usize = 5;
+
+/// The child half of the concurrency test: one writer process running its batches.
 #[test]
-fn writers_in_separate_worktrees_lose_and_duplicate_nothing() {
-    const WRITERS: usize = 4;
-    const BATCHES: usize = 10;
+fn writer_child() {
+    let (Ok(repo), Ok(writer)) =
+        (std::env::var("ACYCLIC_WRITER_REPO"), std::env::var("ACYCLIC_WRITER"))
+    else {
+        return;
+    };
+    let (tracker, _) = Tracker::open(Path::new(&repo)).unwrap();
+    let key = item(&format!("w{writer}"));
+    for batch in 0..BATCHES {
+        let field = format!("f{batch}");
+        tracker
+            .batch(&meta(), NOW, false, &no_project, |replica, at| {
+                replica.write(&key, &field, "actor/user", at, Some(json!(batch))).map(|_| ())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn writer_processes_in_separate_worktrees_lose_and_duplicate_nothing() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (first, _) = Tracker::open(&path).unwrap();
     write(&first, "seed", "f", json!(0));
-    let mut handles = Vec::new();
-    for writer in 0..WRITERS {
-        let worktree = dir.path().join(format!("wt{writer}"));
-        git(
-            &path,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                "--detach",
-                worktree.to_str().unwrap(),
-                "refs/heads/state/mac",
-            ],
-        );
-        handles.push(std::thread::spawn(move || {
-            let (tracker, _) = Tracker::open(&worktree).unwrap();
-            for batch in 0..BATCHES {
-                let key = item(&format!("w{writer}"));
-                let field = format!("f{batch}");
-                tracker
-                    .batch(&meta(), NOW, false, &no_project, |replica, at| {
-                        replica
-                            .write(&key, &field, "actor/user", at, Some(json!(batch)))
-                            .map(|_| ())
-                    })
-                    .unwrap();
-            }
-        }));
-    }
-    for handle in handles {
-        handle.join().expect("no batch failed");
+    let children: Vec<_> = (0..WRITERS)
+        .map(|writer| {
+            let worktree = dir.path().join(format!("wt{writer}"));
+            let target = worktree.to_str().unwrap();
+            git(&path, &["worktree", "add", "-q", "--detach", target, "refs/heads/state/mac"]);
+            Command::new(std::env::current_exe().unwrap())
+                .args(["writer_child", "--exact", "--nocapture"])
+                .env("ACYCLIC_WRITER_REPO", &worktree)
+                .env("ACYCLIC_WRITER", writer.to_string())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for mut child in children {
+        assert!(child.wait().unwrap().success(), "no batch failed");
     }
     let (_, state) = first.load().unwrap();
     let mut dots = std::collections::BTreeSet::new();
@@ -189,6 +194,53 @@ fn writers_in_separate_worktrees_lose_and_duplicate_nothing() {
     }
     let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_.jsonl");
     assert_eq!(events.len(), 1 + WRITERS * BATCHES);
+}
+
+#[test]
+fn a_batch_that_loses_the_race_retries_on_the_new_tip() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "a1", "f", json!(1));
+    let refs = ["refs/heads/state/mac", "refs/heads/log/mac/2026-10/0001"];
+    let before: Vec<_> = refs.iter().map(|r| git(&path, &["rev-parse", r])).collect();
+    // Another writer's batch, rewound so the hook can replay it mid-batch.
+    write(&tracker, "b1", "f", json!(2));
+    let theirs: Vec<_> = refs.iter().map(|r| git(&path, &["rev-parse", r])).collect();
+    for (reference, tip) in refs.iter().zip(&before) {
+        git(&path, &["update-ref", reference, tip]);
+    }
+    let moved = std::cell::Cell::new(false);
+    let replay = {
+        let path = path.clone();
+        let theirs = theirs.clone();
+        move || {
+            if !moved.replace(true) {
+                for (reference, tip) in refs.iter().zip(&theirs) {
+                    git(&path, &["update-ref", reference, tip]);
+                }
+            }
+        }
+    };
+    let hooks = Hooks { after_objects: Some(Box::new(replay)), after_prepare: None };
+    let outcome = tracker
+        .batch_with(
+            &meta(),
+            NOW,
+            false,
+            &no_project,
+            |replica, at| {
+                replica.write(&item("c1"), "f", "actor/user", at, Some(json!(3))).map(|_| ())
+            },
+            &hooks,
+        )
+        .unwrap();
+    assert!(matches!(outcome, Outcome::Committed { retries, .. } if retries >= 1), "{outcome:?}");
+    let (_, state) = tracker.load().unwrap();
+    for id in ["a1", "b1", "c1"] {
+        assert!(state.field(&item(id), "f").is_some(), "{id} is present");
+    }
+    assert_eq!(log_lines(&path, refs[1], "_.jsonl").len(), 3);
 }
 
 /// The child half of the crash tests: runs one batch that aborts at the failpoint named in the environment.
@@ -296,31 +348,58 @@ fn a_squashed_ref_holds_the_same_state() {
     write(&tracker, "a1", "f9", json!(9));
 }
 
+fn assert_fresh(renamed: Option<&ReplicaId>, base: &str) -> String {
+    let renamed = renamed.expect("a fresh id").as_str().to_owned();
+    let suffix = renamed.strip_prefix(&format!("{base}-")).expect("the base id, then a suffix");
+    assert!(!suffix.is_empty());
+    renamed
+}
+
 #[test]
 fn a_replica_that_lost_its_state_takes_a_new_id() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (mac, _) = Tracker::open(&path).unwrap();
     write(&mac, "a1", "f", json!(1));
-    // The server's replica has joined the Mac's state.
-    git(&path, &["config", store::REPLICA_CONFIG, "server"]);
-    let (server, _) = Tracker::open(&path).unwrap();
-    server.join_ref("refs/heads/state/mac").unwrap();
     // The Mac's own ref is lost.
     git(&path, &["update-ref", "-d", "refs/heads/state/mac"]);
-    git(&path, &["config", store::REPLICA_CONFIG, "mac"]);
     let (reopened, renamed) = Tracker::open(&path).unwrap();
-    assert_eq!(renamed.as_ref().map(|r| r.as_str()), Some("mac-2"));
-    assert_eq!(reopened.replica().as_str(), "mac-2");
-    assert_eq!(git(&path, &["config", store::REPLICA_CONFIG]), "mac-2");
+    let renamed = assert_fresh(renamed.as_ref(), "mac");
+    assert_eq!(reopened.replica().as_str(), renamed);
+    assert_eq!(git(&path, &["config", store::REPLICA_CONFIG]), renamed);
+    // The new id is used until it writes, then kept.
+    write(&reopened, "a1", "f", json!(2));
+    let (again, none) = Tracker::open(&path).unwrap();
+    assert_eq!((again.replica().as_str(), none), (renamed.as_str(), None));
+}
+
+#[test]
+fn fresh_clones_of_a_replica_take_different_ids() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (mac, _) = Tracker::open(&path).unwrap();
+    write(&mac, "a1", "f", json!(1));
+    // Clones that fetched no state refs carry the Mac's id over, with nothing to remember it by.
+    let ids: Vec<_> = (0..2)
+        .map(|n| {
+            let clone = dir.path().join(format!("clone{n}"));
+            git(dir.path(), &["init", "-q", clone.to_str().unwrap()]);
+            git(&clone, &["config", store::REPLICA_CONFIG, "mac"]);
+            let (tracker, renamed) = Tracker::open(&clone).unwrap();
+            assert_eq!(tracker.replica(), renamed.as_ref().unwrap());
+            assert_fresh(renamed.as_ref(), "mac")
+        })
+        .collect();
+    assert_ne!(ids[0], ids[1]);
 }
 
 #[test]
 fn two_clones_writing_as_one_replica_are_caught_at_sync() {
     let dir = TempDir::new().unwrap();
     let one = tracker(&dir, "mac");
+    // A copied clone, config and all, before either has written.
     let two = tracker(&dir, "mac-copy");
-    git(&two, &["config", store::REPLICA_CONFIG, "mac"]);
+    store::init_replica(&two, &ReplicaId::new("mac").unwrap()).unwrap();
     let (first, _) = Tracker::open(&one).unwrap();
     let (second, _) = Tracker::open(&two).unwrap();
     write(&first, "a1", "f", json!(1));
@@ -389,10 +468,11 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     // August's archived subtrees have no records yet, so it stays whole.
     let archived_ok = |_: &str, month: &str| month != "2026-08";
     let dropped = tracker.prune(NOW, &retention, &archived_ok).unwrap();
-    assert_eq!(dropped.len(), 2, "{dropped:?}");
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    // September's events are under a month old in the worst case, so they stay until November.
     assert_eq!(
         log_refs(&path),
-        "refs/heads/log/mac/2026-07/0002\nrefs/heads/log/mac/2026-08/0001\nrefs/heads/log/mac/2026-10/0001"
+        "refs/heads/log/mac/2026-07/0002\nrefs/heads/log/mac/2026-08/0001\nrefs/heads/log/mac/2026-09/0001\nrefs/heads/log/mac/2026-10/0001"
     );
     let july = "refs/heads/log/mac/2026-07/0002";
     assert_eq!(git(&path, &["ls-tree", "--name-only", july]), "_.jsonl");
@@ -405,6 +485,12 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     assert!(
         tracker.prune(NOW, &retention, &archived_ok).unwrap().is_empty(),
         "pruning again changes nothing"
+    );
+    let november = 1_793_491_200_000; // 2026-11-01
+    assert_eq!(tracker.prune(november, &retention, &archived_ok).unwrap().len(), 1);
+    assert!(
+        !log_refs(&path).contains("2026-09"),
+        "September's only file went, and its segment with it"
     );
 }
 
@@ -483,7 +569,10 @@ fn a_forced_rewrite_of_a_segment_is_refused_and_moves_nothing() {
     git(&path, &["update-ref", segment, &format!("{segment}~1")]);
     write(&tracker, "x1", "f", json!(3));
     // The store never forces a segment, so git refuses it before sending, and the atomic push moves nothing.
-    assert!(tracker.push(remote_url).is_err());
+    match tracker.push(remote_url) {
+        Err(StoreError::Rejected { reference, .. }) => assert_eq!(reference, segment),
+        other => panic!("expected a rejection, got {other:?}"),
+    }
     assert_eq!(remote_refs(&remote), before, "the state ref didn't move either");
     // Forced by hand, the remote's ruleset refuses it.
     let forced = Command::new("git")
@@ -497,4 +586,48 @@ fn a_forced_rewrite_of_a_segment_is_refused_and_moves_nothing() {
     assert!(!forced.status.success());
     assert!(String::from_utf8_lossy(&forced.stderr).contains("may not be force-pushed"));
     assert_eq!(remote_refs(&remote), before);
+}
+
+#[test]
+fn a_push_leaves_segments_this_clone_never_had() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let remote = remote_with_ruleset(&dir);
+    let remote_url = remote.to_str().unwrap();
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write_month(&tracker, JULY, 1);
+    write(&tracker, "x1", "f", json!(2));
+    tracker.push(remote_url).unwrap();
+    let before = remote_refs(&remote);
+    // Like a clone that fetched only state refs.
+    for segment in log_refs(&path).lines() {
+        git(&path, &["update-ref", "-d", segment]);
+    }
+    assert_eq!(tracker.push(remote_url).unwrap(), 0);
+    assert_eq!(remote_refs(&remote), before, "the audit history survives");
+}
+
+#[test]
+fn a_push_after_the_remote_moved_is_refused_until_fetched() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let remote = remote_with_ruleset(&dir);
+    let remote_url = remote.to_str().unwrap();
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "x1", "f", json!(1));
+    write(&tracker, "x1", "f", json!(2));
+    tracker.push(remote_url).unwrap();
+    // Something else moves the remote's state ref behind this clone's back.
+    git(&remote, &["update-ref", "refs/heads/state/mac", "refs/heads/state/mac~1"]);
+    let before = remote_refs(&remote);
+    write(&tracker, "x1", "f", json!(3));
+    assert!(matches!(tracker.push(remote_url), Err(StoreError::RemoteMoved)));
+    assert_eq!(remote_refs(&remote), before, "nothing moved");
+    // Once fetched (and joined, which here adds nothing new), the push goes through.
+    tracker.fetch(remote_url).unwrap();
+    tracker.push(remote_url).unwrap();
+    assert_eq!(
+        git(&remote, &["rev-parse", "refs/heads/state/mac"]),
+        git(&path, &["rev-parse", "refs/heads/state/mac"])
+    );
 }
