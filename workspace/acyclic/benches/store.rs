@@ -211,8 +211,17 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .collect();
     record(&mut row, "link", &links);
     if batches > 0 {
+        // Distinct items, so the cache's delta grows as an agent's day of edits would grow it.
+        let (ready, _) = tracker.run("ready", false);
+        let mut items: Vec<String> = ready["data"]["ready"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|leaf| leaf["item"].as_str().map(str::to_owned))
+            .collect();
+        items.push(item.clone());
         for n in 0..batches {
-            tracker.run(&format!("edit {item} --notes batch-{n}"), false);
+            tracker.run(&format!("edit {} --notes batch-{n}", items[n % items.len()]), false);
         }
         println!("  after {batches} more batches: {}", store_size(&tracker.repo()));
         record(
