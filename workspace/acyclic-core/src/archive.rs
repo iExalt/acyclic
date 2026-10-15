@@ -106,7 +106,9 @@ impl std::fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::Ineligible(reasons) => write!(f, "not eligible to archive: {reasons:?}"),
+            Self::Ineligible(reasons) => {
+                write!(f, "not eligible to archive: {} reason(s) in the details", reasons.len())
+            },
             Self::NotAllowed(actor) => {
                 write!(f, "{actor} may not archive; the user or a project manager may")
             },

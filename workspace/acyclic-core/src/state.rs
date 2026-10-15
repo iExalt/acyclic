@@ -259,7 +259,9 @@ impl fmt::Display for Error {
             Self::ClockJump { now, last } => {
                 write!(
                     f,
-                    "the clock reads {now} but this replica last wrote at {last}; it stepped back"
+                    "the clock reads {} but this replica last wrote at {}; it stepped back",
+                    crate::time::rfc3339(*now),
+                    crate::time::rfc3339(*last)
                 )
             },
             Self::NotContinuous(replica) => {

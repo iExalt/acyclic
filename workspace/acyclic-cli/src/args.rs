@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 
 /// The acyclic tracker. Every command prints one JSON document.
 #[derive(Debug, Parser)]
-#[command(name = "acyclic", version, disable_help_subcommand = true)]
+#[command(name = "acyclic", version, disable_help_subcommand = true, arg_required_else_help = true)]
 pub struct Cli {
     /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the mapping in ~/.config/acyclic/trackers.toml.
     #[arg(long, global = true)]
@@ -49,10 +49,13 @@ pub enum Command {
         #[arg(long)]
         include_archived: bool,
     },
-    /// Shows an item with its role, readiness and claims.
+    /// Lists every item, by id.
+    List,
+    /// Shows items with their role, readiness and claims, as an array in the order given.
     Show {
-        /// The item.
-        item: String,
+        /// The items.
+        #[arg(required = true)]
+        items: Vec<String>,
     },
     /// Claims a ready leaf, or renews the actor's claim.
     Claim {

@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde_json::Value as Json;
 
 use crate::state::{self, Dot, Journal, Key, Millis, Replica, ReplicaId, State};
+use crate::time::civil;
 use cache::{Cache, Found};
 use git::{Git, NewCommit};
 
@@ -257,22 +258,6 @@ const SCRATCH_LOG: &str = "refs/acyclic/scratch/log";
 /// Changed state files as bytes, for a commit.
 fn file_bytes(files: BTreeMap<String, Option<String>>) -> BTreeMap<String, Option<Vec<u8>>> {
     files.into_iter().map(|(path, content)| (path, content.map(String::into_bytes))).collect()
-}
-
-/// The UTC calendar date of a time: year, month and day.
-fn civil(at: Millis) -> (i64, i64, i64) {
-    // Howard Hinnant's days-to-civil algorithm.
-    let days = at.div_euclid(86_400_000);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    (year, month, day)
 }
 
 #[derive(Serialize)]

@@ -108,6 +108,22 @@ fn usage_errors_use_the_envelope_and_help_is_text() {
     let (code, out) = execute(["acyclic", "--help"].map(Into::into), &env(&[]));
     assert_eq!(code, exit::OK);
     insta::assert_snapshot!(out);
+    // A bare command or group prints its help.
+    assert_eq!(execute(["acyclic"].map(Into::into), &env(&[])), (exit::OK, out));
+    let (code, out) = execute(["acyclic", "item"].map(Into::into), &env(&[]));
+    assert_eq!((code, out.starts_with("Adds, edits")), (exit::OK, true), "{out}");
+}
+
+#[test]
+fn times_print_as_rfc3339_in_utc() {
+    let mut out =
+        json!({"until": 0, "rank": 0, "claims": [{"lease_expires": null, "lease_start": 0}]});
+    timestamps(&mut out);
+    assert_eq!(
+        out,
+        json!({"until": "1970-01-01T00:00:00Z", "rank": 0,
+               "claims": [{"lease_expires": null, "lease_start": "1970-01-01T00:00:00Z"}]})
+    );
 }
 
 #[test]

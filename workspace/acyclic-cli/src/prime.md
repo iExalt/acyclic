@@ -12,8 +12,10 @@ older copy.
 
 ## Output
 
-- Every command but `prime`, `--help` and `--version` prints one JSON document: `{"ok": true, "data": …}` or
-  `{"ok": false, "error": {"code", "message", "details"}}`. Branch on `error.code`, not on the message.
+- Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
+- Every command but `prime`, `--help`, `--version` and a bare group (which prints its help) prints one JSON
+  document: `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Branch on
+  `error.code`, not on the message.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
 - Writes report `changed`. A repeated command changes nothing of its own; it can still commit when a claim's lease
@@ -21,8 +23,8 @@ older copy.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists ready leaves, best first. `acyclic show <item>` explains one: its readiness, children and
-   claims.
+1. `acyclic ready` lists ready leaves, best first, and `acyclic list` every item. `acyclic show <item>...`
+   explains items, as an array in the order given: their readiness, children and claims.
 2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by
    default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the
    tracker; re-run `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work.

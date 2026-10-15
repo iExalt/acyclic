@@ -78,8 +78,14 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("needs", AGENT), 0);
     let proposal = proposed["data"]["proposal"].as_str().unwrap();
     assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
-    assert_eq!(sh.run("show a1", AGENT), 0);
-    assert_eq!(sh.run("show nope", AGENT), 3);
+    assert_eq!(sh.run("list", AGENT), 0);
+    let (code, shown) = sh.output("show a1 a2", AGENT);
+    assert_eq!(
+        (code, shown["data"][1]["item"]["id"].as_str()),
+        (0, Some("a2")),
+        "in the order given"
+    );
+    assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
     let (code, out) = sh.output("thread remove a2 --as-user", AGENT);
     assert_eq!((code, out["data"]["edit"]["thread"].is_null()), (0, true));
     assert_eq!(sh.run("repo set r1 --name code", AGENT), 0);

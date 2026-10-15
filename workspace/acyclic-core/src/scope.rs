@@ -148,7 +148,12 @@ impl fmt::Display for ScopeError {
         match self {
             Self::Write(err) => err.fmt(f),
             Self::NotTheUser(actor) => write!(f, "only the user decides proposals, not {actor}"),
-            Self::NoProposal(id) => write!(f, "no proposal {id} with a single edit"),
+            Self::NoProposal(id) => {
+                write!(
+                    f,
+                    "no proposal {id} with a single edit; `acyclic needs` lists the open ones"
+                )
+            },
             Self::Decided(id) => write!(f, "proposal {id} is already decided"),
         }
     }

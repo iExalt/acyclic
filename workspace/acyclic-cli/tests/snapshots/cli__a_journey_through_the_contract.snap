@@ -109,8 +109,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim a1
     "changed": true,
     "claim": {
       "holder": "session/mac",
-      "lease_expires": 1792026000000,
-      "lease_start": 1792022400000,
+      "lease_expires": "2026-10-15T01:00:00Z",
+      "lease_start": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
     "item": "a1"
@@ -236,47 +236,99 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-15 --as-user
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show a1
+$ ACYCLIC_ACTOR=session/mac acyclic list
 # exit 0
 {
   "data": {
-    "children": [],
-    "claims": [
+    "items": [
       {
-        "holder": "session/mac",
-        "lease_expires": 1792026000000,
-        "lease_start": 1792022400000,
-        "replica": "mac"
-      }
-    ],
-    "item": {
-      "archived": null,
-      "areas": [],
-      "done_at": 1792022400000,
-      "evidence": {
-        "note": "shipped"
+        "item": "a1",
+        "parent": null,
+        "state": "done",
+        "thread": "t1",
+        "title": "First"
       },
-      "gate": null,
-      "id": "a1",
-      "notes": null,
-      "parent": null,
-      "reopened": null,
-      "repositories": [],
-      "resources": [],
-      "size": null,
-      "state": "done",
-      "thread": "t1",
-      "title": "First"
-    },
-    "readiness": {
-      "status": "done"
-    },
-    "role": "item"
+      {
+        "item": "a2",
+        "parent": null,
+        "state": "backlog",
+        "thread": "t1",
+        "title": "Second"
+      }
+    ]
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show nope
+$ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
+# exit 0
+{
+  "data": [
+    {
+      "children": [],
+      "claims": [
+        {
+          "holder": "session/mac",
+          "lease_expires": "2026-10-15T01:00:00Z",
+          "lease_start": "2026-10-15T00:00:00Z",
+          "replica": "mac"
+        }
+      ],
+      "item": {
+        "archived": null,
+        "areas": [],
+        "done_at": "2026-10-15T00:00:00Z",
+        "evidence": {
+          "note": "shipped"
+        },
+        "gate": null,
+        "id": "a1",
+        "notes": null,
+        "parent": null,
+        "reopened": null,
+        "repositories": [],
+        "resources": [],
+        "size": null,
+        "state": "done",
+        "thread": "t1",
+        "title": "First"
+      },
+      "readiness": {
+        "status": "done"
+      },
+      "role": "item"
+    },
+    {
+      "children": [],
+      "claims": [],
+      "item": {
+        "archived": null,
+        "areas": [],
+        "done_at": null,
+        "evidence": null,
+        "gate": null,
+        "id": "a2",
+        "notes": null,
+        "parent": null,
+        "reopened": null,
+        "repositories": [],
+        "resources": [],
+        "size": null,
+        "state": "backlog",
+        "thread": "t1",
+        "title": "Second"
+      },
+      "readiness": {
+        "rank": 0,
+        "status": "ready"
+      },
+      "role": "item"
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic show a1 nope
 # exit 3
 {
   "error": {

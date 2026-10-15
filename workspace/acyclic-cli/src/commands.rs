@@ -77,7 +77,8 @@ impl<'a> Session<'a> {
         match command {
             Command::Init { .. } | Command::Prime => unreachable!("handled before a session opens"),
             Command::Ready { include_archived } => self.ready(*include_archived),
-            Command::Show { item } => self.show(item),
+            Command::List => self.list(),
+            Command::Show { items } => self.show(items),
             Command::Needs => self.needs(),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add { id, title, parent }) => {
@@ -317,21 +318,43 @@ impl<'a> Session<'a> {
         Ok(json!({"ready": ready}))
     }
 
-    fn show(&self, id: &str) -> Result<Json, CliError> {
+    fn list(&self) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let items: Vec<Json> = model
+            .items
+            .values()
+            .map(|item| {
+                json!({
+                    "item": item.id,
+                    "title": item.title,
+                    "state": item.state,
+                    "parent": item.parent,
+                    "thread": item.thread,
+                })
+            })
+            .collect();
+        Ok(json!({"items": items}))
+    }
+
+    fn show(&self, ids: &[String]) -> Result<Json, CliError> {
         let (state, model) = self.read()?;
-        let item = model.items.get(id).ok_or_else(|| not_found(id))?;
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         let readiness = Readiness::new(&state, &model, self.now, &ancestry);
         let alive = |holder: &str| model.run_alive(holder);
-        let claims = claim::live_with(&state, &model::item_key(id)?, self.now, &alive)?;
-        Ok(json!({
-            "item": item,
-            "role": model.role(id),
-            "children": model.children(id),
-            "readiness": readiness.of(id)?,
-            "claims": claims,
-        }))
+        let mut shown = Vec::with_capacity(ids.len());
+        for id in ids {
+            let item = model.items.get(id).ok_or_else(|| not_found(id))?;
+            let claims = claim::live_with(&state, &model::item_key(id)?, self.now, &alive)?;
+            shown.push(json!({
+                "item": item,
+                "role": model.role(id),
+                "children": model.children(id),
+                "readiness": readiness.of(id)?,
+                "claims": claims,
+            }));
+        }
+        Ok(Json::Array(shown))
     }
 
     fn needs(&self) -> Result<Json, CliError> {

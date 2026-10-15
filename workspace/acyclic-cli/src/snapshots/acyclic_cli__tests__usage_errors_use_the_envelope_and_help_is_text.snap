@@ -10,7 +10,8 @@ Commands:
   init      Sets up a tracker clone as a new replica, creating the repository if there is none
   prime     Prints conventions for agents, matched to this version, as text
   ready     Lists ready leaves, best first
-  show      Shows an item with its role, readiness and claims
+  list      Lists every item, by id
+  show      Shows items with their role, readiness and claims, as an array in the order given
   claim     Claims a ready leaf, or renews the actor's claim
   done      Marks an item done, with evidence
   needs     Lists what needs the user
