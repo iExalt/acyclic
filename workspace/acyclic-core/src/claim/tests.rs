@@ -131,9 +131,9 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
         "expired after one lease"
     );
     // Renewed once a burst of syncs, then not again until half the new lease has passed.
-    assert!(renew_leases(&mut a, 950, LEASE, LEASE).unwrap().is_empty());
+    assert_eq!(renew_leases(&mut a, 950, LEASE, LEASE).unwrap(), Vec::<Key>::new());
     // Renewals are the replica's writes, so they don't keep a holder looking busy.
-    assert!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap().is_empty());
+    assert_eq!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap(), Vec::<Key>::new());
 }
 
 #[test]

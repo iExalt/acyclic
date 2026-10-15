@@ -57,7 +57,7 @@ fn reasons(r: &Replica, root: &str, now: Millis) -> Vec<Reason> {
 fn a_gateless_group_waits_thirty_days_after_its_last_done() {
     let r = setup();
     assert_eq!(reasons(&r, "g", 2 * DAY), vec![Reason::Waiting { until: DAY + GATELESS_WAIT }]);
-    assert!(reasons(&r, "g", DAY + GATELESS_WAIT).is_empty());
+    assert_eq!(reasons(&r, "g", DAY + GATELESS_WAIT), Vec::<Reason>::new());
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn a_gated_goal_is_eligible_once_done_and_merged() {
     model::set(&mut r, &item_key("g").unwrap(), field::GATE, Some(&"ships"), user(2)).unwrap();
     add_item(&mut r, "top", "top", user(2)).unwrap();
     set_parent(&mut r, "g", Some("top"), user(2)).unwrap();
-    assert!(reasons(&r, "g", 2 * DAY).is_empty());
+    assert_eq!(reasons(&r, "g", 2 * DAY), Vec::<Reason>::new());
 }
 
 #[test]

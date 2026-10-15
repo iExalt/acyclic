@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn acyclic_graphs_have_none() {
-        assert!(cycles::<&str>(&[]).is_empty());
-        assert!(cycles(&[("a", "b"), ("b", "c"), ("a", "c")]).is_empty());
+        assert_eq!(cycles::<&str>(&[]), Vec::<Vec<&str>>::new());
+        assert_eq!(cycles(&[("a", "b"), ("b", "c"), ("a", "c")]), Vec::<Vec<&str>>::new());
     }
 
     #[test]

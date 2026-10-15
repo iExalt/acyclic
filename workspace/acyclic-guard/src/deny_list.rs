@@ -137,7 +137,7 @@ mod tests {
         assert_eq!(list.matches("xA.Cx"), vec![1]);
         assert_eq!(list.matches("my-SECRET[1]-value"), vec![2]);
         assert_eq!(list.matches("a.c secret[1]"), vec![1, 2]);
-        assert!(list.matches("nothing here").is_empty());
+        assert_eq!(list.matches("nothing here"), Vec::<usize>::new());
     }
 
     #[test]

@@ -115,7 +115,7 @@ fn ordering_links_never_close_a_cycle_locally() {
     }
     // Context links don't order anything.
     link(&mut r, "c", "a", LinkKind::Relates, by(3)).unwrap();
-    assert!(model(&r).link_cycles().is_empty());
+    assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn one_link_added_twice_is_one_link_and_a_re_add_beats_a_removal() {
     assert_eq!(model(&a).links.len(), 1);
     b.join(&a.state).unwrap();
     unlink(&mut a, "x", "y", LinkKind::Blocks, by(3)).unwrap();
-    assert!(model(&a).links.is_empty());
+    assert_eq!(model(&a).links, Vec::new());
     link(&mut b, "x", "y", LinkKind::Blocks, by(3)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).links.len(), 1, "the concurrent re-add wins");
@@ -195,7 +195,7 @@ fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() 
     a.join(&b.state).unwrap();
     let m = model(&a);
     assert_eq!(m.members("t1"), vec!["x"]);
-    assert!(m.members("t2").is_empty());
+    assert_eq!(m.members("t2"), Vec::<&str>::new());
     assert_eq!(m.thread_of("y"), None);
     assert_eq!(m.repository_set("t1"), BTreeSet::from(["code".into(), "docs".into()]));
 }
