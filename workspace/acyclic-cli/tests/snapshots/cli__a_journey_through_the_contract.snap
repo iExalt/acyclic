@@ -1,0 +1,312 @@
+---
+source: workspace/acyclic-cli/tests/cli.rs
+expression: sh.transcript
+---
+$ acyclic init tracker --replica mac
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "created": true,
+    "path": "[dir]/tracker",
+    "replica": "mac"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic add a1 --title First
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a2"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "item": "a2"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Other
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": null,
+    "message": "item a2 exists with another title"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic link a2 blocks a1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "from": "a2",
+    "kind": "blocks",
+    "to": "a1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready
+# exit 0
+{
+  "data": {
+    "ready": [
+      {
+        "item": "a1",
+        "rank": 0,
+        "title": "First"
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic claim a2
+# exit 1
+{
+  "error": {
+    "code": "not-ready",
+    "details": {
+      "readiness": {
+        "status": "blocked",
+        "waiting": {
+          "a1": {
+            "why": "open"
+          }
+        }
+      }
+    },
+    "message": "item a2 isn't ready to claim"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic claim a1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "claim": {
+      "holder": "session/mac",
+      "lease_expires": 1792026000000,
+      "lease_start": 1792022400000,
+      "replica": "mac"
+    },
+    "item": "a1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a1",
+    "state": "done"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready
+# exit 0
+{
+  "data": {
+    "ready": [
+      {
+        "item": "a2",
+        "rank": 0,
+        "title": "Second"
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread t1 --title Work
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "thread": "t1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic member a2 t1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "edit": {
+      "edit": "member",
+      "item": "a2",
+      "thread": "t1"
+    },
+    "outcome": "applied"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic approve t1
+# exit 1
+{
+  "error": {
+    "code": "user-only",
+    "details": null,
+    "message": "only the user sets approved, not session/mac"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic approve t1 --as-user
+# exit 0
+{
+  "data": {
+    "approved": true,
+    "changed": true,
+    "thread": "t1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic member a1 t1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "edit": {
+      "edit": "member",
+      "item": "a1",
+      "thread": "t1"
+    },
+    "outcome": "proposed",
+    "proposal": "mac-15"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic needs
+# exit 0
+{
+  "data": {
+    "needs": [
+      {
+        "actor": "session/mac",
+        "entry": "proposal",
+        "id": "mac-15",
+        "threads": [
+          "t1"
+        ]
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic keep mac-15 --as-user
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "decision": "keep",
+    "proposal": "mac-15"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic show a1
+# exit 0
+{
+  "data": {
+    "children": [],
+    "claims": [
+      {
+        "holder": "session/mac",
+        "lease_expires": 1792026000000,
+        "lease_start": 1792022400000,
+        "replica": "mac"
+      }
+    ],
+    "item": {
+      "archived": null,
+      "areas": [],
+      "done_at": 1792022400000,
+      "evidence": {
+        "note": "shipped"
+      },
+      "gate": null,
+      "id": "a1",
+      "notes": null,
+      "parent": null,
+      "reopened": null,
+      "repositories": [],
+      "resources": [],
+      "size": null,
+      "state": "done",
+      "thread": "t1",
+      "title": "First"
+    },
+    "readiness": {
+      "status": "done"
+    },
+    "role": "item"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic show nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item nope"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic link a1 sideways a2
+# exit 2
+{
+  "error": {
+    "code": "usage",
+    "details": {
+      "help": "error: invalid value 'sideways' for '<KIND>': unknown value \"sideways\"\n\nFor more information, try '--help'.\n"
+    },
+    "message": "invalid value for one of the arguments"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=actor/user acyclic ready
+# exit 2
+{
+  "error": {
+    "code": "user-from-environment",
+    "details": null,
+    "message": "ACYCLIC_ACTOR may not name the user, or every agent started from this shell would act as the user; pass --as-user on the command instead"
+  },
+  "ok": false
+}

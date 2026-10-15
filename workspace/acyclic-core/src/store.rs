@@ -94,6 +94,32 @@ impl From<state::Error> for StoreError {
     }
 }
 
+/// Why a batch failed: the store, or the batch's own writes.
+#[derive(Debug)]
+pub enum BatchError<E> {
+    /// The store failed or refused.
+    Store(StoreError),
+    /// The batch's writes refused.
+    Apply(E),
+}
+
+impl<E> From<StoreError> for BatchError<E> {
+    fn from(err: StoreError) -> Self {
+        Self::Store(err)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for BatchError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(err) => err.fmt(f),
+            Self::Apply(err) => err.fmt(f),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for BatchError<E> {}
+
 /// Who a batch is for: the actor and, for a run's operations, the run and its sequence number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
@@ -339,28 +365,28 @@ impl Tracker {
     ///
     /// Fails when the closure or the clock guard refuses, a lock is held, git fails, or races are lost until the
     /// deadline.
-    pub fn batch(
+    pub fn batch<E>(
         &self,
         meta: &Meta,
         now: Millis,
         allow_clock_step: bool,
         root_of: RootOf<'_>,
-        apply: impl Fn(&mut Replica, Millis) -> Result<(), state::Error>,
-    ) -> Result<Outcome, StoreError> {
+        apply: impl Fn(&mut Replica, Millis) -> Result<(), E>,
+    ) -> Result<Outcome, BatchError<E>> {
         self.batch_with(meta, now, allow_clock_step, root_of, apply, &Hooks::default())
     }
 
     #[doc(hidden)]
     #[allow(clippy::missing_errors_doc)]
-    pub fn batch_with(
+    pub fn batch_with<E>(
         &self,
         meta: &Meta,
         now: Millis,
         allow_clock_step: bool,
         root_of: RootOf<'_>,
-        apply: impl Fn(&mut Replica, Millis) -> Result<(), state::Error>,
+        apply: impl Fn(&mut Replica, Millis) -> Result<(), E>,
         hooks: &Hooks,
-    ) -> Result<Outcome, StoreError> {
+    ) -> Result<Outcome, BatchError<E>> {
         let _lock = self.lock()?;
         let started = Instant::now();
         let mut retries = 0;
@@ -368,29 +394,33 @@ impl Tracker {
             match self.try_batch(meta, now, allow_clock_step, root_of, &apply, hooks) {
                 Ok(Some(commit)) => return Ok(Outcome::Committed { commit, retries }),
                 Ok(None) => return Ok(Outcome::Unchanged),
-                Err(StoreError::Conflict) if started.elapsed() < RETRY_DEADLINE => {
+                Err(BatchError::Store(StoreError::Conflict))
+                    if started.elapsed() < RETRY_DEADLINE =>
+                {
                     retries += 1;
                     std::thread::sleep(backoff(retries));
                 },
-                Err(StoreError::Conflict) => return Err(StoreError::Timeout),
+                Err(BatchError::Store(StoreError::Conflict)) => {
+                    return Err(BatchError::Store(StoreError::Timeout));
+                },
                 Err(err) => return Err(err),
             }
         }
     }
 
-    fn try_batch(
+    fn try_batch<E>(
         &self,
         meta: &Meta,
         now: Millis,
         allow_clock_step: bool,
         root_of: RootOf<'_>,
-        apply: &impl Fn(&mut Replica, Millis) -> Result<(), state::Error>,
+        apply: &impl Fn(&mut Replica, Millis) -> Result<(), E>,
         hooks: &Hooks,
-    ) -> Result<Option<String>, StoreError> {
+    ) -> Result<Option<String>, BatchError<E>> {
         let (tip, before) = self.load()?;
         let mut replica = Replica::open(self.replica.clone(), before.clone());
-        let at = replica.stamp(now, allow_clock_step)?;
-        apply(&mut replica, at)?;
+        let at = replica.stamp(now, allow_clock_step).map_err(StoreError::State)?;
+        apply(&mut replica, at).map_err(BatchError::Apply)?;
         if replica.state == before {
             return Ok(None);
         }

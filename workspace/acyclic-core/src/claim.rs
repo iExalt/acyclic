@@ -172,8 +172,8 @@ pub fn claim(
     Ok(dot.expect("a write with a value mints a dot"))
 }
 
-/// Renews, at a sync, the time leases this replica recorded whose holders are still at work: each winning claim
-/// whose holder wrote something other than a claim within the last `lease`. A holder that stopped writing, such as a
+/// Renews, at a sync, the time leases this replica recorded whose holders are still at work: each winning claim with
+/// less than half of `lease` left whose holder wrote something other than a claim within the last `lease`. A holder that stopped writing, such as a
 /// session that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
 ///
 /// # Panics
@@ -206,7 +206,10 @@ pub fn renew_leases(
         let active = last_active
             .get(claim.holder.as_str())
             .is_some_and(|&at| at >= now.saturating_sub(lease));
-        if claim.replica == mine && claim.lease_expires.is_some() && active {
+        // Only a lease past half its term is renewed, so a burst of writes renews each claim once.
+        let due =
+            claim.lease_expires.is_some_and(|expires| expires.saturating_sub(now) < lease / 2);
+        if claim.replica == mine && due && active {
             renewals.push((key.clone(), claim));
         }
     }

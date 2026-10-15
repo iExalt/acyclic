@@ -1,0 +1,57 @@
+---
+source: workspace/acyclic-cli/tests/cli.rs
+expression: sh.transcript
+---
+$ acyclic init tracker --replica mac
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "created": true,
+    "path": "[dir]/tracker",
+    "replica": "mac"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic add a1 --title First
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready
+# exit 6
+{
+  "error": {
+    "code": "unreadable",
+    "details": {
+      "hint": "run acyclic doctor"
+    },
+    "message": "unreadable state: unreadable state on item a1: unknown variant `from-the-future`, expected one of `backlog`, `parked`, `in-progress`, `done`"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic doctor
+# exit 0
+{
+  "data": {
+    "items": 0,
+    "links": 0,
+    "replica": "mac",
+    "threads": 0,
+    "unreadable": [
+      {
+        "error": "unreadable state: unreadable state on item a1: unknown variant `from-the-future`, expected one of `backlog`, `parked`, `in-progress`, `done`",
+        "id": "a1",
+        "kind": "item"
+      }
+    ]
+  },
+  "ok": true
+}

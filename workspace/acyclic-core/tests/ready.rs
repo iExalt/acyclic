@@ -69,7 +69,7 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
             };
             let dep = model::item_key("dep").map_err(state_error)?;
             model::set(replica, &dep, item::EVIDENCE, Some(&evidence), by).map_err(state_error)?;
-            Ok(())
+            Ok::<(), Error>(())
         })
         .unwrap();
 

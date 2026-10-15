@@ -118,6 +118,10 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
     )
     .unwrap();
 
+    assert!(
+        renew_leases(&mut a, 400, LEASE, LEASE).unwrap().is_empty(),
+        "over half the lease is left"
+    );
     let renewed = renew_leases(&mut a, 900, LEASE, LEASE).unwrap();
     assert_eq!(renewed, vec![item_key("busy").unwrap()], "not the idle one, nor another replica's");
     let busy = winner(&a.state, &item_key("busy").unwrap(), 1_500).unwrap().unwrap();
@@ -126,6 +130,8 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
         winner(&a.state, &item_key("idle").unwrap(), 1_000).unwrap().is_none(),
         "expired after one lease"
     );
+    // Renewed once a burst of syncs, then not again until half the new lease has passed.
+    assert!(renew_leases(&mut a, 950, LEASE, LEASE).unwrap().is_empty());
     // Renewals are the replica's writes, so they don't keep a holder looking busy.
     assert!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap().is_empty());
 }

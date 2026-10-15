@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use acyclic_core::state::{Key, Millis, ReplicaId, State};
-use acyclic_core::store::{self, Hooks, Meta, Outcome, StoreError, Tracker};
+use acyclic_core::state::{Error as StateError, Key, Millis, ReplicaId, State};
+use acyclic_core::store::{self, BatchError, Hooks, Meta, Outcome, StoreError, Tracker};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -93,7 +93,8 @@ fn an_unchanged_batch_commits_nothing() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
-    let outcome = tracker.batch(&meta(), NOW, false, &no_project, |_, _| Ok(())).unwrap();
+    let outcome =
+        tracker.batch(&meta(), NOW, false, &no_project, |_, _| Ok::<(), StateError>(())).unwrap();
     assert_eq!(outcome, Outcome::Unchanged);
     assert!(tracker.load().unwrap().0.is_none());
 }
@@ -110,7 +111,7 @@ fn events_go_to_their_project_roots_file_with_run_and_actor() {
         .batch(&meta, NOW, false, &root_of, |replica, at| {
             replica.write(&actor, "agent", "actor/user", at, Some(json!("claude")))?;
             replica.write(&item("p1"), "title", "run/r1", at, Some(json!("in a project")))?;
-            Ok(())
+            Ok::<(), StateError>(())
         })
         .unwrap();
     let segment = "refs/heads/log/mac/2026-10/0001";
@@ -316,7 +317,7 @@ fn a_held_lock_fails_clearly_and_is_left_alone() {
         replica.write(&key, "f", "actor/user", at, Some(json!(2))).map(|_| ())
     });
     match result {
-        Err(StoreError::Locked { path: locked, age_seconds }) => {
+        Err(BatchError::Store(StoreError::Locked { path: locked, age_seconds })) => {
             assert!(locked.ends_with("refs/heads/state/mac.lock"), "{}", locked.display());
             assert!(age_seconds.is_some());
         },
@@ -425,7 +426,10 @@ fn a_backward_clock_is_refused() {
     let result = tracker.batch(&meta(), NOW - 3_600_000, false, &no_project, |replica, at| {
         replica.write(&shared, "f", "actor/user", at, Some(json!(2))).map(|_| ())
     });
-    assert!(matches!(result, Err(StoreError::State(acyclic_core::state::Error::ClockJump { .. }))));
+    assert!(matches!(
+        result,
+        Err(BatchError::Store(StoreError::State(acyclic_core::state::Error::ClockJump { .. })))
+    ));
 }
 
 /// A batch at `at` writing one field of an item in project `p0` and one in no project.
@@ -435,7 +439,7 @@ fn write_month(tracker: &Tracker, at: Millis, value: i64) {
         .batch(&meta(), at, false, &root_of, |replica, at| {
             replica.write(&item("p1"), "f", "actor/user", at, Some(json!(value)))?;
             replica.write(&item("x1"), "f", "actor/user", at, Some(json!(value)))?;
-            Ok(())
+            Ok::<(), StateError>(())
         })
         .unwrap();
 }

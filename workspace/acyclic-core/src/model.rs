@@ -29,6 +29,22 @@ pub enum Value<T> {
     Conflict(Vec<T>),
 }
 
+/// Unset reads as `null`, one value as itself, and a conflict as `{"conflict": [values]}`.
+impl<T: Serialize> Serialize for Value<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::None => serializer.serialize_none(),
+            Self::One(value) => value.serialize(serializer),
+            Self::Conflict(values) => {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("conflict", values)?;
+                map.end()
+            },
+        }
+    }
+}
+
 impl<T> Value<T> {
     /// The value when there is exactly one.
     #[must_use]
@@ -186,7 +202,7 @@ pub enum Role {
 }
 
 /// An item as read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Item {
     /// The item's id.
     pub id: String,
@@ -237,7 +253,7 @@ impl Item {
 }
 
 /// A link as read.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
     /// The dependent item's id.
     pub from: String,
@@ -248,7 +264,7 @@ pub struct Link {
 }
 
 /// A thread as read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Thread {
     /// The thread's id.
     pub id: String,
@@ -282,7 +298,7 @@ impl Thread {
 }
 
 /// A repository record as read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Repository {
     /// The record's id.
     pub id: String,
@@ -299,7 +315,7 @@ pub struct Repository {
 }
 
 /// A run record as read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Run {
     /// The run's id.
     pub id: String,
@@ -344,69 +360,102 @@ impl Model {
     pub fn read(state: &State) -> Result<Self, Error> {
         let mut model = Self::default();
         for (key, _) in state.entities() {
-            match key.kind.as_str() {
-                kind::ITEM => {
-                    let item = read_item(state, key)?;
-                    for parent in item.parent.all() {
-                        model.children.entry(parent.clone()).or_default().insert(key.id.clone());
-                    }
-                    model.items.insert(key.id.clone(), item);
-                },
-                kind::LINK => {
-                    if state.field(key, link::PRESENT).is_none() {
-                        continue;
-                    }
-                    let (Value::One(from), Value::One(to), Value::One(kind)) = (
-                        value::<String>(state, key, link::FROM)?,
-                        value::<String>(state, key, link::TO)?,
-                        value::<LinkKind>(state, key, link::KIND)?,
-                    ) else {
-                        return Err(Error::Format(format!(
-                            "link {} lacks its ends or kind",
-                            key.id
-                        )));
-                    };
-                    model.links.push(Link { from, to, kind });
-                },
-                kind::THREAD => {
-                    let thread = Thread {
-                        id: key.id.clone(),
-                        title: value(state, key, thread::TITLE)?,
-                        brief: value(state, key, thread::BRIEF)?,
-                        approved: value(state, key, thread::APPROVED)?,
-                        pm_flag: value(state, key, thread::PM_FLAG)?,
-                        repositories: elements(state, key, set::REPOSITORY),
-                        autonomy: value(state, key, thread::AUTONOMY)?,
-                    };
-                    model.threads.insert(key.id.clone(), thread);
-                },
-                kind::REPOSITORY => {
-                    let record = Repository {
-                        id: key.id.clone(),
-                        owner: value(state, key, repository::OWNER)?,
-                        name: value(state, key, repository::NAME)?,
-                        public: value(state, key, repository::PUBLIC)?,
-                        default_branch: value(state, key, repository::DEFAULT_BRANCH)?,
-                        installation: value(state, key, repository::INSTALLATION)?,
-                    };
-                    model.repositories.insert(key.id.clone(), record);
-                },
-                kind::RUN => {
-                    let record = Run {
-                        id: key.id.clone(),
-                        thread: value(state, key, run::THREAD)?,
-                        state: value(state, key, run::STATE)?,
-                    };
-                    model.runs.insert(key.id.clone(), record);
-                },
-                kind::SETTINGS if key.id == crate::schema::GLOBAL => {
-                    model.autonomy = value(state, key, crate::schema::settings::AUTONOMY)?;
-                },
-                _ => {},
-            }
+            model.add(state, key)?;
         }
         model.links.sort();
         Ok(model)
+    }
+
+    /// Reads the model, leaving out every entity that can't be read and listing it with why, so a diagnosis can
+    /// still show the rest. Every other reader uses [`Model::read`], which never hides such an entity.
+    #[must_use]
+    pub fn read_lenient(state: &State) -> (Self, Vec<(Key, Error)>) {
+        let mut model = Self::default();
+        let mut unreadable = Vec::new();
+        for (key, _) in state.entities() {
+            let mut one = Self::default();
+            match one.add(state, key) {
+                Ok(()) => model.merge(one),
+                Err(err) => unreadable.push((key.clone(), err)),
+            }
+        }
+        model.links.sort();
+        (model, unreadable)
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.items.extend(other.items);
+        self.links.extend(other.links);
+        self.threads.extend(other.threads);
+        self.repositories.extend(other.repositories);
+        self.runs.extend(other.runs);
+        if other.autonomy != Value::None {
+            self.autonomy = other.autonomy;
+        }
+        for (parent, children) in other.children {
+            self.children.entry(parent).or_default().extend(children);
+        }
+    }
+
+    fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
+        match key.kind.as_str() {
+            kind::ITEM => {
+                let item = read_item(state, key)?;
+                for parent in item.parent.all() {
+                    self.children.entry(parent.clone()).or_default().insert(key.id.clone());
+                }
+                self.items.insert(key.id.clone(), item);
+            },
+            kind::LINK => {
+                if state.field(key, link::PRESENT).is_none() {
+                    return Ok(());
+                }
+                let (Value::One(from), Value::One(to), Value::One(kind)) = (
+                    value::<String>(state, key, link::FROM)?,
+                    value::<String>(state, key, link::TO)?,
+                    value::<LinkKind>(state, key, link::KIND)?,
+                ) else {
+                    return Err(Error::Format(format!("link {} lacks its ends or kind", key.id)));
+                };
+                self.links.push(Link { from, to, kind });
+            },
+            kind::THREAD => {
+                let thread = Thread {
+                    id: key.id.clone(),
+                    title: value(state, key, thread::TITLE)?,
+                    brief: value(state, key, thread::BRIEF)?,
+                    approved: value(state, key, thread::APPROVED)?,
+                    pm_flag: value(state, key, thread::PM_FLAG)?,
+                    repositories: elements(state, key, set::REPOSITORY),
+                    autonomy: value(state, key, thread::AUTONOMY)?,
+                };
+                self.threads.insert(key.id.clone(), thread);
+            },
+            kind::REPOSITORY => {
+                let record = Repository {
+                    id: key.id.clone(),
+                    owner: value(state, key, repository::OWNER)?,
+                    name: value(state, key, repository::NAME)?,
+                    public: value(state, key, repository::PUBLIC)?,
+                    default_branch: value(state, key, repository::DEFAULT_BRANCH)?,
+                    installation: value(state, key, repository::INSTALLATION)?,
+                };
+                self.repositories.insert(key.id.clone(), record);
+            },
+            kind::RUN => {
+                let record = Run {
+                    id: key.id.clone(),
+                    thread: value(state, key, run::THREAD)?,
+                    state: value(state, key, run::STATE)?,
+                };
+                self.runs.insert(key.id.clone(), record);
+            },
+            kind::SETTINGS if key.id == crate::schema::GLOBAL => {
+                self.autonomy = value(state, key, crate::schema::settings::AUTONOMY)?;
+            },
+            _ => {},
+        }
+        Ok(())
     }
 
     /// An item's children.
