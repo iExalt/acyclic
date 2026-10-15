@@ -9,3 +9,4 @@ pub mod graph;
 pub mod import;
 pub mod schema;
 pub mod state;
+pub mod store;
