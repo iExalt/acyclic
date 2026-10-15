@@ -77,7 +77,9 @@ impl From<ScopeError> for ApplyError {
     fn from(err: ScopeError) -> Self {
         match err {
             ScopeError::Write(err) => Self::Write(err),
-            other => Self::Write(WriteError::State(Error::Format(other.to_string()))),
+            other => {
+                unreachable!("a scope edit refuses only through its write, not with {other:?}")
+            },
         }
     }
 }

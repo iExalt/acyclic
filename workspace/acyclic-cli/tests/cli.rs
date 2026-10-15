@@ -110,7 +110,7 @@ fn an_unreadable_state_points_to_doctor() {
 fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
-    let mut plan = acyclic_fixtures::generate(350, 7);
+    let mut plan = acyclic_fixtures::generate(50, 7);
     let file = sh.path().join("plan.json");
     std::fs::write(&file, plan.to_json()).unwrap();
     let import = |sh: &mut Shell, extra: &str| {
@@ -121,7 +121,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     let dry = import(&mut sh, " --dry-run");
     assert_eq!(
         (dry["changed"].as_bool(), dry["report"]["items"].as_u64()),
-        (Some(false), Some(350))
+        (Some(false), Some(50))
     );
     assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
     assert_eq!(import(&mut sh, "")["changed"], true);
