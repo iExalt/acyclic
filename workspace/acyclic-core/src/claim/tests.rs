@@ -73,6 +73,18 @@ fn a_named_resource_is_held_by_one_holder_at_a_time() {
 }
 
 #[test]
+fn only_a_run_claims_without_a_lease() {
+    let mut r = replica("a");
+    items(&mut r, &["x"]);
+    let x = item_key("x").unwrap();
+    assert_eq!(
+        claim(&mut r, &x, "session/s", 10, None, LEASE),
+        Err(Error::LeaseRequired("session/s".into()))
+    );
+    claim(&mut r, &x, "run/r1", 10, None, LEASE).unwrap();
+}
+
+#[test]
 fn a_runs_claim_lapses_when_its_run_ends() {
     let mut r = replica("a");
     items(&mut r, &["x"]);

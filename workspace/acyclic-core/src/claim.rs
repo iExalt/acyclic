@@ -118,7 +118,7 @@ pub fn winner_with(
 ///
 /// # Errors
 ///
-/// Fails when the item has children, when another holder wins the item in this replica's view (so a claim never
+/// Fails when a holder other than a run claims without a time lease, when the item has children, when another holder wins the item in this replica's view (so a claim never
 /// silently replaces one it has seen; only claims made without seeing each other contest), when another holder's
 /// winning claim on another item holds one of this item's named resources, or on an unreadable claim.
 pub fn claim(
@@ -129,6 +129,10 @@ pub fn claim(
     lease: Option<Millis>,
     max_lease: Millis,
 ) -> Result<Dot, Error> {
+    // Only a run has a liveness signal; any other holder must take a time lease, or its claim would never end.
+    if lease.is_none() && !holder.starts_with("run/") {
+        return Err(Error::LeaseRequired(holder.to_owned()));
+    }
     let model = Model::read(&replica.state)?;
     if !model.children(&item.id).is_empty() {
         return Err(Error::NotALeaf(item.clone()));

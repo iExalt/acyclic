@@ -193,6 +193,8 @@ pub enum Error {
     Claimed(Key),
     /// Only leaves are claimed; the item has children.
     NotALeaf(Key),
+    /// A holder other than a run claimed without a time lease.
+    LeaseRequired(String),
     /// Another holder's live claim on another item holds a named resource this item needs.
     ResourceHeld {
         /// The resource.
@@ -232,6 +234,9 @@ impl fmt::Display for Error {
                 write!(f, "run {run} is applied by replica {applied_by}")
             },
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
+            Self::LeaseRequired(holder) => {
+                write!(f, "{holder} isn't a run, so its claim needs a time lease")
+            },
             Self::NotALeaf(key) => {
                 write!(f, "{} {} has children; claim one of them", key.kind, key.id)
             },
