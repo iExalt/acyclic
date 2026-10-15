@@ -145,16 +145,18 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             "ready",
             &(0..runs).map(|_| tracker.time("ready", false)).collect::<Vec<_>>(),
         );
-        let adds: Vec<Sample> =
-            (0..runs).map(|n| tracker.time(&format!("add z{n} --title First"), false)).collect();
+        let adds: Vec<Sample> = (0..runs)
+            .map(|n| tracker.time(&format!("item add z{n} --title First"), false))
+            .collect();
         record(&mut row, "edit", &adds[..1]);
         println!("  (the edit column is the first add)");
         row.store = store_size(&tracker.repo());
         return row;
     }
     let item = if size < 50 {
-        let adds: Vec<Sample> =
-            (0..size).map(|n| tracker.time(&format!("add i{n} --title Item-{n}"), false)).collect();
+        let adds: Vec<Sample> = (0..size)
+            .map(|n| tracker.time(&format!("item add i{n} --title Item-{n}"), false))
+            .collect();
         report("add", &adds);
         format!("i{}", size - 1)
     } else {
@@ -165,7 +167,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         let open = plan.items.iter().rev().find(|i| i.state != State::Done);
         open.expect("an open item").key.clone()
     };
-    tracker.run("add bench-target --title Target", false);
+    tracker.run("item add bench-target --title Target", false);
     row.store = store_size(&tracker.repo());
     println!("  store: {}", row.store);
 
@@ -182,10 +184,10 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .collect();
     record(&mut row, "ready, no cache", &cold);
     record(&mut row, "show", &times(&|_| format!("show {item}"), false));
-    record(&mut row, "edit", &times(&|n| format!("edit {item} --notes edit-{n}"), false));
+    record(&mut row, "edit", &times(&|n| format!("item edit {item} --notes edit-{n}"), false));
     let fresh: Vec<Sample> = (0..runs)
         .map(|n| {
-            tracker.run(&format!("edit {item} --notes fresh-{n}"), false);
+            tracker.run(&format!("item edit {item} --notes fresh-{n}"), false);
             tracker.time(&format!("show {item}"), false)
         })
         .collect();
@@ -204,8 +206,8 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     record(&mut row, "claim again", &times(&|_| format!("claim {}", leaves[0]), true));
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
-            let sample = tracker.time(&format!("link {item} blocks bench-target"), false);
-            tracker.run(&format!("unlink {item} blocks bench-target"), false);
+            let sample = tracker.time(&format!("link add {item} blocks bench-target"), false);
+            tracker.run(&format!("link remove {item} blocks bench-target"), false);
             sample
         })
         .collect();
@@ -221,13 +223,13 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             .collect();
         items.push(item.clone());
         for n in 0..batches {
-            tracker.run(&format!("edit {} --notes batch-{n}", items[n % items.len()]), false);
+            tracker.run(&format!("item edit {} --notes batch-{n}", items[n % items.len()]), false);
         }
         println!("  after {batches} more batches: {}", store_size(&tracker.repo()));
         record(
             &mut row,
             "edit after batches",
-            &times(&|n| format!("edit {item} --notes late-{n}"), false),
+            &times(&|n| format!("item edit {item} --notes late-{n}"), false),
         );
         record(&mut row, "show after batches", &times(&|_| format!("show {item}"), false));
     }

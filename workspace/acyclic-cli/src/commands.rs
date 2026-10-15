@@ -21,7 +21,9 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use crate::Env;
-use crate::args::{Cli, Command};
+use crate::args::{
+    Attachment, Cli, Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, ThreadCommand,
+};
 use crate::context;
 use crate::error::{CliError, exit};
 
@@ -78,8 +80,10 @@ impl<'a> Session<'a> {
             Command::Show { item } => self.show(item),
             Command::Needs => self.needs(),
             Command::Doctor => self.doctor(),
-            Command::Add { id, title, parent } => self.add(id, title, parent.as_deref()),
-            Command::Edit {
+            Command::Item(ItemCommand::Add { id, title, parent }) => {
+                self.add(id, title, parent.as_deref())
+            },
+            Command::Item(ItemCommand::Edit {
                 id,
                 title,
                 notes,
@@ -89,7 +93,7 @@ impl<'a> Session<'a> {
                 no_area,
                 resource,
                 no_resource,
-            } => self.write(|replica, by| {
+            }) => self.write(|replica, by| {
                 let key = existing(replica, id)?;
                 set_if(replica, &key, field::TITLE, title.as_ref(), by)?;
                 set_if(replica, &key, field::NOTES, notes.as_ref(), by)?;
@@ -107,7 +111,7 @@ impl<'a> Session<'a> {
                 }
                 Ok(json!({"item": id}))
             }),
-            Command::Parent { id, parent } => self.write(|replica, by| {
+            Command::Item(ItemCommand::Move { id, parent }) => self.write(|replica, by| {
                 let key = existing(replica, id)?;
                 if single(replica.state().field(&key, field::PARENT))
                     != parent.as_ref().map(|p| json!(p))
@@ -116,21 +120,21 @@ impl<'a> Session<'a> {
                 }
                 Ok(json!({"item": id, "parent": parent}))
             }),
-            Command::Link { from, kind, to } => self.write(|replica, by| {
+            Command::Link(LinkCommand::Add { from, kind, to }) => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
                 if replica.state().field(&key, link_field::PRESENT).is_none() {
                     model::link(replica, from, to, *kind, by)?;
                 }
                 Ok(json!({"from": from, "kind": kind, "to": to}))
             }),
-            Command::Unlink { from, kind, to } => self.write(|replica, by| {
+            Command::Link(LinkCommand::Remove { from, kind, to }) => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
                 if replica.state().field(&key, link_field::PRESENT).is_some() {
                     model::unlink(replica, from, to, *kind, by)?;
                 }
                 Ok(json!({"from": from, "kind": kind, "to": to}))
             }),
-            Command::State { id, state } => self.write(|replica, by| {
+            Command::Item(ItemCommand::State { id, state }) => self.write(|replica, by| {
                 model::set_state(replica, id, *state, by)?;
                 Ok(json!({"item": id, "state": state}))
             }),
@@ -147,69 +151,42 @@ impl<'a> Session<'a> {
                 model::set_state(replica, id, ItemState::Done, by)?;
                 Ok(json!({"item": id, "state": ItemState::Done}))
             }),
-            Command::Reopen { id } => self.write(|replica, by| {
+            Command::Item(ItemCommand::Reopen { id }) => self.write(|replica, by| {
                 archive::reopen(replica, id, by)?;
                 Ok(json!({"item": id}))
             }),
             Command::Claim { id, lease, force } => self.claim(id, *lease, *force),
-            Command::Thread { id, title, brief } => self.write(|replica, by| {
-                let key = Key::new(kind::THREAD, id)?;
-                set_if(replica, &key, thread::TITLE, title.as_ref(), by)?;
-                set_if(replica, &key, thread::BRIEF, brief.as_ref(), by)?;
-                Ok(json!({"thread": id}))
-            }),
-            Command::Member { item, thread } => {
-                let change = ScopeEdit::Member { item: item.clone(), thread: thread.clone() };
-                self.scope_edit(&change, |model| {
-                    model.items.get(item).is_some_and(|i| i.thread.one() == thread.as_ref())
-                })
-            },
-            Command::Touch { repository, item, thread, remove } => {
-                let change = match (item, thread) {
-                    (Some(item), _) => ScopeEdit::ItemRepository {
-                        item: item.clone(),
-                        repository: repository.clone(),
-                        present: !remove,
-                    },
-                    (None, Some(thread)) => ScopeEdit::ThreadRepository {
-                        thread: thread.clone(),
-                        repository: repository.clone(),
-                        present: !remove,
-                    },
-                    (None, None) => unreachable!("clap requires one"),
-                };
-                self.scope_edit(&change, |model| {
-                    let set = match (item, thread) {
-                        (Some(item), _) => model.items.get(item).map(|i| &i.repositories),
-                        (None, Some(thread)) => model.threads.get(thread).map(|t| &t.repositories),
-                        (None, None) => None,
-                    };
-                    set.is_some_and(|set| set.contains(repository)) != *remove
-                })
-            },
-            Command::Repository { id, owner, name, public, default_branch } => {
+            Command::Thread(ThreadCommand::Set { id, title, brief }) => {
                 self.write(|replica, by| {
+                    let key = Key::new(kind::THREAD, id)?;
+                    set_if(replica, &key, thread::TITLE, title.as_ref(), by)?;
+                    set_if(replica, &key, thread::BRIEF, brief.as_ref(), by)?;
+                    Ok(json!({"thread": id}))
+                })
+            },
+            Command::Thread(ThreadCommand::Add { item, thread }) => self.member(item, Some(thread)),
+            Command::Thread(ThreadCommand::Remove { item }) => self.member(item, None),
+            Command::Repo(RepoCommand::Attach(attachment)) => self.attach(attachment, true),
+            Command::Repo(RepoCommand::Detach(attachment)) => self.attach(attachment, false),
+            Command::Repo(RepoCommand::Set { id, owner, name, public, default_branch }) => self
+                .write(|replica, by| {
                     let key = Key::new(kind::REPOSITORY, id)?;
                     set_if(replica, &key, repository::OWNER, owner.as_ref(), by)?;
                     set_if(replica, &key, repository::NAME, name.as_ref(), by)?;
                     set_if(replica, &key, repository::PUBLIC, public.as_ref(), by)?;
                     set_if(replica, &key, repository::DEFAULT_BRANCH, default_branch.as_ref(), by)?;
                     Ok(json!({"repository": id}))
-                })
-            },
-            Command::Keep { proposal } => self.write(|replica, by| {
+                }),
+            Command::Proposal(ProposalCommand::Keep { proposal }) => self.write(|replica, by| {
                 scope::keep(replica, proposal, by)?;
                 Ok(json!({"proposal": proposal, "decision": "keep"}))
             }),
-            Command::Drop { proposal } => self.write(|replica, by| {
+            Command::Proposal(ProposalCommand::Drop { proposal }) => self.write(|replica, by| {
                 scope::drop(replica, proposal, by)?;
                 Ok(json!({"proposal": proposal, "decision": "drop"}))
             }),
-            Command::Approve { thread: id, revoke } => self.write(|replica, by| {
-                let key = Key::new(kind::THREAD, id)?;
-                set_if(replica, &key, thread::APPROVED, Some(&!revoke), by)?;
-                Ok(json!({"thread": id, "approved": !revoke}))
-            }),
+            Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
+            Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
             Command::Level { level, thread: id } => self.write(|replica, by| {
                 let (key, name) = match id {
                     Some(id) => (Key::new(kind::THREAD, id)?, thread::AUTONOMY),
@@ -219,7 +196,7 @@ impl<'a> Session<'a> {
                 Ok(json!({"thread": id, "level": level}))
             }),
             Command::Import { file, dry_run } => self.import(file, *dry_run),
-            Command::Archive { id } => {
+            Command::Item(ItemCommand::Archive { id }) => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
                 self.write(|replica, by| {
@@ -280,6 +257,49 @@ impl<'a> Session<'a> {
                     json!({"edit": change, "outcome": "proposed", "proposal": id})
                 },
             })
+        })
+    }
+
+    /// Puts an item in a thread, or takes it out.
+    fn member(&self, item: &str, thread: Option<&String>) -> Result<Json, CliError> {
+        let change = ScopeEdit::Member { item: item.to_owned(), thread: thread.cloned() };
+        self.scope_edit(&change, |model| {
+            model.items.get(item).is_some_and(|i| i.thread.one() == thread)
+        })
+    }
+
+    /// Attaches a repository record to an item or a thread, or detaches it.
+    fn attach(&self, attachment: &Attachment, present: bool) -> Result<Json, CliError> {
+        let Attachment { repository, item, thread } = attachment;
+        let change = match (item, thread) {
+            (Some(item), _) => ScopeEdit::ItemRepository {
+                item: item.clone(),
+                repository: repository.clone(),
+                present,
+            },
+            (None, Some(thread)) => ScopeEdit::ThreadRepository {
+                thread: thread.clone(),
+                repository: repository.clone(),
+                present,
+            },
+            (None, None) => unreachable!("clap requires one"),
+        };
+        self.scope_edit(&change, |model| {
+            let set = match (item, thread) {
+                (Some(item), _) => model.items.get(item).map(|i| &i.repositories),
+                (None, Some(thread)) => model.threads.get(thread).map(|t| &t.repositories),
+                (None, None) => None,
+            };
+            set.is_some_and(|set| set.contains(repository)) == present
+        })
+    }
+
+    /// Approves a thread's scope, or revokes the approval.
+    fn approve(&self, id: &str, approved: bool) -> Result<Json, CliError> {
+        self.write(|replica, by| {
+            let key = Key::new(kind::THREAD, id)?;
+            set_if(replica, &key, thread::APPROVED, Some(&approved), by)?;
+            Ok(json!({"thread": id, "approved": approved}))
         })
     }
 

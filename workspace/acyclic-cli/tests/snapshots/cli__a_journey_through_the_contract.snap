@@ -14,7 +14,7 @@ $ acyclic init tracker --replica mac
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic add a1 --title First
+$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
 # exit 0
 {
   "data": {
@@ -24,7 +24,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic add a1 --title First
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
+$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
 # exit 0
 {
   "data": {
@@ -34,7 +34,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
+$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
 # exit 0
 {
   "data": {
@@ -44,7 +44,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Second
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Other
+$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
 # exit 1
 {
   "error": {
@@ -55,7 +55,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic add a2 --title Other
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic link a2 blocks a1
+$ ACYCLIC_ACTOR=session/mac acyclic link add a2 blocks a1
 # exit 0
 {
   "data": {
@@ -144,7 +144,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread t1 --title Work
+$ ACYCLIC_ACTOR=session/mac acyclic thread set t1 --title Work
 # exit 0
 {
   "data": {
@@ -154,7 +154,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread t1 --title Work
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic member a2 t1
+$ ACYCLIC_ACTOR=session/mac acyclic thread add a2 t1
 # exit 0
 {
   "data": {
@@ -169,7 +169,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic member a2 t1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic approve t1
+$ ACYCLIC_ACTOR=session/mac acyclic thread approve t1
 # exit 1
 {
   "error": {
@@ -180,7 +180,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic approve t1
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic approve t1 --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic thread approve t1 --as-user
 # exit 0
 {
   "data": {
@@ -191,7 +191,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic approve t1 --as-user
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic member a1 t1
+$ ACYCLIC_ACTOR=session/mac acyclic thread add a1 t1
 # exit 0
 {
   "data": {
@@ -225,7 +225,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic keep mac-15 --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-15 --as-user
 # exit 0
 {
   "data": {
@@ -287,7 +287,75 @@ $ ACYCLIC_ACTOR=session/mac acyclic show nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic link a1 sideways a2
+$ ACYCLIC_ACTOR=session/mac acyclic thread remove a2 --as-user
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "edit": {
+      "edit": "member",
+      "item": "a2",
+      "thread": null
+    },
+    "outcome": "applied"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --name code
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "repository": "r1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo attach r1 --item a2
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "edit": {
+      "edit": "item-repository",
+      "item": "a2",
+      "present": true,
+      "repository": "r1"
+    },
+    "outcome": "applied"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo detach r1 --item a2
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "edit": {
+      "edit": "item-repository",
+      "item": "a2",
+      "present": false,
+      "repository": "r1"
+    },
+    "outcome": "applied"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
+# exit 0
+{
+  "data": {
+    "approved": false,
+    "changed": true,
+    "thread": "t1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 # exit 2
 {
   "error": {
@@ -300,7 +368,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic link a1 sideways a2
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic unlink a2 blocks a1
+$ ACYCLIC_ACTOR=session/mac acyclic link remove a2 blocks a1
 # exit 0
 {
   "data": {

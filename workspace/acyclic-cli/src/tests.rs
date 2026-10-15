@@ -104,6 +104,10 @@ fn usage_errors_use_the_envelope_and_help_is_text() {
         (code, out.trim()),
         (exit::OK, format!("acyclic {}", acyclic_core::VERSION).as_str())
     );
+    // The top level holds what every session uses; the rest stays in groups.
+    let (code, out) = execute(["acyclic", "--help"].map(Into::into), &env(&[]));
+    assert_eq!(code, exit::OK);
+    insta::assert_snapshot!(out);
 }
 
 #[test]

@@ -14,7 +14,7 @@ $ acyclic init tracker --replica mac
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic add a1 --title First
+$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
 # exit 0
 {
   "data": {

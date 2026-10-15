@@ -30,7 +30,7 @@ fn kebab<T: DeserializeOwned>(text: &str) -> Result<T, String> {
         .map_err(|_| format!("unknown value {text:?}"))
 }
 
-/// The commands.
+/// The commands: the ones every session uses at the top, the rest grouped by what they act on.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Sets up a tracker clone as a new replica, creating the repository if there is none.
@@ -54,10 +54,72 @@ pub enum Command {
         /// The item.
         item: String,
     },
+    /// Claims a ready leaf, or renews the actor's claim.
+    Claim {
+        /// The item.
+        id: String,
+        /// The lease in minutes: 60 by default, at most 480. A run's claim has none and lives while the run does.
+        #[arg(long)]
+        lease: Option<u32>,
+        /// Claim even when the item isn't ready.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Marks an item done, with evidence.
+    Done {
+        /// The item.
+        id: String,
+        /// The repository record holding the commit.
+        #[arg(long, requires = "commit")]
+        repository: Option<String>,
+        /// The commit that completed it.
+        #[arg(long, requires = "repository")]
+        commit: Option<String>,
+        /// A note, such as where a record lives.
+        #[arg(long)]
+        note: Option<String>,
+    },
     /// Lists what needs the user.
     Needs,
+    /// Sets the autonomy level, globally or for a thread (the user's).
+    Level {
+        /// `everything`, `scope-and-irreversible` or `blockers`.
+        #[arg(value_parser = kebab::<Level>)]
+        level: Level,
+        /// The thread; none sets the global level.
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Imports a plan: adds and updates what the document names, and never deletes.
+    Import {
+        /// The import document.
+        file: PathBuf,
+        /// Report what would change without writing it.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Lists entities that can't be read.
     Doctor,
+    /// Adds, edits, moves, reopens or archives items, or sets their state.
+    #[command(subcommand)]
+    Item(ItemCommand),
+    /// Adds or removes links between items.
+    #[command(subcommand)]
+    Link(LinkCommand),
+    /// Creates or edits threads, and puts items in them; agents' edits to approved threads wait as proposals.
+    #[command(subcommand)]
+    Thread(ThreadCommand),
+    /// Creates or edits repository records, and attaches them to items or threads.
+    #[command(subcommand)]
+    Repo(RepoCommand),
+    /// Keeps or drops proposals (the user's).
+    #[command(subcommand)]
+    Proposal(ProposalCommand),
+}
+
+/// The item commands.
+#[derive(Debug, Subcommand)]
+pub enum ItemCommand {
     /// Adds an item.
     Add {
         /// The new item's id.
@@ -99,14 +161,37 @@ pub enum Command {
         no_resource: Vec<String>,
     },
     /// Moves an item under a parent, or to the top level.
-    Parent {
+    Move {
         /// The item.
         id: String,
         /// The new parent; none moves it to the top level.
         parent: Option<String>,
     },
+    /// Sets an item's state; use `acyclic done` to finish it.
+    State {
+        /// The item.
+        id: String,
+        /// `backlog`, `parked` or `in-progress`.
+        #[arg(value_parser = kebab::<ItemState>)]
+        state: ItemState,
+    },
+    /// Reopens a done item.
+    Reopen {
+        /// The item.
+        id: String,
+    },
+    /// Archives a done subtree (the user or a project-management run).
+    Archive {
+        /// The subtree's root.
+        id: String,
+    },
+}
+
+/// The link commands.
+#[derive(Debug, Subcommand)]
+pub enum LinkCommand {
     /// Links two items: `from` blocks on, follows (`after`) or relates to `to`.
-    Link {
+    Add {
         /// The dependent item.
         from: String,
         /// `blocks`, `after` or `relates`.
@@ -116,7 +201,7 @@ pub enum Command {
         to: String,
     },
     /// Removes a link.
-    Unlink {
+    Remove {
         /// The dependent item.
         from: String,
         /// `blocks`, `after` or `relates`.
@@ -125,46 +210,13 @@ pub enum Command {
         /// The item it depends on.
         to: String,
     },
-    /// Sets an item's state; use `done` to finish it.
-    State {
-        /// The item.
-        id: String,
-        /// `backlog`, `parked` or `in-progress`.
-        #[arg(value_parser = kebab::<ItemState>)]
-        state: ItemState,
-    },
-    /// Marks an item done, with evidence.
-    Done {
-        /// The item.
-        id: String,
-        /// The repository record holding the commit.
-        #[arg(long, requires = "commit")]
-        repository: Option<String>,
-        /// The commit that completed it.
-        #[arg(long, requires = "repository")]
-        commit: Option<String>,
-        /// A note, such as where a record lives.
-        #[arg(long)]
-        note: Option<String>,
-    },
-    /// Reopens a done item.
-    Reopen {
-        /// The item.
-        id: String,
-    },
-    /// Claims a ready leaf, or renews the actor's claim.
-    Claim {
-        /// The item.
-        id: String,
-        /// The lease in minutes: 60 by default, at most 480. A run's claim has none and lives while the run does.
-        #[arg(long)]
-        lease: Option<u32>,
-        /// Claim even when the item isn't ready.
-        #[arg(long)]
-        force: bool,
-    },
+}
+
+/// The thread commands.
+#[derive(Debug, Subcommand)]
+pub enum ThreadCommand {
     /// Creates or edits a thread.
-    Thread {
+    Set {
         /// The thread's id.
         id: String,
         /// Its title.
@@ -174,29 +226,35 @@ pub enum Command {
         #[arg(long)]
         brief: Option<String>,
     },
-    /// Puts an item in a thread, or takes it out; agents' edits to approved threads wait as proposals.
-    Member {
+    /// Puts an item in a thread, taking it out of any other.
+    Add {
         /// The item.
         item: String,
-        /// The thread; none takes the item out.
-        thread: Option<String>,
-    },
-    /// Adds a repository to an item or a thread, or removes it.
-    Touch {
-        /// The repository record.
-        repository: String,
-        /// The item.
-        #[arg(long, conflicts_with = "thread", required_unless_present = "thread")]
-        item: Option<String>,
         /// The thread.
-        #[arg(long)]
-        thread: Option<String>,
-        /// Remove it instead.
-        #[arg(long)]
-        remove: bool,
+        thread: String,
     },
+    /// Takes an item out of its thread.
+    Remove {
+        /// The item.
+        item: String,
+    },
+    /// Approves a thread's scope (the user's).
+    Approve {
+        /// The thread.
+        thread: String,
+    },
+    /// Revokes a thread's approval (the user's).
+    Revoke {
+        /// The thread.
+        thread: String,
+    },
+}
+
+/// The repository commands.
+#[derive(Debug, Subcommand)]
+pub enum RepoCommand {
     /// Creates or edits a repository record.
-    Repository {
+    Set {
         /// The record's id.
         id: String,
         /// The owner.
@@ -212,44 +270,36 @@ pub enum Command {
         #[arg(long)]
         default_branch: Option<String>,
     },
-    /// Keeps a proposal (the user's).
+    /// Attaches a repository record to an item or a thread.
+    Attach(Attachment),
+    /// Detaches a repository record from an item or a thread.
+    Detach(Attachment),
+}
+
+/// A repository record and the item or thread it attaches to.
+#[derive(Debug, clap::Args)]
+pub struct Attachment {
+    /// The repository record.
+    pub repository: String,
+    /// The item.
+    #[arg(long, conflicts_with = "thread", required_unless_present = "thread")]
+    pub item: Option<String>,
+    /// The thread.
+    #[arg(long)]
+    pub thread: Option<String>,
+}
+
+/// The proposal commands (the user's).
+#[derive(Debug, Subcommand)]
+pub enum ProposalCommand {
+    /// Keeps a proposal.
     Keep {
         /// The proposal.
         proposal: String,
     },
-    /// Drops a proposal (the user's).
+    /// Drops a proposal.
     Drop {
         /// The proposal.
         proposal: String,
-    },
-    /// Approves a thread's scope, or revokes it (the user's).
-    Approve {
-        /// The thread.
-        thread: String,
-        /// Revoke the approval.
-        #[arg(long)]
-        revoke: bool,
-    },
-    /// Sets the autonomy level, globally or for a thread (the user's).
-    Level {
-        /// `everything`, `scope-and-irreversible` or `blockers`.
-        #[arg(value_parser = kebab::<Level>)]
-        level: Level,
-        /// The thread; none sets the global level.
-        #[arg(long)]
-        thread: Option<String>,
-    },
-    /// Archives a done subtree (the user or a project-management run).
-    Archive {
-        /// The subtree's root.
-        id: String,
-    },
-    /// Imports a plan: adds and updates what the document names, and never deletes.
-    Import {
-        /// The import document.
-        file: PathBuf,
-        /// Report what would change without writing it.
-        #[arg(long)]
-        dry_run: bool,
     },
 }

@@ -59,29 +59,39 @@ const AGENT: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac")];
 fn a_journey_through_the_contract() {
     let mut sh = Shell::new();
     assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
-    assert_eq!(sh.run("add a1 --title First", AGENT), 0);
-    assert_eq!(sh.run("add a2 --title Second", AGENT), 0);
-    assert_eq!(sh.run("add a2 --title Second", AGENT), 0, "a repeat changes nothing");
-    assert_eq!(sh.run("add a2 --title Other", AGENT), 1);
-    assert_eq!(sh.run("link a2 blocks a1", AGENT), 0);
+    assert_eq!(sh.run("item add a1 --title First", AGENT), 0);
+    assert_eq!(sh.run("item add a2 --title Second", AGENT), 0);
+    assert_eq!(sh.run("item add a2 --title Second", AGENT), 0, "a repeat changes nothing");
+    assert_eq!(sh.run("item add a2 --title Other", AGENT), 1);
+    assert_eq!(sh.run("link add a2 blocks a1", AGENT), 0);
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
     assert_eq!(sh.run("claim a1", AGENT), 0);
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0);
     assert_eq!(sh.run("ready", AGENT), 0);
-    assert_eq!(sh.run("thread t1 --title Work", AGENT), 0);
-    assert_eq!(sh.run("member a2 t1", AGENT), 0);
-    assert_eq!(sh.run("approve t1", AGENT), 1, "only the user approves");
-    assert_eq!(sh.run("approve t1 --as-user", AGENT), 0);
-    let (code, proposed) = sh.output("member a1 t1", AGENT);
+    assert_eq!(sh.run("thread set t1 --title Work", AGENT), 0);
+    assert_eq!(sh.run("thread add a2 t1", AGENT), 0);
+    assert_eq!(sh.run("thread approve t1", AGENT), 1, "only the user approves");
+    assert_eq!(sh.run("thread approve t1 --as-user", AGENT), 0);
+    let (code, proposed) = sh.output("thread add a1 t1", AGENT);
     assert_eq!((code, proposed["data"]["outcome"].as_str()), (0, Some("proposed")));
     assert_eq!(sh.run("needs", AGENT), 0);
     let proposal = proposed["data"]["proposal"].as_str().unwrap();
-    assert_eq!(sh.run(&format!("keep {proposal} --as-user"), AGENT), 0);
+    assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
     assert_eq!(sh.run("show a1", AGENT), 0);
     assert_eq!(sh.run("show nope", AGENT), 3);
-    assert_eq!(sh.run("link a1 sideways a2", AGENT), 2);
-    let (code, unlinked) = sh.output("unlink a2 blocks a1", AGENT);
+    let (code, out) = sh.output("thread remove a2 --as-user", AGENT);
+    assert_eq!((code, out["data"]["edit"]["thread"].is_null()), (0, true));
+    assert_eq!(sh.run("repo set r1 --name code", AGENT), 0);
+    for (verb, present) in [("attach", true), ("detach", false)] {
+        let (code, out) = sh.output(&format!("repo {verb} r1 --item a2"), AGENT);
+        let edit = (out["data"]["outcome"].as_str(), out["data"]["edit"]["present"].as_bool());
+        assert_eq!((code, edit), (0, (Some("applied"), Some(present))), "{verb}");
+    }
+    let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
+    assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
+    assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
+    let (code, unlinked) = sh.output("link remove a2 blocks a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
     insta::assert_snapshot!(sh.transcript);
@@ -91,7 +101,7 @@ fn a_journey_through_the_contract() {
 fn an_unreadable_state_points_to_doctor() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
-    sh.run("add a1 --title First", AGENT);
+    sh.run("item add a1 --title First", AGENT);
     // A value from a newer version: an item state this build doesn't know.
     let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
     let meta = acyclic_core::store::Meta { actor: "actor/user".into(), run: None };

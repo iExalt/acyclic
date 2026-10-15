@@ -1,0 +1,31 @@
+---
+source: workspace/acyclic-cli/src/tests.rs
+expression: out
+---
+The acyclic tracker. Every command prints one JSON document
+
+Usage: acyclic [OPTIONS] <COMMAND>
+
+Commands:
+  init      Sets up a tracker clone as a new replica, creating the repository if there is none
+  prime     Prints conventions for agents, matched to this version, as text
+  ready     Lists ready leaves, best first
+  show      Shows an item with its role, readiness and claims
+  claim     Claims a ready leaf, or renews the actor's claim
+  done      Marks an item done, with evidence
+  needs     Lists what needs the user
+  level     Sets the autonomy level, globally or for a thread (the user's)
+  import    Imports a plan: adds and updates what the document names, and never deletes
+  doctor    Lists entities that can't be read
+  item      Adds, edits, moves, reopens or archives items, or sets their state
+  link      Adds or removes links between items
+  thread    Creates or edits threads, and puts items in them; agents' edits to approved threads wait as proposals
+  repo      Creates or edits repository records, and attaches them to items or threads
+  proposal  Keeps or drops proposals (the user's)
+
+Options:
+      --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the mapping in ~/.config/acyclic/trackers.toml
+      --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
+      --as-user            Act as the user
+  -h, --help               Print help
+  -V, --version            Print version

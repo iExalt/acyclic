@@ -28,8 +28,10 @@ older copy.
    tracker; re-run `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work.
 3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
    commit.
-4. `acyclic add`, `edit`, `parent`, `link` and `unlink` shape the plan; `acyclic import <file>` applies a whole
-   plan document, and `--dry-run` reports what it would change.
+4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
+   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
+5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic <group> --help`
+   lists a group's commands.
 
 ## Scope
 
