@@ -89,6 +89,7 @@ fn every_error_has_a_stable_code_and_exit() {
         ApplyError::Cycles(vec![]).into(),
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
+        CliError::refused("unwritable", ""),
     ];
     let mut table = String::new();
     for error in errors {

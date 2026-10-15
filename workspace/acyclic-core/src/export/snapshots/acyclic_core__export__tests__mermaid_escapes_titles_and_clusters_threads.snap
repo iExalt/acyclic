@@ -1,0 +1,25 @@
+---
+source: workspace/acyclic-core/src/export/tests.rs
+expression: "mermaid(&m, &view(&m, &Scope::default()).unwrap())"
+---
+flowchart TB
+  subgraph t_t1["t1 · First #quot;thread#quot;"]
+    n_a["a · Say #quot;hi#quot; #lt;b#gt;#amp;amp;#lt;/b#gt; | ; [x] {y} next line"]
+  end
+  subgraph t_t2["t2 · Second"]
+    n_b["b · Ünïcödé #35; end"]:::done
+  end
+  n_c["c · end"]
+  n_p["p · Project"]
+  n_x["x · Outside"]
+  n_z["z · Old"]:::ghost
+  n_a -.-> n_c
+  n_b --> n_a
+  n_p --- n_a
+  n_p --- n_b
+  n_p --- n_c
+  n_x --> n_c
+  n_z -.- n_a
+  linkStyle 2,3,4 stroke:#bbbbbb
+  classDef done fill:#e8e8e8
+  classDef ghost stroke-dasharray:5 5,color:#888888

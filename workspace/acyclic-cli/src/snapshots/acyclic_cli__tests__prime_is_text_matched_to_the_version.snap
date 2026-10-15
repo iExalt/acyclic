@@ -38,6 +38,8 @@ older copy.
    commit.
 4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
    `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
+   `acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
+   standard output.
 5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic <group> --help`
    lists a group's commands.
 

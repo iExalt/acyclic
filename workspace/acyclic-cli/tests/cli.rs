@@ -100,6 +100,12 @@ fn a_journey_through_the_contract() {
     }
     let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
+    assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
+    let (code, out) = sh.output("graph --format mermaid --output graph.mmd", AGENT);
+    assert_eq!((code, out["data"]["items"].as_u64()), (0, Some(2)));
+    let mermaid = std::fs::read_to_string(sh.path().join("graph.mmd")).unwrap();
+    assert!(mermaid.starts_with("flowchart TB\n"), "{mermaid}");
+    assert_eq!(sh.run("graph --root nope", AGENT), 3);
     assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
     let (code, unlinked) = sh.output("link remove a2 blocks a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");

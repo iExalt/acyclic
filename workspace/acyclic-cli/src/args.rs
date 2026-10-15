@@ -30,7 +30,7 @@ pub struct Cli {
 pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Common Commands", &["ready", "list", "show", "claim", "done", "needs"]),
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
-    ("Other Commands", &["init", "prime", "import", "level", "doctor"]),
+    ("Other Commands", &["init", "prime", "import", "graph", "level", "doctor"]),
 ];
 
 /// The command line, with its top-level help in [`SECTIONS`] rather than one list.
@@ -132,6 +132,24 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
+    /// Draws the graph as DOT or Mermaid, with threads as clusters: to standard output, or to a file.
+    Graph {
+        /// The document's format.
+        #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
+        format: GraphFormat,
+        /// Only this item and its descendants.
+        #[arg(long)]
+        root: Option<String>,
+        /// Only this thread's members; with `--root`, the items in both.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Draw archived items too.
+        #[arg(long)]
+        include_archived: bool,
+        /// Write the document here and print a JSON summary instead.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
     /// Adds, edits, moves, reopens or archives items, or sets their state.
     #[command(subcommand)]
     Item(ItemCommand),
@@ -147,6 +165,15 @@ pub enum Command {
     /// Keeps or drops proposals (the user's).
     #[command(subcommand)]
     Proposal(ProposalCommand),
+}
+
+/// A graph document's format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum GraphFormat {
+    /// Graphviz DOT.
+    Dot,
+    /// A Mermaid flowchart.
+    Mermaid,
 }
 
 /// The item commands.

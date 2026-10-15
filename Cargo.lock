@@ -32,6 +32,7 @@ name = "acyclic-core"
 version = "0.1.0"
 dependencies = [
  "hegeltest",
+ "insta",
  "serde",
  "serde_json",
  "tempfile",

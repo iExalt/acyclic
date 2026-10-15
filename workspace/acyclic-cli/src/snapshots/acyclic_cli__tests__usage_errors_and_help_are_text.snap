@@ -25,6 +25,7 @@ Other Commands:
   init      Sets up a tracker clone as a new replica, creating the repository if there is none
   prime     Prints conventions for agents, matched to this version, as text
   import    Imports a plan: adds and updates what the document names, and never deletes
+  graph     Draws the graph as DOT or Mermaid, with threads as clusters: to standard output, or to a file
   level     Sets the autonomy level, globally or for a thread (the user's)
   doctor    Lists entities that can't be read
 

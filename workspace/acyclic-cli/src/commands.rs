@@ -7,6 +7,7 @@ use std::process::Command as Process;
 
 use acyclic_core::archive;
 use acyclic_core::claim;
+use acyclic_core::export;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model, SetField};
 use acyclic_core::needs;
@@ -22,7 +23,8 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Attachment, Cli, Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, ThreadCommand,
+    Attachment, Cli, Command, GraphFormat, ItemCommand, LinkCommand, ProposalCommand, RepoCommand,
+    ThreadCommand,
 };
 use crate::context;
 use crate::error::{CliError, exit};
@@ -50,6 +52,14 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
         return Ok(Output::Text(prime()));
     }
     let session = Session::open(cli, env)?;
+    if let Command::Graph { format, root, thread, include_archived, output } = &cli.command {
+        let scope = export::Scope {
+            root: root.as_deref(),
+            thread: thread.as_deref(),
+            include_archived: *include_archived,
+        };
+        return session.graph(*format, &scope, output.as_deref());
+    }
     session.dispatch(&cli.command).map(Output::Json)
 }
 
@@ -75,7 +85,9 @@ impl<'a> Session<'a> {
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
     fn dispatch(&self, command: &Command) -> Result<Json, CliError> {
         match command {
-            Command::Init { .. } | Command::Prime => unreachable!("handled before a session opens"),
+            Command::Init { .. } | Command::Prime | Command::Graph { .. } => {
+                unreachable!("handled before dispatch")
+            },
             Command::Ready { include_archived } => self.ready(*include_archived),
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
@@ -316,6 +328,34 @@ impl<'a> Session<'a> {
             .map(|(id, rank)| json!({"item": id, "rank": rank, "title": model.items[&id].title}))
             .collect();
         Ok(json!({"ready": ready}))
+    }
+
+    /// The graph as a document: to standard output as text, or to `output` with a JSON summary.
+    fn graph(
+        &self,
+        format: GraphFormat,
+        scope: &export::Scope<'_>,
+        output: Option<&Path>,
+    ) -> Result<Output, CliError> {
+        let (_, model) = self.read()?;
+        let view = export::view(&model, scope)
+            .map_err(|err| CliError::new("not-found", exit::NOT_FOUND, err.to_string()))?;
+        let (document, name) = match format {
+            GraphFormat::Dot => (export::dot(&model, &view), "dot"),
+            GraphFormat::Mermaid => (export::mermaid(&model, &view), "mermaid"),
+        };
+        let Some(output) = output else { return Ok(Output::Text(document)) };
+        let path = self.env.cwd.join(output);
+        std::fs::write(&path, document).map_err(|err| {
+            CliError::refused("unwritable", format!("can't write {}: {err}", path.display()))
+        })?;
+        Ok(Output::Json(json!({
+            "path": path,
+            "format": name,
+            "items": view.items.len(),
+            "ghosts": view.ghosts.len(),
+            "edges": view.edges.len(),
+        })))
     }
 
     fn list(&self) -> Result<Json, CliError> {

@@ -47,3 +47,4 @@ expression: table
 1 import-cycle
 1 not-ready
 1 already-exists
+1 unwritable

@@ -407,6 +407,42 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic graph --thread t1
+# exit 0
+digraph acyclic {
+  node [shape=box, style=rounded];
+  subgraph "cluster_t_t1" {
+    label="t1 · Work";
+    "n_a1" [label="a1 · First", style="rounded,filled", fillcolor="#e8e8e8"];
+  }
+  "n_a2" [label="a2 · Second", style="rounded,dashed", color=gray, fontcolor=gray];
+  "n_a1" -> "n_a2" [style=solid];
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --output graph.mmd
+# exit 0
+{
+  "data": {
+    "edges": 1,
+    "format": "mermaid",
+    "ghosts": 0,
+    "items": 2,
+    "path": "[dir]/graph.mmd"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic graph --root nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item nope"
+  },
+  "ok": false
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 # exit 2
 
