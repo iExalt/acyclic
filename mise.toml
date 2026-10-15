@@ -44,6 +44,17 @@ depends = ["vendor:graph"]
 env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
 
+[tasks."check:browser"]
+description = "Draws graph pages in headless Chromium and WebKit with the network blocked; downloads Playwright's browsers"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
+run = [
+  "cargo build --quiet --locked -p acyclic -p acyclic-fixtures",
+  # CI sets PLAYWRIGHT_DEPS=--with-deps for the browsers' system libraries.
+  "uv run --no-project --with playwright==1.64.0 python -m playwright install ${PLAYWRIGHT_DEPS:-} chromium webkit",
+  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/debug/acyclic target/debug/acyclic-fixtures",
+]
+
 [tasks."vendor:graph"]
 description = "Fetch the graph page's renderers, pinned by SHA-256, into the CLI's git-ignored assets"
 run = "sh scripts/vendor-graph.sh"
