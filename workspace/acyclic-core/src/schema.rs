@@ -24,8 +24,81 @@ pub mod kind {
 /// The id of the global settings entity.
 pub const GLOBAL: &str = "global";
 
-/// Thread fields set only by the user's batches.
+/// Item fields. Areas, repositories and resources are sets stored a field per element: see [`set`].
+pub mod item {
+    /// A short title.
+    pub const TITLE: &str = "title";
+    /// Design notes.
+    pub const NOTES: &str = "notes";
+    /// The exit check.
+    pub const GATE: &str = "gate";
+    /// The item's state.
+    pub const STATE: &str = "state";
+    /// The parent item's id.
+    pub const PARENT: &str = "parent";
+    /// A rough size.
+    pub const SIZE: &str = "size";
+    /// Whether this done subtree's root is archived.
+    pub const ARCHIVED: &str = "archived";
+    /// Evidence of completion.
+    pub const EVIDENCE: &str = "evidence";
+    /// The thread the item belongs to; at most one, since it is a single field.
+    pub const THREAD: &str = "thread";
+}
+
+/// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.
+pub mod link {
+    /// The dependent item's id.
+    pub const FROM: &str = "from";
+    /// The id of the item it depends on.
+    pub const TO: &str = "to";
+    /// The link's kind.
+    pub const KIND: &str = "kind";
+    /// Whether the link exists; cleared to remove it, and a concurrent re-add wins.
+    pub const PRESENT: &str = "present";
+}
+
+/// Repository record fields.
+pub mod repository {
+    /// The owner, such as an organization.
+    pub const OWNER: &str = "owner";
+    /// The repository's name.
+    pub const NAME: &str = "name";
+    /// Whether the repository is public.
+    pub const PUBLIC: &str = "public";
+    /// The default branch.
+    pub const DEFAULT_BRANCH: &str = "default-branch";
+    /// The App's installation that reaches it.
+    pub const INSTALLATION: &str = "installation";
+}
+
+/// Run record fields.
+pub mod run {
+    /// The thread the run works on.
+    pub const THREAD: &str = "thread";
+    /// The run's state.
+    pub const STATE: &str = "run-state";
+}
+
+/// Prefixes of the fields that hold a set, one field per element with the value `true`. A concurrent add and remove
+/// keeps the add.
+pub mod set {
+    /// Area tags, on items.
+    pub const AREA: &str = "area/";
+    /// Repositories, on items and threads (those added explicitly).
+    pub const REPOSITORY: &str = "repository/";
+    /// Named resources, on items.
+    pub const RESOURCE: &str = "resource/";
+}
+
+/// Thread fields; the flags and choices are set only by the user's batches.
 pub mod thread {
+    /// A short title.
+    pub const TITLE: &str = "title";
+    /// The brief.
+    pub const BRIEF: &str = "brief";
+    /// Whether the thread's scope is approved.
+    pub const APPROVED: &str = "approved";
     /// Whether the thread's agent is a project-management agent.
     pub const PM_FLAG: &str = "pm-flag";
     /// The thread's autonomy level, overriding the global default.

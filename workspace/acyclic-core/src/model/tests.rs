@@ -1,0 +1,251 @@
+use serde_json::json;
+
+use super::*;
+use crate::state::ReplicaId;
+
+fn replica(name: &str) -> Replica {
+    Replica::open(ReplicaId::new(name).unwrap(), State::new())
+}
+
+fn by(at: Millis) -> By<'static> {
+    By { actor: "actor/user", at }
+}
+
+fn items(replica: &mut Replica, ids: &[&str]) {
+    for id in ids {
+        add_item(replica, id, id, by(1)).unwrap();
+    }
+}
+
+fn model(replica: &Replica) -> Model {
+    Model::read(&replica.state).unwrap()
+}
+
+/// Two replicas that share the given items, so each can then write concurrently.
+fn pair(ids: &[&str]) -> (Replica, Replica) {
+    let mut a = replica("a");
+    items(&mut a, ids);
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    (a, b)
+}
+
+#[test]
+fn roles_follow_children_gates_and_the_top_level() {
+    let mut r = replica("a");
+    items(&mut r, &["top", "gated", "plain", "leaf", "leaf2", "gated-top", "under-gated-top"]);
+    set_parent(&mut r, "gated", Some("top"), by(2)).unwrap();
+    set_parent(&mut r, "plain", Some("top"), by(2)).unwrap();
+    set_parent(&mut r, "leaf", Some("gated"), by(2)).unwrap();
+    set_parent(&mut r, "leaf2", Some("plain"), by(2)).unwrap();
+    set_parent(&mut r, "under-gated-top", Some("gated-top"), by(2)).unwrap();
+    for id in ["gated", "gated-top"] {
+        set(&mut r, &item_key(id).unwrap(), field::GATE, Some(&"ships"), by(3)).unwrap();
+    }
+    let m = model(&r);
+    assert_eq!(m.role("top"), Role::Project);
+    assert_eq!(m.role("gated"), Role::Goal);
+    assert_eq!(m.role("plain"), Role::Group);
+    assert_eq!(m.role("leaf"), Role::Item);
+    // A top-level parent is a project even with a gate.
+    assert_eq!(m.role("gated-top"), Role::Project);
+    // An unplaced leaf is an item, not a project.
+    let mut r = replica("b");
+    items(&mut r, &["alone"]);
+    assert_eq!(model(&r).role("alone"), Role::Item);
+}
+
+#[test]
+fn an_item_never_goes_under_itself_or_a_descendant() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b", "c"]);
+    set_parent(&mut r, "b", Some("a"), by(2)).unwrap();
+    set_parent(&mut r, "c", Some("b"), by(2)).unwrap();
+    assert_eq!(set_parent(&mut r, "a", Some("a"), by(3)), Err(WriteError::ParentCycle("a".into())));
+    assert_eq!(set_parent(&mut r, "a", Some("c"), by(3)), Err(WriteError::ParentCycle("a".into())));
+    assert_eq!(
+        set_parent(&mut r, "a", Some("missing"), by(3)),
+        Err(WriteError::NoItem("missing".into()))
+    );
+    set_parent(&mut r, "c", None, by(3)).unwrap();
+    assert_eq!(model(&r).ancestors("c"), Vec::<&str>::new());
+}
+
+#[test]
+fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
+    let (mut a, mut b) = pair(&["x", "y"]);
+    set_parent(&mut a, "x", Some("y"), by(2)).unwrap();
+    set_parent(&mut b, "y", Some("x"), by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    let m = model(&a);
+    assert_eq!(m.parent_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
+    assert_eq!(m.ancestors("x"), vec!["y"]);
+    assert_eq!(m.subtree("x").len(), 2);
+    assert_eq!(m.role("x"), Role::Group);
+    assert!(!m.is_archived("x"));
+    set(&mut a, &item_key("y").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
+    assert!(model(&a).is_archived("x"), "inherited through the cycle, and the walk ends");
+}
+
+#[test]
+fn a_conflicted_parent_counts_as_each_of_its_values() {
+    let (mut a, mut b) = pair(&["p1", "p2", "child"]);
+    set_parent(&mut a, "child", Some("p1"), by(2)).unwrap();
+    set_parent(&mut b, "child", Some("p2"), by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    let m = model(&a);
+    assert!(m.items["child"].parent.is_conflict());
+    let mut ancestors = m.ancestors("child");
+    ancestors.sort_unstable();
+    assert_eq!(ancestors, vec!["p1", "p2"]);
+    assert_eq!((m.children("p1"), m.children("p2")), (vec!["child"], vec!["child"]));
+}
+
+#[test]
+fn ordering_links_never_close_a_cycle_locally() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b", "c"]);
+    link(&mut r, "a", "b", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "b", "c", LinkKind::After, by(2)).unwrap();
+    // Hard and soft links count together.
+    let err = link(&mut r, "c", "a", LinkKind::Blocks, by(3)).unwrap_err();
+    assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
+    assert!(matches!(
+        link(&mut r, "a", "a", LinkKind::After, by(3)),
+        Err(WriteError::LinkCycle(_))
+    ));
+    // Context links don't order anything.
+    link(&mut r, "c", "a", LinkKind::Relates, by(3)).unwrap();
+    assert!(model(&r).link_cycles().is_empty());
+}
+
+#[test]
+fn a_link_cycle_made_by_a_join_is_derived() {
+    let (mut a, mut b) = pair(&["x", "y"]);
+    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut b, "y", "x", LinkKind::After, by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).link_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
+}
+
+#[test]
+fn one_link_added_twice_is_one_link_and_a_re_add_beats_a_removal() {
+    let (mut a, mut b) = pair(&["x", "y"]);
+    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut b, "x", "y", LinkKind::Blocks, by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).links.len(), 1);
+    b.join(&a.state).unwrap();
+    unlink(&mut a, "x", "y", LinkKind::Blocks, by(3)).unwrap();
+    assert!(model(&a).links.is_empty());
+    link(&mut b, "x", "y", LinkKind::Blocks, by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).links.len(), 1, "the concurrent re-add wins");
+}
+
+#[test]
+fn link_ids_are_unambiguous() {
+    let one = link_key("a-b", "c", LinkKind::Blocks).unwrap();
+    let two = link_key("a", "b-c", LinkKind::Blocks).unwrap();
+    assert_ne!(one, two);
+}
+
+#[test]
+fn set_elements_merge_and_a_concurrent_add_beats_a_removal() {
+    let (mut a, mut b) = pair(&["x"]);
+    let key = item_key("x").unwrap();
+    set_element(&mut a, &key, set::AREA, "ui", true, by(2)).unwrap();
+    set_element(&mut b, &key, set::AREA, "core", true, by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    b.join(&a.state).unwrap();
+    assert_eq!(model(&a).items["x"].areas, BTreeSet::from(["core".into(), "ui".into()]));
+    set_element(&mut a, &key, set::AREA, "ui", false, by(3)).unwrap();
+    set_element(&mut b, &key, set::AREA, "ui", true, by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert!(model(&a).items["x"].areas.contains("ui"));
+}
+
+#[test]
+fn names_follow_the_id_rule() {
+    let mut r = replica("a");
+    items(&mut r, &["x"]);
+    let key = item_key("x").unwrap();
+    for bad in ["a/b", "Engine", "", ".hidden"] {
+        assert_eq!(
+            set_element(&mut r, &key, set::RESOURCE, bad, true, by(2)),
+            Err(WriteError::InvalidName(bad.to_owned()))
+        );
+    }
+    let long = "a".repeat(MAX_ID_LEN + 1);
+    assert!(matches!(add_item(&mut r, &long, "t", by(2)), Err(WriteError::InvalidName(_))));
+    add_item(&mut r, &"a".repeat(MAX_ID_LEN), "t", by(2)).unwrap();
+}
+
+#[test]
+fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() {
+    let (mut a, mut b) = pair(&["x", "y"]);
+    let thread_key = |id| Key::new(kind::THREAD, id).unwrap();
+    set(&mut a, &thread_key("t1"), thread::TITLE, Some(&"one"), by(2)).unwrap();
+    set_element(&mut a, &thread_key("t1"), set::REPOSITORY, "docs", true, by(2)).unwrap();
+    for (id, repo) in [("x", "code"), ("y", "infra")] {
+        set_element(&mut a, &item_key(id).unwrap(), set::REPOSITORY, repo, true, by(2)).unwrap();
+    }
+    set(&mut a, &item_key("x").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
+    set(&mut a, &item_key("y").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
+    set(&mut b, &item_key("y").unwrap(), field::THREAD, Some(&"t2"), by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    let m = model(&a);
+    assert_eq!(m.members("t1"), vec!["x"]);
+    assert!(m.members("t2").is_empty());
+    assert_eq!(m.thread_of("y"), None);
+    assert_eq!(m.repository_set("t1"), BTreeSet::from(["code".into(), "docs".into()]));
+}
+
+#[test]
+fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
+    let (mut a, mut b) = pair(&["x"]);
+    set_state(&mut a, "x", ItemState::Done, by(10)).unwrap();
+    set_state(&mut b, "x", ItemState::Done, by(20)).unwrap();
+    a.join(&b.state).unwrap();
+    let m = model(&a);
+    assert_eq!(
+        (m.items["x"].state.clone(), m.items["x"].done_at),
+        (Value::One(ItemState::Done), Some(10))
+    );
+    let before = a.state.clone();
+    set_state(&mut a, "x", ItemState::Done, by(30)).unwrap();
+    assert_eq!(a.state, before);
+    set_state(&mut a, "x", ItemState::InProgress, by(40)).unwrap();
+    assert_eq!(model(&a).items["x"].done_at, None);
+}
+
+#[test]
+fn a_thread_runs_one_run_at_a_time() {
+    let (mut a, mut b) = pair(&[]);
+    start_run(&mut a, "r1", "t1", by(1)).unwrap();
+    assert_eq!(
+        start_run(&mut a, "r2", "t1", by(2)),
+        Err(WriteError::RunActive { thread: "t1".into(), run: "r1".into() })
+    );
+    start_run(&mut b, "r3", "t1", by(1)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(
+        model(&a).run_clashes(),
+        BTreeMap::from([("t1".into(), vec!["r1".into(), "r3".into()])])
+    );
+    let r1 = Key::new(kind::RUN, "r1").unwrap();
+    set(&mut a, &r1, run::STATE, Some(&RunState::Done), by(3)).unwrap();
+    assert!(model(&a).run_clashes().is_empty());
+}
+
+#[test]
+fn equal_concurrent_values_read_as_one_and_unreadable_ones_fail() {
+    let (mut a, mut b) = pair(&["x"]);
+    let key = item_key("x").unwrap();
+    set(&mut a, &key, field::SIZE, Some(&Size::M), by(2)).unwrap();
+    set(&mut b, &key, field::SIZE, Some(&Size::M), by(2)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).items["x"].size, Value::One(Size::M));
+    a.write(&key, field::STATE, "actor/user", 3, Some(json!("from-the-future"))).unwrap();
+    assert!(matches!(Model::read(&a.state), Err(Error::Format(_))));
+}

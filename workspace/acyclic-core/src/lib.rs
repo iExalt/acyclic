@@ -8,6 +8,7 @@ pub mod claim;
 pub mod graph;
 pub mod import;
 pub mod locate;
+pub mod model;
 pub mod schema;
 pub mod state;
 pub mod store;
