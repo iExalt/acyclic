@@ -172,8 +172,12 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
         (dry["changed"].as_bool(), dry["report"]["items"].as_u64()),
         (Some(false), Some(50))
     );
+    // The plan's unthreaded work joins the threads above it.
+    let placed = dry["placed"].clone();
+    assert!(placed["inherited"].as_array().is_some_and(|i| !i.is_empty()), "{dry}");
     assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
-    assert_eq!(import(&mut sh, "")["changed"], true);
+    let done = import(&mut sh, "");
+    assert_eq!((done["changed"].as_bool(), &done["placed"]), (Some(true), &placed));
     let refs = |sh: &Shell| {
         let out = std::process::Command::new("git")
             .args(["for-each-ref", "--format=%(refname) %(objectname)"])

@@ -40,4 +40,5 @@ older copy.
    lists a group's commands.
 6. `acyclic thread split` groups open leaves that no thread holds into draft threads of up to 25 items, unless
    linked work must stay together; `--dry-run` shows them first. Improve a draft's title and brief, and leave
-   approving it to the user.
+   approving it to the user. New or moved work joins the thread of its nearest threaded ancestor, and work
+   piling up without a thread is split on its own: an add, move or import reports what it placed as `placed`.

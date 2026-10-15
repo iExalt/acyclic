@@ -451,6 +451,37 @@ mod tests {
 
     use crate::stats::Stats;
 
+    /// A split of the synthetic plan, its threads left out so that all of its open work is split, keeps each draft
+    /// within the cap and leaves no drafts waiting on each other in a cycle.
+    #[test]
+    fn splits_of_the_plan_respect_dependencies_and_the_cap() {
+        use acyclic_core::model::{By, Model};
+        use acyclic_core::scope::USER;
+        use acyclic_core::split;
+        use acyclic_core::state::{Replica, ReplicaId, State};
+
+        let mut plan = generate(BASE_ITEMS * 10, 7);
+        plan.threads.clear();
+        let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+        let by = By { actor: USER, at: 1 };
+        acyclic_core::import::apply(&plan, &mut r, by).unwrap();
+        let keys: Vec<String> = plan.items.iter().map(|item| item.key.clone()).collect();
+        let placed = split::place(&mut r, &keys, None, by).unwrap();
+        assert!(placed.drafts.len() > 1, "{placed:?}");
+        // The plan's links never tie pieces into a cycle, so every draft fits.
+        for draft in &placed.drafts {
+            assert!(draft.members.len() <= split::CAP && !draft.merged_cycle, "{draft:?}");
+        }
+        let model = Model::read(r.state()).unwrap();
+        for cycle in split::thread_cycles(&model) {
+            assert!(
+                !cycle.iter().all(|t| t.starts_with(split::PREFIX)),
+                "drafts deadlock: {cycle:?}"
+            );
+        }
+        assert_eq!(split::plan(&model, None), vec![], "nothing left to split");
+    }
+
     fn check_shape(items: usize, seed: u64) -> Stats {
         let import = generate(items, seed);
         assert_eq!(import.validate(), vec![], "{items}/{seed} validates");

@@ -139,12 +139,15 @@ impl<'a> Session<'a> {
             }),
             Command::Item(ItemCommand::Move { id, parent }) => self.write(|replica, by| {
                 let key = existing(replica, id)?;
+                let mut placement = split::Placement::default();
                 if single(replica.state().field(&key, field::PARENT))
                     != parent.as_ref().map(|p| json!(p))
                 {
                     model::set_parent(replica, id, parent.as_deref(), by)?;
+                    placement =
+                        split::place(replica, std::slice::from_ref(id), Some(split::BUDGET), by)?;
                 }
-                Ok(json!({"item": id, "parent": parent}))
+                Ok(with_placement(json!({"item": id, "parent": parent}), placement, false))
             }),
             Command::Link(LinkCommand::Add { from, kind, to }) => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
@@ -473,37 +476,16 @@ impl<'a> Session<'a> {
     /// Splits unthreaded leaves into draft threads, or with `dry_run` only reports them.
     fn split(&self, root: Option<&str>, dry_run: bool) -> Result<Json, CliError> {
         let report = |drafts: Vec<split::Draft>| -> Json {
-            let drafts: Vec<Json> = drafts
-                .into_iter()
-                .map(|draft| {
-                    let review = if dry_run {
-                        format!("acyclic graph --open --root {}", draft.root)
-                    } else {
-                        format!("acyclic graph --open --thread {}", draft.id)
-                    };
-                    json!({
-                        "thread": draft.id,
-                        "title": draft.title,
-                        "root": draft.root,
-                        "size": draft.members.len(),
-                        "members": draft.members,
-                        "merged_cycle": draft.merged_cycle,
-                        "cross_top": draft.cross_top,
-                        "waits_with": draft.waits_with,
-                        "review": review,
-                    })
-                })
-                .collect();
-            json!({"cap": split::CAP, "drafts": drafts, "dry_run": dry_run})
+            json!({"cap": split::CAP, "drafts": drafts_json(drafts, dry_run), "dry_run": dry_run})
         };
         if dry_run {
-            let (_, model) = self.read()?;
+            let (state, model) = self.read()?;
             if let Some(root) = root
                 && !model.items.contains_key(root)
             {
                 return Err(not_found(root));
             }
-            let mut data = report(split::plan(&model, root));
+            let mut data = report(split::plan_with(&model, root, &split::held(&state)?));
             data["changed"] = json!(false);
             return Ok(data);
         }
@@ -543,6 +525,8 @@ impl<'a> Session<'a> {
     fn add(&self, id: &str, title: &str, parent: Option<&str>) -> Result<Json, CliError> {
         self.write(|replica, by| {
             let key = model::item_key(id)?;
+            // Only a parent places an item: a new top-level item has nothing to inherit and is one leaf.
+            let mut placed = false;
             if replica.state().entity(&key).is_some() {
                 if single(replica.state().field(&key, field::TITLE)) != Some(json!(title)) {
                     return Err(CliError::refused(
@@ -557,8 +541,14 @@ impl<'a> Session<'a> {
                 && single(replica.state().field(&key, field::PARENT)) != Some(json!(parent))
             {
                 model::set_parent(replica, id, Some(parent), by)?;
+                placed = true;
             }
-            Ok(json!({"item": id}))
+            let placement = if placed {
+                split::place(replica, &[id.to_owned()], Some(split::BUDGET), by)?
+            } else {
+                split::Placement::default()
+            };
+            Ok(with_placement(json!({"item": id}), placement, false))
         })
     }
 
@@ -568,16 +558,22 @@ impl<'a> Session<'a> {
             CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
         })?;
         let doc = Import::from_json(&text)?;
+        // Every subtree the document touches is split, as a plan's import is when work arrives in bulk.
+        let keys: Vec<String> = doc.items.iter().map(|item| item.key.clone()).collect();
         if dry_run {
             let (_, state) = self.tracker.load()?;
             let mut replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let report = import::apply(&doc, &mut replica, By { actor: &self.actor, at })?;
-            return Ok(json!({"report": report, "dry_run": true, "changed": false}));
+            let by = By { actor: &self.actor, at };
+            let report = import::apply(&doc, &mut replica, by)?;
+            let placement = split::place(&mut replica, &keys, None, by)?;
+            let data = json!({"report": report, "dry_run": true, "changed": false});
+            return Ok(with_placement(data, placement, true));
         }
         self.write(|replica, by| {
             let report = import::apply(&doc, replica, by)?;
-            Ok(json!({"report": report, "dry_run": false}))
+            let placement = split::place(replica, &keys, None, by)?;
+            Ok(with_placement(json!({"report": report, "dry_run": false}), placement, false))
         })
     }
 
@@ -747,4 +743,40 @@ fn init(path: &Path, replica: &str) -> Result<Json, CliError> {
     }
     store::init_replica(path, &id)?;
     Ok(json!({"path": path, "replica": replica, "created": !is_repo, "changed": true}))
+}
+
+/// Drafts as `thread split` and placements print them, each with a command to review it.
+fn drafts_json(drafts: Vec<split::Draft>, dry_run: bool) -> Vec<Json> {
+    drafts
+        .into_iter()
+        .map(|draft| {
+            let review = if dry_run {
+                format!("acyclic graph --open --root {}", draft.root)
+            } else {
+                format!("acyclic graph --open --thread {}", draft.id)
+            };
+            json!({
+                "thread": draft.id,
+                "title": draft.title,
+                "root": draft.root,
+                "size": draft.members.len(),
+                "members": draft.members,
+                "merged_cycle": draft.merged_cycle,
+                "cross_top": draft.cross_top,
+                "waits_with": draft.waits_with,
+                "review": review,
+            })
+        })
+        .collect()
+}
+
+/// Adds what placing new or moved work did to a command's data, when it did anything.
+fn with_placement(mut data: Json, placement: split::Placement, dry_run: bool) -> Json {
+    if !placement.is_empty() {
+        data["placed"] = json!({
+            "inherited": placement.inherited,
+            "drafts": drafts_json(placement.drafts, dry_run),
+        });
+    }
+    data
 }

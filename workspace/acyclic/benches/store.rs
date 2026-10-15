@@ -212,6 +212,29 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         })
         .collect();
     record(&mut row, "link", &links);
+    // A new top-level item filled to the split budget: the next add under it is timed beside the add before it,
+    // which splits nothing. Its first child splits it at once, as a new group, so the fill starts after that.
+    let budget = acyclic_core::split::BUDGET;
+    let (plain, splitting): (Vec<Sample>, Vec<Sample>) = (0..runs)
+        .map(|n| {
+            tracker.run(&format!("item add goal-{n} --title Goal"), false);
+            for k in 0..budget {
+                tracker
+                    .run(&format!("item add goal-{n}-{k} --title Leaf --parent goal-{n}"), false);
+            }
+            let line = format!("item add goal-{n}-{budget} --title Leaf --parent goal-{n}");
+            let plain = tracker.time(&line, false);
+            let line = format!("item add goal-{n}-last --title Leaf --parent goal-{n}");
+            let (out, splitting) = tracker.run(&line, false);
+            assert!(
+                out["data"]["placed"]["drafts"].is_array(),
+                "the add past the budget splits: {out}"
+            );
+            (plain, splitting)
+        })
+        .unzip();
+    record(&mut row, "add", &plain);
+    record(&mut row, "add, splitting", &splitting);
     if batches > 0 {
         // Distinct items, so the cache's delta grows as an agent's day of edits would grow it.
         let (ready, _) = tracker.run("ready", false);
@@ -324,6 +347,8 @@ fn print_table(rows: &[Row], batches: usize) {
         "claim",
         "claim again",
         "link",
+        "add",
+        "add, splitting",
     ];
     if batches > 0 {
         columns.extend(["edit after batches", "show after batches"]);

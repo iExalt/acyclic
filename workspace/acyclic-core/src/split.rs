@@ -1,5 +1,5 @@
-//! Automatic splits: open leaves that no thread holds are grouped into draft threads, which agents refine
-//! and the user approves. A split is computed, not judged: it keeps linked work together, keeps each draft inside one
+//! Automatic splits: open leaves that no thread holds are grouped into draft threads, which agents refine and the user
+//! approves. A split is computed, not judged: it keeps linked work together, keeps each draft inside one
 //! subtree, and caps a draft's size. It never moves an item that a thread holds, so approved scope is never touched;
 //! the one exception heals a conflict between unapproved split threads, which concurrent splits on two replicas make.
 //!
@@ -8,16 +8,19 @@
 //! 1. The candidates are open, unarchived leaves with no thread. A subtree whose parent is in conflict waits until the
 //!    conflict is resolved, since it belongs to two places at once.
 //! 2. Candidates tied by a link that orders work (`blocks` or `after`), a link on a group counting for every leaf under
-//!    it, form components. A component
-//!    of at most [`CAP`] leaves stays whole; a larger one is cut, leaf by leaf, along the tree.
+//!    it, form components. A component of at most [`CAP`] leaves stays whole as a piece; a larger one is cut into
+//!    single leaves.
 //! 3. Each piece sits at its leaves' lowest common ancestor. Bottom up, a node gathers its children's open groups and
 //!    its own pieces: while they fit in [`CAP`] they stay one group, open to its parent; otherwise they are packed into
 //!    as few drafts of even size as fit, rooted at that node.
-//! 4. Drafts that `blocks` links would make wait on each other in a cycle are merged, which may exceed the cap or span
-//!    two top-level items; the draft says so, since leaving them apart would deadlock their runs. A cycle through an
-//!    existing thread can't be merged, since a split never touches one; the draft names that thread instead.
+//! 4. Drafts that `blocks` links would make wait on each other in a cycle, which would deadlock their runs, are cut
+//!    again along an order every `blocks` link among them follows, so they wait one way only. Only pieces that wait on
+//!    each other in a cycle must share a draft, which may then pass the cap or span two top-level items; the draft says
+//!    so. A cycle through an existing thread can't be cut, since a split never touches one; the draft names that
+//!    thread instead.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fmt::Write as _;
 
 use serde::Serialize;
@@ -25,9 +28,9 @@ use serde::Serialize;
 use crate::model::{self, By, LinkKind, MAX_ID_LEN, Model, Thread, Value};
 use crate::schema::{kind, thread};
 use crate::scope::{self, ScopeEdit, ScopeError};
-use crate::state::{Key, Replica};
+use crate::state::{Error, Key, Replica, State};
 
-/// The most leaves a draft holds, unless a cycle merged it.
+/// The most leaves a draft holds, unless pieces waiting on each other must share it.
 pub const CAP: usize = 25;
 /// Unassigned open leaves in a top-level subtree beyond which an add splits it.
 pub const BUDGET: usize = 10;
@@ -39,15 +42,15 @@ pub const PREFIX: &str = "s-";
 pub struct Draft {
     /// Its id: the prefix, its root's id and a hash of its members, so equal splits agree and different ones differ.
     pub id: String,
-    /// The item whose subtree holds every member; for a merged cycle across top-level items, the first of them.
+    /// The item whose subtree holds every member; for a draft across top-level items, the first of them.
     pub root: String,
     /// A title for agents to improve: the root's, with an area or repository every member shares.
     pub title: String,
     /// Its members.
     pub members: BTreeSet<String>,
-    /// Whether it merged drafts that would wait on each other, which may take it past the cap.
+    /// Whether it holds pieces that wait on each other in a cycle, which may take it past the cap.
     pub merged_cycle: bool,
-    /// Whether that merge spans top-level items, so `root` holds only some members.
+    /// Whether it spans top-level items, so `root` holds only some members.
     pub cross_top: bool,
     /// Existing threads it would wait on in a cycle, which only a change to those threads can break.
     pub waits_with: BTreeSet<String>,
@@ -75,9 +78,18 @@ fn candidate(model: &Model, id: &str) -> bool {
         && unassigned(model, id)
 }
 
+/// No items held back.
+static NONE: BTreeSet<String> = BTreeSet::new();
+
 /// The drafts for every top-level subtree, or for `root`'s subtree alone.
 #[must_use]
 pub fn plan(model: &Model, root: Option<&str>) -> Vec<Draft> {
+    plan_with(model, root, &NONE)
+}
+
+/// Like [`plan`], leaving out the `held` items, such as those [`held`] names.
+#[must_use]
+pub fn plan_with(model: &Model, root: Option<&str>, held: &BTreeSet<String>) -> Vec<Draft> {
     let tops: Vec<&str> = match root {
         Some(root) if model.items.contains_key(root) => vec![root],
         Some(_) => Vec::new(),
@@ -88,19 +100,41 @@ pub fn plan(model: &Model, root: Option<&str>) -> Vec<Draft> {
             .map(|item| item.id.as_str())
             .collect(),
     };
-    let mut split = Split { model, under: BTreeMap::new(), top: BTreeMap::new() };
-    for top in &tops {
+    plan_tops(model, &tops, held)
+}
+
+/// The items a pending proposal would put in a thread, or take out of one: the user decides where they go, so a
+/// split leaves them be.
+///
+/// # Errors
+///
+/// Fails on an unreadable proposal.
+pub fn held(state: &State) -> Result<BTreeSet<String>, Error> {
+    Ok(scope::proposals(state)?
+        .into_values()
+        .filter(|proposal| proposal.decision == Value::None)
+        .filter_map(|proposal| match proposal.edit.one() {
+            Some(ScopeEdit::Member { item, .. }) => Some(item.clone()),
+            _ => None,
+        })
+        .collect())
+}
+
+/// The drafts for these top-level items' subtrees.
+fn plan_tops(model: &Model, tops: &[&str], held: &BTreeSet<String>) -> Vec<Draft> {
+    let mut split = Split::new(model, held);
+    for top in tops {
         split.collect(top, top, &mut BTreeSet::new());
     }
-    let pieces = split.pieces();
+    let (pieces, unit_of) = split.pieces();
     let mut drafts = Vec::new();
-    for top in &tops {
+    for top in tops {
         let mut seen = BTreeSet::new();
         let (closed, open) = split.pack(top, &pieces, &mut seen);
         drafts.extend(closed);
         drafts.extend(open);
     }
-    let drafts = split.merge_cycles(drafts);
+    let drafts = split.untangle(drafts, &unit_of);
     let waits = split.waits_with(&drafts);
     let mut taken: BTreeSet<String> = model.threads.keys().cloned().collect();
     drafts
@@ -136,6 +170,10 @@ struct Split<'a> {
     under: BTreeMap<&'a str, Vec<&'a str>>,
     /// Each candidate's top-level item.
     top: BTreeMap<&'a str, &'a str>,
+    /// Each candidate's place in a walk of the tree, which orders work that links leave unordered.
+    position: BTreeMap<&'a str, usize>,
+    /// Items that would be candidates but wait on a proposal.
+    held: &'a BTreeSet<String>,
 }
 
 type Group<'a> = BTreeSet<&'a str>;
@@ -150,6 +188,11 @@ enum Waiter<'a> {
 }
 
 impl<'a> Split<'a> {
+    fn new(model: &'a Model, held: &'a BTreeSet<String>) -> Self {
+        let (under, top, position) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+        Self { model, under, top, position, held }
+    }
+
     /// Records the candidates under `node`, guarding against a parent cycle a join made.
     fn collect(
         &mut self,
@@ -162,8 +205,9 @@ impl<'a> Split<'a> {
         }
         let children = self.model.children(node);
         let leaves = if children.is_empty() {
-            if candidate(self.model, node) {
+            if candidate(self.model, node) && !self.held.contains(node) {
                 self.top.insert(node, top);
+                self.position.insert(node, self.position.len());
                 vec![node]
             } else {
                 Vec::new()
@@ -193,8 +237,8 @@ impl<'a> Split<'a> {
         self.under.get(id).map_or(&[], Vec::as_slice)
     }
 
-    /// The pieces, each placed at its leaves' lowest common ancestor.
-    fn pieces(&self) -> BTreeMap<&'a str, Vec<Group<'a>>> {
+    /// The pieces, each placed at its leaves' lowest common ancestor, and the piece each candidate is in.
+    fn pieces(&self) -> (BTreeMap<&'a str, Vec<Group<'a>>>, BTreeMap<&'a str, usize>) {
         let leaves: Vec<&str> = self.top.keys().copied().collect();
         let index: BTreeMap<&str, usize> =
             leaves.iter().enumerate().map(|(i, leaf)| (*leaf, i)).collect();
@@ -222,16 +266,22 @@ impl<'a> Split<'a> {
             components.entry(find(&mut parent, i)).or_default().insert(leaf);
         }
         let mut pieces: BTreeMap<&str, Vec<Group<'a>>> = BTreeMap::new();
+        let mut unit_of = BTreeMap::new();
+        let mut add = |at: &'a str, piece: Group<'a>| {
+            let unit = unit_of.len();
+            unit_of.extend(piece.iter().map(|leaf| (*leaf, unit)));
+            pieces.entry(at).or_default().push(piece);
+        };
         for component in components.into_values() {
             if component.len() <= CAP {
-                pieces.entry(self.lowest_common_ancestor(&component)).or_default().push(component);
+                add(self.lowest_common_ancestor(&component), component);
             } else {
                 for leaf in component {
-                    pieces.entry(leaf).or_default().push(BTreeSet::from([leaf]));
+                    add(leaf, BTreeSet::from([leaf]));
                 }
             }
         }
-        pieces
+        (pieces, unit_of)
     }
 
     fn lowest_common_ancestor(&self, leaves: &Group<'a>) -> &'a str {
@@ -309,45 +359,129 @@ impl<'a> Split<'a> {
         )
     }
 
-    /// Merges drafts that `blocks` links make wait on each other in a cycle.
-    fn merge_cycles(&self, drafts: Vec<Rooted<'a>>) -> Vec<(String, Group<'a>, bool)> {
+    /// Untangles drafts that `blocks` links make wait on each other in a cycle: their leaves are cut again, in an
+    /// order that every `blocks` link among them follows, into even drafts that wait on each other only one way.
+    /// Pieces stay whole, so only pieces that wait on each other in a cycle themselves must share a draft, which may
+    /// then pass the cap.
+    fn untangle(
+        &self,
+        drafts: Vec<Rooted<'a>>,
+        unit_of: &BTreeMap<&'a str, usize>,
+    ) -> Vec<(String, Group<'a>, bool)> {
         let mut draft_of: BTreeMap<&str, usize> = BTreeMap::new();
         for (i, (_, members)) in drafts.iter().enumerate() {
             for member in members {
                 draft_of.insert(member, i);
             }
         }
-        let drafts_under = |id: &str| -> BTreeSet<usize> {
-            self.leaves(id).iter().filter_map(|leaf| draft_of.get(leaf).copied()).collect()
-        };
-        let mut edges = Vec::new();
+        let edges = self.blocks_edges(|leaf| draft_of.get(leaf).copied());
+        let cycles = crate::graph::cycles(&edges);
+        let tangled: BTreeSet<usize> = cycles.iter().flatten().copied().collect();
+        let mut drafts: Vec<Option<Rooted<'a>>> = drafts.into_iter().map(Some).collect();
+        let mut out = Vec::new();
+        for (i, draft) in drafts.iter_mut().enumerate() {
+            if !tangled.contains(&i)
+                && let Some((root, members)) = draft.take()
+            {
+                out.push((root.to_owned(), members, false));
+            }
+        }
+        for cycle in cycles {
+            let leaves: Group<'a> = cycle
+                .iter()
+                .filter_map(|&i| drafts[i].take())
+                .flat_map(|(_, members)| members)
+                .collect();
+            out.extend(self.recut(&leaves, unit_of));
+        }
+        out
+    }
+
+    /// The `(depended on, dependent)` pairs that `blocks` links make between the nodes `node_of` maps leaves to.
+    fn blocks_edges(&self, node_of: impl Fn(&str) -> Option<usize>) -> Vec<(usize, usize)> {
+        let mut edges = BTreeSet::new();
         for link in self.model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
-            for to in drafts_under(&link.to) {
-                for from in drafts_under(&link.from) {
-                    if from != to {
-                        edges.push((to, from));
-                    }
+            let nodes = |id: &str| -> BTreeSet<usize> {
+                self.leaves(id).iter().filter_map(|leaf| node_of(leaf)).collect()
+            };
+            let from = nodes(&link.from);
+            for to in nodes(&link.to) {
+                edges.extend(from.iter().filter(|from| **from != to).map(|from| (to, *from)));
+            }
+        }
+        edges.into_iter().collect()
+    }
+
+    /// Cuts `leaves` into even drafts along an order of their pieces that every `blocks` link among them follows,
+    /// earliest in the tree first; pieces that wait on each other in a cycle become one.
+    fn recut(
+        &self,
+        leaves: &Group<'a>,
+        unit_of: &BTreeMap<&'a str, usize>,
+    ) -> Vec<(String, Group<'a>, bool)> {
+        let unit = |leaf: &str| leaves.contains(leaf).then(|| unit_of[leaf]);
+        let edges = self.blocks_edges(unit);
+        let mut node: BTreeMap<usize, usize> =
+            leaves.iter().map(|leaf| (unit_of[leaf], unit_of[leaf])).collect();
+        let mut merged = BTreeSet::new();
+        for cycle in crate::graph::cycles(&edges) {
+            for &u in &cycle {
+                node.insert(u, cycle[0]);
+            }
+            merged.insert(cycle[0]);
+        }
+        let mut nodes: BTreeMap<usize, Group<'a>> = BTreeMap::new();
+        for leaf in leaves {
+            nodes.entry(node[&unit_of[leaf]]).or_default().insert(leaf);
+        }
+        let mut waiting: BTreeMap<usize, usize> = nodes.keys().map(|&n| (n, 0)).collect();
+        let mut next: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        for (to, from) in edges {
+            let (to, from) = (node[&to], node[&from]);
+            if to != from && next.entry(to).or_default().insert(from) {
+                *waiting.get_mut(&from).expect("a node") += 1;
+            }
+        }
+        let first = |n: usize| nodes[&n].iter().map(|leaf| self.position[leaf]).min().unwrap_or(0);
+        let mut ready: BinaryHeap<Reverse<(usize, usize)>> = waiting
+            .iter()
+            .filter(|(_, w)| **w == 0)
+            .map(|(&n, _)| Reverse((first(n), n)))
+            .collect();
+        let mut order = Vec::with_capacity(nodes.len());
+        while let Some(Reverse((_, n))) = ready.pop() {
+            order.push(n);
+            for &m in next.get(&n).into_iter().flatten() {
+                let w = waiting.get_mut(&m).expect("a node");
+                *w -= 1;
+                if *w == 0 {
+                    ready.push(Reverse((first(m), m)));
                 }
             }
         }
-        let mut merged_into: BTreeMap<usize, usize> = BTreeMap::new();
-        for cycle in crate::graph::cycles(&edges) {
-            for &i in &cycle[1..] {
-                merged_into.insert(i, cycle[0]);
+        let even = leaves.len().div_ceil(leaves.len().div_ceil(CAP));
+        let mut chunks: Vec<(Group<'a>, bool)> = Vec::new();
+        for n in order {
+            let group = nodes.remove(&n).expect("each node once");
+            match chunks.last_mut() {
+                Some((chunk, merged_cycle))
+                    if chunk.len() < even && chunk.len() + group.len() <= CAP =>
+                {
+                    chunk.extend(group);
+                    *merged_cycle |= merged.contains(&n);
+                },
+                _ => chunks.push((group, merged.contains(&n))),
             }
         }
-        let mut out: BTreeMap<usize, (Vec<&str>, Group<'a>, bool)> = BTreeMap::new();
-        for (i, (root, members)) in drafts.into_iter().enumerate() {
-            let target = merged_into.get(&i).copied().unwrap_or(i);
-            let entry = out.entry(target).or_default();
-            entry.0.push(root);
-            entry.1.extend(members);
-            entry.2 |= target != i || merged_into.values().any(|&t| t == i);
-        }
-        out.into_values()
-            .map(|(roots, members, merged)| {
-                let root = if roots.len() == 1 { roots[0] } else { self.common_root(&roots) };
-                (root.to_owned(), members, merged)
+        chunks
+            .into_iter()
+            .map(|(chunk, merged_cycle)| {
+                let tops: BTreeSet<&str> = chunk.iter().map(|leaf| self.top[leaf]).collect();
+                let root = match tops.first() {
+                    Some(top) if tops.len() > 1 => top,
+                    _ => self.lowest_common_ancestor(&chunk),
+                };
+                (root.to_owned(), chunk, merged_cycle)
             })
             .collect()
     }
@@ -423,16 +557,6 @@ impl<'a> Split<'a> {
         memo.insert(id, found.clone());
         found
     }
-
-    /// The nearest item whose subtree holds every root, or the first root when none does.
-    fn common_root(&self, roots: &[&'a str]) -> &'a str {
-        let lines: Vec<BTreeSet<&str>> =
-            roots[1..].iter().map(|root| self.line(root).into_iter().collect()).collect();
-        self.line(roots[0])
-            .into_iter()
-            .find(|node| lines.iter().all(|line| line.contains(node)))
-            .unwrap_or(roots[0])
-    }
 }
 
 /// The representative of `i`'s set in a union-find forest, halving paths on the way.
@@ -448,7 +572,7 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 /// finish until a link or a member moves.
 #[must_use]
 pub fn thread_cycles(model: &Model) -> Vec<BTreeSet<String>> {
-    let split = Split { model, under: BTreeMap::new(), top: BTreeMap::new() };
+    let split = Split::new(model, &NONE);
     split
         .wait_cycles(&BTreeMap::new())
         .into_iter()
@@ -476,16 +600,131 @@ pub fn apply(
     by: By<'_>,
 ) -> Result<Vec<Draft>, ScopeError> {
     let model = Model::read(replica.state())?;
-    let drafts = plan(&model, root);
-    for draft in &drafts {
+    let drafts = plan_with(&model, root, &held(replica.state())?);
+    write(replica, &model, &drafts, by)?;
+    Ok(drafts)
+}
+
+fn write(
+    replica: &mut Replica,
+    model: &Model,
+    drafts: &[Draft],
+    by: By<'_>,
+) -> Result<(), ScopeError> {
+    for draft in drafts {
         let key = Key::new(kind::THREAD, &draft.id)?;
         model::put(replica, &key, thread::TITLE, Some(&draft.title), by)?;
         for member in &draft.members {
             let change = ScopeEdit::Member { item: member.clone(), thread: Some(draft.id.clone()) };
-            scope::edit_in(replica, &model, &change, by)?;
+            scope::edit_in(replica, model, &change, by)?;
         }
     }
-    Ok(drafts)
+    Ok(())
+}
+
+/// The thread of `id`'s nearest ancestor that has one, which new work under it joins; `None` when the nearest thread
+/// on its line is in conflict, or there is none.
+#[must_use]
+pub fn inherited_thread<'m>(model: &'m Model, id: &str) -> Option<&'m str> {
+    let threaded = model
+        .ancestors(id)
+        .into_iter()
+        .map(|a| &model.items[a].thread)
+        .find(|t| **t != Value::None);
+    threaded.and_then(Value::one).map(String::as_str)
+}
+
+/// An item that joined its nearest threaded ancestor's thread, or asked to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Inherited {
+    /// The item.
+    pub item: String,
+    /// The thread.
+    pub thread: String,
+    /// The proposal it waits as, when the thread's scope is approved and the actor may only propose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+}
+
+/// What placing new or moved work did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Placement {
+    /// Items that joined a thread from above.
+    pub inherited: Vec<Inherited>,
+    /// Draft threads a split wrote.
+    pub drafts: Vec<Draft>,
+}
+
+impl Placement {
+    /// Whether it did nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.inherited.is_empty() && self.drafts.is_empty()
+    }
+}
+
+/// Places `items` after an add, a move or an import. An item with no thread joins its nearest threaded ancestor's,
+/// through the scope rules, so an agent only proposes it into approved scope; an item that has a thread keeps it.
+/// Then each top-level subtree the items are in is split when it holds more than `budget` free leaves, when an item
+/// is its parent's first child, so the parent just became a group, or always without a budget.
+///
+/// # Errors
+///
+/// Fails when the state layer refuses.
+pub fn place(
+    replica: &mut Replica,
+    items: &[String],
+    budget: Option<usize>,
+    by: By<'_>,
+) -> Result<Placement, ScopeError> {
+    let mut placement = Placement::default();
+    let model = Model::read(replica.state())?;
+    for item in items {
+        let Some(found) = model.items.get(item) else { continue };
+        if found.thread != Value::None || found.is_done() {
+            continue;
+        }
+        if let Some(thread) = inherited_thread(&model, item) {
+            let change = ScopeEdit::Member { item: item.clone(), thread: Some(thread.to_owned()) };
+            let proposal = match scope::edit_in(replica, &model, &change, by)? {
+                scope::Outcome::Applied => None,
+                scope::Outcome::Proposed(id) => Some(id),
+            };
+            placement.inherited.push(Inherited {
+                item: item.clone(),
+                thread: thread.to_owned(),
+                proposal,
+            });
+        }
+    }
+    let model = if placement.inherited.is_empty() { model } else { Model::read(replica.state())? };
+    let tops: BTreeSet<&str> = items
+        .iter()
+        .filter(|item| model.items.contains_key(item.as_str()))
+        .map(|item| model.ancestors(item).last().copied().unwrap_or(item))
+        .filter(|top| model.items[*top].parent == Value::None && !model.is_archived(top))
+        .collect();
+    let held = held(replica.state())?;
+    let top_of = |item: &str| model.ancestors(item).last().copied().unwrap_or(item).to_owned();
+    let sprouted: BTreeSet<String> = items
+        .iter()
+        .filter(|item| {
+            let parent = model.items.get(item.as_str()).and_then(|i| i.parent.one());
+            parent.is_some_and(|parent| model.children(parent) == [item.as_str()])
+        })
+        .map(|item| top_of(item))
+        .collect();
+    let over: Vec<&str> = tops
+        .into_iter()
+        .filter(|top| {
+            let mut split = Split::new(&model, &held);
+            split.collect(top, top, &mut BTreeSet::new());
+            budget.is_none_or(|budget| split.top.len() > budget) || sprouted.contains(*top)
+        })
+        .collect();
+    placement.drafts = plan_tops(&model, &over, &held);
+    write(replica, &model, &placement.drafts, by)?;
+    Ok(placement)
 }
 
 /// `s-<root>-<hash>`: the root's id, cut to fit, and 24 bits of an FNV-1a hash of the sorted members, salted when an

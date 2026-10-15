@@ -132,24 +132,23 @@ fn conflicting_unapproved_split_threads_are_healed_but_approved_ones_are_left() 
 }
 
 #[test]
-fn a_block_on_a_group_counts_for_its_leaves_and_cycles_merge() {
+fn a_block_on_a_group_counts_for_its_leaves_and_drafts_never_deadlock() {
     // `g1` as a whole waits on `g2-00`, which ties 27 leaves: too many to keep whole, so they are cut along the tree.
     let mut r = two_groups(26, 5);
     link(&mut r, "g1", "g2-00", LinkKind::Blocks, USER).unwrap();
     let drafts = plan(&model(&r), None);
     assert!(drafts.iter().all(|d| !d.merged_cycle), "{drafts:?}");
-    // Now `g2-01` waits on `g1-00`: apart, the drafts holding `g1-00` and `g2-01` would deadlock.
+    assert_no_deadlock(&model(&r), &drafts);
+    // Now `g2-01` waits on `g1-00` too: cut along the tree, `g1`'s drafts and `g2`'s would wait on each other, so
+    // they are cut again along the order the links give, still within the cap.
     link(&mut r, "g2-01", "g1-00", LinkKind::Blocks, USER).unwrap();
     let drafts = plan(&model(&r), None);
-    let merged: Vec<&Draft> = drafts.iter().filter(|d| d.merged_cycle).collect();
-    assert_eq!(merged.len(), 1, "{drafts:?}");
-    assert!(merged[0].members.contains("g1-00") && merged[0].members.contains("g2-01"));
-    assert_eq!(merged[0].root, "p");
-    assert!(!merged[0].cross_top);
+    assert_no_deadlock(&model(&r), &drafts);
+    assert!(drafts.iter().all(|d| !d.merged_cycle && d.members.len() <= CAP), "{drafts:?}");
 }
 
 #[test]
-fn a_cycle_across_top_level_items_merges_and_says_so() {
+fn drafts_waiting_on_each_other_across_top_level_items_share_one_and_say_so() {
     let mut r = replica();
     for (top, leaves) in [("a", ["a0", "a1"]), ("b", ["b0", "b1"])] {
         add(&mut r, top, None);
@@ -162,7 +161,27 @@ fn a_cycle_across_top_level_items_merges_and_says_so() {
     link(&mut r, "b1", "a1", LinkKind::Blocks, USER).unwrap();
     let drafts = plan(&model(&r), None);
     assert_eq!(drafts.len(), 1, "{drafts:?}");
-    assert!(drafts[0].merged_cycle && drafts[0].cross_top && drafts[0].members.len() == 4);
+    assert!(!drafts[0].merged_cycle && drafts[0].cross_top && drafts[0].members.len() == 4);
+}
+
+#[test]
+fn pieces_waiting_on_each_other_share_a_draft_that_says_so() {
+    // A join can leave two leaves in different top-level items waiting on each other; no order can part them.
+    let mut r = replica();
+    for top in ["a", "b"] {
+        add(&mut r, top, None);
+        add(&mut r, &format!("{top}0"), Some(top));
+    }
+    for (from, to) in [("a0", "b0"), ("b0", "a0")] {
+        let key = link_key(from, to, LinkKind::Blocks).unwrap();
+        write(&mut r, &key, link_field::FROM, json!(from));
+        write(&mut r, &key, link_field::TO, json!(to));
+        write(&mut r, &key, link_field::KIND, json!("blocks"));
+        write(&mut r, &key, link_field::PRESENT, json!(true));
+    }
+    let drafts = plan(&model(&r), None);
+    assert_eq!(drafts.len(), 1, "{drafts:?}");
+    assert!(drafts[0].merged_cycle && drafts[0].cross_top, "{drafts:?}");
 }
 
 #[test]
@@ -314,6 +333,33 @@ fn components(model: &Model) -> Vec<BTreeSet<String>> {
     groups.into_values().collect()
 }
 
+/// (a) No draft waits on another in a cycle through `blocks` links, a link on a group counting for its leaves.
+fn assert_no_deadlock(m: &Model, drafts: &[Draft]) {
+    let mut drafts_under: BTreeMap<&str, BTreeSet<usize>> = BTreeMap::new();
+    for (i, draft) in drafts.iter().enumerate() {
+        for member in &draft.members {
+            for node in std::iter::once(member.as_str()).chain(m.ancestors(member)) {
+                drafts_under.entry(node).or_default().insert(i);
+            }
+        }
+    }
+    let mut edges = Vec::new();
+    for link in m.links.iter().filter(|l| l.kind == LinkKind::Blocks) {
+        let none = BTreeSet::new();
+        let under = |id: &str| drafts_under.get(id).unwrap_or(&none).clone();
+        for to in under(&link.to) {
+            for from in under(&link.from).into_iter().filter(|from| *from != to) {
+                edges.push((to, from));
+            }
+        }
+    }
+    assert_eq!(
+        crate::graph::cycles(&edges),
+        Vec::<Vec<usize>>::new(),
+        "(a) drafts wait on each other"
+    );
+}
+
 #[hegel::test(test_cases = 200)]
 fn splits_keep_their_promises(tc: TestCase) {
     let mut r = forest(&tc);
@@ -347,29 +393,7 @@ fn splits_keep_their_promises(tc: TestCase) {
         assert!(drafts_of.len() <= 1, "(d) {component:?} cut across {drafts_of:?}");
     }
     // (a) no draft waits on another in a cycle.
-    let mut drafts_under: BTreeMap<&str, BTreeSet<usize>> = BTreeMap::new();
-    for (i, draft) in drafts.iter().enumerate() {
-        for member in &draft.members {
-            for node in std::iter::once(member.as_str()).chain(m.ancestors(member)) {
-                drafts_under.entry(node).or_default().insert(i);
-            }
-        }
-    }
-    let mut edges = Vec::new();
-    for link in m.links.iter().filter(|l| l.kind == LinkKind::Blocks) {
-        let none = BTreeSet::new();
-        let under = |id: &str| drafts_under.get(id).unwrap_or(&none).clone();
-        for to in under(&link.to) {
-            for from in under(&link.from).into_iter().filter(|from| *from != to) {
-                edges.push((to, from));
-            }
-        }
-    }
-    assert_eq!(
-        crate::graph::cycles(&edges),
-        Vec::<Vec<usize>>::new(),
-        "(a) drafts wait on each other"
-    );
+    assert_no_deadlock(&m, &drafts);
     // (g) once applied, nothing is left to split.
     for draft in &drafts {
         for member in &draft.members {
@@ -421,4 +445,88 @@ fn a_draft_never_writes_into_a_thread_that_exists() {
     assert_ne!(applied[0].id, first[0].id);
     assert_eq!(model(&r).members(&first[0].id), Vec::<&str>::new());
     assert_eq!(model(&r).threads[&applied[0].id].title.one().map(String::as_str), Some("Title p"));
+}
+
+fn place_one(r: &mut Replica, item: &str, budget: Option<usize>, actor: &'static str) -> Placement {
+    place(r, &[item.to_owned()], budget, By { actor, at: 9 }).unwrap()
+}
+
+#[test]
+fn an_add_splits_its_subtree_once_free_leaves_pass_the_budget() {
+    let mut r = two_groups(BUDGET, 0);
+    assert!(place_one(&mut r, "g1-00", Some(BUDGET), USER.actor).is_empty(), "at the budget");
+    add(&mut r, "late", Some("g1"));
+    let placed = place_one(&mut r, "late", Some(BUDGET), USER.actor);
+    assert_eq!(members(&placed.drafts), vec![("p".to_owned(), BUDGET + 1)]);
+    assert_eq!(plan(&model(&r), None), Vec::<Draft>::new(), "written");
+    // An import splits what it touches, however little.
+    let mut r = two_groups(2, 0);
+    assert_eq!(place_one(&mut r, "g1-00", None, USER.actor).drafts.len(), 1);
+}
+
+#[test]
+fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
+    let user = By { actor: USER.actor, at: 1 };
+    let mut r = two_groups(1, 0);
+    for (thread, approved, pm) in [("ok", true, false), ("loose", false, false), ("pm", true, true)]
+    {
+        let key = Key::new(kind::THREAD, thread).unwrap();
+        write(&mut r, &key, thread::APPROVED, json!(approved));
+        write(&mut r, &key, thread::PM_FLAG, json!(pm));
+    }
+    crate::model::start_run(&mut r, "boss", "pm", user).unwrap();
+    write(&mut r, &item_key("g1").unwrap(), field::THREAD, json!("ok"));
+    // The user and a project-management run join approved scope; any other agent proposes.
+    for (leaf, actor, proposed) in
+        [("u", "actor/user", false), ("m", "run/boss", false), ("a", "session/mac", true)]
+    {
+        add(&mut r, leaf, Some("g1-00"));
+        let placed = place_one(&mut r, leaf, Some(BUDGET), actor);
+        let [joined] = placed.inherited.as_slice() else { panic!("{actor}: {placed:?}") };
+        assert_eq!(
+            (joined.thread.as_str(), joined.proposal.is_some()),
+            ("ok", proposed),
+            "{actor}"
+        );
+    }
+    // Unapproved scope takes anyone's work; a thread an item already has is never changed.
+    write(&mut r, &item_key("g1").unwrap(), field::THREAD, json!("loose"));
+    add(&mut r, "b", Some("g1-00"));
+    let placed = place_one(&mut r, "b", Some(BUDGET), "session/mac");
+    assert_eq!(placed.inherited[0].proposal, None);
+    add(&mut r, "c", Some("g1-00"));
+    write(&mut r, &item_key("c").unwrap(), field::THREAD, json!("own"));
+    assert!(place_one(&mut r, "c", Some(BUDGET), "session/mac").is_empty());
+    assert_eq!(model(&r).thread_of("c"), Some("own"));
+}
+
+#[test]
+fn an_item_gaining_its_first_child_splits_its_subtree() {
+    let mut r = two_groups(2, 0);
+    add(&mut r, "kid", Some("g1-00"));
+    let placed = place_one(&mut r, "kid", Some(BUDGET), USER.actor);
+    assert_eq!(placed.drafts.len(), 1, "well under the budget, `g1-00` became a group");
+    assert_eq!(placed.drafts[0].members, BTreeSet::from(["g1-01".to_owned(), "kid".to_owned()]));
+    add(&mut r, "kid2", Some("g1-00"));
+    assert!(place_one(&mut r, "kid2", Some(BUDGET), USER.actor).is_empty(), "a second child isn't");
+}
+
+#[test]
+fn an_item_a_proposal_would_move_waits_for_the_user() {
+    let mut r = two_groups(2, 0);
+    let ok = Key::new(kind::THREAD, "ok").unwrap();
+    write(&mut r, &ok, thread::APPROVED, json!(true));
+    let agent = By { actor: "session/mac", at: 2 };
+    let change = ScopeEdit::Member { item: "g1-00".into(), thread: Some("ok".into()) };
+    let scope::Outcome::Proposed(id) = scope::edit(&mut r, &change, agent).unwrap() else {
+        panic!("an agent proposes into approved scope")
+    };
+    let held = held(r.state()).unwrap();
+    assert_eq!(held, BTreeSet::from(["g1-00".to_owned()]));
+    let drafts = plan_with(&model(&r), None, &held);
+    assert_eq!(drafts[0].members, BTreeSet::from(["g1-01".to_owned()]));
+    assert_eq!(apply(&mut r, None, USER).unwrap(), drafts, "a split writes the same");
+    scope::drop(&mut r, &id, By { actor: USER.actor, at: 3 }).unwrap();
+    let freed = apply(&mut r, None, USER).unwrap();
+    assert_eq!(freed[0].members, BTreeSet::from(["g1-00".to_owned()]), "dropped, it is free again");
 }
