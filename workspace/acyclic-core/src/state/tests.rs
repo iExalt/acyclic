@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use proptest::prelude::*;
+use hegel::TestCase;
+use hegel::generators as gs;
 use serde_json::json;
 
 use super::*;
@@ -413,16 +414,36 @@ enum Step {
     RunOp { run: usize, entity: usize, field: usize, value: Option<i64>, seen_mask: u8 },
 }
 
-fn step() -> impl Strategy<Value = Step> {
-    let value = proptest::option::weighted(0.85, 0..5i64);
-    prop_oneof![
-        3 => (0..3usize, 0..4usize, 0..3usize, value.clone())
-            .prop_map(|(replica, entity, field, value)| Step::Write { replica, entity, field, value }),
-        2 => (0..3usize, 0..3usize).prop_map(|(into, from)| Step::Join { into, from }),
-        2 => (0..4usize, 0..4usize, 0..3usize, value, any::<u8>()).prop_map(|(run, entity, field, value, seen_mask)| {
-            Step::RunOp { run, entity, field, value, seen_mask }
-        }),
-    ]
+fn below(tc: &TestCase, n: usize) -> usize {
+    tc.draw(gs::integers::<usize>().max_value(n - 1))
+}
+
+fn value(tc: &TestCase) -> Option<i64> {
+    // About one write in seven clears the field.
+    (below(tc, 7) != 0).then(|| tc.draw(gs::integers::<i64>().min_value(0).max_value(4)))
+}
+
+/// Up to 40 random steps, weighted 3:2:2 toward writes over joins and run operations.
+fn steps(tc: &TestCase) -> Vec<Step> {
+    let count = below(tc, 41);
+    (0..count)
+        .map(|_| match below(tc, 7) {
+            0..=2 => Step::Write {
+                replica: below(tc, 3),
+                entity: below(tc, 4),
+                field: below(tc, 3),
+                value: value(tc),
+            },
+            3 | 4 => Step::Join { into: below(tc, 3), from: below(tc, 3) },
+            _ => Step::RunOp {
+                run: below(tc, 4),
+                entity: below(tc, 4),
+                field: below(tc, 3),
+                value: value(tc),
+                seen_mask: tc.draw(gs::integers::<u8>()),
+            },
+        })
+        .collect()
 }
 
 /// Runs the steps; each run is applied by replica `run % 3`, with a random subset of the field's current dots as
@@ -480,61 +501,56 @@ fn joined(states: &[&State]) -> State {
     result
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
-
-    /// P1: random writes and stale run operations across three replicas converge in any join order.
-    #[test]
-    fn replicas_converge_in_any_join_order(
-        steps in prop::collection::vec(step(), 0..40),
-        order in Just(vec![0usize, 1, 2]).prop_shuffle(),
-    ) {
-        let replicas = play(&steps);
-        for replica in &replicas {
-            prop_assert!(replica.state.check().is_ok());
-        }
-        let reference = joined(&[&replicas[0].state, &replicas[1].state, &replicas[2].state]);
-        let shuffled = joined(&order.iter().map(|&i| &replicas[i].state).collect::<Vec<_>>());
-        prop_assert_eq!(&shuffled, &reference);
-        // Gossip in the given order, twice round, leaves every replica identical.
-        let mut states: Vec<State> = replicas.iter().map(|r| r.state.clone()).collect();
-        for _ in 0..2 {
-            for &i in &order {
-                for j in 0..3 {
-                    let other = states[j].clone();
-                    states[i].join(&other);
-                }
+/// P1: random writes and stale run operations across three replicas converge in any join order.
+#[hegel::test(test_cases = 256)]
+fn replicas_converge_in_any_join_order(tc: TestCase) {
+    let replicas = play(&steps(&tc));
+    let order = tc.draw(gs::permutations(vec![0usize, 1, 2]));
+    for replica in &replicas {
+        assert!(replica.state.check().is_ok());
+    }
+    let reference = joined(&[&replicas[0].state, &replicas[1].state, &replicas[2].state]);
+    let shuffled = joined(&order.iter().map(|&i| &replicas[i].state).collect::<Vec<_>>());
+    assert_eq!(shuffled, reference);
+    // Gossip in the drawn order, twice round, leaves every replica identical.
+    let mut states: Vec<State> = replicas.iter().map(|r| r.state.clone()).collect();
+    for _ in 0..2 {
+        for &i in &order {
+            for j in 0..3 {
+                let other = states[j].clone();
+                states[i].join(&other);
             }
         }
-        for state in &states {
-            prop_assert_eq!(state, &reference);
-        }
-        prop_assert_eq!(&round_trip(&reference), &reference);
     }
+    for state in &states {
+        assert_eq!(state, &reference);
+    }
+    assert_eq!(round_trip(&reference), reference);
+}
 
-    /// P2: the join is commutative, associative and idempotent.
-    #[test]
-    fn join_is_a_semilattice(steps in prop::collection::vec(step(), 0..40)) {
-        let replicas = play(&steps);
-        let (a, b, c) = (&replicas[0].state, &replicas[1].state, &replicas[2].state);
-        prop_assert_eq!(joined(&[a, b]), joined(&[b, a]));
-        let left = joined(&[&joined(&[a, b]), c]);
-        let right = joined(&[a, &joined(&[b, c])]);
-        prop_assert_eq!(left, right);
-        prop_assert_eq!(&joined(&[a, a]), a);
-    }
+/// P2: the join is commutative, associative and idempotent.
+#[hegel::test(test_cases = 256)]
+fn join_is_a_semilattice(tc: TestCase) {
+    let replicas = play(&steps(&tc));
+    let (a, b, c) = (&replicas[0].state, &replicas[1].state, &replicas[2].state);
+    assert_eq!(joined(&[a, b]), joined(&[b, a]));
+    assert_eq!(joined(&[&joined(&[a, b]), c]), joined(&[a, &joined(&[b, c])]));
+    assert_eq!(&joined(&[a, a]), a);
+}
 
-    /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.
-    #[test]
-    fn claim_winners_agree(starts in (0..1_000i64, 0..1_000i64), leases in (proptest::option::of(1..2_000i64), proptest::option::of(1..2_000i64)), now in 0..3_000i64) {
-        let item = key("item", "a1");
-        let (mut x, mut y) = (replica("x"), replica("y"));
-        claim::claim(&mut x, &item, "run/x", starts.0, leases.0, 10_000).unwrap();
-        claim::claim(&mut y, &item, "run/y", starts.1, leases.1, 10_000).unwrap();
-        let one = joined(&[&x.state, &y.state]);
-        let two = joined(&[&y.state, &x.state]);
-        prop_assert_eq!(claim::winner(&one, &item, now).unwrap(), claim::winner(&two, &item, now).unwrap());
-    }
+/// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.
+#[hegel::test(test_cases = 256)]
+fn claim_winners_agree(tc: TestCase) {
+    let start = || tc.draw(gs::integers::<i64>().min_value(0).max_value(999));
+    let lease = || tc.draw(gs::optional(gs::integers::<i64>().min_value(1).max_value(1_999)));
+    let item = key("item", "a1");
+    let (mut x, mut y) = (replica("x"), replica("y"));
+    claim::claim(&mut x, &item, "run/x", start(), lease(), 10_000).unwrap();
+    claim::claim(&mut y, &item, "run/y", start(), lease(), 10_000).unwrap();
+    let now = tc.draw(gs::integers::<i64>().min_value(0).max_value(2_999));
+    let one = joined(&[&x.state, &y.state]);
+    let two = joined(&[&y.state, &x.state]);
+    assert_eq!(claim::winner(&one, &item, now).unwrap(), claim::winner(&two, &item, now).unwrap());
 }
 
 #[test]
