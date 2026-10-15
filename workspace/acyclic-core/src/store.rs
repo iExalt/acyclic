@@ -415,6 +415,16 @@ impl Tracker {
         &self.replica
     }
 
+    /// The directory acyclic keeps its local files in, under the clone's common Git directory, so every worktree of
+    /// the clone shares it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when Git can't name the common directory.
+    pub fn local_dir(&self) -> Result<PathBuf, StoreError> {
+        Ok(self.git.common_dir()?.join("acyclic"))
+    }
+
     /// The tip of this replica's state ref and the state it holds.
     ///
     /// # Errors

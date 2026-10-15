@@ -142,6 +142,21 @@ fn node_id(prefix: char, id: &str) -> String {
     out
 }
 
+/// A file name for a scope's page, distinct per scope: `all`, or `root-…` and `thread-…` with ids encoded as node
+/// ids are.
+#[must_use]
+pub fn scope_name(scope: &Scope<'_>) -> String {
+    let encode = |kind: &str, id: &str| format!("{kind}-{}", &node_id('x', id)[2..]);
+    match (scope.root, scope.thread) {
+        (None, None) => "all".to_owned(),
+        (Some(root), None) => encode("root", root),
+        (None, Some(thread)) => encode("thread", thread),
+        (Some(root), Some(thread)) => {
+            format!("{}-{}", encode("root", root), encode("thread", thread))
+        },
+    }
+}
+
 /// What a node or cluster shows: its id and title, with a conflicted title's values joined.
 fn label(id: &str, title: &Value<String>) -> String {
     let title = title.all().into_iter().map(String::as_str).collect::<Vec<_>>().join(" | ");
@@ -170,7 +185,8 @@ fn dot_string(text: &str) -> String {
 #[must_use]
 pub fn dot(model: &Model, view: &View) -> String {
     let mut out = String::from("digraph acyclic {\n");
-    out.push_str("  node [shape=box, style=rounded];\n");
+    out.push_str("  fontname=\"Helvetica,Arial,sans-serif\";\n");
+    out.push_str("  node [shape=box, style=rounded, fontname=\"Helvetica,Arial,sans-serif\"];\n");
     let node = |out: &mut String, indent: &str, id: &str| {
         let style = if is_done(model, id) {
             ", style=\"rounded,filled\", fillcolor=\"#e8e8e8\""

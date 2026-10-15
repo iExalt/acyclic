@@ -23,11 +23,12 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Attachment, Cli, Command, GraphFormat, ItemCommand, LinkCommand, ProposalCommand, RepoCommand,
-    ThreadCommand,
+    Attachment, Cli, Command, GraphFormat, ItemCommand, LinkCommand, ProposalCommand, Renderer,
+    RepoCommand, ThreadCommand,
 };
 use crate::context;
 use crate::error::{CliError, exit};
+use crate::page;
 
 /// What a command prints.
 pub enum Output {
@@ -52,13 +53,24 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
         return Ok(Output::Text(prime()));
     }
     let session = Session::open(cli, env)?;
-    if let Command::Graph { format, root, thread, include_archived, output } = &cli.command {
+    if let Command::Graph { format, renderer, open, root, thread, include_archived, output } =
+        &cli.command
+    {
         let scope = export::Scope {
             root: root.as_deref(),
             thread: thread.as_deref(),
             include_archived: *include_archived,
         };
-        return session.graph(*format, &scope, output.as_deref());
+        let format = format.unwrap_or(if *open { GraphFormat::Html } else { GraphFormat::Dot });
+        if renderer.is_some() && format != GraphFormat::Html {
+            return Err(CliError::new(
+                "usage",
+                exit::USAGE,
+                "--renderer lays out the HTML page; pass --format html",
+            ));
+        }
+        let renderer = renderer.unwrap_or(Renderer::Graphviz);
+        return session.graph(format, renderer, &scope, output.as_deref(), *open);
     }
     session.dispatch(&cli.command).map(Output::Json)
 }
@@ -330,28 +342,85 @@ impl<'a> Session<'a> {
         Ok(json!({"ready": ready}))
     }
 
-    /// The graph as a document: to standard output as text, or to `output` with a JSON summary.
+    /// The graph as a document: DOT or Mermaid to standard output as text, or any format to a file with a JSON
+    /// summary, opened in the browser with `open`.
     fn graph(
         &self,
         format: GraphFormat,
+        renderer: Renderer,
         scope: &export::Scope<'_>,
         output: Option<&Path>,
+        open: bool,
     ) -> Result<Output, CliError> {
+        let usage = |message: &str| CliError::new("usage", exit::USAGE, message);
+        if open && format != GraphFormat::Html {
+            return Err(usage("--open opens the HTML page; drop --format or pass --format html"));
+        }
+        if format == GraphFormat::Html && output.is_none() && !open {
+            return Err(usage(
+                "an HTML page is too large for standard output: pass --output <file> or --open",
+            ));
+        }
         let (_, model) = self.read()?;
         let view = export::view(&model, scope)
             .map_err(|err| CliError::new("not-found", exit::NOT_FOUND, err.to_string()))?;
-        let (document, name) = match format {
-            GraphFormat::Dot => (export::dot(&model, &view), "dot"),
-            GraphFormat::Mermaid => (export::mermaid(&model, &view), "mermaid"),
+        let document = match (format, renderer) {
+            (GraphFormat::Dot, _) | (GraphFormat::Html, Renderer::Graphviz) => {
+                export::dot(&model, &view)
+            },
+            (GraphFormat::Mermaid, _) | (GraphFormat::Html, Renderer::Mermaid) => {
+                export::mermaid(&model, &view)
+            },
         };
-        let Some(output) = output else { return Ok(Output::Text(document)) };
-        let path = self.env.cwd.join(output);
-        std::fs::write(&path, document).map_err(|err| {
+        let document = if format == GraphFormat::Html {
+            let title = format!("acyclic: {}", export::scope_name(scope));
+            page::page(&title, renderer, &document).ok_or_else(|| {
+                CliError::refused(
+                    "no-renderer",
+                    "this acyclic was built without the graph page's renderers: run `mise run vendor:graph` and \
+                     rebuild",
+                )
+            })?
+        } else {
+            document
+        };
+        let Some(path) = (match output {
+            Some(output) => Some(self.env.cwd.join(output)),
+            None if open => Some(
+                self.tracker
+                    .local_dir()?
+                    .join("graph")
+                    .join(format!("{}.html", export::scope_name(scope))),
+            ),
+            None => None,
+        }) else {
+            return Ok(Output::Text(document));
+        };
+        let unwritable = |err: std::io::Error| {
             CliError::refused("unwritable", format!("can't write {}: {err}", path.display()))
-        })?;
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(unwritable)?;
+        }
+        std::fs::write(&path, document).map_err(unwritable)?;
+        if open {
+            context::open(self.env, &path).map_err(|err| {
+                CliError::refused(
+                    "unopenable",
+                    format!("wrote {} but can't open it: {err}", path.display()),
+                )
+                .with(json!({"path": path}))
+            })?;
+        }
+        let format = match format {
+            GraphFormat::Dot => "dot",
+            GraphFormat::Mermaid => "mermaid",
+            GraphFormat::Html => "html",
+        };
         Ok(Output::Json(json!({
             "path": path,
-            "format": name,
+            "format": format,
+            "opened": open,
             "items": view.items.len(),
             "ghosts": view.ghosts.len(),
             "edges": view.edges.len(),

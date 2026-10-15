@@ -6,6 +6,8 @@ use acyclic_core::model::{ItemState, Level, LinkKind, Size};
 use std::fmt::Write as _;
 
 use clap::{CommandFactory, Parser, Subcommand};
+
+pub use crate::page::Renderer;
 use serde::de::DeserializeOwned;
 
 /// The acyclic tracker. Every command that runs prints one JSON document.
@@ -132,11 +134,17 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
-    /// Draws the graph as DOT or Mermaid, with threads as clusters: to standard output, or to a file.
+    /// Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser.
     Graph {
-        /// The document's format.
-        #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
-        format: GraphFormat,
+        /// The document's format: DOT by default, HTML with `--open`. HTML needs `--output` or `--open`.
+        #[arg(long, value_enum)]
+        format: Option<GraphFormat>,
+        /// What lays out the HTML page: Graphviz by default.
+        #[arg(long, value_enum)]
+        renderer: Option<Renderer>,
+        /// Write the HTML page into the clone's acyclic directory and open it in the default browser.
+        #[arg(long)]
+        open: bool,
         /// Only this item and its descendants.
         #[arg(long)]
         root: Option<String>,
@@ -174,6 +182,8 @@ pub enum GraphFormat {
     Dot,
     /// A Mermaid flowchart.
     Mermaid,
+    /// A self-contained HTML page that draws it.
+    Html,
 }
 
 /// The item commands.

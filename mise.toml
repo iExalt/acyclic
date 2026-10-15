@@ -14,6 +14,8 @@ podman = { version = "6.1.4", os = ["macos"] }
 
 [tasks.check]
 description = "Routine check: format, Clippy and every crate's unit tests (budget: 60 seconds on a warm cache)"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = [
   # Outside CI, a clone without the pre-push guard fails the check, so it never pushes unguarded.
   '[ -n "${CI:-}" ] || [ "$(git config core.hooksPath)" = .githooks ] || { echo "the pre-push guard is not installed: run mise run hooks:install" >&2; exit 1; }',
@@ -26,15 +28,25 @@ run = [
 
 [tasks."check:integration"]
 description = "Integration tests (budget: 3 minutes)"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
 [tasks."bench:store"]
 description = "Times the binary against trackers of several sizes; not part of any check"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --bench store --"
 
 [tasks."bench:store:phases"]
 description = "Like bench:store, with timing marks splitting each command into phases"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
+
+[tasks."vendor:graph"]
+description = "Fetch the graph page's renderers, pinned by SHA-256, into the CLI's git-ignored assets"
+run = "sh scripts/vendor-graph.sh"
 
 [tasks."hooks:install"]
 description = "Install the pre-push guard for this clone"

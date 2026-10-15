@@ -48,3 +48,5 @@ expression: table
 1 not-ready
 1 already-exists
 1 unwritable
+1 unopenable
+1 no-renderer

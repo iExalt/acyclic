@@ -90,6 +90,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
         CliError::refused("unwritable", ""),
+        CliError::refused("unopenable", ""),
+        CliError::refused("no-renderer", ""),
     ];
     let mut table = String::new();
     for error in errors {

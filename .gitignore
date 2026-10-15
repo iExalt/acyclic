@@ -22,3 +22,6 @@ target
 
 # Hegel's database of failing examples
 .hegel/
+
+# The graph page's renderers, fetched by scripts/vendor-graph.sh and never committed
+/workspace/acyclic-cli/assets/graph/

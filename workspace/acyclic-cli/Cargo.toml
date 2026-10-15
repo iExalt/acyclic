@@ -15,6 +15,9 @@ toml.workspace = true
 [features]
 probe = ["acyclic-core/probe"]
 
+[build-dependencies]
+sha2.workspace = true
+
 [dev-dependencies]
 acyclic-fixtures.workspace = true
 insta.workspace = true

@@ -83,6 +83,15 @@ fn ids_are_injective_and_never_keywords() {
 }
 
 #[test]
+fn each_scope_has_its_own_page_name() {
+    let scope = |root, thread| scope_name(&Scope { root, thread, include_archived: false });
+    assert_eq!(scope(None, None), "all");
+    assert_eq!(scope(Some("a-1"), None), "root-a_2d1");
+    assert_eq!(scope(None, Some("a-1")), "thread-a_2d1");
+    assert_eq!(scope(Some("x"), Some("y")), "root-x-thread-y");
+}
+
+#[test]
 fn dot_escapes_titles_and_clusters_threads() {
     let m = model();
     insta::assert_snapshot!(dot(&m, &view(&m, &Scope::default()).unwrap()));

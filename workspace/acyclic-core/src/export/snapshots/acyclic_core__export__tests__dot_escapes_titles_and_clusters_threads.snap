@@ -3,7 +3,8 @@ source: workspace/acyclic-core/src/export/tests.rs
 expression: "dot(&m, &view(&m, &Scope::default()).unwrap())"
 ---
 digraph acyclic {
-  node [shape=box, style=rounded];
+  fontname="Helvetica,Arial,sans-serif";
+  node [shape=box, style=rounded, fontname="Helvetica,Arial,sans-serif"];
   subgraph "cluster_t_t1" {
     label="t1 · First \"thread\"";
     "n_a" [label="a · Say \"hi\" <b>&amp;amp;</b> | ; [x] {y} next line"];

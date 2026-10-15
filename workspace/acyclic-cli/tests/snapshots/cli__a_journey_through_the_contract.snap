@@ -410,7 +410,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
 $ ACYCLIC_ACTOR=session/mac acyclic graph --thread t1
 # exit 0
 digraph acyclic {
-  node [shape=box, style=rounded];
+  fontname="Helvetica,Arial,sans-serif";
+  node [shape=box, style=rounded, fontname="Helvetica,Arial,sans-serif"];
   subgraph "cluster_t_t1" {
     label="t1 · Work";
     "n_a1" [label="a1 · First", style="rounded,filled", fillcolor="#e8e8e8"];
@@ -427,6 +428,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --output graph.mmd
     "format": "mermaid",
     "ghosts": 0,
     "items": 2,
+    "opened": false,
     "path": "[dir]/graph.mmd"
   },
   "ok": true
@@ -441,6 +443,31 @@ $ ACYCLIC_ACTOR=session/mac acyclic graph --root nope
     "message": "no item nope"
   },
   "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic graph --format html
+# exit 2
+{
+  "error": {
+    "code": "usage",
+    "details": null,
+    "message": "an HTML page is too large for standard output: pass --output <file> or --open"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic graph --open --thread t1
+# exit 0
+{
+  "data": {
+    "edges": 1,
+    "format": "html",
+    "ghosts": 1,
+    "items": 1,
+    "opened": true,
+    "path": "[dir]/tracker/.git/acyclic/graph/thread-t1.html"
+  },
+  "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2

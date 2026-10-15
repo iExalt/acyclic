@@ -6,6 +6,7 @@ pub mod error;
 mod args;
 mod commands;
 mod context;
+mod page;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

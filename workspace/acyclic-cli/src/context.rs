@@ -64,6 +64,28 @@ pub fn now(env: &Env) -> Millis {
         .map_or(0, |d| Millis::try_from(d.as_millis()).unwrap_or(Millis::MAX))
 }
 
+/// Opens a file in the default application without waiting for it. Debug builds honour `ACYCLIC_OPENER`, a program
+/// run in its place, so tests never open a browser; release builds never do.
+pub fn open(env: &Env, path: &Path) -> std::io::Result<()> {
+    #[cfg(debug_assertions)]
+    if let Some(opener) = env.var("ACYCLIC_OPENER") {
+        return spawn(opener, path);
+    }
+    let _ = env;
+    spawn(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }, path)
+}
+
+fn spawn(program: &str, path: &Path) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    Command::new(program)
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+}
+
 fn home(env: &Env) -> Option<PathBuf> {
     env.var("HOME").map(PathBuf::from)
 }
