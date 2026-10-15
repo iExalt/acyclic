@@ -28,6 +28,10 @@ run = [
 description = "Integration tests (budget: 3 minutes)"
 run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
+[tasks."bench:store"]
+description = "Times the CLI against a synthetic tracker (default 3,500 items); not part of any check"
+run = "cargo run --quiet --release --locked -p acyclic-cli --example bench_store --"
+
 [tasks."hooks:install"]
 description = "Install the pre-push guard for this clone"
 run = "git config core.hooksPath .githooks"
