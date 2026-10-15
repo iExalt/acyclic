@@ -523,6 +523,16 @@ impl Model {
         graph::cycles(&edges)
     }
 
+    /// Phase 1's liveness for claims without a time lease: a run's claim holds unless its record shows the run
+    /// ended; any other holder's does.
+    #[must_use]
+    pub fn run_alive(&self, holder: &str) -> bool {
+        match holder.strip_prefix("run/").and_then(|id| self.runs.get(id)) {
+            Some(run) => run.is_active() || run.state == Value::None,
+            None => true,
+        }
+    }
+
     /// Threads with more than one active run, which only a join can make.
     #[must_use]
     pub fn run_clashes(&self) -> BTreeMap<String, Vec<String>> {
@@ -559,6 +569,13 @@ pub enum WriteError {
     },
     /// An item can't link to itself.
     SelfLink(String),
+    /// A run's state can't move that way.
+    RunTransition {
+        /// The run.
+        run: String,
+        /// The refused state.
+        to: RunState,
+    },
     /// The thread already has an active run.
     RunActive {
         /// The thread.
@@ -585,6 +602,7 @@ impl fmt::Display for WriteError {
                 write!(f, "{field} has invariants: write it with {write}")
             },
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
+            Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
             },
@@ -834,11 +852,12 @@ pub fn start_run(
     Ok(key)
 }
 
-/// Sets a run's state.
+/// Moves a run's state forward: starting to running, and either to stopped or done. A run never becomes active
+/// again, so it can't make a second active run on its thread.
 ///
 /// # Errors
 ///
-/// Fails on an invalid id or when the state layer refuses.
+/// Fails on an unknown run, a move backward or out of an ended state, or when the state layer refuses.
 pub fn set_run_state(
     replica: &mut Replica,
     id: &str,
@@ -846,6 +865,17 @@ pub fn set_run_state(
     by: By<'_>,
 ) -> Result<(), WriteError> {
     let key = Key::new(kind::RUN, name(id)?)?;
+    let current = value::<RunState>(&replica.state, &key, run::STATE)?;
+    let allowed = current.all().into_iter().all(|from| {
+        matches!(
+            (from, state),
+            (RunState::Starting, RunState::Running | RunState::Stopped | RunState::Done)
+                | (RunState::Running, RunState::Stopped | RunState::Done)
+        )
+    });
+    if current == Value::None || !allowed {
+        return Err(WriteError::RunTransition { run: id.to_owned(), to: state });
+    }
     put(replica, &key, run::STATE, Some(&state), by)
 }
 

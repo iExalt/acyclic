@@ -271,3 +271,25 @@ fn fields_with_invariants_need_their_checked_writes() {
     ));
     set(&mut r, &x, field::NOTES, Some(&"fine"), by(2)).unwrap();
 }
+
+#[test]
+fn a_run_only_moves_forward() {
+    let mut r = replica("a");
+    assert!(matches!(
+        set_run_state(&mut r, "r9", RunState::Running, by(1)),
+        Err(WriteError::RunTransition { .. })
+    ));
+    start_run(&mut r, "r1", "t1", by(1)).unwrap();
+    set_run_state(&mut r, "r1", RunState::Running, by(2)).unwrap();
+    assert!(matches!(
+        set_run_state(&mut r, "r1", RunState::Starting, by(3)),
+        Err(WriteError::RunTransition { .. })
+    ));
+    set_run_state(&mut r, "r1", RunState::Stopped, by(3)).unwrap();
+    for state in [RunState::Starting, RunState::Running, RunState::Done] {
+        assert!(matches!(
+            set_run_state(&mut r, "r1", state, by(4)),
+            Err(WriteError::RunTransition { .. })
+        ));
+    }
+}

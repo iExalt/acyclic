@@ -115,6 +115,15 @@ pub enum Status {
         /// The holders, winner first.
         holders: Vec<String>,
     },
+    /// Unclaimed, but another item's winning claim holds one of its named resources.
+    ResourceBusy {
+        /// The resource.
+        resource: String,
+        /// The item holding it.
+        item: String,
+        /// That item's holder.
+        holder: String,
+    },
     /// On a cycle of links or parents, which pauses it.
     InCycle,
     /// Its state or thread holds conflicting values.
@@ -223,12 +232,18 @@ impl<'a> Readiness<'a> {
             return Ok(Some(Status::Blocked { waiting }));
         }
         let key = crate::model::item_key(id).map_err(|_| Error::InvalidName(id.to_owned()))?;
-        let claims = claim::live(self.state, &key, self.now)?;
+        let alive = |holder: &str| self.model.run_alive(holder);
+        let claims = claim::live_with(self.state, &key, self.now, &alive)?;
         let mut holders: Vec<String> = Vec::new();
         for claim in claims {
             if !holders.contains(&claim.holder) {
                 holders.push(claim.holder);
             }
+        }
+        if holders.is_empty()
+            && let Some(busy) = self.resource_busy(item)?
+        {
+            return Ok(Some(busy));
         }
         Ok(Some(match holders.len() {
             0 => Status::Ready { rank: self.rank(id) },
@@ -293,6 +308,28 @@ impl<'a> Readiness<'a> {
             .filter(|(k, _)| *k == kind)
             .map(|(_, to)| to.as_str())
             .collect()
+    }
+
+    /// The first named resource of an unclaimed item that another item's winning claim holds.
+    fn resource_busy(&self, item: &Item) -> Result<Option<Status>, Error> {
+        let alive = |holder: &str| self.model.run_alive(holder);
+        for resource in &item.resources {
+            for other in self.model.items.values() {
+                if other.id == item.id || !other.resources.contains(resource) {
+                    continue;
+                }
+                let key = crate::model::item_key(&other.id)
+                    .map_err(|_| Error::InvalidName(other.id.clone()))?;
+                if let Some(claim) = claim::winner_with(self.state, &key, self.now, &alive)? {
+                    return Ok(Some(Status::ResourceBusy {
+                        resource: resource.clone(),
+                        item: other.id.clone(),
+                        holder: claim.holder,
+                    }));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Whether an item is archived, memoized.

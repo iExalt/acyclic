@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use super::*;
-use crate::model::{By, add_item, item_key, link, set, set_element, set_parent, set_state};
+use crate::model::{self, By, add_item, item_key, link, set, set_element, set_parent, set_state};
 use crate::schema::{item as field, kind, repository, set as sets};
 use crate::state::{Key, Replica, ReplicaId};
 
@@ -234,4 +234,23 @@ fn git_ancestry_takes_only_commit_ids() {
     for bad in ["--foo", "abc", "zzzzzzz", &"a".repeat(65)] {
         assert_eq!(ancestry.merged(record, bad), Err("not a commit id".to_owned()), "{bad}");
     }
+}
+
+#[test]
+fn a_held_resource_keeps_an_item_waiting_and_a_dead_runs_claim_frees_it() {
+    let mut r = replica("a");
+    items(&mut r, &["x", "y"]);
+    for id in ["x", "y"] {
+        set_element(&mut r, &item_key(id).unwrap(), sets::RESOURCE, "gpu", true, by(2)).unwrap();
+    }
+    model::start_run(&mut r, "r1", "t1", by(2)).unwrap();
+    claim::claim(&mut r, &item_key("x").unwrap(), "run/r1", 10, None, 1_000).unwrap();
+    let none = Fake::default();
+    assert_eq!(
+        status(&r, &none, "y"),
+        Status::ResourceBusy { resource: "gpu".into(), item: "x".into(), holder: "run/r1".into() }
+    );
+    model::set_run_state(&mut r, "r1", model::RunState::Done, by(20)).unwrap();
+    assert_eq!(status(&r, &none, "x"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &none, "y"), Status::Ready { rank: 0 });
 }

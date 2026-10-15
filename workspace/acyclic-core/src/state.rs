@@ -191,6 +191,17 @@ pub enum Error {
     },
     /// The item already has a live claim in the writer's view.
     Claimed(Key),
+    /// Only leaves are claimed; the item has children.
+    NotALeaf(Key),
+    /// Another holder's live claim on another item holds a named resource this item needs.
+    ResourceHeld {
+        /// The resource.
+        resource: String,
+        /// The item holding it.
+        item: Key,
+        /// Its holder.
+        holder: String,
+    },
     /// A state file that couldn't be read.
     Format(String),
 }
@@ -221,6 +232,12 @@ impl fmt::Display for Error {
                 write!(f, "run {run} is applied by replica {applied_by}")
             },
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
+            Self::NotALeaf(key) => {
+                write!(f, "{} {} has children; claim one of them", key.kind, key.id)
+            },
+            Self::ResourceHeld { resource, item, holder } => {
+                write!(f, "{holder} holds {resource} through {} {}", item.kind, item.id)
+            },
             Self::Format(message) => write!(f, "unreadable state: {message}"),
         }
     }
