@@ -29,6 +29,9 @@ impl Git {
     fn command(&self) -> Command {
         let mut command = Command::new("git");
         command.arg("-C").arg(&self.repo).args(["-c", "core.quotePath=false"]);
+        // No reflogs for the tracker's refs: each would be another fsynced append per batch, the remote holds the
+        // history, and a squash makes it moot.
+        command.args(["-c", "core.logAllRefUpdates=false"]);
         // Errors are classified by their text, so keep git's messages untranslated.
         command.env("LC_ALL", "C").env("LANGUAGE", "");
         command
@@ -88,22 +91,41 @@ impl Git {
     }
 
     /// A ref's object id, or `None` when the ref doesn't exist.
+    /// The first call also learns the common Git directory, saving [`Git::common_dir`] a process.
     pub(crate) fn resolve(&self, reference: &str) -> Result<Option<String>, StoreError> {
-        let output = self
-            .command()
-            .args(["rev-parse", "--verify", "--quiet", &format!("{reference}^{{commit}}")])
+        let learn = self.common.get().is_none();
+        let mut command = self.command();
+        command.arg("rev-parse");
+        if learn {
+            command.arg("--git-common-dir");
+        }
+        let output = command
+            .args(["--verify", "--quiet", &format!("{reference}^{{commit}}")])
             .stdin(Stdio::null())
             .output()
             .map_err(|e| StoreError::Git(e.to_string()))?;
-        Ok(output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned()))
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut lines = text.lines();
+        if learn && let Some(dir) = lines.next() {
+            let dir = PathBuf::from(dir);
+            let _ = self.common.set(if dir.is_absolute() { dir } else { self.repo.join(dir) });
+        }
+        Ok(output.status.success().then(|| lines.next().unwrap_or_default().trim().to_owned()))
     }
 
     /// Refs under a prefix with their object ids.
     pub(crate) fn refs(&self, prefix: &str) -> Result<BTreeMap<String, String>, StoreError> {
-        let text = self.text(["for-each-ref", "--format=%(refname) %(objectname)", prefix])?;
+        self.refs_under(&[prefix])
+    }
+
+    /// Refs under any of several prefixes, or named exactly, with their object ids, in one process.
+    pub(crate) fn refs_under(
+        &self,
+        prefixes: &[&str],
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let mut args = vec!["for-each-ref", "--format=%(refname) %(objectname)"];
+        args.extend(prefixes);
+        let text = self.text(args)?;
         Ok(text
             .lines()
             .filter_map(|line| line.split_once(' '))
@@ -287,6 +309,83 @@ impl Git {
         Ok(String::from_utf8_lossy(&out).trim().to_owned())
     }
 
+    /// Writes commits with one `git fast-import`, so a batch's objects land in a single pack and no temporary
+    /// files are written. Each commit goes to its own scratch ref, forced, since only the
+    /// holder of the batch lock writes them. Returns the commits' ids in order.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git fails, and refuses a path fast-import would read differently: an empty one, or one holding a
+    /// newline or starting with a quote.
+    pub(crate) fn import_commits(
+        &self,
+        commits: &[NewCommit<'_>],
+    ) -> Result<Vec<String>, StoreError> {
+        if let Some(path) = commits
+            .iter()
+            .flat_map(|c| c.files.keys())
+            .find(|path| path.is_empty() || path.contains('\n') || path.starts_with('"'))
+        {
+            return Err(StoreError::Git(format!("can't import the path {path:?}")));
+        }
+        let mut stream: Vec<u8> = b"feature done\n".to_vec();
+        for (n, commit) in commits.iter().enumerate() {
+            let name = format!("acyclic {}", commit.replica);
+            let email = format!("{}@acyclic.invalid", commit.replica);
+            let _ = write!(
+                Bytes(&mut stream),
+                "reset {scratch}\ncommit {scratch}\nmark :{}\nauthor {name} <{email}> {seconds} +0000\ncommitter {name} <{email}> {seconds} \
+                 +0000\ndata {}\n{}\n",
+                n + 1,
+                commit.message.len(),
+                commit.message,
+                scratch = commit.scratch,
+                seconds = commit.seconds,
+            );
+            if let Some(parent) = commit.parent {
+                let _ = writeln!(Bytes(&mut stream), "from {parent}");
+            }
+            for (path, content) in commit.files {
+                match content {
+                    Some(content) => {
+                        let _ = write!(
+                            Bytes(&mut stream),
+                            "M 100644 inline {path}\ndata {}\n",
+                            content.len()
+                        );
+                        stream.extend_from_slice(content);
+                        stream.push(b'\n');
+                    },
+                    None => {
+                        let _ = writeln!(Bytes(&mut stream), "D {path}");
+                    },
+                }
+            }
+            stream.push(b'\n');
+        }
+        for n in 1..=commits.len() {
+            let _ = writeln!(Bytes(&mut stream), "get-mark :{n}");
+        }
+        stream.extend_from_slice(b"done\n");
+        // Keep even a small batch as a pack: unpacking a few objects into loose files costs more than the pack,
+        // and the store's upkeep repacks once packs pile up.
+        let out = self.run(
+            ["-c", "fastimport.unpackLimit=0", "fast-import", "--quiet", "--force"],
+            Some(&stream),
+            &[],
+        )?;
+        let ids: Vec<String> = String::from_utf8_lossy(&out).lines().map(str::to_owned).collect();
+        if ids.len() == commits.len() {
+            Ok(ids)
+        } else {
+            Err(StoreError::Git(format!(
+                "fast-import returned {} ids for {} commits",
+                ids.len(),
+                commits.len()
+            )))
+        }
+    }
+
     /// Starts an interactive `git update-ref --stdin` transaction.
     pub(crate) fn transaction(&self) -> Result<Transaction, StoreError> {
         let mut child = self
@@ -304,6 +403,28 @@ impl Git {
         transaction.send("start")?;
         transaction.expect("start")?;
         Ok(transaction)
+    }
+}
+
+/// A commit for [`Git::import_commits`]: `files` applied to `parent`'s tree (or to an empty tree), where `Some`
+/// content adds or replaces a file and `None` removes it.
+pub(crate) struct NewCommit<'a> {
+    /// The scratch ref fast-import moves to the commit.
+    pub(crate) scratch: &'a str,
+    pub(crate) parent: Option<&'a str>,
+    pub(crate) files: &'a BTreeMap<String, Option<Vec<u8>>>,
+    pub(crate) replica: &'a str,
+    pub(crate) seconds: i64,
+    pub(crate) message: &'a str,
+}
+
+/// Lets `write!` append to a byte buffer.
+struct Bytes<'a>(&'a mut Vec<u8>);
+
+impl std::fmt::Write for Bytes<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
     }
 }
 

@@ -526,6 +526,9 @@ fn replicas_converge_in_any_join_order(tc: TestCase) {
         assert_eq!(state, &reference);
     }
     assert_eq!(round_trip(&reference), reference);
+    // The cache's snapshot and the trusted read give back the same state.
+    assert_eq!(State::from_snapshot(&reference.to_snapshot()).unwrap(), reference);
+    assert_eq!(State::from_own_files(&reference.to_files()).unwrap(), reference);
 }
 
 /// P2: the join is commutative, associative and idempotent.
@@ -536,6 +539,21 @@ fn join_is_a_semilattice(tc: TestCase) {
     assert_eq!(joined(&[a, b]), joined(&[b, a]));
     assert_eq!(joined(&[&joined(&[a, b]), c]), joined(&[a, &joined(&[b, c])]));
     assert_eq!(&joined(&[a, a]), a);
+}
+
+/// The changed files between any two states turn one's files into the other's.
+#[hegel::test(test_cases = 256)]
+fn changed_files_turn_one_states_files_into_anothers(tc: TestCase) {
+    let replicas = play(&steps(&tc));
+    let (before, after) = (&replicas[below(&tc, 3)].state, &replicas[below(&tc, 3)].state);
+    let mut files = before.to_files();
+    for (path, content) in after.changed_files(before) {
+        match content {
+            Some(content) => files.insert(path, content),
+            None => files.remove(&path),
+        };
+    }
+    assert_eq!(files, after.to_files());
 }
 
 /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.

@@ -79,7 +79,7 @@ fn a_batch_moves_state_and_log_together() {
     assert_eq!(git(&path, &["rev-list", "--count", "refs/heads/state/mac"]), "2");
 
     let segment = "refs/heads/log/mac/2026-10/0001";
-    let events = log_lines(&path, segment, "_.jsonl");
+    let events = log_lines(&path, segment, "_/15.jsonl");
     assert_eq!(events.len(), 2);
     assert_eq!(events[1]["actor"], "actor/user");
     assert_eq!(events[1]["writes"][0]["field"], "title");
@@ -115,11 +115,11 @@ fn events_go_to_their_project_roots_file_with_run_and_actor() {
         })
         .unwrap();
     let segment = "refs/heads/log/mac/2026-10/0001";
-    let events = log_lines(&path, segment, "p0.jsonl");
+    let events = log_lines(&path, segment, "p0/15.jsonl");
     assert_eq!(events.len(), 1);
     assert_eq!((events[0]["run"].clone(), events[0]["seq"].clone()), (json!("r1"), json!(7)));
     assert_eq!(events[0]["actor_record"]["agent"], json!(["claude"]));
-    assert_eq!(log_lines(&path, segment, "_.jsonl")[0]["writes"][0]["kind"], "run");
+    assert_eq!(log_lines(&path, segment, "_/15.jsonl")[0]["writes"][0]["kind"], "run");
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn writer_processes_in_separate_worktrees_lose_and_duplicate_nothing() {
             assert!(dots.insert(register.keys().next().unwrap().clone()), "a duplicated dot");
         }
     }
-    let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_.jsonl");
+    let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_/15.jsonl");
     assert_eq!(events.len(), 1 + WRITERS * BATCHES);
 }
 
@@ -241,7 +241,7 @@ fn a_batch_that_loses_the_race_retries_on_the_new_tip() {
     for id in ["a1", "b1", "c1"] {
         assert!(state.field(&item(id), "f").is_some(), "{id} is present");
     }
-    assert_eq!(log_lines(&path, refs[1], "_.jsonl").len(), 3);
+    assert_eq!(log_lines(&path, refs[1], "_/15.jsonl").len(), 3);
 }
 
 /// The child half of the crash tests: runs one batch that aborts at the failpoint named in the environment.
@@ -277,7 +277,8 @@ fn crash_at(point: &str) {
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
     write(&tracker, "a1", "f", json!("before"));
-    let refs = || git(&path, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+    // The batch's scratch refs may be left behind; only the real refs count.
+    let refs = || git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"]);
     let before = refs();
 
     let status = Command::new(std::env::current_exe().unwrap())
@@ -290,8 +291,48 @@ fn crash_at(point: &str) {
     assert_eq!(refs(), before, "neither the state ref nor the log ref moved");
     // git aborts an unfinished transaction when its input closes, so no lock is left and the next batch succeeds.
     write(&tracker, "a1", "f", json!("after"));
-    let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_.jsonl");
+    let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_/15.jsonl");
     assert_eq!(events.len(), 2, "the crashed batch left no event");
+}
+
+#[test]
+fn a_large_batch_writes_a_pack_not_loose_objects() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    tracker
+        .batch(&meta(), NOW, false, &no_project, |replica, at| {
+            (0..500).try_for_each(|n| {
+                replica
+                    .write(&item(&format!("i{n}")), "f", "actor/user", at, Some(json!(n)))
+                    .map(|_| ())
+            })
+        })
+        .unwrap();
+    let counts = git(&path, &["count-objects", "-v"]);
+    let field = |name: &str| -> u32 {
+        counts.lines().find_map(|l| l.strip_prefix(name)).unwrap().trim().parse().unwrap()
+    };
+    // git unpacks an import of under 100 objects (fastimport.unpackLimit); this one is several hundred.
+    assert!(field("count:") < 100, "{counts}");
+    assert_eq!(field("packs:"), 1, "{counts}");
+}
+
+#[test]
+fn the_store_repacks_once_packs_pile_up() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    // In the foreground, so the test sees the result, and after a few packs rather than git's 50.
+    git(&path, &["config", "gc.autoDetach", "false"]);
+    git(&path, &["config", "gc.autoPackLimit", "3"]);
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    for n in 0..5 {
+        write(&tracker, "a1", "f", json!(n));
+    }
+    let counts = git(&path, &["count-objects", "-v"]);
+    let packs: u32 =
+        counts.lines().find_map(|l| l.strip_prefix("packs:")).unwrap().trim().parse().unwrap();
+    assert!(packs <= 3, "each batch writes a pack, and gc folds them: {counts}");
 }
 
 #[test]
@@ -347,6 +388,36 @@ fn a_squashed_ref_holds_the_same_state() {
     joined.join(&after);
     assert_eq!(joined, before);
     write(&tracker, "a1", "f9", json!(9));
+}
+
+#[test]
+fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let other = tracker(&dir, "phone");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    let (phone, _) = Tracker::open(&other).unwrap();
+    let agree = |tracker: &Tracker| {
+        let (tip, cached) = tracker.load().unwrap();
+        assert_eq!((tip, cached), tracker.load_strict().unwrap());
+    };
+    write(&tracker, "a1", "f", json!(1));
+    agree(&tracker);
+    tracker.squash().unwrap().unwrap();
+    agree(&tracker);
+    write(&phone, "b1", "f", json!(2));
+    git(
+        &path,
+        &["fetch", "-q", other.to_str().unwrap(), "refs/heads/state/phone:refs/remotes/phone"],
+    );
+    tracker.join_ref("refs/remotes/phone").unwrap();
+    agree(&tracker);
+
+    // A damaged cache is a miss: the read goes to Git and rewrites it.
+    let cache = path.join(".git/acyclic/cache/mac.json");
+    std::fs::write(&cache, "{not json\n").unwrap();
+    agree(&tracker);
+    assert_ne!(std::fs::read_to_string(&cache).unwrap(), "{not json\n");
 }
 
 fn assert_fresh(renamed: Option<&ReplicaId>, base: &str) -> String {
@@ -473,19 +544,24 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     let archived_ok = |_: &str, month: &str| month != "2026-08";
     let dropped = tracker.prune(NOW, &retention, &archived_ok).unwrap();
     assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert_eq!(
+        git(&path, &["for-each-ref", "refs/acyclic/scratch/log"]),
+        "",
+        "no scratch ref keeps pruned events reachable"
+    );
     // September's events are under a month old in the worst case, so they stay until November.
     assert_eq!(
         log_refs(&path),
         "refs/heads/log/mac/2026-07/0002\nrefs/heads/log/mac/2026-08/0001\nrefs/heads/log/mac/2026-09/0001\nrefs/heads/log/mac/2026-10/0001"
     );
     let july = "refs/heads/log/mac/2026-07/0002";
-    assert_eq!(git(&path, &["ls-tree", "--name-only", july]), "_.jsonl");
+    assert_eq!(git(&path, &["ls-tree", "-r", "--name-only", july]), "_/06.jsonl");
     assert_eq!(
         git(&path, &["rev-list", "--count", july]),
         "1",
         "the new generation has no history"
     );
-    assert_eq!(log_lines(&path, july, "_.jsonl").len(), 1);
+    assert_eq!(log_lines(&path, july, "_/06.jsonl").len(), 1);
     assert!(
         tracker.prune(NOW, &retention, &archived_ok).unwrap().is_empty(),
         "pruning again changes nothing"

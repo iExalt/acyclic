@@ -294,11 +294,12 @@ impl State {
         self.entities.iter()
     }
 
-    /// Joins another state into this one.
-    pub fn join(&mut self, other: &Self) {
+    /// Joins another state into this one, reporting whether any entity changed.
+    pub fn join(&mut self, other: &Self) -> bool {
         let keys: BTreeSet<&Key> = self.entities.keys().chain(other.entities.keys()).collect();
         let empty = Entity::new();
         let mut joined = BTreeMap::new();
+        let mut changed = false;
         for key in keys {
             let mine = self.entities.get(key).unwrap_or(&empty);
             let theirs = other.entities.get(key).unwrap_or(&empty);
@@ -316,12 +317,14 @@ impl State {
                     entity.insert(name.clone(), register);
                 }
             }
+            changed |= *mine != entity;
             if !entity.is_empty() {
                 joined.insert(key.clone(), entity);
             }
         }
         self.entities = joined;
         self.context.join(&other.context);
+        changed
     }
 
     /// Checks that every stored dot is covered by the state's own context, so `seen` means `1..=n` for each writer.
@@ -343,16 +346,22 @@ impl State {
         Ok(())
     }
 
-    fn set(&mut self, key: &Key, field: &str, register: Register) {
+    /// Sets a field, reporting whether its values changed.
+    fn set(&mut self, key: &Key, field: &str, register: Register) -> bool {
         if register.is_empty() {
-            if let Some(entity) = self.entities.get_mut(key) {
-                entity.remove(field);
-                if entity.is_empty() {
-                    self.entities.remove(key);
-                }
+            let Some(entity) = self.entities.get_mut(key) else { return false };
+            let removed = entity.remove(field).is_some();
+            if entity.is_empty() {
+                self.entities.remove(key);
             }
+            removed
         } else {
-            self.entities.entry(key.clone()).or_default().insert(field.to_owned(), register);
+            let entity = self.entities.entry(key.clone()).or_default();
+            if entity.get(field) == Some(&register) {
+                return false;
+            }
+            entity.insert(field.to_owned(), register);
+            true
         }
     }
 }
@@ -372,6 +381,8 @@ pub enum Continuity {
 pub struct Replica {
     id: ReplicaId,
     continuity: Continuity,
+    /// How many writes and joins changed an entity.
+    changes: u64,
     /// The replica's state.
     pub state: State,
 }
@@ -411,13 +422,13 @@ impl Replica {
     /// A replica whose own state is intact.
     #[must_use]
     pub fn open(id: ReplicaId, state: State) -> Self {
-        Self { id, continuity: Continuity::Intact, state }
+        Self { id, continuity: Continuity::Intact, changes: 0, state }
     }
 
     /// A replica rebuilt without its own state, from whatever it could fetch.
     #[must_use]
     pub fn rebuilt(id: ReplicaId, state: State) -> Self {
-        Self { id, continuity: Continuity::Rebuilt, state }
+        Self { id, continuity: Continuity::Rebuilt, changes: 0, state }
     }
 
     /// Marks a rebuilt replica as holding its true highest counter again. Call it only after joining every state ref
@@ -431,6 +442,19 @@ impl Replica {
     #[must_use]
     pub fn id(&self) -> &ReplicaId {
         &self.id
+    }
+
+    /// How many of this replica's writes and joins changed an entity: compare two readings to learn whether
+    /// something in between did. A clear changes an entity without minting a dot.
+    #[must_use]
+    pub fn changes(&self) -> u64 {
+        self.changes
+    }
+
+    fn set(&mut self, key: &Key, field: &str, register: Register) {
+        if self.state.set(key, field, register) {
+            self.changes += 1;
+        }
     }
 
     /// Joins another state.
@@ -447,7 +471,9 @@ impl Replica {
                 return Err(Error::IdReused { replica: self.id.clone(), mine, theirs });
             }
         }
-        self.state.join(other);
+        if self.state.join(other) {
+            self.changes += 1;
+        }
         Ok(())
     }
 
@@ -495,12 +521,12 @@ impl Replica {
             check_value(value)?;
         }
         let Some(value) = value else {
-            self.state.set(key, field, Register::new());
+            self.set(key, field, Register::new());
             return Ok(None);
         };
         let (dot, at) = self.mint(at)?;
         let stamped = Stamped { actor: actor.to_owned(), at, value };
-        self.state.set(key, field, Register::from([(dot.clone(), stamped)]));
+        self.set(key, field, Register::from([(dot.clone(), stamped)]));
         Ok(Some(dot))
     }
 
@@ -555,7 +581,7 @@ impl Replica {
             },
             None => None,
         };
-        self.state.set(&op.key, &op.field, register);
+        self.set(&op.key, &op.field, register);
         let system = format!("replica/{}", self.id);
         self.write(&run, RUN_APPLIED_SEQ, &system, at, Some(Json::from(op.seq)))?;
         if self.state.field(&run, RUN_APPLIED_BY).is_none() {
@@ -571,6 +597,15 @@ impl Replica {
 struct Header {
     format_version: u32,
     context: Context,
+}
+
+/// A whole state in one document: see [`State::to_snapshot`].
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Snapshot {
+    format_version: u32,
+    context: Context,
+    entities: Vec<EntityFile>,
 }
 
 /// An entity file.
@@ -613,63 +648,150 @@ fn canonical<T: Serialize>(value: &T) -> String {
     text
 }
 
+fn entity_file(key: &Key, entity: &Entity) -> String {
+    canonical(&entity_record(key, entity))
+}
+
+fn entity_record(key: &Key, entity: &Entity) -> EntityFile {
+    let fields = entity
+        .iter()
+        .map(|(name, register)| {
+            let values = register
+                .iter()
+                .map(|(dot, v)| ValueFile {
+                    dot: dot.clone(),
+                    actor: v.actor.clone(),
+                    at: v.at,
+                    value: v.value.clone(),
+                })
+                .collect();
+            (name.clone(), values)
+        })
+        .collect();
+    EntityFile { kind: key.kind.clone(), id: key.id.clone(), fields }
+}
+
 impl State {
     /// The state as files: [`HEADER_PATH`] and one file per entity at [`Key::path`], in canonical JSON.
     #[must_use]
     pub fn to_files(&self) -> BTreeMap<String, String> {
         let mut files = BTreeMap::new();
-        let header = Header { format_version: FORMAT_VERSION, context: self.context.clone() };
-        files.insert(HEADER_PATH.to_owned(), canonical(&header));
+        files.insert(HEADER_PATH.to_owned(), self.header_file());
         for (key, entity) in &self.entities {
-            let fields = entity
-                .iter()
-                .map(|(name, register)| {
-                    let values = register
-                        .iter()
-                        .map(|(dot, v)| ValueFile {
-                            dot: dot.clone(),
-                            actor: v.actor.clone(),
-                            at: v.at,
-                            value: v.value.clone(),
-                        })
-                        .collect();
-                    (name.clone(), values)
-                })
-                .collect();
-            let file = EntityFile { kind: key.kind.clone(), id: key.id.clone(), fields };
-            files.insert(key.path(), canonical(&file));
+            files.insert(key.path(), entity_file(key, entity));
         }
         files
     }
 
-    /// Reads a state from its files.
+    /// The files that differ from `before`'s: `Some` content for each new or changed file, `None` for each removed
+    /// one. Serializes only what changed, so it costs nothing like [`State::to_files`] twice.
+    #[must_use]
+    pub fn changed_files(&self, before: &State) -> BTreeMap<String, Option<String>> {
+        let mut changes = BTreeMap::new();
+        if self.context != before.context {
+            changes.insert(HEADER_PATH.to_owned(), Some(self.header_file()));
+        }
+        for (key, entity) in &self.entities {
+            if before.entities.get(key) != Some(entity) {
+                changes.insert(key.path(), Some(entity_file(key, entity)));
+            }
+        }
+        for key in before.entities.keys().filter(|key| !self.entities.contains_key(*key)) {
+            changes.insert(key.path(), None);
+        }
+        changes
+    }
+
+    fn header_file(&self) -> String {
+        canonical(&Header { format_version: FORMAT_VERSION, context: self.context.clone() })
+    }
+
+    /// Reads a state from its files, refusing any that aren't in canonical form, as when they come from another
+    /// replica.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a missing or newer header, a malformed file, a file at the wrong path, a dot beyond the context, or a
+    /// file not in canonical form.
+    pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
+        let state = Self::from_own_files(files)?;
+        if state.to_files() != *files {
+            return Err(Error::Format("files are not in canonical form".to_owned()));
+        }
+        Ok(state)
+    }
+
+    /// Reads a state from files this replica wrote itself, skipping the canonical-form check, which re-serializes
+    /// the whole state; every other check stays.
     ///
     /// # Errors
     ///
     /// Fails on a missing or newer header, a malformed file, a file at the wrong path, or a dot beyond the context.
-    pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
+    pub fn from_own_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
         let header =
             files.get(HEADER_PATH).ok_or_else(|| Error::Format("no state.json".to_owned()))?;
-        let header: serde_json::Value =
+        let header: Json =
             serde_json::from_str(header).map_err(|e| Error::Format(format!("state.json: {e}")))?;
-        let version = header.get("format_version").and_then(Json::as_u64).unwrap_or(0);
-        if version == 0 || version > u64::from(FORMAT_VERSION) {
-            return Err(Error::Format(format!(
-                "format version {version} is not supported; this build reads 1 to {FORMAT_VERSION}"
-            )));
-        }
+        check_version(&header)?;
         let header: Header = serde_json::from_value(header)
             .map_err(|e| Error::Format(format!("state.json: {e}")))?;
-        let mut state = Self { context: header.context, entities: BTreeMap::new() };
-        for (path, text) in files.iter().filter(|(path, _)| path.as_str() != HEADER_PATH) {
-            let file: EntityFile =
-                serde_json::from_str(text).map_err(|e| Error::Format(format!("{path}: {e}")))?;
+        let entities =
+            files.iter().filter(|(path, _)| path.as_str() != HEADER_PATH).map(|(path, text)| {
+                let file: EntityFile = serde_json::from_str(text)
+                    .map_err(|e| Error::Format(format!("{path}: {e}")))?;
+                Ok((Some(path.as_str()), file))
+            });
+        Self::assemble(header.context, entities)
+    }
+
+    /// The whole state as one compact document, for a local cache. It has no canonical form, since nothing hashes
+    /// it.
+    ///
+    /// # Panics
+    ///
+    /// Never: a state holds only strings, integers and the like.
+    #[must_use]
+    pub fn to_snapshot(&self) -> String {
+        let entities =
+            self.entities.iter().map(|(key, entity)| entity_record(key, entity)).collect();
+        let snapshot =
+            Snapshot { format_version: FORMAT_VERSION, context: self.context.clone(), entities };
+        serde_json::to_string(&snapshot).expect("state always serializes")
+    }
+
+    /// Reads a document written by [`State::to_snapshot`], with every check but the canonical form's.
+    ///
+    /// # Errors
+    ///
+    /// Fails on another format version, a malformed document or a dot beyond the context.
+    pub fn from_snapshot(text: &str) -> Result<Self, Error> {
+        let snapshot: Snapshot =
+            serde_json::from_str(text).map_err(|e| Error::Format(format!("snapshot: {e}")))?;
+        if snapshot.format_version != FORMAT_VERSION {
+            return Err(Error::Format(format!(
+                "snapshot format version {} isn't {FORMAT_VERSION}",
+                snapshot.format_version
+            )));
+        }
+        Self::assemble(snapshot.context, snapshot.entities.into_iter().map(|file| Ok((None, file))))
+    }
+
+    /// Builds a state from its context and entity files, checking each file's place (when it has a path), its
+    /// values and finally the dots against the context.
+    fn assemble<'a>(
+        context: Context,
+        files: impl Iterator<Item = Result<(Option<&'a str>, EntityFile), Error>>,
+    ) -> Result<Self, Error> {
+        let mut state = Self { context, entities: BTreeMap::new() };
+        for file in files {
+            let (path, file) = file?;
             let key = Key::new(&file.kind, &file.id)?;
-            if key.path() != *path {
-                return Err(Error::Format(format!("{path} holds {}", key.path())));
+            let at = path.map_or_else(|| key.path(), str::to_owned);
+            if path.is_some_and(|path| key.path() != path) {
+                return Err(Error::Format(format!("{at} holds {}", key.path())));
             }
             for value in file.fields.values().flatten() {
-                check_value(&value.value).map_err(|e| Error::Format(format!("{path}: {e}")))?;
+                check_value(&value.value).map_err(|e| Error::Format(format!("{at}: {e}")))?;
             }
             let mut entity = Entity::new();
             for (name, values) in file.fields {
@@ -686,11 +808,18 @@ impl State {
             }
         }
         state.check()?;
-        if state.to_files() != *files {
-            return Err(Error::Format("files are not in canonical form".to_owned()));
-        }
         Ok(state)
     }
+}
+
+fn check_version(header: &Json) -> Result<(), Error> {
+    let version = header.get("format_version").and_then(Json::as_u64).unwrap_or(0);
+    if version == 0 || version > u64::from(FORMAT_VERSION) {
+        return Err(Error::Format(format!(
+            "format version {version} is not supported; this build reads 1 to {FORMAT_VERSION}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,10 +1,17 @@
 //! State stored in a tracker repository: each replica's state ref holds its whole state as a tree, and its audit log
 //! keeps the events behind its batches, one ref per month.
 //!
-//! A batch reads the replica's state, applies a pure closure, and moves the state ref and the month's log ref in one
+//! A batch reads the replica's state, applies a pure closure, writes the changed files and the day's events with one
+//! `git fast-import` into a single pack, and moves the state ref and the month's log ref in one
 //! `git update-ref --stdin` transaction with compare-and-swap, so both move or neither does. Losing a race re-reads
 //! and re-runs the closure. Only plumbing is used; nothing is checked out.
+//!
+//! Reads come from a cache of the parsed state kept beside the repository for the state ref's current tip, and the
+//! store repacks itself once packs pile up, so git's share of a command stays small and steady; parsing and
+//! rewriting the state still grow with the tracker. The repack runs `git gc --auto`, which skips repacking for a day
+//! after a run that warned, as git records in `gc.log`; packs pile up meanwhile.
 
+mod cache;
 mod git;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +24,8 @@ use serde::Serialize;
 use serde_json::Value as Json;
 
 use crate::state::{self, Dot, Key, Millis, Replica, ReplicaId, State};
-use git::Git;
+use cache::Cache;
+use git::{Git, NewCommit};
 
 /// How long a batch keeps retrying lost races.
 const RETRY_DEADLINE: Duration = Duration::from_secs(30);
@@ -163,7 +171,23 @@ pub struct Tracker {
     replica: ReplicaId,
     /// Whether the id is still marked unused; cleared after the first committed batch.
     unused: AtomicBool,
+    /// The state ref's tip as `open` found it, which the first read reuses rather than resolving it again. Taking
+    /// the batch lock clears it, so a write always starts from a fresh tip; a read using it sees the state as of
+    /// opening.
+    opened: std::sync::Mutex<Option<OpenedTip>>,
+    /// The clone's `gc.auto` and `gc.autoPackLimit`, or git's defaults: when to repack.
+    upkeep: Upkeep,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct Upkeep {
+    loose: usize,
+    packs: usize,
+}
+
+/// The state ref's tip when the tracker was opened: `None` when it had no state yet.
+#[derive(Debug)]
+struct OpenedTip(Option<String>);
 
 /// The git config key naming a new replica id that hasn't written yet.
 pub const UNUSED_CONFIG: &str = "acyclic.replica-unused";
@@ -208,6 +232,39 @@ pub fn segment_ref(namespace: &str, replica: &ReplicaId, month: &str, generation
 /// The calendar month of a timestamp, as `yyyy-mm` in UTC.
 #[must_use]
 pub fn month_of(at: Millis) -> String {
+    let (year, month, _) = civil(at);
+    format!("{year:04}-{month:02}")
+}
+
+/// The UTC day of the month for a time, as two digits.
+fn day_of(at: Millis) -> String {
+    format!("{:02}", civil(at).2)
+}
+
+/// A log file's path in its month's segment: a directory per project root and a file per day, so a batch appends
+/// to one day's events rather than rewriting the month's.
+fn log_path(root: &str, day: &str) -> String {
+    format!("{root}/{day}.jsonl")
+}
+
+/// The scratch refs `git fast-import` leaves a batch's commits on until its transaction moves the real refs; only the
+/// holder of the batch lock writes them. They are never deleted in a transaction, since deleting a packed ref takes
+/// the lock a background repack may hold. The next batch overwrites them, and prune and squash drop them so they
+/// don't keep what those make unreachable.
+const SCRATCH_STATE: &str = "refs/acyclic/scratch/state";
+const SCRATCH_LOG: &str = "refs/acyclic/scratch/log";
+
+/// The changed state files as bytes, for a commit.
+fn state_changes(before: &State, after: &State) -> BTreeMap<String, Option<Vec<u8>>> {
+    after
+        .changed_files(before)
+        .into_iter()
+        .map(|(path, content)| (path, content.map(String::into_bytes)))
+        .collect()
+}
+
+/// The UTC calendar date of a time: year, month and day.
+fn civil(at: Millis) -> (i64, i64, i64) {
     // Howard Hinnant's days-to-civil algorithm.
     let days = at.div_euclid(86_400_000);
     let z = days + 719_468;
@@ -218,7 +275,8 @@ pub fn month_of(at: Millis) -> String {
     let mp = (5 * doy + 2) / 153;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}")
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    (year, month, day)
 }
 
 #[derive(Serialize)]
@@ -314,13 +372,31 @@ impl Tracker {
     /// Fails when the replica id is missing or invalid, or git fails.
     pub fn open(path: &Path) -> Result<(Self, Option<ReplicaId>), StoreError> {
         let git = Git::new(path);
-        let id = git.text(["config", "--get", REPLICA_CONFIG]).map_err(|_| {
+        // The replica's settings and git's repacking thresholds in one process; git prints names in lower case.
+        let settings = git
+            .text(["config", "--get-regexp", r"^(acyclic\.|gc\.auto$|gc\.autopacklimit$)"])
+            .unwrap_or_default();
+        let setting = |name: &str| {
+            settings.lines().find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
+        };
+        let number = |name, default| setting(name).and_then(|v| v.parse().ok()).unwrap_or(default);
+        let upkeep =
+            Upkeep { loose: number("gc.auto", 6_700), packs: number("gc.autopacklimit", 50) };
+        let id = setting(REPLICA_CONFIG).ok_or_else(|| {
             StoreError::Config(format!("no {REPLICA_CONFIG} in {}", path.display()))
         })?;
-        let id = ReplicaId::new(&id)?;
-        let unused = git.text(["config", "--get", UNUSED_CONFIG]).is_ok_and(|v| v == id.as_str());
-        if git.resolve(&state_ref(&id))?.is_some() {
-            return Ok((Self { git, replica: id, unused: AtomicBool::new(false) }, None));
+        let id = ReplicaId::new(id)?;
+        let unused = setting(UNUSED_CONFIG) == Some(id.as_str());
+        let tip = git.resolve(&state_ref(&id))?;
+        let tracker = |git, replica, unused, tip| Self {
+            git,
+            replica,
+            unused: AtomicBool::new(unused),
+            opened: std::sync::Mutex::new(Some(OpenedTip(tip))),
+            upkeep,
+        };
+        if tip.is_some() {
+            return Ok((tracker(git, id, false, tip), None));
         }
         let mut remembered = BTreeSet::new();
         for (_, commit) in git.refs("refs/heads/state/")? {
@@ -328,7 +404,7 @@ impl Tracker {
             remembered.extend(state.context.seen.keys().cloned());
         }
         if unused && !remembered.contains(&id) {
-            return Ok((Self { git, replica: id, unused: AtomicBool::new(true) }, None));
+            return Ok((tracker(git, id, true, None), None));
         }
         let fresh = loop {
             let candidate = ReplicaId::new(&format!("{id}-{}", random_suffix()))?;
@@ -337,7 +413,7 @@ impl Tracker {
             }
         };
         init_replica(path, &fresh)?;
-        Ok((Self { git, replica: fresh.clone(), unused: AtomicBool::new(true) }, Some(fresh)))
+        Ok((tracker(git, fresh.clone(), true, None), Some(fresh)))
     }
 
     /// This replica's id.
@@ -352,10 +428,78 @@ impl Tracker {
     ///
     /// Fails when git fails or the state can't be read.
     pub fn load(&self) -> Result<(Option<String>, State), StoreError> {
+        let opened = self.opened.lock().ok().and_then(|mut opened| opened.take());
+        let tip = match opened {
+            Some(OpenedTip(tip)) => tip,
+            None => self.git.resolve(&state_ref(&self.replica))?,
+        };
+        self.load_at(tip)
+    }
+
+    /// The state at `tip`, from the cache when it holds that tip.
+    fn load_at(&self, tip: Option<String>) -> Result<(Option<String>, State), StoreError> {
+        let Some(tip) = tip else {
+            return Ok((None, State::new()));
+        };
+        let cache = self.cache()?;
+        if let Some(state) = cache.read(&tip) {
+            return Ok((Some(tip), state));
+        }
+        let state = read_own_state(&self.git, &tip)?;
+        cache.write(&tip, &state);
+        Ok((Some(tip), state))
+    }
+
+    /// Like [`Tracker::load`], but always from Git and refusing files that aren't in canonical form, as a check of
+    /// the stored state should.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git fails or the state can't be read.
+    pub fn load_strict(&self) -> Result<(Option<String>, State), StoreError> {
+        if let Ok(mut opened) = self.opened.lock() {
+            opened.take();
+        }
         match self.git.resolve(&state_ref(&self.replica))? {
             Some(tip) => Ok((Some(tip.clone()), read_state(&self.git, &tip)?)),
             None => Ok((None, State::new())),
         }
+    }
+
+    /// Keeps the object store packed: when git's thresholds are probably crossed (`gc.auto` loose objects, judged as
+    /// git does from one of the 256 object directories, or more than `gc.autoPackLimit` packs), runs `git gc --auto`,
+    /// which checks them itself and detaches to repack in the background. Costs a directory read or two otherwise;
+    /// `gc.auto` of 0 turns it off, as in git. Best effort.
+    fn maintain(&self) {
+        let Ok(common) = self.git.common_dir() else { return };
+        let objects = common.join("objects");
+        let count = |dir: &Path, keep: &dyn Fn(&str) -> bool| {
+            std::fs::read_dir(dir).map_or(0, |entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter(|e| e.file_name().to_str().is_some_and(keep))
+                    .count()
+            })
+        };
+        let loose = count(&objects.join("17"), &|name| {
+            name.len() >= 38 && name.bytes().all(|b| b.is_ascii_hexdigit())
+        });
+        let packs = count(&objects.join("pack"), &|name| {
+            Path::new(name).extension().is_some_and(|ext| ext == "pack")
+        });
+        let Upkeep { loose: max_loose, packs: max_packs } = self.upkeep;
+        if max_loose > 0 && (loose * 256 > max_loose || (max_packs > 0 && packs > max_packs)) {
+            let _ = self.git.run(["gc", "--auto", "--quiet"], None, &[]);
+        }
+    }
+
+    /// Deletes a scratch ref, best effort: a repack holding the lock only means it lingers until the next try.
+    fn drop_scratch(&self, scratch: &str) {
+        let _ = self.git.run(["update-ref", "-d", scratch], None, &[]);
+    }
+
+    fn cache(&self) -> Result<Cache, StoreError> {
+        Ok(Cache::new(&self.git.common_dir()?, &self.replica))
     }
 
     /// Runs a batch: `apply` receives the replica's current state and must be pure, since a lost race runs it again
@@ -417,21 +561,24 @@ impl Tracker {
         apply: &impl Fn(&mut Replica, Millis) -> Result<(), E>,
         hooks: &Hooks,
     ) -> Result<Option<String>, BatchError<E>> {
-        let (tip, before) = self.load()?;
+        // The state's tip and the log's segments in one process.
+        let state = state_ref(&self.replica);
+        let refs = self.git.refs_under(&[&state, &format!("refs/heads/log/{}/", self.replica)])?;
+        let (tip, before) = self.load_at(refs.get(&state).cloned())?;
         let mut replica = Replica::open(self.replica.clone(), before.clone());
         let at = replica.stamp(now, allow_clock_step).map_err(StoreError::State)?;
         apply(&mut replica, at).map_err(BatchError::Apply)?;
         if replica.state == before {
             return Ok(None);
         }
-        let commit = self.commit_state(tip.as_deref(), &before, &replica.state, at, "batch")?;
-
+        let state_files = state_changes(&before, &replica.state);
         let event_actor = actor_record(&replica.state, &meta.actor);
         let changes = diff(&before, &replica.state, root_of);
         let month = month_of(at);
-        let (segment, segment_tip) = self.current_segment("log", &month)?;
+        let day = day_of(at);
+        let (segment, segment_tip) = self.segment_in(&refs, "log", &month);
         let mut files = BTreeMap::new();
-        let paths: Vec<String> = changes.keys().map(|root| format!("{root}.jsonl")).collect();
+        let paths: Vec<String> = changes.keys().map(|root| log_path(root, &day)).collect();
         let existing = match &segment_tip {
             Some(tip) => self.git.read_paths(tip, &paths)?,
             None => BTreeMap::new(),
@@ -445,21 +592,26 @@ impl Tracker {
                 seq: meta.run.as_ref().map(|(_, seq)| *seq),
                 writes,
             };
-            let path = format!("{root}.jsonl");
+            let path = log_path(&root, &day);
             let mut content = existing.get(&path).cloned().unwrap_or_default();
             content.extend(serde_json::to_vec(&event).expect("events serialize"));
             content.push(b'\n');
             files.insert(path, Some(content));
         }
-        let log_tree = self.git.write_tree(segment_tip.as_deref(), &files)?;
         let seconds = at.div_euclid(1_000);
-        let log_commit = self.git.commit(
-            &log_tree,
-            segment_tip.as_deref(),
-            self.replica.as_str(),
+        let commit = |scratch, parent, files, message| NewCommit {
+            scratch,
+            parent,
+            files,
+            replica: self.replica.as_str(),
             seconds,
-            "events",
-        )?;
+            message,
+        };
+        let ids = self.git.import_commits(&[
+            commit(SCRATCH_STATE, tip.as_deref(), &state_files, "batch"),
+            commit(SCRATCH_LOG, segment_tip.as_deref(), &files, "events"),
+        ])?;
+        let [commit, log_commit] = [&ids[0], &ids[1]].map(String::clone);
 
         if let Some(hook) = &hooks.after_objects {
             hook();
@@ -472,6 +624,8 @@ impl Tracker {
             hook();
         }
         transaction.commit()?;
+        self.cache()?.write(&commit, &replica.state);
+        self.maintain();
         if self.unused.swap(false, Ordering::Relaxed) {
             // Another worktree may have cleared it already; the state ref now vouches for the id either way.
             let _ = self.git.run(["config", "--unset", UNUSED_CONFIG], None, &[]);
@@ -483,6 +637,10 @@ impl Tracker {
     /// operating system releases the lock when its holder exits, so a crash never leaves it stale. Compare-and-swap
     /// still guards the refs.
     fn lock(&self) -> Result<std::fs::File, StoreError> {
+        // A writer starts from a fresh tip, never the one seen at opening.
+        if let Ok(mut opened) = self.opened.lock() {
+            opened.take();
+        }
         let path = self.git.common_dir()?.join("acyclic-batch.lock");
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -503,19 +661,17 @@ impl Tracker {
         at: Millis,
         message: &str,
     ) -> Result<String, StoreError> {
-        let old = before.to_files();
-        let new = after.to_files();
-        let mut changes: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
-        for (path, content) in &new {
-            if old.get(path) != Some(content) {
-                changes.insert(path.clone(), Some(content.clone().into_bytes()));
-            }
-        }
-        for path in old.keys().filter(|path| !new.contains_key(*path)) {
-            changes.insert(path.clone(), None);
-        }
-        let tree = self.git.write_tree(tip, &changes)?;
-        self.git.commit(&tree, tip, self.replica.as_str(), at.div_euclid(1_000), message)
+        let files = state_changes(before, after);
+        let commit = NewCommit {
+            scratch: SCRATCH_STATE,
+            parent: tip,
+            files: &files,
+            replica: self.replica.as_str(),
+            seconds: at.div_euclid(1_000),
+            message,
+        };
+        let mut ids = self.git.import_commits(&[commit])?;
+        Ok(ids.remove(0))
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -564,7 +720,7 @@ impl Tracker {
                 let expired: Vec<&String> = files
                     .keys()
                     .filter(|path| {
-                        let root = path.strip_suffix(".jsonl").unwrap_or(path);
+                        let root = path.split_once('/').map_or(path.as_str(), |(root, _)| root);
                         retention(root)
                             .is_some_and(|months| months_between(&month, &current) > months)
                             && archived_ok(root, &month)
@@ -603,6 +759,7 @@ impl Tracker {
         if let Some(mut transaction) = transaction {
             transaction.prepare()?;
             transaction.commit()?;
+            self.drop_scratch(SCRATCH_LOG);
         }
         Ok(dropped)
     }
@@ -703,17 +860,21 @@ impl Tracker {
         Ok(refspecs.len())
     }
 
-    /// The month's current segment ref (the highest generation, or generation 1 when none) and its tip.
-    fn current_segment(
+    /// The month's current segment ref among `refs` (the highest generation, or generation 1 when none) and its tip.
+    fn segment_in(
         &self,
+        refs: &BTreeMap<String, String>,
         namespace: &str,
         month: &str,
-    ) -> Result<(String, Option<String>), StoreError> {
+    ) -> (String, Option<String>) {
         let prefix = format!("refs/heads/{namespace}/{}/{month}/", self.replica);
-        let existing = self.git.refs(&prefix)?;
-        match existing.into_iter().max_by_key(|(name, _)| name.clone()) {
-            Some((name, tip)) => Ok((name, Some(tip))),
-            None => Ok((segment_ref(namespace, &self.replica, month, 1), None)),
+        match refs
+            .iter()
+            .filter(|(name, _)| name.starts_with(&prefix))
+            .max_by_key(|(name, _)| *name)
+        {
+            Some((name, tip)) => (name.clone(), Some(tip.clone())),
+            None => (segment_ref(namespace, &self.replica, month, 1), None),
         }
     }
 
@@ -744,7 +905,10 @@ impl Tracker {
             let mut transaction = self.git.transaction()?;
             transaction.update(&state_ref(&self.replica), &commit, tip.as_deref())?;
             match transaction.prepare().and_then(|()| transaction.commit()) {
-                Ok(()) => return Ok(Outcome::Committed { commit, retries }),
+                Ok(()) => {
+                    self.cache()?.write(&commit, &replica.state);
+                    return Ok(Outcome::Committed { commit, retries });
+                },
                 Err(StoreError::Conflict) if started.elapsed() < RETRY_DEADLINE => {
                     retries += 1;
                     std::thread::sleep(backoff(retries));
@@ -768,10 +932,17 @@ impl Tracker {
         let tree = self.git.text(["rev-parse", &format!("{tip}^{{tree}}")])?;
         let seconds = self.git.text(["show", "-s", "--format=%ct", &tip])?.parse().unwrap_or(0);
         let commit = self.git.commit(&tree, None, self.replica.as_str(), seconds, "squash")?;
+        let cache = self.cache()?;
+        let state = cache.read(&tip);
         let mut transaction = self.git.transaction()?;
         transaction.update(&state_ref(&self.replica), &commit, Some(&tip))?;
         transaction.prepare()?;
         transaction.commit()?;
+        self.drop_scratch(SCRATCH_STATE);
+        if let Some(state) = state {
+            // The same tree under a new tip.
+            cache.write(&commit, &state);
+        }
         Ok(Some(commit))
     }
 }
@@ -842,17 +1013,25 @@ fn months_between(from: &str, to: &str) -> u32 {
 }
 
 /// Reads the state held in a commit's tree.
+/// Reads a state from a commit's tree, refusing files that aren't in canonical form.
 fn read_state(git: &Git, commit: &str) -> Result<State, StoreError> {
-    let files = git
-        .read_tree(commit)?
+    Ok(State::from_files(&read_files(git, commit)?)?)
+}
+
+/// Reads a state this replica wrote, skipping the canonical-form check.
+fn read_own_state(git: &Git, commit: &str) -> Result<State, StoreError> {
+    Ok(State::from_own_files(&read_files(git, commit)?)?)
+}
+
+fn read_files(git: &Git, commit: &str) -> Result<BTreeMap<String, String>, StoreError> {
+    git.read_tree(commit)?
         .into_iter()
         .map(|(path, content)| {
             String::from_utf8(content).map(|text| (path.clone(), text)).map_err(|_| {
                 StoreError::State(state::Error::Format(format!("{path} is not UTF-8")))
             })
         })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    Ok(State::from_files(&files)?)
+        .collect()
 }
 
 /// Exponential backoff from about 5 ms to under 2 s: half the step plus up to a whole step of jitter, so racing
@@ -879,6 +1058,9 @@ mod tests {
         assert_eq!(month_of(1_798_761_599_999), "2026-12");
         assert_eq!(month_of(1_798_761_600_000), "2027-01");
         assert_eq!(month_of(-1), "1969-12");
+        assert_eq!(day_of(951_782_400_000), "29");
+        assert_eq!(day_of(951_868_800_000), "01");
+        assert_eq!(day_of(-1), "31");
     }
 
     #[test]

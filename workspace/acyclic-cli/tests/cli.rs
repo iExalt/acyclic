@@ -81,6 +81,8 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("show a1", AGENT), 0);
     assert_eq!(sh.run("show nope", AGENT), 3);
     assert_eq!(sh.run("link a1 sideways a2", AGENT), 2);
+    let (code, unlinked) = sh.output("unlink a2 blocks a1", AGENT);
+    assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
     insta::assert_snapshot!(sh.transcript);
 }

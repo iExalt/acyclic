@@ -250,9 +250,9 @@ impl<'a> Session<'a> {
         let meta = Meta { actor: self.actor.clone(), run: None };
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
-            let before = replica.state.clone();
+            let before = replica.changes();
             let data = apply(replica, By { actor: &self.actor, at })?;
-            *result.borrow_mut() = (data, replica.state != before);
+            *result.borrow_mut() = (data, replica.changes() != before);
             Ok(())
         })?;
         let (mut data, changed) = result.into_inner();
@@ -320,7 +320,8 @@ impl<'a> Session<'a> {
     }
 
     fn doctor(&self) -> Result<Json, CliError> {
-        let (_, state) = self.tracker.load()?;
+        // From Git, refusing non-canonical files, rather than from the cache.
+        let (_, state) = self.tracker.load_strict()?;
         let (model, unreadable) = Model::read_lenient(&state);
         let unreadable: Vec<Json> = unreadable
             .into_iter()

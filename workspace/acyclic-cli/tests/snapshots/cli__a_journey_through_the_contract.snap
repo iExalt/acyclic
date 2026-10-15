@@ -300,6 +300,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic link a1 sideways a2
   "ok": false
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic unlink a2 blocks a1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "from": "a2",
+    "kind": "blocks",
+    "to": "a1"
+  },
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=actor/user acyclic ready
 # exit 2
 {
