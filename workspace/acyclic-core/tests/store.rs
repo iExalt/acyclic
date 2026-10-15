@@ -631,3 +631,20 @@ fn a_push_after_the_remote_moved_is_refused_until_fetched() {
         git(&path, &["rev-parse", "refs/heads/state/mac"])
     );
 }
+
+#[test]
+fn a_plain_fetch_does_not_vouch_for_a_push() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let remote = remote_with_ruleset(&dir);
+    git(&path, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "x1", "f", json!(1));
+    write(&tracker, "x1", "f", json!(2));
+    tracker.push("origin").unwrap();
+    git(&remote, &["update-ref", "refs/heads/state/mac", "refs/heads/state/mac~1"]);
+    // The user, an editor or another tool fetches with the default refspec, joining nothing.
+    git(&path, &["fetch", "-q", "origin"]);
+    write(&tracker, "x1", "f", json!(3));
+    assert!(matches!(tracker.push("origin"), Err(StoreError::RemoteMoved)));
+}

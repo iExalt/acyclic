@@ -507,9 +507,11 @@ impl Tracker {
     }
 
     /// Prunes sealed segments: a project root's file is dropped once every event in it is older than its retention
-    /// in months, so a month's file with one month's retention goes two months on, but only where `archived_ok` confirms the archived subtrees it covers have their records. A
-    /// segment is replaced by the next generation, a parentless commit without the dropped files, so the old events
-    /// become unreachable; a segment left empty is deleted. Every replacement happens in one transaction.
+    /// in months (with one month's retention, September's file goes on 1 November), but only where `archived_ok`
+    /// confirms the archived subtrees it covers have their records. A segment is replaced by the next generation, a
+    /// parentless commit without the dropped files, so the old events become unreachable; a segment left empty is
+    /// deleted. Every replacement happens in one transaction, which also records each deleted segment for the next
+    /// push to delete from the remote.
     ///
     /// # Errors
     ///
@@ -575,7 +577,7 @@ impl Tracker {
         Ok(dropped)
     }
 
-    /// Fetches every replica's state ref from `remote` into its remote-tracking refs, ready to join; this
+    /// Fetches every replica's state ref from `remote` into private fetched refs, ready to join; this
     /// replica's own one is what the next push leases against.
     ///
     /// # Errors
@@ -755,13 +757,14 @@ fn pruned_ref(segment: &str) -> String {
     format!("{PRUNED}{}", segment.trim_start_matches("refs/heads/"))
 }
 
-/// The prefix of the remote-tracking state refs for `remote`, a name or a URL.
+/// The prefix of the fetched state refs for `remote`, a name or a URL. They live outside `refs/remotes/`, which a
+/// plain `git fetch` updates without a join; a lease against such a ref would protect nothing.
 fn tracking_prefix(remote: &str) -> String {
     let name: String = remote
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
-    format!("refs/remotes/{name}/state/")
+    format!("refs/acyclic/remotes/{name}/state/")
 }
 
 /// Classifies a failed push from its porcelain output: a stale lease on the state ref, another refused ref, or a
