@@ -17,6 +17,9 @@ pub use rng::SplitMix64;
 /// The item count the shape's rates are measured at.
 pub const BASE_ITEMS: usize = 350;
 
+/// e^-1.3, for a mean of 1.3 hard links per item. A constant rather than `exp`, whose last bit varies by platform.
+const EXP_MINUS_1_3: f64 = 0.272_531_793_034_012_6;
+
 const AREAS: [&str; 7] = ["core", "api", "storage", "interface", "infra", "research", "docs"];
 const VERBS: [&str; 12] = [
     "Add", "Build", "Measure", "Split", "Wire", "Document", "Harden", "Port", "Profile", "Design",
@@ -247,7 +250,8 @@ impl Generator {
             let item = &mut self.import.items[index];
             if item.state == State::Done {
                 if self.rng.chance(0.5) {
-                    let commit = format!("{:040x}", u128::from(self.rng.next_u64()) << 32);
+                    let (a, b, c) = (self.rng.next_u64(), self.rng.next_u64(), self.rng.next_u64());
+                    let commit = format!("{a:016x}{b:016x}{:08x}", c >> 32);
                     item.evidence = Some(Evidence {
                         commit: Some(commit),
                         repository: item.repositories.first().cloned(),
@@ -371,7 +375,7 @@ impl Generator {
         let mut seen = BTreeSet::new();
         let candidates: Vec<usize> = (0..self.total).filter(|&i| self.depth[i] >= 2).collect();
         for &from in &candidates {
-            let hard = self.rng.poisson_like(1.3);
+            let hard = self.rng.poisson(EXP_MINUS_1_3);
             let soft = usize::from(self.rng.chance(0.1));
             let related = usize::from(self.rng.chance(0.05));
             for (kind, n) in
@@ -397,7 +401,7 @@ impl Generator {
                     {
                         continue;
                     }
-                    if kind != LinkKind::Relates && !seen.insert((from, to)) {
+                    if !seen.insert((from, to, kind)) {
                         continue;
                     }
                     self.import.links.push(Link {
@@ -507,6 +511,20 @@ mod tests {
         let small = mean_thread_size(&check_shape(BASE_ITEMS, 1));
         let large = mean_thread_size(&check_shape(10 * BASE_ITEMS, 1));
         assert!((large - small).abs() <= small * 0.1, "mean thread size {large} vs {small}");
+    }
+
+    /// FNV-1a, to pin a generated plan's exact bytes across platforms and releases.
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    #[test]
+    fn a_seed_gives_the_same_plan_everywhere() {
+        // A deliberate change to the generator updates this digest; anything else changing it is a bug.
+        let json = generate(BASE_ITEMS, 1).to_json();
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (135_247, 16_335_080_223_692_117_457));
     }
 
     #[test]

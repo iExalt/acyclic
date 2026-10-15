@@ -40,9 +40,9 @@ impl SplitMix64 {
         self.unit() < p
     }
 
-    /// A count with a Poisson distribution of the given mean.
-    pub fn poisson_like(&mut self, mean: f64) -> usize {
-        let limit = (-mean).exp();
+    /// A count with a Poisson distribution whose mean `m` is given as `limit` = e^-m, so callers can pass a
+    /// constant and the result never depends on the platform's `exp`.
+    pub fn poisson(&mut self, limit: f64) -> usize {
         let mut product = self.unit();
         let mut count = 0;
         while product > limit {
@@ -79,7 +79,8 @@ mod tests {
             assert!(rng.below(7) < 7);
             assert!((0.0..1.0).contains(&rng.unit()));
         }
-        let mean = (0..10_000).map(|_| rng.poisson_like(1.3)).sum::<usize>() as f64 / 10_000.0;
+        let mean =
+            (0..10_000).map(|_| rng.poisson((-1.3f64).exp())).sum::<usize>() as f64 / 10_000.0;
         assert!((1.2..1.4).contains(&mean), "mean {mean}");
     }
 }

@@ -3,7 +3,7 @@
 //! The format is versioned and kept apart from the model, so the model can change without breaking documents
 //! written against an earlier version. `acyclic import` maps a validated document into the model.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -149,7 +149,7 @@ pub enum LinkKind {
 }
 
 /// A link between two items: `from` depends on, follows or relates to `to`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
     /// The dependent item's key.
@@ -188,7 +188,7 @@ pub enum ParseError {
     Json(serde_json::Error),
     /// The `format` field is missing or wrong.
     NotAnImport,
-    /// Written by a newer version than this build reads.
+    /// Version 0, or written by a newer version than this build reads.
     UnsupportedVersion {
         /// The document's version.
         found: u64,
@@ -253,8 +253,10 @@ pub enum ValidationError {
     ParentCycle(String),
     /// A link joins an item to itself.
     SelfLink(String),
-    /// Hard and soft dependencies among these items form a cycle.
+    /// Hard and soft dependencies among exactly these items form a cycle.
     DependencyCycle(Vec<String>),
+    /// The same link appears twice.
+    DuplicateLink(Link),
     /// An item is a member of several threads.
     ItemInSeveralThreads {
         /// The item.
@@ -286,6 +288,9 @@ impl fmt::Display for ValidationError {
             },
             Self::ArchivedNotDone(item) => {
                 write!(f, "item {item:?} is archived but it or a descendant isn't done")
+            },
+            Self::DuplicateLink(link) => {
+                write!(f, "link {:?} to {:?} ({:?}) appears twice", link.from, link.to, link.kind)
             },
             Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
         }
@@ -319,7 +324,7 @@ impl Import {
             return Err(ParseError::NotAnImport);
         }
         if let Some(found) = value.get("version").and_then(serde_json::Value::as_u64)
-            && found > u64::from(VERSION)
+            && (found == 0 || found > u64::from(VERSION))
         {
             return Err(ParseError::UnsupportedVersion { found });
         }
@@ -419,38 +424,22 @@ impl Import {
     }
 
     fn check_links(&self, errors: &mut Vec<ValidationError>) {
-        let mut edges: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        let mut edges = Vec::new();
+        let mut seen = HashSet::new();
         for link in &self.links {
+            if !seen.insert((&link.from, &link.to, link.kind)) {
+                errors.push(ValidationError::DuplicateLink(link.clone()));
+            }
             if link.from == link.to {
                 errors.push(ValidationError::SelfLink(link.from.clone()));
             } else if link.kind != LinkKind::Relates {
-                edges.entry(link.from.as_str()).or_default().push(link.to.as_str());
+                edges.push((link.from.as_str(), link.to.as_str()));
             }
         }
-        // Kahn's algorithm: whatever can't be ordered lies on or behind a cycle.
-        let mut indegree: BTreeMap<&str, usize> = BTreeMap::new();
-        for (&from, targets) in &edges {
-            indegree.entry(from).or_default();
-            for &to in targets {
-                *indegree.entry(to).or_default() += 1;
-            }
-        }
-        let mut queue: VecDeque<&str> =
-            indegree.iter().filter(|&(_, &n)| n == 0).map(|(&k, _)| k).collect();
-        while let Some(node) = queue.pop_front() {
-            indegree.remove(node);
-            for &to in edges.get(node).into_iter().flatten() {
-                if let Some(n) = indegree.get_mut(to) {
-                    *n -= 1;
-                    if *n == 0 {
-                        queue.push_back(to);
-                    }
-                }
-            }
-        }
-        if !indegree.is_empty() {
-            let stuck = indegree.keys().map(|&key| key.to_owned()).collect();
-            errors.push(ValidationError::DependencyCycle(stuck));
+        for cycle in crate::graph::cycles(&edges) {
+            errors.push(ValidationError::DependencyCycle(
+                cycle.into_iter().map(str::to_owned).collect(),
+            ));
         }
     }
 
@@ -601,6 +590,11 @@ mod tests {
             Import::from_json(&newer),
             Err(ParseError::UnsupportedVersion { found: 2 })
         ));
+        let zero = format!("{{\"format\":\"{FORMAT}\",\"version\":0}}");
+        assert!(matches!(
+            Import::from_json(&zero),
+            Err(ParseError::UnsupportedVersion { found: 0 })
+        ));
         let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":1,\"itmes\":[]}}");
         assert!(matches!(Import::from_json(&unknown), Err(ParseError::Json(_))));
         let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":1}}");
@@ -653,6 +647,37 @@ mod tests {
         import.links.pop();
         import.links.push(link("a", "a", LinkKind::Relates));
         assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
+    }
+
+    #[test]
+    fn a_cycle_names_only_its_members_and_each_cycle_is_reported() {
+        let mut import = valid();
+        import.items.push(item("c", State::Backlog, None));
+        import.items.push(item("d", State::Backlog, None));
+        import.items.push(item("e", State::Backlog, None));
+        // a blocks on b already; b after a closes a cycle that c and d only reach.
+        import.links.push(link("b", "a", LinkKind::After));
+        import.links.push(link("c", "a", LinkKind::Blocks));
+        import.links.push(link("a", "e", LinkKind::Blocks));
+        import.links.push(link("d", "e", LinkKind::Blocks));
+        import.links.push(link("e", "d", LinkKind::Blocks));
+        assert_eq!(
+            import.validate(),
+            vec![
+                ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()]),
+                ValidationError::DependencyCycle(vec!["d".to_owned(), "e".to_owned()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_repeated_link_is_refused() {
+        let mut import = valid();
+        import.links.push(link("b", "a", LinkKind::Relates));
+        assert_eq!(
+            import.validate(),
+            vec![ValidationError::DuplicateLink(link("b", "a", LinkKind::Relates))]
+        );
     }
 
     #[test]
