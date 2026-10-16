@@ -104,13 +104,13 @@ jobs:
           mv dist/acyclic-*/acyclic "dist/$ARCH/acyclic"
           mv dist/acyclic-*/THIRD_PARTY_NOTICES.md dist/
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build, and run it on this architecture
+      - name: Build the archive, and run it on this architecture
         run: |
-          docker buildx build --platform "linux/$ARCH" --provenance=false --load --tag acyclic-server:test --file Containerfile .
+          docker buildx build --platform "linux/$ARCH" --provenance=false --output "type=oci,dest=image-$ARCH.tar" --file Containerfile .
+          skopeo copy --all "oci-archive:image-$ARCH.tar" docker-daemon:acyclic-server:test
           docker run --rm acyclic-server:test --version
           docker run --rm --entrypoint git acyclic-server:test --version
           test "$(docker run --rm --entrypoint id acyclic-server:test -u)" != 0
-          docker buildx build --platform "linux/$ARCH" --provenance=false --output "type=oci,dest=image-$ARCH.tar" --file Containerfile .
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.arch }}
@@ -167,10 +167,11 @@ jobs:
           pattern: image-*
           merge-multiple: true
           path: images
-      - name: Check the tag names the workspace's version
+      - name: Check the tag names the built version
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
-          test "$TAG" = "v$version"
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin; do
+            test -f "dist/acyclic-${TAG#v}-$target.tar.gz"
+          done
       - name: Draft the release, or refresh a draft left by a failed run
         run: |
           (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
