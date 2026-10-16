@@ -100,6 +100,7 @@ fn a_journey_through_the_contract() {
     assert_eq!(code, 0, "{proposed}");
     assert_eq!(sh.run("needs", AGENT), 0);
     assert_eq!(sh.run(&format!("proposal show {proposal}"), AGENT), 0);
+    assert_eq!(sh.run("proposal list", AGENT), 0);
     assert_eq!(sh.run("proposal show nope", AGENT), 3);
     assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
     assert_eq!(sh.run("list", AGENT), 0);

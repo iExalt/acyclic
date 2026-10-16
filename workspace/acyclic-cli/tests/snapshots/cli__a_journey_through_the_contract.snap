@@ -413,6 +413,41 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-16
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic proposal list
+# exit 0
+{
+  "data": {
+    "proposals": [
+      {
+        "actor": "session/mac",
+        "decision": null,
+        "edit": {
+          "after": "t1",
+          "before": null,
+          "field": "thread",
+          "item": "a1",
+          "kind": "member"
+        },
+        "id": "mac-16",
+        "item": {
+          "id": "a1",
+          "parent": null,
+          "readiness": {
+            "status": "done"
+          },
+          "state": "done",
+          "thread": null,
+          "title": "First"
+        },
+        "threads": [
+          "t1"
+        ]
+      }
+    ]
+  },
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic proposal show nope
 # exit 3
 {
