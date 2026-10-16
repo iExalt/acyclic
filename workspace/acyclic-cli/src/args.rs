@@ -221,7 +221,7 @@ pub enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Adds and edits items, and reopens or archives them.
+    /// Adds, edits, reopens, archives and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
     /// Adds or removes links between items.
