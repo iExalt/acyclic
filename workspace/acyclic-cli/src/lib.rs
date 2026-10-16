@@ -52,10 +52,22 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
 /// Runs the CLI as [`run`] does, with the server that `acyclic serve` starts, if this binary has one.
 pub fn run_with(args: impl IntoIterator<Item = OsString>, serve: Option<ServeHook>) -> ExitCode {
     let outcome = execute_with(args, &Env::from_process(), serve);
-    print!("{}", outcome.stdout);
-    eprint!("{}", outcome.stderr);
+    if let Err(err) = emit(&mut std::io::stdout().lock(), &outcome.stdout) {
+        // A reader that has gone, as `| head` does, isn't a failure: the command has already run.
+        if err.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("acyclic: cannot write output: {err}");
+        }
+    }
+    // Standard error is unbuffered and this is only a message, so a closed one is nothing to report.
+    let _ = emit(&mut std::io::stderr().lock(), &outcome.stderr);
     acyclic_core::probe::mark("print output");
     ExitCode::from(outcome.code)
+}
+
+/// Writes `text` and flushes, returning errors instead of panicking as `print!` does.
+fn emit(out: &mut impl std::io::Write, text: &str) -> std::io::Result<()> {
+    out.write_all(text.as_bytes())?;
+    out.flush()
 }
 
 /// What a command line produced.
