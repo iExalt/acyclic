@@ -837,10 +837,11 @@ impl Tracker {
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
         let base = remote_base(remote);
-        let mut args: Vec<String> =
-            ["-c", "maintenance.auto=false", "fetch", "--quiet", "--prune", remote]
-                .map(str::to_owned)
-                .into();
+        let mut args: Vec<String> = NETWORK
+            .into_iter()
+            .chain(["fetch", "--quiet", "--prune", remote])
+            .map(str::to_owned)
+            .collect();
         args.push(format!("+refs/heads/state/*:{base}state/*"));
         for prefix in self.segment_prefixes() {
             let path = &prefix["refs/heads/".len()..];
@@ -904,10 +905,11 @@ impl Tracker {
         let lease = local.remove(&tracking).unwrap_or_default();
         let (pending, ours): (BTreeMap<String, String>, BTreeMap<String, String>) =
             local.into_iter().partition(|(name, _)| name.starts_with(PRUNED));
-        let mut args: Vec<String> =
-            ["-c", "maintenance.auto=false", "push", "--atomic", "--porcelain"]
-                .map(str::to_owned)
-                .into();
+        let mut args: Vec<String> = NETWORK
+            .into_iter()
+            .chain(["push", "--atomic", "--porcelain"])
+            .map(str::to_owned)
+            .collect();
         let mut refspecs = Vec::new();
         for (name, id) in &ours {
             if theirs.get(name) == Some(id) {
@@ -1215,6 +1217,11 @@ impl Tracker {
         Ok(Some(commit))
     }
 }
+
+/// Settings for git's fetches and pushes: no background maintenance, and a transfer slower than 1,000 bytes a second
+/// for 30 seconds fails over HTTP rather than hanging the sync, and the server's writes queued behind it.
+const NETWORK: [&str; 6] =
+    ["-c", "maintenance.auto=false", "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
 
 /// The namespaces holding monthly segments: audit logs and usage records.
 const NAMESPACES: [&str; 2] = ["log", "usage"];

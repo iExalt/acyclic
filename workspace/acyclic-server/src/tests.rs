@@ -212,3 +212,23 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         assert_eq!(classify(refused.clone()), Use::Refused, "{refused}");
     }
 }
+
+#[test]
+fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
+    let server = Arc::new(Server { turn: Duration::from_millis(50), ..Server::new(config(None)) });
+    let router = routes(server.clone());
+    let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
+    // A sync holds the turn throughout.
+    let _sync = server.turns.clone().try_lock_owned().unwrap();
+    let (status, body) = send(
+        &router,
+        Method::POST,
+        "/api/command",
+        &pass,
+        r#"{"item": {"add": {"id": "a", "title": "A"}}}"#,
+    );
+    assert_eq!((status, code(&body)), (StatusCode::SERVICE_UNAVAILABLE, "busy".into()));
+    // Reads don't wait for it.
+    let (status, body) = send(&router, Method::POST, "/api/command", &pass, r#""list""#);
+    assert_ne!(code(&body), "busy", "{status}");
+}

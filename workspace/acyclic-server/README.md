@@ -15,4 +15,6 @@ own origin (`--origin`, `https://<host>` by default).
 
 The server syncs its clone with `origin` every 30 seconds (`--sync-every`). Writes push at once only when the clone
 says so, as for the CLI: set `git config acyclic.pushAfterWrite true` in a server's clone. Writes and syncs take turns,
-so their pushes never race.
+so their pushes never race; a write that waits 15 seconds for its turn is answered `503` with the code `busy`, and git
+gives up on a transfer that stalls for 30 seconds. A clone without `origin` never syncs; one that loses its `origin`
+stops syncing until the server restarts.

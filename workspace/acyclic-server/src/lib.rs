@@ -20,6 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
+use tokio::sync::OwnedMutexGuard;
 use tower_http::services::ServeDir;
 
 /// The header Tailscale sets to the login of the user behind a request.
@@ -233,18 +234,44 @@ fn status(code: u8) -> StatusCode {
     }
 }
 
+/// How long a write waits for its turn before the server answers that it is busy.
+const TURN: Duration = Duration::from_secs(15);
+
 /// A running server's state.
 struct Server {
     config: Config,
-    /// Held by each write and each sync, so that their pushes never race each other.
-    writes: tokio::sync::Mutex<()>,
+    /// Held by each write and each sync until it finishes, so that their pushes never race each other.
+    turns: Arc<tokio::sync::Mutex<()>>,
+    /// How long a write waits for its turn.
+    turn: Duration,
 }
 
 impl Server {
-    /// Runs a command as the user, off the async threads, and returns its exit code and envelope.
-    async fn call(self: &Arc<Self>, command: Command) -> (u8, Value) {
+    fn new(config: Config) -> Self {
+        Self { config, turns: Arc::default(), turn: TURN }
+    }
+
+    /// Waits up to [`Self::turn`] for a write's turn.
+    async fn turn(&self) -> Result<OwnedMutexGuard<()>, CliError> {
+        tokio::time::timeout(self.turn, self.turns.clone().lock_owned()).await.map_err(|_| {
+            CliError::new(
+                "busy",
+                exit::STORE,
+                "the server is still syncing or writing; try again shortly",
+            )
+        })
+    }
+
+    /// Runs a command as the user, off the async threads, and returns its exit code and envelope. A turn, if given,
+    /// is kept until the command finishes, even if the request is dropped meanwhile.
+    async fn call(
+        self: &Arc<Self>,
+        command: Command,
+        turn: Option<OwnedMutexGuard<()>>,
+    ) -> (u8, Value) {
         let server = Arc::clone(self);
         let run = tokio::task::spawn_blocking(move || {
+            let _turn = turn;
             acyclic_cli::call(command, server.config.tracker.clone(), true, &server.config.env)
         });
         run.await.unwrap_or_else(|_| {
@@ -275,10 +302,10 @@ async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
     };
     let (code, envelope) = match classify(&command) {
         Use::Refused => return Refusal::NotAllowed.into_response(),
-        Use::Read => server.call(command).await,
-        Use::Write => {
-            let _turn = server.writes.lock().await;
-            server.call(command).await
+        Use::Read => server.call(command, None).await,
+        Use::Write => match server.turn().await {
+            Ok(turn) => server.call(command, Some(turn)).await,
+            Err(err) => (err.exit, err.envelope()),
         },
     };
     (status(code), Json(envelope)).into_response()
@@ -286,7 +313,7 @@ async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
 
 /// The server's routes, every one behind [`identity`].
 pub fn router(config: Config) -> Router {
-    routes(Arc::new(Server { config, writes: tokio::sync::Mutex::new(()) }))
+    routes(Arc::new(Server::new(config)))
 }
 
 fn routes(server: Arc<Server>) -> Router {
@@ -319,7 +346,7 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
         .enable_all()
         .build()
         .map_err(|err| failed("starting the runtime", err))?;
-    let server = Arc::new(Server { config, writes: tokio::sync::Mutex::new(()) });
+    let server = Arc::new(Server::new(config));
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(options.listen)
             .await
@@ -347,10 +374,9 @@ async fn sync(server: Arc<Server>, every: Duration) {
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticks.tick().await;
-        let (code, envelope) = {
-            let _turn = server.writes.lock().await;
-            server.call(Command::Sync).await
-        };
+        // A sync waits as long as it must: it is the server's own, and the next tick would only queue behind it.
+        let turn = server.turns.clone().lock_owned().await;
+        let (code, envelope) = server.call(Command::Sync, Some(turn)).await;
         if code == exit::OK {
             continue;
         }
