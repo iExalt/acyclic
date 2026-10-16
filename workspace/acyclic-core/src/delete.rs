@@ -53,6 +53,21 @@ pub enum Reason {
     },
 }
 
+impl fmt::Display for Reason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HasChildren { children } => {
+                write!(f, "it has children ({})", crate::say::list(children, ", "))
+            },
+            Self::Linked { from, to, kind } => write!(f, "{from} {} {to}", kind.word()),
+            Self::Finished => {
+                write!(f, "it is done, or holds evidence of it, and finished work stays")
+            },
+            Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
+        }
+    }
+}
+
 /// A refused deletion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeleteError {
@@ -77,7 +92,7 @@ impl fmt::Display for DeleteError {
                 write!(f, "only the user deletes an item in approved thread {thread}, not {actor}")
             },
             Self::InUse(reasons) => {
-                write!(f, "not deletable: {} reason(s) in the details", reasons.len())
+                write!(f, "not deletable: {}", crate::say::list(reasons, "; "))
             },
         }
     }

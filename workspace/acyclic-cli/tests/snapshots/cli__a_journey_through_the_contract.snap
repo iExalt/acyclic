@@ -1148,7 +1148,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item delete d1
         }
       ]
     },
-    "message": "not deletable: 1 reason(s) in the details"
+    "message": "not deletable: it has children (d1-a)"
   },
   "ok": false
 }
@@ -1165,7 +1165,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item delete a1
         }
       ]
     },
-    "message": "not deletable: 1 reason(s) in the details"
+    "message": "not deletable: it is done, or holds evidence of it, and finished work stays"
   },
   "ok": false
 }

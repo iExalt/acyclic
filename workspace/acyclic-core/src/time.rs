@@ -23,6 +23,13 @@ pub fn civil(at: Millis) -> (i64, i64, i64) {
     (year, month, day)
 }
 
+/// A time's UTC calendar date: `YYYY-MM-DD`.
+#[must_use]
+pub fn date(at: Millis) -> String {
+    let (year, month, day) = civil(at);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
 /// A time as RFC 3339 in UTC, to the second: `YYYY-MM-DDTHH:MM:SSZ`.
 #[must_use]
 pub fn rfc3339(at: Millis) -> String {

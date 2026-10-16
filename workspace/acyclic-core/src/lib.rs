@@ -17,6 +17,7 @@ pub mod place;
 #[doc(hidden)]
 pub mod probe;
 pub mod ready;
+mod say;
 pub mod schema;
 pub mod scope;
 pub mod state;

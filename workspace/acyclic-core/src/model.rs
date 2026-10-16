@@ -149,6 +149,16 @@ impl LinkKind {
         }
     }
 
+    /// The word a command line and its output use for the kind: `waits-for`, `follows` or `relates-to`.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Blocks => "waits-for",
+            Self::After => "follows",
+            Self::Relates => "relates-to",
+        }
+    }
+
     /// Whether the kind orders work, so it counts in cycle checks.
     #[must_use]
     pub fn orders(self) -> bool {

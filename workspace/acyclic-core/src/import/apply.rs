@@ -49,10 +49,17 @@ pub enum ApplyError {
 impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Invalid(errors) => write!(f, "the document breaks {} rule(s)", errors.len()),
+            Self::Invalid(errors) => {
+                write!(f, "the document breaks {}", crate::say::few(errors, "rule", "rules", "; "))
+            },
             Self::UserOnly(what) => write!(f, "only the user imports {what}"),
             Self::Cycles(cycles) => {
-                write!(f, "the import would close {} cycle(s) with the tracker", cycles.len())
+                let cycles: Vec<String> = cycles.iter().map(|cycle| cycle.join(" -> ")).collect();
+                write!(
+                    f,
+                    "the import would close {} with the tracker",
+                    crate::say::few(&cycles, "cycle", "cycles", "; ")
+                )
             },
             Self::Write(err) => err.fmt(f),
         }
