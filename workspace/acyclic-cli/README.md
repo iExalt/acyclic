@@ -4,7 +4,7 @@ The tracker's command-line interface over `acyclic-core`.
 
 ## Conventions
 
-Every command's inputs follow these rules, so a command can be guessed from its neighbours.
+Every command's inputs follow these rules, so you can guess a command from its neighbours.
 
 1. **Verbs.** The daily workflow verbs are top level: `ready`, `list`, `show`, `claim`, `release`, `done`, `needs`.
    Everything else is `acyclic <noun> <verb>`. Actions that aren't a field's value are verbs: `item reopen`, `item
@@ -29,14 +29,16 @@ Every command's inputs follow these rules, so a command can be guessed from its 
 7. **Enum-valued inputs** list their values in help, and a wrong value's error lists them again.
 
 Links read left to right: `acyclic link add plant waits-for beds` says plant can't start until beds is done. The kinds
-are `waits-for` (hard), `follows` (soft) and `relates-to`.
+are `waits-for`, which holds work back; `follows`, which only orders the ranking; and `relates-to`, which is
+context only.
 
 ### Output
 
-Every command's output follows these rules, so a key can be guessed from the inputs.
+Every command's output follows these rules, so you can guess a key from the inputs.
 
-1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Times are
-   RFC 3339 in UTC and their keys end in `_at`.
+1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Every
+   command prints one, except `prime`, `graph` without `--output`, `import --schema` and help and version text, which
+   print text; errors are always JSON. Times are RFC 3339 in UTC and their keys end in `_at`.
 2. **Naming.** A record carries its own id as `id`. A reference is named for the entity it points to, in the plural for
    a list: `parent`, `thread`, `item`, `repository`, `proposal`, `repositories`. Keys match the input flags, in snake
    case; enum values are kebab-case. A reference that can name several kinds of entity is `{entity, id}`, as in a
@@ -67,5 +69,5 @@ Every command's output follows these rules, so a key can be guessed from the inp
 8. **`needs`** entries are `{kind, …}`. An entry that is about an item embeds it as its `list` row under `item`, and one
    about a thread embeds its summary under `thread`. A proposal entry embeds the proposal as `proposal show` returns it
    and the item its edit names under `item`, which is `null` for an edit of a thread's repositories.
-9. **Errors** keep a stable `code`, a message that reads as one line and names what it is about, and `details` named by
-   the same rules.
+9. **Errors** keep a stable `code`, a one-line message that says what went wrong and, where a command fixes it, names
+   that command, and `details` named by the same rules.
