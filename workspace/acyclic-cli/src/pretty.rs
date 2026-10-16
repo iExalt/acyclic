@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use comfy_table::{ContentArrangement, LineStyle, Table, TableStyle, presets};
 use serde_json::Value as Json;
 
-use crate::args::{Command, ThreadCommand};
+use crate::args::{Command, LinkCommand, ThreadCommand};
 
 /// A terminal's table: a rule under the header and nothing else, so a wrapped cell still reads as one row.
 const RULED: TableStyle =
@@ -27,6 +27,12 @@ pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> Stri
         ),
         Command::Ready { .. } => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
+        Command::Import { .. } => import(data),
+        Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => {
+            let changed = if data["changed"] == true { "changed" } else { "no change to" };
+            let [from, kind, to] = ["from", "kind", "to"].map(|key| compact(&data[key]));
+            format!("{changed} link {from} {kind} {to}")
+        },
         _ => match data {
             Json::Array(records) => {
                 records.iter().map(|record| block(record, width)).collect::<Vec<_>>().join("\n")
@@ -38,11 +44,51 @@ pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> Stri
     if text.ends_with('\n') { text } else { format!("{text}\n") }
 }
 
-/// An error's envelope as one line for standard error.
+/// An error's envelope as one line for standard error, with its details when it has any, since they often name what
+/// to act on.
 pub(crate) fn error(envelope: &Json) -> String {
     let error = &envelope["error"];
     let message = error["message"].as_str().unwrap_or_default();
-    format!("error: {message} [{}]\n", error["code"].as_str().unwrap_or_default())
+    let code = error["code"].as_str().unwrap_or_default();
+    let details = &error["details"];
+    if empty(details) {
+        format!("error: {message} [{code}]\n")
+    } else {
+        format!("error: {message} [{code}] ({})\n", compact(details))
+    }
+}
+
+/// An import as one line: what it wrote, or would write on a dry run, by kind, and what waits as a proposal.
+fn import(data: &Json) -> String {
+    let counts = &data["counts"];
+    let kinds = [
+        ("items", "item"),
+        ("threads", "thread"),
+        ("links", "link"),
+        ("repositories", "repository"),
+    ];
+    let written: Vec<String> = kinds
+        .iter()
+        .filter_map(|(key, one)| {
+            let n = counts[*key].as_u64().filter(|n| *n > 0)?;
+            Some(if n == 1 { format!("1 {one}") } else { format!("{n} {key}") })
+        })
+        .collect();
+    let mut line = match (written.is_empty(), data["dry_run"] == true) {
+        (true, _) => "no change".to_owned(),
+        (false, dry) => format!(
+            "{}: {} ({} fields)",
+            if dry { "would import" } else { "imported" },
+            written.join(", "),
+            compact(&counts["fields"])
+        ),
+    };
+    for key in ["proposals", "placed"] {
+        if !empty(&data[key]) {
+            write!(line, " · {key} {}", compact(&data[key])).expect("a String takes writes");
+        }
+    }
+    line
 }
 
 /// The objects in a list.
@@ -150,6 +196,12 @@ fn block(record: &Json, width: Option<u16>) -> String {
     let Some(fields) = record.as_object() else {
         return compact(record);
     };
+    // A document that is only a list, as `needs` and `proposal list` are, is that list's table.
+    if let [(_, list)] = fields.iter().collect::<Vec<_>>()[..]
+        && (list.is_array())
+    {
+        return list_table(rows(list), width);
+    }
     let shown: Vec<(&String, &Json)> = leading(fields.keys())
         .into_iter()
         .map(|key| (key, &fields[key]))
@@ -160,31 +212,40 @@ fn block(record: &Json, width: Option<u16>) -> String {
     let name_width = scalars.iter().map(|(key, _)| key.len()).max().unwrap_or(0);
     let mut text = String::new();
     for (key, value) in scalars {
-        writeln!(text, "{key:name_width$}  {}", compact(value)).expect("a String takes writes");
+        // A value of several lines, such as notes, keeps its later lines under its first.
+        let value =
+            compact(value).replace('\n', &format!("\n{:indent$}", "", indent = name_width + 2));
+        writeln!(text, "{key:name_width$}  {value}").expect("a String takes writes");
     }
     for (key, value) in lists {
-        let rows = rows(value);
-        let mut keys: Vec<&String> = Vec::new();
-        for row in &rows {
-            for column in row.as_object().into_iter().flat_map(serde_json::Map::keys) {
-                if !keys.contains(&column) {
-                    keys.push(column);
-                }
-            }
-        }
-        let columns: Vec<String> = leading(keys).into_iter().cloned().collect();
-        write!(text, "\n{key}:\n{}", table(rows, &columns, width)).expect("a String takes writes");
+        write!(text, "\n{key}:\n{}", list_table(rows(value), width))
+            .expect("a String takes writes");
     }
     text
 }
 
-/// Field names with `id` and `title` first, as a record is named, then the rest in order.
+/// Records of any shape as a table, with a column for every field any of them has.
+fn list_table(rows: Vec<&Json>, width: Option<u16>) -> String {
+    let mut keys: Vec<&String> = Vec::new();
+    for row in &rows {
+        for column in row.as_object().into_iter().flat_map(serde_json::Map::keys) {
+            if !keys.contains(&column) {
+                keys.push(column);
+            }
+        }
+    }
+    let columns: Vec<String> = leading(keys).into_iter().cloned().collect();
+    table(rows, &columns, width)
+}
+
+/// Field names with `kind`, `id` and `title` first, as a record is named, then the rest in order.
 fn leading<'a>(keys: impl IntoIterator<Item = &'a String>) -> Vec<&'a String> {
     let mut keys: Vec<&String> = keys.into_iter().collect();
     keys.sort_by_key(|key| match key.as_str() {
-        "id" => 0,
-        "title" => 1,
-        _ => 2,
+        "kind" => 0,
+        "id" => 1,
+        "title" => 2,
+        _ => 3,
     });
     keys
 }

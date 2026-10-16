@@ -74,3 +74,42 @@ fn an_error_is_one_line_naming_its_code() {
     let envelope = json!({"ok": false, "error": {"code": "not-found", "message": "no item nope", "details": {}}});
     assert_eq!(error(&envelope), "error: no item nope [not-found]\n");
 }
+
+#[test]
+fn an_import_and_a_link_say_what_they_wrote() {
+    let counts = |items: u64, links: u64| json!({"items": items, "threads": 1, "links": links, "repositories": 0, "fields": 14});
+    let import = |dry_run: bool, counts: Json| {
+        let line = if dry_run { "import plan.json -n" } else { "import plan.json" };
+        let data = json!({"changes": [{"entity": "item", "id": "a1", "action": "create"}], "counts": counts,
+            "dry_run": dry_run, "placed": [], "proposals": []});
+        render(&command(line), &data, None)
+    };
+    let none = json!({"items": 0, "threads": 0, "links": 0, "repositories": 0, "fields": 0});
+    let link = json!({"changed": true, "from": "a2", "kind": "relates-to", "to": "b1"});
+    insta::assert_snapshot!(format!(
+        "{}{}{}{}",
+        import(false, counts(3, 1)),
+        import(true, counts(1, 2)),
+        import(false, none),
+        render(&command("link add a2 relates-to b1"), &link, None)
+    ));
+}
+
+#[test]
+fn a_lone_list_is_its_table_and_notes_keep_their_column() {
+    let needs = json!({"needs": [
+        {"kind": "awaiting-approval", "thread": {"id": "t1", "title": "T"}, "counts": {"open_members": 1}},
+        {"kind": "unthreaded", "item": {"id": "a1"}, "fix": "acyclic item edit a1 --thread <THREAD>"},
+    ]});
+    let empty = json!({"proposals": []});
+    let noted = json!([{"id": "a1", "notes": "first line\nsecond line"}]);
+    insta::assert_snapshot!(format!(
+        "{}{}{}",
+        render(&command("needs"), &needs, None),
+        render(&command("proposal list"), &empty, None),
+        render(&command("show a1"), &noted, None)
+    ));
+    let details = json!({"ok": false, "error": {"code": "not-found", "message": "no thread a1",
+        "details": {"thread": "t"}}});
+    assert_eq!(error(&details), "error: no thread a1 [not-found] (thread t)\n");
+}

@@ -1,0 +1,8 @@
+---
+source: workspace/acyclic-cli/src/pretty/tests.rs
+expression: "format!(\"{}{}{}{}\", import(false, counts(3, 1)), import(true, counts(1, 2)),\nimport(false, none),\nrender(&command(\"link add a2 relates-to b1\"), &link, None))"
+---
+imported: 3 items, 1 thread, 1 link (14 fields)
+would import: 1 item, 1 thread, 2 links (14 fields)
+no change
+changed link a2 relates-to b1
