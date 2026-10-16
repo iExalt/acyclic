@@ -26,7 +26,7 @@ keeps that repository's audit logs append-only; run it before the first sync.
 
 ## Install
 
-Each [release](https://github.com/iExalt/acyclic/releases) carries a static `acyclic` for Linux on x86-64 and arm64,
+Each [release](https://github.com/iExalt/acyclic/releases) carries `acyclic` for Linux on x86-64 and arm64 (static)
 and for macOS on Apple silicon. With [mise](https://mise.jdx.dev):
 
 ```sh
