@@ -39,11 +39,9 @@ shared repository as its `origin`. `acyclic sync` then pulls in what other machi
 `acyclic link add plant waits-for beds` means plant can't start until beds is done. Links read left to right:
 
 - `waits-for` holds work back.
-- `follows` doesn't hold work back; it only orders the ranking.
 - `relates-to` is context only.
 
-Only `waits-for` and `follows` order work: ids, numbering and thread membership never do, so link every dependency
-you mean.
+Only `waits-for` orders work: ids, numbering and thread membership never do, so link every dependency you mean.
 
 ## Shaping the plan
 

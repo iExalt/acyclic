@@ -249,8 +249,9 @@ impl Writer<'_, '_> {
         for record in &doc.links {
             let kind = match record.kind {
                 LinkKind::WaitsFor => model::LinkKind::Blocks,
-                LinkKind::Follows => model::LinkKind::After,
                 LinkKind::RelatesTo => model::LinkKind::Relates,
+                // Validation refuses it.
+                LinkKind::Follows => continue,
             };
             let key = model::link_key(&record.from, &record.to, kind)?;
             if self.replica.state.field(&key, link::PRESENT).is_none() {

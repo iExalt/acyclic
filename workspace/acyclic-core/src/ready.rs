@@ -1,7 +1,7 @@
 //! Readiness, computed on read under plan D18: done inside a thread, merged across. A dependency in the same thread
 //! is met when it is done; one in another thread, or for an item in no thread, is met once its evidence commit is on
 //! its repository's default branch, and is "in review" until then. Work with no repository is met when done, and an
-//! archived dependency always is. Soft (after) links never block; they rank what follows them lower.
+//! archived dependency always is.
 //!
 //! Only leaves are claimed or ready. A dependency on a parent is met by the parent's own state, and a parent's
 //! dependencies hold back every item under it.
@@ -95,11 +95,8 @@ pub enum Wait {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "status")]
 pub enum Status {
-    /// Ready to work on; a higher rank means more soft predecessors are still open.
-    Ready {
-        /// The number of open soft predecessors.
-        rank: usize,
-    },
+    /// Ready to work on.
+    Ready,
     /// Waiting on hard dependencies, by item id.
     Blocked {
         /// What each unmet dependency waits for.
@@ -158,8 +155,8 @@ pub struct Readiness<'a> {
     ancestry: &'a dyn Ancestry,
     merged: RefCell<BTreeMap<(String, String), Result<bool, String>>>,
     cyclic: BTreeSet<String>,
-    /// Blocks and after links by the item they start from.
-    links_from: BTreeMap<String, Vec<(LinkKind, String)>>,
+    /// Blocks links' targets by the item they start from.
+    links_from: BTreeMap<String, Vec<String>>,
     archived: RefCell<BTreeMap<String, bool>>,
 }
 
@@ -174,9 +171,9 @@ impl<'a> Readiness<'a> {
     ) -> Self {
         let cyclic =
             model.link_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
-        let mut links_from: BTreeMap<String, Vec<(LinkKind, String)>> = BTreeMap::new();
-        for link in model.links.iter().filter(|link| link.kind.orders()) {
-            links_from.entry(link.from.clone()).or_default().push((link.kind, link.to.clone()));
+        let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+            links_from.entry(link.from.clone()).or_default().push(link.to.clone());
         }
         Self {
             state,
@@ -246,19 +243,19 @@ impl<'a> Readiness<'a> {
             return Ok(Some(busy));
         }
         Ok(Some(match holders.len() {
-            0 => Status::Ready { rank: self.rank(id) },
+            0 => Status::Ready,
             1 => Status::Claimed { holder: holders.remove(0) },
             _ => Status::Contested { holders },
         }))
     }
 
-    /// The ready, unclaimed leaves, lowest rank first, then by id. Archived subtrees are left out unless
+    /// The ready, unclaimed leaves, by id. Archived subtrees are left out unless
     /// `include_archived` is set, which judges every item as if nothing were archived.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn ready(&self, include_archived: bool) -> Result<Vec<(String, usize)>, Error> {
+    pub fn ready(&self, include_archived: bool) -> Result<Vec<String>, Error> {
         if include_archived {
             let mut model = self.model.clone();
             for item in model.items.values_mut() {
@@ -281,11 +278,10 @@ impl<'a> Readiness<'a> {
             if item.is_done() || !self.model.children(id).is_empty() {
                 continue;
             }
-            if let Some(Status::Ready { rank }) = self.of(id)? {
-                ready.push((id.clone(), rank));
+            if let Some(Status::Ready) = self.of(id)? {
+                ready.push(id.clone());
             }
         }
-        ready.sort_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0)));
         Ok(ready)
     }
 
@@ -317,7 +313,7 @@ impl<'a> Readiness<'a> {
 
     fn waiting(&self, id: &str) -> BTreeMap<String, Wait> {
         let mut waiting = BTreeMap::new();
-        for to in self.linked_from(id, LinkKind::Blocks) {
+        for to in self.linked_from(id) {
             if let Some(wait) = self.dependency_wait(id, to) {
                 waiting.insert(to.to_owned(), wait);
             }
@@ -325,13 +321,12 @@ impl<'a> Readiness<'a> {
         waiting
     }
 
-    /// The targets of an item's and its ancestors' links of one kind.
-    fn linked_from(&self, id: &str, kind: LinkKind) -> Vec<&str> {
+    /// The targets of an item's and its ancestors' blocks links.
+    fn linked_from(&self, id: &str) -> Vec<&str> {
         std::iter::once(id)
             .chain(self.model.ancestors(id))
             .flat_map(|holder| self.links_from.get(holder).into_iter().flatten())
-            .filter(|(k, _)| *k == kind)
-            .map(|(_, to)| to.as_str())
+            .map(String::as_str)
             .collect()
     }
 
@@ -416,16 +411,6 @@ impl<'a> Readiness<'a> {
             }
         }
         None
-    }
-
-    /// The number of an item's (and its ancestors') soft predecessors that are still open.
-    fn rank(&self, id: &str) -> usize {
-        self.linked_from(id, LinkKind::After)
-            .into_iter()
-            .filter(|to| {
-                !self.is_archived(to) && self.model.items.get(*to).is_none_or(|i| !i.is_done())
-            })
-            .count()
     }
 }
 

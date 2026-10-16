@@ -236,12 +236,12 @@ fn links_joined_into_a_cycle_are_listed_and_unlinking_clears_it() {
     });
     pair.spread(&pair.mac);
     pair.user(&pair.mac, &|r, by| Ok(model::link(r, "x", "y", LinkKind::Blocks, by).map(|_| ())?));
-    pair.user(&pair.pi, &|r, by| Ok(model::link(r, "y", "x", LinkKind::After, by).map(|_| ())?));
+    pair.user(&pair.pi, &|r, by| Ok(model::link(r, "y", "x", LinkKind::Blocks, by).map(|_| ())?));
     pair.exchange();
     pair.assert_settled();
     let cycle = Entry::LinkCycle { items: vec!["x".into(), "y".into()] };
     assert!(pair.needs(NOW).contains(&cycle));
-    pair.user(&pair.pi, &|r, by| Ok(model::unlink(r, "y", "x", LinkKind::After, by).map(|_| ())?));
+    pair.user(&pair.pi, &|r, by| Ok(model::unlink(r, "y", "x", LinkKind::Blocks, by).map(|_| ())?));
     pair.spread(&pair.pi);
     pair.assert_settled();
     assert!(!pair.needs(NOW).contains(&cycle));

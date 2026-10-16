@@ -36,7 +36,7 @@ fn model() -> Model {
     set_state(&mut r, "b", ItemState::Done, USER).unwrap();
     write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(true));
     link(&mut r, "a", "b", LinkKind::Blocks, USER).unwrap();
-    link(&mut r, "c", "a", LinkKind::After, USER).unwrap();
+    crate::model::store_after_link(&mut r, "c", "a", USER);
     link(&mut r, "a", "z", LinkKind::Relates, USER).unwrap();
     link(&mut r, "c", "x", LinkKind::Blocks, USER).unwrap();
     Model::read(r.state()).unwrap()

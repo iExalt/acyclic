@@ -87,7 +87,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "id": "a1",
         "parent": null,
         "readiness": {
-          "rank": 0,
           "status": "ready"
         },
         "state": "backlog",
@@ -222,7 +221,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "id": "a2",
         "parent": null,
         "readiness": {
-          "rank": 0,
           "status": "ready"
         },
         "state": "backlog",
@@ -307,8 +305,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a2
       "gate": null,
       "id": "a2",
       "links": {
-        "followed_by": [],
-        "follows": [],
         "related_from": [],
         "relates_to": [],
         "waited_on_by": [],
@@ -319,7 +315,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a2
       "notes": null,
       "parent": null,
       "readiness": {
-        "rank": 0,
         "status": "ready"
       },
       "reopened": false,
@@ -379,7 +374,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
         "id": "a2",
         "parent": null,
         "readiness": {
-          "rank": 0,
           "status": "ready"
         },
         "state": "backlog",
@@ -545,7 +539,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic list
         "id": "a2",
         "parent": null,
         "readiness": {
-          "rank": 0,
           "status": "ready"
         },
         "state": "backlog",
@@ -616,7 +609,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "id": "a2",
           "parent": null,
           "readiness": {
-            "rank": 0,
             "status": "ready"
           },
           "state": "backlog",
@@ -661,8 +653,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
       "gate": null,
       "id": "a1",
       "links": {
-        "followed_by": [],
-        "follows": [],
         "related_from": [],
         "relates_to": [],
         "waited_on_by": [
@@ -694,8 +684,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
       "gate": null,
       "id": "a2",
       "links": {
-        "followed_by": [],
-        "follows": [],
         "related_from": [],
         "relates_to": [],
         "waited_on_by": [],
@@ -706,7 +694,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
       "notes": null,
       "parent": null,
       "readiness": {
-        "rank": 0,
         "status": "ready"
       },
       "reopened": false,
@@ -975,7 +962,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 
 # stderr
 error: invalid value 'sideways' for '<KIND>'
-  [possible values: waits-for, follows, relates-to]
+  [possible values: waits-for, relates-to]
 
 For more information, try '--help'.
 

@@ -79,14 +79,14 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
         let model = Model::read(&state).unwrap();
         Readiness::new(&state, &model, NOW, &ancestry).of(id).unwrap().unwrap()
     };
-    assert_eq!(check("same"), Status::Ready { rank: 0 }, "met at done inside its thread");
+    assert_eq!(check("same"), Status::Ready, "met at done inside its thread");
     assert!(
         matches!(check("other"), Status::Blocked { waiting } if waiting["dep"] == Wait::InReview)
     );
     assert_eq!(check("dep"), Status::InReview);
 
     git(&code, &["merge", "-q", "--ff-only", "feature"]);
-    assert_eq!(check("other"), Status::Ready { rank: 0 }, "met once merged");
+    assert_eq!(check("other"), Status::Ready, "met once merged");
     assert_eq!(check("dep"), Status::Done);
 
     // A clone of the repository reads the default branch from its remote-tracking ref.
@@ -97,7 +97,7 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
     let model = Model::read(&state).unwrap();
     assert_eq!(
         Readiness::new(&state, &model, NOW, &cloned).of("other").unwrap(),
-        Some(Status::Ready { rank: 0 })
+        Some(Status::Ready)
     );
 }
 

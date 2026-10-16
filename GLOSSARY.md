@@ -119,15 +119,12 @@ _Avoid_: inbox, notifications
 A dependency that blocks the dependent item until the prerequisite is met; link kind `waits-for`.
 _Avoid_: blocker link, depends_on, blocks (in prose)
 
-**Soft dependency**:
-A preferred order between two items that never blocks; link kind `follows`.
-_Avoid_: weak dependency, after (in prose)
-
 **Related**:
 A link that carries context only; link kind `relates-to`.
 _Avoid_: relates_to, relates (in prose), see also
 
-Stored data keeps the older kind names: `blocks` for `waits-for`, `after` for `follows` and `relates` for `relates-to`.
+Stored data keeps the older kind names: `blocks` for `waits-for` and `relates` for `relates-to`. Soft dependencies
+(`follows`, stored as `after`) are retired: no write adds one, and a stored one reads as `relates-to`.
 
 ## Where the data lives
 
@@ -164,7 +161,7 @@ _Avoid_: merge conflict (nothing blocks a sync)
 - A **Thread** may hold **Items** from different branches of the outcome tree
 - A **Thread** has one **Run** at a time; each **Run** continues the thread's conversation
 - A **Goal** is an **Item** whose **Gate** must pass before it is done
-- **Hard dependencies** (`waits-for`) and **Soft dependencies** (`follows`) together never form a cycle
+- **Hard dependencies** (`waits-for`) never form a cycle
 
 ## Flagged ambiguities
 

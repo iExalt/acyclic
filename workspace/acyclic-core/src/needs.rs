@@ -67,7 +67,7 @@ pub enum Entry {
         /// The remote.
         remote: String,
     },
-    /// Links of blocks and after kinds form a cycle.
+    /// Blocks links form a cycle.
     LinkCycle {
         /// The items on it.
         items: Vec<String>,
@@ -147,7 +147,7 @@ pub enum Entry {
     Reopened {
         /// The item.
         item: String,
-        /// Its dependents, by hard or soft link.
+        /// Its dependents, by waits-for link.
         dependents: Vec<String>,
     },
     /// A parent marked done while children are open.

@@ -93,7 +93,7 @@ impl View<'_> {
     }
 
     /// The rows of the items that are ready, each with whether its work is `approved`; the same rows, filtered by
-    /// their own `approved`, when only approved work is asked for. The rank is in the row's `readiness`.
+    /// their own `approved`, when only approved work is asked for.
     pub fn ready_rows(&self, ready: &[String], only_approved: bool) -> Result<Vec<Json>, CliError> {
         let mut rows = Vec::new();
         for id in ready {
@@ -350,16 +350,14 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
 /// An item's links to and from other items, by the words the commands use.
 fn links(all: &[Link], id: &str) -> Json {
     let mut found: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for kind in
-        ["waits_for", "follows", "relates_to", "waited_on_by", "followed_by", "related_from"]
-    {
+    for kind in ["waits_for", "relates_to", "waited_on_by", "related_from"] {
         found.insert(kind, Vec::new());
     }
     for link in all {
         let (out, back) = match link.kind {
             LinkKind::Blocks => ("waits_for", "waited_on_by"),
-            LinkKind::After => ("follows", "followed_by"),
-            LinkKind::Relates => ("relates_to", "related_from"),
+            // The model reads a stored after link as relates.
+            LinkKind::After | LinkKind::Relates => ("relates_to", "related_from"),
         };
         if link.from == id {
             found.entry(out).or_default().push(&link.to);
@@ -515,7 +513,7 @@ mod tests {
     }
 
     /// Items `goal` > `a` and `b` in approved thread `t`, `late` an agent's raced add to it, `c` waiting for `a`
-    /// and following `b`, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
+    /// and relating to `b` through an after link as older versions stored one, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
     fn tracker() -> Replica {
         let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
         let user = by(USER);
@@ -526,7 +524,15 @@ mod tests {
             set_parent(&mut r, id, Some("goal"), user).unwrap();
         }
         link(&mut r, "c", "a", LinkKind::Blocks, user).unwrap();
-        link(&mut r, "c", "b", LinkKind::After, user).unwrap();
+        let after = model::link_key("c", "b", LinkKind::After).unwrap();
+        for (field, value) in [
+            ("from", json!("c")),
+            ("to", json!("b")),
+            ("kind", json!("after")),
+            ("present", json!(true)),
+        ] {
+            r.write(&after, field, USER, 1, Some(value)).unwrap();
+        }
         let repo = key(kind::REPOSITORY, "r");
         for (field, value) in [
             (repository::OWNER, json!("me")),
@@ -585,7 +591,7 @@ mod tests {
                     {
                         assert!(inner.is_boolean(), "{here}: {inner}");
                     }
-                    if inner.is_i64() && name != "rank" {
+                    if inner.is_i64() {
                         assert!(
                             TIMESTAMP_KEYS.contains(&name.as_str()),
                             "{here}: a number that isn't counted"
@@ -620,10 +626,10 @@ mod tests {
                 view.item("c", &view.model.items["c"]).unwrap()["links"]["waits_for"],
                 json!(["a"])
             );
-            assert_eq!(
-                view.item("c", &view.model.items["c"]).unwrap()["links"]["follows"],
-                json!(["b"])
-            );
+            // A stored after link shows as relates-to, and there is no follows key.
+            let links = &view.item("c", &view.model.items["c"]).unwrap()["links"];
+            assert_eq!(links["relates_to"], json!(["b"]));
+            assert_eq!(links.get("follows"), None);
             assert_eq!(shown["claims"][0]["holder"], "session/pi");
             assert_eq!(
                 (&shown["archived"], &shown["reopened"], &shown["done_at"]),
@@ -651,7 +657,7 @@ mod tests {
                 match value {
                     Json::Object(map) => {
                         for (name, inner) in map {
-                            if inner.is_i64() && name != "rank" && name != "members" {
+                            if inner.is_i64() && name != "members" {
                                 keys.insert(name.clone());
                             }
                             go(inner, keys);

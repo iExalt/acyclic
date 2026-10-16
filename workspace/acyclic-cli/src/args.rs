@@ -536,22 +536,19 @@ impl ItemEdit {
 pub enum LinkWord {
     /// `<FROM>` can't start until `<TO>` is done.
     WaitsFor,
-    /// `<FROM>` is better done after `<TO>`, but may go first.
-    Follows,
     /// Context only: neither orders the other.
     RelatesTo,
 }
 
 impl LinkWord {
     /// Every word.
-    pub const ALL: [Self; 3] = [Self::WaitsFor, Self::Follows, Self::RelatesTo];
+    pub const ALL: [Self; 2] = [Self::WaitsFor, Self::RelatesTo];
 
     /// The model's kind for the word.
     #[must_use]
     pub fn kind(self) -> LinkKind {
         match self {
             Self::WaitsFor => LinkKind::Blocks,
-            Self::Follows => LinkKind::After,
             Self::RelatesTo => LinkKind::Relates,
         }
     }
@@ -561,7 +558,6 @@ impl LinkWord {
 const LINK_EXAMPLE: &str = concat!(
     "Kinds:\n",
     "  waits-for   <FROM> can't start until <TO> is done\n",
-    "  follows     <FROM> is better done after <TO>, but may go first\n",
     "  relates-to  context only: neither orders the other\n",
     "\n",
     "Example: acyclic link add plant waits-for beds (plant can't start until beds is done)"
@@ -571,10 +567,10 @@ const LINK_EXAMPLE: &str = concat!(
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum LinkCommand {
-    /// Links two items: `<FROM>` waits for, follows, or relates to `<TO>`.
+    /// Links two items: `<FROM>` waits for or relates to `<TO>`.
     #[command(after_help = LINK_EXAMPLE)]
     Add {
-        /// The item that waits, follows or relates.
+        /// The item that waits or relates.
         from: String,
         /// How `<FROM>` stands to `<TO>`.
         #[arg(value_parser = values(&LinkWord::ALL))]
@@ -582,10 +578,10 @@ pub enum LinkCommand {
         /// The item it stands to.
         to: String,
     },
-    /// Removes a link: `<FROM>` no longer waits for, follows, or relates to `<TO>`.
+    /// Removes a link: `<FROM>` no longer waits for or relates to `<TO>`.
     #[command(after_help = LINK_EXAMPLE)]
     Remove {
-        /// The item that waits, follows or relates.
+        /// The item that waits or relates.
         from: String,
         /// How `<FROM>` stands to `<TO>`.
         #[arg(value_parser = values(&LinkWord::ALL))]

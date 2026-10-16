@@ -146,6 +146,12 @@ fn link_word(words: &[String]) -> Option<String> {
     if group != "link" || !["add", "remove"].contains(&verb.as_str()) {
         return None;
     }
+    if ["follows", "after"].contains(&kind.as_str()) {
+        return Some(format!(
+            "`{kind}` links are retired: use `acyclic link {verb} {from} waits-for {to}` when {from} can't start \
+             until {to} is done, or `relates-to` for context"
+        ));
+    }
     let (_, new) = acyclic_core::import::RENAMED_LINK_KINDS.iter().find(|(old, _)| old == kind)?;
     Some(format!("`{kind}` is now `{new}`: use `acyclic link {verb} {from} {new} {to}`"))
 }

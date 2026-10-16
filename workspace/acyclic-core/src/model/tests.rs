@@ -134,11 +134,10 @@ fn ordering_links_never_close_a_cycle_locally() {
     let mut r = replica("a");
     items(&mut r, &["a", "b", "c"]);
     link(&mut r, "a", "b", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "b", "c", LinkKind::After, by(2)).unwrap();
-    // Hard and soft links count together.
+    link(&mut r, "b", "c", LinkKind::Blocks, by(2)).unwrap();
     let err = link(&mut r, "c", "a", LinkKind::Blocks, by(3)).unwrap_err();
     assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
-    for kind in [LinkKind::Blocks, LinkKind::After, LinkKind::Relates] {
+    for kind in [LinkKind::Blocks, LinkKind::Relates] {
         assert_eq!(link(&mut r, "a", "a", kind, by(3)), Err(WriteError::SelfLink("a".into())));
     }
     // Context links don't order anything.
@@ -147,10 +146,34 @@ fn ordering_links_never_close_a_cycle_locally() {
 }
 
 #[test]
+fn a_stored_after_link_reads_as_relates_once_orders_nothing_and_is_removed_as_relates() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b"]);
+    assert_eq!(link(&mut r, "a", "b", LinkKind::After, by(2)), Err(WriteError::FollowsRetired));
+    store_after_link(&mut r, "a", "b", by(2));
+    let relates = Link { from: "a".into(), to: "b".into(), kind: LinkKind::Relates };
+    assert_eq!(model(&r).links, std::slice::from_ref(&relates));
+    // Alongside a relates link between the same items, it is still one link.
+    link(&mut r, "a", "b", LinkKind::Relates, by(3)).unwrap();
+    assert_eq!(model(&r).links, [relates]);
+    // It orders nothing: the reverse waits-for closes no cycle, and the thread has two heads.
+    link(&mut r, "b", "a", LinkKind::Blocks, by(4)).unwrap();
+    assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
+    unlink(&mut r, "b", "a", LinkKind::Blocks, by(5)).unwrap();
+    for id in ["a", "b"] {
+        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
+    }
+    assert_eq!(model(&r).heads("t"), ["a", "b"]);
+    // Removing the relates link removes both.
+    unlink(&mut r, "a", "b", LinkKind::Relates, by(6)).unwrap();
+    assert_eq!(model(&r).links, []);
+}
+
+#[test]
 fn a_link_cycle_made_by_a_join_is_derived() {
     let (mut a, mut b) = pair(&["x", "y"]);
     link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::After, by(2)).unwrap();
+    link(&mut b, "y", "x", LinkKind::Blocks, by(2)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).link_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
 }
@@ -240,8 +263,8 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     assert_eq!(heads(&r), ["a", "b", "c", "d"], "membership alone orders nothing");
     link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
     link(&mut r, "a", "d", LinkKind::Relates, by(3)).unwrap();
-    // Through an item outside the thread, a soft link orders too.
-    link(&mut r, "c", "x", LinkKind::After, by(3)).unwrap();
+    // Through an item outside the thread, a link orders too.
+    link(&mut r, "c", "x", LinkKind::Blocks, by(3)).unwrap();
     link(&mut r, "x", "a", LinkKind::Blocks, by(3)).unwrap();
     // A parent's links order what is under it.
     set_parent(&mut r, "d", Some("p"), by(3)).unwrap();
@@ -252,7 +275,7 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(5)).unwrap();
     // A parent in the thread is never a head, and following it follows what is under it.
     put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
-    link(&mut r, "b", "p", LinkKind::After, by(5)).unwrap();
+    link(&mut r, "b", "p", LinkKind::Blocks, by(5)).unwrap();
     assert_eq!(heads(&r), ["d"]);
 }
 

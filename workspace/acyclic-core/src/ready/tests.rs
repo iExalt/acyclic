@@ -72,18 +72,18 @@ fn blocked(waits: &[(&str, Wait)]) -> Status {
 }
 
 #[test]
-fn a_hard_dependency_blocks_until_done_and_a_soft_one_only_ranks() {
+fn a_hard_dependency_blocks_until_done_and_a_stored_after_link_never_does() {
     let mut r = replica("a");
     items(&mut r, &["dep", "soft", "x"]);
     link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "x", "soft", LinkKind::After, by(2)).unwrap();
+    model::store_after_link(&mut r, "x", "soft", by(2));
     let none = Fake::default();
     assert_eq!(status(&r, &none, "x"), blocked(&[("dep", Wait::Open)]));
     // Work with no repository is met when done.
     done_with(&mut r, "dep", None);
-    assert_eq!(status(&r, &none, "x"), Status::Ready { rank: 1 });
+    assert_eq!(status(&r, &none, "x"), Status::Ready);
     done_with(&mut r, "soft", None);
-    assert_eq!(status(&r, &none, "x"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &none, "x"), Status::Ready);
 }
 
 #[test]
@@ -98,13 +98,13 @@ fn done_inside_a_thread_merged_across() {
     thread(&mut r, "same", "t1");
     thread(&mut r, "other", "t2");
     let unmerged = Fake::with(&[("c1", Ok(false))]);
-    assert_eq!(status(&r, &unmerged, "same"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &unmerged, "same"), Status::Ready);
     assert_eq!(status(&r, &unmerged, "other"), blocked(&[("dep", Wait::InReview)]));
     // An item in no thread needs the merge too.
     assert_eq!(status(&r, &unmerged, "loose"), blocked(&[("dep", Wait::InReview)]));
     assert_eq!(status(&r, &unmerged, "dep"), Status::InReview);
     let merged = Fake::with(&[("c1", Ok(true))]);
-    assert_eq!(status(&r, &merged, "other"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &merged, "other"), Status::Ready);
     assert_eq!(status(&r, &merged, "dep"), Status::Done);
 }
 
@@ -141,7 +141,7 @@ fn an_archived_dependency_is_met() {
     done_with(&mut r, "dep", Some("c1"));
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     let unmerged = Fake::with(&[("c1", Ok(false))]);
-    assert_eq!(status(&r, &unmerged, "x"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &unmerged, "x"), Status::Ready);
     assert_eq!(status(&r, &unmerged, "dep"), Status::Archived);
 }
 
@@ -170,7 +170,7 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_own_
     assert_eq!(unfinished(&r).1, Some(Status::Parked));
     set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
     done_with(&mut r, "goal", None);
-    assert_eq!(status(&r, &none, "after-goal"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &none, "after-goal"), Status::Ready);
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn cycles_conflicts_and_parked_items_are_not_ready() {
     items(&mut a, &["x", "y", "p", "c"]);
     let mut b = replica("b");
     b.join(&a.state).unwrap();
-    link(&mut a, "x", "y", LinkKind::After, by(2)).unwrap();
+    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
     link(&mut b, "y", "x", LinkKind::Blocks, by(2)).unwrap();
     set_state(&mut a, "c", ItemState::InProgress, by(2)).unwrap();
     set_state(&mut b, "c", ItemState::Done, by(2)).unwrap();
@@ -214,13 +214,13 @@ fn claims_show_and_a_contest_names_its_winner_first() {
 }
 
 #[test]
-fn ready_ranks_leaves_and_checks_each_needed_commit_once() {
+fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     let mut r = replica("a");
     items(&mut r, &["dep", "x", "y", "z", "unrelated", "goal", "archived-leaf"]);
     for id in ["x", "y"] {
         link(&mut r, id, "dep", LinkKind::Blocks, by(2)).unwrap();
     }
-    link(&mut r, "z", "x", LinkKind::After, by(2)).unwrap();
+    model::store_after_link(&mut r, "z", "x", by(2));
     done_with(&mut r, "dep", Some("c1"));
     done_with(&mut r, "unrelated", Some("c2"));
     set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
@@ -230,14 +230,14 @@ fn ready_ranks_leaves_and_checks_each_needed_commit_once() {
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
     let ready = readiness.ready(false).unwrap();
-    assert_eq!(ready, vec![("x".into(), 0), ("y".into(), 0), ("z".into(), 1)]);
+    assert_eq!(ready, ["x", "y", "z"], "an open after link holds nothing back");
     assert_eq!(
         ancestry.calls.get(),
         1,
         "c1 once for two dependents, and never c2, which nothing needs"
     );
     let with_archived = readiness.ready(true).unwrap();
-    assert!(with_archived.contains(&("archived-leaf".into(), 0)));
+    assert!(with_archived.contains(&"archived-leaf".to_owned()));
 }
 
 #[test]
@@ -266,6 +266,6 @@ fn a_held_resource_keeps_an_item_waiting_and_a_dead_runs_claim_frees_it() {
         Status::ResourceBusy { resource: "gpu".into(), item: "x".into(), holder: "run/r1".into() }
     );
     model::set_run_state(&mut r, "r1", model::RunState::Done, by(20)).unwrap();
-    assert_eq!(status(&r, &none, "x"), Status::Ready { rank: 0 });
-    assert_eq!(status(&r, &none, "y"), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, &none, "x"), Status::Ready);
+    assert_eq!(status(&r, &none, "y"), Status::Ready);
 }

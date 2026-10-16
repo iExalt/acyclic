@@ -114,6 +114,7 @@ impl From<WriteError> for CliError {
             WriteError::Checked { .. } => Self::refused("checked-field", message),
             WriteError::UserOnly { .. } => Self::refused("user-only", message),
             WriteError::SelfLink(_) => Self::refused("self-link", message),
+            WriteError::FollowsRetired => Self::refused("follows-retired", message),
             WriteError::RunTransition { .. } => Self::refused("run-transition", message),
             WriteError::RunActive { .. } => Self::refused("run-active", message),
         }

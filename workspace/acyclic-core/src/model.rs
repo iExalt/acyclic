@@ -134,7 +134,8 @@ pub struct Evidence {
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     Blocks,
-    /// A soft dependency: `from` prefers to follow `to`.
+    /// A retired soft dependency, still in stored state: the model reads it as [`LinkKind::Relates`], and no write
+    /// adds one.
     After,
     /// Context only.
     Relates,
@@ -162,7 +163,7 @@ impl LinkKind {
     /// Whether the kind orders work, so it counts in cycle checks.
     #[must_use]
     pub fn orders(self) -> bool {
-        matches!(self, Self::Blocks | Self::After)
+        self == Self::Blocks
     }
 }
 
@@ -399,6 +400,8 @@ impl Model {
             model.add(state, key)?;
         }
         model.links.sort();
+        // A stored after link reads as relates-to, so a pair holding both is one link.
+        model.links.dedup();
         Ok(model)
     }
 
@@ -416,6 +419,7 @@ impl Model {
             }
         }
         model.links.sort();
+        model.links.dedup();
         (model, unreadable)
     }
 
@@ -455,6 +459,7 @@ impl Model {
                 ) else {
                     return Err(Error::Format(format!("link {} lacks its ends or kind", key.id)));
                 };
+                let kind = if kind == LinkKind::After { LinkKind::Relates } else { kind };
                 self.links.push(Link { from, to, kind });
             },
             kind::THREAD => {
@@ -589,7 +594,7 @@ impl Model {
         repositories
     }
 
-    /// The cycles among blocks and after links, each sorted.
+    /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {
         let edges: Vec<(String, String)> = self
@@ -601,7 +606,7 @@ impl Model {
         graph::cycles(&edges)
     }
 
-    /// A path of blocks and after links from `from` to `to`, both included; a single item when they are the same.
+    /// A path of blocks links from `from` to `to`, both included; a single item when they are the same.
     #[must_use]
     pub fn ordering_path(&self, from: &str, to: &str) -> Option<Vec<String>> {
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -632,7 +637,7 @@ impl Model {
     }
 
     /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
-    /// when a path of blocks and after links, from the leaf or an ancestor, reaches that member or one of its
+    /// when a path of blocks links, from the leaf or an ancestor, reaches that member or one of its
     /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
     /// unsaid: they may run in parallel, or a link is missing.
     #[must_use]
@@ -736,7 +741,7 @@ pub enum WriteError {
     Deleted(String),
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
-    /// The link would close a cycle of blocks and after links, through these items.
+    /// The link would close a cycle of blocks links, through these items.
     LinkCycle(Vec<String>),
     /// The field has invariants: write it with its checked write.
     Checked {
@@ -754,6 +759,8 @@ pub enum WriteError {
     },
     /// An item can't link to itself.
     SelfLink(String),
+    /// Follows links are retired: nothing adds one.
+    FollowsRetired,
     /// A run's state can't move that way.
     RunTransition {
         /// The run.
@@ -789,6 +796,11 @@ impl fmt::Display for WriteError {
             },
             Self::UserOnly { field, actor } => write!(f, "only the user sets {field}, not {actor}"),
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
+            Self::FollowsRetired => write!(
+                f,
+                "follows links are retired: use waits-for when one item can't start before the other is done, \
+                 or relates-to for context"
+            ),
             Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
@@ -1040,8 +1052,8 @@ pub fn set_parent(
 ///
 /// # Errors
 ///
-/// Fails when either item doesn't exist, when a blocks or after link would close a cycle, or when the state layer
-/// refuses.
+/// Fails on an after link, which is retired, when either item doesn't exist, when a blocks link would close a cycle,
+/// or when the state layer refuses.
 pub fn link(
     replica: &mut Replica,
     from: &str,
@@ -1049,6 +1061,9 @@ pub fn link(
     kind: LinkKind,
     by: By<'_>,
 ) -> Result<Key, WriteError> {
+    if kind == LinkKind::After {
+        return Err(WriteError::FollowsRetired);
+    }
     existing(&replica.state, from)?;
     existing(&replica.state, to)?;
     if from == to {
@@ -1069,7 +1084,22 @@ pub fn link(
     Ok(key)
 }
 
-/// Removes a link; a concurrent re-add survives.
+/// Stores an after link as older versions wrote one, for tests of how the model reads it.
+#[cfg(test)]
+pub(crate) fn store_after_link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) {
+    let key = link_key(from, to, LinkKind::After).unwrap();
+    for (name, value) in [
+        (link::FROM, to_json(&from)),
+        (link::TO, to_json(&to)),
+        (link::KIND, to_json(&LinkKind::After)),
+        (link::PRESENT, to_json(&true)),
+    ] {
+        replica.write(&key, name, by.actor, by.at, Some(value)).unwrap();
+    }
+}
+
+/// Removes a link; a concurrent re-add survives. Removing a relates link also removes a stored after link between
+/// the same items, since the model reads one as the other.
 ///
 /// # Errors
 ///
@@ -1081,9 +1111,18 @@ pub fn unlink(
     kind: LinkKind,
     by: By<'_>,
 ) -> Result<(), WriteError> {
-    let key = link_key(from, to, kind)?;
-    // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
-    replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+    let mut kinds = vec![kind];
+    if kind == LinkKind::Relates {
+        kinds.push(LinkKind::After);
+    }
+    for kind in kinds {
+        let key = link_key(from, to, kind)?;
+        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
+        if kind == LinkKind::After && replica.state.field(&key, link::PRESENT).is_none() {
+            continue;
+        }
+        replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+    }
     Ok(())
 }
 

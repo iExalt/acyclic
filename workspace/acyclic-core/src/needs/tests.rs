@@ -142,7 +142,7 @@ fn the_state_puts_its_problems_on_the_list() {
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", LinkKind::Blocks, user(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::After, user(2)).unwrap();
+    link(&mut b, "y", "x", LinkKind::Blocks, user(2)).unwrap();
     claim::claim(&mut a, &item_key("x").unwrap(), "session/a", 2, Some(NOW), NOW).unwrap();
     claim::claim(&mut b, &item_key("x").unwrap(), "session/b", 2, Some(NOW), NOW).unwrap();
     claim::claim(&mut a, &item_key("gpu1").unwrap(), "session/a", 2, Some(NOW), NOW).unwrap();

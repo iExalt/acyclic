@@ -29,8 +29,7 @@ Every command's inputs follow these rules, so you can guess a command from its n
 7. **Enum-valued inputs** list their values in help, and a wrong value's error lists them again.
 
 Links read left to right: `acyclic link add plant waits-for beds` says plant can't start until beds is done. The kinds
-are `waits-for`, which holds work back; `follows`, which only orders the ranking; and `relates-to`, which is
-context only.
+are `waits-for`, which holds work back, and `relates-to`, which is context only.
 
 ### Output
 
@@ -42,10 +41,10 @@ Every command's output follows these rules, so you can guess a key from the inpu
 2. **Naming.** A record carries its own id as `id`. A reference is named for the entity it points to, in the plural for
    a list: `parent`, `thread`, `item`, `repository`, `proposal`, `repositories`. Keys match the input flags, in snake
    case; enum values are kebab-case. A reference that can name several kinds of entity is `{entity, id}`, as in a
-   conflict, a dangling reference or an unreadable record. Links read `waits_for`, `follows` and `relates_to` from an
-   item and `waited_on_by`, `followed_by` and `related_from` towards it.
+   conflict, a dangling reference or an unreadable record. Links read `waits_for` and `relates_to` from an item and
+   `waited_on_by` and `related_from` towards it.
 3. **One summary per entity**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`;
-   `ready` adds `approved`, and the rank is in `readiness`. A thread is `{id, title, approved, heads, counts}`, a
+   `ready` adds `approved`. A thread is `{id, title, approved, heads, counts}`, a
    repository record `{id, owner, name, public, default_branch}` and a proposal `{id, actor, decision, threads}`. `list`
    returns the summaries and `show` returns the same object with its details added at the top level, so a thread's
    `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`. `proposal list`

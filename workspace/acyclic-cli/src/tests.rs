@@ -213,12 +213,12 @@ fn the_help_sections_hold_every_command_once() {
 
 #[test]
 fn times_print_as_rfc3339_in_utc() {
-    let mut out = json!({"eligible_at": 0, "rank": 0,
+    let mut out = json!({"eligible_at": 0, "members": 0,
                          "claims": [{"lease_expires_at": null, "lease_started_at": 0}]});
     timestamps(&mut out);
     assert_eq!(
         out,
-        json!({"eligible_at": "1970-01-01T00:00:00Z", "rank": 0,
+        json!({"eligible_at": "1970-01-01T00:00:00Z", "members": 0,
                "claims": [{"lease_expires_at": null,
                            "lease_started_at": "1970-01-01T00:00:00Z"}]})
     );
@@ -239,7 +239,7 @@ fn an_actor_may_claim_past_its_own_claims_only() {
         holders: vec![first.into(), second.into()],
     };
     for (status, may) in [
-        (Status::Ready { rank: 0 }, true),
+        (Status::Ready, true),
         (claimed(me), true),
         (claimed("run/r1"), false),
         (contested(me, "run/r1"), true),
@@ -512,11 +512,10 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
 }
 
 #[test]
-fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
+fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
     use acyclic_core::model::LinkKind;
     for (word, kind) in [
         (args::LinkWord::WaitsFor, LinkKind::Blocks),
-        (args::LinkWord::Follows, LinkKind::After),
         (args::LinkWord::RelatesTo, LinkKind::Relates),
     ] {
         assert_eq!(word.kind(), kind);
@@ -524,10 +523,22 @@ fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
     // Exhaustive, so a new word must be listed.
     for word in args::LinkWord::ALL {
         match word {
-            args::LinkWord::WaitsFor | args::LinkWord::Follows | args::LinkWord::RelatesTo => {},
+            args::LinkWord::WaitsFor | args::LinkWord::RelatesTo => {},
         }
     }
-    for (old, new) in [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")] {
+    // Soft links are retired, under either name, with the words to use instead.
+    for retired in ["follows", "after"] {
+        let out = run(&format!("acyclic link add a2 {retired} a1"));
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{retired}");
+        assert!(
+            out.stderr.contains(&format!(
+                "`{retired}` links are retired: use `acyclic link add a2 waits-for a1` when a2 can't start until a1 \
+                 is done, or `relates-to` for context"
+            )),
+            "{out:?}"
+        );
+    }
+    for (old, new) in [("blocks", "waits-for"), ("relates", "relates-to")] {
         let out = run(&format!("acyclic link add a2 {old} a1"));
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{old}");
         assert!(
@@ -541,7 +552,8 @@ fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
     assert!(out.stderr.contains("use `acyclic link remove a2 waits-for a1`"), "{out:?}");
     assert!(run("acyclic link add a2 sideways a1").stderr.contains("[possible values: waits-for"));
     let help = run("acyclic help link add").stdout;
-    assert!(help.contains("`<FROM>` waits for, follows, or relates to `<TO>`"), "{help}");
+    assert!(help.contains("`<FROM>` waits for or relates to `<TO>`"), "{help}");
+    assert!(!help.contains("follows"), "{help}");
     assert!(help.contains("acyclic link add plant waits-for beds"), "{help}");
 }
 

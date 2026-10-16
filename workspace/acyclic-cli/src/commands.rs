@@ -475,7 +475,6 @@ impl<'a> Session<'a> {
         self.with_view(|view| {
             let ready = view.readiness.ready(include_archived)?;
             acyclic_core::probe::mark("readiness");
-            let ready: Vec<String> = ready.into_iter().map(|(id, _)| id).collect();
             Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
         })
     }
@@ -786,7 +785,7 @@ impl<'a> Session<'a> {
 /// the actor's own claim, as winner of a contest or as holder of a shared resource. Core allows the same.
 pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
     match status {
-        Some(Status::Ready { .. }) => true,
+        Some(Status::Ready) => true,
         Some(Status::Claimed { holder } | Status::ResourceBusy { holder, .. }) => holder == actor,
         Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
         _ => false,

@@ -17,7 +17,7 @@ digraph acyclic {
   "n_p" [label="p · Project"];
   "n_x" [label="x · Outside"];
   "n_z" [label="z · Old", style="rounded,dashed", color=gray, fontcolor=gray];
-  "n_a" -> "n_c" [style=dashed];
+  "n_a" -> "n_c" [style=dotted, arrowhead=none];
   "n_b" -> "n_a" [style=solid];
   "n_p" -> "n_a" [color=gray, arrowhead=none];
   "n_p" -> "n_b" [color=gray, arrowhead=none];

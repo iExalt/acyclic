@@ -231,8 +231,8 @@ pub fn dot(model: &Model, view: &View) -> String {
         let style = match edge.kind {
             EdgeKind::Tree => "color=gray, arrowhead=none",
             EdgeKind::Link(LinkKind::Blocks) => "style=solid",
-            EdgeKind::Link(LinkKind::After) => "style=dashed",
-            EdgeKind::Link(LinkKind::Relates) => "style=dotted, arrowhead=none",
+            // The model reads a stored after link as relates.
+            EdgeKind::Link(LinkKind::After | LinkKind::Relates) => "style=dotted, arrowhead=none",
         };
         writeln!(
             out,
@@ -306,8 +306,7 @@ pub fn mermaid(model: &Model, view: &View) -> String {
                 "---"
             },
             EdgeKind::Link(LinkKind::Blocks) => "-->",
-            EdgeKind::Link(LinkKind::After) => "-.->",
-            EdgeKind::Link(LinkKind::Relates) => "-.-",
+            EdgeKind::Link(LinkKind::After | LinkKind::Relates) => "-.-",
         };
         writeln!(out, "  {} {arrow} {}", node_id('n', &edge.from), node_id('n', &edge.to))
             .expect("a String takes writes");
