@@ -116,7 +116,7 @@ fn agent_child() {
         }
         // Agents start at different places in the list, so they mostly want different items.
         let index: usize = actor.trim_start_matches("session/agent").parse().unwrap();
-        let item = ready[index % ready.len()]["item"].as_str().unwrap().to_owned();
+        let item = ready[index % ready.len()]["id"].as_str().unwrap().to_owned();
         let (code, out) = acyclic(tracker, &actor, &format!("claim {item}"));
         match code {
             0 => {

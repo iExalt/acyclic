@@ -109,7 +109,7 @@ impl From<WriteError> for CliError {
             WriteError::Deleted(_) => Self::refused("deleted", message),
             WriteError::ParentCycle(_) => Self::refused("parent-cycle", message),
             WriteError::LinkCycle(path) => {
-                Self::refused("link-cycle", message).with(json!({"path": path}))
+                Self::refused("link-cycle", message).with(json!({"items": path}))
             },
             WriteError::Checked { .. } => Self::refused("checked-field", message),
             WriteError::UserOnly { .. } => Self::refused("user-only", message),

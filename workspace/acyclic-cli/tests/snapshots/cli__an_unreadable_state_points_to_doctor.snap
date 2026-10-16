@@ -20,6 +20,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
   "data": {
     "changed": true,
     "item": "a1",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -42,15 +43,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
 # exit 0
 {
   "data": {
-    "items": 0,
-    "links": 0,
+    "counts": {
+      "items": 0,
+      "links": 0,
+      "threads": 0
+    },
     "replica": "mac",
-    "threads": 0,
     "unreadable": [
       {
+        "entity": "item",
         "error": "unreadable state: unreadable state on item a1: unknown variant `from-the-future`, expected one of `backlog`, `parked`, `in-progress`, `done`",
-        "id": "a1",
-        "kind": "item"
+        "id": "a1"
       }
     ]
   },

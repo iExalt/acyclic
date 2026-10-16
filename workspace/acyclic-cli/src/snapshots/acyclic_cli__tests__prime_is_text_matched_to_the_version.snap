@@ -55,17 +55,16 @@ older copy.
    `acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
    standard output.
 5. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
-   with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their members,
-   and `acyclic thread show <thread>` shows each member's state and readiness. Both list a thread's `heads`: its open
-   leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another, link
-   them. `acyclic help <command>` shows a command's arguments.
+   with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
+   `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
+   open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
+   link them. `acyclic help <command>` shows a command's arguments.
 6. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
    its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
-   reports it as `inherited`. Once the user approves a thread, your change to its members or repositories doesn't
+   reports it as `placed`. Once the user approves a thread, your change to its members or repositories doesn't
    apply unless you are a run on a project-management thread: it waits in `acyclic needs` as a proposal for the user.
-   An item or thread edit lists its proposals in `proposals`, and an add, edit or import lists the proposal in its
-   report. Carry on with other work.
+   An item or thread edit, and an import, list their proposals in `proposals`. Carry on with other work.
 7. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With

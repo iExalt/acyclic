@@ -11,7 +11,7 @@ use acyclic_core::claim;
 use acyclic_core::delete;
 use acyclic_core::export;
 use acyclic_core::import::{self, Import};
-use acyclic_core::model::{self, By, Evidence, ItemState, Level, LinkKind, Model, SetField, Value};
+use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField, Value};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
@@ -31,6 +31,7 @@ use crate::context;
 use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
 use crate::error::{CliError, exit};
 use crate::page;
+use crate::view::{self, View};
 
 /// What a command prints.
 pub enum Output {
@@ -149,17 +150,15 @@ impl<'a> Session<'a> {
                     resources: Delta { add: resource.clone(), remove: Vec::new() },
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
-                self.write(|replica, by| {
-                    Ok(edit::add_item(replica, item, &fields, by)?.json("item", item))
-                })
-                .map_err(|error| {
-                    self.misplaced(error, parent.as_deref(), || {
-                        format!(
-                            "acyclic item add {item} --title <TITLE> --thread {}",
-                            parent.as_deref().unwrap_or_default()
-                        )
+                self.write(|replica, by| Ok(edit::add_item(replica, item, &fields, by)?.item(item)))
+                    .map_err(|error| {
+                        self.misplaced(error, parent.as_deref(), || {
+                            format!(
+                                "acyclic item add {item} --title <TITLE> --thread {}",
+                                parent.as_deref().unwrap_or_default()
+                            )
+                        })
                     })
-                })
             },
             Command::Item(ItemCommand::Edit(edit)) => {
                 let fields = ItemFields {
@@ -181,9 +180,9 @@ impl<'a> Session<'a> {
                     },
                 };
                 let item = &edit.item;
-                self.write(|replica, by| {
-                    Ok(edit::edit_item(replica, item, &fields, by)?.json("item", item))
-                })
+                self.write(
+                    |replica, by| Ok(edit::edit_item(replica, item, &fields, by)?.item(item)),
+                )
                 .map_err(|error| {
                     self.misplaced(error, edit.parent.as_deref(), || {
                         format!(
@@ -233,7 +232,7 @@ impl<'a> Session<'a> {
                                 "already-done",
                                 format!("item {id} is done with other evidence; pass --force to replace it"),
                             )
-                            .with(json!({"evidence": model.items[id].evidence})));
+                            .with(json!({"evidence": view::evidence(&model.items[id].evidence)})));
                         }
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
@@ -262,7 +261,7 @@ impl<'a> Session<'a> {
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    Ok(edit::add_thread(replica, thread, &fields, by)?.json("thread", thread))
+                    Ok(edit::add_thread(replica, thread, &fields, by)?.thread(thread))
                 })
             },
             Command::Thread(ThreadCommand::Edit(edit)) => {
@@ -277,7 +276,7 @@ impl<'a> Session<'a> {
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
-                    Ok(edit::edit_thread(replica, thread, &fields, by)?.json("thread", thread))
+                    Ok(edit::edit_thread(replica, thread, &fields, by)?.thread(thread))
                 })
             },
             Command::Repo(RepoCommand::List) => self.repositories(),
@@ -325,14 +324,12 @@ impl<'a> Session<'a> {
             Command::Proposal(ProposalCommand::Show { proposals }) => {
                 self.show_proposals(proposals)
             },
-            Command::Proposal(ProposalCommand::Keep { proposal }) => self.write(|replica, by| {
-                scope::keep(replica, proposal, by)?;
-                Ok(json!({"proposal": proposal, "decision": "keep"}))
-            }),
-            Command::Proposal(ProposalCommand::Drop { proposal }) => self.write(|replica, by| {
-                scope::drop(replica, proposal, by)?;
-                Ok(json!({"proposal": proposal, "decision": "drop"}))
-            }),
+            Command::Proposal(ProposalCommand::Keep { proposal }) => {
+                self.decide(proposal, scope::keep, "keep")
+            },
+            Command::Proposal(ProposalCommand::Drop { proposal }) => {
+                self.decide(proposal, scope::drop, "drop")
+            },
             Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
             Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
             Command::Level { level: None } => self.levels(),
@@ -428,6 +425,32 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// Decides a proposal, and says which member and thread the edit named, and whether that member's work is
+    /// approved afterwards: a kept membership edit into an approved thread extends the approval.
+    fn decide(
+        &self,
+        proposal: &str,
+        decide: fn(&mut Replica, &str, By<'_>) -> Result<(), scope::ScopeError>,
+        decision: &str,
+    ) -> Result<Json, CliError> {
+        self.write(|replica, by| {
+            let edit = scope::proposals(replica.state())?
+                .get(proposal)
+                .and_then(|p| p.edit.one().cloned());
+            decide(replica, proposal, by)?;
+            let (item, thread) = match edit {
+                Some(scope::ScopeEdit::Member { item, thread }) => (Some(item), thread),
+                _ => (None, None),
+            };
+            let approved = match &item {
+                Some(item) => view::approval(&Model::read(replica.state())?, item).1,
+                None => false,
+            };
+            Ok(json!({"proposal": proposal, "decision": decision, "item": item, "thread": thread,
+                      "approved": approved}))
+        })
+    }
+
     /// Approves a thread's scope, or revokes the approval.
     fn approve(&self, id: &str, approved: bool) -> Result<Json, CliError> {
         self.write(|replica, by| {
@@ -436,23 +459,23 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
+    /// Reads the tracker and hands `read` a view of it: its items' readiness is judged against the clones' history.
+    fn with_view<T>(
+        &self,
+        read: impl FnOnce(&View<'_>) -> Result<T, CliError>,
+    ) -> Result<T, CliError> {
         let (state, model) = self.read()?;
-        let clones = context::clones(self.env)?;
-        let ancestry = GitAncestry::new(clones);
+        let ancestry = GitAncestry::new(context::clones(self.env)?);
         let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let ready = readiness.ready(include_archived)?;
-        acyclic_core::probe::mark("readiness");
-        let ready: Vec<Json> = ready
-            .into_iter()
-            .map(|(id, rank)| (approval(&model, &id), id, rank))
-            .filter(|((_, approved), _, _)| *approved || !only_approved)
-            .map(|((thread, approved), id, rank)| {
-                json!({"item": id, "rank": rank, "title": model.items[&id].title, "thread": thread,
-                       "approved": approved})
-            })
-            .collect();
-        Ok(json!({"ready": ready}))
+        read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
+    }
+
+    fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
+        self.with_view(|view| {
+            let ready = view.readiness.ready(include_archived)?;
+            acyclic_core::probe::mark("readiness");
+            Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
+        })
     }
 
     /// The graph as a document: DOT or Mermaid to standard output as text, or any format to a file with a JSON
@@ -534,134 +557,74 @@ impl<'a> Session<'a> {
             "path": path,
             "format": format,
             "opened": open,
-            "items": view.items.len(),
-            "ghosts": view.ghosts.len(),
-            "edges": view.edges.len(),
+            "counts": {
+                "items": view.items.len(),
+                "ghosts": view.ghosts.len(),
+                "edges": view.edges.len(),
+            },
         })))
     }
 
     fn list(&self) -> Result<Json, CliError> {
-        let (_, model) = self.read()?;
-        let items: Vec<Json> = model
-            .items
-            .values()
-            .map(|item| {
-                json!({
-                    "item": item.id,
-                    "title": item.title,
-                    "state": item.state,
-                    "parent": item.parent,
-                    "thread": item.thread,
-                })
-            })
-            .collect();
-        Ok(json!({"items": items}))
+        self.with_view(|view| {
+            let items = view
+                .model
+                .items
+                .keys()
+                .map(|id| view.item_row(id))
+                .collect::<Result<Vec<Json>, CliError>>()?;
+            Ok(json!({"items": items}))
+        })
     }
 
     fn show(&self, ids: &[String]) -> Result<Json, CliError> {
-        let (state, model) = self.read()?;
-        let clones = context::clones(self.env)?;
-        let ancestry = GitAncestry::new(clones);
-        let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let alive = |holder: &str| model.run_alive(holder);
-        let mut shown = Vec::with_capacity(ids.len());
-        for id in ids {
-            let item = model.items.get(id).ok_or_else(|| not_found(id))?;
-            let claims = claim::live_with(&state, &model::item_key(id)?, self.now, &alive)?;
-            shown.push(json!({
-                "item": item,
-                "role": model.role(id),
-                "children": model.children(id),
-                "readiness": readiness.of(id)?,
-                "claims": claims,
-            }));
-        }
-        Ok(Json::Array(shown))
+        self.with_view(|view| {
+            let mut shown = Vec::with_capacity(ids.len());
+            for id in ids {
+                let item = view.model.items.get(id).ok_or_else(|| not_found(id))?;
+                shown.push(view.item(id, item)?);
+            }
+            Ok(Json::Array(shown))
+        })
     }
 
     fn threads(&self) -> Result<Json, CliError> {
         let (_, model) = self.read()?;
-        let threads: Vec<Json> = thread_members(&model)
-            .into_iter()
-            .map(|(id, members)| {
-                let done = members.iter().filter(|m| model.items[m.item].is_done()).count();
-                let conflicted: Vec<&str> =
-                    members.iter().filter(|m| m.conflict).map(|m| m.item).collect();
-                let thread = model.threads.get(id);
-                json!({
-                    "thread": id,
-                    "title": thread.map(|t| &t.title),
-                    "approved": thread.map(|t| &t.approved),
-                    "members": members.iter().map(|m| m.item).collect::<Vec<_>>(),
-                    "heads": model.heads(id),
-                    "conflicted": conflicted,
-                    "done": done,
-                })
-            })
-            .collect();
-        Ok(json!({"threads": threads}))
+        Ok(json!({"threads": view::thread_rows(&model)}))
     }
 
     fn show_threads(&self, ids: &[String]) -> Result<Json, CliError> {
-        let (state, model) = self.read()?;
-        let clones = context::clones(self.env)?;
-        let ancestry = GitAncestry::new(clones);
-        let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let known = thread_members(&model);
-        let mut shown = Vec::with_capacity(ids.len());
-        for id in ids {
-            let Some(listed) = known.get(id.as_str()) else {
-                return Err(CliError::new("not-found", exit::NOT_FOUND, format!("no thread {id}")));
-            };
-            let thread = model.threads.get(id);
-            let mut members = Vec::new();
-            for &Member { item: member, conflict } in listed {
-                let item = &model.items[member];
-                members.push(json!({
-                    "item": member,
-                    "title": item.title,
-                    "state": item.state,
-                    "readiness": readiness.of(member)?,
-                    "in_approval": thread.and_then(|t| t.approved_member(member)),
-                    "conflict": conflict,
-                }));
+        self.with_view(|view| {
+            let known = thread_members(view.model);
+            let mut shown = Vec::with_capacity(ids.len());
+            for id in ids {
+                let Some(listed) = known.get(id.as_str()) else {
+                    return Err(CliError::new(
+                        "not-found",
+                        exit::NOT_FOUND,
+                        format!("no thread {id}"),
+                    ));
+                };
+                shown.push(view.thread(id, listed)?);
             }
-            shown.push(json!({
-                "thread": thread.map_or_else(|| json!({"id": id}), |t| json!(t)),
-                "repositories": model.repository_set(id),
-                "heads": model.heads(id),
-                "members": members,
-            }));
-        }
-        Ok(Json::Array(shown))
+            Ok(Json::Array(shown))
+        })
     }
 
     fn levels(&self) -> Result<Json, CliError> {
         let (_, model) = self.read()?;
-        let own: BTreeMap<&str, Level> = model
+        let own: Vec<Json> = model
             .threads
             .iter()
             .filter(|(_, thread)| thread.autonomy != Value::None)
-            .map(|(id, _)| (id.as_str(), model.level(Some(id))))
+            .map(|(id, _)| json!({"id": id, "level": model.level(Some(id))}))
             .collect();
         Ok(json!({"global": model.level(None), "threads": own}))
     }
 
     fn repositories(&self) -> Result<Json, CliError> {
         let (_, model) = self.read()?;
-        let records: Vec<Json> = model
-            .repositories
-            .values()
-            .map(|record| {
-                json!({
-                    "repository": record.id,
-                    "owner": record.owner,
-                    "name": record.name,
-                    "public": record.public,
-                    "default_branch": record.default_branch,
-                })
-            })
-            .collect();
+        let records: Vec<Json> = model.repositories.values().map(view::repo_row).collect();
         Ok(json!({"repositories": records}))
     }
 
@@ -672,19 +635,7 @@ impl<'a> Session<'a> {
             let record = model.repositories.get(id).ok_or_else(|| {
                 CliError::new("not-found", exit::NOT_FOUND, format!("no repository record {id}"))
             })?;
-            let items: Vec<&str> = model
-                .items
-                .values()
-                .filter(|item| item.repositories.contains(id))
-                .map(|item| item.id.as_str())
-                .collect();
-            let threads: Vec<&str> = model
-                .threads
-                .values()
-                .filter(|thread| thread.repositories.contains(id))
-                .map(|thread| thread.id.as_str())
-                .collect();
-            shown.push(json!({"repository": record, "items": items, "threads": threads}));
+            shown.push(view::repo_show(&model, record));
         }
         Ok(Json::Array(shown))
     }
@@ -697,14 +648,7 @@ impl<'a> Session<'a> {
             let proposal = all.get(id).ok_or_else(|| {
                 CliError::new("not-found", exit::NOT_FOUND, format!("no proposal {id}"))
             })?;
-            let threads = proposal.edit.one().map(|edit| edit.approved_threads(&model));
-            shown.push(json!({
-                "proposal": id,
-                "actor": proposal.actor,
-                "decision": proposal.decision,
-                "edit": proposal.edit,
-                "threads": threads,
-            }));
+            shown.push(view::proposal_show(&model, proposal));
         }
         Ok(Json::Array(shown))
     }
@@ -758,13 +702,15 @@ impl<'a> Session<'a> {
         let (model, unreadable) = Model::read_lenient(&state);
         let unreadable: Vec<Json> = unreadable
             .into_iter()
-            .map(|(key, err)| json!({"kind": key.kind, "id": key.id, "error": err.to_string()}))
+            .map(|(key, err)| json!({"entity": key.kind, "id": key.id, "error": err.to_string()}))
             .collect();
         Ok(json!({
             "replica": self.tracker.replica().as_str(),
-            "items": model.items.len(),
-            "links": model.links.len(),
-            "threads": model.threads.len(),
+            "counts": {
+                "items": model.items.len(),
+                "links": model.links.len(),
+                "threads": model.threads.len(),
+            },
             "unreadable": unreadable,
         }))
     }
@@ -783,14 +729,13 @@ impl<'a> Session<'a> {
             let at = replica.stamp(self.now, false)?;
             let by = By { actor: &self.actor, at };
             let report = import::apply(&doc, &mut replica, by)?;
-            let inherited = place::place(&mut replica, &keys, by)?;
-            let data = json!({"report": report, "dry_run": true, "changed": false});
-            return Ok(with_inherited(data, &inherited));
+            let placed = place::place(&mut replica, &keys, by)?;
+            return Ok(import_json(&report, &placed, true));
         }
         self.write(|replica, by| {
             let report = import::apply(&doc, replica, by)?;
-            let inherited = place::place(replica, &keys, by)?;
-            Ok(with_inherited(json!({"report": report, "dry_run": false}), &inherited))
+            let placed = place::place(replica, &keys, by)?;
+            Ok(import_json(&report, &placed, false))
         })
     }
 
@@ -820,7 +765,7 @@ impl<'a> Session<'a> {
             let model = Model::read(replica.state())?;
             let alive = |holder: &str| model.run_alive(holder);
             let held = claim::winner_with(replica.state(), &key, by.at, &alive)?;
-            Ok(json!({"item": id, "claim": held}))
+            Ok(json!({"item": id, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
 }
@@ -876,7 +821,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
             missing.join(", ")
         ),
     )
-    .with(json!({"missing": missing})))
+    .with(json!({"missing": missing.iter().map(|f| f.replace('-', "_")).collect::<Vec<_>>()})))
 }
 
 /// Whether recording `evidence` would replace different evidence on an item that is already done.
@@ -918,20 +863,6 @@ fn check_finish(
         format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it"),
     )
     .with(json!({"readiness": status})))
-}
-
-/// An item's thread, and whether the user approved its work: the thread's approval holds without a conflict, and the
-/// approval saw the item when it recorded what it saw. A conflict counts against, unlike for protecting scope, since
-/// this says whether work may start.
-pub(crate) fn approval(model: &Model, id: &str) -> (Option<String>, bool) {
-    let Some(thread) = model.items.get(id).and_then(|item| item.thread.one()) else {
-        return (None, false);
-    };
-    let approved = model
-        .threads
-        .get(thread)
-        .is_some_and(|t| t.approved.one() == Some(&true) && t.approved_member(id) != Some(false));
-    (Some(thread.clone()), approved)
 }
 
 /// Whether an agent may finish an item in `status` without forcing: when it may claim it, or it is finished already.
@@ -1168,10 +1099,37 @@ fn set_origin(
     Ok(true)
 }
 
-/// Adds the items that joined a thread passed down to them, or asked to, to a command's data, when there are any.
-pub(crate) fn with_inherited(mut data: Json, inherited: &[place::Inherited]) -> Json {
-    if !inherited.is_empty() {
-        data["inherited"] = json!(inherited);
+/// The items that joined a thread passed down to them, or asked to, as `{item, thread, outcome, proposal}`: applied at
+/// once, or proposed when the thread's scope is approved and the actor may only propose.
+pub(crate) fn placed(inherited: &[place::Inherited]) -> Json {
+    inherited
+        .iter()
+        .map(|p| {
+            json!({"item": p.item, "thread": p.thread,
+                   "outcome": if p.proposal.is_some() { "proposed" } else { "applied" },
+                   "proposal": p.proposal})
+        })
+        .collect()
+}
+
+/// An import's result: what it changed, in counts and field by field, the proposals it left and the threads items
+/// joined. A dry run changes nothing.
+fn import_json(report: &import::Report, inherited: &[place::Inherited], dry_run: bool) -> Json {
+    let mut data = json!({
+        "dry_run": dry_run,
+        "counts": {
+            "repositories": report.repositories,
+            "items": report.items,
+            "links": report.links,
+            "threads": report.threads,
+            "fields": report.fields,
+        },
+        "changes": report.changes,
+        "proposals": report.proposals,
+        "placed": placed(inherited),
+    });
+    if dry_run {
+        data["changed"] = json!(false);
     }
     data
 }

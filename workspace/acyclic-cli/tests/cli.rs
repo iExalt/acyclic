@@ -112,11 +112,7 @@ fn a_journey_through_the_contract() {
         "one missing thread fails the whole command"
     );
     let (code, shown) = sh.output("show a1 a2", AGENT);
-    assert_eq!(
-        (code, shown["data"][1]["item"]["id"].as_str()),
-        (0, Some("a2")),
-        "in the order given"
-    );
+    assert_eq!((code, shown["data"][1]["id"].as_str()), (0, Some("a2")), "in the order given");
     assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
     let (code, out) = sh.output("item edit a2 --no-thread --as-user", AGENT);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)));
@@ -143,7 +139,7 @@ fn a_journey_through_the_contract() {
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
     assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
     let (code, out) = sh.output("graph --format mermaid --output graph.mmd", AGENT);
-    assert_eq!((code, out["data"]["items"].as_u64()), (0, Some(2)));
+    assert_eq!((code, out["data"]["counts"]["items"].as_u64()), (0, Some(2)));
     let mermaid = std::fs::read_to_string(sh.path().join("graph.mmd")).unwrap();
     assert!(mermaid.starts_with("flowchart TB\n"), "{mermaid}");
     assert_eq!(sh.run("graph --root nope", AGENT), 3);
@@ -180,7 +176,7 @@ fn a_journey_through_the_contract() {
         "another parent"
     );
     let (_, under) = sh.output("item add a4 --title Third-follow-up --parent a2", AGENT);
-    assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "a parent passes its thread down");
+    assert_eq!(under["data"]["placed"][0]["thread"], "t2", "a parent passes its thread down");
     // A parent is finished once its children are.
     sh.run("item add g1 --title Goal", AGENT);
     sh.run("item add g1-a --title Part --parent g1", AGENT);
@@ -247,15 +243,24 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     };
     let dry = import(&mut sh, " --dry-run");
     assert_eq!(
-        (dry["changed"].as_bool(), dry["report"]["items"].as_u64()),
+        (dry["changed"].as_bool(), dry["counts"]["items"].as_u64()),
         (Some(false), Some(50))
     );
+    // Each record is listed as created, with its fields, and nothing has been written.
+    let creates =
+        dry["changes"].as_array().unwrap().iter().filter(|c| c["action"] == "create").count();
+    assert_eq!(
+        creates,
+        50 + dry["counts"]["links"].as_u64().unwrap() as usize
+            + dry["counts"]["threads"].as_u64().unwrap() as usize
+            + dry["counts"]["repositories"].as_u64().unwrap() as usize
+    );
     // The plan's unthreaded work joins the threads above it.
-    let inherited = dry["inherited"].clone();
+    let inherited = dry["placed"].clone();
     assert!(inherited.as_array().is_some_and(|i| !i.is_empty()), "{dry}");
-    assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
+    assert_eq!(sh.output("doctor", AGENT).1["data"]["counts"]["items"], 0);
     let done = import(&mut sh, "");
-    assert_eq!((done["changed"].as_bool(), &done["inherited"]), (Some(true), &inherited));
+    assert_eq!((done["changed"].as_bool(), &done["placed"]), (Some(true), &inherited));
     let refs = |sh: &Shell| {
         let out = std::process::Command::new("git")
             .args(["for-each-ref", "--format=%(refname) %(objectname)"])
@@ -267,15 +272,21 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     };
     let before = refs(&sh);
     assert!(before.contains("refs/heads/state/"), "{before}");
-    assert_eq!(import(&mut sh, "")["changed"], false, "a repeat changes nothing");
+    let again = import(&mut sh, "");
+    assert_eq!(
+        (&again["changed"], &again["changes"]),
+        (&json!(false), &json!([])),
+        "a repeat changes nothing"
+    );
     assert_eq!(refs(&sh), before, "and commits nothing");
     plan.items[0].title.push_str(" renamed");
     std::fs::write(&file, plan.to_json()).unwrap();
     let renamed = import(&mut sh, "");
     assert_eq!(
-        (renamed["changed"].as_bool(), renamed["report"]["fields"].as_u64()),
+        (renamed["changed"].as_bool(), renamed["counts"]["fields"].as_u64()),
         (Some(true), Some(1))
     );
+    assert_eq!(renamed["changes"][0]["fields"]["title"]["to"], plan.items[0].title);
     assert_eq!(sh.run("import missing.json --as-user", &[]), 3);
 }
 

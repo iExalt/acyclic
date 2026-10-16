@@ -203,7 +203,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .expect("a ready list")
         .iter()
         .take(runs)
-        .map(|leaf| leaf["item"].as_str().expect("an item id").to_owned())
+        .map(|leaf| leaf["id"].as_str().expect("an item id").to_owned())
         .collect();
     let claims: Vec<Sample> =
         leaves.iter().map(|leaf| tracker.time(&format!("claim {leaf}"), true)).collect();
@@ -227,7 +227,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             let line = format!("item add goal-{n}-leaf --title Leaf --parent goal-{n}");
             let (out, plain) = tracker.run(&line, false);
             assert!(
-                out["data"]["inherited"].is_array(),
+                out["data"]["placed"].as_array().is_some_and(|placed| !placed.is_empty()),
                 "the add joins its parent's thread: {out}"
             );
             plain
@@ -243,7 +243,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|leaf| leaf["item"].as_str().map(str::to_owned))
+            .filter_map(|leaf| leaf["id"].as_str().map(str::to_owned))
             .collect();
         items.push(item.clone());
         for n in 0..batches {

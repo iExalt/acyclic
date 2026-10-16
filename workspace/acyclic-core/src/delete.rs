@@ -41,7 +41,8 @@ pub enum Reason {
         from: String,
         /// The item it depends on.
         to: String,
-        /// The link's kind.
+        /// The link's kind, as the command line names it.
+        #[serde(serialize_with = "word")]
         kind: LinkKind,
     },
     /// It is done, or holds evidence of it.
@@ -66,6 +67,11 @@ impl fmt::Display for Reason {
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
         }
     }
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde passes a reference")]
+fn word<S: serde::Serializer>(kind: &LinkKind, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(kind.word())
 }
 
 /// A refused deletion.
