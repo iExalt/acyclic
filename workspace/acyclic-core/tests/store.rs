@@ -20,6 +20,10 @@ fn git(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        // Without an identity, a command that writes a reflog looks the host name up to make an email address, which
+        // stalls each call by seconds on a machine with a slow resolver.
+        .env("GIT_COMMITTER_NAME", "acyclic test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
@@ -623,6 +627,10 @@ fn a_forced_rewrite_of_a_segment_is_refused_and_moves_nothing() {
         .args(["push", "--force", remote_url, &format!("{segment}:{segment}")])
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        // Without an identity, a command that writes a reflog looks the host name up to make an email address, which
+        // stalls each call by seconds on a machine with a slow resolver.
+        .env("GIT_COMMITTER_NAME", "acyclic test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
         .output()
         .unwrap();
     assert!(!forced.status.success());
