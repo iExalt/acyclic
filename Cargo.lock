@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acyclic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "acyclic-cli",
  "acyclic-core",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "acyclic-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "acyclic-core",
  "acyclic-fixtures",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "acyclic-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hegeltest",
  "insta",
@@ -43,21 +43,21 @@ dependencies = [
 
 [[package]]
 name = "acyclic-fixtures"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "acyclic-core",
 ]
 
 [[package]]
 name = "acyclic-guard"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "acyclic-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "acyclic-cli",
  "axum",
