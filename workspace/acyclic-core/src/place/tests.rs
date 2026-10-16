@@ -100,9 +100,8 @@ fn a_groups_new_work_joins_the_thread_its_other_work_is_in() {
     set_thread(&mut r, "boxes", "t");
     for kid in ["pack", "van"] {
         add(&mut r, kid, Some("move"));
-        let (placed, handed) = place_and_read(&mut r, &[kid.to_owned()], USER).unwrap();
+        let placed = place(&mut r, &[kid.to_owned()], USER).unwrap();
         assert_eq!(placed[0].thread, "t");
-        assert_eq!(handed, model(&r), "the model handed back is the state's");
     }
     assert_eq!(model(&r).members("t").len(), 3);
 }
@@ -144,10 +143,9 @@ fn an_agents_sibling_join_into_approved_scope_is_a_proposal() {
     set_thread(&mut r, "g1-00", "ok");
     add(&mut r, "late", Some("g1"));
     let agent = By { actor: "session/mac", at: 9 };
-    let (placed, handed) = place_and_read(&mut r, &["late".to_owned()], agent).unwrap();
+    let placed = place(&mut r, &["late".to_owned()], agent).unwrap();
     let [joined] = placed.as_slice() else { panic!("{placed:?}") };
     assert_eq!((joined.thread.as_str(), joined.proposal.is_some()), ("ok", true));
-    assert_eq!(handed, model(&r));
 }
 
 #[test]

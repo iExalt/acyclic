@@ -81,20 +81,7 @@ pub fn place(
     items: &[String],
     by: By<'_>,
 ) -> Result<Vec<Inherited>, ScopeError> {
-    Ok(place_and_read(replica, items, by)?.0)
-}
-
-/// Like [`place`], also returning the model as it stands after placing, so a caller that reads next saves a read.
-///
-/// # Errors
-///
-/// Fails when the state layer refuses.
-pub fn place_and_read(
-    replica: &mut Replica,
-    items: &[String],
-    by: By<'_>,
-) -> Result<(Vec<Inherited>, Model), ScopeError> {
-    let mut model = Model::read(replica.state())?;
+    let model = Model::read(replica.state())?;
     let mut placed = Vec::new();
     for item in items {
         let Some(found) = model.items.get(item) else { continue };
@@ -110,13 +97,7 @@ pub fn place_and_read(
             placed.push(Inherited { item: item.clone(), thread: thread.to_owned(), proposal });
         }
     }
-    // An applied join writes only the item's thread, which was unset: set it here rather than read the state again.
-    for joined in placed.iter().filter(|joined| joined.proposal.is_none()) {
-        if let Some(item) = model.items.get_mut(&joined.item) {
-            item.thread = Value::One(joined.thread.clone());
-        }
-    }
-    Ok((placed, model))
+    Ok(placed)
 }
 
 /// The threads that `blocks` links make wait on each other, one set per cycle: work in them can't all finish until a

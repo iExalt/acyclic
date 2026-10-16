@@ -20,5 +20,4 @@ pub mod schema;
 pub mod scope;
 pub mod state;
 pub mod store;
-pub mod suggest;
 pub mod time;

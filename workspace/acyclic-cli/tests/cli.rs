@@ -12,13 +12,11 @@ const NOW: &str = "1792022400000";
 struct Shell {
     dir: TempDir,
     transcript: String,
-    /// Whether the transcript keeps an add's placement candidates; they would churn every add's entry otherwise.
-    candidates: bool,
 }
 
 impl Shell {
     fn new() -> Self {
-        Self { dir: TempDir::new().unwrap(), transcript: String::new(), candidates: false }
+        Self { dir: TempDir::new().unwrap(), transcript: String::new() }
     }
 
     fn env(&self, extra: &[(&str, &str)]) -> Env {
@@ -44,18 +42,11 @@ impl Shell {
         let code = outcome.code;
         let output = outcome.stdout.replace(self.dir.path().to_str().unwrap(), "[dir]");
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap_or_default();
-        let mut shown_output = output.clone();
-        if !self.candidates && parsed["data"].get("candidates").is_some() {
-            let mut trimmed = parsed.clone();
-            trimmed["data"].as_object_mut().unwrap().remove("candidates");
-            shown_output = format!("{}\n", serde_json::to_string_pretty(&trimmed).unwrap());
-        }
         let shown: Vec<&str> =
             extra.iter().filter(|(n, _)| *n == "ACYCLIC_ACTOR").map(|(_, v)| *v).collect();
         let prefix =
             shown.first().map(|actor| format!("ACYCLIC_ACTOR={actor} ")).unwrap_or_default();
-        writeln!(self.transcript, "$ {prefix}acyclic {line}\n# exit {code}\n{shown_output}")
-            .unwrap();
+        writeln!(self.transcript, "$ {prefix}acyclic {line}\n# exit {code}\n{output}").unwrap();
         if !outcome.stderr.is_empty() {
             writeln!(self.transcript, "# stderr\n{}", outcome.stderr).unwrap();
         }
@@ -161,16 +152,9 @@ fn a_journey_through_the_contract() {
         assert_eq!((code, out["error"]["details"]["meant"].as_str()), (3, Some(meant)), "{line}");
     }
     assert_eq!(sh.run("needs", AGENT), 0);
-    // Every add offers places for the item; one is kept in full here.
-    sh.candidates = true;
-    let (code, added) = sh.output("item add a3 --title Second-follow-up", AGENT);
-    sh.candidates = false;
-    let first = &added["data"]["candidates"]["parents"][0];
-    let shown = (first["item"].as_str(), first["accept"].as_str());
-    assert_eq!((code, shown), (0, (Some("a2"), Some("acyclic item move a3 a2"))));
+    assert_eq!(sh.run("item add a3 --title Second-follow-up", AGENT), 0);
     let (_, under) = sh.output("item add a3 --title Second-follow-up --parent a2", AGENT);
-    assert_eq!(under["data"]["candidates"]["parent_rank"], 1, "the parent given ranks first");
-    assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "and passes its thread down");
+    assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "a parent passes its thread down");
     // A parent is finished once its children are.
     sh.run("item add g1 --title Goal", AGENT);
     sh.run("item add g1-a --title Part --parent g1", AGENT);

@@ -742,26 +742,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
 # exit 0
 {
   "data": {
-    "candidates": {
-      "parents": [
-        {
-          "accept": "acyclic item move a3 a2",
-          "inherits": "t2",
-          "item": "a2",
-          "score": 0.043,
-          "title": "Second"
-        }
-      ],
-      "related": [],
-      "threads": [
-        {
-          "accept": "acyclic thread add a3 t2",
-          "score": 0.538,
-          "thread": "t2",
-          "title": "Follow-ups"
-        }
-      ]
-    },
     "changed": true,
     "item": "a3"
   },

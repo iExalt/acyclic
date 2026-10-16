@@ -20,7 +20,6 @@ use acyclic_core::schema::{
 use acyclic_core::scope::{self, Outcome as ScopeOutcome, ScopeEdit};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
-use acyclic_core::suggest;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
@@ -696,20 +695,9 @@ impl<'a> Session<'a> {
                 model::set_parent(replica, id, Some(parent), by)?;
                 placed = true;
             }
-            // Candidates on every add, after placement, so each parent names the thread it would pass down as it
-            // stands now. With a parent given, its rank says whether the words agree with it.
-            let (inherited, model) = if placed {
-                place::place_and_read(replica, &[id.to_owned()], by)?
-            } else {
-                (Vec::new(), Model::read(replica.state())?)
-            };
-            let (suggestions, given) = suggest::suggest(&model, id, parent, suggest::LIMIT);
-            let mut candidates = json!(suggestions);
-            if let Some(given) = given {
-                candidates["parent_rank"] = json!(given.rank);
-                candidates["parent_score"] = json!(given.score);
-            }
-            Ok(with_inherited(json!({"item": id, "candidates": candidates}), &inherited))
+            let inherited =
+                if placed { place::place(replica, &[id.to_owned()], by)? } else { Vec::new() };
+            Ok(with_inherited(json!({"item": id}), &inherited))
         })
     }
 
