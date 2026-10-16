@@ -1,13 +1,13 @@
-name: Release
+name: Build
 
-# Builds the release binaries and the server's image on every change that could alter them, and rehearses publishing
-# the image into a throwaway registry. A `v*` tag publishes: the GitHub release with the archives, and the image on
-# GitHub's container registry. Only the `release` job can write.
+# Builds the release binaries and the server's image, and rehearses publishing the image into a throwaway registry.
+# Every pull request runs it, and `build ok` is the check that must pass before a merge. Pushes to main run it too, so
+# pull requests and tags start from main's caches. publish.yml calls it to build the tagged commit it publishes.
 on:
+  pull_request:
   push:
     branches: [main]
-    tags: ["v*"]
-    paths: &paths
+    paths:
       - Cargo.toml
       - Cargo.lock
       - Containerfile
@@ -19,23 +19,31 @@ on:
       - scripts/notices/**
       - scripts/publish-image.sh
       - scripts/vendor-graph*
-      - .github/workflows/release.yml
-  pull_request:
-    paths: *paths
-  workflow_dispatch:
+      - .github/workflows/build.yml
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build
+        type: string
+        required: true
+      skip-rehearsal:
+        description: Skip rehearsing the image's publication
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push to a pull request replaces its running build. A called run takes the caller's github context, so it
+# gets a group of its own that can't collide with the caller's.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: build-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   # The build needs only Rust and cargo-about.
   MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
-  IMAGE: ghcr.io/iexalt/acyclic-server
 
 jobs:
   build:
@@ -52,6 +60,8 @@ jobs:
       ACYCLIC_REQUIRE_ASSETS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -93,6 +103,8 @@ jobs:
       ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: archive-${{ matrix.target }}
@@ -119,7 +131,8 @@ jobs:
 
   rehearse:
     name: rehearse publishing
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    # Outside a call the input is null, and `!null` is true, so pull requests and pushes rehearse.
+    if: ${{ !inputs.skip-rehearsal }}
     needs: image
     runs-on: ubuntu-24.04
     services:
@@ -128,6 +141,8 @@ jobs:
         ports: ["5000:5000"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: image-*
@@ -144,71 +159,21 @@ jobs:
             | jq -e '[.manifests[].platform.architecture] | sort == ["amd64", "arm64"]'
           docker run --rm localhost:5000/acyclic-server:rehearsal --version
 
-  release:
-    name: release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: image
+  # The one check a merge requires, so the requirement survives changes to the matrix. A skipped job would count as
+  # passing, so this fails unless every job succeeded, or the rehearsal was skipped because the caller asked.
+  ok:
+    name: build ok
+    if: ${{ !cancelled() }}
+    needs: [build, image, rehearse]
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      packages: write
     env:
-      TAG: ${{ github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
+      BUILD: ${{ needs.build.result }}
+      IMAGE: ${{ needs.image.result }}
+      REHEARSE: ${{ needs.rehearse.result }}
+      SKIP_REHEARSAL: ${{ inputs.skip-rehearsal == true }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: archive-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: image-*
-          merge-multiple: true
-          path: images
-      - name: Check the tag names the built version
-        run: |
-          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin; do
-            test -f "dist/acyclic-${TAG#v}-$target.tar.gz"
-          done
-      - name: Draft the release, or refresh a draft left by a failed run
-        run: |
-          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" --clobber dist/*
-          else
-            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "acyclic $TAG. The server's image is $IMAGE:$TAG." dist/*
-          fi
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Push the image
-        env:
-          ACTOR: ${{ github.actor }}
-        run: |
-          echo "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
-          echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
-          sh scripts/publish-image.sh "$IMAGE" "$TAG" images
-      - name: Publish the release
-        run: gh release edit "$TAG" --draft=false --latest
-
-  verify:
-    name: verify ${{ matrix.arch }}
-    needs: release
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - { arch: amd64, runner: ubuntu-24.04 }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
-    permissions:
-      packages: read
-    env:
-      TAG: ${{ github.ref_name }}
-    steps:
-      - name: Run the published image on this architecture
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
-          docker run --rm "$IMAGE:$TAG" --version | tee /dev/stderr | grep -qx "acyclic ${TAG#v}"
+      - run: |
+          echo "build: $BUILD, image: $IMAGE, rehearse: $REHEARSE"
+          test "$BUILD" = success
+          test "$IMAGE" = success
+          test "$REHEARSE" = success || { test "$SKIP_REHEARSAL" = true && test "$REHEARSE" = skipped; }

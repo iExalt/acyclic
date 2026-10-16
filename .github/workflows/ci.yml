@@ -1,11 +1,18 @@
 name: CI
 
+# Every pull request, where its three checks must pass before a merge, and every push to main.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A newer push to a pull request replaces its running checks; every push to main is checked.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
