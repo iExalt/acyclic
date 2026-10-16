@@ -359,11 +359,8 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
                 found.as_str().map(str::to_owned)
             };
             let (from, to, kind) = (read("from")?, read("to")?, read("kind")?);
-            let word = match kind.as_str() {
-                "blocks" => "waits-for",
-                "after" => "follows",
-                _ => "relates-to",
-            };
+            // A stored after link reads as relates-to, and removing that clears it.
+            let word = if kind == "blocks" { "waits-for" } else { "relates-to" };
             Some(format!("acyclic link add|remove {from} {word} {to}"))
         },
         _ => None,
@@ -880,6 +877,19 @@ mod tests {
                 follows_the_conventions(entry, "needs");
             }
         });
+    }
+
+    #[test]
+    fn a_conflicted_link_that_an_older_version_stored_resolves_as_relates_to() {
+        let mut mac = tracker();
+        let link_key = key("link", "after-1-a-b");
+        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "after")] {
+            mac.write(&link_key, field, USER, 1, Some(json!(value))).unwrap();
+        }
+        assert_eq!(
+            resolve(mac.state(), "link", "after-1-a-b", "present").as_deref(),
+            Some("acyclic link add|remove a relates-to b")
+        );
     }
 
     #[test]

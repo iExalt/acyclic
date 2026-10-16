@@ -67,10 +67,10 @@ standard output.
 
 ## Output
 
-- `prime`, `import --schema`, help and version text, and `graph` without `--file`, print documents or text. Every
-  other command prints one JSON document: `{"ok": true, "data": …}` or
-  `{"ok": false, "error": {"code", "message", "details"}}`. Errors are always JSON. Branch on `error.code`, not on
-  the message. Leave `--output` at `json`: `-o pretty` is for people.
+- `prime`, `completions`, `import --schema`, help and version text, and `graph` without `--file`, print documents
+  or text. Leave `--output` at `json`: `-o pretty` is for people. With `json`, every other command prints one JSON
+  document: `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`, errors included.
+  Branch on `error.code`, not on the message.
 - A bare group such as `acyclic item` prints its help.
 - A command line that doesn't parse prints its error as text on standard error, with exit code 2; run
   `acyclic <command> --help` to see the command's arguments. `acyclic help <command>` shows them too.
