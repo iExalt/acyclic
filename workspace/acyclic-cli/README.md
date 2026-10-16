@@ -56,12 +56,15 @@ Every command's output follows these rules, so a key can be guessed from the inp
    The user's own change to an approved thread's members, a project manager's, and `proposal keep` extend the approval
    to the member; an agent's change that waits as a proposal doesn't.
 6. **Writes** return `{changed, <entity>: id, …}`. An item or thread edit and an import also return `proposals`, the
-   ids of the edits that wait for the user, which is always present. An item add, edit or import returns `placed`: the
-   items that joined a thread passed down to them, as `{item, thread, outcome, proposal}`, with `outcome` `applied` or
-   `proposed`. `proposal keep` and `proposal drop` return the `item` and `thread` the edit named and whether the item is
+   ids of every edit the write left waiting for the user, its own and the placements below, each once; it is always
+   present. An item add, edit or import returns `placed`: the items that joined a thread passed down to them, as
+   `{item, thread, outcome, proposal}`, with `outcome` `applied` or `proposed`. `proposal keep` and `proposal drop` return the `item` and `thread` the edit named and whether the item is
    `approved` afterwards.
 7. **`import`** returns `counts` and `changes`, the records it creates or updates, or only proposes, each with the
    `fields` that change as `{from, to}`: `{entity, id, action, fields}`, where `action` is `create`, `update` or
    `propose`. A link is named by `from`, `kind` and `to`. `--dry-run` reports the same without writing.
-8. **Errors** keep a stable `code`, a message that reads as one line and names what it is about, and `details` named by
+8. **`needs`** entries are `{kind, …}`. An entry that is about an item embeds it as its `list` row under `item`, and one
+   about a thread embeds its summary under `thread`. A proposal entry embeds the proposal as `proposal show` returns it
+   and the item its edit names under `item`, which is `null` for an edit of a thread's repositories.
+9. **Errors** keep a stable `code`, a message that reads as one line and names what it is about, and `details` named by
    the same rules.

@@ -171,3 +171,31 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
         Err("not-found")
     );
 }
+
+#[test]
+fn every_proposal_a_write_leaves_is_listed_including_the_placement_ones() {
+    let mut r = replica();
+    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
+    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
+    let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
+    add_item(&mut r, "a", &in_t, USER_BY).unwrap();
+    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
+    // An agent's item under a member of the approved thread would join it, which waits as a proposal.
+    let under = ItemFields { parent: Change::Set("a".into()), ..titled("B") };
+    let written = add_item(&mut r, "b", &under, AGENT).unwrap();
+    assert_eq!(written.proposals, Vec::<String>::new(), "no edit of its own proposed anything");
+    let data = written.item("b");
+    let placed = data["placed"][0]["proposal"].as_str().unwrap().to_owned();
+    assert_eq!(
+        (&data["placed"][0]["outcome"], &data["proposals"]),
+        (&json!("proposed"), &json!([placed]))
+    );
+    // Together with its own edits' proposals, each once and in order.
+    assert_eq!(
+        all_proposals(
+            &["z-1".to_owned(), placed.clone()],
+            &[Inherited { item: "b".into(), thread: "t".into(), proposal: Some(placed.clone()) }]
+        ),
+        [placed, "z-1".to_owned()]
+    );
+}

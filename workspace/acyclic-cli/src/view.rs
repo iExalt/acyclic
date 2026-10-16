@@ -201,10 +201,22 @@ impl View<'_> {
                 Entry::RunClash { thread: id, runs } => {
                     json!({"kind": "run-clash", "thread": thread(id), "runs": runs})
                 },
-                Entry::Proposal { id, .. } => json!({
-                    "kind": "proposal",
-                    "proposal": proposals.get(id).map(|p| proposal_show(self.model, p)),
-                }),
+                Entry::Proposal { id, .. } => {
+                    let proposal = proposals.get(id);
+                    // The item the edit names, as every entry about an item shows it; a thread's repository
+                    // edit names none.
+                    let item = match proposal.and_then(|p| p.edit.one()) {
+                        Some(
+                            ScopeEdit::Member { item, .. } | ScopeEdit::ItemRepository { item, .. },
+                        ) => self.item_row(item)?,
+                        _ => Json::Null,
+                    };
+                    json!({
+                        "kind": "proposal",
+                        "proposal": proposal.map(|p| proposal_show(self.model, p)),
+                        "item": item,
+                    })
+                },
                 Entry::Unapproved { item, thread: id, actor, keep, drop } => json!({
                     "kind": "unapproved", "item": self.item_row(item)?, "thread": thread(id),
                     "actor": actor, "keep": keep, "drop": drop,
@@ -784,6 +796,11 @@ mod tests {
                 proposal_show(view.model, all.values().next().unwrap())
             );
             assert_eq!(proposal["proposal"]["edit"]["after"], "t");
+            assert_eq!(
+                proposal["item"],
+                view.item_row("c").unwrap(),
+                "the item, as `list` shows it"
+            );
             let unseen = of("unapproved")[0];
             assert_eq!(
                 (&unseen["item"]["id"], &unseen["thread"]["id"]),
