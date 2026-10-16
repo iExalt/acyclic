@@ -87,11 +87,17 @@ fn an_import_and_a_link_say_what_they_wrote() {
     let none = json!({"items": 0, "threads": 0, "links": 0, "repositories": 0, "fields": 0});
     let link = json!({"changed": true, "from": "a2", "kind": "relates-to", "to": "b1"});
     insta::assert_snapshot!(format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         import(false, counts(3, 1)),
         import(true, counts(1, 2)),
         import(false, none),
-        render(&command("link add a2 relates-to b1"), &link, None)
+        render(&command("link add a2 relates-to b1"), &link, None),
+        render(
+            &command("link remove a2 relates-to b1"),
+            &json!({"changed": false, "from": "a2",
+            "kind": "relates-to", "to": "b1"}),
+            None
+        )
     ));
 }
 

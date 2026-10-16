@@ -28,10 +28,19 @@ pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> Stri
         Command::Ready { .. } => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
-        Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => {
-            let changed = if data["changed"] == true { "changed" } else { "no change to" };
+        Command::Link(link) => {
             let [from, kind, to] = ["from", "kind", "to"].map(|key| compact(&data[key]));
-            format!("{changed} link {from} {kind} {to}")
+            let changed = data["changed"] == true;
+            match (link, changed) {
+                (LinkCommand::Add { .. }, true) => format!("added link {from} {kind} {to}"),
+                (LinkCommand::Add { .. }, false) => {
+                    format!("link {from} {kind} {to} is already there")
+                },
+                (LinkCommand::Remove { .. }, true) => format!("removed link {from} {kind} {to}"),
+                (LinkCommand::Remove { .. }, false) => {
+                    format!("no link {from} {kind} {to} to remove")
+                },
+            }
         },
         _ => match data {
             Json::Array(records) => {
