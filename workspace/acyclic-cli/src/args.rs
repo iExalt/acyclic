@@ -122,6 +122,9 @@ pub enum Command {
         /// A note, such as where a record lives.
         #[arg(long)]
         note: Option<String>,
+        /// Finish it although it isn't ready or someone else holds it.
+        #[arg(long)]
+        force: bool,
     },
     /// Lists what needs the user.
     Needs,

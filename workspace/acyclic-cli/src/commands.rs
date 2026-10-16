@@ -12,7 +12,7 @@ use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model, SetField};
 use acyclic_core::needs;
 use acyclic_core::place;
-use acyclic_core::ready::{GitAncestry, Readiness, Status};
+use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::schema::{
     GLOBAL, item as field, kind, link as link_field, repository, settings, thread,
 };
@@ -165,25 +165,36 @@ impl<'a> Session<'a> {
                 }
                 Ok(json!({"from": from, "kind": kind, "to": to}))
             }),
+            Command::Item(ItemCommand::State { state: ItemState::Done, .. }) => Err(CliError::new(
+                "usage",
+                exit::USAGE,
+                "finish an item with acyclic done, which records its evidence and releases its claim",
+            )),
             Command::Item(ItemCommand::State { id, state }) => self.write(|replica, by| {
                 model::set_state(replica, id, *state, by)?;
                 Ok(json!({"item": id, "state": state}))
             }),
-            Command::Done { id, repository, commit, note } => self.write(|replica, by| {
-                let key = existing(replica, id)?;
-                if repository.is_some() || note.is_some() {
-                    let evidence = Evidence {
-                        repository: repository.clone(),
-                        commit: commit.clone(),
-                        note: note.clone(),
-                    };
-                    set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
-                }
-                model::set_state(replica, id, ItemState::Done, by)?;
-                // Finished work holds nothing, not even the resources its claim named.
-                claim::release(replica, &key, by.actor);
-                Ok(json!({"item": id, "state": ItemState::Done}))
-            }),
+            Command::Done { id, repository, commit, note, force } => {
+                let ancestry = GitAncestry::new(context::clones(self.env)?);
+                self.write(|replica, by| {
+                    let key = existing(replica, id)?;
+                    if !force {
+                        check_finish(replica, id, by, &ancestry)?;
+                    }
+                    if repository.is_some() || note.is_some() {
+                        let evidence = Evidence {
+                            repository: repository.clone(),
+                            commit: commit.clone(),
+                            note: note.clone(),
+                        };
+                        set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
+                    }
+                    model::set_state(replica, id, ItemState::Done, by)?;
+                    // Finished work holds nothing, not even the resources its claim named.
+                    claim::release(replica, &key, by.actor);
+                    Ok(json!({"item": id, "state": ItemState::Done}))
+                })
+            },
             Command::Release { id } => self.write(|replica, by| {
                 let key = existing(replica, id)?;
                 Ok(json!({"item": id, "released": claim::release(replica, &key, by.actor)}))
@@ -661,6 +672,48 @@ pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
         Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
         _ => false,
     }
+}
+
+/// Refuses to let an agent finish an item that isn't ready or that someone else holds; the user may finish anything.
+/// A finished item may be finished again, which changes nothing.
+fn check_finish(
+    replica: &Replica,
+    id: &str,
+    by: By<'_>,
+    ancestry: &dyn Ancestry,
+) -> Result<(), CliError> {
+    if by.actor == scope::USER {
+        return Ok(());
+    }
+    let model = Model::read(replica.state())?;
+    let readiness = Readiness::new(replica.state(), &model, by.at, ancestry);
+    let status = readiness.of(id)?;
+    if may_finish(status.as_ref(), by.actor) {
+        return Ok(());
+    }
+    // A parent is finished once its children are, unless it would be held back as a leaf.
+    if status == Some(Status::Parent) {
+        let (open, held) = readiness.unfinished(id);
+        if open.is_empty() && held.is_none() {
+            return Ok(());
+        }
+        return Err(CliError::refused(
+            "not-ready",
+            format!("item {id} can't be finished yet: it has open children or is held back"),
+        )
+        .with(json!({"readiness": status, "open": open, "held": held})));
+    }
+    Err(CliError::refused(
+        "not-ready",
+        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it"),
+    )
+    .with(json!({"readiness": status})))
+}
+
+/// Whether an agent may finish an item in `status` without forcing: when it may claim it, or it is finished already.
+pub(crate) fn may_finish(status: Option<&Status>, actor: &str) -> bool {
+    matches!(status, Some(Status::Done | Status::InReview | Status::Unverified { .. }))
+        || may_claim(status, actor)
 }
 
 /// The agent block, with this build's version.

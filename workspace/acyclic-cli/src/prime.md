@@ -33,7 +33,8 @@ older copy.
    If `claim`, `ready` or `show` says another holder wins a contest for your item, stop and run
    `acyclic release <item>`: it drops only your claim.
 3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
-   commit. It releases your claim.
+   commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
+   are done; don't use `--force` to finish someone else's work.
 4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
    `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
    `acyclic item add` returns `candidates`: likely parents, threads and archived items to relate to, best first,

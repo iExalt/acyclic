@@ -290,6 +290,31 @@ impl<'a> Readiness<'a> {
     }
 
     /// The unmet hard dependencies of an item and its ancestors.
+    /// What keeps a parent from being finished: its children that are neither done nor archived, and what would hold
+    /// it back as a leaf (a cycle, being parked, or unmet dependencies).
+    #[must_use]
+    pub fn unfinished(&self, id: &str) -> (Vec<String>, Option<Status>) {
+        let open = self
+            .model
+            .children(id)
+            .into_iter()
+            .filter(|child| {
+                self.model.items.get(*child).is_some_and(|c| !c.is_done() && !c.is_archived_root())
+            })
+            .map(str::to_owned)
+            .collect();
+        let held = if self.cyclic.contains(id) {
+            Some(Status::InCycle)
+        } else if self.model.items.get(id).is_some_and(|i| i.state == Value::One(ItemState::Parked))
+        {
+            Some(Status::Parked)
+        } else {
+            let waiting = self.waiting(id);
+            (!waiting.is_empty()).then_some(Status::Blocked { waiting })
+        };
+        (open, held)
+    }
+
     fn waiting(&self, id: &str) -> BTreeMap<String, Wait> {
         let mut waiting = BTreeMap::new();
         for to in self.linked_from(id, LinkKind::Blocks) {

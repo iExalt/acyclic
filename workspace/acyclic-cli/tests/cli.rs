@@ -80,8 +80,13 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("link add a2 blocks a1", AGENT), 0);
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
+    assert_eq!(sh.run("done a2", AGENT), 1, "nor can it be finished");
+    assert_eq!(sh.run("item state a2 done", AGENT), 2, "done finishes items");
     assert_eq!(sh.run("claim a1", AGENT), 0);
+    let pi = [("ACYCLIC_ACTOR", "session/pi")];
+    assert_eq!(sh.run("done a1", &pi), 1, "another agent's claim");
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0);
+    assert_eq!(sh.run("done a1 --note shipped", AGENT), 0, "finishing again changes nothing");
     let (code, released) = sh.output("release a1", AGENT);
     assert_eq!(
         (code, released["data"]["released"].as_bool(), released["data"]["changed"].as_bool()),
@@ -148,6 +153,17 @@ fn a_journey_through_the_contract() {
     let (_, under) = sh.output("item add a3 --title Second-follow-up --parent a2", AGENT);
     assert_eq!(under["data"]["candidates"]["parent_rank"], 1, "the parent given ranks first");
     assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "and passes its thread down");
+    // A parent is finished once its children are.
+    sh.run("item add g1 --title Goal", AGENT);
+    sh.run("item add g1-a --title Part --parent g1", AGENT);
+    let (code, out) = sh.output("done g1", AGENT);
+    assert_eq!((code, &out["error"]["details"]["open"]), (1, &serde_json::json!(["g1-a"])));
+    sh.run("claim g1-a", AGENT);
+    sh.run("done g1-a", AGENT);
+    assert_eq!(sh.run("done g1", AGENT), 0, "a parent is finished once its children are");
+    sh.run("item add g2 --title Goal", AGENT);
+    sh.run("item add g2-a --title Part --parent g2", AGENT);
+    assert_eq!(sh.run("done g2 --force", AGENT), 0, "or when forced");
     insta::assert_snapshot!(sh.transcript);
 }
 

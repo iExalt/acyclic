@@ -156,6 +156,19 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_own_
     assert_eq!(status(&r, &none, "child"), blocked(&[("dep", Wait::Open)]));
     assert_eq!(status(&r, &none, "goal"), Status::Parent);
     assert_eq!(status(&r, &none, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    // Finishing the parent waits on its child, and on its own dependency once the child is done.
+    let unfinished = |r: &Replica| {
+        let model = Model::read(&r.state).unwrap();
+        Readiness::new(&r.state, &model, 5, &none).unfinished("goal")
+    };
+    assert_eq!(unfinished(&r), (vec!["child".to_owned()], Some(blocked(&[("dep", Wait::Open)]))));
+    done_with(&mut r, "child", None);
+    assert_eq!(unfinished(&r), (vec![], Some(blocked(&[("dep", Wait::Open)]))));
+    done_with(&mut r, "dep", None);
+    assert_eq!(unfinished(&r), (vec![], None));
+    set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
+    assert_eq!(unfinished(&r).1, Some(Status::Parked));
+    set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
     done_with(&mut r, "goal", None);
     assert_eq!(status(&r, &none, "after-goal"), Status::Ready { rank: 0 });
 }

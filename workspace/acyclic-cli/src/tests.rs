@@ -178,8 +178,18 @@ fn an_actor_may_claim_past_its_own_claims_only() {
         (Status::Parent, false),
     ] {
         assert_eq!(may_claim(Some(&status), me), may, "{status:?}");
+        assert_eq!(
+            commands::may_finish(Some(&status), me),
+            may,
+            "{status:?}: finishing as claiming"
+        );
     }
     assert!(!may_claim(None, me));
+    // Finishing again changes nothing, so it needs no claim; a blocked item can't be finished.
+    let blocked = Status::Blocked { waiting: std::collections::BTreeMap::new() };
+    for (status, may) in [(Status::Done, true), (Status::InReview, true), (blocked, false)] {
+        assert_eq!(commands::may_finish(Some(&status), me), may, "{status:?}");
+    }
 }
 
 #[test]
