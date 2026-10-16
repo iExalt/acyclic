@@ -829,19 +829,30 @@ impl Tracker {
     }
 
     /// Fetches every replica's state ref from `remote` into private fetched refs, ready to join; this
-    /// replica's own one is what the next push leases against.
+    /// replica's own one is what the next push leases against. This replica's own segments come along, so a sync
+    /// knows what its push must send without asking the remote again.
     ///
     /// # Errors
     ///
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
-        let tracking = tracking_prefix(remote);
-        self.git.run(
-            ["fetch", "--quiet", "--prune", remote, &format!("+refs/heads/state/*:{tracking}*")],
-            None,
-            &[],
-        )?;
+        let base = remote_base(remote);
+        let mut args: Vec<String> =
+            ["-c", "maintenance.auto=false", "fetch", "--quiet", "--prune", remote]
+                .map(str::to_owned)
+                .into();
+        args.push(format!("+refs/heads/state/*:{base}state/*"));
+        for prefix in self.segment_prefixes() {
+            let path = &prefix["refs/heads/".len()..];
+            args.push(format!("+{prefix}*:{base}{path}*"));
+        }
+        self.git.run(args, None, &[])?;
         Ok(())
+    }
+
+    /// The prefixes of this replica's log and usage segments.
+    fn segment_prefixes(&self) -> Vec<String> {
+        NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)).collect()
     }
 
     /// Pushes this replica's refs to `remote` in one atomic push: the state ref, every log and usage segment that is
@@ -857,8 +868,7 @@ impl Tracker {
     pub fn push(&self, remote: &str) -> Result<usize, StoreError> {
         let mine = state_ref(&self.replica);
         let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
-        let segment_prefixes: Vec<String> =
-            NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)).collect();
+        let segment_prefixes = self.segment_prefixes();
         let listing = self.git.text(
             ["ls-remote", remote, mine.as_str()]
                 .into_iter()
@@ -870,20 +880,40 @@ impl Tracker {
             .filter_map(|line| line.split_once('\t'))
             .map(|(id, name)| (name.to_owned(), id.to_owned()))
             .collect();
-        let mut ours = self.git.refs(&mine)?;
-        let mut pending = BTreeMap::new();
-        for prefix in &segment_prefixes {
-            ours.extend(self.git.refs(prefix)?);
-            pending.extend(self.git.refs(&pruned_ref(prefix))?);
-        }
-        let mut args = vec!["push".to_owned(), "--atomic".to_owned(), "--porcelain".to_owned()];
+        // This replica's refs, its pending deletions and the lease's tip, in one process.
+        let pruned_prefixes: Vec<String> = segment_prefixes.iter().map(|p| pruned_ref(p)).collect();
+        let patterns: Vec<&str> = [mine.as_str(), tracking.as_str()]
+            .into_iter()
+            .chain(segment_prefixes.iter().map(String::as_str))
+            .chain(pruned_prefixes.iter().map(String::as_str))
+            .collect();
+        let local = self.git.refs_under(&patterns)?;
+        self.send(remote, &theirs, local)
+    }
+
+    /// Pushes what [`Self::push`] would, given the remote's refs by name and this clone's: its state ref, the
+    /// lease's tip under its fetched name, its segments and its pending deletions.
+    fn send(
+        &self,
+        remote: &str,
+        theirs: &BTreeMap<String, String>,
+        mut local: BTreeMap<String, String>,
+    ) -> Result<usize, StoreError> {
+        let mine = state_ref(&self.replica);
+        let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
+        let lease = local.remove(&tracking).unwrap_or_default();
+        let (pending, ours): (BTreeMap<String, String>, BTreeMap<String, String>) =
+            local.into_iter().partition(|(name, _)| name.starts_with(PRUNED));
+        let mut args: Vec<String> =
+            ["-c", "maintenance.auto=false", "push", "--atomic", "--porcelain"]
+                .map(str::to_owned)
+                .into();
         let mut refspecs = Vec::new();
         for (name, id) in &ours {
             if theirs.get(name) == Some(id) {
                 continue;
             }
             if *name == mine {
-                let lease = self.git.resolve(&tracking)?.unwrap_or_default();
                 args.push(format!("--force-with-lease={name}:{lease}"));
             }
             refspecs.push(format!("{name}:{name}"));
@@ -915,7 +945,9 @@ impl Tracker {
                 return Err(push_failure(&mine, &output));
             }
         }
-        if let Some(tip) = ours.get(&mine) {
+        if let Some(tip) = ours.get(&mine)
+            && *tip != lease
+        {
             self.git.run(["update-ref", &tracking, tip], None, &[])?;
         }
         for (marker, tip) in settled {
@@ -958,30 +990,64 @@ impl Tracker {
     ///
     /// Fails as [`Self::join_ref`] does.
     pub fn join_refs(&self, references: &[String]) -> Result<Outcome, StoreError> {
-        let mut others = Vec::with_capacity(references.len());
+        let mut tips = Vec::with_capacity(references.len());
         for reference in references {
-            let tip = self
-                .git
-                .resolve(reference)?
-                .ok_or_else(|| StoreError::Config(format!("no ref {reference}")))?;
-            others.push(read_state(&self.git, &tip)?);
+            tips.push(
+                self.git
+                    .resolve(reference)?
+                    .ok_or_else(|| StoreError::Config(format!("no ref {reference}")))?,
+            );
+        }
+        self.join_tips(&tips, None, &[])
+    }
+
+    /// Joins the states held at these commits into this replica's state, in one commit, starting from `local`, the
+    /// state ref's tip as last listed, when known. `markers` are refs to set along with it, or alone when the join
+    /// changes nothing.
+    fn join_tips(
+        &self,
+        tips: &[String],
+        mut local: Option<String>,
+        markers: &[(String, String)],
+    ) -> Result<Outcome, StoreError> {
+        let mut others = Vec::with_capacity(tips.len());
+        for tip in tips {
+            others.push(read_state(&self.git, tip)?);
         }
         let _lock = self.lock()?;
         let started = Instant::now();
         let mut retries = 0;
         loop {
-            let (tip, before) = self.load()?;
+            // A listed tip that moved since fails the transaction below, and the retry reads the ref afresh.
+            let (tip, before) = match local.take() {
+                Some(listed) => {
+                    let (tip, state, _) = self.load_at(Some(listed))?;
+                    (tip, state)
+                },
+                None => self.load()?,
+            };
             let mut replica = Replica::open(self.replica.clone(), before.clone());
             for other in &others {
                 replica.join(other)?;
             }
             if replica.state == before {
+                if !markers.is_empty() {
+                    let mut transaction = self.git.transaction()?;
+                    for (marker, tip) in markers {
+                        transaction.set(marker, tip)?;
+                    }
+                    transaction.prepare()?;
+                    transaction.commit()?;
+                }
                 return Ok(Outcome::Unchanged);
             }
             let at = replica.state.context.clocks.get(&self.replica).copied().unwrap_or(0);
             let commit = self.commit_state(tip.as_deref(), &before, &replica.state, at, "join")?;
             let mut transaction = self.git.transaction()?;
             transaction.update(&state_ref(&self.replica), &commit, tip.as_deref())?;
+            for (marker, tip) in markers {
+                transaction.set(marker, tip)?;
+            }
             match transaction.prepare().and_then(|()| transaction.commit()) {
                 Ok(()) => {
                     self.cache()?.write(&commit, &replica.state);
@@ -997,12 +1063,12 @@ impl Tracker {
         }
     }
 
-    /// Syncs with `remote`: fetches every replica's state ref, joins them all into this replica's state, its own
-    /// fetched one included, then pushes. A remote copy of this replica's state ref that isn't this clone's own
-    /// earlier push means another clone writes under this replica's id, and the sync stops before its push could
-    /// overwrite that clone's work. One case passes unseen: a push whose tracking update was lost, followed by a local
-    /// squash before the next sync, can't be told from a duplicate's write and is refused as one. Only the join holds
-    /// the write lock, not the network calls.
+    /// Syncs with `remote`: fetches every replica's state ref, joins those that moved since this replica last joined
+    /// them into its state, then pushes what the remote lacks. A remote copy of this replica's state ref that isn't
+    /// this clone's own earlier push means another clone writes under this replica's id, and the sync stops before its
+    /// push could overwrite that clone's work. One case passes unseen: a push whose tracking update was lost, followed
+    /// by a local squash before the next sync, can't be told from a duplicate's write and is refused as one. Only the
+    /// join holds the write lock, not the network calls.
     ///
     /// # Errors
     ///
@@ -1012,19 +1078,47 @@ impl Tracker {
     pub fn sync(&self, remote: &str) -> Result<Synced, StoreError> {
         let prefix = tracking_prefix(remote);
         let own = format!("{prefix}{}", self.replica);
+        let joined_prefix = joined_prefix(&self.replica, remote);
+        let mine = state_ref(&self.replica);
         let last_seen = self.git.resolve(&own)?;
         self.fetch(remote)?;
+        // One listing serves the whole sync: what was fetched, what was joined before, and what a push compares.
+        let base = remote_base(remote);
+        let segments = self.segment_prefixes();
+        let pruned: Vec<String> = segments.iter().map(|prefix| pruned_ref(prefix)).collect();
+        let patterns: Vec<&str> = [base.as_str(), joined_prefix.as_str(), mine.as_str()]
+            .into_iter()
+            .chain(segments.iter().chain(&pruned).map(String::as_str))
+            .collect();
+        let mut fetched = BTreeMap::new();
+        let mut done = BTreeMap::new();
+        let mut theirs = BTreeMap::new();
+        let mut local = BTreeMap::new();
+        for (name, tip) in self.git.refs_under(&patterns)? {
+            if let Some(path) = name.strip_prefix(&base) {
+                theirs.insert(format!("refs/heads/{path}"), tip.clone());
+                if name.starts_with(&prefix) {
+                    if name == own {
+                        local.insert(name.clone(), tip.clone());
+                    }
+                    fetched.insert(name, tip);
+                }
+            } else if name.starts_with(&joined_prefix) {
+                done.insert(name, tip);
+            } else {
+                local.insert(name, tip);
+            }
+        }
         // Only this replica writes its state ref, so a move of the remote's copy is this clone's own push whose
         // tracking update was lost (an ancestor of the local tip), a deleted remote ref (pushed again), or another
         // clone writing as this replica. A join can't tell that last case apart when both clones wrote as many
         // operations, so it is checked here.
-        let fetched_own = self.git.resolve(&own)?;
+        let fetched_own = fetched.get(&own).cloned();
         if fetched_own != last_seen
             && let Some(remote_tip) = &fetched_own
         {
-            let local = self.git.resolve(&state_ref(&self.replica))?;
-            let ours = local.is_some_and(|local| {
-                self.git.run(["merge-base", "--is-ancestor", remote_tip, &local], None, &[]).is_ok()
+            let ours = local.get(&mine).is_some_and(|local| {
+                self.git.run(["merge-base", "--is-ancestor", remote_tip, local], None, &[]).is_ok()
             });
             if !ours {
                 match &last_seen {
@@ -1034,11 +1128,31 @@ impl Tracker {
                 return Err(StoreError::Duplicate(self.replica.clone()));
             }
         }
-        let fetched = self.git.refs(&prefix)?;
-        let names: Vec<String> = fetched.keys().cloned().collect();
-        let joined = !names.is_empty() && self.join_refs(&names)? != Outcome::Unchanged;
-        let pushed = self.push(remote)?;
-        let replicas = names.iter().map(|name| name[prefix.len()..].to_owned()).collect();
+        // This replica's own state is already in its tip by now. Another's needs joining only when it moved since
+        // this replica last joined it, which a marker per replica records once the join commits. A replica with no
+        // state yet, such as a fresh id taken after its state ref went, trusts no marker.
+        let has_state = local.contains_key(&mine);
+        let fresh: Vec<(String, String)> = fetched
+            .iter()
+            .filter(|(name, _)| **name != own)
+            .map(|(name, tip)| (format!("{joined_prefix}{}", &name[prefix.len()..]), tip.clone()))
+            .filter(|(marker, tip)| !has_state || done.get(marker) != Some(tip))
+            .collect();
+        let mut joined = false;
+        if !fresh.is_empty() {
+            let tips: Vec<String> = fresh.iter().map(|(_, tip)| tip.clone()).collect();
+            if let Outcome::Committed { commit, .. } =
+                self.join_tips(&tips, local.get(&mine).cloned(), &fresh)?
+            {
+                local.insert(mine.clone(), commit);
+                joined = true;
+            }
+        }
+        // Right after the fetch, its refs say what the remote holds, so the push needn't ask.
+        let pushed = self.send(remote, &theirs, local)?;
+        // Fetch and push skip git's own upkeep, so a clone that mostly syncs gets the store's here.
+        self.maintain();
+        let replicas = fetched.keys().map(|name| name[prefix.len()..].to_owned()).collect();
         Ok(Synced { fetched: replicas, joined, pushed })
     }
 
@@ -1105,14 +1219,25 @@ fn pruned_ref(segment: &str) -> String {
     format!("{PRUNED}{}", segment.trim_start_matches("refs/heads/"))
 }
 
-/// The prefix of the fetched state refs for `remote`, a name or a URL. They live outside `refs/remotes/`, which a
-/// plain `git fetch` updates without a join; a lease against such a ref would protect nothing.
-fn tracking_prefix(remote: &str) -> String {
+/// The prefix of the refs fetched from `remote`, a name or a URL, each named as on the remote less `refs/heads/`.
+/// They live outside `refs/remotes/`, which a plain `git fetch` updates without a join; a lease against such a ref
+/// would protect nothing.
+fn remote_base(remote: &str) -> String {
     let name: String = remote
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
-    format!("refs/acyclic/remotes/{name}/state/")
+    format!("refs/acyclic/remotes/{name}/")
+}
+
+/// The prefix of the fetched state refs for `remote`.
+fn tracking_prefix(remote: &str) -> String {
+    format!("{}state/", remote_base(remote))
+}
+
+/// The prefix of the markers recording, per other replica, the state tip from `remote` that `replica` last joined.
+fn joined_prefix(replica: &ReplicaId, remote: &str) -> String {
+    tracking_prefix(remote).replacen("/remotes/", &format!("/joined/{replica}/"), 1)
 }
 
 /// Classifies a failed push from its porcelain output: a stale lease on the state ref, another refused ref, or a

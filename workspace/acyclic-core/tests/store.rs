@@ -639,10 +639,11 @@ fn pushes_are_atomic_and_pass_the_ruleset() {
     write(&tracker, "x1", "f", json!(3));
     assert_eq!(tracker.push(remote_url).unwrap(), 2);
 
-    // Pruning deletes one generation and creates the next: both pass the ruleset.
+    // Pruning deletes one generation and creates the next: both pass the ruleset, and a sync sends them though the
+    // state ref hasn't moved.
     let pruned = tracker.prune(NOW, &|_| Some(1), &|_, _| true).unwrap();
     assert!(!pruned.is_empty());
-    tracker.push(remote_url).unwrap();
+    tracker.sync(remote_url).unwrap();
     let local = git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"]);
     assert_eq!(remote_refs(&remote), local);
 }
@@ -750,7 +751,8 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     let remote = remote_with_ruleset(&dir);
     let url = remote.to_str().unwrap();
     let (mac, _) = Tracker::open(&tracker(&dir, "mac")).unwrap();
-    let (pi, _) = Tracker::open(&tracker(&dir, "pi")).unwrap();
+    let pi_path = tracker(&dir, "pi");
+    let (pi, _) = Tracker::open(&pi_path).unwrap();
     write(&mac, "x1", "f", json!(1));
     write(&pi, "x1", "g", json!(2));
     let first = mac.sync(url).unwrap();
@@ -764,10 +766,26 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     assert_eq!(entities(&mac), entities(&pi), "converged");
     let again = mac.sync(url).unwrap();
     assert_eq!((again.joined, again.pushed), (false, 0), "nothing new either way");
+    // A clone whose state ref went, here along with the remote's copy, takes a fresh id; that id has joined none
+    // of the others yet, whatever the old one had.
+    pi.sync(url).unwrap();
+    git(&pi_path, &["update-ref", "-d", "refs/heads/state/pi"]);
+    git(&remote, &["update-ref", "-d", "refs/heads/state/pi"]);
+    let (fresh, renamed) = Tracker::open(&pi_path).unwrap();
+    assert!(renamed.is_some());
+    assert!(fresh.sync(url).unwrap().joined);
+    assert_eq!(entities(&fresh), entities(&mac), "it holds the others' work again");
     // A squash rewrites the state ref; the lease lets it through, and segments still only fast-forward.
     mac.squash().unwrap();
     write(&mac, "x1", "f", json!(3));
     assert!(mac.sync(url).unwrap().pushed > 0);
+}
+
+/// The state refs a clone fetched, with their tips.
+fn fetched_states(path: &Path) -> String {
+    let listing =
+        git(path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/acyclic/remotes/"]);
+    listing.lines().filter(|line| line.contains("/state/")).collect::<Vec<_>>().join("\n")
 }
 
 #[test]
@@ -789,12 +807,10 @@ fn a_copied_clone_writing_as_the_same_replica_is_refused_at_sync_and_moves_nothi
     write(&twin, "x1", "f", json!(3));
     mac.sync(url).unwrap();
     let before = remote_refs(&remote);
-    let tracking = "refs/acyclic/remotes/";
-    let seen = git(&copy, &["for-each-ref", "--format=%(refname) %(objectname)", tracking]);
+    let seen = fetched_states(&copy);
     assert!(matches!(twin.sync(url), Err(StoreError::Duplicate(_))));
     assert_eq!(remote_refs(&remote), before, "nothing pushed");
-    let after = git(&copy, &["for-each-ref", "--format=%(refname) %(objectname)", tracking]);
-    assert_eq!(after, seen, "and the copy still leases against what it last saw");
+    assert_eq!(fetched_states(&copy), seen, "and the copy still leases against what it last saw");
 }
 
 #[test]
@@ -807,7 +823,7 @@ fn a_lost_tracking_update_or_a_deleted_remote_ref_is_not_a_duplicate() {
     let (mac, _) = Tracker::open(&path).unwrap();
     write(&mac, "x1", "f", json!(1));
     mac.sync(url).unwrap();
-    let tracking = git(&path, &["for-each-ref", "--format=%(refname)", "refs/acyclic/remotes/"]);
+    let tracking = fetched_states(&path).split(' ').next().unwrap().to_owned();
     // A push the remote applied, whose local tracking update never ran.
     write(&mac, "x1", "f", json!(2));
     let pushed = git(&path, &["rev-parse", "refs/heads/state/mac"]);

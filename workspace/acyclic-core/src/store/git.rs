@@ -472,6 +472,11 @@ impl Transaction {
         }
     }
 
+    /// Points `reference` at `new`, whatever it held.
+    pub(crate) fn set(&mut self, reference: &str, new: &str) -> Result<(), StoreError> {
+        self.send(&format!("update {reference} {new}"))
+    }
+
     /// Deletes `reference`, which must be at `old`.
     pub(crate) fn delete(&mut self, reference: &str, old: &str) -> Result<(), StoreError> {
         self.send(&format!("delete {reference} {old}"))

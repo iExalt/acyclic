@@ -6,8 +6,10 @@
 //! `mise run bench:store:phases -- …` builds it with timing marks and splits each command's time into phases.
 //! `--batches` adds that many one-field edits after the first measurements, then times edits and reads again.
 //!
-//! A claim takes a different ready leaf each run; claiming again renews. "show after edit" is the first read of
-//! files the edit just wrote, which an on-access scanner may inspect; repeated reads hide that cost.
+//! A claim takes a different ready leaf each run; claiming again renews. The sync columns run against a bare repository
+//! on the same disk, so they time the work around the network rather than the network: the first sync sends the whole
+//! store, "sync" joins another replica's one new item, and "sync, idle" finds nothing new. "show after edit" is the
+//! first read of files the edit just wrote, which an on-access scanner may inspect; repeated reads hide that cost.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -229,6 +231,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .collect();
     record(&mut row, "add at top", &tops);
     record(&mut row, "add", &plain);
+    sync(&tracker, &mut row, runs);
     if batches > 0 {
         // Distinct items, so the cache's delta grows as an agent's day of edits would grow it.
         let (ready, _) = tracker.run("ready", false);
@@ -251,6 +254,29 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         record(&mut row, "show after batches", &times(&|_| format!("show {item}"), false));
     }
     row
+}
+
+/// Times syncs through a bare repository that a second replica, `peer`, also syncs with.
+fn sync(tracker: &Tracker, row: &mut Row, runs: usize) {
+    let remote = tracker.path().join("remote.git");
+    let made = Command::new("git").args(["init", "-q", "--bare"]).arg(&remote).status();
+    assert!(made.expect("git runs").success(), "a bare remote");
+    let url = remote.to_str().expect("a UTF-8 path");
+    tracker.run(&format!("init tracker --replica bench --remote {url}"), false);
+    row.times.insert("sync, first", report("sync, first", &[tracker.time("sync", false)]));
+    let peer = Tracker::new();
+    peer.run(&format!("init tracker --replica peer --remote {url}"), false);
+    peer.run("sync", false);
+    let moved: Vec<Sample> = (0..runs)
+        .map(|n| {
+            peer.run(&format!("item add peer-{n} --title Peer"), false);
+            peer.run("sync", false);
+            tracker.time("sync", false)
+        })
+        .collect();
+    row.times.insert("sync", report("sync", &moved));
+    let idle: Vec<Sample> = (0..runs).map(|_| tracker.time("sync", false)).collect();
+    row.times.insert("sync, idle", report("sync, idle", &idle));
 }
 
 /// Prints an operation's median and, with timing marks, the median of each phase; returns the median in ms.
@@ -343,6 +369,9 @@ fn print_table(rows: &[Row], batches: usize) {
         "link",
         "add at top",
         "add",
+        "sync, first",
+        "sync",
+        "sync, idle",
     ];
     if batches > 0 {
         columns.extend(["edit after batches", "show after batches"]);
