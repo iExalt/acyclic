@@ -100,6 +100,26 @@ impl Written {
     }
 }
 
+/// An add that names other values than the entity holds, which `edit` is for.
+fn already_exists(what: &str, edit: &str, id: &str, differs: &[&str]) -> CliError {
+    let fix: Vec<String> = differs
+        .iter()
+        .map(|flag| {
+            // A pair of presence flags takes no value.
+            if flag.contains('/') { flag.replace('/', "|") } else { format!("{flag} …") }
+        })
+        .collect();
+    CliError::refused(
+        "already-exists",
+        format!(
+            "{what} {id} exists with other {}; change it with `acyclic {edit} {id} {}`",
+            differs.join(", "),
+            fix.join(" ")
+        ),
+    )
+    .with(json!({"differs": differs}))
+}
+
 fn not_found(message: String) -> CliError {
     CliError::new("not-found", exit::NOT_FOUND, message)
 }
@@ -350,11 +370,7 @@ fn repeat_item(
         check(flag, satisfied.into_iter().all(|same| same));
     }
     if !differs.is_empty() {
-        return Err(CliError::refused(
-            "already-exists",
-            format!("item {id} exists with other {}", differs.join(", ")),
-        )
-        .with(json!({"differs": differs})));
+        return Err(already_exists("item", "item edit", id, &differs));
     }
     // The same proposal again is reported again, and nothing is written.
     let mut written = Written::default();
@@ -435,11 +451,7 @@ pub(crate) fn add_thread(
         }
     }
     if !differs.is_empty() {
-        return Err(CliError::refused(
-            "already-exists",
-            format!("thread {id} exists with other {}", differs.join(", ")),
-        )
-        .with(json!({"differs": differs})));
+        return Err(already_exists("thread", "thread edit", id, &differs));
     }
     let mut written = Written::default();
     for change in &changes {
@@ -506,11 +518,7 @@ pub(crate) fn add_repository(
     if differs.is_empty() {
         return Ok(());
     }
-    Err(CliError::refused(
-        "already-exists",
-        format!("repository record {id} exists with other {}", differs.join(", ")),
-    )
-    .with(json!({"differs": differs})))
+    Err(already_exists("repository record", "repo edit", id, &differs))
 }
 
 #[cfg(test)]
