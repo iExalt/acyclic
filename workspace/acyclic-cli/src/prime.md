@@ -18,6 +18,11 @@ acyclic done <item> --note "what was done"
 `ready` lists ready leaves, best first. Finish with the `--repository` and `--commit` form, or with `--note` when the
 result isn't a commit.
 
+## Setting up a clone
+
+`acyclic init --replica <id> <path> --remote <url>` creates a tracker clone at `<path>` as a new replica, with the
+shared repository as its `origin`. `acyclic sync` then pulls in what other machines recorded and pushes yours.
+
 ## Who you are
 
 - Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`, or `run/<id>`

@@ -502,7 +502,8 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
     for lease in ["0", "481", "999"] {
         let err =
             args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", lease]).unwrap_err();
-        assert!(err.to_string().contains("1..=480"), "{err}");
+        assert!(err.to_string().contains("--lease takes 1 to 480 minutes"), "{err}");
+        assert!(!err.to_string().contains("1..="), "{err}");
     }
     assert!(args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", "480"]).is_ok());
     // The help text says the same bound.

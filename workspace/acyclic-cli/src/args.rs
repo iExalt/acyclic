@@ -92,6 +92,14 @@ where
 /// The longest lease, in minutes.
 pub const LEASE_MAX_MINUTES: u32 = 480;
 
+/// Reads a lease in minutes, refusing one outside 1 to the longest in plain words.
+fn lease_minutes(text: &str) -> Result<u32, String> {
+    text.parse::<u32>()
+        .ok()
+        .filter(|minutes| (1..=LEASE_MAX_MINUTES).contains(minutes))
+        .ok_or_else(|| format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes"))
+}
+
 /// The commands: the ones every session uses at the top, the rest grouped by what they act on.
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
@@ -141,7 +149,7 @@ pub enum Command {
         /// The item.
         item: String,
         /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=i64::from(LEASE_MAX_MINUTES)))]
+        #[arg(long, value_parser = lease_minutes)]
         lease: Option<u32>,
         /// Claim even when the item isn't ready.
         #[arg(long)]
