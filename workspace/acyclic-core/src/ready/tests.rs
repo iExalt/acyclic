@@ -401,11 +401,36 @@ fn ready_lists_the_actors_thread_first_then_approved_ones_by_natural_title_and_l
     assert_eq!(
         order,
         [
-            ("d", vec!["m1", "m2", "m10", "i4"]),
+            ("d", vec!["i4", "m1", "m2", "m10"]),
             ("c", vec!["i3"]),
             ("b", vec!["i2"]),
             ("f", vec!["i6"]),
             ("a", vec!["i1"]),
         ]
     );
+}
+
+#[test]
+fn an_item_is_busy_whenever_its_thread_is_even_through_another_members_resource() {
+    let mut r = replica("a");
+    items(&mut r, &["free", "parked"]);
+    set_state(&mut r, "parked", ItemState::Parked, by(2)).unwrap();
+    add_item(&mut r, "theirs", "theirs", by(1)).unwrap();
+    thread(&mut r, "theirs", "other");
+    for id in ["parked", "theirs"] {
+        set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
+            .unwrap();
+    }
+    claim::claim(&mut r, "other", "session/other", 900, Some(500), 1_000).unwrap();
+    let none = Fake::default();
+    let busy = Status::ResourceBusy {
+        resource: "gpu".into(),
+        thread: "other".into(),
+        holder: "session/other".into(),
+    };
+    assert_eq!(status(&r, &none, "free"), busy, "show agrees with the thread");
+    let model = Model::read(&r.state).unwrap();
+    let readiness = Readiness::new(&r.state, &model, NOW, &none);
+    assert!(matches!(readiness.thread("main").unwrap(), ThreadStatus::ResourceBusy { .. }));
+    assert_eq!(readiness.ready(false, "session/me").unwrap(), []);
 }

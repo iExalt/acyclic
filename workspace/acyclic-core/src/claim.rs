@@ -144,43 +144,46 @@ pub fn covering(
     }
 }
 
-/// The resources a claim on a thread holds: those its open members name. Finished or archived work holds nothing.
+/// The resources a claim on each thread holds, by thread: those its open members name, in one pass over the items.
+/// Finished or archived work holds nothing, and a thread with no record or no such resource is left out.
 #[must_use]
-pub fn resources<'m>(model: &'m Model, thread: &str) -> BTreeSet<&'m str> {
-    model
-        .members(thread)
-        .into_iter()
-        .filter(|id| !model.items[*id].is_done() && !model.is_archived(id))
-        .flat_map(|id| model.items[id].resources.iter().map(String::as_str))
-        .collect()
+pub fn resources(model: &Model) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut found: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for item in model.items.values().filter(|item| !item.resources.is_empty()) {
+        let Some(thread) = item.thread.one().filter(|thread| model.threads.contains_key(*thread))
+        else {
+            continue;
+        };
+        if !item.is_done() && !model.is_archived(&item.id) {
+            found.entry(thread).or_default().extend(item.resources.iter().map(String::as_str));
+        }
+    }
+    found
 }
+
+/// A resource held elsewhere: the resource, the thread whose claim holds it, and that claim's holder.
+pub type Held = (String, String, String);
 
 /// A resource the thread's open members name that another thread's winning claim, held by someone other than
 /// `holder`, holds: the resource, that thread and its holder. With no `holder`, any other thread's winner counts.
+/// `held` is [`resources`], and `winner` gives a thread's winning claim.
 ///
 /// # Errors
 ///
 /// Fails when a claim can't be read.
 pub fn resource_held(
-    state: &State,
-    model: &Model,
+    held: &BTreeMap<&str, BTreeSet<&str>>,
     thread: &str,
     holder: Option<&str>,
-    now: Millis,
-    alive: Alive<'_>,
-) -> Result<Option<(String, String, String)>, Error> {
-    let wanted = resources(model, thread);
-    if wanted.is_empty() {
-        return Ok(None);
-    }
-    for other in model.threads.keys().filter(|other| *other != thread) {
-        let Some(resource) = resources(model, other).intersection(&wanted).next().copied() else {
-            continue;
-        };
-        if let Some(claim) = winner_with(state, &thread_key(other)?, now, alive)?
+    winner: impl Fn(&str) -> Result<Option<Claim>, Error>,
+) -> Result<Option<Held>, Error> {
+    let Some(wanted) = held.get(thread) else { return Ok(None) };
+    for (other, theirs) in held.iter().filter(|(other, _)| **other != thread) {
+        let Some(resource) = theirs.intersection(wanted).next() else { continue };
+        if let Some(claim) = winner(other)?
             && holder != Some(claim.holder.as_str())
         {
-            return Ok(Some((resource.to_owned(), other.clone(), claim.holder)));
+            return Ok(Some(((*resource).to_owned(), (*other).to_owned(), claim.holder)));
         }
     }
     Ok(None)
@@ -223,8 +226,9 @@ pub fn claim(
     if current.as_ref().is_some_and(|claim| claim.holder != holder) {
         return Err(Error::Claimed(key));
     }
+    let winner = |other: &str| winner_with(&replica.state, &thread_key(other)?, at, &alive);
     if let Some((resource, thread, holder)) =
-        resource_held(&replica.state, &model, thread, Some(holder), at, &alive)?
+        resource_held(&resources(&model), thread, Some(holder), winner)?
     {
         return Err(Error::ResourceHeld { resource, thread, holder });
     }
@@ -311,17 +315,13 @@ pub struct Clash {
 pub fn clashes(state: &State, model: &Model, now: Millis) -> Result<Vec<Clash>, Error> {
     let alive = |holder: &str| model.run_alive(holder);
     let mut by_resource: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
-    for thread in model.threads.keys() {
-        let held = resources(model, thread);
-        if held.is_empty() {
-            continue;
-        }
+    for (thread, held) in resources(model) {
         if let Some(claim) = winner_with(state, &thread_key(thread)?, now, &alive)? {
             for resource in held {
                 by_resource
                     .entry(resource)
                     .or_default()
-                    .push((thread.clone(), claim.holder.clone()));
+                    .push((thread.to_owned(), claim.holder.clone()));
             }
         }
     }

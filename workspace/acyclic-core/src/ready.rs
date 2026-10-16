@@ -6,7 +6,7 @@
 //! Only leaves are claimed or ready. A dependency on a parent is met by the parent's own state, and a parent's
 //! dependencies hold back every item under it.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Command;
@@ -115,7 +115,8 @@ pub enum Status {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// Its thread is unclaimed, but another thread's winning claim holds one of its named resources.
+    /// Its thread is unclaimed, but another thread's winning claim holds a resource one of its thread's open members
+    /// names.
     ResourceBusy {
         /// The resource.
         resource: String,
@@ -232,6 +233,14 @@ pub struct Readiness<'a> {
     /// Blocks links' targets by the item they start from.
     links_from: BTreeMap<String, Vec<String>>,
     archived: RefCell<BTreeMap<String, bool>>,
+    /// Each thread's members, built on first use.
+    members: OnceCell<BTreeMap<&'a str, Vec<&'a str>>>,
+    /// The resources each thread's claim holds, built on first use.
+    resources: OnceCell<BTreeMap<&'a str, BTreeSet<&'a str>>>,
+    /// Each thread's winning claim, memoized.
+    winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
+    /// Whether another thread holds a resource each thread needs, memoized.
+    busy: RefCell<BTreeMap<String, Option<claim::Held>>>,
 }
 
 impl<'a> Readiness<'a> {
@@ -258,6 +267,10 @@ impl<'a> Readiness<'a> {
             cyclic,
             links_from,
             archived: RefCell::default(),
+            members: OnceCell::new(),
+            resources: OnceCell::new(),
+            winners: RefCell::default(),
+            busy: RefCell::default(),
         }
     }
 
@@ -279,9 +292,10 @@ impl<'a> Readiness<'a> {
             }
         }
         if holders.is_empty()
-            && let Some(busy) = self.resource_busy(item)?
+            && let Some(thread) = item.thread.one()
+            && let Some((resource, thread, holder)) = self.thread_busy(thread)?
         {
-            return Ok(Some(busy));
+            return Ok(Some(Status::ResourceBusy { resource, thread, holder }));
         }
         Ok(Some(match holders.len() {
             0 => Status::Ready,
@@ -340,10 +354,20 @@ impl<'a> Readiness<'a> {
         if !self.model.threads.contains_key(thread) {
             return Ok(ThreadStatus::Missing);
         }
-        let items: Vec<String> = self
-            .model
-            .members(thread)
+        let members = self.members.get_or_init(|| {
+            let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+            for item in self.model.items.values() {
+                if let Some(thread) = item.thread.one() {
+                    members.entry(thread).or_default().push(&item.id);
+                }
+            }
+            members
+        });
+        let items: Vec<String> = members
+            .get(thread)
             .into_iter()
+            .flatten()
+            .copied()
             // Finished work is skipped before its merge is checked.
             .filter(|id| !self.model.items[*id].is_done())
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
@@ -363,9 +387,7 @@ impl<'a> Readiness<'a> {
         if let Some(holder) = holders.pop() {
             return Ok(ThreadStatus::Claimed { holder, items });
         }
-        if let Some((resource, thread, holder)) =
-            claim::resource_held(self.state, self.model, thread, None, self.now, &alive)?
-        {
+        if let Some((resource, thread, holder)) = self.thread_busy(thread)? {
             return Ok(ThreadStatus::ResourceBusy { resource, thread, holder });
         }
         Ok(if items.is_empty() {
@@ -398,6 +420,10 @@ impl<'a> Readiness<'a> {
                 cyclic: self.cyclic.clone(),
                 links_from: self.links_from.clone(),
                 archived: RefCell::default(),
+                members: OnceCell::new(),
+                resources: OnceCell::new(),
+                winners: RefCell::new(self.winners.borrow().clone()),
+                busy: RefCell::default(),
             };
             return unarchived.ready(false, actor);
         }
@@ -474,27 +500,27 @@ impl<'a> Readiness<'a> {
             .collect()
     }
 
-    /// The first named resource of an item in an unclaimed thread that another thread's winning claim holds.
-    fn resource_busy(&self, item: &Item) -> Result<Option<Status>, Error> {
-        let alive = |holder: &str| self.model.run_alive(holder);
-        let Some(own) = item.thread.one() else { return Ok(None) };
-        for resource in &item.resources {
-            for thread in self.model.threads.keys().filter(|thread| *thread != own) {
-                if !claim::resources(self.model, thread).contains(resource.as_str()) {
-                    continue;
-                }
-                if let Some(claim) =
-                    claim::winner_with(self.state, &claim::thread_key(thread)?, self.now, &alive)?
-                {
-                    return Ok(Some(Status::ResourceBusy {
-                        resource: resource.clone(),
-                        thread: thread.clone(),
-                        holder: claim.holder,
-                    }));
-                }
-            }
+    /// A thread's winning claim, memoized.
+    fn winner(&self, thread: &str) -> Result<Option<claim::Claim>, Error> {
+        if let Some(winner) = self.winners.borrow().get(thread) {
+            return Ok(winner.clone());
         }
-        Ok(None)
+        let alive = |holder: &str| self.model.run_alive(holder);
+        let winner = claim::winner_with(self.state, &claim::thread_key(thread)?, self.now, &alive)?;
+        self.winners.borrow_mut().insert(thread.to_owned(), winner.clone());
+        Ok(winner)
+    }
+
+    /// A resource the thread's open members name that another thread's winning claim holds, with that thread and its
+    /// holder, memoized. Any member's resource counts, so a thread and each of its items agree.
+    fn thread_busy(&self, thread: &str) -> Result<Option<claim::Held>, Error> {
+        if let Some(busy) = self.busy.borrow().get(thread) {
+            return Ok(busy.clone());
+        }
+        let held = self.resources.get_or_init(|| claim::resources(self.model));
+        let busy = claim::resource_held(held, thread, None, |other| self.winner(other))?;
+        self.busy.borrow_mut().insert(thread.to_owned(), busy.clone());
+        Ok(busy)
     }
 
     /// Whether an item is archived, memoized.

@@ -10,14 +10,14 @@ fn numbers_sort_by_value_and_the_rest_as_text() {
     titles.sort_by(|a, b| cmp(a, b));
     assert_eq!(
         titles,
-        ["9", "10", "Step", "Step 02", "Step 2", "Step 2a", "Step 2b", "Step 10", "step 1"]
+        ["9", "10", "Step", "step 1", "Step 02", "Step 2", "Step 2a", "Step 2b", "Step 10"]
     );
 }
 
 /// Natural order is a total order: antisymmetric, equal only for equal strings, and transitive.
 #[hegel::test]
 fn natural_order_is_total(tc: TestCase) {
-    let text = || tc.draw(gs::from_regex("[ab0-29 ]{0,6}"));
+    let text = || tc.draw(gs::from_regex("[abAB0-29 ]{0,6}"));
     let (a, b, c) = (text(), text(), text());
     assert_eq!(cmp(&a, &b), cmp(&b, &a).reverse());
     assert_eq!(cmp(&a, &b) == Ordering::Equal, a == b);
