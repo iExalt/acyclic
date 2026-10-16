@@ -184,12 +184,12 @@ fn check_targets(
     let model = Model::read(state)?;
     if let Some(thread) = thread.filter(|thread| !thread_exists(&model, thread)) {
         return Err(not_found(format!(
-            "no thread {thread}; add it with acyclic thread add {thread} --title <TITLE>"
+            "no thread {thread}; add it with `acyclic thread add {thread} --title <TITLE>`"
         )));
     }
     match repositories.iter().find(|id| !model.repositories.contains_key(*id)) {
         Some(id) => {
-            Err(not_found(format!("no repository record {id}; add it with acyclic repo add {id}")))
+            Err(not_found(format!("no repository record {id}; add it with `acyclic repo add {id}`")))
         },
         None => Ok(()),
     }
@@ -435,7 +435,7 @@ pub(crate) fn edit_thread(
     by: By<'_>,
 ) -> Result<Written, CliError> {
     if !thread_exists(&Model::read(replica.state())?, id) {
-        return Err(not_found(format!("no thread {id}")));
+        return Err(not_found(format!("no thread {id}; `acyclic thread list` lists them")));
     }
     write_thread(replica, id, fields, by)
 }
@@ -453,7 +453,7 @@ pub(crate) fn add_thread(
     }
     let state = replica.state();
     let model = Model::read(state)?;
-    let thread = model.threads.get(id).ok_or_else(|| not_found(format!("no thread {id}")))?;
+    let thread = model.threads.get(id).ok_or_else(|| not_found(format!("no thread {id}; `acyclic thread list` lists them")))?;
     let mut differs: Vec<&str> = Vec::new();
     if fields.title.as_ref() != thread.title.one() {
         differs.push("--title");
@@ -494,7 +494,7 @@ pub(crate) fn edit_repository(
 ) -> Result<(), CliError> {
     let key = Key::new(kind::REPOSITORY, id)?;
     if replica.state().entity(&key).is_none() {
-        return Err(not_found(format!("no repository record {id}")));
+        return Err(not_found(format!("no repository record {id}; `acyclic repo list` lists them")));
     }
     write_repository(replica, &key, fields, by)
 }
@@ -526,7 +526,7 @@ pub(crate) fn add_repository(
     let record = model
         .repositories
         .get(id)
-        .ok_or_else(|| not_found(format!("no repository record {id}")))?;
+        .ok_or_else(|| not_found(format!("no repository record {id}; `acyclic repo list` lists them")))?;
     let mut differs: Vec<&str> = Vec::new();
     for (flag, same) in [
         ("--owner", fields.owner.as_ref() == record.owner.one()),

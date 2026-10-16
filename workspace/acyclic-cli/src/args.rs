@@ -427,7 +427,7 @@ pub enum ItemCommand {
         /// The subtree's root.
         item: String,
     },
-    /// Deletes an item nothing refers to: no children or links, not done, not claimed.
+    /// Deletes an item nothing refers to: no children, links, evidence or live claim; in an approved thread, user only.
     Delete {
         /// The item.
         item: String,
