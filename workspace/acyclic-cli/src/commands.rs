@@ -474,6 +474,7 @@ impl<'a> Session<'a> {
         self.with_view(|view| {
             let ready = view.readiness.ready(include_archived)?;
             acyclic_core::probe::mark("readiness");
+            let ready: Vec<String> = ready.into_iter().map(|(id, _)| id).collect();
             Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
         })
     }
@@ -654,20 +655,18 @@ impl<'a> Session<'a> {
     }
 
     fn needs(&self) -> Result<Json, CliError> {
-        let (state, model) = self.read()?;
-        let clones = context::clones(self.env)?;
-        let ancestry = GitAncestry::new(clones);
-        let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        let mut entries = needs::needs_you(&state, &model, &readiness, self.now)?;
-        // Local to this clone, so derived here rather than kept in the shared state: asked to push every write, it
-        // still holds writes the remote lacks.
-        if let Some(remote) = self.tracker.remote()
-            && self.tracker.push_after_write()
-            && self.tracker.unpushed(remote)?
-        {
-            entries.push(needs::Entry::Unpushed { remote: remote.to_owned() });
-        }
-        Ok(json!({"needs": entries}))
+        self.with_view(|view| {
+            let mut entries = needs::needs_you(view.state, view.model, view.readiness, self.now)?;
+            // Local to this clone, so derived here rather than kept in the shared state: asked to push every write,
+            // it still holds writes the remote lacks.
+            if let Some(remote) = self.tracker.remote()
+                && self.tracker.push_after_write()
+                && self.tracker.unpushed(remote)?
+            {
+                entries.push(needs::Entry::Unpushed { remote: remote.to_owned() });
+            }
+            Ok(json!({"needs": view.needs(&entries)?}))
+        })
     }
 
     fn sync(&self, with_usage: bool) -> Result<Json, CliError> {

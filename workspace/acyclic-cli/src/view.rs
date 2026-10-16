@@ -8,9 +8,10 @@ use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Item, ItemState, Link, LinkKind, Model, Value};
+use acyclic_core::needs::Entry;
 use acyclic_core::ready::Readiness;
-use acyclic_core::scope::{Decision, Proposal, ScopeEdit};
-use acyclic_core::state::{Millis, State};
+use acyclic_core::scope::{self, Decision, Proposal, ScopeEdit};
+use acyclic_core::state::{Key, Millis, State};
 use serde_json::{Map, Value as Json, json};
 
 use crate::commands::{Member, thread_members};
@@ -91,19 +92,12 @@ impl View<'_> {
         }))
     }
 
-    /// The rows of the items that are ready, with each one's `rank` and whether its work is `approved`; the same
-    /// rows, filtered by their own `approved`, when only approved work is asked for.
-    pub fn ready_rows(
-        &self,
-        ready: &[(String, usize)],
-        only_approved: bool,
-    ) -> Result<Vec<Json>, CliError> {
+    /// The rows of the items that are ready, each with whether its work is `approved`; the same rows, filtered by
+    /// their own `approved`, when only approved work is asked for. The rank is in the row's `readiness`.
+    pub fn ready_rows(&self, ready: &[String], only_approved: bool) -> Result<Vec<Json>, CliError> {
         let mut rows = Vec::new();
-        for (id, rank) in ready {
-            let row = with(
-                self.item_row(id)?,
-                json!({"rank": rank, "approved": approval(self.model, id).1}),
-            );
+        for id in ready {
+            let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
             if row["approved"] == true || !only_approved {
                 rows.push(row);
             }
@@ -160,6 +154,164 @@ impl View<'_> {
                 "members": members,
             }),
         ))
+    }
+}
+
+impl View<'_> {
+    /// The needs-you list: each entry is `{kind, …}`, with item and thread entries embedding their summaries, a
+    /// proposal embedding what `proposal show` returns, and a conflict listing its `values` and how to `resolve` it.
+    pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
+        let members = thread_members(self.model);
+        let proposals = scope::proposals(self.state)?;
+        let thread =
+            |id: &str| thread_row(self.model, id, members.get(id).map_or(&[][..], Vec::as_slice));
+        let items = |ids: &[String]| -> Result<Json, CliError> {
+            Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
+        };
+        let mut found = Vec::with_capacity(entries.len());
+        for entry in entries {
+            found.push(match entry {
+                Entry::Conflict { kind, id, field } => self.conflict(kind, id, field, &thread)?,
+                Entry::AwaitingApproval { thread: id, members: open, waits_with, .. } => json!({
+                    "kind": "awaiting-approval", "thread": thread(id),
+                    "waits_with": waits_with.iter().map(|id| thread(id)).collect::<Vec<_>>(),
+                    "counts": {"open_members": open},
+                }),
+                Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
+                Entry::LinkCycle { items: ids } => json!({"kind": "link-cycle", "items": items(ids)?}),
+                Entry::ParentCycle { items: ids } => {
+                    json!({"kind": "parent-cycle", "items": items(ids)?})
+                },
+                Entry::Contest { item, holders } => {
+                    json!({"kind": "contest", "item": self.item_row(item)?, "holders": holders})
+                },
+                Entry::ResourceClash { resource, holders } => {
+                    let holders = holders
+                        .iter()
+                        .map(|(item, holder)| Ok(json!({"item": self.item_row(item)?, "holder": holder})))
+                        .collect::<Result<Vec<Json>, CliError>>()?;
+                    json!({"kind": "resource-clash", "resource": resource, "holders": holders})
+                },
+                Entry::ClockAhead { item, holder } => {
+                    json!({"kind": "clock-ahead", "item": self.item_row(item)?, "holder": holder})
+                },
+                Entry::UnknownRun { item, holder } => {
+                    json!({"kind": "unknown-run", "item": self.item_row(item)?, "holder": holder})
+                },
+                Entry::RunClash { thread: id, runs } => {
+                    json!({"kind": "run-clash", "thread": thread(id), "runs": runs})
+                },
+                Entry::Proposal { id, .. } => json!({
+                    "kind": "proposal",
+                    "proposal": proposals.get(id).map(|p| proposal_show(self.model, p)),
+                }),
+                Entry::Unapproved { item, thread: id, actor, keep, drop } => json!({
+                    "kind": "unapproved", "item": self.item_row(item)?, "thread": thread(id),
+                    "actor": actor, "keep": keep, "drop": drop,
+                }),
+                Entry::NewBlocker { item, thread: id, blocker } => json!({
+                    "kind": "new-blocker", "item": self.item_row(item)?, "thread": thread(id),
+                    "blocker": self.item_row(blocker)?,
+                }),
+                Entry::Reopened { item, dependents } => json!({
+                    "kind": "reopened", "item": self.item_row(item)?, "dependents": items(dependents)?,
+                }),
+                Entry::DoneEarly { item, open } => {
+                    json!({"kind": "done-early", "item": self.item_row(item)?, "open": items(open)?})
+                },
+                Entry::Dangling { kind, id, field, target } => json!({
+                    "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
+                }),
+                Entry::Unverified { item, repository, reason } => json!({
+                    "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
+                    "reason": reason,
+                }),
+                Entry::Question { id, thread: asking, class, text } => json!({
+                    "kind": "question", "id": id, "thread": asking.as_deref().map(thread),
+                    "class": class, "text": text,
+                }),
+            });
+        }
+        Ok(found)
+    }
+
+    /// A conflict: the entity and field, the values written apart (a clear among them as `null`), the entity's
+    /// summary when it is an item or thread, and the command that settles it, if any command writes the field.
+    fn conflict(
+        &self,
+        entity: &str,
+        id: &str,
+        field: &str,
+        thread: &dyn Fn(&str) -> Json,
+    ) -> Result<Json, CliError> {
+        let key = Key::new(entity, id)?;
+        let mut values: Vec<&Json> = Vec::new();
+        for (_, stamped) in self.state.field(&key, field).into_iter().flatten() {
+            if !values.contains(&&stamped.value) {
+                values.push(&stamped.value);
+            }
+        }
+        let mut entry = json!({
+            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values,
+            "resolve": resolve(self.state, entity, id, field),
+        });
+        match entity {
+            "item" => entry["item"] = self.item_row(id)?,
+            "thread" => entry["thread"] = thread(id),
+            _ => {},
+        }
+        Ok(entry)
+    }
+}
+
+/// The command that settles a conflict in `field` of an entity, with the choice left to fill in; none when no command
+/// writes the field.
+fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String> {
+    let edit = |flag: &str, clearable: bool| {
+        let clear = if clearable { format!(" (or --no-{flag})") } else { String::new() };
+        let command = match entity {
+            "item" => "item edit",
+            "thread" => "thread edit",
+            _ => "repo edit",
+        };
+        Some(format!(
+            "acyclic {command} {id} --{flag} <{}>{clear}",
+            flag.to_uppercase().replace('-', "_")
+        ))
+    };
+    match (entity, field) {
+        ("item" | "thread", "title") | ("repository", "owner" | "name") => edit(field, false),
+        ("item", "state") => edit("state", false),
+        ("item", "notes" | "gate" | "size" | "parent" | "thread") | ("thread", "brief") => {
+            edit(field, true)
+        },
+        ("thread", "autonomy") => edit("level", true),
+        ("repository", "default-branch") => edit("default-branch", false),
+        ("repository", "public") => Some(format!("acyclic repo edit {id} --public|--private")),
+        ("item", "evidence") => Some(format!(
+            "acyclic done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --note <NOTE>)"
+        )),
+        ("item", "archived") => Some(format!("acyclic item archive {id}")),
+        ("item", "reopened") => Some(format!("acyclic item reopen {id}")),
+        ("thread", "approved" | "approved-members") => {
+            Some(format!("acyclic thread approve|revoke {id} --as-user"))
+        },
+        ("settings", _) => Some("acyclic level <LEVEL> --as-user".to_owned()),
+        ("link", _) => {
+            let read = |name: &str| {
+                let key = Key::new("link", id).ok()?;
+                let found = state.field(&key, name)?.iter().next()?.1.value.clone();
+                found.as_str().map(str::to_owned)
+            };
+            let (from, to, kind) = (read("from")?, read("to")?, read("kind")?);
+            let word = match kind.as_str() {
+                "blocks" => "waits-for",
+                "after" => "follows",
+                _ => "relates-to",
+            };
+            Some(format!("acyclic link add|remove {from} {word} {to}"))
+        },
+        _ => None,
     }
 }
 
@@ -493,8 +645,7 @@ mod tests {
     fn a_ready_row_is_approved_exactly_when_ready_approved_lists_it() {
         let r = tracker();
         viewing(&r, |view| {
-            let ready: Vec<(String, usize)> =
-                ["a", "b", "c", "late"].map(|id| (id.to_owned(), 0)).to_vec();
+            let ready: Vec<String> = ["a", "b", "c", "late"].map(str::to_owned).to_vec();
             let all = view.ready_rows(&ready, false).unwrap();
             let approved = view.ready_rows(&ready, true).unwrap();
             let flags: Vec<(&str, bool)> = all
@@ -588,6 +739,62 @@ mod tests {
         for p in shown.iter().chain([&decided]) {
             follows_the_conventions(p, "proposal");
         }
+    }
+
+    #[test]
+    fn the_needs_list_embeds_what_each_entry_is_about() {
+        let mut mac = tracker();
+        let agent = by("session/mac");
+        scope::edit(&mut mac, &member("c", Some("t")), agent).unwrap();
+        let user = by(USER);
+        // Two replicas disagree about an item's parent and a thread's approval.
+        let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+        set_parent(&mut mac, "b", None, user).unwrap();
+        set_parent(&mut pi, "b", Some("a"), user).unwrap();
+        model::set(&mut mac, &key(kind::THREAD, "u"), thread_field::APPROVED, Some(&true), user)
+            .unwrap();
+        model::set(&mut pi, &key(kind::THREAD, "u"), thread_field::APPROVED, Some(&false), user)
+            .unwrap();
+        mac.join(pi.state()).unwrap();
+        viewing(&mac, |view| {
+            let entries =
+                acyclic_core::needs::needs_you(view.state, view.model, view.readiness, NOW)
+                    .unwrap();
+            let needs = view.needs(&entries).unwrap();
+            let of =
+                |kind: &str| -> Vec<&Json> { needs.iter().filter(|n| n["kind"] == kind).collect() };
+            let conflicts = of("conflict");
+            let parent = conflicts.iter().find(|c| c["field"] == "parent").unwrap();
+            assert_eq!(parent["entity"], "item");
+            assert_eq!(parent["item"]["id"], "b");
+            assert_eq!(parent["values"], json!([null, "a"]));
+            assert_eq!(parent["resolve"], "acyclic item edit b --parent <PARENT> (or --no-parent)");
+            // A conflicting approval isn't one, and the command that settles it is the user's.
+            let approval = conflicts.iter().find(|c| c["field"] == "approved").unwrap();
+            assert_eq!(
+                (&approval["thread"]["id"], &approval["thread"]["approved"]),
+                (&json!("u"), &json!(false))
+            );
+            assert_eq!(approval["resolve"], "acyclic thread approve|revoke u --as-user");
+            // A proposal is what `proposal show` returns, and an unseen member names the thread and its commands.
+            let proposal = of("proposal")[0];
+            let all = scope::proposals(view.state).unwrap();
+            assert_eq!(
+                proposal["proposal"],
+                proposal_show(view.model, all.values().next().unwrap())
+            );
+            assert_eq!(proposal["proposal"]["edit"]["after"], "t");
+            let unseen = of("unapproved")[0];
+            assert_eq!(
+                (&unseen["item"]["id"], &unseen["thread"]["id"]),
+                (&json!("late"), &json!("t"))
+            );
+            assert_eq!(unseen["keep"], "acyclic item edit late --thread t");
+            for entry in &needs {
+                assert!(entry["kind"].is_string(), "{entry}");
+                follows_the_conventions(entry, "needs");
+            }
+        });
     }
 
     #[test]

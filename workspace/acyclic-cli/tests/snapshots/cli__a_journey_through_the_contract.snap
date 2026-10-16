@@ -86,7 +86,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "approved": false,
         "id": "a1",
         "parent": null,
-        "rank": 0,
         "readiness": {
           "rank": 0,
           "status": "ready"
@@ -222,7 +221,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "approved": false,
         "id": "a2",
         "parent": null,
-        "rank": 0,
         "readiness": {
           "rank": 0,
           "status": "ready"
@@ -327,7 +325,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
         "approved": true,
         "id": "a2",
         "parent": null,
-        "rank": 0,
         "readiness": {
           "rank": 0,
           "status": "ready"
@@ -361,12 +358,22 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "data": {
     "needs": [
       {
-        "actor": "session/mac",
-        "entry": "proposal",
-        "id": "mac-16",
-        "threads": [
-          "t1"
-        ]
+        "kind": "proposal",
+        "proposal": {
+          "actor": "session/mac",
+          "decision": null,
+          "edit": {
+            "after": "t1",
+            "before": null,
+            "field": "thread",
+            "item": "a1",
+            "kind": "member"
+          },
+          "id": "mac-16",
+          "threads": [
+            "t1"
+          ]
+        }
       }
     ]
   },
@@ -1004,12 +1011,23 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "data": {
     "needs": [
       {
-        "entry": "awaiting-approval",
-        "heads": [
-          "a2"
-        ],
-        "members": 1,
-        "thread": "t2",
+        "counts": {
+          "open_members": 1
+        },
+        "kind": "awaiting-approval",
+        "thread": {
+          "approved": false,
+          "counts": {
+            "conflicted": 0,
+            "done": 0,
+            "members": 1
+          },
+          "heads": [
+            "a2"
+          ],
+          "id": "t2",
+          "title": "Follow-ups"
+        },
         "waits_with": []
       }
     ]

@@ -336,7 +336,7 @@ fn two_machines_sync_through_a_shared_repository() {
     let (code, out) = sh.output("item add a3 --title Stranded", AGENT);
     assert_eq!((code, out["data"]["push"]["ok"].as_bool()), (0, Some(false)), "the write stands");
     let (_, out) = sh.output("needs", AGENT);
-    assert_eq!(out["data"]["needs"][0]["entry"], "unpushed");
+    assert_eq!(out["data"]["needs"][0]["kind"], "unpushed");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
     sh.run("sync", AGENT);
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
@@ -348,7 +348,7 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("item edit a1 --parent b1", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["entry"], "conflict");
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["kind"], "conflict");
     let (_, out) = sh.output("item edit a1 --no-parent --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
