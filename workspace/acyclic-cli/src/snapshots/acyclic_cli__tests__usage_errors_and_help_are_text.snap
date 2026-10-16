@@ -2,7 +2,7 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command that runs prints one JSON document
+The acyclic tracker. Every command prints one JSON document, except `prime`, `graph` without `--output`, `import --schema` and help and version text
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
@@ -20,15 +20,15 @@ Command Groups:
   link      Adds or removes links between items
   thread    Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
   repo      Adds, edits, lists and shows repository records
-  proposal  Shows proposals, and keeps or drops them (the user's)
+  proposal  Shows proposals, and keeps or drops them (user only)
 
 Other Commands:
   init      Sets up a tracker clone as a new replica, creating the repository if there is none
   sync      Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
   prime     Prints conventions for agents, matched to this version, as text
-  import    Imports a plan: adds and updates what the document names, and never deletes. `--schema` prints an annotated example of the document
+  import    Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
   graph     Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
-  level     Prints the autonomy levels, or with a level sets the global one (the user's)
+  level     Prints the autonomy levels; with a level, sets the global one (user only)
   doctor    Lists entities that can't be read
   serve     Serves the JSON API and the app, refusing any request without the user's Tailscale identity
 

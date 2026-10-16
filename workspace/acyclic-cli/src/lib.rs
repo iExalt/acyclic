@@ -91,8 +91,8 @@ impl Outcome {
 }
 
 /// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
-/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Help, `--version` and
-/// `prime` print text instead, and a command line that doesn't parse prints its error and usage as text to standard
+/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Help and version text,
+/// `prime`, `graph` without `--output` and `import --schema` print text instead, and a command line that doesn't parse prints its error and usage as text to standard
 /// error, with exit code 2, as other command-line tools do.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
     execute_with(args, env, None)
