@@ -18,3 +18,6 @@
 - Most behaviour is covered by unit tests in the core library; integration tests cover contracts; browser journeys
   and live runs belong to gates.
 - Commit messages follow Conventional Commits.
+- Pull requests are squash-merged, and release-please reads only the squashed commit: its title, from the pull
+  request's title, and its body, from the description. Title a pull request as a Conventional Commit that covers
+  everything in it, with `!` if anything in it breaks compatibility.

@@ -12,6 +12,8 @@ disable = ["MD036"]
 [per-file-ignores]
 # CLAUDE.md is a one-line `@AGENTS.md` import, not a document.
 "CLAUDE.md" = ["MD041"]
+# release-please writes CHANGELOG.md: a blank line doubled after each version heading, and long commit links.
+"CHANGELOG.md" = ["MD012", "MD013"]
 
 [MD013]
 line-length = 120
