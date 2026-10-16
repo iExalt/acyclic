@@ -6,6 +6,7 @@ pub mod error;
 pub mod args;
 mod commands;
 mod context;
+mod hints;
 mod page;
 
 use std::collections::BTreeMap;
@@ -103,8 +104,9 @@ fn execute_with(
     use clap::FromArgMatches;
     use clap::error::ErrorKind;
     acyclic_core::probe::mark("start");
+    let args: Vec<OsString> = args.into_iter().collect();
     let parsed = args::command()
-        .try_get_matches_from(args)
+        .try_get_matches_from(&args)
         .and_then(|matches| args::Cli::from_arg_matches(&matches));
     let cli = match parsed {
         Ok(cli) => cli,
@@ -120,9 +122,16 @@ fn execute_with(
             return Outcome::out(exit::OK, err.to_string());
         },
         Err(err) => {
-            return Outcome { code: exit::USAGE, stdout: String::new(), stderr: err.to_string() };
+            let stderr = match hints::hint(&args) {
+                Some(hint) => format!("error: {hint}\n\nFor more information, try '--help'.\n"),
+                None => err.to_string(),
+            };
+            return Outcome { code: exit::USAGE, stdout: String::new(), stderr };
         },
     };
+    if let Err(err) = cli.command.validate() {
+        return Outcome::out(err.exit, render(&err.envelope()));
+    }
     if let (Command::Serve(options), Some(serve)) = (&cli.command, serve) {
         return match serve_with(&cli, options, env, serve) {
             Ok(()) => Outcome::out(exit::OK, String::new()),

@@ -72,7 +72,7 @@ def small_tracker(directory):
             title,
             *(["--parent", parent] if parent else []),
         )
-    acyclic(tracker, "link", "add", "paint", "blocks", "buy")
+    acyclic(tracker, "link", "add", "paint", "waits-for", "buy")
     acyclic(tracker, "link", "add", "paint", "relates", "tiles")
     acyclic(tracker, "thread", "set", "kitchen", "--title", "Kitchen </script>")
     acyclic(tracker, "thread", "add", "paint", "kitchen")

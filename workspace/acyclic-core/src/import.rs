@@ -15,8 +15,39 @@ pub use apply::{ApplyError, Report, apply};
 /// The value of the document's `format` field.
 pub const FORMAT: &str = "acyclic-import";
 
-/// The newest version this build reads.
-pub const VERSION: u32 = 1;
+/// The newest version this build reads. Version 2 names link kinds `waits-for`, `follows` and `relates-to`; version 1,
+/// still read, names them `blocks`, `after` and `relates`.
+pub const VERSION: u32 = 2;
+
+/// An annotated version 2 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
+/// remove, since JSON has no comments.
+pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its records named by keys you choose.
+// Importing adds and updates what it names and never deletes, so importing it again changes nothing.
+// JSON has no comments: remove the lines that start with //.
+{
+  "format": "acyclic-import",
+  "version": 2,
+  // A code repository that items can name; all four fields are required.
+  "repositories": [
+    {"key": "code", "owner": "me", "name": "garden", "public": false, "default_branch": "main"}
+  ],
+  "items": [
+    // Required: key and title. "state" is backlog, parked, in-progress or done, and defaults to backlog.
+    // Optional: parent (an item's key), notes, gate, size (xs, s, m, l, xl), areas, resources, repositories,
+    // archived, and evidence on done items.
+    {"key": "beds", "title": "Build the beds", "size": "m", "repositories": ["code"]},
+    {"key": "plant", "title": "Plant the seeds", "areas": ["garden"]}
+  ],
+  // "from" waits-for, follows or relates-to "to": plant can't start until beds is done.
+  "links": [
+    {"from": "plant", "kind": "waits-for", "to": "beds"}
+  ],
+  // A thread groups items for one continuing agent conversation; "items" lists its members' keys.
+  "threads": [
+    {"key": "spring", "title": "Spring planting", "items": ["beds", "plant"]}
+  ]
+}
+"#;
 
 /// A plan to import.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,10 +88,11 @@ pub struct Repository {
 }
 
 /// An item's state. "In review" and readiness are derived on read, never imported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum State {
     /// Not started.
+    #[default]
     Backlog,
     /// Set aside on purpose.
     Parked,
@@ -115,7 +147,8 @@ pub struct Item {
     /// The exit check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<String>,
-    /// The item's state.
+    /// The item's state; backlog when left out.
+    #[serde(default)]
     pub state: State,
     /// The parent item's key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,12 +178,16 @@ pub struct Item {
 #[serde(rename_all = "kebab-case")]
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
-    Blocks,
+    WaitsFor,
     /// A soft dependency: `from` prefers to follow `to`.
-    After,
+    Follows,
     /// Context only.
-    Relates,
+    RelatesTo,
 }
+
+/// The names version 1 gave link kinds, with the ones that replaced them.
+const VERSION_1_LINK_KINDS: [(&str, &str); 3] =
+    [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")];
 
 /// A link between two items: `from` depends on, follows or relates to `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -344,6 +381,18 @@ impl Import {
         {
             return Err(ParseError::UnsupportedVersion { found });
         }
+        let mut value = value;
+        if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
+            for link in value.get_mut("links").and_then(|l| l.as_array_mut()).into_iter().flatten()
+            {
+                let renamed = link.get("kind").and_then(|k| k.as_str()).and_then(|old| {
+                    VERSION_1_LINK_KINDS.iter().find(|(name, _)| *name == old).map(|(_, new)| *new)
+                });
+                if let Some(new) = renamed {
+                    link["kind"] = new.into();
+                }
+            }
+        }
         serde_json::from_value(value).map_err(ParseError::Json)
     }
 
@@ -471,7 +520,7 @@ impl Import {
             }
             if link.from == link.to {
                 errors.push(ValidationError::SelfLink(link.from.clone()));
-            } else if link.kind != LinkKind::Relates {
+            } else if link.kind != LinkKind::RelatesTo {
                 edges.push((link.from.as_str(), link.to.as_str()));
             }
         }
@@ -604,7 +653,8 @@ mod tests {
             repository: Some("r".to_owned()),
             note: None,
         });
-        import.links = vec![link("a", "b", LinkKind::Blocks), link("b", "a", LinkKind::Relates)];
+        import.links =
+            vec![link("a", "b", LinkKind::WaitsFor), link("b", "a", LinkKind::RelatesTo)];
         import.threads = vec![thread("t", &["a", "b"])];
         import
     }
@@ -627,7 +677,7 @@ mod tests {
         let newer = format!("{{\"format\":\"{FORMAT}\",\"version\":{}}}", VERSION + 1);
         assert!(matches!(
             Import::from_json(&newer),
-            Err(ParseError::UnsupportedVersion { found: 2 })
+            Err(ParseError::UnsupportedVersion { found: 3 })
         ));
         let zero = format!("{{\"format\":\"{FORMAT}\",\"version\":0}}");
         assert!(matches!(
@@ -636,8 +686,39 @@ mod tests {
         ));
         let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":1,\"itmes\":[]}}");
         assert!(matches!(Import::from_json(&unknown), Err(ParseError::Json(_))));
-        let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":1}}");
+        let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":2}}");
         assert_eq!(Import::from_json(&minimal).unwrap(), Import::new());
+    }
+
+    #[test]
+    fn version_1_names_links_as_it_did_and_version_2_as_it_does() {
+        let read = |version: u32, kind: &str| {
+            Import::from_json(&format!(
+                "{{\"format\":\"{FORMAT}\",\"version\":{version},\"items\":[{{\"key\":\"a\",\"title\":\"A\"}},\
+                 {{\"key\":\"b\",\"title\":\"B\"}}],\"links\":[{{\"from\":\"a\",\"to\":\"b\",\"kind\":\"{kind}\"}}]}}"
+            ))
+        };
+        for (old, new, expected) in [
+            ("blocks", "waits-for", LinkKind::WaitsFor),
+            ("after", "follows", LinkKind::Follows),
+            ("relates", "relates-to", LinkKind::RelatesTo),
+        ] {
+            assert_eq!(read(1, old).unwrap().links[0].kind, expected, "{old}");
+            assert_eq!(read(2, new).unwrap().links[0].kind, expected, "{new}");
+            assert!(matches!(read(2, old), Err(ParseError::Json(_))), "{old} is version 1's");
+        }
+        // A left-out state is the backlog, in either version.
+        assert_eq!(read(2, "waits-for").unwrap().items[0].state, State::Backlog);
+    }
+
+    #[test]
+    fn the_schema_example_is_a_valid_document() {
+        let json: String =
+            SCHEMA.lines().filter(|line| !line.trim_start().starts_with("//")).collect();
+        let example = Import::from_json(&json).unwrap();
+        assert_eq!(example.validate(), vec![]);
+        assert_eq!(example.version, VERSION);
+        assert_eq!(example.items[1].state, State::Backlog);
     }
 
     #[test]
@@ -646,7 +727,7 @@ mod tests {
         import.items.push(item("a", State::Backlog, Some("nowhere")));
         import.items.push(item("", State::Backlog, None));
         import.threads.push(thread("t", &["ghost"]));
-        import.links.push(link("a", "missing", LinkKind::After));
+        import.links.push(link("a", "missing", LinkKind::Follows));
         let errors = import.validate();
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Item, "a".to_owned())));
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Thread, "t".to_owned())));
@@ -678,13 +759,13 @@ mod tests {
     #[test]
     fn hard_and_soft_links_together_must_be_acyclic() {
         let mut import = valid();
-        import.links.push(link("b", "a", LinkKind::After));
+        import.links.push(link("b", "a", LinkKind::Follows));
         assert_eq!(
             import.validate(),
             vec![ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()])]
         );
         import.links.pop();
-        import.links.push(link("a", "a", LinkKind::Relates));
+        import.links.push(link("a", "a", LinkKind::RelatesTo));
         assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
     }
 
@@ -695,11 +776,11 @@ mod tests {
         import.items.push(item("d", State::Backlog, None));
         import.items.push(item("e", State::Backlog, None));
         // a blocks on b already; b after a closes a cycle that c and d only reach.
-        import.links.push(link("b", "a", LinkKind::After));
-        import.links.push(link("c", "a", LinkKind::Blocks));
-        import.links.push(link("a", "e", LinkKind::Blocks));
-        import.links.push(link("d", "e", LinkKind::Blocks));
-        import.links.push(link("e", "d", LinkKind::Blocks));
+        import.links.push(link("b", "a", LinkKind::Follows));
+        import.links.push(link("c", "a", LinkKind::WaitsFor));
+        import.links.push(link("a", "e", LinkKind::WaitsFor));
+        import.links.push(link("d", "e", LinkKind::WaitsFor));
+        import.links.push(link("e", "d", LinkKind::WaitsFor));
         assert_eq!(
             import.validate(),
             vec![
@@ -712,10 +793,10 @@ mod tests {
     #[test]
     fn a_repeated_link_is_refused() {
         let mut import = valid();
-        import.links.push(link("b", "a", LinkKind::Relates));
+        import.links.push(link("b", "a", LinkKind::RelatesTo));
         assert_eq!(
             import.validate(),
-            vec![ValidationError::DuplicateLink(link("b", "a", LinkKind::Relates))]
+            vec![ValidationError::DuplicateLink(link("b", "a", LinkKind::RelatesTo))]
         );
     }
 

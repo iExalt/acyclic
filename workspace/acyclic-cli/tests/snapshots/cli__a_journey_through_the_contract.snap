@@ -55,13 +55,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic link add a2 blocks a1
+$ ACYCLIC_ACTOR=session/mac acyclic link add a2 waits-for a1
 # exit 0
 {
   "data": {
     "changed": true,
     "from": "a2",
-    "kind": "blocks",
+    "kind": "waits-for",
     "to": "a1"
   },
   "ok": true
@@ -661,17 +661,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 
 # stderr
 error: invalid value 'sideways' for '<KIND>'
-  [possible values: blocks, after, relates]
+  [possible values: waits-for, follows, relates-to]
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/mac acyclic link remove a2 blocks a1
+$ ACYCLIC_ACTOR=session/mac acyclic link remove a2 waits-for a1
 # exit 0
 {
   "data": {
     "changed": true,
     "from": "a2",
-    "kind": "blocks",
+    "kind": "waits-for",
     "to": "a1"
   },
   "ok": true
