@@ -109,17 +109,51 @@ fn every_error_has_a_stable_code_and_exit() {
         ApplyError::Invalid(vec![]).into(),
         ApplyError::UserOnly("approved threads".into()).into(),
         ApplyError::Cycles(vec![]).into(),
+        // Raised by the commands themselves.
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
+        CliError::refused("already-done", ""),
+        CliError::refused("incomplete-repository", ""),
         CliError::refused("unwritable", ""),
         CliError::refused("unopenable", ""),
         CliError::refused("no-renderer", ""),
+        CliError::new("not-found", exit::NOT_FOUND, ""),
+        CliError::new("usage", exit::USAGE, ""),
+        CliError::new("invalid-commit", exit::USAGE, ""),
+        CliError::new("invalid-actor", exit::USAGE, ""),
+        CliError::new("user-from-environment", exit::USAGE, ""),
+        CliError::new("config", exit::CONFIG, ""),
+        CliError::new("no-remote", exit::CONFIG, ""),
+        CliError::new("no-server", exit::CONFIG, ""),
     ];
     let mut table = String::new();
-    for error in errors {
+    for error in &errors {
         writeln!(table, "{} {}", error.exit, error.code).unwrap();
     }
     insta::assert_snapshot!(table);
+    // Every code a command can raise is in the table above, so the next one added there must be added here.
+    let known: std::collections::BTreeSet<&str> = errors.iter().map(|error| error.code).collect();
+    let mut scanned = 0;
+    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs", "hints.rs", "page.rs"]
+    {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
+        )
+        .unwrap();
+        let tests = source.find("#[cfg(test)]").unwrap_or(source.len());
+        for call in ["CliError::new(", "CliError::refused("] {
+            for (at, _) in source[..tests].match_indices(call) {
+                let rest = source[at + call.len()..].trim_start();
+                let code = rest.strip_prefix('"').and_then(|r| r.split('"').next());
+                // A code that isn't a literal, such as one passed in, is checked where it is written.
+                if let Some(code) = code {
+                    assert!(known.contains(code), "{file}: {code} is raised but not in the table");
+                    scanned += 1;
+                }
+            }
+        }
+    }
+    assert!(scanned > 10, "the scan found only {scanned} codes");
 }
 
 fn run(line: &str) -> Outcome {
