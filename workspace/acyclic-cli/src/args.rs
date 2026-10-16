@@ -113,8 +113,8 @@ pub enum Command {
     Claim {
         /// The item.
         id: String,
-        /// The lease in minutes: 60 by default, at most 480. A run's claim has none and lives while the run does.
-        #[arg(long)]
+        /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=480))]
         lease: Option<u32>,
         /// Claim even when the item isn't ready.
         #[arg(long)]
@@ -252,6 +252,9 @@ impl Command {
             Self::Show { items } if items.is_empty() => usage("show needs at least one item"),
             Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
                 usage("thread show needs at least one thread")
+            },
+            Self::Claim { lease: Some(lease), .. } if !(1..=480).contains(lease) => {
+                usage("--lease is 1 to 480 minutes")
             },
             Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
                 usage("done takes --repository and --commit together")

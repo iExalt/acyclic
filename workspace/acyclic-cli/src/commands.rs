@@ -252,6 +252,15 @@ impl<'a> Session<'a> {
             Command::Repo(RepoCommand::Set { id, owner, name, public, default_branch }) => self
                 .write(|replica, by| {
                     let key = Key::new(kind::REPOSITORY, id)?;
+                    let exists = replica.state().entity(&key).is_some();
+                    check_new_repository(
+                        id,
+                        exists,
+                        owner.as_ref(),
+                        name.as_ref(),
+                        *public,
+                        default_branch.as_ref(),
+                    )?;
                     set_if(replica, &key, repository::OWNER, owner.as_ref(), by)?;
                     set_if(replica, &key, repository::NAME, name.as_ref(), by)?;
                     set_if(replica, &key, repository::PUBLIC, public.as_ref(), by)?;
@@ -825,6 +834,37 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
         ),
     )
     .with(json!({"missing": missing})))
+}
+
+/// Refuses to create a repository record that lacks a field; editing one may set any subset.
+pub(crate) fn check_new_repository(
+    id: &str,
+    exists: bool,
+    owner: Option<&String>,
+    name: Option<&String>,
+    public: Option<bool>,
+    default_branch: Option<&String>,
+) -> Result<(), CliError> {
+    let missing: Vec<&str> = [
+        ("--owner", owner.is_none()),
+        ("--name", name.is_none()),
+        ("--public", public.is_none()),
+        ("--default-branch", default_branch.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(flag, absent)| absent.then_some(flag))
+    .collect();
+    if exists || missing.is_empty() {
+        return Ok(());
+    }
+    Err(CliError::new(
+        "usage",
+        exit::USAGE,
+        format!(
+            "creating repository {id} needs --owner, --name, --public and --default-branch (missing: {})",
+            missing.join(", ")
+        ),
+    ))
 }
 
 /// Whether recording `evidence` would replace different evidence on an item that is already done.
