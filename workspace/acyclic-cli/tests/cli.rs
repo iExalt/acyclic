@@ -152,6 +152,14 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("thread set t2 --title Follow-ups", AGENT), 0);
     let (code, out) = sh.output("thread add a2 t2", AGENT);
     assert_eq!((code, out["data"]["outcome"].as_str()), (0, Some("applied")), "unapproved scope");
+    // A thread where an item belongs says which command was meant.
+    for (line, meant) in [
+        ("thread add t2 a2", "acyclic thread add a2 t2"),
+        ("item move a2 t2", "acyclic thread add a2 t2"),
+    ] {
+        let (code, out) = sh.output(line, AGENT);
+        assert_eq!((code, out["error"]["details"]["meant"].as_str()), (3, Some(meant)), "{line}");
+    }
     assert_eq!(sh.run("needs", AGENT), 0);
     // Every add offers places for the item; one is kept in full here.
     sh.candidates = true;

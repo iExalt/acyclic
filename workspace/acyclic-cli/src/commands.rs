@@ -142,18 +142,25 @@ impl<'a> Session<'a> {
                 }
                 Ok(json!({"item": id}))
             }),
-            Command::Item(ItemCommand::Move { id, parent }) => self.write(|replica, by| {
-                let key = existing(replica, id)?;
-                let mut inherited = Vec::new();
-                if !holds_only(
-                    replica.state().field(&key, field::PARENT),
-                    parent.as_ref().map(|p| json!(p)),
-                ) {
-                    model::set_parent(replica, id, parent.as_deref(), by)?;
-                    inherited = place::place(replica, std::slice::from_ref(id), by)?;
-                }
-                Ok(with_inherited(json!({"item": id, "parent": parent}), &inherited))
-            }),
+            Command::Item(ItemCommand::Move { id, parent }) => self
+                .write(|replica, by| {
+                    let key = existing(replica, id)?;
+                    let mut inherited = Vec::new();
+                    if !holds_only(
+                        replica.state().field(&key, field::PARENT),
+                        parent.as_ref().map(|p| json!(p)),
+                    ) {
+                        model::set_parent(replica, id, parent.as_deref(), by)?;
+                        inherited = place::place(replica, std::slice::from_ref(id), by)?;
+                    }
+                    Ok(with_inherited(json!({"item": id, "parent": parent}), &inherited))
+                })
+                .map_err(|error| match parent {
+                    Some(parent) => self.misplaced_thread(error, parent, || {
+                        format!("acyclic thread add {id} {parent}")
+                    }),
+                    None => error,
+                }),
             Command::Link(LinkCommand::Add { from, kind, to }) => self.write(|replica, by| {
                 let key = model::link_key(from, to, *kind)?;
                 if replica.state().field(&key, link_field::PRESENT).is_none() {
@@ -217,7 +224,13 @@ impl<'a> Session<'a> {
                     Ok(json!({"thread": id}))
                 })
             },
-            Command::Thread(ThreadCommand::Add { item, thread }) => self.member(item, Some(thread)),
+            Command::Thread(ThreadCommand::Add { item, thread }) => {
+                self.member(item, Some(thread)).map_err(|error| {
+                    self.misplaced_thread(error, item, || {
+                        format!("acyclic thread add {thread} {item}")
+                    })
+                })
+            },
             Command::Thread(ThreadCommand::Remove { item }) => self.member(item, None),
             Command::Repo(RepoCommand::Attach(attachment)) => self.attach(attachment, true),
             Command::Repo(RepoCommand::Detach(attachment)) => self.attach(attachment, false),
@@ -322,6 +335,31 @@ impl<'a> Session<'a> {
                 },
             })
         })
+    }
+
+    /// A missing item that names a thread, as when a command's arguments are swapped, says which command was meant.
+    /// Only a failed command reads the model again, so the check costs a working one nothing.
+    fn misplaced_thread(
+        &self,
+        error: CliError,
+        named: &str,
+        meant: impl FnOnce() -> String,
+    ) -> CliError {
+        if error.code != "not-found" || error.message != format!("no item {named}") {
+            return error;
+        }
+        match self.read() {
+            Ok((_, model)) if model.threads.contains_key(named) => {
+                let meant = meant();
+                CliError::new(
+                    error.code,
+                    error.exit,
+                    format!("{}: {named} is a thread; did you mean `{meant}`?", error.message),
+                )
+                .with(json!({"meant": meant}))
+            },
+            _ => error,
+        }
     }
 
     /// Puts an item in a thread, or takes it out.

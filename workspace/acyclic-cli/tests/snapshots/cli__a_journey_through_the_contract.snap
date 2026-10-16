@@ -693,6 +693,32 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add a2 t2
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t2 a2
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": {
+      "meant": "acyclic thread add a2 t2"
+    },
+    "message": "no item t2: t2 is a thread; did you mean `acyclic thread add a2 t2`?"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item move a2 t2
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": {
+      "meant": "acyclic thread add a2 t2"
+    },
+    "message": "no item t2: t2 is a thread; did you mean `acyclic thread add a2 t2`?"
+  },
+  "ok": false
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic needs
 # exit 0
 {
