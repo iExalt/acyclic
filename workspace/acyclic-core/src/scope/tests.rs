@@ -170,7 +170,7 @@ fn below(tc: &TestCase, n: usize) -> usize {
 /// run and an agent run while the user flips threads' approved and project-management flags and decides proposals.
 /// Joined in any order they converge on one membership, one set of proposals and one needs-you list, and no edit is
 /// lost: each either applied where it was made or exists as a proposal.
-#[hegel::test(test_cases = 128)]
+#[hegel::test(profile = "light")]
 fn apply_or_propose_converges_and_drops_nothing(tc: TestCase) {
     let base = setup();
     let mut replicas: Vec<Replica> = ["a", "b", "c"]

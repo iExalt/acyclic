@@ -34,6 +34,11 @@ depends = ["vendor:graph"]
 env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
+[tasks."check:properties"]
+description = "The core's unit tests with every property test at 20,000 cases (about 40 seconds); not part of any check"
+env = { HEGEL_TEST_CASES = "20000" }
+run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p acyclic-core --lib --locked'''
+
 [tasks."bench:store"]
 description = "Times the binary against trackers of several sizes; not part of any check"
 depends = ["vendor:graph"]

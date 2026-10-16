@@ -423,6 +423,7 @@ enum Step {
     Write { replica: usize, entity: usize, field: usize, value: Option<i64> },
     Join { into: usize, from: usize },
     RunOp { run: usize, entity: usize, field: usize, value: Option<i64>, seen_mask: u8 },
+    Resend { run: usize, back: usize },
 }
 
 fn below(tc: &TestCase, n: usize) -> usize {
@@ -434,11 +435,12 @@ fn value(tc: &TestCase) -> Option<i64> {
     (below(tc, 7) != 0).then(|| tc.draw(gs::integers::<i64>().min_value(0).max_value(4)))
 }
 
-/// Up to 40 random steps, weighted 3:2:2 toward writes over joins and run operations.
+/// Up to 40 random steps, weighted 3:2:2:1 toward writes over joins, run operations and resent operations; a resend
+/// sends a run's operation `back` places before its latest again.
 fn steps(tc: &TestCase) -> Vec<Step> {
     let count = below(tc, 41);
     (0..count)
-        .map(|_| match below(tc, 7) {
+        .map(|_| match below(tc, 8) {
             0..=2 => Step::Write {
                 replica: below(tc, 3),
                 entity: below(tc, 4),
@@ -446,13 +448,14 @@ fn steps(tc: &TestCase) -> Vec<Step> {
                 value: value(tc),
             },
             3 | 4 => Step::Join { into: below(tc, 3), from: below(tc, 3) },
-            _ => Step::RunOp {
+            5 | 6 => Step::RunOp {
                 run: below(tc, 4),
                 entity: below(tc, 4),
                 field: below(tc, 3),
                 value: value(tc),
                 seen_mask: tc.draw(gs::integers::<u8>()),
             },
+            _ => Step::Resend { run: below(tc, 4), back: below(tc, 4) },
         })
         .collect()
 }
@@ -467,20 +470,29 @@ fn play(steps: &[Step]) -> Vec<Replica> {
     play.replicas
 }
 
-/// Three replicas part way through a list of steps.
+/// Three replicas part way through a list of steps. Each step checks what it promises as it goes: a run's operation
+/// replaces exactly the values its run saw, and a resent one changes nothing.
 struct Play {
     replicas: Vec<Replica>,
-    seqs: [u64; 4],
+    /// Each run's operations, in order.
+    sent: [Vec<Op>; 4],
+    /// Every dot each replica's fields have held, so a run can have seen values written over since.
+    held: BTreeMap<(usize, Key, String), BTreeSet<Dot>>,
     at: Millis,
 }
 
 impl Play {
     fn new() -> Self {
-        Self { replicas: REPLICAS.iter().map(|name| replica(name)).collect(), seqs: [0; 4], at: 0 }
+        Self {
+            replicas: REPLICAS.iter().map(|name| replica(name)).collect(),
+            sent: Default::default(),
+            held: BTreeMap::new(),
+            at: 0,
+        }
     }
 
     fn step(&mut self, step: &Step) {
-        let Self { replicas, seqs, at } = self;
+        let Self { replicas, sent, held, at } = self;
         let at = std::mem::replace(at, *at + 1);
         match step {
             Step::Write { replica, entity, field, value } => {
@@ -497,26 +509,60 @@ impl Play {
                 let applier = &mut replicas[run % 3];
                 let item = key("item", &format!("e{entity}"));
                 let field = format!("f{field}");
-                let seen = applier
-                    .state
-                    .field(&item, &field)
+                // A random subset of what the field has held here, current or written over: a stale run's view.
+                let seen = held
+                    .get(&(run % 3, item.clone(), field.clone()))
                     .into_iter()
                     .flatten()
                     .enumerate()
                     .filter(|(i, _)| seen_mask & (1 << (i % 8)) != 0)
-                    .map(|(_, (dot, _))| dot.clone())
+                    .map(|(_, dot)| dot.clone())
+                    .collect::<Vec<_>>();
+                let actor = format!("run/run{run}");
+                // What it didn't see, and didn't write itself, stays beside its value as a conflict.
+                let mut kept: BTreeSet<Dot> = applier
+                    .state
+                    .field(&item, &field)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(dot, stamped)| !seen.contains(dot) && stamped.actor != actor)
+                    .map(|(dot, _)| dot.clone())
                     .collect();
-                seqs[*run] += 1;
                 let op = op(
                     &format!("run{run}"),
-                    seqs[*run],
+                    sent[*run].len() as u64 + 1,
                     &item,
                     &field,
                     value.map(Json::from),
                     seen,
                 );
-                assert!(matches!(applier.apply(&op, at), Ok(Applied::Applied(_))));
+                let Ok(Applied::Applied(dot)) = applier.apply(&op, at) else { panic!("{op:?}") };
+                kept.extend(dot);
+                let now: BTreeSet<Dot> = applier
+                    .state
+                    .field(&item, &field)
+                    .into_iter()
+                    .flatten()
+                    .map(|(d, _)| d.clone())
+                    .collect();
+                assert_eq!(now, kept, "an operation replaces exactly what its run saw");
+                sent[*run].push(op);
             },
+            Step::Resend { run, back } => {
+                let Some(op) = sent[*run].iter().rev().nth(*back) else { return };
+                let applier = &mut replicas[run % 3];
+                let before = applier.state.clone();
+                assert_eq!(applier.apply(op, at), Ok(Applied::Duplicate));
+                assert_eq!(applier.state, before, "a resent operation changes nothing");
+            },
+        }
+        for (index, replica) in replicas.iter().enumerate() {
+            for (key, entity) in replica.state.entities() {
+                for (field, register) in entity {
+                    let dots = held.entry((index, key.clone(), field.clone())).or_default();
+                    dots.extend(register.keys().cloned());
+                }
+            }
         }
     }
 }
@@ -530,7 +576,7 @@ fn joined(states: &[&State]) -> State {
 }
 
 /// P1: random writes and stale run operations across three replicas converge in any join order.
-#[hegel::test(test_cases = 256)]
+#[hegel::test]
 fn replicas_converge_in_any_join_order(tc: TestCase) {
     let replicas = play(&steps(&tc));
     let order = tc.draw(gs::permutations(vec![0usize, 1, 2]));
@@ -560,7 +606,7 @@ fn replicas_converge_in_any_join_order(tc: TestCase) {
 }
 
 /// P2: the join is commutative, associative and idempotent.
-#[hegel::test(test_cases = 256)]
+#[hegel::test]
 fn join_is_a_semilattice(tc: TestCase) {
     let replicas = play(&steps(&tc));
     let (a, b, c) = (&replicas[0].state, &replicas[1].state, &replicas[2].state);
@@ -570,7 +616,7 @@ fn join_is_a_semilattice(tc: TestCase) {
 }
 
 /// The changed files between any two states turn one's files into the other's.
-#[hegel::test(test_cases = 256)]
+#[hegel::test]
 fn changed_files_turn_one_states_files_into_anothers(tc: TestCase) {
     let replicas = play(&steps(&tc));
     let (before, after) = (&replicas[below(&tc, 3)].state, &replicas[below(&tc, 3)].state);
@@ -587,7 +633,7 @@ fn changed_files_turn_one_states_files_into_anothers(tc: TestCase) {
 /// A journal started part way through any steps records exactly what changed: its files are the whole-state
 /// comparison's, swapping turns the state back into the earlier one and forward again, and the replica's change
 /// counter moved whenever an entity changed.
-#[hegel::test(test_cases = 256)]
+#[hegel::test]
 fn a_journal_records_exactly_what_changed(tc: TestCase) {
     let (first, then) = (steps(&tc), steps(&tc));
     let mut play = Play::new();
@@ -615,7 +661,7 @@ fn a_journal_records_exactly_what_changed(tc: TestCase) {
 }
 
 /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.
-#[hegel::test(test_cases = 256)]
+#[hegel::test]
 fn claim_winners_agree(tc: TestCase) {
     let start = || tc.draw(gs::integers::<i64>().min_value(0).max_value(999));
     let lease = || tc.draw(gs::optional(gs::integers::<i64>().min_value(1).max_value(1_999)));

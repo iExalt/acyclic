@@ -779,6 +779,12 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     mac.squash().unwrap();
     write(&mac, "x1", "f", json!(3));
     assert!(mac.sync(url).unwrap().pushed > 0);
+    // A replica that joined the old history joins the squashed one, and one that only ever saw the squash agrees.
+    assert!(fresh.sync(url).unwrap().joined);
+    assert_eq!(entities(&fresh), entities(&mac), "converged across the squash");
+    let (late, _) = Tracker::open(&tracker(&dir, "late")).unwrap();
+    late.sync(url).unwrap();
+    assert_eq!(entities(&late), entities(&fresh), "a squashed tip joins like its history");
 }
 
 /// The state refs a clone fetched, with their tips.
