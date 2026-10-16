@@ -5,27 +5,31 @@ use std::path::PathBuf;
 use acyclic_core::model::{ItemState, Level, LinkKind, Size};
 use std::fmt::Write as _;
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{CommandFactory, Parser, Subcommand};
 
 pub use crate::page::Renderer;
 use serde::Deserialize;
 
 use crate::error::{CliError, exit};
-use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+/// The heading the options that every command takes sit under in its help.
+const GLOBAL_OPTIONS: &str = "Global options";
 
 /// The acyclic tracker. Every command that runs prints one JSON document.
 #[derive(Debug, Parser)]
-#[command(name = "acyclic", version, disable_help_subcommand = true, arg_required_else_help = true)]
+#[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
     /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in
     /// ~/.config/acyclic/trackers.toml.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = GLOBAL_OPTIONS)]
     pub tracker: Option<PathBuf>,
     /// Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = GLOBAL_OPTIONS)]
     pub actor: Option<String>,
     /// Act as the user.
-    #[arg(long, global = true, conflicts_with = "actor")]
+    #[arg(long, global = true, conflicts_with = "actor", help_heading = GLOBAL_OPTIONS)]
     pub as_user: bool,
     /// The command.
     #[command(subcommand)]
@@ -41,9 +45,10 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
 
 /// The command line, with its top-level help in [`SECTIONS`] rather than one list.
 pub fn command() -> clap::Command {
-    let command = Cli::command();
+    let mut command = Cli::command();
+    command.build();
     let width = command.get_subcommands().map(|c| c.get_name().len()).max().unwrap_or(0);
-    let mut template = String::from("{about-with-newline}\n{usage-heading} {usage}\n");
+    let mut template = String::from("{about-with-newline}\nUsage: acyclic [OPTIONS] <COMMAND>\n");
     for (heading, names) in SECTIONS {
         write!(template, "\n{heading}:\n").expect("a String takes writes");
         for name in names {
@@ -55,15 +60,36 @@ pub fn command() -> clap::Command {
             writeln!(template, "  {name:width$}  {about}").expect("a String takes writes");
         }
     }
-    template.push_str("\nOptions:\n{options}\n\nRun 'acyclic <command> --help' for more information on a command.\n");
-    command.help_template(template)
+    template.push_str(
+        "\n{all-args}\n\nRun 'acyclic help <command>' for more information on a command.\n",
+    );
+    // The sections list the commands, so clap's own list is left out.
+    command.mut_subcommands(|sub| sub.hide(true)).help_template(template)
 }
 
-/// Parses a kebab-case name into one of the model's enums.
-fn kebab<T: DeserializeOwned>(text: &str) -> Result<T, String> {
-    serde_json::from_value(serde_json::Value::String(text.to_owned()))
-        .map_err(|_| format!("unknown value {text:?}"))
+/// The name serde gives a value of one of the model's enums: kebab-case.
+fn name<T: Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(name)) => name,
+        other => unreachable!("an enum serializes as its name, not {other:?}"),
+    }
 }
+
+/// A parser for one of the model's enums that takes each of `all` by its kebab-case name, lists them in help, and
+/// names them when a value isn't one.
+fn values<T>(all: &'static [T]) -> impl TypedValueParser<Value = T>
+where
+    T: Serialize + Clone + Send + Sync + 'static,
+{
+    let names: Vec<String> = all.iter().map(name).collect();
+    PossibleValuesParser::new(names.clone()).map(move |chosen| {
+        let at = names.iter().position(|name| *name == chosen).expect("the parser checked it");
+        all[at].clone()
+    })
+}
+
+/// The longest lease, in minutes.
+pub const LEASE_MAX_MINUTES: u32 = 480;
 
 /// The commands: the ones every session uses at the top, the rest grouped by what they act on.
 #[derive(Debug, Subcommand, Deserialize)]
@@ -114,7 +140,7 @@ pub enum Command {
         /// The item.
         id: String,
         /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=480))]
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=i64::from(LEASE_MAX_MINUTES)))]
         lease: Option<u32>,
         /// Claim even when the item isn't ready.
         #[arg(long)]
@@ -148,8 +174,8 @@ pub enum Command {
     Needs,
     /// Sets the autonomy level, globally or for a thread (the user's).
     Level {
-        /// `everything`, `scope-and-irreversible` or `blockers`.
-        #[arg(value_parser = kebab::<Level>)]
+        /// The level.
+        #[arg(value_parser = values(&Level::ALL))]
         level: Level,
         /// The thread; none sets the global level.
         #[arg(long)]
@@ -253,8 +279,8 @@ impl Command {
             Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
                 usage("thread show needs at least one thread")
             },
-            Self::Claim { lease: Some(lease), .. } if !(1..=480).contains(lease) => {
-                usage("--lease is 1 to 480 minutes")
+            Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
+                usage(&format!("--lease is 1 to {LEASE_MAX_MINUTES} minutes"))
             },
             Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
                 usage("done takes --repository and --commit together")
@@ -310,7 +336,7 @@ pub enum ItemCommand {
         #[arg(long)]
         gate: Option<String>,
         /// A new size.
-        #[arg(long, value_parser = kebab::<Size>)]
+        #[arg(long, value_parser = values(&Size::ALL))]
         size: Option<Size>,
         /// Areas to add.
         #[arg(long)]
@@ -340,8 +366,8 @@ pub enum ItemCommand {
     State {
         /// The item.
         id: String,
-        /// `backlog`, `parked` or `in-progress`.
-        #[arg(value_parser = kebab::<ItemState>)]
+        /// The state: not `done`, which `acyclic done` sets.
+        #[arg(value_parser = values(&[ItemState::Backlog, ItemState::Parked, ItemState::InProgress]))]
         state: ItemState,
     },
     /// Reopens a done item.
@@ -365,7 +391,7 @@ pub enum LinkCommand {
         /// The dependent item.
         from: String,
         /// `blocks`, `after` or `relates`.
-        #[arg(value_parser = kebab::<LinkKind>)]
+        #[arg(value_parser = values(&LinkKind::ALL))]
         kind: LinkKind,
         /// The item it depends on.
         to: String,
@@ -375,7 +401,7 @@ pub enum LinkCommand {
         /// The dependent item.
         from: String,
         /// `blocks`, `after` or `relates`.
-        #[arg(value_parser = kebab::<LinkKind>)]
+        #[arg(value_parser = values(&LinkKind::ALL))]
         kind: LinkKind,
         /// The item it depends on.
         to: String,

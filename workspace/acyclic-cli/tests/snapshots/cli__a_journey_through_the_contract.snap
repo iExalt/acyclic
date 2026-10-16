@@ -126,14 +126,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a2
 
 $ ACYCLIC_ACTOR=session/mac acyclic item state a2 done
 # exit 2
-{
-  "error": {
-    "code": "usage",
-    "details": null,
-    "message": "finish an item with acyclic done, which records its evidence and releases its claim"
-  },
-  "ok": false
-}
+
+# stderr
+error: invalid value 'done' for '<STATE>'
+  [possible values: backlog, parked, in-progress]
+
+For more information, try '--help'.
 
 $ ACYCLIC_ACTOR=session/mac acyclic claim a1
 # exit 0
@@ -662,7 +660,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 # exit 2
 
 # stderr
-error: invalid value 'sideways' for '<KIND>': unknown value "sideways"
+error: invalid value 'sideways' for '<KIND>'
+  [possible values: blocks, after, relates]
 
 For more information, try '--help'.
 

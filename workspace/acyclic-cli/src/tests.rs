@@ -142,10 +142,20 @@ fn usage_errors_and_help_are_text() {
     let help = run("acyclic --help");
     assert_eq!(help.code, exit::OK);
     insta::assert_snapshot!(help.stdout);
-    // A bare command or group prints its help.
+    // A bare command or group prints its help, and so does `help`, with the global options under their own heading.
     assert_eq!(run("acyclic"), help);
-    let out = run("acyclic item");
-    assert_eq!((out.code, out.stdout.starts_with("Adds, edits")), (exit::OK, true), "{out:?}");
+    assert_eq!(run("acyclic help"), help);
+    let item = run("acyclic item");
+    assert_eq!(run("acyclic help item"), item);
+    let edit = run("acyclic help item edit");
+    assert_eq!(edit, run("acyclic item edit --help"));
+    assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
+    assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
+    // An enum-valued input lists its values in help, and a wrong one names them.
+    assert!(edit.stdout.contains("[possible values: xs, s, m, l, xl]"), "{edit:?}");
+    let wrong = run("acyclic item edit a --size huge");
+    assert_eq!(wrong.code, exit::USAGE);
+    assert!(wrong.stderr.contains("[possible values: xs, s, m, l, xl]"), "{wrong:?}");
 }
 
 #[test]
@@ -154,7 +164,11 @@ fn the_help_sections_hold_every_command_once() {
         args::SECTIONS.iter().flat_map(|(_, names)| names.iter().copied()).collect();
     named.sort_unstable();
     let command = args::command();
-    let mut commands: Vec<&str> = command.get_subcommands().map(clap::Command::get_name).collect();
+    let mut commands: Vec<&str> = command
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .filter(|name| *name != "help")
+        .collect();
     commands.sort_unstable();
     assert_eq!(named, commands);
 }
@@ -306,7 +320,8 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
 /// <argument>`. Deserializing already refuses a missing field that isn't optional or a list. Argument groups aren't
 /// walked: the command line has none.
 fn constrained(command: &clap::Command, path: &str, found: &mut Vec<String>) {
-    for arg in command.get_arguments() {
+    // The global options are checked once, by `actor`.
+    for arg in command.get_arguments().filter(|arg| !arg.is_global_set()) {
         let debug = format!("{arg:?}");
         let constrained = (arg.is_required_set()
             && matches!(arg.get_action(), clap::ArgAction::Append))
