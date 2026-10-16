@@ -81,19 +81,34 @@ fn costs_are_exact_and_reasoning_is_part_of_output() {
         10,
         "m",
         &json!({"input": 1_000_000, "output": 1, "reasoning": 1, "cache_read": 2, "cache_write_5m": 3,
-               "cache_write_1h": 4, "audio": 9}),
+                "cache_write_1h": 4, "audio": 0}),
     );
     // $3 for a million input tokens, $0.000000075 for one output token, and the cache classes at their own rates;
-    // the reasoning token is already in output, and an unknown class isn't priced.
+    // the reasoning token is already in output.
     assert_eq!(prices.cost(&call), Some(3 * DOLLAR + 75_000 + 2 * 30 + 3 * 50 + 4 * 70));
-    // A model the table doesn't name, or a call before its first rate, is unpriced rather than free.
+}
+
+#[test]
+fn what_the_table_cant_price_in_full_is_unpriced_never_free() {
+    let prices = Prices { version: 1, rates: vec![rate("m", 0, 3_000_000, 75_000)] };
+    let call = priced("a", 10, "m", &json!({"input": 1}));
+    assert!(prices.cost(&call).is_some());
+    // A model the table doesn't name, or a call before its first rate.
     assert_eq!(prices.cost(&priced("b", 10, "other", &json!({"input": 1}))), None);
     let later = Prices { version: 1, rates: vec![rate("m", 11, 3_000_000, 75_000)] };
     assert_eq!(later.cost(&call), None);
-    let totals =
-        totals([&call, &priced("b", 10, "other", &json!({}))], &prices, |r| r.model.clone());
-    assert_eq!(totals.unpriced, BTreeMap::from([("other".to_owned(), 1)]));
-    assert_eq!(totals.cost.len(), 1);
+    // Tokens of a class this version doesn't know, or a price dimension the rates don't distinguish.
+    assert_eq!(prices.cost(&priced("c", 10, "m", &json!({"input": 1, "audio": 9}))), None);
+    let mut tiered = call.clone();
+    tiered.dimensions.insert("service_tier".into(), "priority".into());
+    assert_eq!(prices.cost(&tiered), None);
+    // Totals keep them apart, and count calls whose usage never arrived, priced or not.
+    let mut missing = call.clone();
+    missing.usage_missing = true;
+    let totals = totals([&call, &tiered, &missing], &prices, |r| r.model.clone());
+    assert_eq!(totals.cost.get("m"), Some(&(2 * 3_000_000)));
+    assert_eq!(totals.unpriced, BTreeMap::from([("m".to_owned(), 1)]));
+    assert_eq!(totals.incomplete, BTreeMap::from([("m".to_owned(), 1)]));
 }
 
 #[test]

@@ -173,7 +173,8 @@ pub struct Prices {
 }
 
 impl Prices {
-    /// The rate for a call: its provider's and model's latest to start at or before the call.
+    /// The rate for a call: its provider's and model's latest to start at or before the call, and of two starting
+    /// together, the later in the table.
     #[must_use]
     pub fn rate(&self, record: &Record) -> Option<&Rate> {
         self.rates
@@ -186,10 +187,15 @@ impl Prices {
             .max_by_key(|rate| rate.from)
     }
 
-    /// A call's cost at its rate, or `None` when the table has no rate for it. Reasoning is part of output, so it
-    /// isn't priced again, and token classes this version doesn't know aren't priced.
+    /// A call's cost at its rate, or `None` when the table can't price all of it: no rate for it, a price
+    /// dimension such as a service tier (rates don't distinguish them yet), or tokens of a class this version doesn't
+    /// know. Reasoning is part of output, so it isn't priced again.
     #[must_use]
     pub fn cost(&self, record: &Record) -> Option<Picos> {
+        let unknown = record.tokens.extra.values().any(|count| count.as_u64() != Some(0));
+        if unknown || !record.dimensions.is_empty() {
+            return None;
+        }
         let rates = self.rate(record)?.per_mtok;
         let tokens = &record.tokens;
         Some(
@@ -216,6 +222,8 @@ pub struct Totals {
     pub cost: BTreeMap<String, Picos>,
     /// The calls the table couldn't price, by key: never counted as free.
     pub unpriced: BTreeMap<String, usize>,
+    /// The calls that ended without reporting their usage, by key, priced or not: their cost is a lower bound.
+    pub incomplete: BTreeMap<String, usize>,
 }
 
 /// Prices every record and sums the costs by `key`.
@@ -226,6 +234,9 @@ pub fn totals<'a>(
 ) -> Totals {
     let mut totals = Totals { version: prices.version, ..Totals::default() };
     for record in records {
+        if record.usage_missing {
+            *totals.incomplete.entry(key(record)).or_default() += 1;
+        }
         match prices.cost(record) {
             Some(cost) => *totals.cost.entry(key(record)).or_default() += cost,
             None => *totals.unpriced.entry(key(record)).or_default() += 1,
