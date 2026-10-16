@@ -399,3 +399,49 @@ fn only_the_user_sets_a_threads_approval_flags_and_the_global_settings() {
         Err(WriteError::Checked { .. })
     ));
 }
+
+/// A name for each variant, written as an exhaustive `match` so that adding a variant fails to compile here until
+/// it is listed in its enum's `ALL`.
+fn listed_in_all() {
+    for state in ItemState::ALL {
+        match state {
+            ItemState::Backlog | ItemState::Parked | ItemState::InProgress | ItemState::Done => {},
+        }
+    }
+    for size in Size::ALL {
+        match size {
+            Size::Xs | Size::S | Size::M | Size::L | Size::Xl => {},
+        }
+    }
+    for level in Level::ALL {
+        match level {
+            Level::Everything | Level::ScopeAndIrreversible | Level::Blockers => {},
+        }
+    }
+    for kind in LinkKind::ALL {
+        match kind {
+            LinkKind::Blocks | LinkKind::After | LinkKind::Relates => {},
+        }
+    }
+}
+
+fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
+    all: &[T],
+) -> Vec<String> {
+    all.iter()
+        .map(|value| {
+            let name = serde_json::to_value(value).unwrap();
+            assert_eq!(&serde_json::from_value::<T>(name.clone()).unwrap(), value);
+            name.as_str().unwrap().to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
+    listed_in_all();
+    assert_eq!(names(&ItemState::ALL), ["backlog", "parked", "in-progress", "done"]);
+    assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
+    assert_eq!(names(&LinkKind::ALL), ["blocks", "after", "relates"]);
+    assert_eq!(names(&Level::ALL), ["everything", "scope-and-irreversible", "blockers"]);
+}

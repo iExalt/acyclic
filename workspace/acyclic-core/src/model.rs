@@ -87,6 +87,11 @@ pub enum ItemState {
     Done,
 }
 
+impl ItemState {
+    /// Every state, in order.
+    pub const ALL: [Self; 4] = [Self::Backlog, Self::Parked, Self::InProgress, Self::Done];
+}
+
 /// A rough size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -101,6 +106,11 @@ pub enum Size {
     L,
     /// Extra large.
     Xl,
+}
+
+impl Size {
+    /// Every size, smallest first.
+    pub const ALL: [Self; 5] = [Self::Xs, Self::S, Self::M, Self::L, Self::Xl];
 }
 
 /// What shows a done item was done.
@@ -131,6 +141,9 @@ pub enum LinkKind {
 }
 
 impl LinkKind {
+    /// Every kind.
+    pub const ALL: [Self; 3] = [Self::Blocks, Self::After, Self::Relates];
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Blocks => "blocks",
@@ -178,6 +191,11 @@ pub enum Level {
     ScopeAndIrreversible,
     /// Ask only about blockers: the default.
     Blockers,
+}
+
+impl Level {
+    /// Every level, most talkative first.
+    pub const ALL: [Self; 3] = [Self::Everything, Self::ScopeAndIrreversible, Self::Blockers];
 }
 
 /// What reopening recorded on an item.

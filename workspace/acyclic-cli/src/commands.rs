@@ -25,8 +25,8 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Attachment, Cli, Command, GraphFormat, ItemCommand, LinkCommand, ProposalCommand, Renderer,
-    RepoCommand, ThreadCommand,
+    Attachment, Cli, Command, GraphFormat, ItemCommand, LEASE_MAX_MINUTES, LinkCommand,
+    ProposalCommand, Renderer, RepoCommand, ThreadCommand,
 };
 use crate::context;
 use crate::error::{CliError, exit};
@@ -44,7 +44,7 @@ const MINUTE: Millis = 60 * 1000;
 /// The default time lease.
 const LEASE: Millis = 60 * MINUTE;
 /// The longest time lease.
-const MAX_LEASE: Millis = 8 * LEASE;
+const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
