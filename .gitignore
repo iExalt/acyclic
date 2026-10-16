@@ -25,3 +25,6 @@ target
 
 # The graph page's renderers, fetched by scripts/vendor-graph.sh and never committed
 /workspace/acyclic-cli/assets/graph/
+
+# rumdl's lint cache
+.rumdl_cache/

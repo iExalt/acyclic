@@ -1,0 +1,22 @@
+# rumdl settings for acyclic's Markdown. Format, then lint:
+#   mise exec -- rumdl fmt
+#   mise exec -- rumdl check
+
+[global]
+# The docs render on GitHub.
+flavor = "gfm"
+line-length = 120
+# A bold label ahead of a table is house style, not a missing heading.
+disable = ["MD036"]
+
+[per-file-ignores]
+# CLAUDE.md is a one-line `@AGENTS.md` import, not a document.
+"CLAUDE.md" = ["MD041"]
+
+[MD013]
+line-length = 120
+# Commands and diagrams in code blocks can't be rewrapped.
+code-blocks = false
+# Rewrap only the paragraphs that overflow; leave the rest of the wrapping alone.
+reflow = true
+reflow-mode = "default"

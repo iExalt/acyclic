@@ -1,9 +1,9 @@
 # Third-party code
 
 `acyclic graph --format html` (and `--open`) writes a page that embeds one of two renderers. Neither is in this
-repository: `mise run vendor:graph` (`scripts/vendor-graph.sh`) fetches them, pinned in `scripts/vendor-graph.pins`, from npm into
-`workspace/acyclic-cli/assets/graph/`, refusing any file whose SHA-256 differs from its pin below, and the build embeds
-them in the binary. Each page carries a notice naming the renderer's licences and sources.
+repository: `mise run vendor:graph` (`scripts/vendor-graph.sh`) fetches them, pinned in `scripts/vendor-graph.pins`,
+from npm into `workspace/acyclic-cli/assets/graph/`, refusing any file whose SHA-256 differs from its pin below, and the
+build embeds them in the binary. Each page carries a notice naming the renderer's licences and sources.
 
 ## Graphviz, through @hpcc-js/wasm-graphviz
 

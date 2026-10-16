@@ -48,6 +48,7 @@ older copy.
    add`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
    its parent passes down, or else the one its siblings share; an add, move or import reports it as `inherited`.
 7. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
-   joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent.
-   Run it before reading what another machine wrote and after writing what one should see. With `git config acyclic.pushAfterWrite true` in the tracker clone, every write pushes too and reports
-   `push`; a push that fails leaves the write in place and shows in `acyclic needs` until a sync.
+   joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
+   it before reading what another machine wrote and after writing what one should see. With
+   `git config acyclic.pushAfterWrite true` in the tracker clone, every write pushes too and reports `push`; a push that
+   fails leaves the write in place and shows in `acyclic needs` until a sync.
