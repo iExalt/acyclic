@@ -364,3 +364,21 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     );
     assert!(serde_json::from_value::<args::Command>(json!({"serve": {"login": "x"}})).is_err());
 }
+
+#[test]
+fn a_closed_pipe_is_an_error_to_return_not_a_panic() {
+    struct Closed;
+    impl std::io::Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let err = emit(&mut Closed, "text").unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+    let mut ok = Vec::new();
+    emit(&mut ok, "text").unwrap();
+    assert_eq!(ok, b"text");
+}
