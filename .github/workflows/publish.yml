@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       ref: refs/tags/${{ inputs.tag || github.ref_name }}
-      rehearse: false
+      skip-rehearsal: true
 
   release:
     name: release

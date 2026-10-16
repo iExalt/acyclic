@@ -26,10 +26,10 @@ on:
         description: The commit or tag to build
         type: string
         required: true
-      rehearse:
-        description: Rehearse publishing the image
+      skip-rehearsal:
+        description: Skip rehearsing the image's publication
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -131,8 +131,8 @@ jobs:
 
   rehearse:
     name: rehearse publishing
-    # Outside a call `inputs.rehearse` is empty, so pull requests and pushes rehearse.
-    if: ${{ inputs.rehearse != false }}
+    # Outside a call the input is null, and `!null` is true, so pull requests and pushes rehearse.
+    if: ${{ !inputs.skip-rehearsal }}
     needs: image
     runs-on: ubuntu-24.04
     services:
@@ -163,17 +163,17 @@ jobs:
   # passing, so this fails unless every job succeeded, or the rehearsal was skipped because the caller asked.
   ok:
     name: build ok
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [build, image, rehearse]
     runs-on: ubuntu-24.04
     env:
       BUILD: ${{ needs.build.result }}
       IMAGE: ${{ needs.image.result }}
       REHEARSE: ${{ needs.rehearse.result }}
-      REHEARSAL_WANTED: ${{ inputs.rehearse != false }}
+      SKIP_REHEARSAL: ${{ inputs.skip-rehearsal == true }}
     steps:
       - run: |
           echo "build: $BUILD, image: $IMAGE, rehearse: $REHEARSE"
           test "$BUILD" = success
           test "$IMAGE" = success
-          test "$REHEARSE" = success || { test "$REHEARSAL_WANTED" = false && test "$REHEARSE" = skipped; }
+          test "$REHEARSE" = success || { test "$SKIP_REHEARSAL" = true && test "$REHEARSE" = skipped; }
