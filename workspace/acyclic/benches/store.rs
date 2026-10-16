@@ -222,7 +222,8 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     let plain: Vec<Sample> = (0..runs)
         .map(|n| {
             tops.push(tracker.time(&format!("item add goal-{n} --title Goal"), false));
-            tracker.run(&format!("thread add goal-{n} bench-{n}"), false);
+            tracker.run(&format!("thread add bench-{n} --title Bench"), false);
+            tracker.run(&format!("item edit goal-{n} --thread bench-{n}"), false);
             let line = format!("item add goal-{n}-leaf --title Leaf --parent goal-{n}");
             let (out, plain) = tracker.run(&line, false);
             assert!(

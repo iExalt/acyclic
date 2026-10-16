@@ -74,8 +74,8 @@ def small_tracker(directory):
         )
     acyclic(tracker, "link", "add", "paint", "waits-for", "buy")
     acyclic(tracker, "link", "add", "paint", "relates", "tiles")
-    acyclic(tracker, "thread", "set", "kitchen", "--title", "Kitchen </script>")
-    acyclic(tracker, "thread", "add", "paint", "kitchen")
+    acyclic(tracker, "thread", "add", "kitchen", "--title", "Kitchen </script>")
+    acyclic(tracker, "item", "edit", "paint", "--thread", "kitchen")
     return tracker
 
 

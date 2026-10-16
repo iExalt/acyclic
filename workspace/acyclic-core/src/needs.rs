@@ -226,8 +226,8 @@ pub fn needs_you(
     }
     for found in scope::unapproved(state, model)? {
         entries.insert(Entry::Unapproved {
-            keep: format!("acyclic thread add {} {}", found.item, found.thread),
-            drop: format!("acyclic thread remove {}", found.item),
+            keep: format!("acyclic item edit {} --thread {}", found.item, found.thread),
+            drop: format!("acyclic item edit {} --no-thread", found.item),
             item: found.item,
             thread: found.thread,
             actor: found.actor,

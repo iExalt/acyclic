@@ -131,14 +131,14 @@ pub enum Command {
     /// Shows items with their role, readiness and claims, as an array in the order given.
     Show {
         /// The items.
-        #[arg(required = true)]
+        #[arg(required = true, value_name = "ITEM")]
         #[serde(default)]
         items: Vec<String>,
     },
     /// Claims a ready leaf, or renews the actor's claim.
     Claim {
         /// The item.
-        id: String,
+        item: String,
         /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=i64::from(LEASE_MAX_MINUTES)))]
         lease: Option<u32>,
@@ -150,12 +150,12 @@ pub enum Command {
     /// Releases the actor's claim on an item, leaving anyone else's.
     Release {
         /// The item.
-        id: String,
+        item: String,
     },
     /// Marks an item done, with evidence, and releases the actor's claim on it.
     Done {
         /// The item.
-        id: String,
+        item: String,
         /// The repository record holding the commit.
         #[arg(long, requires = "commit")]
         repository: Option<String>,
@@ -172,14 +172,11 @@ pub enum Command {
     },
     /// Lists what needs the user.
     Needs,
-    /// Sets the autonomy level, globally or for a thread (the user's).
+    /// Prints the autonomy levels, or with a level sets the global one (the user's).
     Level {
-        /// The level.
+        /// The global level to set; none prints it and every thread's own.
         #[arg(value_parser = values(&Level::ALL))]
-        level: Level,
-        /// The thread; none sets the global level.
-        #[arg(long)]
-        thread: Option<String>,
+        level: Option<Level>,
     },
     /// Imports a plan: adds and updates what the document names, and never deletes. `--schema` prints an
     /// annotated example of the document.
@@ -224,19 +221,19 @@ pub enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Adds, edits, moves, reopens or archives items, or sets their state.
+    /// Adds and edits items, and reopens or archives them.
     #[command(subcommand)]
     Item(ItemCommand),
     /// Adds or removes links between items.
     #[command(subcommand)]
     Link(LinkCommand),
-    /// Creates or edits threads, and puts items in them; agents' edits to approved threads wait as proposals.
+    /// Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals.
     #[command(subcommand)]
     Thread(ThreadCommand),
-    /// Creates or edits repository records, and attaches them to items or threads.
+    /// Adds, edits, lists and shows repository records.
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// Keeps or drops proposals (the user's).
+    /// Shows proposals, and keeps or drops them (the user's).
     #[command(subcommand)]
     Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
@@ -271,37 +268,66 @@ pub struct Serve {
     pub sync_every: u64,
 }
 
+/// A usage error.
+fn usage(message: impl Into<String>) -> CliError {
+    CliError::new("usage", exit::USAGE, message)
+}
+
+/// Refuses a flag and the one that clears it, given together.
+fn clears(flag: &str, set: bool, clear: bool) -> Result<(), CliError> {
+    if set && clear {
+        return Err(usage(format!("--{flag} and --no-{flag} contradict each other")));
+    }
+    Ok(())
+}
+
+/// Refuses a set-valued flag and the one that removes from it, naming the same element.
+fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliError> {
+    match add.iter().find(|name| remove.contains(name)) {
+        Some(name) => Err(usage(format!("--{flag} and --no-{flag} both name {name}"))),
+        None => Ok(()),
+    }
+}
+
 impl Command {
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
-    /// that require or exclude each other.
+    /// that require or exclude each other, and the flags that clear what another sets.
     ///
     /// # Errors
     ///
     /// A usage error naming the missing or clashing arguments.
     pub fn validate(&self) -> Result<(), CliError> {
-        let usage = |message: &str| Err(CliError::new("usage", exit::USAGE, message));
         match self {
-            Self::Show { items } if items.is_empty() => usage("show needs at least one item"),
+            Self::Show { items } if items.is_empty() => Err(usage("show needs at least one item")),
             Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
-                usage("thread show needs at least one thread")
+                Err(usage("thread show needs at least one thread"))
+            },
+            Self::Repo(RepoCommand::Show { repositories }) if repositories.is_empty() => {
+                Err(usage("repo show needs at least one repository"))
+            },
+            Self::Proposal(ProposalCommand::Show { proposals }) if proposals.is_empty() => {
+                Err(usage("proposal show needs at least one proposal"))
             },
             Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
-                usage(&format!("--lease is 1 to {LEASE_MAX_MINUTES} minutes"))
+                Err(usage(format!("--lease is 1 to {LEASE_MAX_MINUTES} minutes")))
+            },
+            Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
+                Err(usage("done takes --repository and --commit together"))
             },
             Self::Import { file: None, schema: false, .. } => {
-                usage("import needs a file, or --schema for an example of one")
+                Err(usage("import needs a file, or --schema for an example of one"))
             },
             Self::Import { file: Some(_), schema: true, .. }
             | Self::Import { dry_run: true, schema: true, .. } => {
-                usage("--schema prints an example: it takes no file and no --dry-run")
+                Err(usage("--schema prints an example: it takes no file and no --dry-run"))
             },
-            Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
-                usage("done takes --repository and --commit together")
+            Self::Item(ItemCommand::Edit(edit)) => edit.validate(),
+            Self::Thread(ThreadCommand::Edit(edit)) => edit.validate(),
+            Self::Repo(RepoCommand::Add { public, private, .. }) if public == private => {
+                Err(usage("a repository is --public or --private: pass one"))
             },
-            Self::Repo(RepoCommand::Attach(attachment) | RepoCommand::Detach(attachment))
-                if attachment.item.is_some() == attachment.thread.is_some() =>
-            {
-                usage("name either an item or a thread")
+            Self::Repo(RepoCommand::Edit { public: true, private: true, .. }) => {
+                Err(usage("--public and --private contradict each other"))
             },
             _ => Ok(()),
         }
@@ -320,79 +346,174 @@ pub enum GraphFormat {
     Html,
 }
 
+/// The states a command may set: not `done`, which `acyclic done` sets with its evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StateWord {
+    /// Not started.
+    Backlog,
+    /// Set aside on purpose.
+    Parked,
+    /// Being worked on.
+    InProgress,
+}
+
+impl StateWord {
+    /// Every state a command may set.
+    pub const ALL: [Self; 3] = [Self::Backlog, Self::Parked, Self::InProgress];
+
+    /// The model's state for the word.
+    #[must_use]
+    pub fn state(self) -> ItemState {
+        match self {
+            Self::Backlog => ItemState::Backlog,
+            Self::Parked => ItemState::Parked,
+            Self::InProgress => ItemState::InProgress,
+        }
+    }
+}
+
 /// The item commands.
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ItemCommand {
-    /// Adds an item.
+    /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused.
     Add {
-        /// The new item's id.
-        id: String,
+        /// The new item.
+        item: String,
         /// Its title.
         #[arg(long)]
         title: String,
         /// Its parent.
         #[arg(long)]
         parent: Option<String>,
-    },
-    /// Edits an item's plain fields and sets.
-    Edit {
-        /// The item.
-        id: String,
-        /// A new title.
+        /// Its thread.
         #[arg(long)]
-        title: Option<String>,
-        /// New notes.
+        thread: Option<String>,
+        /// Its state; backlog by default.
+        #[arg(long, value_parser = values(&StateWord::ALL))]
+        state: Option<StateWord>,
+        /// Its notes.
         #[arg(long)]
         notes: Option<String>,
-        /// A new gate.
+        /// Its gate.
         #[arg(long)]
         gate: Option<String>,
-        /// A new size.
+        /// Its size.
         #[arg(long, value_parser = values(&Size::ALL))]
         size: Option<Size>,
-        /// Areas to add.
-        #[arg(long)]
+        /// An area it is in; repeat for more.
+        #[arg(long, value_name = "AREA")]
         #[serde(default)]
         area: Vec<String>,
-        /// Areas to remove.
-        #[arg(long)]
-        #[serde(default)]
-        no_area: Vec<String>,
-        /// Named resources to add.
-        #[arg(long)]
+        /// A named resource it holds while worked on; repeat for more.
+        #[arg(long, value_name = "RESOURCE")]
         #[serde(default)]
         resource: Vec<String>,
-        /// Named resources to remove.
-        #[arg(long)]
+        /// A repository it touches; repeat for more.
+        #[arg(long, value_name = "REPOSITORY")]
         #[serde(default)]
-        no_resource: Vec<String>,
+        repository: Vec<String>,
     },
-    /// Moves an item under a parent, or to the top level.
-    Move {
-        /// The item.
-        id: String,
-        /// The new parent; none moves it to the top level.
-        parent: Option<String>,
-    },
-    /// Sets an item's state; use `acyclic done` to finish it.
-    State {
-        /// The item.
-        id: String,
-        /// The state: not `done`, which `acyclic done` sets.
-        #[arg(value_parser = values(&[ItemState::Backlog, ItemState::Parked, ItemState::InProgress]))]
-        state: ItemState,
-    },
+    /// Edits an item: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
+    Edit(ItemEdit),
     /// Reopens a done item.
     Reopen {
         /// The item.
-        id: String,
+        item: String,
     },
     /// Archives a done subtree (the user or a project-management run).
     Archive {
         /// The subtree's root.
-        id: String,
+        item: String,
     },
+}
+
+/// What `item edit` changes.
+#[derive(Debug, clap::Args, Deserialize)]
+#[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ItemEdit {
+    /// The item.
+    pub item: String,
+    /// A new title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Put it under this parent.
+    #[arg(long)]
+    pub parent: Option<String>,
+    /// Put it at the top level.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_parent: bool,
+    /// Put it in this thread, taking it out of any other.
+    #[arg(long)]
+    pub thread: Option<String>,
+    /// Take it out of its thread.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_thread: bool,
+    /// Set its state: not `done`, which `acyclic done` sets.
+    #[arg(long, value_parser = values(&StateWord::ALL))]
+    pub state: Option<StateWord>,
+    /// New notes.
+    #[arg(long)]
+    pub notes: Option<String>,
+    /// Clear its notes.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_notes: bool,
+    /// A new gate.
+    #[arg(long)]
+    pub gate: Option<String>,
+    /// Clear its gate.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_gate: bool,
+    /// A new size.
+    #[arg(long, value_parser = values(&Size::ALL))]
+    pub size: Option<Size>,
+    /// Clear its size.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_size: bool,
+    /// Add an area; repeat for more.
+    #[arg(long, value_name = "AREA")]
+    #[serde(default)]
+    pub area: Vec<String>,
+    /// Remove an area; repeat for more.
+    #[arg(long, value_name = "AREA")]
+    #[serde(default)]
+    pub no_area: Vec<String>,
+    /// Add a named resource; repeat for more.
+    #[arg(long, value_name = "RESOURCE")]
+    #[serde(default)]
+    pub resource: Vec<String>,
+    /// Remove a named resource; repeat for more.
+    #[arg(long, value_name = "RESOURCE")]
+    #[serde(default)]
+    pub no_resource: Vec<String>,
+    /// Add a repository it touches; repeat for more.
+    #[arg(long, value_name = "REPOSITORY")]
+    #[serde(default)]
+    pub repository: Vec<String>,
+    /// Remove a repository it touches; repeat for more.
+    #[arg(long, value_name = "REPOSITORY")]
+    #[serde(default)]
+    pub no_repository: Vec<String>,
+}
+
+impl ItemEdit {
+    fn validate(&self) -> Result<(), CliError> {
+        clears("parent", self.parent.is_some(), self.no_parent)?;
+        clears("thread", self.thread.is_some(), self.no_thread)?;
+        clears("notes", self.notes.is_some(), self.no_notes)?;
+        clears("gate", self.gate.is_some(), self.no_gate)?;
+        clears("size", self.size.is_some(), self.no_size)?;
+        overlaps("area", &self.area, &self.no_area)?;
+        overlaps("resource", &self.resource, &self.no_resource)?;
+        overlaps("repository", &self.repository, &self.no_repository)
+    }
 }
 
 /// A link's kind as the command line names it. The stored names are the model's [`LinkKind`], which are kept as they
@@ -470,33 +591,30 @@ pub enum ThreadCommand {
     /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
     Show {
         /// The threads.
-        #[arg(required = true)]
+        #[arg(required = true, value_name = "THREAD")]
         #[serde(default)]
         threads: Vec<String>,
     },
-    /// Creates or edits a thread.
-    Set {
-        /// The thread's id.
-        id: String,
+    /// Adds a thread; adding it again with the same fields changes nothing, and with other fields is refused.
+    Add {
+        /// The new thread.
+        thread: String,
         /// Its title.
         #[arg(long)]
-        title: Option<String>,
+        title: String,
         /// Its brief.
         #[arg(long)]
         brief: Option<String>,
+        /// A repository it touches beyond its items'; repeat for more.
+        #[arg(long, value_name = "REPOSITORY")]
+        #[serde(default)]
+        repository: Vec<String>,
+        /// Its autonomy level (the user's).
+        #[arg(long, value_parser = values(&Level::ALL))]
+        level: Option<Level>,
     },
-    /// Puts an item in a thread, taking it out of any other.
-    Add {
-        /// The item.
-        item: String,
-        /// The thread.
-        thread: String,
-    },
-    /// Takes an item out of its thread.
-    Remove {
-        /// The item.
-        item: String,
-    },
+    /// Edits a thread: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
+    Edit(ThreadEdit),
     /// Approves a thread's scope (the user's).
     Approve {
         /// The thread.
@@ -509,57 +627,124 @@ pub enum ThreadCommand {
     },
 }
 
+/// What `thread edit` changes.
+#[derive(Debug, clap::Args, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ThreadEdit {
+    /// The thread.
+    pub thread: String,
+    /// A new title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// A new brief.
+    #[arg(long)]
+    pub brief: Option<String>,
+    /// Clear its brief.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_brief: bool,
+    /// Add a repository it touches beyond its items'; repeat for more.
+    #[arg(long, value_name = "REPOSITORY")]
+    #[serde(default)]
+    pub repository: Vec<String>,
+    /// Remove a repository; repeat for more.
+    #[arg(long, value_name = "REPOSITORY")]
+    #[serde(default)]
+    pub no_repository: Vec<String>,
+    /// Set its autonomy level (the user's).
+    #[arg(long, value_parser = values(&Level::ALL))]
+    pub level: Option<Level>,
+    /// Clear its autonomy level, so the global one applies (the user's).
+    #[arg(long)]
+    #[serde(default)]
+    pub no_level: bool,
+}
+
+impl ThreadEdit {
+    fn validate(&self) -> Result<(), CliError> {
+        clears("brief", self.brief.is_some(), self.no_brief)?;
+        clears("level", self.level.is_some(), self.no_level)?;
+        overlaps("repository", &self.repository, &self.no_repository)
+    }
+}
+
 /// The repository commands.
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum RepoCommand {
-    /// Creates or edits a repository record.
-    Set {
-        /// The record's id.
-        id: String,
+    /// Lists every repository record, by id.
+    List,
+    /// Shows repository records with the items and threads that name them, as an array in the order given.
+    Show {
+        /// The repositories.
+        #[arg(required = true, value_name = "REPOSITORY")]
+        #[serde(default)]
+        repositories: Vec<String>,
+    },
+    /// Adds a repository record; adding it again with the same fields changes nothing, and with other fields is
+    /// refused.
+    Add {
+        /// The new record.
+        repository: String,
         /// The owner.
         #[arg(long)]
-        owner: Option<String>,
+        owner: String,
         /// The repository's name.
         #[arg(long)]
-        name: Option<String>,
-        /// Whether it is public.
-        #[arg(long)]
-        public: Option<bool>,
+        name: String,
         /// The default branch.
         #[arg(long)]
-        default_branch: Option<String>,
+        default_branch: String,
+        /// It is public: this or `--private`.
+        #[arg(long)]
+        #[serde(default)]
+        public: bool,
+        /// It is private: this or `--public`.
+        #[arg(long)]
+        #[serde(default)]
+        private: bool,
     },
-    /// Attaches a repository record to an item or a thread.
-    Attach(Attachment),
-    /// Detaches a repository record from an item or a thread.
-    Detach(Attachment),
+    /// Edits a repository record: any of its fields.
+    Edit {
+        /// The record.
+        repository: String,
+        /// A new owner.
+        #[arg(long)]
+        owner: Option<String>,
+        /// A new name.
+        #[arg(long)]
+        name: Option<String>,
+        /// A new default branch.
+        #[arg(long)]
+        default_branch: Option<String>,
+        /// It is public.
+        #[arg(long)]
+        #[serde(default)]
+        public: bool,
+        /// It is private.
+        #[arg(long)]
+        #[serde(default)]
+        private: bool,
+    },
 }
 
-/// A repository record and the item or thread it attaches to.
-#[derive(Debug, clap::Args, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct Attachment {
-    /// The repository record.
-    pub repository: String,
-    /// The item.
-    #[arg(long, conflicts_with = "thread", required_unless_present = "thread")]
-    pub item: Option<String>,
-    /// The thread.
-    #[arg(long)]
-    pub thread: Option<String>,
-}
-
-/// The proposal commands (the user's).
+/// The proposal commands (the user's decide).
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
-    /// Keeps a proposal.
+    /// Shows proposals with who proposed them, the edit and any decision, as an array in the order given.
+    Show {
+        /// The proposals.
+        #[arg(required = true, value_name = "PROPOSAL")]
+        #[serde(default)]
+        proposals: Vec<String>,
+    },
+    /// Keeps a proposal (the user's).
     Keep {
         /// The proposal.
         proposal: String,
     },
-    /// Drops a proposal.
+    /// Drops a proposal (the user's).
     Drop {
         /// The proposal.
         proposal: String,

@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use acyclic_cli::{Env, execute};
+use serde_json::json;
 use tempfile::TempDir;
 
 /// 2026-10-15T00:00:00Z.
@@ -72,7 +73,7 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
     assert_eq!(sh.run("done a2", AGENT), 1, "nor can it be finished");
-    assert_eq!(sh.run("item state a2 done", AGENT), 2, "done finishes items");
+    assert_eq!(sh.run("item edit a2 --state done", AGENT), 2, "done finishes items");
     assert_eq!(sh.run("claim a1", AGENT), 0);
     let pi = [("ACYCLIC_ACTOR", "session/pi")];
     assert_eq!(sh.run("done a1", &pi), 1, "another agent's claim");
@@ -85,16 +86,21 @@ fn a_journey_through_the_contract() {
         "done released the claim already, and releasing nothing isn't an error"
     );
     assert_eq!(sh.run("ready", AGENT), 0);
-    assert_eq!(sh.run("thread set t1 --title Work", AGENT), 0);
-    assert_eq!(sh.run("thread add a2 t1", AGENT), 0);
+    assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0);
+    assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0, "a repeat changes nothing");
+    assert_eq!(sh.run("thread add t1 --title Other", AGENT), 1, "a conflicting add is refused");
+    assert_eq!(sh.run("item edit a2 --thread nope", AGENT), 3, "a thread that isn't there");
+    assert_eq!(sh.run("item edit a2 --thread t1", AGENT), 0);
     assert_eq!(sh.run("thread approve t1", AGENT), 1, "only the user approves");
     assert_eq!(sh.run("thread approve t1 --as-user", AGENT), 0);
     let (_, ready) = sh.output("ready --approved", AGENT);
     assert_eq!(ready["data"]["ready"][0]["thread"], "t1", "{ready}");
-    let (code, proposed) = sh.output("thread add a1 t1", AGENT);
-    assert_eq!((code, proposed["data"]["outcome"].as_str()), (0, Some("proposed")));
+    let (code, proposed) = sh.output("item edit a1 --thread t1", AGENT);
+    let proposal = proposed["data"]["proposals"][0].as_str().unwrap();
+    assert_eq!(code, 0, "{proposed}");
     assert_eq!(sh.run("needs", AGENT), 0);
-    let proposal = proposed["data"]["proposal"].as_str().unwrap();
+    assert_eq!(sh.run(&format!("proposal show {proposal}"), AGENT), 0);
+    assert_eq!(sh.run("proposal show nope", AGENT), 3);
     assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
     assert_eq!(sh.run("list", AGENT), 0);
     // a1 joined after the approval, so the approval didn't see it.
@@ -112,17 +118,27 @@ fn a_journey_through_the_contract() {
         "in the order given"
     );
     assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
-    let (code, out) = sh.output("thread remove a2 --as-user", AGENT);
-    assert_eq!((code, out["data"]["edit"]["thread"].is_null()), (0, true));
-    assert_eq!(sh.run("repo set r1 --name code", AGENT), 2, "a new record needs every field");
-    let full = "repo set r1 --owner me --name code --public true --default-branch main";
+    let (code, out) = sh.output("item edit a2 --no-thread --as-user", AGENT);
+    assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)));
+    assert_eq!(sh.run("repo add r1 --name code", AGENT), 2, "a new record needs every field");
+    let full = "repo add r1 --owner me --name code --default-branch main --public";
     assert_eq!(sh.run(full, AGENT), 0);
-    assert_eq!(sh.run("repo set r1 --default-branch trunk", AGENT), 0, "an edit takes any subset");
-    for (verb, present) in [("attach", true), ("detach", false)] {
-        let (code, out) = sh.output(&format!("repo {verb} r1 --item a2"), AGENT);
-        let edit = (out["data"]["outcome"].as_str(), out["data"]["edit"]["present"].as_bool());
-        assert_eq!((code, edit), (0, (Some("applied"), Some(present))), "{verb}");
+    assert_eq!(sh.run(full, AGENT), 0, "a repeat changes nothing");
+    assert_eq!(
+        sh.run("repo add r1 --owner me --name code --default-branch main --private", AGENT),
+        1
+    );
+    assert_eq!(sh.run("repo edit r1 --default-branch trunk", AGENT), 0, "an edit takes any subset");
+    assert_eq!(sh.run("repo edit nope --private", AGENT), 3);
+    for (flag, present) in [("--repository", true), ("--no-repository", false)] {
+        let (code, out) = sh.output(&format!("item edit a2 {flag} r1"), AGENT);
+        assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "{flag}");
+        assert_eq!(
+            sh.output("repo show r1", AGENT).1["data"][0]["items"],
+            json!(present.then_some("a2").into_iter().collect::<Vec<_>>())
+        );
     }
+    assert_eq!(sh.run("repo list", AGENT), 0);
     let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
     assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
@@ -139,24 +155,31 @@ fn a_journey_through_the_contract() {
     let page = std::fs::read_to_string(path).unwrap();
     assert!(page.contains("data-renderer=\"graphviz\""));
     assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
+    assert_eq!(sh.run("link add a1 blocks a2", AGENT), 2, "the old words are refused");
     let (code, unlinked) = sh.output("link remove a2 waits-for a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
     // a2 left t1; an agent groups it into a new thread, which the user then sees awaiting approval.
-    assert_eq!(sh.run("thread set t2 --title Follow-ups", AGENT), 0);
-    let (code, out) = sh.output("thread add a2 t2", AGENT);
-    assert_eq!((code, out["data"]["outcome"].as_str()), (0, Some("applied")), "unapproved scope");
+    assert_eq!(sh.run("thread add t2 --title Follow-ups", AGENT), 0);
+    let (code, out) = sh.output("item edit a2 --thread t2", AGENT);
+    assert_eq!((code, &out["data"]["proposals"]), (0, &json!([])), "unapproved scope");
     // A thread where an item belongs says which command was meant.
-    for (line, meant) in [
-        ("thread add t2 a2", "acyclic thread add a2 t2"),
-        ("item move a2 t2", "acyclic thread add a2 t2"),
-    ] {
-        let (code, out) = sh.output(line, AGENT);
-        assert_eq!((code, out["error"]["details"]["meant"].as_str()), (3, Some(meant)), "{line}");
-    }
+    let (code, out) = sh.output("item edit a2 --parent t2", AGENT);
+    let meant = out["error"]["details"]["meant"].as_str();
+    assert_eq!((code, meant), (3, Some("acyclic item edit a2 --thread t2")));
+    assert_eq!(sh.run("level", AGENT), 0);
+    assert_eq!(sh.run("level everything", AGENT), 1, "only the user sets the level");
+    assert_eq!(sh.run("level everything --as-user", AGENT), 0);
+    assert_eq!(sh.run("thread edit t2 --level blockers --as-user", AGENT), 0);
+    assert_eq!(sh.run("level", AGENT), 0);
     assert_eq!(sh.run("needs", AGENT), 0);
     assert_eq!(sh.run("item add a3 --title Second-follow-up", AGENT), 0);
-    let (_, under) = sh.output("item add a3 --title Second-follow-up --parent a2", AGENT);
+    assert_eq!(
+        sh.run("item add a3 --title Second-follow-up --parent a2", AGENT),
+        1,
+        "another parent"
+    );
+    let (_, under) = sh.output("item add a4 --title Third-follow-up --parent a2", AGENT);
     assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "a parent passes its thread down");
     // A parent is finished once its children are.
     sh.run("item add g1 --title Goal", AGENT);
@@ -290,27 +313,29 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("sync", AGENT);
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
     // The user's move to the top racing the other machine's move is a conflict, and moving it again settles it.
-    sh.run("item move a1 a2", AGENT);
+    sh.run("item edit a1 --parent a2", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", pi);
-    sh.run("item move a1 --as-user", AGENT);
-    sh.run("item move a1 b1", pi);
+    sh.run("item edit a1 --no-parent --as-user", AGENT);
+    sh.run("item edit a1 --parent b1", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["entry"], "conflict");
-    let (_, out) = sh.output("item move a1 --as-user", AGENT);
+    let (_, out) = sh.output("item edit a1 --no-parent --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
     // Likewise taking an item out of a thread while the other machine puts it in one.
-    sh.run("thread add a1 t1", AGENT);
+    sh.run("thread add t1 --title One", AGENT);
+    sh.run("thread add t2 --title Two", AGENT);
+    sh.run("item edit a1 --thread t1", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", pi);
-    sh.run("thread remove a1 --as-user", AGENT);
-    sh.run("thread add a1 t2", pi);
+    sh.run("item edit a1 --no-thread --as-user", AGENT);
+    sh.run("item edit a1 --thread t2", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["field"], "thread");
-    let (_, out) = sh.output("thread remove a1 --as-user", AGENT);
+    let (_, out) = sh.output("item edit a1 --no-thread --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
 }

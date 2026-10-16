@@ -16,11 +16,11 @@ Common Commands:
   needs     Lists what needs the user
 
 Command Groups:
-  item      Adds, edits, moves, reopens or archives items, or sets their state
+  item      Adds and edits items, and reopens or archives them
   link      Adds or removes links between items
-  thread    Creates or edits threads, and puts items in them; agents' edits to approved threads wait as proposals
-  repo      Creates or edits repository records, and attaches them to items or threads
-  proposal  Keeps or drops proposals (the user's)
+  thread    Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
+  repo      Adds, edits, lists and shows repository records
+  proposal  Shows proposals, and keeps or drops them (the user's)
 
 Other Commands:
   init      Sets up a tracker clone as a new replica, creating the repository if there is none
@@ -28,7 +28,7 @@ Other Commands:
   prime     Prints conventions for agents, matched to this version, as text
   import    Imports a plan: adds and updates what the document names, and never deletes. `--schema` prints an annotated example of the document
   graph     Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
-  level     Sets the autonomy level, globally or for a thread (the user's)
+  level     Prints the autonomy levels, or with a level sets the global one (the user's)
   doctor    Lists entities that can't be read
   serve     Serves the JSON API and the app, refusing any request without the user's Tailscale identity
 

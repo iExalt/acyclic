@@ -6,6 +6,7 @@ pub mod error;
 pub mod args;
 mod commands;
 mod context;
+mod edit;
 mod hints;
 mod page;
 
