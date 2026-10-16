@@ -61,6 +61,11 @@ fn only_an_item_nothing_refers_to_is_deleted() {
     assert_eq!(message, "parent can't be deleted: it has children (kid)");
     let message = delete_item(&mut r, "a", user(NOW)).unwrap_err().to_string();
     assert_eq!(message, "a can't be deleted: a waits-for b");
+    // The details name a link's kind as the command line does.
+    let Err(DeleteError::InUse { reasons, .. }) = delete_item(&mut r, "a", user(NOW)) else {
+        panic!("in use")
+    };
+    assert_eq!(serde_json::to_value(&reasons).unwrap()[0]["kind"], "waits-for");
     assert!(matches!(
         delete_item(&mut r, "nope", user(NOW)),
         Err(DeleteError::Write(WriteError::NoItem(_)))

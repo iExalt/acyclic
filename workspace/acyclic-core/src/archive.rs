@@ -43,6 +43,7 @@ pub enum Reason {
     /// A root without a gate waits after its last item is done.
     Waiting {
         /// When it becomes eligible.
+        #[serde(rename = "eligible_at")]
         until: Millis,
     },
 }

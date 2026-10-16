@@ -183,13 +183,14 @@ fn the_help_sections_hold_every_command_once() {
 
 #[test]
 fn times_print_as_rfc3339_in_utc() {
-    let mut out =
-        json!({"until": 0, "rank": 0, "claims": [{"lease_expires": null, "lease_start": 0}]});
+    let mut out = json!({"eligible_at": 0, "rank": 0,
+                         "claims": [{"lease_expires_at": null, "lease_started_at": 0}]});
     timestamps(&mut out);
     assert_eq!(
         out,
-        json!({"until": "1970-01-01T00:00:00Z", "rank": 0,
-               "claims": [{"lease_expires": null, "lease_start": "1970-01-01T00:00:00Z"}]})
+        json!({"eligible_at": "1970-01-01T00:00:00Z", "rank": 0,
+               "claims": [{"lease_expires_at": null,
+                           "lease_started_at": "1970-01-01T00:00:00Z"}]})
     );
 }
 
@@ -278,7 +279,7 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
         ("late", (thread("ok"), false)),
         ("raced", (thread("both"), false)),
     ] {
-        assert_eq!(commands::approval(&model, item), expected, "{item}");
+        assert_eq!(crate::view::approval(&model, item), expected, "{item}");
     }
 }
 
@@ -699,8 +700,8 @@ fn an_edit_that_is_refused_in_part_writes_nothing() {
         assert!(code == exit::NOT_FOUND || code == exit::USAGE, "{refused}: {code}");
     }
     let (_, shown) = go("show a");
-    assert_eq!(shown["data"][0]["item"]["title"], "Before");
+    assert_eq!(shown["data"][0]["title"], "Before");
     let (code, edited) = go("item edit a --title After --area x");
     assert_eq!((code, edited["data"]["proposals"].clone()), (0, json!([])));
-    assert_eq!(go("show a").1["data"][0]["item"]["title"], "After");
+    assert_eq!(go("show a").1["data"][0]["title"], "After");
 }

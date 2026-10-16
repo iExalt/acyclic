@@ -13,7 +13,7 @@ use acyclic_core::state::{Key, Replica, State};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use crate::commands::{element_if, existing, holds_only, set_if, with_inherited};
+use crate::commands::{element_if, existing, holds_only, placed, set_if};
 use crate::error::{CliError, exit};
 
 /// A single-valued field's change: `--field` sets it, `--no-field` clears it, and neither leaves it.
@@ -94,9 +94,14 @@ pub(crate) struct Written {
 }
 
 impl Written {
-    /// The command's data, naming the entity it wrote as `what`.
-    pub fn json(self, what: &str, id: &str) -> Json {
-        with_inherited(json!({what: id, "proposals": self.proposals}), &self.inherited)
+    /// An item's data: the item, the proposals its scope changes left, and the threads items joined.
+    pub fn item(self, id: &str) -> Json {
+        json!({"item": id, "proposals": self.proposals, "placed": placed(&self.inherited)})
+    }
+
+    /// A thread's data: the thread and the proposals its scope changes left.
+    pub fn thread(self, id: &str) -> Json {
+        json!({"thread": id, "proposals": self.proposals})
     }
 }
 
@@ -109,6 +114,14 @@ fn already_exists(what: &str, edit: &str, id: &str, differs: &[&str]) -> CliErro
             if flag.contains('/') { flag.replace('/', "|") } else { format!("{flag} …") }
         })
         .collect();
+    // The fields as the output names them: `--default-branch` is `default_branch`, a pair of flags is the first.
+    let fields: Vec<String> = differs
+        .iter()
+        .map(|flag| {
+            let first = flag.split('/').next().unwrap_or(flag);
+            first.trim_start_matches('-').replace('-', "_")
+        })
+        .collect();
     CliError::refused(
         "already-exists",
         format!(
@@ -117,7 +130,7 @@ fn already_exists(what: &str, edit: &str, id: &str, differs: &[&str]) -> CliErro
             fix.join(" ")
         ),
     )
-    .with(json!({"differs": differs}))
+    .with(json!({"fields": fields}))
 }
 
 fn not_found(message: String) -> CliError {

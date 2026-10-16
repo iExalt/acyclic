@@ -20,6 +20,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
   "data": {
     "changed": true,
     "item": "a1",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -31,6 +32,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -42,6 +44,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
   "data": {
     "changed": false,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -53,8 +56,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
   "error": {
     "code": "already-exists",
     "details": {
-      "differs": [
-        "--title"
+      "fields": [
+        "title"
       ]
     },
     "message": "item a2 exists with other --title; change it with `acyclic item edit a2 --title …`"
@@ -81,8 +84,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
     "ready": [
       {
         "approved": false,
-        "item": "a1",
+        "id": "a1",
+        "parent": null,
         "rank": 0,
+        "readiness": {
+          "rank": 0,
+          "status": "ready"
+        },
+        "state": "backlog",
         "thread": null,
         "title": "First"
       }
@@ -146,8 +155,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim a1
     "changed": true,
     "claim": {
       "holder": "session/mac",
-      "lease_expires": "2026-10-15T01:00:00Z",
-      "lease_start": "2026-10-15T00:00:00Z",
+      "lease_expires_at": "2026-10-15T01:00:00Z",
+      "lease_started_at": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
     "item": "a1"
@@ -211,8 +220,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
     "ready": [
       {
         "approved": false,
-        "item": "a2",
+        "id": "a2",
+        "parent": null,
         "rank": 0,
+        "readiness": {
+          "rank": 0,
+          "status": "ready"
+        },
+        "state": "backlog",
         "thread": null,
         "title": "Second"
       }
@@ -249,8 +264,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Other
   "error": {
     "code": "already-exists",
     "details": {
-      "differs": [
-        "--title"
+      "fields": [
+        "title"
       ]
     },
     "message": "thread t1 exists with other --title; change it with `acyclic thread edit t1 --title …`"
@@ -275,6 +290,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -309,8 +325,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
     "ready": [
       {
         "approved": true,
-        "item": "a2",
+        "id": "a2",
+        "parent": null,
         "rank": 0,
+        "readiness": {
+          "rank": 0,
+          "status": "ready"
+        },
+        "state": "backlog",
         "thread": "t1",
         "title": "Second"
       }
@@ -325,6 +347,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
   "data": {
     "changed": true,
     "item": "a1",
+    "placed": [],
     "proposals": [
       "mac-16"
     ]
@@ -358,11 +381,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-16
       "actor": "session/mac",
       "decision": null,
       "edit": {
-        "edit": "member",
+        "after": "t1",
+        "before": null,
+        "field": "thread",
         "item": "a1",
-        "thread": "t1"
+        "kind": "member"
       },
-      "proposal": "mac-16",
+      "id": "mac-16",
       "threads": [
         "t1"
       ]
@@ -386,9 +411,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-16 --as-user
 # exit 0
 {
   "data": {
+    "approved": true,
     "changed": true,
     "decision": "keep",
-    "proposal": "mac-16"
+    "item": "a1",
+    "proposal": "mac-16",
+    "thread": "t1"
   },
   "ok": true
 }
@@ -399,15 +427,22 @@ $ ACYCLIC_ACTOR=session/mac acyclic list
   "data": {
     "items": [
       {
-        "item": "a1",
+        "id": "a1",
         "parent": null,
+        "readiness": {
+          "status": "done"
+        },
         "state": "done",
         "thread": "t1",
         "title": "First"
       },
       {
-        "item": "a2",
+        "id": "a2",
         "parent": null,
+        "readiness": {
+          "rank": 0,
+          "status": "ready"
+        },
         "state": "backlog",
         "thread": "t1",
         "title": "Second"
@@ -424,16 +459,15 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
     "threads": [
       {
         "approved": true,
-        "conflicted": [],
-        "done": 1,
+        "counts": {
+          "conflicted": 0,
+          "done": 1,
+          "members": 2
+        },
         "heads": [
           "a2"
         ],
-        "members": [
-          "a1",
-          "a2"
-        ],
-        "thread": "t1",
+        "id": "t1",
         "title": "Work"
       }
     ]
@@ -446,46 +480,48 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
 {
   "data": [
     {
+      "approved": true,
+      "brief": null,
+      "counts": {
+        "conflicted": 0,
+        "done": 1,
+        "members": 2
+      },
       "heads": [
         "a2"
       ],
+      "id": "t1",
+      "level": null,
       "members": [
         {
-          "conflict": false,
-          "in_approval": true,
-          "item": "a1",
+          "approved": true,
+          "conflicted": false,
+          "id": "a1",
+          "parent": null,
           "readiness": {
             "status": "done"
           },
           "state": "done",
+          "thread": "t1",
           "title": "First"
         },
         {
-          "conflict": false,
-          "in_approval": true,
-          "item": "a2",
+          "approved": true,
+          "conflicted": false,
+          "id": "a2",
+          "parent": null,
           "readiness": {
             "rank": 0,
             "status": "ready"
           },
           "state": "backlog",
+          "thread": "t1",
           "title": "Second"
         }
       ],
+      "pm": false,
       "repositories": [],
-      "thread": {
-        "approved": true,
-        "approved_members": [
-          "a1",
-          "a2"
-        ],
-        "autonomy": null,
-        "brief": null,
-        "id": "t1",
-        "pm_flag": null,
-        "repositories": [],
-        "title": "Work"
-      }
+      "title": "Work"
     }
   ],
   "ok": true
@@ -507,57 +543,75 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
 {
   "data": [
     {
+      "archived": false,
+      "areas": [],
       "children": [],
       "claims": [],
-      "item": {
-        "archived": null,
-        "areas": [],
-        "done_at": "2026-10-15T00:00:00Z",
-        "evidence": {
-          "note": "shipped"
-        },
-        "gate": null,
-        "id": "a1",
-        "notes": null,
-        "parent": null,
-        "reopened": null,
-        "repositories": [],
-        "resources": [],
-        "size": null,
-        "state": "done",
-        "thread": "t1",
-        "title": "First"
+      "done_at": "2026-10-15T00:00:00Z",
+      "evidence": {
+        "commit": null,
+        "note": "shipped",
+        "repository": null
       },
+      "gate": null,
+      "id": "a1",
+      "links": {
+        "followed_by": [],
+        "follows": [],
+        "related_from": [],
+        "relates_to": [],
+        "waited_on_by": [
+          "a2"
+        ],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": null,
       "readiness": {
         "status": "done"
       },
-      "role": "item"
+      "reopened": false,
+      "repositories": [],
+      "resources": [],
+      "role": "item",
+      "size": null,
+      "state": "done",
+      "thread": "t1",
+      "title": "First"
     },
     {
+      "archived": false,
+      "areas": [],
       "children": [],
       "claims": [],
-      "item": {
-        "archived": null,
-        "areas": [],
-        "done_at": null,
-        "evidence": null,
-        "gate": null,
-        "id": "a2",
-        "notes": null,
-        "parent": null,
-        "reopened": null,
-        "repositories": [],
-        "resources": [],
-        "size": null,
-        "state": "backlog",
-        "thread": "t1",
-        "title": "Second"
+      "done_at": null,
+      "evidence": null,
+      "gate": null,
+      "id": "a2",
+      "links": {
+        "followed_by": [],
+        "follows": [],
+        "related_from": [],
+        "relates_to": [],
+        "waited_on_by": [],
+        "waits_for": [
+          "a1"
+        ]
       },
+      "notes": null,
+      "parent": null,
       "readiness": {
         "rank": 0,
         "status": "ready"
       },
-      "role": "item"
+      "reopened": false,
+      "repositories": [],
+      "resources": [],
+      "role": "item",
+      "size": null,
+      "state": "backlog",
+      "thread": "t1",
+      "title": "Second"
     }
   ],
   "ok": true
@@ -580,6 +634,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread --as-user
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -623,8 +678,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
   "error": {
     "code": "already-exists",
     "details": {
-      "differs": [
-        "--public/--private"
+      "fields": [
+        "public"
       ]
     },
     "message": "repository record r1 exists with other --public/--private; change it with `acyclic repo edit r1 --public|--private`"
@@ -659,6 +714,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --repository r1
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -669,17 +725,15 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo show r1
 {
   "data": [
     {
+      "default_branch": "trunk",
+      "id": "r1",
+      "installation": null,
       "items": [
         "a2"
       ],
-      "repository": {
-        "default_branch": "trunk",
-        "id": "r1",
-        "installation": null,
-        "name": "code",
-        "owner": "me",
-        "public": true
-      },
+      "name": "code",
+      "owner": "me",
+      "public": true,
       "threads": []
     }
   ],
@@ -692,6 +746,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-repository r1
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -702,15 +757,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo show r1
 {
   "data": [
     {
+      "default_branch": "trunk",
+      "id": "r1",
+      "installation": null,
       "items": [],
-      "repository": {
-        "default_branch": "trunk",
-        "id": "r1",
-        "installation": null,
-        "name": "code",
-        "owner": "me",
-        "public": true
-      },
+      "name": "code",
+      "owner": "me",
+      "public": true,
       "threads": []
     }
   ],
@@ -724,10 +777,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo list
     "repositories": [
       {
         "default_branch": "trunk",
+        "id": "r1",
         "name": "code",
         "owner": "me",
-        "public": true,
-        "repository": "r1"
+        "public": true
       }
     ]
   },
@@ -762,10 +815,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --output graph.mmd
 # exit 0
 {
   "data": {
-    "edges": 1,
+    "counts": {
+      "edges": 1,
+      "ghosts": 0,
+      "items": 2
+    },
     "format": "mermaid",
-    "ghosts": 0,
-    "items": 2,
     "opened": false,
     "path": "[dir]/graph.mmd"
   },
@@ -798,10 +853,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic graph --open --thread t1
 # exit 0
 {
   "data": {
-    "edges": 1,
+    "counts": {
+      "edges": 1,
+      "ghosts": 1,
+      "items": 1
+    },
     "format": "html",
-    "ghosts": 1,
-    "items": 1,
     "opened": true,
     "path": "[dir]/tracker/.git/acyclic/graph/thread-t1.html"
   },
@@ -865,6 +922,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t2
   "data": {
     "changed": true,
     "item": "a2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -888,7 +946,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic level
 {
   "data": {
     "global": "blockers",
-    "threads": {}
+    "threads": []
   },
   "ok": true
 }
@@ -930,9 +988,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic level
 {
   "data": {
     "global": "everything",
-    "threads": {
-      "t2": "blockers"
-    }
+    "threads": [
+      {
+        "id": "t2",
+        "level": "blockers"
+      }
+    ]
   },
   "ok": true
 }
@@ -962,6 +1023,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
   "data": {
     "changed": true,
     "item": "a3",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -973,8 +1035,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --paren
   "error": {
     "code": "already-exists",
     "details": {
-      "differs": [
-        "--parent"
+      "fields": [
+        "parent"
       ]
     },
     "message": "item a3 exists with other --parent; change it with `acyclic item edit a3 --parent …`"
@@ -987,13 +1049,15 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent
 {
   "data": {
     "changed": true,
-    "inherited": [
+    "item": "a4",
+    "placed": [
       {
         "item": "a4",
+        "outcome": "applied",
+        "proposal": null,
         "thread": "t2"
       }
     ],
-    "item": "a4",
     "proposals": []
   },
   "ok": true
@@ -1005,6 +1069,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1 --title Goal
   "data": {
     "changed": true,
     "item": "g1",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -1016,6 +1081,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
   "data": {
     "changed": true,
     "item": "g1-a",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -1047,8 +1113,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim g1-a
     "changed": true,
     "claim": {
       "holder": "session/mac",
-      "lease_expires": "2026-10-15T01:00:00Z",
-      "lease_start": "2026-10-15T00:00:00Z",
+      "lease_expires_at": "2026-10-15T01:00:00Z",
+      "lease_started_at": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
     "item": "g1-a"
@@ -1084,6 +1150,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2 --title Goal
   "data": {
     "changed": true,
     "item": "g2",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -1095,6 +1162,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
   "data": {
     "changed": true,
     "item": "g2-a",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -1117,6 +1185,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
   "data": {
     "changed": true,
     "item": "d1",
+    "placed": [],
     "proposals": []
   },
   "ok": true
@@ -1128,6 +1197,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1-a --title Part --parent d1
   "data": {
     "changed": true,
     "item": "d1-a",
+    "placed": [],
     "proposals": []
   },
   "ok": true

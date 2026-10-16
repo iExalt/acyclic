@@ -9,6 +9,7 @@ mod context;
 mod edit;
 mod hints;
 mod page;
+mod view;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -17,7 +18,7 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 
-use acyclic_core::time::{TIMESTAMP_KEYS, rfc3339};
+use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Serve};
 use crate::error::{CliError, exit};
@@ -186,6 +187,11 @@ fn render(value: &serde_json::Value) -> String {
     text.push('\n');
     text
 }
+
+/// The fields that hold a time in what commands print, each ending in `_at` but for the dates of an archive wait. A new
+/// time field in output must join this list, which a test checks against the views.
+const TIMESTAMP_KEYS: [&str; 4] =
+    ["done_at", "eligible_at", "lease_expires_at", "lease_started_at"];
 
 /// Rewrites every time in the output as RFC 3339 in UTC, to the second.
 fn timestamps(value: &mut serde_json::Value) {
