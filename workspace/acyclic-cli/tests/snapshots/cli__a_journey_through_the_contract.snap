@@ -73,8 +73,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "data": {
     "ready": [
       {
+        "approved": false,
         "item": "a1",
         "rank": 0,
+        "thread": null,
         "title": "First"
       }
     ]
@@ -204,8 +206,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "data": {
     "ready": [
       {
+        "approved": false,
         "item": "a2",
         "rank": 0,
+        "thread": null,
         "title": "Second"
       }
     ]
@@ -256,6 +260,23 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread approve t1 --as-user
     "approved": true,
     "changed": true,
     "thread": "t1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready --approved
+# exit 0
+{
+  "data": {
+    "ready": [
+      {
+        "approved": true,
+        "item": "a2",
+        "rank": 0,
+        "thread": "t1",
+        "title": "Second"
+      }
+    ]
   },
   "ok": true
 }

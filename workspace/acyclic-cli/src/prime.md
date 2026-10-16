@@ -25,7 +25,8 @@ older copy.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists ready leaves, best first, and `acyclic list` every item. `acyclic show <item>...`
+1. `acyclic ready` lists ready leaves, best first, each with its thread and whether the user approved its work;
+   `acyclic ready --approved` lists only approved work. `acyclic list` lists every item. `acyclic show <item>...`
    explains items, as an array in the order given: their readiness, children and claims.
 2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by
    default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the

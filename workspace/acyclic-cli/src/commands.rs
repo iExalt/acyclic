@@ -102,7 +102,9 @@ impl<'a> Session<'a> {
             Command::Init { .. } | Command::Prime | Command::Graph { .. } => {
                 unreachable!("handled before dispatch")
             },
-            Command::Ready { include_archived } => self.ready(*include_archived),
+            Command::Ready { include_archived, approved } => {
+                self.ready(*include_archived, *approved)
+            },
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
             Command::Needs => self.needs(),
@@ -372,7 +374,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn ready(&self, include_archived: bool) -> Result<Json, CliError> {
+    fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
         let (state, model) = self.read()?;
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
@@ -381,7 +383,12 @@ impl<'a> Session<'a> {
         acyclic_core::probe::mark("readiness");
         let ready: Vec<Json> = ready
             .into_iter()
-            .map(|(id, rank)| json!({"item": id, "rank": rank, "title": model.items[&id].title}))
+            .map(|(id, rank)| (approval(&model, &id), id, rank))
+            .filter(|((_, approved), _, _)| *approved || !only_approved)
+            .map(|((thread, approved), id, rank)| {
+                json!({"item": id, "rank": rank, "title": model.items[&id].title, "thread": thread,
+                       "approved": approved})
+            })
             .collect();
         Ok(json!({"ready": ready}))
     }
@@ -708,6 +715,20 @@ fn check_finish(
         format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it"),
     )
     .with(json!({"readiness": status})))
+}
+
+/// An item's thread, and whether the user approved its work: the thread's approval holds without a conflict, and the
+/// approval saw the item when it recorded what it saw. A conflict counts against, unlike for protecting scope, since
+/// this says whether work may start.
+pub(crate) fn approval(model: &Model, id: &str) -> (Option<String>, bool) {
+    let Some(thread) = model.items.get(id).and_then(|item| item.thread.one()) else {
+        return (None, false);
+    };
+    let approved = model
+        .threads
+        .get(thread)
+        .is_some_and(|t| t.approved.one() == Some(&true) && t.approved_member(id) != Some(false));
+    (Some(thread.clone()), approved)
 }
 
 /// Whether an agent may finish an item in `status` without forcing: when it may claim it, or it is finished already.

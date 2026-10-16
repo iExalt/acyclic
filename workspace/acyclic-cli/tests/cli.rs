@@ -98,6 +98,8 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("thread add a2 t1", AGENT), 0);
     assert_eq!(sh.run("thread approve t1", AGENT), 1, "only the user approves");
     assert_eq!(sh.run("thread approve t1 --as-user", AGENT), 0);
+    let (_, ready) = sh.output("ready --approved", AGENT);
+    assert_eq!(ready["data"]["ready"][0]["thread"], "t1", "{ready}");
     let (code, proposed) = sh.output("thread add a1 t1", AGENT);
     assert_eq!((code, proposed["data"]["outcome"].as_str()), (0, Some("proposed")));
     assert_eq!(sh.run("needs", AGENT), 0);

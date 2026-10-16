@@ -84,6 +84,9 @@ pub enum Command {
         /// Judge archived work as if it weren't archived.
         #[arg(long)]
         include_archived: bool,
+        /// Only items in threads the user approved, with the item among what the approval saw.
+        #[arg(long)]
+        approved: bool,
     },
     /// Lists every item, by id.
     List,

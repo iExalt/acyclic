@@ -199,3 +199,44 @@ fn prime_is_text_matched_to_the_version() {
     assert!(out.contains(&format!("acyclic {})", acyclic_core::VERSION)));
     insta::assert_snapshot!(out.replace(acyclic_core::VERSION, "[version]"));
 }
+
+#[test]
+fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
+    use acyclic_core::model::{self, By, Model, add_item};
+    use acyclic_core::schema::{kind, thread};
+    use acyclic_core::scope::ScopeEdit;
+    use acyclic_core::state::Replica;
+    let user = By { actor: acyclic_core::scope::USER, at: 1 };
+    let thread_key = |id: &str| Key::new(kind::THREAD, id).unwrap();
+    let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), acyclic_core::state::State::new());
+    for id in ["x", "y", "z", "late", "raced"] {
+        add_item(&mut mac, id, id, user).unwrap();
+    }
+    let join = |replica: &mut Replica, item: &str, thread: &str| {
+        let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
+        acyclic_core::scope::edit(replica, &member, user).unwrap();
+    };
+    join(&mut mac, "x", "ok");
+    join(&mut mac, "y", "draft");
+    join(&mut mac, "raced", "both");
+    acyclic_core::scope::approve(&mut mac, "ok", true, user).unwrap();
+    model::set(&mut mac, &thread_key("draft"), thread::APPROVED, Some(&false), user).unwrap();
+    // Joined after the approval, so the approval didn't see it.
+    join(&mut mac, "late", "ok");
+    // One replica approves while another doesn't know of it and says no: a conflict.
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+    model::set(&mut mac, &thread_key("both"), thread::APPROVED, Some(&true), user).unwrap();
+    model::set(&mut pi, &thread_key("both"), thread::APPROVED, Some(&false), user).unwrap();
+    mac.join(pi.state()).unwrap();
+    let model = Model::read(mac.state()).unwrap();
+    let thread = |t: &str| Some(t.to_owned());
+    for (item, expected) in [
+        ("x", (thread("ok"), true)),
+        ("y", (thread("draft"), false)),
+        ("z", (None, false)),
+        ("late", (thread("ok"), false)),
+        ("raced", (thread("both"), false)),
+    ] {
+        assert_eq!(commands::approval(&model, item), expected, "{item}");
+    }
+}
