@@ -49,9 +49,9 @@ For example, `acyclic item edit beds --thread garden --no-notes --area soil --no
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence
-or a live claim, and in an approved thread only the user may delete. `acyclic link` has `add` and `remove`. `acyclic import <file>`
-applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the
-plan format.
+or a live claim, and in an approved thread only the user may delete. `acyclic link` has `add` and `remove`.
+`acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
+`acyclic import --schema` prints the plan format.
 
 Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
 and thread it belongs with.
