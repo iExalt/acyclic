@@ -59,6 +59,8 @@ pub enum Entry {
         members: usize,
         /// Threads it waits on in a cycle through `blocks` links, so not all of them can finish as they stand.
         waits_with: Vec<String>,
+        /// Its heads: two or more say its order is partly unsaid, so approving it says they may run in any order.
+        heads: Vec<String>,
     },
     /// This clone pushes every write, yet holds writes the remote lacks: `acyclic sync` sends them.
     Unpushed {
@@ -277,6 +279,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             thread: id.clone(),
             members: count,
             waits_with: waits_with.into_iter().cloned().collect(),
+            heads: model.heads(id).into_iter().map(str::to_owned).collect(),
         });
     }
 }

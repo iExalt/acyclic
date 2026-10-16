@@ -604,6 +604,51 @@ impl Model {
         None
     }
 
+    /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
+    /// when a path of blocks and after links, from the leaf or an ancestor, reaches that member or one of its
+    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
+    /// unsaid: they may run in parallel, or a link is missing.
+    #[must_use]
+    pub fn heads(&self, thread: &str) -> Vec<&str> {
+        let open: Vec<&str> = self
+            .members(thread)
+            .into_iter()
+            .filter(|id| !self.items[*id].is_done() && !self.is_archived(id))
+            .collect();
+        let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for link in self.links.iter().filter(|link| link.kind.orders()) {
+            next.entry(link.from.as_str()).or_default().push(link.to.as_str());
+        }
+        let follows_another = |leaf: &str| {
+            let others: BTreeSet<&str> = open
+                .iter()
+                .filter(|member| **member != leaf)
+                .flat_map(|member| std::iter::once(*member).chain(self.ancestors(member)))
+                .collect();
+            let mut seen: BTreeSet<&str> =
+                std::iter::once(leaf).chain(self.ancestors(leaf)).collect();
+            let mut frontier: Vec<&str> = seen.iter().copied().collect();
+            while let Some(node) = frontier.pop() {
+                for &to in next.get(node).into_iter().flatten() {
+                    if others.contains(to) {
+                        return true;
+                    }
+                    // What waits on `to` waits on its ancestors' dependencies too.
+                    for reached in std::iter::once(to).chain(self.ancestors(to)) {
+                        if seen.insert(reached) {
+                            frontier.push(reached);
+                        }
+                    }
+                }
+            }
+            false
+        };
+        open.iter()
+            .copied()
+            .filter(|id| self.children(id).is_empty() && !follows_another(id))
+            .collect()
+    }
+
     /// The cycles among parents, which only a join can make, each sorted.
     #[must_use]
     pub fn parent_cycles(&self) -> Vec<Vec<String>> {

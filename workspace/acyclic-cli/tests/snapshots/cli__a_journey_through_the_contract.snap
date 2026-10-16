@@ -359,6 +359,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "approved": true,
         "conflicted": [],
         "done": 1,
+        "heads": [
+          "a2"
+        ],
         "members": [
           "a1",
           "a2"
@@ -376,6 +379,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
 {
   "data": [
     {
+      "heads": [
+        "a2"
+      ],
       "members": [
         {
           "conflict": false,
@@ -694,6 +700,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
     "needs": [
       {
         "entry": "awaiting-approval",
+        "heads": [
+          "a2"
+        ],
         "members": 1,
         "thread": "t2",
         "waits_with": []

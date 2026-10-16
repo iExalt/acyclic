@@ -217,10 +217,12 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
     let awaiting = |r: &Replica| -> Vec<Entry> {
         list(r).into_iter().filter(|e| matches!(e, Entry::AwaitingApproval { .. })).collect()
     };
-    let entry = |thread: &str, other: &str| Entry::AwaitingApproval {
+    // Nothing within either thread orders its two members.
+    let entry = |thread: &str, other: &str, heads: [&str; 2]| Entry::AwaitingApproval {
         thread: thread.into(),
         members: 2,
         waits_with: vec![other.into()],
+        heads: heads.map(String::from).to_vec(),
     };
     model::set(&mut r, &Key::new(kind::THREAD, "finished").unwrap(), thread::TITLE, Some(&"F"), by)
         .unwrap();
@@ -230,12 +232,12 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
     model::set_state(&mut r, "f", ItemState::Done, by).unwrap();
     assert_eq!(
         awaiting(&r),
-        vec![entry("t", "u"), entry("u", "t")],
+        vec![entry("t", "u", ["x", "x2"]), entry("u", "t", ["y", "y2"])],
         "an empty thread, or one with only finished work, awaits nothing"
     );
     let t = Key::new(kind::THREAD, "t").unwrap();
     model::set(&mut r, &t, thread::APPROVED, Some(&true), user(2)).unwrap();
-    assert_eq!(awaiting(&r), vec![entry("u", "t")]);
+    assert_eq!(awaiting(&r), vec![entry("u", "t", ["y", "y2"])]);
 }
 
 #[test]

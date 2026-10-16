@@ -534,6 +534,7 @@ impl<'a> Session<'a> {
                     "title": thread.map(|t| &t.title),
                     "approved": thread.map(|t| &t.approved),
                     "members": members.iter().map(|m| m.item).collect::<Vec<_>>(),
+                    "heads": model.heads(id),
                     "conflicted": conflicted,
                     "done": done,
                 })
@@ -569,6 +570,7 @@ impl<'a> Session<'a> {
             shown.push(json!({
                 "thread": thread.map_or_else(|| json!({"id": id}), |t| json!(t)),
                 "repositories": model.repository_set(id),
+                "heads": model.heads(id),
                 "members": members,
             }));
         }

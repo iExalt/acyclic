@@ -301,9 +301,9 @@ pub enum LinkCommand {
 /// The thread commands.
 #[derive(Debug, Subcommand)]
 pub enum ThreadCommand {
-    /// Lists every thread, by id, with its approval and its members.
+    /// Lists every thread, by id, with its approval, its members and its heads: the open leaves nothing in it orders.
     List,
-    /// Shows threads with each member's title, state and readiness, as an array in the order given.
+    /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
     Show {
         /// The threads.
         #[arg(required = true)]

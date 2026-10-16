@@ -44,13 +44,16 @@ older copy.
    commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
    are done; don't use `--force` to finish someone else's work.
 4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
-   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
+   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change. Only `blocks`
+   and `after` links order work: ids, numbering and thread membership never do, so link every dependency you mean.
    `acyclic item add` returns `candidates`: likely parents, threads and archived items to relate to, best first,
    each with the command that accepts it; with `--parent`, `parent_rank` says where your choice ranks.
    `acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
    standard output.
 5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic thread list` lists
    the threads with their members, and `acyclic thread show <thread>` shows each member's state and readiness.
+   Both list a thread's `heads`: its open leaves that nothing in the thread orders. Two or more mean they may run in
+   any order; when one needs another, link them.
    `acyclic <group> --help` lists a group's commands.
 6. Grouping work into threads is yours: create threads with `acyclic thread set`, fill them with `acyclic thread add`,
    give each a title and brief, and leave approving them to the user. New or moved work joins the thread its parent

@@ -229,6 +229,34 @@ fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() 
 }
 
 #[test]
+fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b", "c", "d", "p", "x"]);
+    for id in ["a", "b", "c", "d"] {
+        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(2)).unwrap();
+    }
+    let heads =
+        |r: &Replica| model(r).heads("t").into_iter().map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(heads(&r), ["a", "b", "c", "d"], "membership alone orders nothing");
+    link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut r, "a", "d", LinkKind::Relates, by(3)).unwrap();
+    // Through an item outside the thread, a soft link orders too.
+    link(&mut r, "c", "x", LinkKind::After, by(3)).unwrap();
+    link(&mut r, "x", "a", LinkKind::Blocks, by(3)).unwrap();
+    // A parent's links order what is under it.
+    set_parent(&mut r, "d", Some("p"), by(3)).unwrap();
+    link(&mut r, "p", "a", LinkKind::Blocks, by(3)).unwrap();
+    assert_eq!(heads(&r), ["a"]);
+    set_state(&mut r, "a", ItemState::Done, by(4)).unwrap();
+    assert_eq!(heads(&r), ["b", "c", "d"], "a done member orders nothing");
+    put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(5)).unwrap();
+    // A parent in the thread is never a head, and following it follows what is under it.
+    put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
+    link(&mut r, "b", "p", LinkKind::After, by(5)).unwrap();
+    assert_eq!(heads(&r), ["d"]);
+}
+
+#[test]
 fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
     let (mut a, mut b) = pair(&["x"]);
     set_state(&mut a, "x", ItemState::Done, by(10)).unwrap();
