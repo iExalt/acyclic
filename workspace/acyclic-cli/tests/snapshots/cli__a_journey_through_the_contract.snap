@@ -452,7 +452,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
       "members": [
         {
           "conflict": false,
-          "in_approval": false,
+          "in_approval": true,
           "item": "a1",
           "readiness": {
             "status": "done"
@@ -476,6 +476,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
       "thread": {
         "approved": true,
         "approved_members": [
+          "a1",
           "a2"
         ],
         "autonomy": null,

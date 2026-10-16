@@ -261,8 +261,9 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
     join(&mut mac, "raced", "both");
     acyclic_core::scope::approve(&mut mac, "ok", true, user).unwrap();
     model::set(&mut mac, &thread_key("draft"), thread::APPROVED, Some(&false), user).unwrap();
-    // Joined after the approval, so the approval didn't see it.
-    join(&mut mac, "late", "ok");
+    // An agent's add that raced the approval reaches the thread unproposed, and the approval didn't see it.
+    let late = model::item_key("late").unwrap();
+    mac.write(&late, "thread", "session/mac", 2, Some(json!("ok"))).unwrap();
     // One replica approves while another doesn't know of it and says no: a conflict.
     let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
     model::set(&mut mac, &thread_key("both"), thread::APPROVED, Some(&true), user).unwrap();
