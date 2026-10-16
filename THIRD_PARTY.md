@@ -24,3 +24,16 @@ build embeds them in the binary. Each page carries a notice naming the renderer'
 - Tarball: <https://registry.npmjs.org/mermaid/-/mermaid-12.2.0.tgz>, SHA-256
   `071914164d0f6d53e5c26a10a220230d4ae8d37ed0f2263fbf072266f0af3a0a`.
 - File: `package/dist/mermaid.min.js`, SHA-256 `a8a6a6f805b074a8261a2825c86f99c8054acb3b35f50bb7e24a4f9f2c3c3b9f`.
+
+## Release binaries
+
+The Linux binaries are linked statically against musl, under the MIT License (<https://musl.libc.org>). Each release
+archive carries `THIRD_PARTY_NOTICES.md`: this file followed by the licences of the Rust crates the binary links,
+collected by `mise run notices` ([cargo-about](https://github.com/EmbarkStudios/cargo-about)).
+
+## The server's image
+
+The image adds the binary and these notices to Alpine Linux, with its `git` and `ca-certificates` packages. Alpine's
+packages keep their own licences: among them BusyBox and git are under the GNU General Public License version 2, and
+musl under the MIT License. `/usr/share/acyclic/packages.txt` in the image lists every package and version it holds;
+their sources are in Alpine's aports repository (<https://gitlab.alpinelinux.org/alpine/aports>) and on its mirrors.

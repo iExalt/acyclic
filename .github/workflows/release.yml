@@ -1,0 +1,213 @@
+name: Release
+
+# Builds the release binaries and the server's image on every change that could alter them, and rehearses publishing
+# the image into a throwaway registry. A `v*` tag publishes: the GitHub release with the archives, and the image on
+# GitHub's container registry. Only the `release` job can write.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: &paths
+      - Cargo.toml
+      - Cargo.lock
+      - Containerfile
+      - LICENSE
+      - THIRD_PARTY.md
+      - mise.toml
+      - workspace/**
+      - scripts/notices.sh
+      - scripts/notices/**
+      - scripts/publish-image.sh
+      - scripts/vendor-graph*
+      - .github/workflows/release.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The build needs only Rust and cargo-about.
+  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
+  IMAGE: ghcr.io/iexalt/acyclic-server
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, runner: macos-15 }
+    env:
+      TARGET: ${{ matrix.target }}
+      ACYCLIC_REQUIRE_ASSETS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+      - run: rustup target add "$TARGET"
+      - run: mise run vendor:graph
+      - run: cargo build --release --locked -p acyclic --target "$TARGET"
+      - name: Check the binary runs, and is static on Linux
+        run: |
+          bin="target/$TARGET/release/acyclic"
+          "$bin" --version
+          case "$TARGET" in
+            *linux*) file "$bin" | tee /dev/stderr | grep -q 'static' ;;
+          esac
+      - name: Package
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "acyclic") | .version')
+          stage="acyclic-$version-$TARGET"
+          mkdir -p "dist/$stage"
+          cp "target/$TARGET/release/acyclic" LICENSE "dist/$stage/"
+          mise run notices -- "dist/$stage/THIRD_PARTY_NOTICES.md"
+          tar -czf "dist/$stage.tar.gz" -C dist "$stage"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  image:
+    name: image ${{ matrix.arch }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, target: x86_64-unknown-linux-musl, runner: ubuntu-24.04 }
+          - { arch: arm64, target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist
+      - name: Stage the binary and the notices
+        run: |
+          tar -xzf dist/acyclic-*.tar.gz -C dist
+          mkdir -p "dist/$ARCH"
+          mv dist/acyclic-*/acyclic "dist/$ARCH/acyclic"
+          mv dist/acyclic-*/THIRD_PARTY_NOTICES.md dist/
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build, and run it on this architecture
+        run: |
+          docker buildx build --platform "linux/$ARCH" --provenance=false --load --tag acyclic-server:test --file Containerfile .
+          docker run --rm acyclic-server:test --version
+          docker run --rm --entrypoint git acyclic-server:test --version
+          test "$(docker run --rm --entrypoint id acyclic-server:test -u)" != 0
+          docker buildx build --platform "linux/$ARCH" --provenance=false --output "type=oci,dest=image-$ARCH.tar" --file Containerfile .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ matrix.arch }}
+          path: image-${{ matrix.arch }}.tar
+          if-no-files-found: error
+
+  rehearse:
+    name: rehearse publishing
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    needs: image
+    runs-on: ubuntu-24.04
+    services:
+      registry:
+        image: registry:2
+        ports: ["5000:5000"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-*
+          merge-multiple: true
+          path: images
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: network=host
+      - run: sh scripts/publish-image.sh localhost:5000/acyclic-server rehearsal images --dest-tls-verify=false
+      - name: Check the index holds both architectures and runs here
+        run: |
+          docker buildx imagetools inspect localhost:5000/acyclic-server:rehearsal
+          docker buildx imagetools inspect localhost:5000/acyclic-server:rehearsal --format '{{json .Manifest}}' \
+            | jq -e '[.manifests[].platform.architecture] | sort == ["amd64", "arm64"]'
+          docker run --rm localhost:5000/acyclic-server:rehearsal --version
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-*
+          merge-multiple: true
+          path: images
+      - name: Check the tag names the workspace's version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          test "$TAG" = "v$version"
+      - name: Draft the release, or refresh a draft left by a failed run
+        run: |
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" --clobber dist/*
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "acyclic $TAG. The server's image is $IMAGE:$TAG." dist/*
+          fi
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Push the image
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          sh scripts/publish-image.sh "$IMAGE" "$TAG" images
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --latest
+
+  verify:
+    name: verify ${{ matrix.arch }}
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    permissions:
+      packages: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Run the published image on this architecture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          docker run --rm "$IMAGE:$TAG" --version | tee /dev/stderr | grep -qx "acyclic ${TAG#v}"

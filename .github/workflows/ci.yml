@@ -10,7 +10,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # The checks need only Rust, nextest and Gitleaks; skip the rest of mise.toml's tools.
-  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman
+  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
 
 jobs:
   check:
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Python and uv run Playwright here.
-      MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman
+      MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
       PLAYWRIGHT_DEPS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

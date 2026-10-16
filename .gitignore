@@ -28,3 +28,6 @@ target
 
 # rumdl's lint cache
 .rumdl_cache/
+
+# Release builds staged for the server's image
+/dist/
