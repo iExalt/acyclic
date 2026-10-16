@@ -2,6 +2,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::Method;
 use tower::ServiceExt as _;
 
+use serde_json::json;
+
 use super::*;
 
 const LOGIN: &str = "user@example.com";
@@ -155,10 +157,9 @@ fn the_server_runs_only_the_commands_it_allows() {
     // A read passes every check and runs; the tracker clone is missing, so it fails as the CLI's would.
     let (status, code) = post(&pass, r#"{"show": {"items": ["a"]}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
-    assert_eq!(
-        post(&pass, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#),
-        (StatusCode::FORBIDDEN, "not-allowed".into())
-    );
+    // So does a write.
+    let (status, code) = post(&pass, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#);
+    assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     assert_eq!(post(&pass, r#""sync""#), (StatusCode::FORBIDDEN, "not-allowed".into()));
     assert_eq!(
         post(&pass, r#"{"show": {"items": []}}"#),
@@ -171,4 +172,43 @@ fn the_server_runs_only_the_commands_it_allows() {
     );
     let foreign = [pass[0], pass[1], pass[2], ("origin", "https://elsewhere.example")];
     assert_eq!(post(&foreign, r#""list""#), (StatusCode::FORBIDDEN, "wrong-origin".into()));
+}
+
+#[test]
+fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
+    let classify = |value: Value| classify(&serde_json::from_value(value).unwrap());
+    for read in [
+        json!("list"),
+        json!("needs"),
+        json!({"ready": {}}),
+        json!({"show": {"items": ["a"]}}),
+        json!({"thread": "list"}),
+        json!({"thread": {"show": {"threads": ["t"]}}}),
+    ] {
+        assert_eq!(classify(read.clone()), Use::Read, "{read}");
+    }
+    for write in [
+        json!({"claim": {"id": "a"}}),
+        json!({"release": {"id": "a"}}),
+        json!({"done": {"id": "a", "note": "n"}}),
+        json!({"level": {"level": "blockers"}}),
+        json!({"item": {"add": {"id": "a", "title": "A"}}}),
+        json!({"item": {"archive": {"id": "a"}}}),
+        json!({"link": {"add": {"from": "a", "kind": "blocks", "to": "b"}}}),
+        json!({"thread": {"approve": {"thread": "t"}}}),
+        json!({"repo": {"attach": {"repository": "r", "item": "a"}}}),
+        json!({"proposal": {"keep": {"proposal": "p"}}}),
+    ] {
+        assert_eq!(classify(write.clone()), Use::Write, "{write}");
+    }
+    for refused in [
+        json!({"init": {"path": "/elsewhere", "replica": "x"}}),
+        json!("sync"),
+        json!("prime"),
+        json!({"import": {"file": "/etc/passwd"}}),
+        json!("doctor"),
+        json!({"graph": {"output": "/tmp/graph.dot"}}),
+    ] {
+        assert_eq!(classify(refused.clone()), Use::Refused, "{refused}");
+    }
 }

@@ -228,6 +228,10 @@ pub struct Serve {
     /// hold only what the server's own build put there.
     #[arg(long = "static")]
     pub static_dir: Option<PathBuf>,
+    /// Seconds between syncs with the clone's `origin`; 0 never syncs. Writes also push when the clone's
+    /// `acyclic.pushAfterWrite` says so.
+    #[arg(long, default_value_t = 30)]
+    pub sync_every: u64,
 }
 
 impl Command {

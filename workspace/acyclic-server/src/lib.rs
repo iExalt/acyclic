@@ -4,9 +4,12 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use acyclic_cli::Env;
-use acyclic_cli::args::{Command, Serve, ThreadCommand};
+use acyclic_cli::args::{
+    Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, Serve, ThreadCommand,
+};
 use acyclic_cli::error::{CliError, exit};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
@@ -162,16 +165,60 @@ pub fn same_origin(headers: &HeaderMap, config: &Config) -> Result<(), Refusal> 
     }
 }
 
-/// Whether the server runs a command: reads, for now.
-fn allowed(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::List
-            | Command::Show { .. }
-            | Command::Ready { .. }
-            | Command::Needs
-            | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
-    )
+/// What a command does, for the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Use {
+    /// It only reads, so it runs beside anything.
+    Read,
+    /// It may write, so it waits for the other writes and the sync loop.
+    Write,
+    /// The server doesn't run it for a request: it sets up or syncs the clone, reads or writes files on the server, or
+    /// starts another server.
+    Refused,
+}
+
+/// What a command does. With no catch-all arm, a new command or subcommand fails to compile until it is placed here.
+fn classify(command: &Command) -> Use {
+    match command {
+        Command::Init { .. }
+        | Command::Sync
+        | Command::Prime
+        | Command::Import { .. }
+        | Command::Doctor
+        | Command::Graph { .. }
+        | Command::Serve(_) => Use::Refused,
+        Command::Ready { .. }
+        | Command::List
+        | Command::Show { .. }
+        | Command::Needs
+        | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. }) => Use::Read,
+        Command::Claim { .. }
+        | Command::Release { .. }
+        | Command::Done { .. }
+        | Command::Level { .. }
+        | Command::Item(
+            ItemCommand::Add { .. }
+            | ItemCommand::Edit { .. }
+            | ItemCommand::Move { .. }
+            | ItemCommand::State { .. }
+            | ItemCommand::Reopen { .. }
+            | ItemCommand::Archive { .. },
+        )
+        | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
+        | Command::Thread(
+            ThreadCommand::Set { .. }
+            | ThreadCommand::Add { .. }
+            | ThreadCommand::Remove { .. }
+            | ThreadCommand::Approve { .. }
+            | ThreadCommand::Revoke { .. },
+        )
+        | Command::Repo(
+            RepoCommand::Set { .. } | RepoCommand::Attach(_) | RepoCommand::Detach(_),
+        )
+        | Command::Proposal(ProposalCommand::Keep { .. } | ProposalCommand::Drop { .. }) => {
+            Use::Write
+        },
+    }
 }
 
 /// The HTTP status for a command's exit code.
@@ -186,15 +233,37 @@ fn status(code: u8) -> StatusCode {
     }
 }
 
-async fn guard(State(config): State<Arc<Config>>, request: Request, next: Next) -> Response {
-    match identity(request.headers(), &config) {
+/// A running server's state.
+struct Server {
+    config: Config,
+    /// Held by each write and each sync, so that their pushes never race each other.
+    writes: tokio::sync::Mutex<()>,
+}
+
+impl Server {
+    /// Runs a command as the user, off the async threads, and returns its exit code and envelope.
+    async fn call(self: &Arc<Self>, command: Command) -> (u8, Value) {
+        let server = Arc::clone(self);
+        let run = tokio::task::spawn_blocking(move || {
+            acyclic_cli::call(command, server.config.tracker.clone(), true, &server.config.env)
+        });
+        run.await.unwrap_or_else(|_| {
+            let err =
+                CliError::new("internal", exit::UNREADABLE, "the command failed unexpectedly");
+            (err.exit, err.envelope())
+        })
+    }
+}
+
+async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) -> Response {
+    match identity(request.headers(), &server.config) {
         Ok(()) => next.run(request).await,
         Err(refusal) => refusal.into_response(),
     }
 }
 
-async fn command(State(config): State<Arc<Config>>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(refusal) = same_origin(&headers, &config) {
+async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    if let Err(refusal) = same_origin(&headers, &server.config) {
         return refusal.into_response();
     }
     let command: Command = match serde_json::from_slice(&body) {
@@ -204,31 +273,32 @@ async fn command(State(config): State<Arc<Config>>, headers: HeaderMap, body: By
             return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
         },
     };
-    if !allowed(&command) {
-        return Refusal::NotAllowed.into_response();
-    }
-    let run = tokio::task::spawn_blocking(move || {
-        acyclic_cli::call(command, config.tracker.clone(), false, &config.env)
-    });
-    let Ok((code, envelope)) = run.await else {
-        let err = CliError::new("internal", exit::UNREADABLE, "the command failed unexpectedly");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(err.envelope())).into_response();
+    let (code, envelope) = match classify(&command) {
+        Use::Refused => return Refusal::NotAllowed.into_response(),
+        Use::Read => server.call(command).await,
+        Use::Write => {
+            let _turn = server.writes.lock().await;
+            server.call(command).await
+        },
     };
-    (status(code), Json::<Value>(envelope)).into_response()
+    (status(code), Json(envelope)).into_response()
 }
 
 /// The server's routes, every one behind [`identity`].
 pub fn router(config: Config) -> Router {
-    let config = Arc::new(config);
+    routes(Arc::new(Server { config, writes: tokio::sync::Mutex::new(()) }))
+}
+
+fn routes(server: Arc<Server>) -> Router {
     let mut router = Router::new().route("/api/command", post(command));
-    if let Some(dir) = &config.static_dir {
+    if let Some(dir) = &server.config.static_dir {
         router = router.fallback_service(ServeDir::new(dir));
     }
-    router.layer(middleware::from_fn_with_state(config.clone(), guard)).with_state(config)
+    router.layer(middleware::from_fn_with_state(server.clone(), guard)).with_state(server)
 }
 
 /// Serves the tracker clone at `tracker` until interrupted: `acyclic serve`. Prints one JSON line with the address
-/// it listens on once it does.
+/// it listens on once it does, and syncs with the clone's `origin` as the settings say.
 ///
 /// # Errors
 ///
@@ -249,20 +319,47 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
         .enable_all()
         .build()
         .map_err(|err| failed("starting the runtime", err))?;
+    let server = Arc::new(Server { config, writes: tokio::sync::Mutex::new(()) });
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(options.listen)
             .await
             .map_err(|err| failed(&format!("listening on {}", options.listen), err))?;
         let address = listener.local_addr().map_err(|err| failed("reading the address", err))?;
+        if options.sync_every > 0 {
+            tokio::spawn(sync(server.clone(), Duration::from_secs(options.sync_every)));
+        }
         let mut stdout = std::io::stdout();
         writeln!(stdout, "{}", json!({"ok": true, "data": {"listening": address.to_string()}}))
             .and_then(|()| stdout.flush())
             .map_err(|err| failed("printing the address", err))?;
-        axum::serve(listener, router(config))
+        axum::serve(listener, routes(server))
             .with_graceful_shutdown(stopped())
             .await
             .map_err(|err| failed("serving", err))
     })
+}
+
+/// Syncs the clone with its `origin` every `every`, each sync after the last has finished, until the server stops.
+/// A failed sync prints its envelope to standard error and the next one tries again; a clone without `origin` stops the
+/// loop after saying so.
+async fn sync(server: Arc<Server>, every: Duration) {
+    let mut ticks = tokio::time::interval(every);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticks.tick().await;
+        let (code, envelope) = {
+            let _turn = server.writes.lock().await;
+            server.call(Command::Sync).await
+        };
+        if code == exit::OK {
+            continue;
+        }
+        if envelope["error"]["code"] == "no-remote" {
+            eprintln!("acyclic: the tracker clone has no origin, so the server doesn't sync");
+            return;
+        }
+        eprintln!("{envelope}");
+    }
 }
 
 /// Waits for an interrupt or, on Unix, a termination signal.

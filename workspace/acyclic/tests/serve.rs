@@ -1,10 +1,11 @@
-//! `acyclic serve` as a process: it says where it listens, refuses a request without the user's identity, and answers
-//! a read as the CLI does.
+//! `acyclic serve` as a process: it says where it listens, refuses a request without the user's identity, answers a
+//! read as the CLI does, writes as the user, and syncs with the other replicas.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -60,35 +61,89 @@ fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) 
     (status, serde_json::from_str(body).unwrap())
 }
 
-#[test]
-fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
-    let dir = tempfile::tempdir().unwrap();
-    let tracker = dir.path().join("tracker");
-    let output =
-        acyclic(dir.path()).args(["init", "tracker", "--replica", "mac"]).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
-    cli(&tracker, "item add a --title A --as-user");
-
-    let mut child = acyclic(&tracker)
+/// Starts the server on `tracker` and returns it with the address it listens on.
+fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
+    let mut child = acyclic(tracker)
         .args(["serve", "--listen", "127.0.0.1:0", "--login", LOGIN, "--host", HOST])
+        .args(extra)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let _server = Server(child);
+    let server = Server(child);
     let started: Value = serde_json::from_str(&line).unwrap();
-    let address = started["data"]["listening"].as_str().unwrap();
+    (server, started["data"]["listening"].as_str().unwrap().to_owned())
+}
 
-    let json = ("Content-Type", "application/json");
-    let (status, refused) = request(address, &[("Host", HOST), json], r#""list""#);
+/// Sends a command as the user.
+fn command(address: &str, body: &str) -> (u16, Value) {
+    let headers =
+        [("Host", HOST), ("Tailscale-User-Login", LOGIN), ("Content-Type", "application/json")];
+    request(address, &headers, body)
+}
+
+/// Sets up the clone `name` in `dir` as a replica of the same name.
+fn init(dir: &Path, name: &str, remote: Option<&str>) -> PathBuf {
+    let mut line = vec!["init", name, "--replica", name];
+    line.extend(remote.iter().flat_map(|remote| ["--remote", remote]));
+    let output = acyclic(dir).args(line).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    dir.join(name)
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = init(dir.path(), "mac", None);
+    cli(&tracker, "item add a --title A --as-user");
+    let (_server, address) = serve(&tracker, &[]);
+
+    let anonymous = [("Host", HOST), ("Content-Type", "application/json")];
+    let (status, refused) = request(&address, &anonymous, r#""list""#);
     assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
 
-    let (status, shown) = request(
-        address,
-        &[("Host", HOST), ("Tailscale-User-Login", LOGIN), json],
-        r#"{"show": {"items": ["a"]}}"#,
-    );
+    let (status, shown) = command(&address, r#"{"show": {"items": ["a"]}}"#);
     assert_eq!(status, 200, "{shown}");
     assert_eq!(shown, cli(&tracker, "show a"));
+}
+
+#[test]
+fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "--quiet", "--bare", "shared.git"]);
+    let server = init(dir.path(), "server", Some("../shared.git"));
+    let phone = init(dir.path(), "phone", Some("../shared.git"));
+    git(&server, &["config", "acyclic.pushAfterWrite", "true"]);
+    let (_server, address) = serve(&server, &["--sync-every", "1"]);
+
+    // A write through the server is the user's, and reaches the shared repository at once.
+    let (status, added) = command(&address, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#);
+    assert_eq!(status, 200, "{added}");
+    let shared = dir.path().join("shared.git");
+    let logs = git(&shared, &["for-each-ref", "--format=%(refname)", "refs/heads/log/server/"]);
+    let log = logs.lines().next().expect("the server's log was pushed");
+    let events = git(&shared, &["log", "-p", "--format=", log]);
+    let event =
+        events.lines().find(|line| line.contains(r#""id":"a""#)).expect("the add is logged");
+    assert!(event.contains(r#""actor":"actor/user""#), "{event}");
+
+    // Another replica's write reaches the server's API through its sync loop.
+    cli(&phone, "item add b --title B --as-user");
+    cli(&phone, "sync");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (status, shown) = command(&address, r#"{"show": {"items": ["b"]}}"#);
+        if status == 200 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the server never synced b: {shown}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
