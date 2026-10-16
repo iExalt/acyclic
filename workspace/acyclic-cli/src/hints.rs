@@ -114,6 +114,10 @@ pub fn hint(args: &[OsString]) -> Option<String> {
             })
     });
     if let Some(removed) = removed {
+        // `thread add` still exists, so the form that is gone is named by its arguments.
+        if removed.words == ["thread", "add"] {
+            return Some(format!("`thread add <ITEM> <THREAD>` is gone: use {}", removed.instead));
+        }
         let old = removed.words.join(" ");
         return Some(match removed.flag {
             Some(flag) => format!("`acyclic {old} {flag}` is gone: use {}", removed.instead),

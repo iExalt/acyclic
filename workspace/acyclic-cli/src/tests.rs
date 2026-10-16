@@ -188,11 +188,7 @@ fn usage_errors_and_help_are_text() {
     let edit = run("acyclic help item edit");
     assert_eq!(edit, run("acyclic item edit --help"));
     assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
-    assert_eq!(
-        (item.code, item.stdout.starts_with("Adds and edits")),
-        (exit::OK, true),
-        "{item:?}"
-    );
+    assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
     // An enum-valued input lists its values in help, and a wrong one names them.
     assert!(edit.stdout.contains("[possible values: xs, s, m, l, xl]"), "{edit:?}");
     let wrong = run("acyclic item edit a --size huge");
@@ -672,7 +668,9 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         "{out:?}"
     );
     // The old form of a command that is still there is caught as the failed parse it is.
-    assert!(run("acyclic thread add a1 t1").stderr.contains("acyclic item edit <ITEM> --thread"));
+    let old_add = run("acyclic thread add a1 t1").stderr;
+    assert!(old_add.starts_with("error: `thread add <ITEM> <THREAD>` is gone: use"), "{old_add}");
+    assert!(old_add.contains("acyclic item edit <ITEM> --thread"));
 }
 
 #[test]
