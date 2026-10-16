@@ -1,0 +1,33 @@
+name: Release Please
+
+# Keeps a release PR open that bumps the version and writes CHANGELOG.md from the Conventional Commits on main. Merging
+# it makes the v* tag and a draft release with the changelog as its notes, and the tag starts publish.yml, which fills
+# the draft and publishes it. The release App's token is used, not GITHUB_TOKEN: what GITHUB_TOKEN makes starts no
+# workflows, so the release PR would get no checks and the tag no publish.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.token.outputs.token }}

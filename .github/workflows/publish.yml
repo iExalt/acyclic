@@ -8,8 +8,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      # Publishing marks the release Latest and moves the image's `latest` to it, so use this for the newest tag only.
       tag:
-        description: The tag to publish, such as v1.2.3
+        description: The newest tag, to publish again, such as v1.2.3
         type: string
         required: true
 
