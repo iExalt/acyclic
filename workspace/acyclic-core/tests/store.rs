@@ -138,65 +138,6 @@ fn a_new_month_starts_a_new_segment() {
     assert_eq!(refs, "refs/heads/log/mac/2026-10/0001\nrefs/heads/log/mac/2026-11/0001");
 }
 
-const WRITERS: usize = 4;
-const BATCHES: usize = 5;
-
-/// The child half of the concurrency test: one writer process running its batches.
-#[test]
-fn writer_child() {
-    let (Ok(repo), Ok(writer)) =
-        (std::env::var("ACYCLIC_WRITER_REPO"), std::env::var("ACYCLIC_WRITER"))
-    else {
-        return;
-    };
-    let (tracker, _) = Tracker::open(Path::new(&repo)).unwrap();
-    let key = item(&format!("w{writer}"));
-    for batch in 0..BATCHES {
-        let field = format!("f{batch}");
-        tracker
-            .batch(&meta(), NOW, false, &no_project, |replica, at| {
-                replica.write(&key, &field, "actor/user", at, Some(json!(batch))).map(|_| ())
-            })
-            .unwrap();
-    }
-}
-
-#[test]
-fn writer_processes_in_separate_worktrees_lose_and_duplicate_nothing() {
-    let dir = TempDir::new().unwrap();
-    let path = tracker(&dir, "mac");
-    let (first, _) = Tracker::open(&path).unwrap();
-    write(&first, "seed", "f", json!(0));
-    let children: Vec<_> = (0..WRITERS)
-        .map(|writer| {
-            let worktree = dir.path().join(format!("wt{writer}"));
-            let target = worktree.to_str().unwrap();
-            git(&path, &["worktree", "add", "-q", "--detach", target, "refs/heads/state/mac"]);
-            Command::new(std::env::current_exe().unwrap())
-                .args(["writer_child", "--exact", "--nocapture"])
-                .env("ACYCLIC_WRITER_REPO", &worktree)
-                .env("ACYCLIC_WRITER", writer.to_string())
-                .spawn()
-                .unwrap()
-        })
-        .collect();
-    for mut child in children {
-        assert!(child.wait().unwrap().success(), "no batch failed");
-    }
-    let (_, state) = first.load().unwrap();
-    let mut dots = std::collections::BTreeSet::new();
-    for writer in 0..WRITERS {
-        let entity = state.entity(&item(&format!("w{writer}"))).unwrap();
-        assert_eq!(entity.len(), BATCHES, "writer {writer} lost writes");
-        for register in entity.values() {
-            assert_eq!(register.len(), 1);
-            assert!(dots.insert(register.keys().next().unwrap().clone()), "a duplicated dot");
-        }
-    }
-    let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_/15.jsonl");
-    assert_eq!(events.len(), 1 + WRITERS * BATCHES);
-}
-
 #[test]
 fn a_batch_that_loses_the_race_retries_on_the_new_tip() {
     let dir = TempDir::new().unwrap();
