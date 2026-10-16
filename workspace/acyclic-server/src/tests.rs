@@ -160,7 +160,10 @@ fn the_server_runs_only_the_commands_it_allows() {
     // So does a write.
     let (status, code) = post(&pass, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
-    assert_eq!(post(&pass, r#""sync""#), (StatusCode::FORBIDDEN, "not-allowed".into()));
+    assert_eq!(
+        post(&pass, r#"{"sync": {"with-usage": true}}"#),
+        (StatusCode::FORBIDDEN, "not-allowed".into())
+    );
     assert_eq!(
         post(&pass, r#"{"show": {"items": []}}"#),
         (StatusCode::BAD_REQUEST, "usage".into())
@@ -203,7 +206,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
     }
     for refused in [
         json!({"init": {"path": "/elsewhere", "replica": "x"}}),
-        json!("sync"),
+        json!({"sync": {}}),
         json!("prime"),
         json!({"import": {"file": "/etc/passwd"}}),
         json!("doctor"),

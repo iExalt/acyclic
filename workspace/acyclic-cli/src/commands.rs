@@ -115,7 +115,7 @@ impl<'a> Session<'a> {
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
             Command::Needs => self.needs(),
-            Command::Sync => self.sync(),
+            Command::Sync { with_usage } => self.sync(*with_usage),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add { id, title, parent }) => {
                 self.add(id, title, parent.as_deref())
@@ -638,9 +638,9 @@ impl<'a> Session<'a> {
         Ok(json!({"needs": entries}))
     }
 
-    fn sync(&self) -> Result<Json, CliError> {
+    fn sync(&self, with_usage: bool) -> Result<Json, CliError> {
         let remote = self.remote()?;
-        let synced = self.tracker.sync(remote)?;
+        let synced = self.tracker.sync_with(remote, store::Fetch { usage: with_usage })?;
         Ok(json!({
             "remote": remote,
             "fetched": synced.fetched,

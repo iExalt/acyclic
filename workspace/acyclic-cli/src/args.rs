@@ -81,7 +81,12 @@ pub enum Command {
         remote: Option<String>,
     },
     /// Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs.
-    Sync,
+    Sync {
+        /// Fetch every writer's usage records too, as a server does for cost totals.
+        #[arg(long)]
+        #[serde(default)]
+        with_usage: bool,
+    },
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
     /// Lists ready leaves, best first.

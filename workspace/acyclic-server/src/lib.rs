@@ -182,7 +182,7 @@ enum Use {
 fn classify(command: &Command) -> Use {
     match command {
         Command::Init { .. }
-        | Command::Sync
+        | Command::Sync { .. }
         | Command::Prime
         | Command::Import { .. }
         | Command::Doctor
@@ -366,7 +366,7 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
     })
 }
 
-/// Syncs the clone with its `origin` every `every`, each sync after the last has finished, until the server stops.
+/// Syncs the clone with its `origin` every `every`, fetching every writer's usage records too, each sync after the last has finished, until the server stops.
 /// A failed sync prints its envelope to standard error and the next one tries again; a clone without `origin` stops the
 /// loop after saying so.
 async fn sync(server: Arc<Server>, every: Duration) {
@@ -376,7 +376,7 @@ async fn sync(server: Arc<Server>, every: Duration) {
         ticks.tick().await;
         // A sync waits as long as it must: it is the server's own, and the next tick would only queue behind it.
         let turn = server.turns.clone().lock_owned().await;
-        let (code, envelope) = server.call(Command::Sync, Some(turn)).await;
+        let (code, envelope) = server.call(Command::Sync { with_usage: true }, Some(turn)).await;
         if code == exit::OK {
             continue;
         }
