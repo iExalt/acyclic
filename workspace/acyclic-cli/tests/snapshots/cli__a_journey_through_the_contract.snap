@@ -522,6 +522,27 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread remove a2 --as-user
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --name code
+# exit 2
+{
+  "error": {
+    "code": "usage",
+    "details": null,
+    "message": "creating repository r1 needs --owner, --name, --public and --default-branch (missing: --owner, --public, --default-branch)"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --owner me --name code --public true --default-branch main
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "repository": "r1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --default-branch trunk
 # exit 0
 {
   "data": {
