@@ -188,9 +188,9 @@ fn check_targets(
         )));
     }
     match repositories.iter().find(|id| !model.repositories.contains_key(*id)) {
-        Some(id) => {
-            Err(not_found(format!("no repository record {id}; add it with `acyclic repo add {id}`")))
-        },
+        Some(id) => Err(not_found(format!(
+            "no repository record {id}; add it with `acyclic repo add {id}`"
+        ))),
         None => Ok(()),
     }
 }
@@ -453,7 +453,10 @@ pub(crate) fn add_thread(
     }
     let state = replica.state();
     let model = Model::read(state)?;
-    let thread = model.threads.get(id).ok_or_else(|| not_found(format!("no thread {id}; `acyclic thread list` lists them")))?;
+    let thread = model
+        .threads
+        .get(id)
+        .ok_or_else(|| not_found(format!("no thread {id}; `acyclic thread list` lists them")))?;
     let mut differs: Vec<&str> = Vec::new();
     if fields.title.as_ref() != thread.title.one() {
         differs.push("--title");
@@ -494,7 +497,9 @@ pub(crate) fn edit_repository(
 ) -> Result<(), CliError> {
     let key = Key::new(kind::REPOSITORY, id)?;
     if replica.state().entity(&key).is_none() {
-        return Err(not_found(format!("no repository record {id}; `acyclic repo list` lists them")));
+        return Err(not_found(format!(
+            "no repository record {id}; `acyclic repo list` lists them"
+        )));
     }
     write_repository(replica, &key, fields, by)
 }
@@ -523,10 +528,9 @@ pub(crate) fn add_repository(
         return write_repository(replica, &key, fields, by);
     }
     let model = Model::read(replica.state())?;
-    let record = model
-        .repositories
-        .get(id)
-        .ok_or_else(|| not_found(format!("no repository record {id}; `acyclic repo list` lists them")))?;
+    let record = model.repositories.get(id).ok_or_else(|| {
+        not_found(format!("no repository record {id}; `acyclic repo list` lists them"))
+    })?;
     let mut differs: Vec<&str> = Vec::new();
     for (flag, same) in [
         ("--owner", fields.owner.as_ref() == record.owner.one()),
