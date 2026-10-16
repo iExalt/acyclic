@@ -10,7 +10,7 @@ use crate::claim;
 use crate::model::{self, Level, Model, Value};
 use crate::place;
 use crate::ready::{Readiness, Status, Wait};
-use crate::schema::{kind, link, question, set, thread};
+use crate::schema::{kind, question, set};
 use crate::scope;
 use crate::state::{Error, Key, Millis, State};
 
@@ -340,34 +340,23 @@ fn claims(
     Ok(())
 }
 
-/// Unmet blocks links from items in approved threads, added after the thread's approval. The two are compared by
-/// their writers' stamps, so a blocker added within the clock guard's skew of an approval on another replica may be
-/// misordered; re-approving a thread acknowledges the blockers before it.
+/// Unmet blocks links from items in approved threads, added after the thread's approval.
 fn new_blockers(
     state: &State,
     model: &Model,
     readiness: &Readiness<'_>,
     entries: &mut BTreeSet<Entry>,
 ) -> Result<(), Error> {
-    let latest = |key: &Key, field: &str| {
-        state.field(key, field).into_iter().flatten().map(|(_, v)| v.at).max()
-    };
-    for link in model.links.iter().filter(|l| l.kind == model::LinkKind::Blocks) {
-        let Some(thread_id) = model.thread_of(&link.from) else { continue };
-        if !model.threads.get(thread_id).is_some_and(model::Thread::is_approved) {
-            continue;
-        }
-        let approved_at = latest(&Key::new(kind::THREAD, thread_id)?, thread::APPROVED);
-        let link_key = model::link_key(&link.from, &link.to, link.kind)
-            .map_err(|_| Error::InvalidName(link.from.clone()))?;
-        let linked_at = latest(&link_key, link::PRESENT);
-        let unmet = matches!(readiness.of(&link.from)?, Some(Status::Blocked { waiting }) if waiting.contains_key(&link.to));
-        if unmet && linked_at > approved_at {
-            entries.insert(Entry::NewBlocker {
-                item: link.from.clone(),
-                thread: thread_id.to_owned(),
-                blocker: link.to.clone(),
-            });
+    for thread in model.threads.keys() {
+        for (item, blocker) in scope::blockers_since_approval(state, model, thread)? {
+            let unmet = matches!(readiness.of(item)?, Some(Status::Blocked { waiting }) if waiting.contains_key(blocker));
+            if unmet {
+                entries.insert(Entry::NewBlocker {
+                    item: item.to_owned(),
+                    thread: thread.clone(),
+                    blocker: blocker.to_owned(),
+                });
+            }
         }
     }
     Ok(())

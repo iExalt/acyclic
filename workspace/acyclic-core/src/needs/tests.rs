@@ -4,7 +4,7 @@ use serde_json::json;
 use super::*;
 use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent, start_run};
 use crate::ready::Ancestry;
-use crate::schema::{GLOBAL, item as field, settings};
+use crate::schema::{GLOBAL, item as field, settings, thread};
 use crate::scope::{ScopeEdit, USER, edit};
 use crate::state::{Replica, ReplicaId};
 
@@ -174,6 +174,14 @@ fn the_state_puts_its_problems_on_the_list() {
     });
     has(&Entry::RunClash { thread: "ok".into(), runs: vec!["r1".into(), "r2".into()] });
     has(&Entry::NewBlocker { item: "work".into(), thread: "ok".into(), blocker: "x".into() });
+    // Approving the thread again acknowledges it, though its members and approval are unchanged.
+    let mut acknowledged = a.clone();
+    assert!(scope::approve(&mut acknowledged, "ok", true, user(4)).unwrap());
+    assert!(!list(&acknowledged).iter().any(|e| matches!(e, Entry::NewBlocker { .. })));
+    assert!(
+        !scope::approve(&mut acknowledged, "ok", true, user(5)).unwrap(),
+        "a repeat changes nothing"
+    );
     assert!(entries.iter().any(|e| matches!(e, Entry::Proposal { actor, threads, .. } if actor == "run/r1" && threads == &["ok"])));
     has(&Entry::UnknownRun { item: "kid".into(), holder: "run/ghost".into() });
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });

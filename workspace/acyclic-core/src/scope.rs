@@ -10,7 +10,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{self, By, Model, Value, WriteError};
-use crate::schema::{item as field, kind, proposal, set, thread as thread_field};
+use crate::schema::{item as field, kind, link, proposal, set, thread as thread_field};
 use crate::state::{Error, Key, Replica, State};
 
 /// The user's actor id.
@@ -230,7 +230,10 @@ pub fn approve(
     let model = Model::read(&replica.state)?;
     let current = model.threads.get(thread);
     let mut changed = false;
-    if current.map(|t| &t.approved) != Some(&Value::One(approved)) {
+    // Approving again acknowledges the blockers added since, so it writes even when nothing else changes.
+    let acknowledges =
+        approved && !blockers_since_approval(&replica.state, &model, thread)?.is_empty();
+    if current.map(|t| &t.approved) != Some(&Value::One(approved)) || acknowledges {
         model::set(replica, &key, thread_field::APPROVED, Some(&approved), by)?;
         changed = true;
     }
@@ -248,6 +251,39 @@ pub fn approve(
         }
     }
     Ok(changed)
+}
+
+/// The blocks links from an approved thread's members added after its approval, as `(from, to)`. The two are
+/// compared by their writers' stamps, so a blocker added within the clock guard's skew of an approval on another
+/// replica may be misordered; approving the thread again acknowledges them.
+///
+/// # Errors
+///
+/// Fails on an invalid id.
+pub fn blockers_since_approval<'m>(
+    state: &State,
+    model: &'m Model,
+    thread: &str,
+) -> Result<Vec<(&'m str, &'m str)>, Error> {
+    if !model.threads.get(thread).is_some_and(model::Thread::is_approved) {
+        return Ok(Vec::new());
+    }
+    let latest = |key: &Key, name: &str| {
+        state.field(key, name).into_iter().flatten().map(|(_, v)| v.at).max()
+    };
+    let approved_at = latest(&Key::new(kind::THREAD, thread)?, thread_field::APPROVED);
+    let mut found = Vec::new();
+    for edge in &model.links {
+        if edge.kind != model::LinkKind::Blocks || model.thread_of(&edge.from) != Some(thread) {
+            continue;
+        }
+        let key = model::link_key(&edge.from, &edge.to, edge.kind)
+            .map_err(|_| Error::InvalidName(edge.from.clone()))?;
+        if latest(&key, link::PRESENT) > approved_at {
+            found.push((edge.from.as_str(), edge.to.as_str()));
+        }
+    }
+    Ok(found)
 }
 
 /// An open member of an approved thread that the approval didn't see, put there by an agent: an agent's edit made
