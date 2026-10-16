@@ -92,7 +92,7 @@ impl Trackers {
         self.prefixes
             .iter()
             .filter_map(|(prefix, tracker)| {
-                let prefix = normalize(prefix);
+                let prefix = normalize_prefix(prefix);
                 let matches = remote == prefix
                     || remote.strip_prefix(&prefix).is_some_and(|rest| rest.starts_with('/'));
                 matches.then_some((prefix.len(), tracker))
@@ -152,6 +152,14 @@ pub fn normalize(url: &str) -> String {
     let path = tidy(path.trim_start_matches('/'));
     let joined = if path.is_empty() { authority.to_owned() } else { format!("{authority}/{path}") };
     joined.to_ascii_lowercase()
+}
+
+/// A prefix as [`normalize`] reduces a remote. A prefix may also be a bare `host/path`, which `normalize` would read
+/// as a local path; anything not shaped like a local path names a host, so it is lowercased like a host URL.
+fn normalize_prefix(prefix: &str) -> String {
+    let normalized = normalize(prefix);
+    let local = prefix.trim().starts_with(['/', '.', '~']) || prefix.trim().starts_with("file://");
+    if local { normalized } else { normalized.to_ascii_lowercase() }
 }
 
 fn expand(tracker: &str, home: &Path) -> PathBuf {
@@ -222,11 +230,12 @@ mod tests {
             r#"
             [prefixes]
             "github.com/some-org" = "/t/org"
-            "github.com/some-org/one" = "~/t/one"
+            "github.com/Some-Org/One" = "~/t/one"
             "https://Example.test" = "/t/host"
             "#,
         );
         let lookup = |url| map.lookup(url, home);
+        // A bare `host/path` prefix ignores case like the host URL it stands for.
         assert_eq!(lookup("git@github.com:some-org/one.git"), Some("/home/u/t/one".into()));
         assert_eq!(lookup("https://github.com/some-org/two"), Some("/t/org".into()));
         // `some-org` doesn't match `some-organ`.
