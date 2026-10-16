@@ -76,6 +76,12 @@ run = "sh scripts/vendor-graph.sh"
 description = "Write the release's third-party notices to the path given: THIRD_PARTY.md and the Rust crates' licences"
 run = "sh scripts/notices.sh"
 
+[tasks.install]
+description = "Install the acyclic CLI from this checkout into ~/.cargo/bin"
+depends = ["vendor:graph"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1" }
+run = "cargo install --locked --path workspace/acyclic"
+
 [tasks."hooks:install"]
 description = "Install the pre-push guard for this clone"
 run = "git config core.hooksPath .githooks"
