@@ -12,12 +12,12 @@ pub mod import;
 pub mod locate;
 pub mod model;
 pub mod needs;
+pub mod place;
 #[doc(hidden)]
 pub mod probe;
 pub mod ready;
 pub mod schema;
 pub mod scope;
-pub mod split;
 pub mod state;
 pub mod store;
 pub mod suggest;

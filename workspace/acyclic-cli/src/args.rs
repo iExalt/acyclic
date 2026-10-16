@@ -317,14 +317,6 @@ pub enum ThreadCommand {
         /// The thread.
         thread: String,
     },
-    /// Groups open leaves that no thread holds into draft threads for the user to approve.
-    Split {
-        /// Only this item's subtree; every top-level item's otherwise.
-        root: Option<String>,
-        /// Reports the drafts without writing them.
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
 
 /// The repository commands.

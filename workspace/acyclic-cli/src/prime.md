@@ -40,7 +40,6 @@ older copy.
    standard output.
 5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic <group> --help`
    lists a group's commands.
-6. `acyclic thread split` groups open leaves that no thread holds into draft threads of up to 25 items, unless
-   linked work must stay together; `--dry-run` shows them first. Improve a draft's title and brief, and leave
-   approving it to the user. New or moved work joins the thread of its nearest threaded ancestor, and work
-   piling up without a thread is split on its own: an add, move or import reports what it placed as `placed`.
+6. Grouping work into threads is yours: create threads with `acyclic thread set`, fill them with `acyclic thread
+   add`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
+   its parent passes down, or else the one its siblings share; an add, move or import reports it as `inherited`.

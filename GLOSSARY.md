@@ -53,7 +53,7 @@ unit.
 _Avoid_: workstream, track, lane, operation
 
 **Provisional thread**:
-A thread acyclic or an agent proposed that the user has not yet approved.
+A thread an agent or an import created that the user has not yet approved.
 _Avoid_: draft thread, suggested thread
 
 **Proposed member**:
@@ -89,7 +89,7 @@ The part of acyclic that starts runs of approved, ready threads on its own, with
 _Avoid_: scheduler, project manager
 
 **Intake**:
-Adding work by describing it to an agent in a chat, which files it, places it and splits it.
+Adding work by describing it to an agent in a chat, which files it, places it and groups it into threads.
 _Avoid_: triage, inbox
 
 **Unfiled chat**:

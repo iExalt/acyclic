@@ -127,20 +127,11 @@ fn a_journey_through_the_contract() {
     let (code, unlinked) = sh.output("link remove a2 blocks a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
-    // a2 left t1, so a split drafts a thread for it; the user then sees it awaiting approval.
-    let (code, dry) = sh.output("thread split --dry-run", AGENT);
-    assert_eq!((code, dry["data"]["drafts"][0]["members"][0].as_str()), (0, Some("a2")));
-    assert_eq!(sh.run("thread split nope", AGENT), 3);
-    let (code, split) = sh.output("thread split", AGENT);
-    let drafted = &dry["data"]["drafts"][0]["thread"];
-    assert_eq!((code, &split["data"]["drafts"][0]["thread"]), (0, drafted), "as the dry run said");
+    // a2 left t1; an agent groups it into a new thread, which the user then sees awaiting approval.
+    assert_eq!(sh.run("thread set t2 --title Follow-ups", AGENT), 0);
+    let (code, out) = sh.output("thread add a2 t2", AGENT);
+    assert_eq!((code, out["data"]["outcome"].as_str()), (0, Some("applied")), "unapproved scope");
     assert_eq!(sh.run("needs", AGENT), 0);
-    let (code, again) = sh.output("thread split", AGENT);
-    assert_eq!(
-        (code, again["data"]["changed"].as_bool()),
-        (0, Some(false)),
-        "nothing left to split"
-    );
     // Every add offers places for the item; one is kept in full here.
     sh.candidates = true;
     let (code, added) = sh.output("item add a3 --title Second-follow-up", AGENT);
@@ -150,6 +141,7 @@ fn a_journey_through_the_contract() {
     assert_eq!((code, shown), (0, (Some("a2"), Some("acyclic item move a3 a2"))));
     let (_, under) = sh.output("item add a3 --title Second-follow-up --parent a2", AGENT);
     assert_eq!(under["data"]["candidates"]["parent_rank"], 1, "the parent given ranks first");
+    assert_eq!(under["data"]["inherited"][0]["thread"], "t2", "and passes its thread down");
     insta::assert_snapshot!(sh.transcript);
 }
 
@@ -192,11 +184,11 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
         (Some(false), Some(50))
     );
     // The plan's unthreaded work joins the threads above it.
-    let placed = dry["placed"].clone();
-    assert!(placed["inherited"].as_array().is_some_and(|i| !i.is_empty()), "{dry}");
+    let inherited = dry["inherited"].clone();
+    assert!(inherited.as_array().is_some_and(|i| !i.is_empty()), "{dry}");
     assert_eq!(sh.output("doctor", AGENT).1["data"]["items"], 0);
     let done = import(&mut sh, "");
-    assert_eq!((done["changed"].as_bool(), &done["placed"]), (Some(true), &placed));
+    assert_eq!((done["changed"].as_bool(), &done["inherited"]), (Some(true), &inherited));
     let refs = |sh: &Shell| {
         let out = std::process::Command::new("git")
             .args(["for-each-ref", "--format=%(refname) %(objectname)"])

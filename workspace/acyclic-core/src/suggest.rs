@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::model::{Item, Model};
-use crate::split;
+use crate::place;
 
 /// Candidates of each kind shown on an add.
 pub const LIMIT: usize = 3;
@@ -377,7 +377,7 @@ pub fn suggest(
         .filter(|(_, score)| *score > 0.0)
         .take(limit)
         .map(|(parent, score)| {
-            let inherits = split::passed_down(model, parent).map(str::to_owned);
+            let inherits = place::passed_down(model, parent).map(str::to_owned);
             Parent {
                 item: parent.clone(),
                 title: title(parent),

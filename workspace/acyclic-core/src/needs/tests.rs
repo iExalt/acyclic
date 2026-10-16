@@ -220,7 +220,6 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
     let entry = |thread: &str, other: &str| Entry::AwaitingApproval {
         thread: thread.into(),
         members: 2,
-        over_cap: false,
         waits_with: vec![other.into()],
     };
     model::set(&mut r, &Key::new(kind::THREAD, "finished").unwrap(), thread::TITLE, Some(&"F"), by)
@@ -237,17 +236,4 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
     let t = Key::new(kind::THREAD, "t").unwrap();
     model::set(&mut r, &t, thread::APPROVED, Some(&true), user(2)).unwrap();
     assert_eq!(awaiting(&r), vec![entry("u", "t")]);
-    let big = Key::new(kind::THREAD, "big").unwrap();
-    model::set(&mut r, &big, thread::TITLE, Some(&"Big"), by).unwrap();
-    for i in 0..=split::CAP {
-        let item = format!("z{i}");
-        add_item(&mut r, &item, &item, by).unwrap();
-        edit(&mut r, &ScopeEdit::Member { item, thread: Some("big".into()) }, by).unwrap();
-    }
-    assert!(awaiting(&r).contains(&Entry::AwaitingApproval {
-        thread: "big".into(),
-        members: split::CAP + 1,
-        over_cap: true,
-        waits_with: vec![],
-    }));
 }

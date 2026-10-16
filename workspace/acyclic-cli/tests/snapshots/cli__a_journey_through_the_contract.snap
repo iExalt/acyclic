@@ -501,65 +501,27 @@ $ ACYCLIC_ACTOR=actor/user acyclic ready
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread split --dry-run
+$ ACYCLIC_ACTOR=session/mac acyclic thread set t2 --title Follow-ups
 # exit 0
 {
   "data": {
-    "cap": 25,
-    "changed": false,
-    "drafts": [
-      {
-        "cross_top": false,
-        "members": [
-          "a2"
-        ],
-        "merged_cycle": false,
-        "review": "acyclic graph --open --root a2",
-        "root": "a2",
-        "size": 1,
-        "thread": "s-a2-b75370",
-        "title": "Second",
-        "waits_with": []
-      }
-    ],
-    "dry_run": true
+    "changed": true,
+    "thread": "t2"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread split nope
-# exit 3
-{
-  "error": {
-    "code": "not-found",
-    "details": null,
-    "message": "no item nope"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic thread split
+$ ACYCLIC_ACTOR=session/mac acyclic thread add a2 t2
 # exit 0
 {
   "data": {
-    "cap": 25,
     "changed": true,
-    "drafts": [
-      {
-        "cross_top": false,
-        "members": [
-          "a2"
-        ],
-        "merged_cycle": false,
-        "review": "acyclic graph --open --thread s-a2-b75370",
-        "root": "a2",
-        "size": 1,
-        "thread": "s-a2-b75370",
-        "title": "Second",
-        "waits_with": []
-      }
-    ],
-    "dry_run": false
+    "edit": {
+      "edit": "member",
+      "item": "a2",
+      "thread": "t2"
+    },
+    "outcome": "applied"
   },
   "ok": true
 }
@@ -572,23 +534,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
       {
         "entry": "awaiting-approval",
         "members": 1,
-        "over_cap": false,
-        "thread": "s-a2-b75370",
+        "thread": "t2",
         "waits_with": []
       }
     ]
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic thread split
-# exit 0
-{
-  "data": {
-    "cap": 25,
-    "changed": false,
-    "drafts": [],
-    "dry_run": false
   },
   "ok": true
 }
@@ -601,7 +550,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
       "parents": [
         {
           "accept": "acyclic item move a3 a2",
-          "inherits": "s-a2-b75370",
+          "inherits": "t2",
           "item": "a2",
           "score": 0.428,
           "title": "Second"
@@ -610,10 +559,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
       "related": [],
       "threads": [
         {
-          "accept": "acyclic thread add a3 s-a2-b75370",
-          "score": 0.428,
-          "thread": "s-a2-b75370",
-          "title": "Second"
+          "accept": "acyclic thread add a3 t2",
+          "score": 0.538,
+          "thread": "t2",
+          "title": "Follow-ups"
         }
       ]
     },
@@ -628,16 +577,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --paren
 {
   "data": {
     "changed": true,
-    "item": "a3",
-    "placed": {
-      "drafts": [],
-      "inherited": [
-        {
-          "item": "a3",
-          "thread": "s-a2-b75370"
-        }
-      ]
-    }
+    "inherited": [
+      {
+        "item": "a3",
+        "thread": "t2"
+      }
+    ],
+    "item": "a3"
   },
   "ok": true
 }

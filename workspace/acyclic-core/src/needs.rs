@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::claim;
 use crate::model::{self, Level, Model, Value};
+use crate::place;
 use crate::ready::{Readiness, Status, Wait};
 use crate::schema::{kind, link, question, set, thread};
 use crate::scope;
-use crate::split;
 use crate::state::{Error, Key, Millis, State};
 
 /// What kind of question an agent asks; the exact classes are settled with the app's mockups.
@@ -57,8 +57,6 @@ pub enum Entry {
         thread: String,
         /// How many open, unarchived items it holds.
         members: usize,
-        /// Whether that is more than a split would put in one thread.
-        over_cap: bool,
         /// Threads it waits on in a cycle through `blocks` links, so not all of them can finish as they stand.
         waits_with: Vec<String>,
     },
@@ -236,7 +234,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             *members.entry(thread).or_default() += 1;
         }
     }
-    let cycles = split::thread_cycles(model);
+    let cycles = place::thread_cycles(model);
     for (id, thread) in &model.threads {
         let Some(&count) = members.get(id.as_str()) else { continue };
         if thread.is_approved() {
@@ -251,7 +249,6 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
         entries.insert(Entry::AwaitingApproval {
             thread: id.clone(),
             members: count,
-            over_cap: count > split::CAP,
             waits_with: waits_with.into_iter().cloned().collect(),
         });
     }
