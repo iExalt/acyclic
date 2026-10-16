@@ -58,7 +58,8 @@ _Avoid_: draft thread, suggested thread
 
 **Proposed member**:
 An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes and
-a project-management agent's apply at once.
+a project-management agent's apply at once. An agent's add that crossed the approval between machines is listed in
+the same way, kept by the user adding it to the thread again or, all at once, by approving the thread again.
 
 **Project-management agent**:
 An agent the user deployed to change the graph's structure, whose edits apply like the user's.
@@ -146,6 +147,13 @@ A set of projects whose items may share a tracker because the same people may se
 **Replica**:
 One machine's copy of a tracker, shared by every agent on that machine.
 _Avoid_: instance, node
+
+**Conflict**:
+A field holding two values that replicas wrote without seeing each other's, kept side by side until someone writes
+the field again. Clearing a field counts as a value, so a clear and a set made apart conflict too: moving an item to
+the top level while an agent moves it elsewhere asks which move stands. Sets of things, such as links and areas, don't
+conflict: an add the remover never saw survives.
+_Avoid_: merge conflict (nothing blocks a sync)
 
 ## Relationships
 

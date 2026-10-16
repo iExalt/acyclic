@@ -107,6 +107,15 @@ pub fn winner_with(
     Ok(live_with(state, item, now, alive)?.into_iter().next())
 }
 
+/// Releases `holder`'s claims on an item and no one else's, so a contest's loser can step aside without taking the
+/// winner's claim with it, as any write to the field would. Returns whether it held one.
+pub fn release(replica: &mut Replica, item: &Key, holder: &str) -> bool {
+    replica.retain(item, FIELD, |stamped| {
+        serde_json::from_value::<Claim>(stamped.value.clone())
+            .map_or(true, |claim| claim.holder != holder)
+    })
+}
+
 /// Claims a leaf item for `holder`, or renews the claim `holder` already wins. A time lease runs for `lease` from
 /// `at`, capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its
 /// write supersedes the other contestants' values: an ordinary resolving write. Run liveness comes from the run

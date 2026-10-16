@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 /// The newest state format this build reads.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// How far a writer's clock may step back before a write is refused, in milliseconds.
 pub const CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
@@ -607,6 +607,19 @@ impl Replica {
         Ok((dot, *clock))
     }
 
+    /// Drops the field's values that `keep` rejects, minting no dot: the context still covers them, so a join removes
+    /// them from every replica, while values written elsewhere unseen survive. Returns whether anything was dropped.
+    pub fn retain(&mut self, key: &Key, field: &str, keep: impl Fn(&Stamped) -> bool) -> bool {
+        let Some(current) = self.state.field(key, field) else { return false };
+        let kept: Register =
+            current.iter().filter(|(_, v)| keep(v)).map(|(d, v)| (d.clone(), v.clone())).collect();
+        if kept.len() == current.len() {
+            return false;
+        }
+        self.set(key, field, kept);
+        true
+    }
+
     /// Writes a field, superseding every value this replica has seen. `None` clears it.
     ///
     /// # Errors
@@ -801,6 +814,8 @@ impl State {
         journal: &Journal,
     ) -> BTreeMap<String, Option<String>> {
         let mut changes = BTreeMap::new();
+        // Rewriting the header only when the context moves keeps an older version's header until then; that is safe
+        // because any value an older build can't read (a clear's null) arrives with a new dot, so the context moves.
         if self.context != journal.context {
             changes.insert(HEADER_PATH.to_owned(), Some(self.header_file()));
         }
@@ -843,7 +858,19 @@ impl State {
     /// file not in canonical form.
     pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
         let state = Self::from_own_files(files)?;
-        if state.to_files() != *files {
+        let mut expected = state.to_files();
+        // An older version's header stays canonical under its own number until the next write rewrites it.
+        let version = files
+            .get(HEADER_PATH)
+            .and_then(|text| serde_json::from_str::<Json>(text).ok())
+            .and_then(|header| header.get("format_version").and_then(Json::as_u64))
+            .and_then(|version| u32::try_from(version).ok())
+            .unwrap_or(FORMAT_VERSION);
+        expected.insert(
+            HEADER_PATH.to_owned(),
+            canonical(&Header { format_version: version, context: state.context.clone() }),
+        );
+        if expected != *files {
             return Err(Error::Format("files are not in canonical form".to_owned()));
         }
         Ok(state)

@@ -237,3 +237,58 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
     model::set(&mut r, &t, thread::APPROVED, Some(&true), user(2)).unwrap();
     assert_eq!(awaiting(&r), vec![entry("u", "t")]);
 }
+
+#[test]
+fn an_agents_member_the_approval_never_saw_is_the_users_to_keep_or_drop() {
+    let agent = By { actor: "session/pi", at: 2 };
+    let unapproved = |r: &Replica| -> Vec<String> {
+        list(r)
+            .into_iter()
+            .filter_map(|e| match e {
+                Entry::Unapproved { item, .. } => Some(item),
+                _ => None,
+            })
+            .collect()
+    };
+    let member = |item: &str| ScopeEdit::Member { item: item.into(), thread: Some("t".into()) };
+    let (mut a, mut b) = (replica("a"), replica("b"));
+    for id in ["seen", "late", "other"] {
+        add_item(&mut a, id, id, user(1)).unwrap();
+    }
+    edit(&mut a, &member("seen"), user(1)).unwrap();
+    b.join(&a.state).unwrap();
+    // b's agent sees t unapproved, so its edit applies, while a's user approves t.
+    scope::approve(&mut a, "t", true, user(2)).unwrap();
+    edit(&mut b, &member("late"), agent).unwrap();
+    a.join(&b.state).unwrap();
+    let entry = Entry::Unapproved {
+        item: "late".into(),
+        thread: "t".into(),
+        actor: "session/pi".into(),
+        keep: "acyclic thread add late t".into(),
+        drop: "acyclic thread remove late".into(),
+    };
+    assert!(list(&a).contains(&entry), "{:?}", list(&a));
+    // The user putting it in the thread again keeps it: the user's write needs no approval.
+    edit(&mut a, &member("late"), user(3)).unwrap();
+    assert_eq!(unapproved(&a), Vec::<String>::new());
+    // Approvals that raced with different members each approved theirs.
+    edit(&mut b, &member("other"), agent).unwrap();
+    let mut c = replica("c");
+    c.join(&a.state).unwrap();
+    c.join(&b.state).unwrap();
+    scope::approve(&mut c, "t", true, user(4)).unwrap();
+    edit(&mut a, &ScopeEdit::Member { item: "seen".into(), thread: None }, user(4)).unwrap();
+    assert!(scope::approve(&mut a, "t", true, user(4)).unwrap());
+    a.join(&c.state).unwrap();
+    a.join(&b.state).unwrap();
+    assert!(Model::read(&a.state).unwrap().threads["t"].approved_members.is_conflict());
+    assert_eq!(unapproved(&a), Vec::<String>::new(), "other is in c's list, which raced a's");
+    // A thread approved before approvals recorded their members has nothing to compare against.
+    let old = Key::new(kind::THREAD, "old").unwrap();
+    add_item(&mut b, "legacy", "legacy", user(5)).unwrap();
+    edit(&mut b, &ScopeEdit::Member { item: "legacy".into(), thread: Some("old".into()) }, agent)
+        .unwrap();
+    model::set(&mut b, &old, thread::APPROVED, Some(&true), user(5)).unwrap();
+    assert_eq!(unapproved(&b), Vec::<String>::new());
+}

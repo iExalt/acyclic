@@ -30,8 +30,10 @@ older copy.
 2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by
    default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the
    tracker; re-run `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work.
+   If `claim`, `ready` or `show` says another holder wins a contest for your item, stop and run
+   `acyclic release <item>`: it drops only your claim.
 3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
-   commit.
+   commit. It releases your claim.
 4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
    `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
    `acyclic item add` returns `candidates`: likely parents, threads and archived items to relate to, best first,

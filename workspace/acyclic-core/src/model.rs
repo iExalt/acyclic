@@ -25,11 +25,12 @@ pub enum Value<T> {
     None,
     /// One value, or several equal ones.
     One(T),
-    /// Concurrent, different values, in dot order.
-    Conflict(Vec<T>),
+    /// Concurrent, different values, in dot order; `None` is a clear that raced them.
+    Conflict(Vec<Option<T>>),
 }
 
-/// Unset reads as `null`, one value as itself, and a conflict as `{"conflict": [values]}`.
+/// Unset reads as `null`, one value as itself, and a conflict as `{"conflict": [values]}`, a clear among them as
+/// `null`.
 impl<T: Serialize> Serialize for Value<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -55,13 +56,13 @@ impl<T> Value<T> {
         }
     }
 
-    /// Every value: none, one, or each conflicting one.
+    /// Every value set: none, one, or each conflicting one; a clear in a conflict sets none.
     #[must_use]
     pub fn all(&self) -> Vec<&T> {
         match self {
             Self::None => Vec::new(),
             Self::One(value) => vec![value],
-            Self::Conflict(values) => values.iter().collect(),
+            Self::Conflict(values) => values.iter().flatten().collect(),
         }
     }
 
@@ -276,6 +277,8 @@ pub struct Thread {
     pub approved: Value<bool>,
     /// Whether the thread's agent is a project-management agent; a conflict counts as not.
     pub pm_flag: Value<bool>,
+    /// The members the latest approval saw; none on threads approved before approvals recorded them.
+    pub approved_members: Value<Vec<String>>,
     /// Repositories added explicitly, beyond those of its items.
     pub repositories: BTreeSet<String>,
     /// The thread's autonomy level, overriding the global one.
@@ -287,6 +290,14 @@ impl Thread {
     #[must_use]
     pub fn is_approved(&self) -> bool {
         self.approved.all().into_iter().any(|approved| *approved)
+    }
+
+    /// Whether `item` was a member when the thread was approved, or `None` when no approval recorded its members.
+    /// Approvals that raced each other each saw what they list, so a member of any of them counts.
+    #[must_use]
+    pub fn approved_member(&self, item: &str) -> Option<bool> {
+        let lists = self.approved_members.all();
+        (!lists.is_empty()).then(|| lists.into_iter().flatten().any(|member| member == item))
     }
 
     /// Whether the thread's agent is a project-management agent: only when every value says so.
@@ -426,6 +437,7 @@ impl Model {
                     brief: value(state, key, thread::BRIEF)?,
                     approved: value(state, key, thread::APPROVED)?,
                     pm_flag: value(state, key, thread::PM_FLAG)?,
+                    approved_members: value(state, key, thread::APPROVED_MEMBERS)?,
                     repositories: elements(state, key, set::REPOSITORY),
                     autonomy: value(state, key, thread::AUTONOMY)?,
                 };
@@ -772,8 +784,9 @@ const CHECKED: [(&str, &str, &str); 8] = [
 ];
 
 /// Fields only the user's batches set: a thread's approval, flags and choices, and every global setting.
-const USER_ONLY: [(&str, &str); 6] = [
+const USER_ONLY: [(&str, &str); 7] = [
     (kind::THREAD, thread::APPROVED),
+    (kind::THREAD, thread::APPROVED_MEMBERS),
     (kind::THREAD, thread::PM_FLAG),
     (kind::THREAD, thread::AUTONOMY),
     (kind::THREAD, thread::LAUNCH),
@@ -810,6 +823,8 @@ pub fn set<T: Serialize>(
     put(replica, key, name, value, by)
 }
 
+/// Writes a single-valued field. A clear writes `null` rather than nothing, so a set it never saw conflicts with it
+/// instead of silently outliving it; `null` reads as unset.
 pub(crate) fn put<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
@@ -817,7 +832,7 @@ pub(crate) fn put<T: Serialize>(
     value: Option<&T>,
     by: By<'_>,
 ) -> Result<(), WriteError> {
-    replica.write(key, name, by.actor, by.at, value.map(to_json))?;
+    replica.write(key, name, by.actor, by.at, Some(value.map_or(Json::Null, to_json)))?;
     Ok(())
 }
 
@@ -988,7 +1003,9 @@ pub fn unlink(
     by: By<'_>,
 ) -> Result<(), WriteError> {
     let key = link_key(from, to, kind)?;
-    put::<bool>(replica, &key, link::PRESENT, None, by)
+    // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
+    replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+    Ok(())
 }
 
 /// Records a run starting on a thread.
@@ -1084,9 +1101,9 @@ pub(crate) fn value<T: DeserializeOwned + PartialEq>(
     key: &Key,
     name: &str,
 ) -> Result<Value<T>, Error> {
-    let mut values: Vec<T> = Vec::new();
+    let mut values: Vec<Option<T>> = Vec::new();
     for stamped in state.field(key, name).into_iter().flatten().map(|(_, v)| v) {
-        let value: T = serde_json::from_value(stamped.value.clone()).map_err(|e| {
+        let value: Option<T> = serde_json::from_value(stamped.value.clone()).map_err(|e| {
             Error::Format(format!("unreadable {name} on {} {}: {e}", key.kind, key.id))
         })?;
         if !values.contains(&value) {
@@ -1095,7 +1112,7 @@ pub(crate) fn value<T: DeserializeOwned + PartialEq>(
     }
     Ok(match values.len() {
         0 => Value::None,
-        1 => Value::One(values.remove(0)),
+        1 => values.remove(0).map_or(Value::None, Value::One),
         _ => Value::Conflict(values),
     })
 }

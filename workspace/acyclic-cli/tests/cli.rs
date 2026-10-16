@@ -82,6 +82,12 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
     assert_eq!(sh.run("claim a1", AGENT), 0);
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0);
+    let (code, released) = sh.output("release a1", AGENT);
+    assert_eq!(
+        (code, released["data"]["released"].as_bool(), released["data"]["changed"].as_bool()),
+        (0, Some(false), Some(false)),
+        "done released the claim already, and releasing nothing isn't an error"
+    );
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("thread set t1 --title Work", AGENT), 0);
     assert_eq!(sh.run("thread add a2 t1", AGENT), 0);

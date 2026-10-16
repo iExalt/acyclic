@@ -102,6 +102,34 @@ fn a_conflicted_parent_counts_as_each_of_its_values() {
 }
 
 #[test]
+fn a_clear_racing_a_set_conflicts_while_clears_agree_and_an_old_empty_clear_reads_alike() {
+    let notes = |r: &Replica| model(r).items["x"].notes.clone();
+    let key = item_key("x").unwrap();
+    let (mut a, mut b) = pair(&["x"]);
+    set(&mut a, &key, field::NOTES, Some(&"first"), by(2)).unwrap();
+    b.join(&a.state).unwrap();
+    set::<String>(&mut a, &key, field::NOTES, None, by(3)).unwrap();
+    set(&mut b, &key, field::NOTES, Some(&"second"), by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(notes(&a), Value::Conflict(vec![None, Some("second".to_owned())]));
+    assert_eq!(serde_json::to_value(notes(&a)).unwrap(), json!({"conflict": [null, "second"]}));
+    // A clear after seeing both settles it; so do two clears that race.
+    set::<String>(&mut b, &key, field::NOTES, None, by(4)).unwrap();
+    b.join(&a.state).unwrap();
+    set::<String>(&mut a, &key, field::NOTES, None, by(4)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(notes(&a), Value::None);
+    // A clear written before clears were values left an empty register, which reads the same.
+    let mut old = replica("old");
+    items(&mut old, &["x"]);
+    old.write(&key, field::NOTES, "actor/user", 2, None).unwrap();
+    assert_eq!(notes(&old), Value::None);
+    // Set after a clear, in order, is just the set.
+    set(&mut a, &key, field::NOTES, Some(&"third"), by(5)).unwrap();
+    assert_eq!(notes(&a), Value::One("third".to_owned()));
+}
+
+#[test]
 fn ordering_links_never_close_a_cycle_locally() {
     let mut r = replica("a");
     items(&mut r, &["a", "b", "c"]);

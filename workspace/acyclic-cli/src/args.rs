@@ -30,7 +30,7 @@ pub struct Cli {
 
 /// The top level's help sections, in order: what every session uses, the groups, then the rest.
 pub const SECTIONS: [(&str, &[&str]); 3] = [
-    ("Common Commands", &["ready", "list", "show", "claim", "done", "needs"]),
+    ("Common Commands", &["ready", "list", "show", "claim", "release", "done", "needs"]),
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
     ("Other Commands", &["init", "sync", "prime", "import", "graph", "level", "doctor"]),
 ];
@@ -104,7 +104,12 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Marks an item done, with evidence.
+    /// Releases the actor's claim on an item, leaving anyone else's.
+    Release {
+        /// The item.
+        id: String,
+    },
+    /// Marks an item done, with evidence, and releases the actor's claim on it.
     Done {
         /// The item.
         id: String,

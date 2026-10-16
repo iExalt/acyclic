@@ -129,6 +129,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic release a1
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "item": "a1",
+    "released": false
+  },
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic ready
 # exit 0
 {
@@ -202,7 +213,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add a1 t1
       "thread": "t1"
     },
     "outcome": "proposed",
-    "proposal": "mac-15"
+    "proposal": "mac-16"
   },
   "ok": true
 }
@@ -215,7 +226,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
       {
         "actor": "session/mac",
         "entry": "proposal",
-        "id": "mac-15",
+        "id": "mac-16",
         "threads": [
           "t1"
         ]
@@ -225,13 +236,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-15 --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-16 --as-user
 # exit 0
 {
   "data": {
     "changed": true,
     "decision": "keep",
-    "proposal": "mac-15"
+    "proposal": "mac-16"
   },
   "ok": true
 }
@@ -266,14 +277,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
   "data": [
     {
       "children": [],
-      "claims": [
-        {
-          "holder": "session/mac",
-          "lease_expires": "2026-10-15T01:00:00Z",
-          "lease_start": "2026-10-15T00:00:00Z",
-          "replica": "mac"
-        }
-      ],
+      "claims": [],
       "item": {
         "archived": null,
         "areas": [],

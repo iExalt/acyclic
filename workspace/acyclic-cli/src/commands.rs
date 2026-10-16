@@ -179,7 +179,13 @@ impl<'a> Session<'a> {
                     set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                 }
                 model::set_state(replica, id, ItemState::Done, by)?;
+                // Finished work holds nothing, not even the resources its claim named.
+                claim::release(replica, &key, by.actor);
                 Ok(json!({"item": id, "state": ItemState::Done}))
+            }),
+            Command::Release { id } => self.write(|replica, by| {
+                let key = existing(replica, id)?;
+                Ok(json!({"item": id, "released": claim::release(replica, &key, by.actor)}))
             }),
             Command::Item(ItemCommand::Reopen { id }) => self.write(|replica, by| {
                 archive::reopen(replica, id, by)?;
@@ -285,11 +291,11 @@ impl<'a> Session<'a> {
     fn scope_edit(
         &self,
         change: &ScopeEdit,
-        already: impl Fn(&Model) -> bool,
+        already: impl Fn(&State, &Model) -> Result<bool, CliError>,
     ) -> Result<Json, CliError> {
         self.write(|replica, by| {
             let model = Model::read(replica.state())?;
-            if already(&model) {
+            if already(replica.state(), &model)? {
                 return Ok(json!({"edit": change, "outcome": "unchanged"}));
             }
             Ok(match scope::edit(replica, change, by)? {
@@ -304,8 +310,15 @@ impl<'a> Session<'a> {
     /// Puts an item in a thread, or takes it out.
     fn member(&self, item: &str, thread: Option<&String>) -> Result<Json, CliError> {
         let change = ScopeEdit::Member { item: item.to_owned(), thread: thread.cloned() };
-        self.scope_edit(&change, |model| {
-            model.items.get(item).is_some_and(|i| i.thread.one() == thread)
+        self.scope_edit(&change, |state, model| {
+            if model.items.get(item).is_none_or(|i| i.thread.one() != thread) {
+                return Ok(false);
+            }
+            // The user putting an unapproved member in its thread again keeps it, so it writes; an agent's repeat
+            // changes nothing.
+            Ok(thread.is_none()
+                || scope::classify(model, &self.actor) != scope::Actor::User
+                || !scope::unapproved(state, model)?.iter().any(|u| u.item == item))
         })
     }
 
@@ -325,21 +338,20 @@ impl<'a> Session<'a> {
             },
             (None, None) => unreachable!("clap requires one"),
         };
-        self.scope_edit(&change, |model| {
+        self.scope_edit(&change, |_, model| {
             let set = match (item, thread) {
                 (Some(item), _) => model.items.get(item).map(|i| &i.repositories),
                 (None, Some(thread)) => model.threads.get(thread).map(|t| &t.repositories),
                 (None, None) => None,
             };
-            set.is_some_and(|set| set.contains(repository)) == present
+            Ok(set.is_some_and(|set| set.contains(repository)) == present)
         })
     }
 
     /// Approves a thread's scope, or revokes the approval.
     fn approve(&self, id: &str, approved: bool) -> Result<Json, CliError> {
         self.write(|replica, by| {
-            let key = Key::new(kind::THREAD, id)?;
-            set_if(replica, &key, thread::APPROVED, Some(&approved), by)?;
+            scope::approve(replica, id, approved, by)?;
             Ok(json!({"thread": id, "approved": approved}))
         })
     }
@@ -663,10 +675,12 @@ fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     Ok(key)
 }
 
-/// A field's value when it holds exactly one.
+/// A field's value when it holds exactly one; a clear holds none.
 fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
     match register {
-        Some(register) if register.len() == 1 => register.values().next().map(|v| v.value.clone()),
+        Some(register) if register.len() == 1 => {
+            register.values().next().map(|v| v.value.clone()).filter(|value| !value.is_null())
+        },
         _ => None,
     }
 }

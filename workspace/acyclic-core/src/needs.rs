@@ -119,6 +119,19 @@ pub enum Entry {
         /// The approved threads it changes.
         threads: Vec<String>,
     },
+    /// An agent's member of an approved thread that the approval never saw: its edit raced the approval.
+    Unapproved {
+        /// The item.
+        item: String,
+        /// Its approved thread.
+        thread: String,
+        /// The agent that put it there.
+        actor: String,
+        /// The user's command that keeps it.
+        keep: String,
+        /// The user's command that drops it.
+        drop: String,
+    },
     /// A blocker added to approved work after its approval.
     NewBlocker {
         /// The blocked item.
@@ -208,6 +221,15 @@ pub fn needs_you(
             let actor = proposal.actor.one().cloned().unwrap_or_default();
             entries.insert(Entry::Proposal { id: proposal.id, actor, threads });
         }
+    }
+    for found in scope::unapproved(state, model)? {
+        entries.insert(Entry::Unapproved {
+            keep: format!("acyclic thread add {} {}", found.item, found.thread),
+            drop: format!("acyclic thread remove {}", found.item),
+            item: found.item,
+            thread: found.thread,
+            actor: found.actor,
+        });
     }
     new_blockers(state, model, readiness, &mut entries)?;
     awaiting_approval(model, &mut entries);

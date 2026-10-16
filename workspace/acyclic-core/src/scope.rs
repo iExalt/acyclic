@@ -10,7 +10,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{self, By, Model, Value, WriteError};
-use crate::schema::{item as field, kind, proposal, set};
+use crate::schema::{item as field, kind, proposal, set, thread as thread_field};
 use crate::state::{Error, Key, Replica, State};
 
 /// The user's actor id.
@@ -212,6 +212,92 @@ pub(crate) fn edit_in(
     model::put(replica, &key, proposal::EDIT, Some(change), by)?;
     model::put(replica, &key, proposal::ACTOR, Some(&by.actor), by)?;
     Ok(Outcome::Proposed(id))
+}
+
+/// Approves a thread's scope and records the members it sees, or revokes the approval. The user's only; writes
+/// nothing already so, and returns whether it wrote.
+///
+/// # Errors
+///
+/// Fails when the actor isn't the user or the state layer refuses.
+pub fn approve(
+    replica: &mut Replica,
+    thread: &str,
+    approved: bool,
+    by: By<'_>,
+) -> Result<bool, ScopeError> {
+    let key = Key::new(kind::THREAD, thread)?;
+    let model = Model::read(&replica.state)?;
+    let current = model.threads.get(thread);
+    let mut changed = false;
+    if current.map(|t| &t.approved) != Some(&Value::One(approved)) {
+        model::set(replica, &key, thread_field::APPROVED, Some(&approved), by)?;
+        changed = true;
+    }
+    if approved {
+        // Every member, done ones too, so one reopened later isn't taken for work that joined unseen.
+        let members: Vec<String> = model
+            .items
+            .values()
+            .filter(|item| item.thread.one().map(String::as_str) == Some(thread))
+            .map(|item| item.id.clone())
+            .collect();
+        if current.map(|t| &t.approved_members) != Some(&Value::One(members.clone())) {
+            model::set(replica, &key, thread_field::APPROVED_MEMBERS, Some(&members), by)?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// An open member of an approved thread that the approval didn't see, put there by an agent: an agent's edit made
+/// before it saw the approval, which reached approved scope without a proposal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unapproved {
+    /// The item.
+    pub item: String,
+    /// Its thread.
+    pub thread: String,
+    /// Who put it there.
+    pub actor: String,
+}
+
+/// Every [`Unapproved`] member, by item. The user keeps one by putting it in the thread again, which makes the user
+/// its writer, or drops it by taking it out; approving the thread again keeps them all. A thread that recorded no members at its approval is left alone, as is a
+/// member whose thread is in conflict, which the conflict covers.
+///
+/// # Errors
+///
+/// Fails on an invalid item id.
+pub fn unapproved(state: &State, model: &Model) -> Result<Vec<Unapproved>, Error> {
+    let mut found = Vec::new();
+    for (id, item) in &model.items {
+        let Value::One(thread) = &item.thread else { continue };
+        if item.is_done() || model.is_archived(id) {
+            continue;
+        }
+        let Some(record) = model.threads.get(thread) else { continue };
+        if !record.is_approved() || record.approved_member(id) != Some(false) {
+            continue;
+        }
+        let key = Key::new(kind::ITEM, id)?;
+        let writers: Vec<&str> = state
+            .field(&key, field::THREAD)
+            .into_iter()
+            .flatten()
+            .map(|(_, v)| v.actor.as_str())
+            .collect();
+        if writers.iter().all(|actor| classify(model, actor) == Actor::Agent)
+            && let Some(actor) = writers.first()
+        {
+            found.push(Unapproved {
+                item: id.clone(),
+                thread: thread.clone(),
+                actor: (*actor).to_owned(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 /// Keeps a proposal: applies its edit and records the decision. The user's only.

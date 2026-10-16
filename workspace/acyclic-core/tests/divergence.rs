@@ -19,6 +19,7 @@ use acyclic_core::needs::{self, Entry};
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, Readiness};
 use acyclic_core::schema::{item as field, kind, thread};
+use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use tempfile::TempDir;
@@ -199,21 +200,27 @@ fn concurrent_edits_conflict_and_a_resolution_clears_them_unless_it_races_anothe
 }
 
 #[test]
-fn a_set_racing_a_clear_wins_since_a_clear_removes_only_the_values_it_saw() {
+fn a_move_to_the_top_racing_another_move_conflicts_until_one_is_chosen() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| {
-        add(r, by, "x", None)?;
-        Ok(model::set(r, &item("x"), field::NOTES, Some(&"first"), by)?)
+        add(r, by, "p", None)?;
+        add(r, by, "q", None)?;
+        add(r, by, "x", Some("p"))
     });
     pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| {
-        Ok(model::set(r, &item("x"), field::NOTES, Some(&"second"), by)?)
-    });
-    pair.user(&pair.pi, &|r, by| Ok(model::set::<String>(r, &item("x"), field::NOTES, None, by)?));
+    // The user moves x to the top level, a clear of its parent, while an agent moves it under q.
+    pair.user(&pair.mac, &|r, by| Ok(model::set_parent(r, "x", None, by)?));
+    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| Ok(model::set_parent(r, "x", Some("q"), by)?));
     pair.exchange();
     let state = pair.assert_settled();
-    assert_eq!(Model::read(&state).unwrap().items["x"].notes.all(), [&"second".to_owned()]);
-    assert!(!pair.needs(NOW).contains(&conflict("x", "notes")));
+    let parent = &Model::read(&state).unwrap().items["x"].parent;
+    assert_eq!(*parent, model::Value::Conflict(vec![None, Some("q".to_owned())]));
+    assert!(pair.needs(NOW).contains(&conflict("x", "parent")));
+    pair.user(&pair.pi, &|r, by| Ok(model::set_parent(r, "x", None, by)?));
+    pair.spread(&pair.pi);
+    let state = pair.assert_settled();
+    assert_eq!(Model::read(&state).unwrap().items["x"].parent, model::Value::None);
+    assert!(!pair.needs(NOW).contains(&conflict("x", "parent")));
 }
 
 #[test]
@@ -269,7 +276,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
 }
 
 #[test]
-fn claims_that_never_saw_each_other_contest_alike_on_both_and_end_with_their_leases() {
+fn claims_that_never_saw_each_other_contest_alike_on_both_until_the_loser_steps_aside() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
     pair.spread(&pair.mac);
@@ -283,10 +290,22 @@ fn claims_that_never_saw_each_other_contest_alike_on_both_and_end_with_their_lea
     pair.assert_settled();
     let contests: Vec<Entry> =
         pair.needs(NOW).into_iter().filter(|e| matches!(e, Entry::Contest { .. })).collect();
-    let [Entry::Contest { item, holders }] = contests.as_slice() else { panic!("{contests:?}") };
-    assert_eq!((item.as_str(), holders.len()), ("x", 2));
-    // Nothing releases a claim early: a contest between sessions lasts until a lease runs out.
-    assert!(!pair.needs(NOW + 61 * MINUTE).iter().any(|e| matches!(e, Entry::Contest { .. })));
+    let [Entry::Contest { item: contested, holders }] = contests.as_slice() else {
+        panic!("{contests:?}")
+    };
+    assert_eq!((contested.as_str(), holders.len()), ("x", 2));
+    let loser = holders[1].clone();
+    let (tracker, winner) =
+        if loser == "session/mac" { (&pair.mac, "session/pi") } else { (&pair.pi, "session/mac") };
+    Pair::edit(tracker, &loser, NOW + MINUTE, &|r, by| {
+        assert!(claim::release(r, &item("x"), by.actor));
+        Ok(())
+    });
+    pair.exchange();
+    let state = pair.assert_settled();
+    assert!(!pair.needs(NOW + MINUTE).iter().any(|e| matches!(e, Entry::Contest { .. })));
+    let held = claim::winner(&state, &item("x"), NOW + MINUTE).unwrap().unwrap();
+    assert_eq!(held.holder, winner, "the winner's claim stands");
 }
 
 #[test]
@@ -375,6 +394,38 @@ fn a_parent_finished_while_a_child_arrives_is_done_early_until_reopened() {
     pair.spread(&pair.pi);
     pair.assert_settled();
     assert!(!pair.needs(NOW).contains(&early));
+}
+
+#[test]
+fn an_agents_member_racing_an_approval_is_listed_until_the_user_keeps_it() {
+    let pair = Pair::new();
+    pair.user(&pair.mac, &|r, by| {
+        add(r, by, "x", None)?;
+        add(r, by, "y", None)?;
+        scope::edit(r, &ScopeEdit::Member { item: "x".into(), thread: Some("t".into()) }, by)?;
+        Ok(())
+    });
+    pair.spread(&pair.mac);
+    // pi's agent sees t unapproved, so its edit applies; mac's user approves t at the same time.
+    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| {
+        let change = ScopeEdit::Member { item: "y".into(), thread: Some("t".into()) };
+        assert_eq!(scope::edit(r, &change, by)?, scope::Outcome::Applied);
+        Ok(())
+    });
+    pair.user(&pair.mac, &|r, by| Ok(scope::approve(r, "t", true, by).map(|_| ())?));
+    pair.exchange();
+    pair.assert_settled();
+    let listed = |entries: Vec<Entry>| {
+        entries.iter().any(|e| matches!(e, Entry::Unapproved { item, .. } if item == "y"))
+    };
+    assert!(listed(pair.needs(NOW)));
+    pair.user(&pair.pi, &|r, by| {
+        Ok(scope::edit(r, &ScopeEdit::Member { item: "y".into(), thread: Some("t".into()) }, by)
+            .map(|_| ())?)
+    });
+    pair.spread(&pair.pi);
+    pair.assert_settled();
+    assert!(!listed(pair.needs(NOW)));
 }
 
 #[test]

@@ -125,6 +125,8 @@ pub mod thread {
     pub const BRIEF: &str = "brief";
     /// Whether the thread's scope is approved.
     pub const APPROVED: &str = "approved";
+    /// The members the latest approval saw, sorted: a member that joined unseen is the user's to keep or drop.
+    pub const APPROVED_MEMBERS: &str = "approved-members";
     /// Whether the thread's agent is a project-management agent.
     pub const PM_FLAG: &str = "pm-flag";
     /// The thread's autonomy level, overriding the global default.

@@ -108,12 +108,20 @@ fn reading_refuses_newer_formats_and_bad_files() {
     a.write(&key("item", "a1"), "title", "user", 1, Some(json!("t"))).unwrap();
     let files = a.state.to_files();
 
+    let version = format!("\"format_version\": {FORMAT_VERSION}");
     let mut newer = files.clone();
-    newer.insert(
-        HEADER_PATH.to_owned(),
-        files[HEADER_PATH].replace("\"format_version\": 1", "\"format_version\": 2"),
+    let next = format!("\"format_version\": {}", FORMAT_VERSION + 1);
+    newer.insert(HEADER_PATH.to_owned(), files[HEADER_PATH].replace(&version, &next));
+    assert!(
+        matches!(State::from_files(&newer), Err(Error::Format(m)) if m.contains("not supported"))
     );
-    assert!(matches!(State::from_files(&newer), Err(Error::Format(m)) if m.contains("version 2")));
+    // Version 1, from before clears were values, still reads.
+    let mut first = files.clone();
+    first.insert(
+        HEADER_PATH.to_owned(),
+        files[HEADER_PATH].replace(&version, "\"format_version\": 1"),
+    );
+    assert_eq!(State::from_files(&first).unwrap(), a.state);
 
     let mut moved = files.clone();
     let text = moved.remove("item/27/a1.json").unwrap();
@@ -123,7 +131,7 @@ fn reading_refuses_newer_formats_and_bad_files() {
     let mut ahead = files;
     ahead.insert(
         HEADER_PATH.to_owned(),
-        "{\"format_version\":1,\"context\":{\"seen\":{},\"clocks\":{}}}".to_owned(),
+        "{\"format_version\":2,\"context\":{\"seen\":{},\"clocks\":{}}}".to_owned(),
     );
     assert!(State::from_files(&ahead).is_err(), "a dot beyond the context");
 }

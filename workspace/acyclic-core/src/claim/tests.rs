@@ -134,6 +134,9 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
     assert_eq!(renew_leases(&mut a, 950, LEASE, LEASE).unwrap(), Vec::<Key>::new());
     // Renewals are the replica's writes, so they don't keep a holder looking busy.
     assert_eq!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap(), Vec::<Key>::new());
+    // A renewed claim is still its holder's to release, though the replica wrote it.
+    assert!(release(&mut a, &item_key("busy").unwrap(), "session/busy"));
+    assert!(winner(&a.state, &item_key("busy").unwrap(), 1_500).unwrap().is_none());
 }
 
 #[test]
@@ -157,4 +160,49 @@ fn claims_made_apart_on_one_resource_are_a_clash() {
         }]
     );
     assert!(clashes(&a.state, &model, 2_000).unwrap().is_empty(), "gone when the leases end");
+}
+
+#[test]
+fn a_release_drops_only_its_holders_claim_whatever_races_it() {
+    let holders = |r: &Replica| -> Vec<String> {
+        live(&r.state, &item_key("x").unwrap(), 50).unwrap().into_iter().map(|c| c.holder).collect()
+    };
+    let x = item_key("x").unwrap();
+    // A contest seen on both: one claimed first, so one wins.
+    let contest = || {
+        let mut a = replica("a");
+        items(&mut a, &["x"]);
+        let mut b = replica("b");
+        b.join(&a.state).unwrap();
+        let mut c = replica("c");
+        c.join(&a.state).unwrap();
+        claim(&mut a, &x, "session/one", 10, Some(LEASE), LEASE).unwrap();
+        claim(&mut b, &x, "session/two", 20, Some(LEASE), LEASE).unwrap();
+        a.join(&b.state).unwrap();
+        b.join(&a.state).unwrap();
+        assert_eq!(holders(&a), ["session/one", "session/two"]);
+        (a, b, c)
+    };
+    // The loser steps aside while the winner renews: both drop the loser's claim.
+    let (mut a, mut b, _) = contest();
+    assert!(release(&mut b, &x, "session/two"));
+    assert!(!release(&mut b, &x, "session/two"), "nothing left to release");
+    claim(&mut a, &x, "session/one", 30, Some(LEASE), LEASE).unwrap();
+    a.join(&b.state).unwrap();
+    b.join(&a.state).unwrap();
+    assert_eq!(
+        (holders(&a), holders(&b)),
+        (vec!["session/one".to_owned()], vec!["session/one".to_owned()])
+    );
+    // A claim the release never saw survives it.
+    let (_, mut b, mut c) = contest();
+    claim(&mut c, &x, "session/three", 40, Some(LEASE), LEASE).unwrap();
+    assert!(release(&mut b, &x, "session/two"));
+    b.join(&c.state).unwrap();
+    assert_eq!(holders(&b), ["session/one", "session/three"]);
+    // The winner stepping aside leaves the item to the loser, on every replica.
+    let (mut a, b, _) = contest();
+    assert!(release(&mut a, &x, "session/one"));
+    a.join(&b.state).unwrap();
+    assert_eq!(holder(&a, "x", 50).as_deref(), Some("session/two"));
 }
