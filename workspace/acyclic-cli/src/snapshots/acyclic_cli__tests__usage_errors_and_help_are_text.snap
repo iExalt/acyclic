@@ -32,7 +32,7 @@ Other Commands:
   doctor    Lists entities that can't be read
 
 Options:
-      --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the mapping in ~/.config/acyclic/trackers.toml
+      --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in ~/.config/acyclic/trackers.toml
       --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
       --as-user            Act as the user
   -h, --help               Print help

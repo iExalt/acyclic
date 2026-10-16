@@ -38,6 +38,24 @@ fn the_user_is_never_inherited_from_the_environment() {
 }
 
 #[test]
+fn a_tracker_clone_needs_no_home_or_mapping() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let git = |args: &[&str]| {
+        let status =
+            std::process::Command::new("git").arg("-C").arg(dir.path()).args(args).status();
+        assert!(status.unwrap().success(), "git {args:?}");
+    };
+    git(&["init", "-q", "clone"]);
+    git(&["-C", "clone", "config", "acyclic.replica", "mac"]);
+    let inside = dir.path().join("clone/deeper");
+    std::fs::create_dir(&inside).unwrap();
+    let cli = args::Cli::try_parse_from(["acyclic", "list"]).unwrap();
+    // No HOME, so no mapping could be read.
+    let found = context::tracker(&cli, &Env { cwd: inside, ..Env::default() }).unwrap();
+    assert_eq!(found.canonicalize().unwrap(), dir.path().join("clone").canonicalize().unwrap());
+}
+
+#[test]
 fn every_error_has_a_stable_code_and_exit() {
     let key = Key::new("item", "a1").unwrap();
     // One of each variant, so a renamed code shows here.

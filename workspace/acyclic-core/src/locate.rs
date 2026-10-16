@@ -1,5 +1,6 @@
 //! Finding a code repository's tracker: a private mapping from remote URL prefixes to tracker clones, kept in
-//! `~/.config/acyclic/trackers.toml` so no acyclic files go into code repositories.
+//! `~/.config/acyclic/trackers.toml` so no acyclic files go into code repositories. A tracker clone is its own
+//! tracker, so it needs no entry.
 //!
 //! ```toml
 //! # Used when no prefix matches.
@@ -17,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
+
+use crate::store::REPLICA_CONFIG;
 
 /// The mapping's file, under the home directory.
 pub const CONFIG_PATH: &str = ".config/acyclic/trackers.toml";
@@ -101,14 +104,26 @@ impl Trackers {
             .map(|(_, tracker)| expand(tracker, home))
     }
 
-    /// The tracker for the code repository at `repo`: the first of its remotes, `origin` and then the others by
-    /// name, that a prefix matches, else the default.
+    /// The tracker for the repository at `repo`: the repository itself when it is a tracker clone, else the first
+    /// of its remotes, `origin` and then the others by name, that a prefix matches, else the default.
     ///
     /// # Errors
     ///
     /// Fails when `repo` isn't a repository, or no remote is mapped and there is no default.
     pub fn for_repo(&self, repo: &Path, home: &Path) -> Result<PathBuf, LocateError> {
-        let remotes = remote_urls(repo)?;
+        let settings = Settings::read(repo)?;
+        match settings.own_clone()? {
+            Some(clone) => Ok(clone),
+            None => self.for_remotes(&settings.remotes, home),
+        }
+    }
+
+    /// The tracker for a repository's remotes, `origin` first: the first that a prefix matches, else the default.
+    ///
+    /// # Errors
+    ///
+    /// Fails when no remote is mapped and there is no default.
+    pub fn for_remotes(&self, remotes: &[String], home: &Path) -> Result<PathBuf, LocateError> {
         if let Some(tracker) = remotes.iter().find_map(|url| self.match_prefix(url, home)) {
             return Ok(tracker);
         }
@@ -169,29 +184,75 @@ fn expand(tracker: &str, home: &Path) -> PathBuf {
     }
 }
 
-/// The repository's remote URLs, `origin` first.
-fn remote_urls(repo: &Path) -> Result<Vec<String>, LocateError> {
-    let output = Command::new("git")
+/// What a repository's own configuration says about finding its tracker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    /// Where it was read.
+    pub repo: PathBuf,
+    /// Its remotes' URLs, `origin` first and then the others by name.
+    pub remotes: Vec<String>,
+    /// Whether it is a tracker clone: setup gave it a replica id.
+    pub tracker: bool,
+}
+
+impl Settings {
+    /// Reads the settings of the repository at `repo`, which may be any directory in its working tree.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `repo` isn't a repository or git can't run.
+    pub fn read(repo: &Path) -> Result<Self, LocateError> {
+        let pattern = format!(r"^(remote\..*\.url|{})$", REPLICA_CONFIG.replace('.', r"\."));
+        let output = git(repo, &["config", "--local", "--get-regexp", &pattern])?;
+        // Exit status 1 means no key matched; anything else, such as not being a repository, is a failure.
+        if !output.status.success() && output.status.code() != Some(1) {
+            return Err(LocateError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ));
+        }
+        let mut tracker = false;
+        let mut remotes: Vec<(String, String)> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+                tracker |= key == REPLICA_CONFIG;
+                let name = key.strip_prefix("remote.")?.strip_suffix(".url")?;
+                Some((name.to_owned(), value.to_owned()))
+            })
+            .collect();
+        remotes.sort_by_key(|(name, _)| (name != "origin", name.clone()));
+        let remotes = remotes.into_iter().map(|(_, url)| url).collect();
+        Ok(Self { repo: repo.to_owned(), remotes, tracker })
+    }
+
+    /// The working tree's root when the repository is a tracker clone, so a command run anywhere inside one opens
+    /// it, with no mapping.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git can't find the working tree's root.
+    pub fn own_clone(&self) -> Result<Option<PathBuf>, LocateError> {
+        if !self.tracker {
+            return Ok(None);
+        }
+        let output = git(&self.repo, &["rev-parse", "--show-toplevel"])?;
+        if !output.status.success() {
+            return Err(LocateError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ));
+        }
+        Ok(Some(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end())))
+    }
+}
+
+fn git(repo: &Path, args: &[&str]) -> Result<std::process::Output, LocateError> {
+    Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["config", "--local", "--get-regexp", r"^remote\..*\.url$"])
+        .args(args)
         .env("LC_ALL", "C")
         .output()
-        .map_err(|err| LocateError::Git(format!("git can't run: {err}")))?;
-    // Exit status 1 means no remote matched; anything else, such as not being a repository, is a failure.
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(LocateError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
-    }
-    let mut remotes: Vec<(String, String)> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let (key, url) = line.split_once(' ')?;
-            let name = key.strip_prefix("remote.")?.strip_suffix(".url")?;
-            Some((name.to_owned(), url.to_owned()))
-        })
-        .collect();
-    remotes.sort_by_key(|(name, _)| (name != "origin", name.clone()));
-    Ok(remotes.into_iter().map(|(_, url)| url).collect())
+        .map_err(|err| LocateError::Git(format!("git can't run: {err}")))
 }
 
 #[cfg(test)]

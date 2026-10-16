@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use acyclic_core::locate::Trackers;
+use acyclic_core::locate::{Settings, Trackers};
 use acyclic_core::model::Repository;
 use acyclic_core::scope::USER;
 use acyclic_core::state::Millis;
@@ -90,7 +90,8 @@ fn home(env: &Env) -> Option<PathBuf> {
     env.var("HOME").map(PathBuf::from)
 }
 
-/// The tracker clone: `--tracker`, else `ACYCLIC_TRACKER`, else the mapping for the working directory's repository.
+/// The tracker clone: `--tracker`, else `ACYCLIC_TRACKER`, else the working directory's repository when it is a tracker
+/// clone, else the mapping for it.
 pub fn tracker(cli: &Cli, env: &Env) -> Result<PathBuf, CliError> {
     if let Some(path) = &cli.tracker {
         return Ok(env.cwd.join(path));
@@ -98,10 +99,15 @@ pub fn tracker(cli: &Cli, env: &Env) -> Result<PathBuf, CliError> {
     if let Some(path) = env.var("ACYCLIC_TRACKER") {
         return Ok(env.cwd.join(path));
     }
+    // A tracker clone needs neither HOME nor the mapping.
+    let settings = Settings::read(&env.cwd)?;
+    if let Some(clone) = settings.own_clone()? {
+        return Ok(clone);
+    }
     let home = home(env).ok_or_else(|| {
         CliError::new("no-tracker", exit::CONFIG, "HOME isn't set, so no mapping")
     })?;
-    Ok(Trackers::load(&home)?.for_repo(&env.cwd, &home)?)
+    Ok(Trackers::load(&home)?.for_remotes(&settings.remotes, &home)?)
 }
 
 /// The machine's code clones, by repository record id, from `~/.config/acyclic/clones.toml`.

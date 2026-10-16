@@ -14,7 +14,8 @@ use serde::de::DeserializeOwned;
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, disable_help_subcommand = true, arg_required_else_help = true)]
 pub struct Cli {
-    /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the mapping in ~/.config/acyclic/trackers.toml.
+    /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in
+    /// ~/.config/acyclic/trackers.toml.
     #[arg(long, global = true)]
     pub tracker: Option<PathBuf>,
     /// Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command.
