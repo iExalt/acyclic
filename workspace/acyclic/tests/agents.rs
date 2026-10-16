@@ -58,6 +58,10 @@ fn git(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        // With no configured identity, a command that writes a reflog, as `worktree add` does, looks the machine's host
+        // name up to make an email address, which stalled each call by 5 seconds on a machine with a slow resolver.
+        .env("GIT_COMMITTER_NAME", "acyclic test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
@@ -75,6 +79,7 @@ fn agent_child() {
         return;
     };
     let (tracker, report) = (Path::new(&tracker), Path::new(&report));
+    // About five times the run takes alone, so a loaded machine doesn't fail it and a stuck agent still does.
     let deadline = Instant::now() + Duration::from_secs(30);
     let wait_for = |names: &[String]| {
         while !names.iter().all(|name| report.with_file_name(name).exists()) {
