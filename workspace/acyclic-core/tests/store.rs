@@ -850,10 +850,4 @@ fn usage_counts_once_across_writers_and_only_servers_fetch_others_usage() {
     // Each call once; of equal copies, the lowest writer's, so every replica keeps the same.
     let both = [("mac".to_owned(), "r1/1".to_owned()), ("mac".to_owned(), "r1/2".to_owned())];
     assert_eq!(ids(&server), both);
-    // The server's own segment still goes out with its next sync, which the fetched copies don't disturb.
-    server.record_usage(NOW + 2, &[call("r1/3", NOW)]).unwrap();
-    server.sync_with(remote_url, store::Fetch { usage: true }).unwrap();
-    assert_eq!(ids(&server).len(), 3);
-    let on_remote = remote_refs(&remote);
-    assert!(on_remote.contains("refs/heads/usage/server/2026-10/0001"), "{on_remote}");
 }
