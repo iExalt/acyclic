@@ -89,7 +89,12 @@ fn a_journey_through_the_contract() {
     let pi = [("ACYCLIC_ACTOR", "session/pi")];
     assert_eq!(sh.run("claim t0", &pi), 1, "another agent's claim");
     assert_eq!(sh.run("done a1", &pi), 1, "and its items");
-    assert_eq!(sh.run("done a1 --note shipped", AGENT), 0);
+    let (code, done) = sh.output("done a1 -n shipped", AGENT);
+    assert_eq!(
+        (code, &done["data"]["evidence"]),
+        (0, &json!({"repository": null, "commit": null, "note": "shipped"})),
+        "done echoes what it recorded: {done}"
+    );
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0, "finishing again changes nothing");
     let (code, shown) = sh.output("thread show t0", AGENT);
     assert_eq!(
@@ -119,8 +124,12 @@ fn a_journey_through_the_contract() {
     let (_, ready) = sh.output("ready --approved", AGENT);
     assert_eq!(ready["data"]["ready"][0]["id"], "t1", "{ready}");
     let (code, proposed) = sh.output("item edit a1 --thread t1", AGENT);
-    let proposal = proposed["data"]["proposals"][0].as_str().unwrap();
-    assert_eq!(code, 0, "{proposed}");
+    let proposal = proposed["data"]["proposals"][0]["id"].as_str().unwrap();
+    assert_eq!(
+        (code, &proposed["data"]["proposals"][0]["field"]),
+        (0, &json!("thread")),
+        "{proposed}"
+    );
     assert_eq!(sh.run("needs", AGENT), 0);
     assert_eq!(sh.run(&format!("proposal show {proposal}"), AGENT), 0);
     assert_eq!(sh.run("proposal list", AGENT), 0);

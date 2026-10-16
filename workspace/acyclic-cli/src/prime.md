@@ -112,7 +112,8 @@ standard output.
    its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
    reports it as `placed`. Once the user approves a thread, your change to its members or repositories doesn't
    apply unless you are a run on a project-management thread: it waits in `acyclic needs` as a proposal for the user.
-   An item or thread edit, and an import, list their proposals in `proposals`. Carry on with other work.
+   An item or thread edit, and an import, list their proposals in `proposals`, each with the `field` it proposed.
+   Carry on with other work.
 6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With

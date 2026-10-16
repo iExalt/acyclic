@@ -2,35 +2,36 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document, except `prime`, `graph` without `--output`, `import --schema` and help and version text
+The acyclic tracker. Every command prints one JSON document, except `prime`, `completions`, `graph` without `--output`, `import --schema` and help and version text
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
 Common Commands:
-  ready     Lists threads with ready work, the actor's own first, each with its ready items
-  list      Lists every item, by id
-  show      Shows items with their role, readiness and claims, as an array in the order given
-  claim     Claims a thread with ready work, or renews the actor's claim on it
-  release   Releases the actor's claim on a thread, leaving anyone else's
-  done      Marks an item done, with evidence
-  needs     Lists what needs the user
+  ready        Lists threads with ready work, the actor's own first, each with its ready items
+  list         Lists every item, by id
+  show         Shows items with their role, readiness and claims, as an array in the order given
+  claim        Claims a thread with ready work, or renews the actor's claim on it
+  release      Releases the actor's claim on a thread, leaving anyone else's
+  done         Marks an item done, with evidence
+  needs        Lists what needs the user
 
 Command Groups:
-  item      Adds, edits, reopens, archives and deletes items
-  link      Adds or removes links between items
-  thread    Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
-  repo      Adds, edits, lists and shows repository records
-  proposal  Lists and shows proposals, and keeps or drops them (user only)
+  item         Adds, edits, reopens, archives and deletes items
+  link         Adds or removes links between items
+  thread       Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
+  repo         Adds, edits, lists and shows repository records
+  proposal     Lists and shows proposals, and keeps or drops them (user only)
 
 Other Commands:
-  init      Sets up a tracker clone as a new replica, creating the repository if there is none
-  sync      Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
-  prime     Prints conventions for agents, matched to this version, as text
-  import    Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
-  graph     Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
-  level     Prints the autonomy levels; with a level, sets the global one (user only)
-  doctor    Lists entities that can't be read
-  serve     Serves the JSON API and the app, refusing any request without the user's Tailscale identity
+  init         Sets up a tracker clone as a new replica, creating the repository if there is none
+  sync         Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
+  prime        Prints conventions for agents, matched to this version, as text
+  import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
+  graph        Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
+  level        Prints the autonomy levels; with a level, sets the global one (user only)
+  doctor       Lists entities that can't be read
+  serve        Serves the JSON API and the app, refusing any request without the user's Tailscale identity
+  completions  Prints a completion script for a shell, as text
 
 Options:
   -h, --help     Print help

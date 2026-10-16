@@ -388,6 +388,7 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     // needs a rule there before it joins this list. `serve` is never deserialized.
     let mut found = Vec::new();
     for sub in args::command().get_subcommands().filter(|sub| sub.get_name() != "serve") {
+        // `completions` is never deserialized either, but has nothing to check.
         constrained(sub, sub.get_name(), &mut found);
     }
     found.sort();
@@ -432,6 +433,9 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             .is_err()
     );
     assert!(serde_json::from_value::<args::Command>(json!({"serve": {"login": "x"}})).is_err());
+    assert!(
+        serde_json::from_value::<args::Command>(json!({"completions": {"shell": "zsh"}})).is_err()
+    );
 }
 
 #[test]
@@ -564,6 +568,21 @@ fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
 }
 
 #[test]
+fn completions_are_text_that_reaches_nested_commands_and_short_flags() {
+    for (shell, nested, short) in [
+        ("bash", "subcmd__item__subcmd__edit", "-t"),
+        ("zsh", "(edit)", "'-t+["),
+        ("fish", "from edit\" -s t", "-l dry-run"),
+    ] {
+        let out = run(&format!("acyclic completions {shell}"));
+        assert_eq!((out.code, out.stderr.as_str()), (exit::OK, ""), "{shell}");
+        assert!(out.stdout.contains(nested) && out.stdout.contains(short), "{shell}");
+        assert!(out.stdout.contains("dry-run") && out.stdout.contains("completions"), "{shell}");
+    }
+    assert_eq!(run("acyclic completions tcsh").code, exit::USAGE);
+}
+
+#[test]
 fn import_schema_prints_an_example_as_text_and_takes_no_file() {
     let out = run("acyclic import --schema");
     assert_eq!((out.code, out.stdout.as_str()), (exit::OK, acyclic_core::import::SCHEMA));
@@ -594,6 +613,7 @@ fn every_command_follows_the_input_conventions() {
     // Positionals are the subject's id, named for the entity; these are the only others.
     let exceptions = [
         ("init", "path"),
+        ("completions", "shell"),
         ("import", "file"),
         ("level", "level"),
         ("link add", "from"),
@@ -618,12 +638,20 @@ fn every_command_follows_the_input_conventions() {
                     "{path}: positional <{shown}> is neither an entity's id nor a listed exception"
                 );
             }
+            // A short flag is its long's initial, apart from the usual `-n` for a dry run; `-o` is left for output.
+            if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
+                assert!(
+                    long.starts_with(short) || (short, long) == ('n', "dry-run"),
+                    "{path}: -{short} for --{long}"
+                );
+                assert_ne!(short, 'o', "{path}: -o is kept for output");
+            }
             // A flag that clears or removes has the flag that sets or adds.
             if let Some(field) = arg.get_long().and_then(|long| long.strip_prefix("no-")) {
                 assert!(longs.contains(&field), "{path}: --no-{field} without --{field}");
             }
             // An input that takes one of the model's enums lists its values.
-            if ["size", "state", "level", "kind", "format", "renderer"].contains(&id) {
+            if ["size", "state", "level", "kind", "format", "renderer", "shell"].contains(&id) {
                 assert!(!arg.get_possible_values().is_empty(), "{path}: {id} lists no values");
             }
         }

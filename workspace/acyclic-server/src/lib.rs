@@ -187,7 +187,8 @@ fn classify(command: &Command) -> Use {
         | Command::Import { .. }
         | Command::Doctor
         | Command::Graph { .. }
-        | Command::Serve(_) => Use::Refused,
+        | Command::Serve(_)
+        | Command::Completions { .. } => Use::Refused,
         Command::Ready { .. }
         | Command::List
         | Command::Show { .. }

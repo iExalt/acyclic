@@ -55,6 +55,9 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Prime = &cli.command {
         return Ok(Output::Text(prime()));
     }
+    if let Command::Completions { shell } = &cli.command {
+        return Ok(Output::Text(completions(*shell)));
+    }
     if let Command::Import { schema: true, .. } = &cli.command {
         return Ok(Output::Text(import::SCHEMA.to_owned()));
     }
@@ -114,7 +117,8 @@ impl<'a> Session<'a> {
             | Command::Prime
             | Command::Graph { .. }
             | Command::Import { file: None, .. }
-            | Command::Serve(_) => {
+            | Command::Serve(_)
+            | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
             Command::Ready { include_archived, approved } => {
@@ -233,7 +237,10 @@ impl<'a> Session<'a> {
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
                     model::set_state(replica, id, ItemState::Done, by)?;
-                    Ok(json!({"item": id, "state": ItemState::Done}))
+                    // The evidence it holds now, so a caller sees what was recorded.
+                    let model = Model::read(replica.state())?;
+                    let evidence = view::evidence(&model.items[id].evidence);
+                    Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
                 })
             },
             Command::Release { thread } => self.write(|replica, by| {
@@ -496,9 +503,9 @@ impl<'a> Session<'a> {
         let view = export::view(&model, scope)
             .map_err(|err| CliError::new("not-found", exit::NOT_FOUND, err.to_string()))?;
         let document = match (format, renderer) {
-            (GraphFormat::Dot, _) | (GraphFormat::Html, Renderer::Graphviz) => {
-                export::dot(&model, &view)
-            },
+            (GraphFormat::Dot, _) => export::dot_with_legend(&model, &view),
+            // The page draws its own legend.
+            (GraphFormat::Html, Renderer::Graphviz) => export::dot(&model, &view),
             (GraphFormat::Mermaid, _) | (GraphFormat::Html, Renderer::Mermaid) => {
                 export::mermaid(&model, &view)
             },
@@ -882,6 +889,15 @@ pub(crate) fn may_finish(status: Option<&Status>, actor: &str) -> bool {
 /// The agent block, with this build's version.
 pub(crate) fn prime() -> String {
     include_str!("prime.md").replace("{version}", acyclic_core::VERSION)
+}
+
+/// A completion script for `shell`. It completes from the plain command line, because the sectioned help hides the
+/// subcommands from clap's own list, and a generator leaves hidden ones out.
+pub(crate) fn completions(shell: clap_complete::Shell) -> String {
+    use clap::CommandFactory as _;
+    let mut script = Vec::new();
+    clap_complete::generate(shell, &mut crate::args::Cli::command(), "acyclic", &mut script);
+    String::from_utf8(script).expect("a completion script is UTF-8")
 }
 
 /// An item as a thread lists it.

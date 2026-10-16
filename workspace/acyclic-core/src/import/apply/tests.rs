@@ -121,7 +121,7 @@ fn an_agents_addition_to_approved_scope_is_proposed() {
     assert_eq!(changes[0]["action"], "create");
     assert_eq!(
         changes[1],
-        json!({"entity": "item", "id": "c", "action": "propose", "proposal": report.proposals[0],
+        json!({"entity": "item", "id": "c", "action": "propose", "proposal": report.proposals[0].id,
                "fields": {"thread": {"from": null, "to": "t"}}})
     );
     assert_eq!(Model::read(&r.state).unwrap().thread_of("c"), None);

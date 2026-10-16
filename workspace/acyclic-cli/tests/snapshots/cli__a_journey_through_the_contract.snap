@@ -249,11 +249,16 @@ $ ACYCLIC_ACTOR=session/pi acyclic done a1
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
+$ ACYCLIC_ACTOR=session/mac acyclic done a1 -n shipped
 # exit 0
 {
   "data": {
     "changed": true,
+    "evidence": {
+      "commit": null,
+      "note": "shipped",
+      "repository": null
+    },
     "item": "a1",
     "state": "done"
   },
@@ -265,6 +270,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
 {
   "data": {
     "changed": false,
+    "evidence": {
+      "commit": null,
+      "note": "shipped",
+      "repository": null
+    },
     "item": "a1",
     "state": "done"
   },
@@ -572,7 +582,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
     "item": "a1",
     "placed": [],
     "proposals": [
-      "mac-19"
+      {
+        "field": "thread",
+        "id": "mac-19"
+      }
     ]
   },
   "ok": true
@@ -1098,6 +1111,21 @@ digraph acyclic {
   }
   "n_a2" [label="a2 · Second", style="rounded,dashed", color=gray, fontcolor=gray];
   "n_a1" -> "n_a2" [style=solid];
+  subgraph "cluster_legend" {
+    label="Legend"; style=dashed; color=gray; fontcolor=gray;
+    node [fontcolor=gray, color=gray];
+    "legend_first" [label="done first"];
+    "legend_waits" [label="waits for it"];
+    "legend_first" -> "legend_waits" [style=solid];
+    "legend_relates" [label="relates to"];
+    "legend_related" [label="related item"];
+    "legend_relates" -> "legend_related" [style=dotted, arrowhead=none];
+    "legend_parent" [label="parent"];
+    "legend_child" [label="child"];
+    "legend_parent" -> "legend_child" [color=gray, arrowhead=none];
+    "legend_done" [label="done", style="rounded,filled", fillcolor="#e8e8e8"];
+    "legend_ghost" [label="outside the view", style="rounded,dashed"];
+  }
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --output graph.mmd
@@ -1439,6 +1467,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1-a
 {
   "data": {
     "changed": true,
+    "evidence": null,
     "item": "g1-a",
     "state": "done"
   },
@@ -1450,6 +1479,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1
 {
   "data": {
     "changed": true,
+    "evidence": null,
     "item": "g1",
     "state": "done"
   },
@@ -1485,6 +1515,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g2 --force
 {
   "data": {
     "changed": true,
+    "evidence": null,
     "item": "g2",
     "state": "done"
   },

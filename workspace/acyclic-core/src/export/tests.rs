@@ -95,6 +95,11 @@ fn each_scope_has_its_own_page_name() {
 fn dot_escapes_titles_and_clusters_threads() {
     let m = model();
     insta::assert_snapshot!(dot(&m, &view(&m, &Scope::default()).unwrap()));
+    // Read on its own, DOT carries a legend for those styles, just before the document ends.
+    let legended = dot_with_legend(&m, &view(&m, &Scope::default()).unwrap());
+    let plain = dot(&m, &view(&m, &Scope::default()).unwrap());
+    assert_eq!(legended.replace(DOT_LEGEND, ""), plain);
+    assert!(legended.ends_with("  }\n}\n") && legended.contains("cluster_legend"));
 }
 
 #[test]

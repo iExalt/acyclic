@@ -17,8 +17,8 @@ use serde::Serialize;
 /// The heading the options that every command takes sit under in its help.
 const GLOBAL_OPTIONS: &str = "Global options";
 
-/// The acyclic tracker. Every command prints one JSON document, except `prime`, `graph` without `--output`, `import
-/// --schema` and help and version text.
+/// The acyclic tracker. Every command prints one JSON document, except `prime`, `completions`, `graph` without
+/// `--output`, `import --schema` and help and version text.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -41,7 +41,10 @@ pub struct Cli {
 pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Common Commands", &["ready", "list", "show", "claim", "release", "done", "needs"]),
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
-    ("Other Commands", &["init", "sync", "prime", "import", "graph", "level", "doctor", "serve"]),
+    (
+        "Other Commands",
+        &["init", "sync", "prime", "import", "graph", "level", "doctor", "serve", "completions"],
+    ),
 ];
 
 /// The command line, with its top-level help in [`SECTIONS`] rather than one list.
@@ -131,7 +134,7 @@ pub enum Command {
         #[serde(default)]
         include_archived: bool,
         /// Only items in threads the user approved, with the item among what the approval saw.
-        #[arg(long)]
+        #[arg(short = 'a', long)]
         #[serde(default)]
         approved: bool,
     },
@@ -149,10 +152,10 @@ pub enum Command {
         /// The thread.
         thread: String,
         /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
-        #[arg(long, value_parser = lease_minutes)]
+        #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
         /// Claim even when the thread has no ready work.
-        #[arg(long)]
+        #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
     },
@@ -166,16 +169,16 @@ pub enum Command {
         /// The item.
         item: String,
         /// The repository record holding the commit.
-        #[arg(long, requires = "commit")]
+        #[arg(short = 'r', long, requires = "commit")]
         repository: Option<String>,
         /// The commit that completed it.
-        #[arg(long, requires = "repository")]
+        #[arg(short = 'c', long, requires = "repository")]
         commit: Option<String>,
         /// A note, such as where a record lives.
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         note: Option<String>,
         /// Finish it although it isn't ready or someone else holds it.
-        #[arg(long)]
+        #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
     },
@@ -193,7 +196,7 @@ pub enum Command {
         #[arg(required_unless_present = "schema")]
         file: Option<PathBuf>,
         /// Report what would change without writing it.
-        #[arg(long, conflicts_with = "schema")]
+        #[arg(short = 'n', long, conflicts_with = "schema")]
         #[serde(default)]
         dry_run: bool,
         /// Print an annotated example of the document's current version as text, and import nothing.
@@ -247,6 +250,15 @@ pub enum Command {
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip_deserializing)]
     Serve(Serve),
+    /// Prints a completion script for a shell, as text.
+    ///
+    /// For zsh, write it to a directory on `fpath`: `acyclic completions zsh > ~/.zfunc/_acyclic`.
+    #[serde(skip_deserializing)]
+    Completions {
+        /// The shell.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// The server's settings.
@@ -390,16 +402,16 @@ pub enum ItemCommand {
         /// The new item.
         item: String,
         /// Its title.
-        #[arg(long)]
+        #[arg(short = 't', long)]
         title: String,
         /// Its parent.
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         parent: Option<String>,
         /// Its thread.
         #[arg(long)]
         thread: Option<String>,
         /// Its state; backlog by default.
-        #[arg(long, value_parser = values(&StateWord::ALL))]
+        #[arg(short = 's', long, value_parser = values(&StateWord::ALL))]
         state: Option<StateWord>,
         /// Its notes.
         #[arg(long)]
@@ -450,10 +462,10 @@ pub struct ItemEdit {
     /// The item.
     pub item: String,
     /// A new title.
-    #[arg(long)]
+    #[arg(short = 't', long)]
     pub title: Option<String>,
     /// Put it under this parent.
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pub parent: Option<String>,
     /// Put it at the top level.
     #[arg(long)]
@@ -467,7 +479,7 @@ pub struct ItemEdit {
     #[serde(default)]
     pub no_thread: bool,
     /// Set its state: not `done`, which `acyclic done` sets.
-    #[arg(long, value_parser = values(&StateWord::ALL))]
+    #[arg(short = 's', long, value_parser = values(&StateWord::ALL))]
     pub state: Option<StateWord>,
     /// New notes.
     #[arg(long)]
@@ -609,10 +621,10 @@ pub enum ThreadCommand {
         /// The new thread.
         thread: String,
         /// Its title.
-        #[arg(long)]
+        #[arg(short = 't', long)]
         title: String,
         /// Its brief.
-        #[arg(long)]
+        #[arg(short = 'b', long)]
         brief: Option<String>,
         /// A repository it touches beyond its items'; repeat for more.
         #[arg(long, value_name = "REPOSITORY")]
@@ -643,10 +655,10 @@ pub struct ThreadEdit {
     /// The thread.
     pub thread: String,
     /// A new title.
-    #[arg(long)]
+    #[arg(short = 't', long)]
     pub title: Option<String>,
     /// A new brief.
-    #[arg(long)]
+    #[arg(short = 'b', long)]
     pub brief: Option<String>,
     /// Clear its brief.
     #[arg(long)]

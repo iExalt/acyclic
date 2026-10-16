@@ -246,6 +246,38 @@ pub fn dot(model: &Model, view: &View) -> String {
     out
 }
 
+/// A legend for [`dot`]'s styles, a cluster of sample nodes and edges, for DOT read on its own; the HTML page draws
+/// its own.
+const DOT_LEGEND: &str = r##"  subgraph "cluster_legend" {
+    label="Legend"; style=dashed; color=gray; fontcolor=gray;
+    node [fontcolor=gray, color=gray];
+    "legend_first" [label="done first"];
+    "legend_waits" [label="waits for it"];
+    "legend_first" -> "legend_waits" [style=solid];
+    "legend_relates" [label="relates to"];
+    "legend_related" [label="related item"];
+    "legend_relates" -> "legend_related" [style=dotted, arrowhead=none];
+    "legend_parent" [label="parent"];
+    "legend_child" [label="child"];
+    "legend_parent" -> "legend_child" [color=gray, arrowhead=none];
+    "legend_done" [label="done", style="rounded,filled", fillcolor="#e8e8e8"];
+    "legend_ghost" [label="outside the view", style="rounded,dashed"];
+  }
+"##;
+
+/// [`dot`] with a legend for its styles.
+///
+/// # Panics
+///
+/// Never: [`dot`] always ends with the closing brace.
+#[must_use]
+pub fn dot_with_legend(model: &Model, view: &View) -> String {
+    let mut out = dot(model, view);
+    let end = out.rfind('}').expect("a DOT document ends with a brace");
+    out.insert_str(end, DOT_LEGEND);
+    out
+}
+
 /// A Mermaid quoted label, with the characters Mermaid reads as syntax as its entity codes.
 fn mermaid_string(text: &str) -> String {
     let mut out = String::from("\"");

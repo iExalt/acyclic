@@ -73,7 +73,25 @@ pub enum ScopeEdit {
     },
 }
 
+/// A proposal a write left for the user, with the field of the record that it would change, as `show` names it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct Proposed {
+    /// The proposal.
+    pub id: String,
+    /// The field: `thread` or `repositories`.
+    pub field: String,
+}
+
 impl ScopeEdit {
+    /// The field of its record the edit changes, as `show` names it: `thread` or `repositories`.
+    #[must_use]
+    pub fn field(&self) -> &'static str {
+        match self {
+            Self::Member { .. } => "thread",
+            Self::ItemRepository { .. } | Self::ThreadRepository { .. } => "repositories",
+        }
+    }
+
     /// The approved threads whose scope the edit changes, in the model's view.
     #[must_use]
     pub fn approved_threads(&self, model: &Model) -> Vec<String> {
