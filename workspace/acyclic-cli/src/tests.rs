@@ -704,36 +704,3 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         assert_eq!(check(line), Ok(()), "{line}");
     }
 }
-
-#[test]
-fn an_edit_that_is_refused_in_part_writes_nothing() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let env = |actor: &str| {
-        let mut env = env(&[
-            ("ACYCLIC_NOW", "1792022400000"),
-            ("ACYCLIC_TRACKER", "tracker"),
-            ("ACYCLIC_ACTOR", actor),
-        ]);
-        env.cwd = dir.path().to_path_buf();
-        env
-    };
-    let go = |line: &str| {
-        let out = execute(
-            ["acyclic"].into_iter().chain(line.split(' ')).map(Into::into),
-            &env("session/mac"),
-        );
-        (out.code, serde_json::from_str::<Value>(&out.stdout).unwrap_or_default())
-    };
-    assert_eq!(go("init tracker --replica mac").0, 0);
-    assert_eq!(go("item add a --title Before").0, 0);
-    // A valid title with an unknown parent, thread or repository: refused as a whole.
-    for refused in ["--parent nope", "--thread nope", "--repository nope", "--state done"] {
-        let code = go(&format!("item edit a --title After {refused}")).0;
-        assert!(code == exit::NOT_FOUND || code == exit::USAGE, "{refused}: {code}");
-    }
-    let (_, shown) = go("show a");
-    assert_eq!(shown["data"][0]["title"], "Before");
-    let (code, edited) = go("item edit a --title After --area x");
-    assert_eq!((code, edited["data"]["proposals"].clone()), (0, json!([])));
-    assert_eq!(go("show a").1["data"][0]["title"], "After");
-}

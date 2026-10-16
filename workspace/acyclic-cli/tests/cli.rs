@@ -90,6 +90,9 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("thread add t1 --title Other", AGENT), 1, "a conflicting add is refused");
     assert_eq!(sh.run("item edit a2 --thread nope", AGENT), 3, "a thread that isn't there");
+    // An edit refused in part writes nothing: the title is kept when the parent it came with is missing.
+    assert_eq!(sh.run("item edit a2 --title Renamed --parent nope", AGENT), 3);
+    assert_eq!(sh.output("show a2", AGENT).1["data"][0]["title"], "Second", "refused as a whole");
     assert_eq!(sh.run("item edit a2 --thread t1", AGENT), 0);
     assert_eq!(sh.run("thread approve t1", AGENT), 1, "only the user approves");
     assert_eq!(sh.run("thread approve t1 --as-user", AGENT), 0);
