@@ -56,11 +56,9 @@ impl std::fmt::Display for Reason {
                 write!(f, "{item}'s commit isn't merged, or can't be checked")
             },
             Self::LiveDependent { from, to } => write!(f, "{from}, still open, depends on {to}"),
-            Self::Waiting { until } => write!(
-                f,
-                "it has no gate, so it waits until {} (30 days after its last item is done)",
-                crate::time::date(*until)
-            ),
+            Self::Waiting { .. } => {
+                write!(f, "it has no gate, and its last item was done less than 30 days ago")
+            },
         }
     }
 }
@@ -113,7 +111,12 @@ pub enum ArchiveError {
     /// The model layer refused.
     Write(WriteError),
     /// The root isn't eligible.
-    Ineligible(Vec<Reason>),
+    Ineligible {
+        /// The root.
+        item: String,
+        /// Why not.
+        reasons: Vec<Reason>,
+    },
     /// Reopening needs a done item.
     NotDone(String),
     /// Only the user or a project-management run archives.
@@ -124,8 +127,17 @@ impl std::fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::Ineligible(reasons) => {
-                write!(f, "not eligible to archive: {}", crate::say::list(reasons, "; "))
+            Self::Ineligible { item, reasons } => {
+                // A wait is the only reason there is, and it ends on a date.
+                let until = reasons.iter().find_map(|reason| match reason {
+                    Reason::Waiting { until } => Some(crate::time::date(*until)),
+                    _ => None,
+                });
+                match until {
+                    Some(date) => write!(f, "{item} can't be archived until {date}: ")?,
+                    None => write!(f, "{item} can't be archived: ")?,
+                }
+                write!(f, "{}", crate::say::list(reasons, "; "))
             },
             Self::NotAllowed(actor) => {
                 write!(f, "{actor} may not archive; the user or a project manager may")
@@ -171,7 +183,7 @@ pub fn archive(
         eligibility(&readiness, &model, root, by.at)?
     };
     if !reasons.is_empty() {
-        return Err(ArchiveError::Ineligible(reasons));
+        return Err(ArchiveError::Ineligible { item: root.to_owned(), reasons });
     }
     let key = model::item_key(root)?;
     model::put(replica, &key, field::ARCHIVED, Some(&true), by)?;
