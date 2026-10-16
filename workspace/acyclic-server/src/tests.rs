@@ -110,8 +110,11 @@ fn code(body: &str) -> String {
 #[test]
 fn every_route_is_behind_the_identity_check() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.html"), "the app").unwrap();
-    let router = router(config(Some(dir.path().to_path_buf())));
+    let www = dir.path().join("www");
+    std::fs::create_dir(&www).unwrap();
+    std::fs::write(www.join("index.html"), "the app").unwrap();
+    std::fs::write(dir.path().join("secret"), "outside").unwrap();
+    let router = router(config(Some(www)));
     let host = ("host", HOST_NAME);
     let user = (IDENTITY, LOGIN);
     for (method, path) in [

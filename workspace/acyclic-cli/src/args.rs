@@ -224,7 +224,8 @@ pub struct Serve {
     /// The origin a browser's request must come from; `https://<host>` by default.
     #[arg(long)]
     pub origin: Option<String>,
-    /// A directory of static files to serve, such as the built app.
+    /// A directory of static files to serve, such as the built app. Symbolic links in it are followed, so it should
+    /// hold only what the server's own build put there.
     #[arg(long = "static")]
     pub static_dir: Option<PathBuf>,
 }

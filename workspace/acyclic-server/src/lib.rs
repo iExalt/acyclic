@@ -210,8 +210,11 @@ async fn command(State(config): State<Arc<Config>>, headers: HeaderMap, body: By
     let run = tokio::task::spawn_blocking(move || {
         acyclic_cli::call(command, config.tracker.clone(), false, &config.env)
     });
-    let (code, envelope): (u8, Value) = run.await.expect("a command never panics");
-    (status(code), Json(envelope)).into_response()
+    let Ok((code, envelope)) = run.await else {
+        let err = CliError::new("internal", exit::UNREADABLE, "the command failed unexpectedly");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(err.envelope())).into_response();
+    };
+    (status(code), Json::<Value>(envelope)).into_response()
 }
 
 /// The server's routes, every one behind [`identity`].

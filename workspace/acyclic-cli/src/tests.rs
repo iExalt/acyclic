@@ -303,7 +303,8 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
 }
 
 /// Every argument under `command` that the parser constrains and deserializing doesn't, as `<command path>:
-/// <argument>`. Deserializing already refuses a missing field that isn't optional or a list.
+/// <argument>`. Deserializing already refuses a missing field that isn't optional or a list. Argument groups aren't
+/// walked: the command line has none.
 fn constrained(command: &clap::Command, path: &str, found: &mut Vec<String>) {
     for arg in command.get_arguments() {
         let debug = format!("{arg:?}");
