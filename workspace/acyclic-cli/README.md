@@ -44,9 +44,10 @@ Every command's output follows these rules, so you can guess a key from the inpu
    conflict, a dangling reference or an unreadable record. Links read `waits_for` and `relates_to` from an item and
    `waited_on_by` and `related_from` towards it.
 3. **One summary per entity**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`;
-   `ready` adds `approved`. A thread is `{id, title, approved, heads, counts}`, a
-   repository record `{id, owner, name, public, default_branch}` and a proposal `{id, actor, decision, threads}`. `list`
-   returns the summaries and `show` returns the same object with its details added at the top level, so a thread's
+   `ready` lists thread summaries, each with its ready `items`, which add `approved`. A thread is
+   `{id, title, approved, heads, counts}`, a repository record `{id, owner, name, public, default_branch}` and a
+   proposal `{id, actor, decision, threads}`. `list` returns the summaries and `show` returns the same object with
+   its details added at the top level, so a thread's
    `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`. `proposal list`
    returns every proposal, open ones first, as `proposal show` does, with the item its edit names under `item`.
 4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor`, `graph --output`

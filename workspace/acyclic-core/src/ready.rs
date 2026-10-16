@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{Evidence, Item, ItemState, LinkKind, Model, Repository, Value};
+use crate::natural;
 use crate::state::{Error, Millis, State};
 
 /// Whether a commit is on a repository's default branch.
@@ -211,6 +212,15 @@ impl ThreadStatus {
     }
 }
 
+/// A thread with work for an actor, as `ready` lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadyThread {
+    /// The thread.
+    pub thread: String,
+    /// Its ready members, by title in natural order, then id.
+    pub items: Vec<String>,
+}
+
 /// Readiness over one state, with ancestry checks cached by repository and commit.
 pub struct Readiness<'a> {
     state: &'a State,
@@ -365,14 +375,15 @@ impl<'a> Readiness<'a> {
         })
     }
 
-    /// The leaves `actor` may work on, by id: the ready members of every thread it may claim, which are its own and
-    /// the unclaimed ones. Archived subtrees are left out unless `include_archived` is set, which judges every item as
-    /// if nothing were archived.
+    /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
+    /// unclaimed ones, approved first, then by title in natural order and id. Threads others hold are left out.
+    /// Archived subtrees are left out unless `include_archived` is set, which judges every item as if nothing were
+    /// archived.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn ready(&self, include_archived: bool, actor: &str) -> Result<Vec<String>, Error> {
+    pub fn ready(&self, include_archived: bool, actor: &str) -> Result<Vec<ReadyThread>, Error> {
         if include_archived {
             let mut model = self.model.clone();
             for item in model.items.values_mut() {
@@ -390,15 +401,32 @@ impl<'a> Readiness<'a> {
             };
             return unarchived.ready(false, actor);
         }
+        let title =
+            |id: &str, title: &Value<String>| title.one().cloned().unwrap_or_else(|| id.to_owned());
         let mut ready = Vec::new();
-        for thread in self.model.threads.keys() {
-            let status = self.thread(thread)?;
-            if status.claimable_by(actor) {
-                ready.extend(status.items().iter().cloned());
+        for (id, thread) in &self.model.threads {
+            let status = self.thread(id)?;
+            if !status.claimable_by(actor) || status.items().is_empty() {
+                continue;
             }
+            let own = !matches!(status, ThreadStatus::Ready { .. });
+            let mut items: Vec<(String, &String)> = status
+                .items()
+                .iter()
+                .map(|item| (title(item, &self.model.items[item].title), item))
+                .collect();
+            items.sort_by(|a, b| natural::cmp(&a.0, &b.0).then_with(|| a.1.cmp(b.1)));
+            let items = items.into_iter().map(|(_, item)| item.clone()).collect();
+            let key = (!own, !thread.is_approved(), title(id, &thread.title));
+            ready.push((key, ReadyThread { thread: id.clone(), items }));
         }
-        ready.sort();
-        Ok(ready)
+        ready.sort_by(|(a, x), (b, y)| {
+            (a.0, a.1)
+                .cmp(&(b.0, b.1))
+                .then_with(|| natural::cmp(&a.2, &b.2))
+                .then_with(|| x.thread.cmp(&y.thread))
+        });
+        Ok(ready.into_iter().map(|(_, thread)| thread).collect())
     }
 
     /// The unmet hard dependencies of an item and its ancestors.

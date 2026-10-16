@@ -12,6 +12,7 @@ pub mod graph;
 pub mod import;
 pub mod locate;
 pub mod model;
+pub mod natural;
 pub mod needs;
 pub mod place;
 #[doc(hidden)]

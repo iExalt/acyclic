@@ -107,7 +107,13 @@ fn agent_child() {
         assert!(Instant::now() < deadline, "{actor} still working at the deadline");
         let (code, ready) = acyclic(tracker, &actor, "ready");
         assert_eq!(code, 0, "{ready}");
-        let ready = ready["data"]["ready"].as_array().unwrap().clone();
+        // One row per thread, the actor's own first; flattened to its items.
+        let ready: Vec<Value> = ready["data"]["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|thread| thread["items"].as_array().unwrap().clone())
+            .collect();
         if let Some(thread) = held.clone() {
             // Work the held thread's ready items in turn, then let it go.
             let ours = ready.iter().find(|row| row["thread"] == thread.as_str());

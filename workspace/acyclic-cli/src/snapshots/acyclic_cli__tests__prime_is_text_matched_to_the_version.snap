@@ -14,16 +14,16 @@ Set `ACYCLIC_ACTOR` first (see "Who you are"), then:
 ```sh
 acyclic ready
 acyclic claim <thread>
-# ...work its ready items, finishing each:
+# ...work its ready items in order, finishing each:
 acyclic done <item> --repository <record> --commit <id>
 acyclic done <item> --note "what was done"
-# ...and when no item of it is left ready:
+# ...and when none of its items is left ready:
 acyclic release <thread>
 ```
 
 A thread is the unit of work: you claim a whole thread, and you and your subagents work every member without
-claiming items. `ready` lists the ready items in the threads you may claim. Finish with the `--repository` and
-`--commit` form, or with `--note` when the result isn't a commit.
+claiming items. `ready` lists threads with ready work, best first, each with its ready `items` in order. Finish with
+the `--repository` and `--commit` form, or with `--note` when the result isn't a commit.
 
 ## Setting up a clone
 
@@ -59,9 +59,9 @@ For example, `acyclic item edit beds --thread garden --no-notes --area soil --no
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence
-or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic link` has `add` and `remove`.
-`acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
-`acyclic import --schema` prints the plan format.
+or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic link` has
+`add` and `remove`. `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would
+change. `acyclic import --schema` prints the plan format.
 
 Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
 and thread it belongs with.
@@ -88,8 +88,9 @@ standard output.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists the ready items in your own thread and in threads nobody holds, each with its thread and
-   whether the user approved its work; `acyclic ready --approved` lists only approved work. An item in no thread is
+1. `acyclic ready` lists the threads you may work: yours first, then those nobody holds, approved first, then by
+   title. Each row is the thread's summary with its ready `items`, each saying whether the user approved its work;
+   `acyclic ready --approved` lists only approved work. An item in no thread is
    never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic list` lists every item. `acyclic show
    <item>...` explains items, as an array in the order given: their readiness, children and their thread's claims.
    See "Details" for work that waits as `in-review` or `unverified`.

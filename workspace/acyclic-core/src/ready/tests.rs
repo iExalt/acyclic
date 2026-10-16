@@ -71,6 +71,11 @@ fn status(r: &Replica, ancestry: &dyn Ancestry, id: &str) -> Status {
     Readiness::new(&r.state, &model, NOW, ancestry).of(id).unwrap().unwrap()
 }
 
+/// The ready items, thread by thread, in the order `ready` lists them.
+fn flat(threads: &[ReadyThread]) -> Vec<String> {
+    threads.iter().flat_map(|t| t.items.iter().cloned()).collect()
+}
+
 fn blocked(waits: &[(&str, Wait)]) -> Status {
     Status::Blocked { waiting: waits.iter().map(|(id, w)| ((*id).to_owned(), w.clone())).collect() }
 }
@@ -238,7 +243,7 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     assert_eq!(status(&r, &none, "waiting"), blocked(&[("dep", Wait::Open)]));
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &none);
-    assert_eq!(readiness.ready(false, "session/s").unwrap(), Vec::<String>::new());
+    assert_eq!(readiness.ready(false, "session/s").unwrap(), []);
     assert_eq!(readiness.thread("ghost").unwrap(), ThreadStatus::Missing);
 }
 
@@ -259,7 +264,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     };
     let ready = |r: &Replica, actor: &str| {
         let model = Model::read(&r.state).unwrap();
-        Readiness::new(&r.state, &model, NOW, &none).ready(false, actor).unwrap()
+        flat(&Readiness::new(&r.state, &model, NOW, &none).ready(false, actor).unwrap())
     };
     let workable = vec!["dep".to_owned(), "x".to_owned()];
     assert_eq!(at(&a, "main"), ThreadStatus::Ready { items: workable.clone() });
@@ -305,14 +310,14 @@ fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     let ancestry = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
-    let ready = readiness.ready(false, "session/s").unwrap();
+    let ready = flat(&readiness.ready(false, "session/s").unwrap());
     assert_eq!(ready, ["x", "y", "z"], "an open after link holds nothing back");
     assert_eq!(
         ancestry.calls.get(),
         1,
         "c1 once for two dependents, and never c2, which nothing needs"
     );
-    let with_archived = readiness.ready(true, "session/s").unwrap();
+    let with_archived = flat(&readiness.ready(true, "session/s").unwrap());
     assert!(with_archived.contains(&"archived-leaf".to_owned()));
 }
 
@@ -357,4 +362,50 @@ fn a_held_resource_keeps_another_threads_work_waiting_and_a_dead_runs_claim_free
     model::set_run_state(&mut r, "r1", model::RunState::Done, by(20)).unwrap();
     assert_eq!(status(&r, &none, "x"), Status::Ready);
     assert_eq!(status(&r, &none, "y"), Status::Ready);
+}
+
+#[test]
+fn ready_lists_the_actors_thread_first_then_approved_ones_by_natural_title_and_leaves_out_others_held()
+ {
+    let mut r = replica("a");
+    // Thread ids run against their titles, so only the titles can order them.
+    for (item, held, title) in [
+        ("i1", "a", "Step 10"),
+        ("i2", "b", "Step 2"),
+        ("i3", "c", "Step 1"),
+        ("i4", "d", "Mine"),
+        ("i5", "e", "Theirs"),
+        ("i6", "f", "Step 2"),
+    ] {
+        add_item(&mut r, item, item, by(1)).unwrap();
+        thread(&mut r, item, held);
+        set(&mut r, &claim::thread_key(held).unwrap(), thread_field::TITLE, Some(&title), by(1))
+            .unwrap();
+    }
+    set(&mut r, &claim::thread_key("c").unwrap(), thread_field::APPROVED, Some(&true), by(1))
+        .unwrap();
+    // Items within a thread sort by title in natural order too, then by id.
+    for (item, title) in [("m10", "Part 10"), ("m2", "Part 2"), ("m1", "Part 2")] {
+        add_item(&mut r, item, title, by(1)).unwrap();
+        thread(&mut r, item, "d");
+    }
+    claim::claim(&mut r, "d", "session/me", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "e", "session/other", 900, Some(500), 1_000).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    let ready =
+        Readiness::new(&r.state, &model, NOW, &Fake::default()).ready(false, "session/me").unwrap();
+    let order: Vec<(&str, Vec<&str>)> = ready
+        .iter()
+        .map(|t| (t.thread.as_str(), t.items.iter().map(String::as_str).collect()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("d", vec!["m1", "m2", "m10", "i4"]),
+            ("c", vec!["i3"]),
+            ("b", vec!["i2"]),
+            ("f", vec!["i6"]),
+            ("a", vec!["i1"]),
+        ]
+    );
 }

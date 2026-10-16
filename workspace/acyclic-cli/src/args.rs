@@ -124,7 +124,7 @@ pub enum Command {
     },
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
-    /// Lists ready leaves in the threads the actor may claim, by id.
+    /// Lists threads with ready work, the actor's own first, each with its ready items.
     Ready {
         /// Judge archived work as if it weren't archived.
         #[arg(long)]

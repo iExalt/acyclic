@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Item, ItemState, Link, LinkKind, Model, Value};
 use acyclic_core::needs::Entry;
-use acyclic_core::ready::Readiness;
+use acyclic_core::ready::{Readiness, ReadyThread};
 use acyclic_core::scope::{self, Decision, Proposal, ScopeEdit};
 use acyclic_core::state::{Key, Millis, State};
 use serde_json::{Map, Value as Json, json};
@@ -92,14 +92,27 @@ impl View<'_> {
         }))
     }
 
-    /// The rows of the items that are ready, each with whether its work is `approved`; the same rows, filtered by
-    /// their own `approved`, when only approved work is asked for.
-    pub fn ready_rows(&self, ready: &[String], only_approved: bool) -> Result<Vec<Json>, CliError> {
+    /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
+    /// item row with whether its work is `approved`. When only approved work is asked for, the items are filtered by
+    /// their own `approved`, and a thread left with none is dropped.
+    pub fn ready_rows(
+        &self,
+        ready: &[ReadyThread],
+        only_approved: bool,
+    ) -> Result<Vec<Json>, CliError> {
+        let members = thread_members(self.model);
         let mut rows = Vec::new();
-        for id in ready {
-            let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
-            if row["approved"] == true || !only_approved {
-                rows.push(row);
+        for ReadyThread { thread, items } in ready {
+            let mut found = Vec::new();
+            for id in items {
+                let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
+                if row["approved"] == true || !only_approved {
+                    found.push(row);
+                }
+            }
+            if !found.is_empty() {
+                let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
+                rows.push(with(thread_row(self.model, thread, listed), json!({"items": found})));
             }
         }
         Ok(rows)
@@ -687,20 +700,31 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_row_is_approved_exactly_when_ready_approved_lists_it() {
+    fn a_ready_row_is_a_thread_whose_items_are_approved_exactly_when_ready_approved_lists_them() {
         let r = tracker();
         viewing(&r, |view| {
-            let ready: Vec<String> = ["a", "b", "c", "late"].map(str::to_owned).to_vec();
+            let items = ["a", "b", "late"].map(str::to_owned).to_vec();
+            let ready = [ReadyThread { thread: "t".into(), items }];
             let all = view.ready_rows(&ready, false).unwrap();
             let approved = view.ready_rows(&ready, true).unwrap();
-            let flags: Vec<(&str, bool)> = all
+            assert_eq!(
+                (all[0]["id"].as_str(), all[0]["approved"].as_bool()),
+                (Some("t"), Some(true))
+            );
+            let flags: Vec<(&str, bool)> = all[0]["items"]
+                .as_array()
+                .unwrap()
                 .iter()
                 .map(|row| (row["id"].as_str().unwrap(), row["approved"].as_bool().unwrap()))
                 .collect();
-            // The agent's raced add was never seen by the approval, and c has no thread.
-            assert_eq!(flags, [("a", true), ("b", true), ("c", false), ("late", false)]);
-            assert!(approved.iter().all(|row| row["approved"] == true), "{approved:?}");
-            assert_eq!(approved.len(), 2);
+            // The agent's raced add was never seen by the approval.
+            assert_eq!(flags, [("a", true), ("b", true), ("late", false)]);
+            let kept = approved[0]["items"].as_array().unwrap();
+            assert!(kept.iter().all(|row| row["approved"] == true), "{approved:?}");
+            assert_eq!(kept.len(), 2);
+            // A thread left with no approved work isn't listed.
+            let unapproved = [ReadyThread { thread: "t".into(), items: vec!["late".into()] }];
+            assert_eq!(view.ready_rows(&unapproved, true).unwrap(), Vec::<Json>::new());
             for row in &all {
                 follows_the_conventions(row, "ready");
             }

@@ -128,14 +128,29 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
     "ready": [
       {
         "approved": false,
-        "id": "a1",
-        "parent": null,
-        "readiness": {
-          "status": "ready"
+        "counts": {
+          "conflicted": 0,
+          "done": 0,
+          "members": 2
         },
-        "state": "backlog",
-        "thread": "t0",
-        "title": "First"
+        "heads": [
+          "a1"
+        ],
+        "id": "t0",
+        "items": [
+          {
+            "approved": false,
+            "id": "a1",
+            "parent": null,
+            "readiness": {
+              "status": "ready"
+            },
+            "state": "backlog",
+            "thread": "t0",
+            "title": "First"
+          }
+        ],
+        "title": "Start"
       }
     ]
   },
@@ -352,14 +367,29 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
     "ready": [
       {
         "approved": false,
-        "id": "a2",
-        "parent": null,
-        "readiness": {
-          "status": "ready"
+        "counts": {
+          "conflicted": 0,
+          "done": 1,
+          "members": 2
         },
-        "state": "backlog",
-        "thread": "t0",
-        "title": "Second"
+        "heads": [
+          "a2"
+        ],
+        "id": "t0",
+        "items": [
+          {
+            "approved": false,
+            "id": "a2",
+            "parent": null,
+            "readiness": {
+              "status": "ready"
+            },
+            "state": "backlog",
+            "thread": "t0",
+            "title": "Second"
+          }
+        ],
+        "title": "Start"
       }
     ]
   },
@@ -505,14 +535,29 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
     "ready": [
       {
         "approved": true,
-        "id": "a2",
-        "parent": null,
-        "readiness": {
-          "status": "ready"
+        "counts": {
+          "conflicted": 0,
+          "done": 0,
+          "members": 1
         },
-        "state": "backlog",
-        "thread": "t1",
-        "title": "Second"
+        "heads": [
+          "a2"
+        ],
+        "id": "t1",
+        "items": [
+          {
+            "approved": true,
+            "id": "a2",
+            "parent": null,
+            "readiness": {
+              "status": "ready"
+            },
+            "state": "backlog",
+            "thread": "t1",
+            "title": "Second"
+          }
+        ],
+        "title": "Work"
       }
     ]
   },
