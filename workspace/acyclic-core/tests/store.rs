@@ -481,7 +481,7 @@ fn fresh_clones_of_a_replica_take_different_ids() {
 }
 
 #[test]
-fn two_clones_writing_as_one_replica_are_caught_at_sync() {
+fn joining_a_state_that_saw_more_of_our_writes_is_refused() {
     let dir = TempDir::new().unwrap();
     let one = tracker(&dir, "mac");
     // A copied clone, config and all, before either has written.
@@ -742,4 +742,85 @@ fn a_plain_fetch_does_not_vouch_for_a_push() {
     git(&path, &["fetch", "-q", "origin"]);
     write(&tracker, "x1", "f", json!(3));
     assert!(matches!(tracker.push("origin"), Err(StoreError::RemoteMoved)));
+}
+
+#[test]
+fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset() {
+    let dir = TempDir::new().unwrap();
+    let remote = remote_with_ruleset(&dir);
+    let url = remote.to_str().unwrap();
+    let (mac, _) = Tracker::open(&tracker(&dir, "mac")).unwrap();
+    let (pi, _) = Tracker::open(&tracker(&dir, "pi")).unwrap();
+    write(&mac, "x1", "f", json!(1));
+    write(&pi, "x1", "g", json!(2));
+    let first = mac.sync(url).unwrap();
+    assert_eq!((first.fetched.len(), first.joined), (0, false), "an empty remote");
+    let second = pi.sync(url).unwrap();
+    assert_eq!((second.fetched, second.joined), (vec!["mac".to_owned()], true));
+    mac.sync(url).unwrap();
+    let entities = |t: &Tracker| {
+        t.load().unwrap().1.entities().map(|(k, e)| (k.clone(), e.clone())).collect::<Vec<_>>()
+    };
+    assert_eq!(entities(&mac), entities(&pi), "converged");
+    let again = mac.sync(url).unwrap();
+    assert_eq!((again.joined, again.pushed), (false, 0), "nothing new either way");
+    // A squash rewrites the state ref; the lease lets it through, and segments still only fast-forward.
+    mac.squash().unwrap();
+    write(&mac, "x1", "f", json!(3));
+    assert!(mac.sync(url).unwrap().pushed > 0);
+}
+
+#[test]
+fn a_copied_clone_writing_as_the_same_replica_is_refused_at_sync_and_moves_nothing() {
+    let dir = TempDir::new().unwrap();
+    let remote = remote_with_ruleset(&dir);
+    let url = remote.to_str().unwrap();
+    let path = tracker(&dir, "mac");
+    let (mac, _) = Tracker::open(&path).unwrap();
+    write(&mac, "x1", "f", json!(1));
+    mac.sync(url).unwrap();
+    let copy = dir.path().join("copy");
+    let copied = Command::new("cp").arg("-R").arg(&path).arg(&copy).status().unwrap();
+    assert!(copied.success());
+    let (twin, renamed) = Tracker::open(&copy).unwrap();
+    assert_eq!(renamed, None, "a copy carries the id and its state ref");
+    // Each writes as many operations, so a join alone can't tell their writes apart.
+    write(&mac, "x1", "f", json!(2));
+    write(&twin, "x1", "f", json!(3));
+    mac.sync(url).unwrap();
+    let before = remote_refs(&remote);
+    let tracking = "refs/acyclic/remotes/";
+    let seen = git(&copy, &["for-each-ref", "--format=%(refname) %(objectname)", tracking]);
+    assert!(matches!(twin.sync(url), Err(StoreError::Duplicate(_))));
+    assert_eq!(remote_refs(&remote), before, "nothing pushed");
+    let after = git(&copy, &["for-each-ref", "--format=%(refname) %(objectname)", tracking]);
+    assert_eq!(after, seen, "and the copy still leases against what it last saw");
+}
+
+#[test]
+fn a_lost_tracking_update_or_a_deleted_remote_ref_is_not_a_duplicate() {
+    let dir = TempDir::new().unwrap();
+    let remote = dir.path().join("plain.git");
+    git(dir.path(), &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    let url = remote.to_str().unwrap();
+    let path = tracker(&dir, "mac");
+    let (mac, _) = Tracker::open(&path).unwrap();
+    write(&mac, "x1", "f", json!(1));
+    mac.sync(url).unwrap();
+    let tracking = git(&path, &["for-each-ref", "--format=%(refname)", "refs/acyclic/remotes/"]);
+    // A push the remote applied, whose local tracking update never ran.
+    write(&mac, "x1", "f", json!(2));
+    let pushed = git(&path, &["rev-parse", "refs/heads/state/mac"]);
+    mac.sync(url).unwrap();
+    git(&path, &["update-ref", &tracking, "refs/heads/state/mac~1"]);
+    write(&mac, "x1", "f", json!(3));
+    mac.sync(url).unwrap();
+    assert_ne!(git(&remote, &["rev-parse", "refs/heads/state/mac"]), pushed, "pushed again");
+    // A remote recreated without this replica's ref.
+    git(&remote, &["update-ref", "-d", "refs/heads/state/mac"]);
+    mac.sync(url).unwrap();
+    assert_eq!(
+        git(&remote, &["rev-parse", "refs/heads/state/mac"]),
+        git(&path, &["rev-parse", "refs/heads/state/mac"])
+    );
 }

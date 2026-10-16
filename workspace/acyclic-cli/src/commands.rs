@@ -48,8 +48,8 @@ const MAX_LEASE: Millis = 8 * LEASE;
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
-    if let Command::Init { path, replica } = &cli.command {
-        return init(&env.cwd.join(path), replica).map(Output::Json);
+    if let Command::Init { path, replica, remote } = &cli.command {
+        return init(&env.cwd.join(path), replica, remote.as_deref()).map(Output::Json);
     }
     if let Command::Prime = &cli.command {
         return Ok(Output::Text(prime()));
@@ -106,6 +106,7 @@ impl<'a> Session<'a> {
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
             Command::Needs => self.needs(),
+            Command::Sync => self.sync(),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add { id, title, parent }) => {
                 self.add(id, title, parent.as_deref())
@@ -266,6 +267,17 @@ impl<'a> Session<'a> {
         let (mut data, changed) = result.into_inner();
         if let Json::Object(map) = &mut data {
             map.insert("changed".to_owned(), Json::Bool(changed));
+            // Asked to push every write: a failed push doesn't fail the write, which `acyclic sync` carries later.
+            if changed
+                && self.tracker.push_after_write()
+                && let Some(remote) = self.tracker.remote()
+            {
+                let push = match self.tracker.push(remote) {
+                    Ok(pushed) => json!({"ok": true, "pushed": pushed}),
+                    Err(err) => json!({"ok": false, "reason": err.to_string()}),
+                };
+                map.insert("push".to_owned(), push);
+            }
         }
         Ok(data)
     }
@@ -475,7 +487,42 @@ impl<'a> Session<'a> {
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         let readiness = Readiness::new(&state, &model, self.now, &ancestry);
-        Ok(json!({"needs": needs::needs_you(&state, &model, &readiness, self.now)?}))
+        let mut entries = needs::needs_you(&state, &model, &readiness, self.now)?;
+        // Local to this clone, so derived here rather than kept in the shared state: asked to push every write, it
+        // still holds writes the remote lacks.
+        if let Some(remote) = self.tracker.remote()
+            && self.tracker.push_after_write()
+            && self.tracker.unpushed(remote)?
+        {
+            entries.push(needs::Entry::Unpushed { remote: remote.to_owned() });
+        }
+        Ok(json!({"needs": entries}))
+    }
+
+    fn sync(&self) -> Result<Json, CliError> {
+        let remote = self.remote()?;
+        let synced = self.tracker.sync(remote)?;
+        Ok(json!({
+            "remote": remote,
+            "fetched": synced.fetched,
+            "joined": synced.joined,
+            "pushed": synced.pushed,
+            "changed": synced.joined,
+        }))
+    }
+
+    /// The remote to sync with, or a configuration error naming how to add one.
+    fn remote(&self) -> Result<&'static str, CliError> {
+        self.tracker.remote().ok_or_else(|| {
+            CliError::new(
+                "no-remote",
+                exit::CONFIG,
+                format!(
+                    "the tracker clone has no {}; set one with acyclic init <clone> --replica <id> --remote <url>",
+                    store::REMOTE
+                ),
+            )
+        })
     }
 
     fn doctor(&self) -> Result<Json, CliError> {
@@ -681,7 +728,7 @@ fn project_root(state: &State, key: &Key) -> Option<String> {
 }
 
 /// Creates the tracker repository, or configures an existing clone, as a new replica. Adds no files or hooks.
-fn init(path: &Path, replica: &str) -> Result<Json, CliError> {
+fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliError> {
     let id = ReplicaId::new(replica)?;
     let git = |args: &[&str]| {
         Process::new("git").arg("-C").arg(path).args(args).env("LC_ALL", "C").output()
@@ -695,8 +742,9 @@ fn init(path: &Path, replica: &str) -> Result<Json, CliError> {
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
         match configured {
             Some(existing) if existing == replica => {
+                let changed = remote.map(|url| set_origin(&git, url)).transpose()?.unwrap_or(false);
                 return Ok(
-                    json!({"path": path, "replica": replica, "created": false, "changed": false}),
+                    json!({"path": path, "replica": replica, "created": false, "changed": changed}),
                 );
             },
             Some(existing) => {
@@ -722,7 +770,35 @@ fn init(path: &Path, replica: &str) -> Result<Json, CliError> {
         }
     }
     store::init_replica(path, &id)?;
+    if let Some(url) = remote {
+        set_origin(&git, url)?;
+    }
     Ok(json!({"path": path, "replica": replica, "created": !is_repo, "changed": true}))
+}
+
+/// Points the clone's `origin` at `url`, adding it when missing; whether that changed anything.
+fn set_origin(
+    git: &impl Fn(&[&str]) -> std::io::Result<std::process::Output>,
+    url: &str,
+) -> Result<bool, CliError> {
+    let current = git(&["remote", "get-url", store::REMOTE])
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    let args = match current {
+        Some(current) if current == url => return Ok(false),
+        Some(_) => ["remote", "set-url", store::REMOTE, url],
+        None => ["remote", "add", store::REMOTE, url],
+    };
+    let out = git(&args).map_err(|e| CliError::new("git", exit::STORE, e.to_string()))?;
+    if !out.status.success() {
+        return Err(CliError::new(
+            "git",
+            exit::STORE,
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        ));
+    }
+    Ok(true)
 }
 
 /// Adds the items that joined a thread passed down to them, or asked to, to a command's data, when there are any.

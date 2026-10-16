@@ -32,7 +32,7 @@ pub struct Cli {
 pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Common Commands", &["ready", "list", "show", "claim", "done", "needs"]),
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
-    ("Other Commands", &["init", "prime", "import", "graph", "level", "doctor"]),
+    ("Other Commands", &["init", "sync", "prime", "import", "graph", "level", "doctor"]),
 ];
 
 /// The command line, with its top-level help in [`SECTIONS`] rather than one list.
@@ -71,7 +71,12 @@ pub enum Command {
         /// The new replica's id, such as `mac`.
         #[arg(long)]
         replica: String,
+        /// The shared tracker repository to sync with, set as the clone's `origin`.
+        #[arg(long)]
+        remote: Option<String>,
     },
+    /// Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs.
+    Sync,
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
     /// Lists ready leaves, best first.

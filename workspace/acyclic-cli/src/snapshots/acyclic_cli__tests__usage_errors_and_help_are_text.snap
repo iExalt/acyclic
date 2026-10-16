@@ -23,6 +23,7 @@ Command Groups:
 
 Other Commands:
   init      Sets up a tracker clone as a new replica, creating the repository if there is none
+  sync      Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
   prime     Prints conventions for agents, matched to this version, as text
   import    Imports a plan: adds and updates what the document names, and never deletes
   graph     Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser

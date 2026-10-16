@@ -60,6 +60,11 @@ pub enum Entry {
         /// Threads it waits on in a cycle through `blocks` links, so not all of them can finish as they stand.
         waits_with: Vec<String>,
     },
+    /// This clone pushes every write, yet holds writes the remote lacks: `acyclic sync` sends them.
+    Unpushed {
+        /// The remote.
+        remote: String,
+    },
     /// Links of blocks and after kinds form a cycle.
     LinkCycle {
         /// The items on it.

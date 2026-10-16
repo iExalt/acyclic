@@ -59,6 +59,9 @@ pub enum StoreError {
     Config(String),
     /// The remote's state ref moved since this replica last pushed or fetched it: fetch and join, then push again.
     RemoteMoved,
+    /// The remote's copy of this replica's state ref moved since this clone last synced: another clone writes as this
+    /// replica.
+    Duplicate(ReplicaId),
     /// The remote refused a ref, so the atomic push moved nothing.
     Rejected {
         /// The refused ref.
@@ -88,6 +91,12 @@ impl fmt::Display for StoreError {
             Self::RemoteMoved => {
                 write!(f, "the remote's state ref moved since the last sync; fetch and join first")
             },
+            Self::Duplicate(replica) => write!(
+                f,
+                "the remote's state of replica {replica} holds writes this clone never made: another clone writes as \
+                 {replica}, and only one clone may use a replica's id. Nothing was joined or pushed; don't retry, \
+                 tell the user"
+            ),
             Self::Rejected { reference, reason } => {
                 write!(f, "the remote refused {reference}: {reason}")
             },
@@ -178,7 +187,28 @@ pub struct Tracker {
     opened: std::sync::Mutex<Option<OpenedTip>>,
     /// The clone's `gc.auto` and `gc.autoPackLimit`, or git's defaults: when to repack.
     upkeep: Upkeep,
+    /// Whether the clone has a remote named [`REMOTE`].
+    origin: bool,
+    /// Whether every write ends with a push: `acyclic.pushAfterWrite` in the clone's git config.
+    push_after_write: bool,
 }
+
+/// What a sync did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Synced {
+    /// The replicas whose state refs the remote holds, this one's included once it has pushed.
+    pub fetched: Vec<String>,
+    /// Whether joining them changed this replica's state.
+    pub joined: bool,
+    /// How many refs the push updated or deleted.
+    pub pushed: usize,
+}
+
+/// The remote a tracker clone syncs with.
+pub const REMOTE: &str = "origin";
+
+/// The git config key that makes every write end with a push, as git lists it: in lower case.
+pub const PUSH_AFTER_WRITE_CONFIG: &str = "acyclic.pushafterwrite";
 
 #[derive(Debug, Clone, Copy)]
 struct Upkeep {
@@ -365,7 +395,11 @@ impl Tracker {
         let git = Git::new(path);
         // The replica's settings and git's repacking thresholds in one process; git prints names in lower case.
         let settings = git
-            .text(["config", "--get-regexp", r"^(acyclic\.|gc\.auto$|gc\.autopacklimit$)"])
+            .text([
+                "config",
+                "--get-regexp",
+                r"^(acyclic\.|gc\.auto$|gc\.autopacklimit$|remote\.origin\.url$)",
+            ])
             .unwrap_or_default();
         let setting = |name: &str| {
             settings.lines().find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
@@ -373,6 +407,10 @@ impl Tracker {
         let number = |name, default| setting(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         let upkeep =
             Upkeep { loose: number("gc.auto", 6_700), packs: number("gc.autopacklimit", 50) };
+        let origin = setting("remote.origin.url").is_some();
+        let push_after_write = setting(PUSH_AFTER_WRITE_CONFIG).is_some_and(|v| {
+            matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1")
+        });
         let id = setting(REPLICA_CONFIG).ok_or_else(|| {
             StoreError::Config(format!("no {REPLICA_CONFIG} in {}", path.display()))
         })?;
@@ -387,6 +425,8 @@ impl Tracker {
             unused: AtomicBool::new(unused),
             opened: std::sync::Mutex::new(Some(OpenedTip(tip))),
             upkeep,
+            origin,
+            push_after_write,
         };
         if tip.is_some() {
             return Ok((tracker(git, id, false, tip), None));
@@ -909,18 +949,32 @@ impl Tracker {
     /// Fails when the other state has seen more of this replica's writes than it has (another clone uses this
     /// replica's id), or on a lock, git failure or lost races.
     pub fn join_ref(&self, reference: &str) -> Result<Outcome, StoreError> {
-        let other_tip = self
-            .git
-            .resolve(reference)?
-            .ok_or_else(|| StoreError::Config(format!("no ref {reference}")))?;
-        let other = read_state(&self.git, &other_tip)?;
+        self.join_refs(&[reference.to_owned()])
+    }
+
+    /// Joins the states held at `references` into this replica's state, in one commit.
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`Self::join_ref`] does.
+    pub fn join_refs(&self, references: &[String]) -> Result<Outcome, StoreError> {
+        let mut others = Vec::with_capacity(references.len());
+        for reference in references {
+            let tip = self
+                .git
+                .resolve(reference)?
+                .ok_or_else(|| StoreError::Config(format!("no ref {reference}")))?;
+            others.push(read_state(&self.git, &tip)?);
+        }
         let _lock = self.lock()?;
         let started = Instant::now();
         let mut retries = 0;
         loop {
             let (tip, before) = self.load()?;
             let mut replica = Replica::open(self.replica.clone(), before.clone());
-            replica.join(&other)?;
+            for other in &others {
+                replica.join(other)?;
+            }
             if replica.state == before {
                 return Ok(Outcome::Unchanged);
             }
@@ -941,6 +995,75 @@ impl Tracker {
                 Err(err) => return Err(err),
             }
         }
+    }
+
+    /// Syncs with `remote`: fetches every replica's state ref, joins them all into this replica's state, its own
+    /// fetched one included, then pushes. A remote copy of this replica's state ref that isn't this clone's own
+    /// earlier push means another clone writes under this replica's id, and the sync stops before its push could
+    /// overwrite that clone's work. One case passes unseen: a push whose tracking update was lost, followed by a local
+    /// squash before the next sync, can't be told from a duplicate's write and is refused as one. Only the join holds
+    /// the write lock, not the network calls.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::State`] with an id reuse when another clone writes as this replica, and the errors of
+    /// [`Self::fetch`], [`Self::join_refs`] and [`Self::push`]; a failed push never retries, since right after a
+    /// fetch a moved ref means something else writes this replica's refs.
+    pub fn sync(&self, remote: &str) -> Result<Synced, StoreError> {
+        let prefix = tracking_prefix(remote);
+        let own = format!("{prefix}{}", self.replica);
+        let last_seen = self.git.resolve(&own)?;
+        self.fetch(remote)?;
+        // Only this replica writes its state ref, so a move of the remote's copy is this clone's own push whose
+        // tracking update was lost (an ancestor of the local tip), a deleted remote ref (pushed again), or another
+        // clone writing as this replica. A join can't tell that last case apart when both clones wrote as many
+        // operations, so it is checked here.
+        let fetched_own = self.git.resolve(&own)?;
+        if fetched_own != last_seen
+            && let Some(remote_tip) = &fetched_own
+        {
+            let local = self.git.resolve(&state_ref(&self.replica))?;
+            let ours = local.is_some_and(|local| {
+                self.git.run(["merge-base", "--is-ancestor", remote_tip, &local], None, &[]).is_ok()
+            });
+            if !ours {
+                match &last_seen {
+                    Some(tip) => self.git.run(["update-ref", &own, tip], None, &[])?,
+                    None => self.git.run(["update-ref", "-d", &own], None, &[])?,
+                };
+                return Err(StoreError::Duplicate(self.replica.clone()));
+            }
+        }
+        let fetched = self.git.refs(&prefix)?;
+        let names: Vec<String> = fetched.keys().cloned().collect();
+        let joined = !names.is_empty() && self.join_refs(&names)? != Outcome::Unchanged;
+        let pushed = self.push(remote)?;
+        let replicas = names.iter().map(|name| name[prefix.len()..].to_owned()).collect();
+        Ok(Synced { fetched: replicas, joined, pushed })
+    }
+
+    /// Whether this replica's state ref is ahead of what it last pushed to or fetched from `remote`, judged without
+    /// reaching the remote.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git fails.
+    pub fn unpushed(&self, remote: &str) -> Result<bool, StoreError> {
+        let mine = self.git.resolve(&state_ref(&self.replica))?;
+        let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
+        Ok(mine.is_some() && mine != self.git.resolve(&tracking)?)
+    }
+
+    /// The remote this clone syncs with, `origin`, when it has one.
+    #[must_use]
+    pub fn remote(&self) -> Option<&'static str> {
+        self.origin.then_some(REMOTE)
+    }
+
+    /// Whether every write ends with a push, as `acyclic.pushAfterWrite` in the clone's git config asks.
+    #[must_use]
+    pub fn push_after_write(&self) -> bool {
+        self.push_after_write
     }
 
     /// Squashes this replica's state ref to a parentless commit of the same tree, under a lease on the tip it read.

@@ -211,3 +211,55 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     );
     assert_eq!(sh.run("import missing.json --as-user", &[]), 3);
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+#[test]
+fn two_machines_sync_through_a_shared_repository() {
+    let mut sh = Shell::new();
+    let pi: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/pi"), ("ACYCLIC_TRACKER", "pi")];
+    git(sh.path(), &["init", "-q", "--bare", "shared.git"]);
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    let (code, out) = sh.output("sync", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (5, Some("no-remote")));
+    let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
+    assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "a remote added later");
+    sh.run("item add a1 --title First", AGENT);
+    let (code, out) = sh.output("sync", AGENT);
+    assert_eq!((code, out["data"]["pushed"].as_u64().is_some_and(|n| n > 0)), (0, true));
+    // A second machine starts from the shared repository and sees the first's work.
+    assert_eq!(sh.run("init pi --replica pi --remote ../shared.git", &[]), 0);
+    let (code, out) = sh.output("sync", pi);
+    assert_eq!(
+        (code, &out["data"]["fetched"], out["data"]["joined"].as_bool()),
+        (0, &serde_json::json!(["mac"]), Some(true))
+    );
+    assert_eq!(sh.output("show a1", pi).0, 0);
+    sh.run("item add b1 --title Second", pi);
+    sh.run("sync", pi);
+    let (_, out) = sh.output("sync", AGENT);
+    assert_eq!(out["data"]["fetched"], serde_json::json!(["mac", "pi"]));
+    assert_eq!(sh.output("show b1", AGENT).0, 0, "and the first sees the second's");
+    // Asked to push every write, a write reports its push; one that fails shows in needs until a sync.
+    git(&sh.path().join("tracker"), &["config", "acyclic.pushAfterWrite", "true"]);
+    let (_, out) = sh.output("item add a2 --title Pushed", AGENT);
+    assert_eq!(out["data"]["push"]["ok"].as_bool(), Some(true), "{out}");
+    git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../nowhere.git"]);
+    let (code, out) = sh.output("item add a3 --title Stranded", AGENT);
+    assert_eq!((code, out["data"]["push"]["ok"].as_bool()), (0, Some(false)), "the write stands");
+    let (_, out) = sh.output("needs", AGENT);
+    assert_eq!(out["data"]["needs"][0]["entry"], "unpushed");
+    git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
+    sh.run("sync", AGENT);
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+}
