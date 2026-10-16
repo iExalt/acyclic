@@ -43,7 +43,7 @@ Every command's output follows these rules, so a key can be guessed from the inp
    conflict, a dangling reference or an unreadable record. Links read `waits_for`, `follows` and `relates_to` from an
    item and `waited_on_by`, `followed_by` and `related_from` towards it.
 3. **One summary per entity**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`;
-   `ready` adds `rank` and `approved`. A thread is `{id, title, approved, heads, counts}`, a repository record
+   `ready` adds `approved`, and the rank is in `readiness`. A thread is `{id, title, approved, heads, counts}`, a repository record
    `{id, owner, name, public, default_branch}` and a proposal `{id, actor, decision, threads}`. `list` returns the
    summaries and `show` returns the same object with its details added at the top level, so a thread's `show` adds
    `members`, each an item summary that says whether it is `approved` and `conflicted`.
