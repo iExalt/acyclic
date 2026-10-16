@@ -703,10 +703,11 @@ impl<'a> Session<'a> {
             } else {
                 (Vec::new(), Model::read(replica.state())?)
             };
-            let (suggestions, rank) = suggest::suggest(&model, id, parent, suggest::LIMIT);
+            let (suggestions, given) = suggest::suggest(&model, id, parent, suggest::LIMIT);
             let mut candidates = json!(suggestions);
-            if parent.is_some() {
-                candidates["parent_rank"] = json!(rank);
+            if let Some(given) = given {
+                candidates["parent_rank"] = json!(given.rank);
+                candidates["parent_score"] = json!(given.score);
             }
             Ok(with_inherited(json!({"item": id, "candidates": candidates}), &inherited))
         })

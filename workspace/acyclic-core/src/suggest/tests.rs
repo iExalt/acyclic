@@ -45,14 +45,14 @@ fn words_lead_to_the_parent_whose_children_share_them() {
     let mut r = home();
     add(&mut r, "new", "Paint the bathroom", None);
     let shown = parents(&r, "new");
-    let leaves: BTreeSet<&str> = shown[..2].iter().map(String::as_str).collect();
-    assert_eq!(leaves, BTreeSet::from(["paint", "tiles"]), "leaves share words too");
-    assert_eq!(shown[2], "house", "and their parent, through them");
-    add(&mut r, "car", "Rent a car in Lisbon", None);
+    assert_eq!(shown[0], "house", "a group, through its children's words");
+    let leaves: BTreeSet<&str> = shown[1..].iter().map(String::as_str).collect();
     assert_eq!(
-        parents(&r, "car")[0],
-        "flights".to_owned().replace("flights", &parents(&r, "car")[0])
+        leaves,
+        BTreeSet::from(["paint", "tiles"]),
+        "leaves share words too, and count for less"
     );
+    add(&mut r, "car", "Rent a car in Lisbon", None);
     let ranked =
         rank(&model(&r), &Query::words_of(&model(&r).items["car"]), &subtree(&model(&r), "car"));
     let trip = ranked.parents.iter().position(|(id, _)| id == "trip").unwrap();
@@ -170,21 +170,42 @@ fn threads_rank_by_their_words_and_parents_name_the_thread_they_pass_down() {
 }
 
 #[test]
-fn a_given_parent_reports_its_rank_or_none_past_the_limit() {
+fn a_given_parent_reports_its_rank_and_score_wherever_it_stands() {
     let mut r = home();
     add(&mut r, "new", "Book Lisbon flights and hotel", Some("trip"));
     let m = model(&r);
     let all = rank(&m, &Query::words_of(&m.items["new"]), &subtree(&m, "new"));
-    let rank_of = |id: &str| all.parents.iter().position(|(p, _)| p == id).unwrap() + 1;
-    assert_eq!(suggest(&m, "new", Some("trip"), LIMIT).1, Some(rank_of("trip")));
-    assert!(rank_of("tiles") > LIMIT);
-    assert_eq!(suggest(&m, "new", Some("tiles"), LIMIT).1, None);
+    let given = |id: &str| {
+        let (rank, (_, score)) =
+            all.parents.iter().enumerate().find(|(_, (p, _))| p == id).unwrap();
+        Given { rank: Some(rank + 1), score: *score }
+    };
+    assert_eq!(suggest(&m, "new", Some("trip"), LIMIT).1, Some(given("trip")));
+    // Shown one at a time, the leaf `hotel` scores but isn't shown.
+    let (shown, hotel) = suggest(&m, "new", Some("hotel"), 1);
+    assert_eq!((shown.parents.len(), hotel), (1, Some(given("hotel"))));
+    assert!(given("hotel").rank > Some(1) && given("hotel").score > 0.0);
     // A given parent sharing nothing has no rank, though zero scores sort among the others by id.
     let mut lone = Replica::open(ReplicaId::new("pi").unwrap(), State::new());
     add(&mut lone, "aaa", "Unrelated chores", None);
     add(&mut lone, "trip", "Lisbon trip", None);
     add(&mut lone, "new", "Lisbon museum", Some("aaa"));
-    assert_eq!(suggest(&model(&lone), "new", Some("aaa"), LIMIT).1, None);
+    let nothing = Given { rank: None, score: 0.0 };
+    assert_eq!(suggest(&model(&lone), "new", Some("aaa"), LIMIT).1, Some(nothing));
+}
+
+#[test]
+fn candidates_below_the_floor_are_not_shown() {
+    let mut r = home();
+    add(&mut r, "new", "Renew passports, insurance and visas before Lisbon", None);
+    let m = model(&r);
+    let all = rank(&m, &Query::words_of(&m.items["new"]), &subtree(&m, "new"));
+    let shown: Vec<String> =
+        suggest(&m, "new", None, all.parents.len()).0.parents.into_iter().map(|p| p.item).collect();
+    assert!(all.parents.iter().any(|(_, s)| *s > 0.0 && *s < MIN_SCORE), "{all:?}");
+    let reaching: Vec<String> =
+        all.parents.into_iter().filter(|(_, s)| *s >= MIN_SCORE).map(|(p, _)| p).collect();
+    assert_eq!(shown, reaching);
 }
 
 #[test]
@@ -194,4 +215,8 @@ fn words_are_unicode_and_ids_stay_whole() {
         ["café", "rénovation", "straße", "d62", "step", "2.4"]
     );
     assert_eq!(tokens("a I of the x"), Vec::<String>::new());
+    assert_eq!(
+        tokens("Threads, heads, stories, process, status, analysis, gas"),
+        ["thread", "head", "story", "process", "status", "analysis", "gas"]
+    );
 }

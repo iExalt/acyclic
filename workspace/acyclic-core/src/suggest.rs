@@ -1,9 +1,11 @@
 //! Placement candidates: where a new item might go. Live items are ranked as parents and threads by how much their
 //! words share with the item's (TF-IDF cosine over titles and notes, with a group's children's titles describing it),
-//! by shared areas and repositories, and by closeness to what the item links to. Archived items are never parents;
-//! one that matches well is offered as a `relates` link beside a live parent instead.
+//! by shared areas and repositories, and by closeness to what the item links to, with leaves counting for less than
+//! groups. Archived items are never parents; one that matches well is offered as a `relates` link beside a live
+//! parent instead.
 //!
-//! The weights are first guesses, named so that later tuning has a reference.
+//! The weights are first guesses, named so that later tuning has a reference; the `placement` example measures them
+//! against a plan.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,6 +22,11 @@ pub const CHILD_WEIGHT: f64 = 0.5;
 pub const LABEL_BONUS: f64 = 0.2;
 /// Added to the parent of each item the item links to; half of it to the grandparent.
 pub const PROXIMITY: f64 = 0.3;
+/// The least score a candidate parent needs to be shown: below it, a match is a word or two in passing.
+pub const MIN_SCORE: f64 = 0.02;
+/// What a leaf's score counts for as a parent, against a group's: new work mostly joins a group, and a leaf's own
+/// words describe one piece of work rather than a place for more. Leaves still rank where no group matches.
+pub const LEAF_WEIGHT: f64 = 0.1;
 
 /// Words that say nothing about where work belongs.
 const STOPWORDS: &[&str] = &[
@@ -82,13 +89,29 @@ pub struct Ranking {
 }
 
 /// The lowercased words of `text`: letters and digits, with dots inside a word kept so ids such as `2.4` stay whole;
-/// single characters and stopwords dropped.
+/// single characters and stopwords dropped, and plurals made singular.
 #[must_use]
 pub fn tokens(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric() && c != '.')
         .map(|word| word.trim_matches('.').to_lowercase())
         .filter(|word| word.chars().count() > 1 && !STOPWORDS.contains(&word.as_str()))
+        .map(singular)
         .collect()
+}
+
+/// A plural's singular, by English's commonest rules: `-ies` to `-y`, and a final `s` dropped except after `s`, `u`
+/// or `i`, so `process`, `status` and `analysis` stay whole. A word the rules mangle is mangled alike everywhere.
+fn singular(word: String) -> String {
+    if word.chars().count() <= 3 {
+        return word;
+    }
+    if let Some(stem) = word.strip_suffix("ies") {
+        return format!("{stem}y");
+    }
+    match word.strip_suffix('s') {
+        Some(stem) if !stem.ends_with(['s', 'u', 'i']) => stem.to_owned(),
+        _ => word,
+    }
 }
 
 type Vector = BTreeMap<String, f64>;
@@ -236,7 +259,8 @@ pub fn rank(model: &Model, query: &Query<'_>, exclude: &BTreeSet<&str>) -> Ranki
             }
         } else if !item.is_done() {
             let proximity = near.get(item.id.as_str()).copied().unwrap_or(0.0);
-            parents.push((item.id.clone(), score + proximity));
+            let weight = if children.is_empty() { LEAF_WEIGHT } else { 1.0 };
+            parents.push((item.id.clone(), (score + proximity) * weight));
         }
     }
     let threads = rank_threads(model, &scorer, &items);
@@ -349,32 +373,39 @@ pub struct Suggestions {
 
 const PROPOSED: &str = "approved scope: an agent's move is proposed to the user, not applied";
 
-/// The candidates for item `id`, as a fresh add sees them, `limit` of each; and the rank of `given`, a parent the
-/// caller named, among all parents, from 1, if it is among the first `limit`.
+/// Where a parent the caller named stands among all candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Given {
+    /// Its place among the parents that score, from 1, though only the first `limit` are shown; none when it
+    /// scores nothing, since zero scores sort among themselves by id alone.
+    pub rank: Option<usize>,
+    /// Its score.
+    pub score: f64,
+}
+
+/// The candidates for item `id`, as a fresh add sees them, `limit` of each scoring at least [`MIN_SCORE`]; and where
+/// `given`, a parent the caller named, stands among all parents.
 #[must_use]
 pub fn suggest(
     model: &Model,
     id: &str,
     given: Option<&str>,
     limit: usize,
-) -> (Suggestions, Option<usize>) {
+) -> (Suggestions, Option<Given>) {
     let Some(item) = model.items.get(id) else { return (Suggestions::default(), None) };
     let ranking = rank(model, &Query::of(model, item), &subtree(model, id));
-    // Ranked among the parents that would be shown, which all share something with the item.
-    let given_rank = given
-        .and_then(|given| {
-            let shown = ranking.parents.iter().filter(|(_, score)| *score > 0.0);
-            shown.into_iter().position(|(parent, _)| parent == given)
-        })
-        .filter(|rank| *rank < limit)
-        .map(|rank| rank + 1);
+    let given = given.map(|given| {
+        let score = ranking.parents.iter().find(|(p, _)| p == given).map_or(0.0, |(_, s)| *s);
+        let scoring = ranking.parents.iter().filter(|(_, score)| *score > 0.0);
+        Given { rank: scoring.into_iter().position(|(p, _)| p == given).map(|r| r + 1), score }
+    });
     let title = |id: &str| model.items.get(id).map(|i| title_of(i).to_owned()).unwrap_or_default();
     let approved =
         |thread: &str| model.threads.get(thread).is_some_and(crate::model::Thread::is_approved);
     let parents: Vec<Parent> = ranking
         .parents
         .iter()
-        .filter(|(_, score)| *score > 0.0)
+        .filter(|(_, score)| *score >= MIN_SCORE)
         .take(limit)
         .map(|(parent, score)| {
             let inherits = place::passed_down(model, parent).map(str::to_owned);
@@ -417,7 +448,7 @@ pub fn suggest(
             note: approved(thread).then_some(PROPOSED),
         })
         .collect();
-    (Suggestions { parents, threads, related }, given_rank)
+    (Suggestions { parents, threads, related }, given)
 }
 
 #[cfg(test)]

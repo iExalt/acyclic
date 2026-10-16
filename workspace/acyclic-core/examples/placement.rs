@@ -92,11 +92,13 @@ fn main() -> ExitCode {
     }
     let model = Model::read(replica.state()).expect("an imported state reads");
     println!(
-        "{} items; constants: child weight {}, label bonus {}, proximity {}",
+        "{} items; constants: child weight {}, label bonus {}, proximity {}, leaf weight {}, floor {}",
         model.items.len(),
         suggest::CHILD_WEIGHT,
         suggest::LABEL_BONUS,
-        suggest::PROXIMITY
+        suggest::PROXIMITY,
+        suggest::LEAF_WEIGHT,
+        suggest::MIN_SCORE
     );
     for (setting, with_links) in [("add", false), ("with links", true)] {
         let mut overall = Tally::default();
@@ -110,12 +112,12 @@ fn main() -> ExitCode {
                 Query { notes: "", ..Query::words_of(item) }
             };
             let ranking = suggest::rank(&model, &query, &suggest::subtree(&model, &item.id));
-            // A true parent sharing nothing with the item isn't found, wherever its id sorts it: an add shows
-            // only candidates that score.
+            // A true parent scoring below the floor isn't found, wherever it sorts: an add shows only candidates
+            // that reach it.
             let rank = ranking
                 .parents
                 .iter()
-                .position(|(id, score)| id == parent && *score > 0.0)
+                .position(|(id, score)| id == parent && *score >= suggest::MIN_SCORE)
                 .map(|i| i + 1);
             let candidates = ranking.parents.len();
             overall.add(rank, candidates);
