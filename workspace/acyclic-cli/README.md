@@ -46,7 +46,8 @@ Every command's output follows these rules, so a key can be guessed from the inp
    `ready` adds `approved`, and the rank is in `readiness`. A thread is `{id, title, approved, heads, counts}`, a
    repository record `{id, owner, name, public, default_branch}` and a proposal `{id, actor, decision, threads}`. `list`
    returns the summaries and `show` returns the same object with its details added at the top level, so a thread's
-   `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`.
+   `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`. `proposal list`
+   returns every proposal, open ones first, as `proposal show` does, with the item its edit names under `item`.
 4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor`, `graph --output`
    and `import`. An absent scalar is `null`, an absent set is `[]`, and a flag such as `approved`, `archived`,
    `reopened`, `public` or `conflicted` is always `true` or `false`. A scalar whose replicas disagree reads

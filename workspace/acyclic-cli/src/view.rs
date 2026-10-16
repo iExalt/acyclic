@@ -203,18 +203,13 @@ impl View<'_> {
                 },
                 Entry::Proposal { id, .. } => {
                     let proposal = proposals.get(id);
-                    // The item the edit names, as every entry about an item shows it; a thread's repository
-                    // edit names none.
-                    let item = match proposal.and_then(|p| p.edit.one()) {
-                        Some(
-                            ScopeEdit::Member { item, .. } | ScopeEdit::ItemRepository { item, .. },
-                        ) => self.item_row(item)?,
-                        _ => Json::Null,
-                    };
                     json!({
                         "kind": "proposal",
                         "proposal": proposal.map(|p| proposal_show(self.model, p)),
-                        "item": item,
+                        "item": match proposal {
+                            Some(p) => self.proposal_item(p)?,
+                            None => Json::Null,
+                        },
                     })
                 },
                 Entry::Unapproved { item, thread: id, actor, keep, drop } => json!({
@@ -245,6 +240,31 @@ impl View<'_> {
             });
         }
         Ok(found)
+    }
+
+    /// The item a proposal's edit names, as every entry about an item shows it, or `null` for an edit of a thread's
+    /// repositories, which names none.
+    fn proposal_item(&self, proposal: &Proposal) -> Result<Json, CliError> {
+        match proposal.edit.one() {
+            Some(ScopeEdit::Member { item, .. } | ScopeEdit::ItemRepository { item, .. }) => {
+                self.item_row(item)
+            },
+            _ => Ok(Json::Null),
+        }
+    }
+
+    /// Every proposal, open ones first and then decided ones, each by id: what `proposal show` returns and the item
+    /// its edit names.
+    pub fn proposals(&self) -> Result<Vec<Json>, CliError> {
+        let all = scope::proposals(self.state)?;
+        let (open, decided): (Vec<&Proposal>, Vec<&Proposal>) =
+            all.values().partition(|p| p.decision == Value::None);
+        open.into_iter()
+            .chain(decided)
+            .map(|p| {
+                Ok(with(proposal_show(self.model, p), json!({"item": self.proposal_item(p)?})))
+            })
+            .collect()
     }
 
     /// A conflict: the entity and field, the values written apart (a clear among them as `null`), the entity's
@@ -810,6 +830,33 @@ mod tests {
             for entry in &needs {
                 assert!(entry["kind"].is_string(), "{entry}");
                 follows_the_conventions(entry, "needs");
+            }
+        });
+    }
+
+    #[test]
+    fn proposals_list_open_before_decided_with_the_item_each_names() {
+        let mut r = tracker();
+        let agent = by("session/mac");
+        scope::edit(&mut r, &member("c", Some("t")), agent).unwrap();
+        let more = ScopeEdit::ThreadRepository {
+            thread: "t".into(),
+            repository: "r".into(),
+            present: true,
+        };
+        scope::edit(&mut r, &more, agent).unwrap();
+        let first = scope::proposals(r.state()).unwrap().into_keys().next().unwrap();
+        scope::keep(&mut r, &first, by(USER)).unwrap();
+        viewing(&r, |view| {
+            let listed = view.proposals().unwrap();
+            // The open one comes first, though it has the later id; the decided one keeps its item.
+            let shown: Vec<(&Json, &Json)> =
+                listed.iter().map(|p| (&p["decision"], &p["item"]["id"])).collect();
+            assert_eq!(shown, [(&Json::Null, &Json::Null), (&json!("keep"), &json!("c"))]);
+            assert_eq!(listed[0]["edit"]["kind"], "thread-repository");
+            assert_eq!(listed[1]["item"], view.item_row("c").unwrap());
+            for p in &listed {
+                follows_the_conventions(p, "proposal");
             }
         });
     }

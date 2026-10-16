@@ -233,7 +233,7 @@ pub enum Command {
     /// Adds, edits, lists and shows repository records.
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// Shows proposals, and keeps or drops them (user only).
+    /// Lists and shows proposals, and keeps or drops them (user only).
     #[command(subcommand)]
     Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
@@ -737,6 +737,9 @@ pub enum RepoCommand {
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
+    /// Lists every proposal, open ones first and then decided ones, each by id, with who proposed it, its edit and its
+    /// decision.
+    List,
     /// Shows proposals with who proposed them, the edit and any decision, as an array in the order given.
     Show {
         /// The proposals.

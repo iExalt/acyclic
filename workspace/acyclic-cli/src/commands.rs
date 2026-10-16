@@ -321,6 +321,7 @@ impl<'a> Session<'a> {
                     Ok(json!({"repository": repository}))
                 })
             },
+            Command::Proposal(ProposalCommand::List) => self.proposal_list(),
             Command::Proposal(ProposalCommand::Show { proposals }) => {
                 self.show_proposals(proposals)
             },
@@ -643,6 +644,10 @@ impl<'a> Session<'a> {
             shown.push(view::repo_show(&model, record));
         }
         Ok(Json::Array(shown))
+    }
+
+    fn proposal_list(&self) -> Result<Json, CliError> {
+        self.with_view(|view| Ok(json!({"proposals": view.proposals()?})))
     }
 
     fn show_proposals(&self, ids: &[String]) -> Result<Json, CliError> {

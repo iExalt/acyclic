@@ -195,7 +195,7 @@ fn classify(command: &Command) -> Use {
         | Command::Level { level: None }
         | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
         | Command::Repo(RepoCommand::List | RepoCommand::Show { .. })
-        | Command::Proposal(ProposalCommand::Show { .. }) => Use::Read,
+        | Command::Proposal(ProposalCommand::List | ProposalCommand::Show { .. }) => Use::Read,
         Command::Claim { .. }
         | Command::Release { .. }
         | Command::Done { .. }

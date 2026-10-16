@@ -197,6 +197,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"thread": {"show": {"threads": ["t"]}}}),
         json!({"repo": "list"}),
         json!({"repo": {"show": {"repositories": ["r"]}}}),
+        json!({"proposal": "list"}),
         json!({"proposal": {"show": {"proposals": ["p"]}}}),
         json!({"level": {}}),
     ] {
