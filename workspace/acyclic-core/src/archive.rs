@@ -143,6 +143,7 @@ pub fn archive(
     root: &str,
     by: By<'_>,
 ) -> Result<(), ArchiveError> {
+    model::existing(&replica.state, root)?;
     let model = Model::read(&replica.state)?;
     if scope::classify(&model, by.actor) == scope::Actor::Agent {
         return Err(ArchiveError::NotAllowed(by.actor.to_owned()));
@@ -166,6 +167,7 @@ pub fn archive(
 ///
 /// Fails when the item isn't done or a write is refused.
 pub fn reopen(replica: &mut Replica, id: &str, by: By<'_>) -> Result<(), ArchiveError> {
+    model::existing(&replica.state, id)?;
     let model = Model::read(&replica.state)?;
     if !model.items.get(id).is_some_and(model::Item::is_done) {
         return Err(ArchiveError::NotDone(id.to_owned()));

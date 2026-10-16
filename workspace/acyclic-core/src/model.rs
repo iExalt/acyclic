@@ -425,6 +425,8 @@ impl Model {
 
     fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
         match key.kind.as_str() {
+            // A deleted item is gone from every reader; see `crate::delete`.
+            kind::ITEM if is_deleted(state, key) => {},
             kind::ITEM => {
                 let item = read_item(state, key)?;
                 for parent in item.parent.all() {
@@ -720,6 +722,8 @@ pub enum WriteError {
     InvalidName(String),
     /// The item doesn't exist.
     NoItem(String),
+    /// The item was deleted, and its id isn't used again.
+    Deleted(String),
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
     /// The link would close a cycle of blocks and after links, through these items.
@@ -765,6 +769,7 @@ impl fmt::Display for WriteError {
                 "{name:?} is not a valid name: use at most {MAX_ID_LEN} lowercase letters, digits, '-', '_' or '.'"
             ),
             Self::NoItem(id) => write!(f, "no item {id}"),
+            Self::Deleted(id) => write!(f, "item {id} was deleted, and its id isn't used again"),
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
             Self::LinkCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
@@ -832,9 +837,10 @@ fn to_json<T: Serialize>(value: &T) -> Json {
 }
 
 /// The fields only a checked write may set, with the write to use instead.
-const CHECKED: [(&str, &str, &str); 8] = [
+const CHECKED: [(&str, &str, &str); 9] = [
     (kind::ITEM, field::THREAD, "scope::edit"),
     (kind::ITEM, field::ARCHIVED, "archive::archive"),
+    (kind::ITEM, field::DELETED, "delete::delete_item"),
     (kind::ITEM, field::REOPENED, "archive::reopen"),
     (kind::ITEM, field::PARENT, "set_parent"),
     (kind::ITEM, field::STATE, "set_state"),
@@ -959,7 +965,7 @@ pub(crate) fn put_element(
 ///
 /// # Errors
 ///
-/// Fails on an invalid id or when the state layer refuses.
+/// Fails on an invalid id, on the id of a deleted item, or when the state layer refuses.
 pub fn add_item(
     replica: &mut Replica,
     id: &str,
@@ -967,6 +973,9 @@ pub fn add_item(
     by: By<'_>,
 ) -> Result<Key, WriteError> {
     let key = item_key(id)?;
+    if is_deleted(&replica.state, &key) {
+        return Err(WriteError::Deleted(id.to_owned()));
+    }
     put(replica, &key, field::TITLE, Some(&title), by)?;
     put(replica, &key, field::STATE, Some(&ItemState::Backlog), by)?;
     Ok(key)
@@ -1120,9 +1129,22 @@ pub fn set_run_state(
     put(replica, &key, run::STATE, Some(&state), by)
 }
 
-pub(crate) fn existing(state: &State, id: &str) -> Result<Key, WriteError> {
+/// Whether an item has been deleted: its tombstone is set, and nothing clears it.
+#[must_use]
+pub fn is_deleted(state: &State, key: &Key) -> bool {
+    state
+        .field(key, field::DELETED)
+        .is_some_and(|register| register.values().any(|v| v.value == Json::Bool(true)))
+}
+
+/// An existing item's key: an item that was never written, or was deleted, isn't one.
+///
+/// # Errors
+///
+/// Fails on an invalid id, or when no such item exists.
+pub fn existing(state: &State, id: &str) -> Result<Key, WriteError> {
     let key = item_key(id)?;
-    if state.entity(&key).is_none() {
+    if state.entity(&key).is_none() || is_deleted(state, &key) {
         return Err(WriteError::NoItem(id.to_owned()));
     }
     Ok(key)

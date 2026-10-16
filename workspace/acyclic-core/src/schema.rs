@@ -46,6 +46,8 @@ pub mod item {
     pub const EVIDENCE: &str = "evidence";
     /// The thread the item belongs to; at most one, since it is a single field.
     pub const THREAD: &str = "thread";
+    /// Set when the item is deleted: a tombstone no write clears. See `crate::delete`.
+    pub const DELETED: &str = "deleted";
     /// Set when the item is reopened, until it is done again; flags its dependents.
     pub const REOPENED: &str = "reopened";
 }

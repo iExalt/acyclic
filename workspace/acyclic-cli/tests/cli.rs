@@ -192,6 +192,23 @@ fn a_journey_through_the_contract() {
     sh.run("item add g2 --title Goal", AGENT);
     sh.run("item add g2-a --title Part --parent g2", AGENT);
     assert_eq!(sh.run("done g2 --force", AGENT), 0, "or when forced");
+    // Only an item nothing refers to is deleted, and it is gone for good.
+    assert_eq!(sh.run("item add d1 --title Doomed", AGENT), 0);
+    assert_eq!(sh.run("item add d1-a --title Part --parent d1", AGENT), 0);
+    let (code, out) = sh.output("item delete d1", AGENT);
+    assert_eq!((code, &out["error"]["details"]["reasons"][0]["why"]), (1, &json!("has-children")));
+    assert_eq!(sh.run("item delete a1", AGENT), 1, "done work stays");
+    assert_eq!(sh.run("item delete d1-a", AGENT), 0);
+    assert_eq!(sh.run("item delete d1", AGENT), 0);
+    let (code, out) = sh.output("item delete d1", AGENT);
+    assert_eq!(
+        (code, out["data"]["changed"].as_bool()),
+        (0, Some(false)),
+        "a repeat changes nothing"
+    );
+    assert_eq!(sh.run("show d1", AGENT), 3);
+    assert_eq!(sh.run("item add d1 --title Doomed", AGENT), 1, "its id is retired");
+    assert_eq!(sh.run("item delete nope", AGENT), 3);
     insta::assert_snapshot!(sh.transcript);
 }
 

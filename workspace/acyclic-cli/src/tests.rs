@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 
 use acyclic_core::archive::ArchiveError;
+use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::{RunState, WriteError};
@@ -76,6 +77,7 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::Format("bad".into()).into(),
         WriteError::InvalidName("A".into()).into(),
         WriteError::NoItem("a1".into()).into(),
+        WriteError::Deleted("a1".into()).into(),
         WriteError::ParentCycle("a1".into()).into(),
         WriteError::LinkCycle(vec!["a1".into()]).into(),
         WriteError::Checked { field: "state".into(), write: "set_state" }.into(),
@@ -86,6 +88,8 @@ fn every_error_has_a_stable_code_and_exit() {
         ScopeError::NotTheUser("session/s".into()).into(),
         ScopeError::NoProposal("p".into()).into(),
         ScopeError::Decided("p".into()).into(),
+        DeleteError::InUse(vec![]).into(),
+        DeleteError::NotAllowed { actor: "session/s".into(), thread: "t".into() }.into(),
         ArchiveError::Ineligible(vec![]).into(),
         ArchiveError::NotDone("a1".into()).into(),
         ArchiveError::NotAllowed("run/r".into()).into(),
@@ -627,7 +631,10 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
     }
     let out = run("acyclic thread set t1 --title T");
     assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""));
-    assert!(out.stderr.starts_with("error: `acyclic thread set` is gone: use `"), "{out:?}");
+    assert!(
+        out.stderr.starts_with("error: `acyclic thread set` is gone: use `acyclic thread add"),
+        "{out:?}"
+    );
     // The old form of a command that is still there is caught as the failed parse it is.
     assert!(run("acyclic thread add a1 t1").stderr.contains("acyclic item edit <ITEM> --thread"));
 }

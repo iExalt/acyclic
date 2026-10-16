@@ -204,7 +204,8 @@ fn classify(command: &Command) -> Use {
             ItemCommand::Add { .. }
             | ItemCommand::Edit(_)
             | ItemCommand::Reopen { .. }
-            | ItemCommand::Archive { .. },
+            | ItemCommand::Archive { .. }
+            | ItemCommand::Delete { .. },
         )
         | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
         | Command::Thread(

@@ -8,6 +8,7 @@ use std::process::Command as Process;
 
 use acyclic_core::archive;
 use acyclic_core::claim;
+use acyclic_core::delete;
 use acyclic_core::export;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Level, LinkKind, Model, SetField, Value};
@@ -341,6 +342,10 @@ impl<'a> Session<'a> {
                 Ok(json!({"level": level}))
             }),
             Command::Import { file: Some(file), dry_run, .. } => self.import(file, *dry_run),
+            Command::Item(ItemCommand::Delete { item }) => self.write(|replica, by| {
+                delete::delete_item(replica, item, by)?;
+                Ok(json!({"item": item}))
+            }),
             Command::Item(ItemCommand::Archive { item: id }) => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
@@ -1004,12 +1009,9 @@ pub(crate) fn not_found(id: &str) -> CliError {
     CliError::new("not-found", exit::NOT_FOUND, format!("no item {id}"))
 }
 
+/// An item's key, refusing one that doesn't exist or was deleted.
 pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
-    let key = model::item_key(id)?;
-    if replica.state().entity(&key).is_none() {
-        return Err(not_found(id));
-    }
-    Ok(key)
+    Ok(model::existing(replica.state(), id)?)
 }
 
 /// A field's value when it holds exactly one; a clear holds none.

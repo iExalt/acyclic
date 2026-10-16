@@ -299,6 +299,9 @@ pub(crate) fn add_item(
 ) -> Result<Written, CliError> {
     let title = fields.title.as_deref().expect("an add has a title");
     let key = model::item_key(id)?;
+    if model::is_deleted(replica.state(), &key) {
+        return Err(model::WriteError::Deleted(id.to_owned()).into());
+    }
     if replica.state().entity(&key).is_some() {
         return repeat_item(replica.state(), id, fields, by);
     }

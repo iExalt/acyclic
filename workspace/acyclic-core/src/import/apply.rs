@@ -103,6 +103,11 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
             return Err(ApplyError::UserOnly("archived items".to_owned()));
         }
     }
+    for item in &doc.items {
+        if model::is_deleted(&replica.state, &model::item_key(&item.key)?) {
+            return Err(WriteError::Deleted(item.key.clone()).into());
+        }
+    }
     let before = Model::read(&replica.state)?;
     let cycles_before: BTreeSet<Vec<String>> =
         before.parent_cycles().into_iter().chain(before.link_cycles()).collect();

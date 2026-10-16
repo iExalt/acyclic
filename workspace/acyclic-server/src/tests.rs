@@ -210,6 +210,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"item": {"add": {"item": "a", "title": "A"}}}),
         json!({"item": {"edit": {"item": "a", "no-thread": true, "area": ["x"]}}}),
         json!({"item": {"archive": {"item": "a"}}}),
+        json!({"item": {"delete": {"item": "a"}}}),
         json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
         json!({"thread": {"approve": {"thread": "t"}}}),
         json!({"thread": {"add": {"thread": "t", "title": "T"}}}),

@@ -1109,3 +1109,125 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g2 --force
   },
   "ok": true
 }
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "d1",
+    "proposals": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add d1-a --title Part --parent d1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "d1-a",
+    "proposals": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+# exit 1
+{
+  "error": {
+    "code": "in-use",
+    "details": {
+      "reasons": [
+        {
+          "children": [
+            "d1-a"
+          ],
+          "why": "has-children"
+        }
+      ]
+    },
+    "message": "not deletable: 1 reason(s) in the details"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete a1
+# exit 1
+{
+  "error": {
+    "code": "in-use",
+    "details": {
+      "reasons": [
+        {
+          "why": "finished"
+        }
+      ]
+    },
+    "message": "not deletable: 1 reason(s) in the details"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete d1-a
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "d1-a"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "d1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "item": "d1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic show d1
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item d1"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
+# exit 1
+{
+  "error": {
+    "code": "deleted",
+    "details": null,
+    "message": "item d1 was deleted, and its id isn't used again"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item delete nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item nope"
+  },
+  "ok": false
+}
