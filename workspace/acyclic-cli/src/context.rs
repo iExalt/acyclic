@@ -46,7 +46,7 @@ fn checked_actor(actor: &str) -> Result<String, CliError> {
         Err(CliError::new(
             "invalid-actor",
             exit::USAGE,
-            format!("{actor:?} isn't an actor such as session/mac or run/r1"),
+            format!("{actor:?} isn't a valid actor: use a name such as session/mac or run/r1"),
         ))
     }
 }
@@ -105,7 +105,7 @@ pub fn tracker(cli: &Cli, env: &Env) -> Result<PathBuf, CliError> {
         return Ok(clone);
     }
     let home = home(env).ok_or_else(|| {
-        CliError::new("no-tracker", exit::CONFIG, "HOME isn't set, so no mapping")
+        CliError::new("no-tracker", exit::CONFIG, "HOME isn't set, so ~/.config/acyclic/trackers.toml can't be found; pass --tracker or set ACYCLIC_TRACKER")
     })?;
     Ok(Trackers::load(&home)?.for_remotes(&settings.remotes, &home)?)
 }

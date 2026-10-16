@@ -603,7 +603,7 @@ impl<'a> Session<'a> {
                     return Err(CliError::new(
                         "not-found",
                         exit::NOT_FOUND,
-                        format!("no thread {id}"),
+                        format!("no thread {id}; `acyclic thread list` lists them"),
                     ));
                 };
                 shown.push(view.thread(id, listed)?);
@@ -634,7 +634,11 @@ impl<'a> Session<'a> {
         let mut shown = Vec::with_capacity(ids.len());
         for id in ids {
             let record = model.repositories.get(id).ok_or_else(|| {
-                CliError::new("not-found", exit::NOT_FOUND, format!("no repository record {id}"))
+                CliError::new(
+                    "not-found",
+                    exit::NOT_FOUND,
+                    format!("no repository record {id}; `acyclic repo list` lists them"),
+                )
             })?;
             shown.push(view::repo_show(&model, record));
         }
@@ -647,7 +651,11 @@ impl<'a> Session<'a> {
         let mut shown = Vec::with_capacity(ids.len());
         for id in ids {
             let proposal = all.get(id).ok_or_else(|| {
-                CliError::new("not-found", exit::NOT_FOUND, format!("no proposal {id}"))
+                CliError::new(
+                    "not-found",
+                    exit::NOT_FOUND,
+                    format!("no proposal {id}; `acyclic proposal list` lists them"),
+                )
             })?;
             shown.push(view::proposal_show(&model, proposal));
         }
@@ -688,7 +696,7 @@ impl<'a> Session<'a> {
                 "no-remote",
                 exit::CONFIG,
                 format!(
-                    "the tracker clone has no {}; set one with acyclic init <clone> --replica <id> --remote <url>",
+                    "the tracker clone has no {}; set one with `acyclic init <clone> --replica <id> --remote <url>`",
                     store::REMOTE
                 ),
             )
@@ -755,7 +763,7 @@ impl<'a> Session<'a> {
                 if !may_claim(status.as_ref(), by.actor) {
                     return Err(CliError::refused(
                         "not-ready",
-                        format!("item {id} isn't ready to claim"),
+                        format!("item {id} isn't ready to claim; `acyclic show {id}` says why"),
                     )
                     .with(json!({"readiness": status})));
                 }
@@ -798,7 +806,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
         return Err(CliError::new(
             "not-found",
             exit::NOT_FOUND,
-            format!("no repository record {id}"),
+            format!("no repository record {id}; `acyclic repo list` lists them"),
         ));
     };
     let missing: Vec<&str> = [
@@ -816,7 +824,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     Err(CliError::refused(
         "incomplete-repository",
         format!(
-            "repository record {id} is missing {}; set it with acyclic repo edit",
+            "repository record {id} is missing {}; set it with `acyclic repo edit {id}`",
             missing.join(", ")
         ),
     )
@@ -853,13 +861,13 @@ fn check_finish(
         }
         return Err(CliError::refused(
             "not-ready",
-            format!("item {id} can't be finished yet: it has open children or is held back"),
+            format!("item {id} can't be finished yet: it has open children or is held back; `acyclic show {id}` says which"),
         )
         .with(json!({"readiness": status, "open": open, "held": held})));
     }
     Err(CliError::refused(
         "not-ready",
-        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it"),
+        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show {id}` says which"),
     )
     .with(json!({"readiness": status})))
 }

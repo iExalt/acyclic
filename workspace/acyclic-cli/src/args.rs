@@ -17,7 +17,8 @@ use serde::Serialize;
 /// The heading the options that every command takes sit under in its help.
 const GLOBAL_OPTIONS: &str = "Global options";
 
-/// The acyclic tracker. Every command that runs prints one JSON document.
+/// The acyclic tracker. Every command prints one JSON document, except `prime`, `graph` without `--output`, `import
+/// --schema` and help and version text.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -172,14 +173,13 @@ pub enum Command {
     },
     /// Lists what needs the user.
     Needs,
-    /// Prints the autonomy levels, or with a level sets the global one (the user's).
+    /// Prints the autonomy levels; with a level, sets the global one (user only).
     Level {
         /// The global level to set; none prints it and every thread's own.
         #[arg(value_parser = values(&Level::ALL))]
         level: Option<Level>,
     },
-    /// Imports a plan: adds and updates what the document names, and never deletes. `--schema` prints an
-    /// annotated example of the document.
+    /// Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example.
     Import {
         /// The import document.
         #[arg(required_unless_present = "schema")]
@@ -233,7 +233,7 @@ pub enum Command {
     /// Adds, edits, lists and shows repository records.
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// Shows proposals, and keeps or drops them (the user's).
+    /// Shows proposals, and keeps or drops them (user only).
     #[command(subcommand)]
     Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
@@ -276,7 +276,7 @@ fn usage(message: impl Into<String>) -> CliError {
 /// Refuses a flag and the one that clears it, given together.
 fn clears(flag: &str, set: bool, clear: bool) -> Result<(), CliError> {
     if set && clear {
-        return Err(usage(format!("--{flag} and --no-{flag} contradict each other")));
+        return Err(usage(format!("--{flag} and --no-{flag} contradict each other: pass one")));
     }
     Ok(())
 }
@@ -309,10 +309,10 @@ impl Command {
                 Err(usage("proposal show needs at least one proposal"))
             },
             Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
-                Err(usage(format!("--lease is 1 to {LEASE_MAX_MINUTES} minutes")))
+                Err(usage(format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes")))
             },
             Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
-                Err(usage("done takes --repository and --commit together"))
+                Err(usage("done takes --repository and --commit together, or --note alone"))
             },
             Self::Import { file: None, schema: false, .. } => {
                 Err(usage("import needs a file, or --schema for an example of one"))
@@ -422,7 +422,7 @@ pub enum ItemCommand {
         /// The item.
         item: String,
     },
-    /// Archives a done subtree (the user or a project-management run).
+    /// Archives a done subtree (user or project-management run only).
     Archive {
         /// The subtree's root.
         item: String,
@@ -614,18 +614,18 @@ pub enum ThreadCommand {
         #[arg(long, value_name = "REPOSITORY")]
         #[serde(default)]
         repository: Vec<String>,
-        /// Its autonomy level (the user's).
+        /// Its autonomy level (user only).
         #[arg(long, value_parser = values(&Level::ALL))]
         level: Option<Level>,
     },
     /// Edits a thread: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ThreadEdit),
-    /// Approves a thread's scope (the user's).
+    /// Approves a thread's scope (user only).
     Approve {
         /// The thread.
         thread: String,
     },
-    /// Revokes a thread's approval (the user's).
+    /// Revokes a thread's approval (user only).
     Revoke {
         /// The thread.
         thread: String,
@@ -656,10 +656,10 @@ pub struct ThreadEdit {
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,
-    /// Set its autonomy level (the user's).
+    /// Set its autonomy level (user only).
     #[arg(long, value_parser = values(&Level::ALL))]
     pub level: Option<Level>,
-    /// Clear its autonomy level, so the global one applies (the user's).
+    /// Clear its autonomy level, so the global one applies (user only).
     #[arg(long)]
     #[serde(default)]
     pub no_level: bool,
@@ -733,7 +733,7 @@ pub enum RepoCommand {
     },
 }
 
-/// The proposal commands (the user's decide).
+/// The proposal commands (user only).
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
@@ -744,12 +744,12 @@ pub enum ProposalCommand {
         #[serde(default)]
         proposals: Vec<String>,
     },
-    /// Keeps a proposal (the user's).
+    /// Keeps a proposal (user only).
     Keep {
         /// The proposal.
         proposal: String,
     },
-    /// Drops a proposal (the user's).
+    /// Drops a proposal (user only).
     Drop {
         /// The proposal.
         proposal: String,

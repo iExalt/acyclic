@@ -114,7 +114,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim a2
         }
       }
     },
-    "message": "item a2 isn't ready to claim"
+    "message": "item a2 isn't ready to claim; `acyclic show a2` says why"
   },
   "ok": false
 }
@@ -134,7 +134,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a2
         }
       }
     },
-    "message": "item a2 isn't yours to finish: it isn't ready, or someone else holds it"
+    "message": "item a2 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show a2` says which"
   },
   "ok": false
 }
@@ -174,7 +174,7 @@ $ ACYCLIC_ACTOR=session/pi acyclic done a1
         "status": "claimed"
       }
     },
-    "message": "item a1 isn't yours to finish: it isn't ready, or someone else holds it"
+    "message": "item a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show a1` says which"
   },
   "ok": false
 }
@@ -358,6 +358,16 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "data": {
     "needs": [
       {
+        "item": {
+          "id": "a1",
+          "parent": null,
+          "readiness": {
+            "status": "done"
+          },
+          "state": "done",
+          "thread": null,
+          "title": "First"
+        },
         "kind": "proposal",
         "proposal": {
           "actor": "session/mac",
@@ -409,7 +419,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal show nope
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no proposal nope"
+    "message": "no proposal nope; `acyclic proposal list` lists them"
   },
   "ok": false
 }
@@ -540,7 +550,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1 nope
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no thread nope"
+    "message": "no thread nope; `acyclic thread list` lists them"
   },
   "ok": false
 }
@@ -1119,7 +1129,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1
         "status": "parent"
       }
     },
-    "message": "item g1 can't be finished yet: it has open children or is held back"
+    "message": "item g1 can't be finished yet: it has open children or is held back; `acyclic show g1` says which"
   },
   "ok": false
 }
