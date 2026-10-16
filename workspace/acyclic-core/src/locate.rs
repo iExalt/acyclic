@@ -41,7 +41,10 @@ impl fmt::Display for LocateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Config(message) => write!(f, "~/{CONFIG_PATH}: {message}"),
-            Self::NoRemote => write!(f, "the repository has no remote to find its tracker by"),
+            Self::NoRemote => write!(
+                f,
+                "the repository has no remote to find its tracker by; pass --tracker or set ACYCLIC_TRACKER"
+            ),
             Self::Git(message) => write!(f, "can't read the repository's remotes: {message}"),
             Self::NotMapped(remotes) => write!(
                 f,

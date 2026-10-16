@@ -82,7 +82,7 @@ impl fmt::Display for StoreError {
                 if let Some(age) = age_seconds {
                     write!(f, " ({age} s old)")?;
                 }
-                write!(f, "; if no git process holds it, remove it with the lock recovery command")
+                write!(f, "; if no git process holds it, delete that file")
             },
             Self::Timeout => {
                 write!(f, "gave up after losing races to other writers for {RETRY_DEADLINE:?}")
@@ -90,7 +90,10 @@ impl fmt::Display for StoreError {
             Self::State(err) => err.fmt(f),
             Self::Config(message) => write!(f, "tracker not set up: {message}"),
             Self::RemoteMoved => {
-                write!(f, "the remote's state ref moved since the last sync; fetch and join first")
+                write!(
+                    f,
+                    "the remote's state ref moved since the last sync; run `acyclic sync` first"
+                )
             },
             Self::Duplicate(replica) => write!(
                 f,
