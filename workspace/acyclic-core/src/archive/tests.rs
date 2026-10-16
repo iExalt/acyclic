@@ -91,12 +91,12 @@ fn open_unmerged_and_depended_on_subtrees_say_why() {
 fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
     let mut r = setup();
     let refused = archive(&mut r, &ByName, "g", user(2 * DAY)).unwrap_err();
-    assert!(matches!(refused, ArchiveError::Ineligible(_)));
+    assert!(matches!(refused, ArchiveError::Ineligible { .. }));
     // One line, with the date the wait ends.
     assert_eq!(
         refused.to_string(),
-        "not eligible to archive: it has no gate, so it waits until 1970-02-01 (30 days after its last item \
-         is done)"
+        "g can't be archived until 1970-02-01: it has no gate, and its last item was done less than 30 days \
+         ago"
     );
     let now = DAY + GATELESS_WAIT;
     let agent = By { actor: "run/worker", at: now };

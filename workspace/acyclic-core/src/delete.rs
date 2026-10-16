@@ -81,7 +81,12 @@ pub enum DeleteError {
         thread: String,
     },
     /// The item is in use.
-    InUse(Vec<Reason>),
+    InUse {
+        /// The item.
+        item: String,
+        /// Why not.
+        reasons: Vec<Reason>,
+    },
 }
 
 impl fmt::Display for DeleteError {
@@ -91,8 +96,8 @@ impl fmt::Display for DeleteError {
             Self::NotAllowed { actor, thread } => {
                 write!(f, "only the user deletes an item in approved thread {thread}, not {actor}")
             },
-            Self::InUse(reasons) => {
-                write!(f, "not deletable: {}", crate::say::list(reasons, "; "))
+            Self::InUse { item, reasons } => {
+                write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
             },
         }
     }
@@ -172,7 +177,7 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     }
     let reasons = reasons(replica, &model, id, by.at)?;
     if !reasons.is_empty() {
-        return Err(DeleteError::InUse(reasons));
+        return Err(DeleteError::InUse { item: id.to_owned(), reasons });
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
     Ok(true)

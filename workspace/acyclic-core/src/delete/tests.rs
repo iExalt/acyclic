@@ -34,7 +34,7 @@ fn with_items(ids: &[&str]) -> Replica {
 
 fn refusal(r: &mut Replica, id: &str, by: By<'_>) -> Vec<String> {
     match delete_item(r, id, by) {
-        Err(DeleteError::InUse(reasons)) => reasons
+        Err(DeleteError::InUse { reasons, .. }) => reasons
             .into_iter()
             .map(|reason| serde_json::to_value(reason).unwrap()["why"].as_str().unwrap().to_owned())
             .collect(),
@@ -58,9 +58,9 @@ fn only_an_item_nothing_refers_to_is_deleted() {
     assert_eq!(refusal(&mut r, "claimed", user(NOW)), ["claimed"]);
     // The refusal says why in one line.
     let message = delete_item(&mut r, "parent", user(NOW)).unwrap_err().to_string();
-    assert_eq!(message, "not deletable: it has children (kid)");
+    assert_eq!(message, "parent can't be deleted: it has children (kid)");
     let message = delete_item(&mut r, "a", user(NOW)).unwrap_err().to_string();
-    assert_eq!(message, "not deletable: a waits-for b");
+    assert_eq!(message, "a can't be deleted: a waits-for b");
     assert!(matches!(
         delete_item(&mut r, "nope", user(NOW)),
         Err(DeleteError::Write(WriteError::NoItem(_)))

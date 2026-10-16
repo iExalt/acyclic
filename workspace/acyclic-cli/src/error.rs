@@ -164,8 +164,8 @@ impl From<DeleteError> for CliError {
         match err {
             DeleteError::Write(err) => err.into(),
             DeleteError::NotAllowed { .. } => Self::refused("user-only", message),
-            DeleteError::InUse(reasons) => {
-                Self::refused("in-use", message).with(json!({"reasons": reasons}))
+            DeleteError::InUse { item, reasons } => {
+                Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
             },
         }
     }
@@ -176,8 +176,8 @@ impl From<ArchiveError> for CliError {
         let message = err.to_string();
         match err {
             ArchiveError::Write(err) => err.into(),
-            ArchiveError::Ineligible(reasons) => {
-                Self::refused("ineligible", message).with(json!({"reasons": reasons}))
+            ArchiveError::Ineligible { item, reasons } => {
+                Self::refused("ineligible", message).with(json!({"item": item, "reasons": reasons}))
             },
             ArchiveError::NotDone(_) => Self::refused("not-done", message),
             ArchiveError::NotAllowed(_) => Self::refused("not-allowed", message),
