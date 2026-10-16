@@ -56,6 +56,11 @@ fn only_an_item_nothing_refers_to_is_deleted() {
     assert_eq!(refusal(&mut r, "b", user(NOW)), ["linked"]);
     assert_eq!(refusal(&mut r, "done", user(NOW)), ["finished"]);
     assert_eq!(refusal(&mut r, "claimed", user(NOW)), ["claimed"]);
+    // The refusal says why in one line.
+    let message = delete_item(&mut r, "parent", user(NOW)).unwrap_err().to_string();
+    assert_eq!(message, "not deletable: it has children (kid)");
+    let message = delete_item(&mut r, "a", user(NOW)).unwrap_err().to_string();
+    assert_eq!(message, "not deletable: a waits-for b");
     assert!(matches!(
         delete_item(&mut r, "nope", user(NOW)),
         Err(DeleteError::Write(WriteError::NoItem(_)))

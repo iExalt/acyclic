@@ -47,6 +47,24 @@ pub enum Reason {
     },
 }
 
+impl std::fmt::Display for Reason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Archived => write!(f, "it is archived already"),
+            Self::Open { item } => write!(f, "{item} isn't done"),
+            Self::Unmerged { item } => {
+                write!(f, "{item}'s commit isn't merged, or can't be checked")
+            },
+            Self::LiveDependent { from, to } => write!(f, "{from}, still open, depends on {to}"),
+            Self::Waiting { until } => write!(
+                f,
+                "it has no gate, so it waits until {} (30 days after its last item is done)",
+                crate::time::date(*until)
+            ),
+        }
+    }
+}
+
 /// Why `root` can't be archived at `now`; empty when it can.
 ///
 /// # Errors
@@ -107,7 +125,7 @@ impl std::fmt::Display for ArchiveError {
         match self {
             Self::Write(err) => err.fmt(f),
             Self::Ineligible(reasons) => {
-                write!(f, "not eligible to archive: {} reason(s) in the details", reasons.len())
+                write!(f, "not eligible to archive: {}", crate::say::list(reasons, "; "))
             },
             Self::NotAllowed(actor) => {
                 write!(f, "{actor} may not archive; the user or a project manager may")
