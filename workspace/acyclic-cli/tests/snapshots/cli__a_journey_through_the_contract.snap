@@ -19,7 +19,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
 {
   "data": {
     "changed": true,
-    "item": "a1"
+    "item": "a1",
+    "proposals": []
   },
   "ok": true
 }
@@ -29,7 +30,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
 {
   "data": {
     "changed": true,
-    "item": "a2"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
@@ -39,7 +41,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
 {
   "data": {
     "changed": false,
-    "item": "a2"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
@@ -49,8 +52,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
 {
   "error": {
     "code": "already-exists",
-    "details": null,
-    "message": "item a2 exists with another title"
+    "details": {
+      "differs": [
+        "--title"
+      ]
+    },
+    "message": "item a2 exists with other --title"
   },
   "ok": false
 }
@@ -124,12 +131,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a2
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item state a2 done
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --state done
 # exit 2
 
 # stderr
-error: invalid value 'done' for '<STATE>'
-  [possible values: backlog, parked, in-progress]
+error: finish an item with `acyclic done <ITEM>`, which records its evidence and releases its claim
 
 For more information, try '--help'.
 
@@ -215,27 +221,61 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread set t1 --title Work
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
 # exit 0
 {
   "data": {
     "changed": true,
+    "proposals": [],
     "thread": "t1"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add a2 t1
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "proposals": [],
+    "thread": "t1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Other
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "differs": [
+        "--title"
+      ]
+    },
+    "message": "thread t1 exists with other --title"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no thread nope; add it with acyclic thread add nope --title <TITLE>"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
 # exit 0
 {
   "data": {
     "changed": true,
-    "edit": {
-      "edit": "member",
-      "item": "a2",
-      "thread": "t1"
-    },
-    "outcome": "applied"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
@@ -279,18 +319,15 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add a1 t1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
 # exit 0
 {
   "data": {
     "changed": true,
-    "edit": {
-      "edit": "member",
-      "item": "a1",
-      "thread": "t1"
-    },
-    "outcome": "proposed",
-    "proposal": "mac-16"
+    "item": "a1",
+    "proposals": [
+      "mac-16"
+    ]
   },
   "ok": true
 }
@@ -311,6 +348,38 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
     ]
   },
   "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-16
+# exit 0
+{
+  "data": [
+    {
+      "actor": "session/mac",
+      "decision": null,
+      "edit": {
+        "edit": "member",
+        "item": "a1",
+        "thread": "t1"
+      },
+      "proposal": "mac-16",
+      "threads": [
+        "t1"
+      ]
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic proposal show nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no proposal nope"
+  },
+  "ok": false
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-16 --as-user
@@ -504,33 +573,65 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread remove a2 --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread --as-user
 # exit 0
 {
   "data": {
     "changed": true,
-    "edit": {
-      "edit": "member",
-      "item": "a2",
-      "thread": null
-    },
-    "outcome": "applied"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --name code
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --name code
 # exit 2
+
+# stderr
+error: the following required arguments were not provided:
+  --owner <OWNER>
+  --default-branch <DEFAULT_BRANCH>
+
+Usage: acyclic repo add --owner <OWNER> --name <NAME> --default-branch <DEFAULT_BRANCH> <REPOSITORY>
+
+For more information, try '--help'.
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --public
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "repository": "r1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --public
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "repository": "r1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --private
+# exit 1
 {
   "error": {
-    "code": "usage",
-    "details": null,
-    "message": "creating repository r1 needs --owner, --name, --public and --default-branch (missing: --owner, --public, --default-branch)"
+    "code": "already-exists",
+    "details": {
+      "differs": [
+        "--public/--private"
+      ]
+    },
+    "message": "repository record r1 exists with other --public/--private"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --owner me --name code --public true --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repo edit r1 --default-branch trunk
 # exit 0
 {
   "data": {
@@ -540,44 +641,94 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --owner me --name code --public 
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo set r1 --default-branch trunk
+$ ACYCLIC_ACTOR=session/mac acyclic repo edit nope --private
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no repository record nope"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --repository r1
 # exit 0
 {
   "data": {
     "changed": true,
-    "repository": "r1"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo attach r1 --item a2
+$ ACYCLIC_ACTOR=session/mac acyclic repo show r1
+# exit 0
+{
+  "data": [
+    {
+      "items": [
+        "a2"
+      ],
+      "repository": {
+        "default_branch": "trunk",
+        "id": "r1",
+        "installation": null,
+        "name": "code",
+        "owner": "me",
+        "public": true
+      },
+      "threads": []
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-repository r1
 # exit 0
 {
   "data": {
     "changed": true,
-    "edit": {
-      "edit": "item-repository",
-      "item": "a2",
-      "present": true,
-      "repository": "r1"
-    },
-    "outcome": "applied"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo detach r1 --item a2
+$ ACYCLIC_ACTOR=session/mac acyclic repo show r1
+# exit 0
+{
+  "data": [
+    {
+      "items": [],
+      "repository": {
+        "default_branch": "trunk",
+        "id": "r1",
+        "installation": null,
+        "name": "code",
+        "owner": "me",
+        "public": true
+      },
+      "threads": []
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repo list
 # exit 0
 {
   "data": {
-    "changed": true,
-    "edit": {
-      "edit": "item-repository",
-      "item": "a2",
-      "present": false,
-      "repository": "r1"
-    },
-    "outcome": "applied"
+    "repositories": [
+      {
+        "default_branch": "trunk",
+        "name": "code",
+        "owner": "me",
+        "public": true,
+        "repository": "r1"
+      }
+    ]
   },
   "ok": true
 }
@@ -665,6 +816,14 @@ error: invalid value 'sideways' for '<KIND>'
 
 For more information, try '--help'.
 
+$ ACYCLIC_ACTOR=session/mac acyclic link add a1 blocks a2
+# exit 2
+
+# stderr
+error: `blocks` is now `waits-for`: use `acyclic link add a1 waits-for a2`
+
+For more information, try '--help'.
+
 $ ACYCLIC_ACTOR=session/mac acyclic link remove a2 waits-for a1
 # exit 0
 {
@@ -688,55 +847,93 @@ $ ACYCLIC_ACTOR=actor/user acyclic ready
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread set t2 --title Follow-ups
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t2 --title Follow-ups
 # exit 0
 {
   "data": {
     "changed": true,
+    "proposals": [],
     "thread": "t2"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add a2 t2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t2
 # exit 0
 {
   "data": {
     "changed": true,
-    "edit": {
-      "edit": "member",
-      "item": "a2",
-      "thread": "t2"
-    },
-    "outcome": "applied"
+    "item": "a2",
+    "proposals": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t2 a2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --parent t2
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": {
-      "meant": "acyclic thread add a2 t2"
+      "meant": "acyclic item edit a2 --thread t2"
     },
-    "message": "no item t2: t2 is a thread; did you mean `acyclic thread add a2 t2`?"
+    "message": "no item t2: t2 is a thread; did you mean `acyclic item edit a2 --thread t2`?"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item move a2 t2
-# exit 3
+$ ACYCLIC_ACTOR=session/mac acyclic level
+# exit 0
+{
+  "data": {
+    "global": "blockers",
+    "threads": {}
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic level everything
+# exit 1
 {
   "error": {
-    "code": "not-found",
-    "details": {
-      "meant": "acyclic thread add a2 t2"
-    },
-    "message": "no item t2: t2 is a thread; did you mean `acyclic thread add a2 t2`?"
+    "code": "user-only",
+    "details": null,
+    "message": "only the user sets autonomy, not session/mac"
   },
   "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic level everything --as-user
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "level": "everything"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread edit t2 --level blockers --as-user
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "proposals": [],
+    "thread": "t2"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic level
+# exit 0
+{
+  "data": {
+    "global": "everything",
+    "threads": {
+      "t2": "blockers"
+    }
+  },
+  "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic needs
@@ -763,23 +960,40 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
 {
   "data": {
     "changed": true,
-    "item": "a3"
+    "item": "a3",
+    "proposals": []
   },
   "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --parent a2
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "differs": [
+        "--parent"
+      ]
+    },
+    "message": "item a3 exists with other --parent"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent a2
 # exit 0
 {
   "data": {
     "changed": true,
     "inherited": [
       {
-        "item": "a3",
+        "item": "a4",
         "thread": "t2"
       }
     ],
-    "item": "a3"
+    "item": "a4",
+    "proposals": []
   },
   "ok": true
 }
@@ -789,7 +1003,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1 --title Goal
 {
   "data": {
     "changed": true,
-    "item": "g1"
+    "item": "g1",
+    "proposals": []
   },
   "ok": true
 }
@@ -799,7 +1014,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
 {
   "data": {
     "changed": true,
-    "item": "g1-a"
+    "item": "g1-a",
+    "proposals": []
   },
   "ok": true
 }
@@ -866,7 +1082,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2 --title Goal
 {
   "data": {
     "changed": true,
-    "item": "g2"
+    "item": "g2",
+    "proposals": []
   },
   "ok": true
 }
@@ -876,7 +1093,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
 {
   "data": {
     "changed": true,
-    "item": "g2-a"
+    "item": "g2-a",
+    "proposals": []
   },
   "ok": true
 }

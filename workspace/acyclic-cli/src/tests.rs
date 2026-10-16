@@ -150,7 +150,11 @@ fn usage_errors_and_help_are_text() {
     let edit = run("acyclic help item edit");
     assert_eq!(edit, run("acyclic item edit --help"));
     assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
-    assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
+    assert_eq!(
+        (item.code, item.stdout.starts_with("Adds and edits")),
+        (exit::OK, true),
+        "{item:?}"
+    );
     // An enum-valued input lists its values in help, and a wrong one names them.
     assert!(edit.stdout.contains("[possible values: xs, s, m, l, xl]"), "{edit:?}");
     let wrong = run("acyclic item edit a --size huge");
@@ -355,8 +359,8 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             "import: dry_run",
             "import: file",
             "import: schema",
-            "repo attach: item",
-            "repo detach: item",
+            "proposal show: proposals",
+            "repo show: repositories",
             "show: items",
             "thread show: threads",
         ]
@@ -367,25 +371,21 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     };
     assert_eq!(refused(json!({"show": {"items": []}})), Err("usage"));
     assert_eq!(refused(json!({"thread": {"show": {"threads": []}}})), Err("usage"));
-    assert_eq!(refused(json!({"done": {"id": "a", "commit": "c"}})), Err("usage"));
+    assert_eq!(refused(json!({"done": {"item": "a", "commit": "c"}})), Err("usage"));
     assert_eq!(refused(json!({"import": {}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"file": "p", "schema": true}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"schema": true, "dry-run": true}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"schema": true}})), Ok(()));
     assert_eq!(refused(json!({"import": {"file": "p", "dry-run": true}})), Ok(()));
-    assert_eq!(refused(json!({"repo": {"attach": {"repository": "r"}}})), Err("usage"));
-    assert_eq!(
-        refused(json!({"repo": {"detach": {"repository": "r", "item": "a", "thread": "t"}}})),
-        Err("usage")
-    );
+    assert_eq!(refused(json!({"repo": {"show": {"repositories": []}}})), Err("usage"));
+    assert_eq!(refused(json!({"proposal": {"show": {"proposals": []}}})), Err("usage"));
     for lease in [0, 481] {
-        assert_eq!(refused(json!({"claim": {"id": "a", "lease": lease}})), Err("usage"));
+        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Err("usage"));
     }
     for lease in [1, 480] {
-        assert_eq!(refused(json!({"claim": {"id": "a", "lease": lease}})), Ok(()));
+        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Ok(()));
     }
-    assert_eq!(refused(json!({"done": {"id": "a", "repository": "r", "commit": "c"}})), Ok(()));
-    assert_eq!(refused(json!({"repo": {"attach": {"repository": "r", "thread": "t"}}})), Ok(()));
+    assert_eq!(refused(json!({"done": {"item": "a", "repository": "r", "commit": "c"}})), Ok(()));
     // Unknown fields and the server's own command are refused when deserializing.
     assert!(
         serde_json::from_value::<args::Command>(json!({"show": {"items": ["a"], "force": true}}))
@@ -475,20 +475,6 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
 }
 
 #[test]
-fn creating_a_repository_record_needs_every_field_and_editing_any() {
-    let (o, n, main) = ("o".to_owned(), "n".to_owned(), "main".to_owned());
-    let check = |exists, owner, name, public, branch| {
-        commands::check_new_repository("r", exists, owner, name, public, branch)
-    };
-    let err = check(false, Some(&o), None, None, Some(&main)).unwrap_err();
-    assert_eq!((err.code, err.exit), ("usage", error::exit::USAGE));
-    assert!(err.message.contains("creating repository r needs"), "{err}");
-    assert!(err.message.contains("(missing: --name, --public)"), "{err}");
-    assert!(check(false, Some(&o), Some(&n), Some(true), Some(&main)).is_ok());
-    assert!(check(true, Some(&o), None, None, None).is_ok());
-}
-
-#[test]
 fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
     use acyclic_core::model::LinkKind;
     for (word, kind) in [
@@ -533,4 +519,180 @@ fn import_schema_prints_an_example_as_text_and_takes_no_file() {
         let out = run(line);
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
     }
+}
+
+/// Every command below `command`, as `(path, command)`, leaving out the server and the built-in help.
+fn walk<'a>(command: &'a clap::Command, path: &str, found: &mut Vec<(String, &'a clap::Command)>) {
+    for sub in command.get_subcommands().filter(|sub| !["serve", "help"].contains(&sub.get_name()))
+    {
+        let path = format!("{path} {}", sub.get_name()).trim_start().to_owned();
+        found.push((path.clone(), sub));
+        walk(sub, &path, found);
+    }
+}
+
+#[test]
+fn every_command_follows_the_input_conventions() {
+    let root = args::command();
+    let mut commands = Vec::new();
+    walk(&root, "", &mut commands);
+    // Positionals are the subject's id, named for the entity; these are the only others.
+    let exceptions = [
+        ("init", "path"),
+        ("import", "file"),
+        ("level", "level"),
+        ("link add", "from"),
+        ("link add", "kind"),
+        ("link add", "to"),
+        ("link remove", "from"),
+        ("link remove", "kind"),
+        ("link remove", "to"),
+    ];
+    let entities = ["ITEM", "THREAD", "REPOSITORY", "PROPOSAL"];
+    for (path, command) in &commands {
+        let longs: Vec<&str> = command.get_arguments().filter_map(clap::Arg::get_long).collect();
+        for arg in command.get_arguments() {
+            let id = arg.get_id().as_str();
+            if arg.is_positional() {
+                let shown = arg
+                    .get_value_names()
+                    .and_then(|names| names.first())
+                    .map_or_else(|| id.to_uppercase(), ToString::to_string);
+                assert!(
+                    entities.contains(&shown.as_str()) || exceptions.contains(&(path.as_str(), id)),
+                    "{path}: positional <{shown}> is neither an entity's id nor a listed exception"
+                );
+            }
+            // A flag that clears or removes has the flag that sets or adds.
+            if let Some(field) = arg.get_long().and_then(|long| long.strip_prefix("no-")) {
+                assert!(longs.contains(&field), "{path}: --no-{field} without --{field}");
+            }
+            // An input that takes one of the model's enums lists its values.
+            if ["size", "state", "level", "kind", "format", "renderer"].contains(&id) {
+                assert!(!arg.get_possible_values().is_empty(), "{path}: {id} lists no values");
+            }
+        }
+    }
+    // The global options sit under their own heading on every page.
+    for arg in root.get_arguments().filter(|arg| arg.is_global_set()) {
+        assert_eq!(arg.get_help_heading(), Some("Global options"), "{:?}", arg.get_id());
+    }
+    // Every group has the verbs that make it uniform where it has the entity.
+    let group = |name: &str| -> Vec<&str> {
+        commands.iter().filter_map(|(path, _)| path.strip_prefix(name)?.strip_prefix(' ')).collect()
+    };
+    for (name, verbs) in [
+        ("item", &["add", "edit"][..]),
+        ("thread", &["add", "edit", "list", "show"]),
+        ("repo", &["add", "edit", "list", "show"]),
+    ] {
+        for verb in verbs {
+            assert!(group(name).contains(verb), "{name} {verb}");
+        }
+    }
+}
+
+#[test]
+fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
+    let hint = |line: &str| {
+        let args: Vec<OsString> = line.split(' ').map(Into::into).collect();
+        hints::hint(&args)
+    };
+    for (line, instead) in [
+        ("acyclic item move a1 b1", "acyclic item edit <ITEM> --parent <PARENT>"),
+        ("acyclic item state a1 parked", "acyclic item edit <ITEM> --state <STATE>"),
+        ("acyclic thread set t1 --title T", "acyclic thread add <THREAD> --title <TITLE>"),
+        ("acyclic thread add a1 t1", "acyclic item edit <ITEM> --thread <THREAD>"),
+        ("acyclic --actor x thread remove a1", "acyclic item edit <ITEM> --no-thread"),
+        ("acyclic repo set r1 --name n", "acyclic repo add <REPOSITORY>"),
+        ("acyclic repo attach r1 --item a1", "acyclic item edit <ITEM> --repository <REPOSITORY>"),
+        ("acyclic repo detach r1 --thread t1", "acyclic thread edit <THREAD> --no-repository"),
+        ("acyclic level --thread t1 blockers", "acyclic thread edit <THREAD> --level <LEVEL>"),
+        ("acyclic item edit a1 --state done", "acyclic done <ITEM>"),
+        ("acyclic item add a1 --title T --state=done", "acyclic done <ITEM>"),
+    ] {
+        assert!(hint(line).is_some_and(|text| text.contains(instead)), "{line}: {:?}", hint(line));
+    }
+    // Commands that kept their names in a new shape get no hint.
+    for line in [
+        "acyclic thread add t1 --title T",
+        "acyclic thread add t1",
+        "acyclic item edit a1 --parent b1",
+        "acyclic item edit a1 --state parked",
+        "acyclic level blockers",
+        "acyclic thread edit t1 --level blockers",
+        "acyclic repo edit r1 --private",
+    ] {
+        assert_eq!(hint(line), None, "{line}");
+    }
+    let out = run("acyclic thread set t1 --title T");
+    assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""));
+    assert!(out.stderr.starts_with("error: `acyclic thread set` is gone: use `"), "{out:?}");
+    // The old form of a command that is still there is caught as the failed parse it is.
+    assert!(run("acyclic thread add a1 t1").stderr.contains("acyclic item edit <ITEM> --thread"));
+}
+
+#[test]
+fn flags_that_contradict_each_other_are_usage_errors() {
+    let check = |line: &str| {
+        let cli = args::Cli::try_parse_from(line.split(' ')).unwrap();
+        cli.command.validate().map_err(|err| err.code)
+    };
+    for line in [
+        "acyclic item edit a --notes x --no-notes",
+        "acyclic item edit a --parent b --no-parent",
+        "acyclic item edit a --thread t --no-thread",
+        "acyclic item edit a --size m --no-size",
+        "acyclic item edit a --gate g --no-gate",
+        "acyclic item edit a --area x --no-area x",
+        "acyclic item edit a --repository r --no-repository r",
+        "acyclic thread edit t --brief b --no-brief",
+        "acyclic thread edit t --level blockers --no-level",
+        "acyclic thread edit t --repository r --no-repository r",
+        "acyclic repo edit r --public --private",
+        "acyclic repo add r --owner o --name n --default-branch main",
+        "acyclic repo add r --owner o --name n --default-branch main --public --private",
+    ] {
+        assert_eq!(check(line), Err("usage"), "{line}");
+    }
+    for line in [
+        "acyclic item edit a --area x --no-area y --no-notes --parent b",
+        "acyclic repo add r --owner o --name n --default-branch main --private",
+        "acyclic repo edit r --public",
+    ] {
+        assert_eq!(check(line), Ok(()), "{line}");
+    }
+}
+
+#[test]
+fn an_edit_that_is_refused_in_part_writes_nothing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let env = |actor: &str| {
+        let mut env = env(&[
+            ("ACYCLIC_NOW", "1792022400000"),
+            ("ACYCLIC_TRACKER", "tracker"),
+            ("ACYCLIC_ACTOR", actor),
+        ]);
+        env.cwd = dir.path().to_path_buf();
+        env
+    };
+    let go = |line: &str| {
+        let out = execute(
+            ["acyclic"].into_iter().chain(line.split(' ')).map(Into::into),
+            &env("session/mac"),
+        );
+        (out.code, serde_json::from_str::<Value>(&out.stdout).unwrap_or_default())
+    };
+    assert_eq!(go("init tracker --replica mac").0, 0);
+    assert_eq!(go("item add a --title Before").0, 0);
+    // A valid title with an unknown parent, thread or repository: refused as a whole.
+    for refused in ["--parent nope", "--thread nope", "--repository nope", "--state done"] {
+        let code = go(&format!("item edit a --title After {refused}")).0;
+        assert!(code == exit::NOT_FOUND || code == exit::USAGE, "{refused}: {code}");
+    }
+    let (_, shown) = go("show a");
+    assert_eq!(shown["data"][0]["item"]["title"], "Before");
+    let (code, edited) = go("item edit a --title After --area x");
+    assert_eq!((code, edited["data"]["proposals"].clone()), (0, json!([])));
+    assert_eq!(go("show a").1["data"][0]["item"]["title"], "After");
 }

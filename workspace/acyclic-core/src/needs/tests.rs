@@ -275,8 +275,8 @@ fn an_agents_member_the_approval_never_saw_is_the_users_to_keep_or_drop() {
         item: "late".into(),
         thread: "t".into(),
         actor: "session/pi".into(),
-        keep: "acyclic thread add late t".into(),
-        drop: "acyclic thread remove late".into(),
+        keep: "acyclic item edit late --thread t".into(),
+        drop: "acyclic item edit late --no-thread".into(),
     };
     assert!(list(&a).contains(&entry), "{:?}", list(&a));
     // The user putting it in the thread again keeps it: the user's write needs no approval.

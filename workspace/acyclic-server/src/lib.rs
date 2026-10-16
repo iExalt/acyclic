@@ -192,30 +192,28 @@ fn classify(command: &Command) -> Use {
         | Command::List
         | Command::Show { .. }
         | Command::Needs
-        | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. }) => Use::Read,
+        | Command::Level { level: None }
+        | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
+        | Command::Repo(RepoCommand::List | RepoCommand::Show { .. })
+        | Command::Proposal(ProposalCommand::Show { .. }) => Use::Read,
         Command::Claim { .. }
         | Command::Release { .. }
         | Command::Done { .. }
-        | Command::Level { .. }
+        | Command::Level { level: Some(_) }
         | Command::Item(
             ItemCommand::Add { .. }
-            | ItemCommand::Edit { .. }
-            | ItemCommand::Move { .. }
-            | ItemCommand::State { .. }
+            | ItemCommand::Edit(_)
             | ItemCommand::Reopen { .. }
             | ItemCommand::Archive { .. },
         )
         | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
         | Command::Thread(
-            ThreadCommand::Set { .. }
-            | ThreadCommand::Add { .. }
-            | ThreadCommand::Remove { .. }
+            ThreadCommand::Add { .. }
+            | ThreadCommand::Edit(_)
             | ThreadCommand::Approve { .. }
             | ThreadCommand::Revoke { .. },
         )
-        | Command::Repo(
-            RepoCommand::Set { .. } | RepoCommand::Attach(_) | RepoCommand::Detach(_),
-        )
+        | Command::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. })
         | Command::Proposal(ProposalCommand::Keep { .. } | ProposalCommand::Drop { .. }) => {
             Use::Write
         },

@@ -10,14 +10,12 @@ use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::export;
 use acyclic_core::import::{self, Import};
-use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField};
+use acyclic_core::model::{self, By, Evidence, ItemState, Level, LinkKind, Model, SetField, Value};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
-use acyclic_core::schema::{
-    GLOBAL, item as field, kind, link as link_field, repository, settings, thread,
-};
-use acyclic_core::scope::{self, Outcome as ScopeOutcome, ScopeEdit};
+use acyclic_core::schema::{GLOBAL, item as field, kind, link as link_field, settings};
+use acyclic_core::scope;
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
@@ -25,10 +23,11 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Attachment, Cli, Command, GraphFormat, ItemCommand, LEASE_MAX_MINUTES, LinkCommand,
-    ProposalCommand, Renderer, RepoCommand, ThreadCommand,
+    Cli, Command, GraphFormat, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, ProposalCommand,
+    Renderer, RepoCommand, StateWord, ThreadCommand,
 };
 use crate::context;
+use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
 use crate::error::{CliError, exit};
 use crate::page;
 
@@ -124,56 +123,75 @@ impl<'a> Session<'a> {
             Command::Needs => self.needs(),
             Command::Sync { with_usage } => self.sync(*with_usage),
             Command::Doctor => self.doctor(),
-            Command::Item(ItemCommand::Add { id, title, parent }) => {
-                self.add(id, title, parent.as_deref())
-            },
-            Command::Item(ItemCommand::Edit {
-                id,
+            Command::Item(ItemCommand::Add {
+                item,
                 title,
+                parent,
+                thread,
+                state,
                 notes,
                 gate,
                 size,
                 area,
-                no_area,
                 resource,
-                no_resource,
-            }) => self.write(|replica, by| {
-                let key = existing(replica, id)?;
-                set_if(replica, &key, field::TITLE, title.as_ref(), by)?;
-                set_if(replica, &key, field::NOTES, notes.as_ref(), by)?;
-                set_if(replica, &key, field::GATE, gate.as_ref(), by)?;
-                set_if(replica, &key, field::SIZE, size.as_ref(), by)?;
-                for (set, names, present) in [
-                    (SetField::Area, area, true),
-                    (SetField::Area, no_area, false),
-                    (SetField::Resource, resource, true),
-                    (SetField::Resource, no_resource, false),
-                ] {
-                    for name in names {
-                        element_if(replica, &key, set, name, present, by)?;
-                    }
-                }
-                Ok(json!({"item": id}))
-            }),
-            Command::Item(ItemCommand::Move { id, parent }) => self
-                .write(|replica, by| {
-                    let key = existing(replica, id)?;
-                    let mut inherited = Vec::new();
-                    if !holds_only(
-                        replica.state().field(&key, field::PARENT),
-                        parent.as_ref().map(|p| json!(p)),
-                    ) {
-                        model::set_parent(replica, id, parent.as_deref(), by)?;
-                        inherited = place::place(replica, std::slice::from_ref(id), by)?;
-                    }
-                    Ok(with_inherited(json!({"item": id, "parent": parent}), &inherited))
+                repository,
+            }) => {
+                let fields = ItemFields {
+                    title: Some(title.clone()),
+                    parent: Change::of(parent.clone(), false),
+                    thread: Change::of(thread.clone(), false),
+                    state: state.map(StateWord::state),
+                    notes: Change::of(notes.clone(), false),
+                    gate: Change::of(gate.clone(), false),
+                    size: Change::of(*size, false),
+                    areas: Delta { add: area.clone(), remove: Vec::new() },
+                    resources: Delta { add: resource.clone(), remove: Vec::new() },
+                    repositories: Delta { add: repository.clone(), remove: Vec::new() },
+                };
+                self.write(|replica, by| {
+                    Ok(edit::add_item(replica, item, &fields, by)?.json("item", item))
                 })
-                .map_err(|error| match parent {
-                    Some(parent) => self.misplaced_thread(error, parent, || {
-                        format!("acyclic thread add {id} {parent}")
-                    }),
-                    None => error,
-                }),
+                .map_err(|error| {
+                    self.misplaced(error, parent.as_deref(), || {
+                        format!(
+                            "acyclic item add {item} --title <TITLE> --thread {}",
+                            parent.as_deref().unwrap_or_default()
+                        )
+                    })
+                })
+            },
+            Command::Item(ItemCommand::Edit(edit)) => {
+                let fields = ItemFields {
+                    title: edit.title.clone(),
+                    parent: Change::of(edit.parent.clone(), edit.no_parent),
+                    thread: Change::of(edit.thread.clone(), edit.no_thread),
+                    state: edit.state.map(StateWord::state),
+                    notes: Change::of(edit.notes.clone(), edit.no_notes),
+                    gate: Change::of(edit.gate.clone(), edit.no_gate),
+                    size: Change::of(edit.size, edit.no_size),
+                    areas: Delta { add: edit.area.clone(), remove: edit.no_area.clone() },
+                    resources: Delta {
+                        add: edit.resource.clone(),
+                        remove: edit.no_resource.clone(),
+                    },
+                    repositories: Delta {
+                        add: edit.repository.clone(),
+                        remove: edit.no_repository.clone(),
+                    },
+                };
+                let item = &edit.item;
+                self.write(|replica, by| {
+                    Ok(edit::edit_item(replica, item, &fields, by)?.json("item", item))
+                })
+                .map_err(|error| {
+                    self.misplaced(error, edit.parent.as_deref(), || {
+                        format!(
+                            "acyclic item edit {item} --thread {}",
+                            edit.parent.as_deref().unwrap_or_default()
+                        )
+                    })
+                })
+            },
             Command::Link(LinkCommand::Add { from, kind: word, to }) => {
                 self.write(|replica, by| {
                     let kind = word.kind();
@@ -194,16 +212,7 @@ impl<'a> Session<'a> {
                     Ok(json!({"from": from, "kind": word, "to": to}))
                 })
             },
-            Command::Item(ItemCommand::State { state: ItemState::Done, .. }) => Err(CliError::new(
-                "usage",
-                exit::USAGE,
-                "finish an item with acyclic done, which records its evidence and releases its claim",
-            )),
-            Command::Item(ItemCommand::State { id, state }) => self.write(|replica, by| {
-                model::set_state(replica, id, *state, by)?;
-                Ok(json!({"item": id, "state": state}))
-            }),
-            Command::Done { id, repository, commit, note, force } => {
+            Command::Done { item: id, repository, commit, note, force } => {
                 let ancestry = GitAncestry::new(context::clones(self.env)?);
                 self.write(|replica, by| {
                     let key = existing(replica, id)?;
@@ -233,53 +242,88 @@ impl<'a> Session<'a> {
                     Ok(json!({"item": id, "state": ItemState::Done}))
                 })
             },
-            Command::Release { id } => self.write(|replica, by| {
+            Command::Release { item: id } => self.write(|replica, by| {
                 let key = existing(replica, id)?;
                 Ok(json!({"item": id, "released": claim::release(replica, &key, by.actor)}))
             }),
-            Command::Item(ItemCommand::Reopen { id }) => self.write(|replica, by| {
+            Command::Item(ItemCommand::Reopen { item: id }) => self.write(|replica, by| {
                 archive::reopen(replica, id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Claim { id, lease, force } => self.claim(id, *lease, *force),
+            Command::Claim { item: id, lease, force } => self.claim(id, *lease, *force),
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
-            Command::Thread(ThreadCommand::Set { id, title, brief }) => {
+            Command::Thread(ThreadCommand::Add { thread, title, brief, repository, level }) => {
+                let fields = ThreadFields {
+                    title: Some(title.clone()),
+                    brief: Change::of(brief.clone(), false),
+                    level: Change::of(*level, false),
+                    repositories: Delta { add: repository.clone(), remove: Vec::new() },
+                };
                 self.write(|replica, by| {
-                    let key = Key::new(kind::THREAD, id)?;
-                    set_if(replica, &key, thread::TITLE, title.as_ref(), by)?;
-                    set_if(replica, &key, thread::BRIEF, brief.as_ref(), by)?;
-                    Ok(json!({"thread": id}))
+                    Ok(edit::add_thread(replica, thread, &fields, by)?.json("thread", thread))
                 })
             },
-            Command::Thread(ThreadCommand::Add { item, thread }) => {
-                self.member(item, Some(thread)).map_err(|error| {
-                    self.misplaced_thread(error, item, || {
-                        format!("acyclic thread add {thread} {item}")
-                    })
+            Command::Thread(ThreadCommand::Edit(edit)) => {
+                let fields = ThreadFields {
+                    title: edit.title.clone(),
+                    brief: Change::of(edit.brief.clone(), edit.no_brief),
+                    level: Change::of(edit.level, edit.no_level),
+                    repositories: Delta {
+                        add: edit.repository.clone(),
+                        remove: edit.no_repository.clone(),
+                    },
+                };
+                let thread = &edit.thread;
+                self.write(|replica, by| {
+                    Ok(edit::edit_thread(replica, thread, &fields, by)?.json("thread", thread))
                 })
             },
-            Command::Thread(ThreadCommand::Remove { item }) => self.member(item, None),
-            Command::Repo(RepoCommand::Attach(attachment)) => self.attach(attachment, true),
-            Command::Repo(RepoCommand::Detach(attachment)) => self.attach(attachment, false),
-            Command::Repo(RepoCommand::Set { id, owner, name, public, default_branch }) => self
-                .write(|replica, by| {
-                    let key = Key::new(kind::REPOSITORY, id)?;
-                    let exists = replica.state().entity(&key).is_some();
-                    check_new_repository(
-                        id,
-                        exists,
-                        owner.as_ref(),
-                        name.as_ref(),
-                        *public,
-                        default_branch.as_ref(),
-                    )?;
-                    set_if(replica, &key, repository::OWNER, owner.as_ref(), by)?;
-                    set_if(replica, &key, repository::NAME, name.as_ref(), by)?;
-                    set_if(replica, &key, repository::PUBLIC, public.as_ref(), by)?;
-                    set_if(replica, &key, repository::DEFAULT_BRANCH, default_branch.as_ref(), by)?;
-                    Ok(json!({"repository": id}))
-                }),
+            Command::Repo(RepoCommand::List) => self.repositories(),
+            Command::Repo(RepoCommand::Show { repositories }) => {
+                self.show_repositories(repositories)
+            },
+            Command::Repo(RepoCommand::Add {
+                repository,
+                owner,
+                name,
+                default_branch,
+                public,
+                ..
+            }) => {
+                let fields = RepositoryFields {
+                    owner: Some(owner.clone()),
+                    name: Some(name.clone()),
+                    default_branch: Some(default_branch.clone()),
+                    public: Some(*public),
+                };
+                self.write(|replica, by| {
+                    edit::add_repository(replica, repository, &fields, by)?;
+                    Ok(json!({"repository": repository}))
+                })
+            },
+            Command::Repo(RepoCommand::Edit {
+                repository,
+                owner,
+                name,
+                default_branch,
+                public,
+                private,
+            }) => {
+                let fields = RepositoryFields {
+                    owner: owner.clone(),
+                    name: name.clone(),
+                    default_branch: default_branch.clone(),
+                    public: (*public || *private).then_some(*public),
+                };
+                self.write(|replica, by| {
+                    edit::edit_repository(replica, repository, &fields, by)?;
+                    Ok(json!({"repository": repository}))
+                })
+            },
+            Command::Proposal(ProposalCommand::Show { proposals }) => {
+                self.show_proposals(proposals)
+            },
             Command::Proposal(ProposalCommand::Keep { proposal }) => self.write(|replica, by| {
                 scope::keep(replica, proposal, by)?;
                 Ok(json!({"proposal": proposal, "decision": "keep"}))
@@ -290,16 +334,14 @@ impl<'a> Session<'a> {
             }),
             Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
             Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
-            Command::Level { level, thread: id } => self.write(|replica, by| {
-                let (key, name) = match id {
-                    Some(id) => (Key::new(kind::THREAD, id)?, thread::AUTONOMY),
-                    None => (Key::new(kind::SETTINGS, GLOBAL)?, settings::AUTONOMY),
-                };
-                set_if(replica, &key, name, Some(level), by)?;
-                Ok(json!({"thread": id, "level": level}))
+            Command::Level { level: None } => self.levels(),
+            Command::Level { level: Some(level) } => self.write(|replica, by| {
+                let key = Key::new(kind::SETTINGS, GLOBAL)?;
+                set_if(replica, &key, settings::AUTONOMY, Some(level), by)?;
+                Ok(json!({"level": level}))
             }),
             Command::Import { file: Some(file), dry_run, .. } => self.import(file, *dry_run),
-            Command::Item(ItemCommand::Archive { id }) => {
+            Command::Item(ItemCommand::Archive { item: id }) => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
                 self.write(|replica, by| {
@@ -355,33 +397,15 @@ impl<'a> Session<'a> {
         Ok(data)
     }
 
-    fn scope_edit(
-        &self,
-        change: &ScopeEdit,
-        already: impl Fn(&State, &Model) -> Result<bool, CliError>,
-    ) -> Result<Json, CliError> {
-        self.write(|replica, by| {
-            let model = Model::read(replica.state())?;
-            if already(replica.state(), &model)? {
-                return Ok(json!({"edit": change, "outcome": "unchanged"}));
-            }
-            Ok(match scope::edit(replica, change, by)? {
-                ScopeOutcome::Applied => json!({"edit": change, "outcome": "applied"}),
-                ScopeOutcome::Proposed(id) => {
-                    json!({"edit": change, "outcome": "proposed", "proposal": id})
-                },
-            })
-        })
-    }
-
-    /// A missing item that names a thread, as when a command's arguments are swapped, says which command was meant.
+    /// A missing parent that names a thread, as when `--parent` was meant as `--thread`, says which command was meant.
     /// Only a failed command reads the model again, so the check costs a working one nothing.
-    fn misplaced_thread(
+    fn misplaced(
         &self,
         error: CliError,
-        named: &str,
+        named: Option<&str>,
         meant: impl FnOnce() -> String,
     ) -> CliError {
+        let Some(named) = named else { return error };
         if error.code != "not-found" || error.message != format!("no item {named}") {
             return error;
         }
@@ -397,51 +421,6 @@ impl<'a> Session<'a> {
             },
             _ => error,
         }
-    }
-
-    /// Puts an item in a thread, or takes it out.
-    fn member(&self, item: &str, thread: Option<&String>) -> Result<Json, CliError> {
-        let change = ScopeEdit::Member { item: item.to_owned(), thread: thread.cloned() };
-        self.scope_edit(&change, |state, model| {
-            // Read the register itself: a conflict reads as no single thread, which `thread remove` must still settle.
-            let key = model::item_key(item)?;
-            if !model.items.contains_key(item)
-                || !holds_only(state.field(&key, field::THREAD), thread.map(|t| json!(t)))
-            {
-                return Ok(false);
-            }
-            // The user putting an unapproved member in its thread again keeps it, so it writes; an agent's repeat
-            // changes nothing.
-            Ok(thread.is_none()
-                || scope::classify(model, &self.actor) != scope::Actor::User
-                || !scope::unapproved(state, model)?.iter().any(|u| u.item == item))
-        })
-    }
-
-    /// Attaches a repository record to an item or a thread, or detaches it.
-    fn attach(&self, attachment: &Attachment, present: bool) -> Result<Json, CliError> {
-        let Attachment { repository, item, thread } = attachment;
-        let change = match (item, thread) {
-            (Some(item), _) => ScopeEdit::ItemRepository {
-                item: item.clone(),
-                repository: repository.clone(),
-                present,
-            },
-            (None, Some(thread)) => ScopeEdit::ThreadRepository {
-                thread: thread.clone(),
-                repository: repository.clone(),
-                present,
-            },
-            (None, None) => unreachable!("clap requires one"),
-        };
-        self.scope_edit(&change, |_, model| {
-            let set = match (item, thread) {
-                (Some(item), _) => model.items.get(item).map(|i| &i.repositories),
-                (None, Some(thread)) => model.threads.get(thread).map(|t| &t.repositories),
-                (None, None) => None,
-            };
-            Ok(set.is_some_and(|set| set.contains(repository)) == present)
-        })
     }
 
     /// Approves a thread's scope, or revokes the approval.
@@ -652,6 +631,79 @@ impl<'a> Session<'a> {
         Ok(Json::Array(shown))
     }
 
+    fn levels(&self) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let own: BTreeMap<&str, Level> = model
+            .threads
+            .iter()
+            .filter(|(_, thread)| thread.autonomy != Value::None)
+            .map(|(id, _)| (id.as_str(), model.level(Some(id))))
+            .collect();
+        Ok(json!({"global": model.level(None), "threads": own}))
+    }
+
+    fn repositories(&self) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let records: Vec<Json> = model
+            .repositories
+            .values()
+            .map(|record| {
+                json!({
+                    "repository": record.id,
+                    "owner": record.owner,
+                    "name": record.name,
+                    "public": record.public,
+                    "default_branch": record.default_branch,
+                })
+            })
+            .collect();
+        Ok(json!({"repositories": records}))
+    }
+
+    fn show_repositories(&self, ids: &[String]) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let mut shown = Vec::with_capacity(ids.len());
+        for id in ids {
+            let record = model.repositories.get(id).ok_or_else(|| {
+                CliError::new("not-found", exit::NOT_FOUND, format!("no repository record {id}"))
+            })?;
+            let items: Vec<&str> = model
+                .items
+                .values()
+                .filter(|item| item.repositories.contains(id))
+                .map(|item| item.id.as_str())
+                .collect();
+            let threads: Vec<&str> = model
+                .threads
+                .values()
+                .filter(|thread| thread.repositories.contains(id))
+                .map(|thread| thread.id.as_str())
+                .collect();
+            shown.push(json!({"repository": record, "items": items, "threads": threads}));
+        }
+        Ok(Json::Array(shown))
+    }
+
+    fn show_proposals(&self, ids: &[String]) -> Result<Json, CliError> {
+        let (state, model) = self.read()?;
+        let all = scope::proposals(&state)?;
+        let mut shown = Vec::with_capacity(ids.len());
+        for id in ids {
+            let proposal = all.get(id).ok_or_else(|| {
+                CliError::new("not-found", exit::NOT_FOUND, format!("no proposal {id}"))
+            })?;
+            let threads = proposal.edit.one().map(|edit| edit.approved_threads(&model));
+            shown.push(json!({
+                "proposal": id,
+                "actor": proposal.actor,
+                "decision": proposal.decision,
+                "edit": proposal.edit,
+                "threads": threads,
+            }));
+        }
+        Ok(Json::Array(shown))
+    }
+
     fn needs(&self) -> Result<Json, CliError> {
         let (state, model) = self.read()?;
         let clones = context::clones(self.env)?;
@@ -710,33 +762,6 @@ impl<'a> Session<'a> {
             "threads": model.threads.len(),
             "unreadable": unreadable,
         }))
-    }
-
-    fn add(&self, id: &str, title: &str, parent: Option<&str>) -> Result<Json, CliError> {
-        self.write(|replica, by| {
-            let key = model::item_key(id)?;
-            // Only a parent places an item: a new top-level item has nothing to inherit and is one leaf.
-            let mut placed = false;
-            if replica.state().entity(&key).is_some() {
-                if single(replica.state().field(&key, field::TITLE)) != Some(json!(title)) {
-                    return Err(CliError::refused(
-                        "already-exists",
-                        format!("item {id} exists with another title"),
-                    ));
-                }
-            } else {
-                model::add_item(replica, id, title, by)?;
-            }
-            if let Some(parent) = parent
-                && single(replica.state().field(&key, field::PARENT)) != Some(json!(parent))
-            {
-                model::set_parent(replica, id, Some(parent), by)?;
-                placed = true;
-            }
-            let inherited =
-                if placed { place::place(replica, &[id.to_owned()], by)? } else { Vec::new() };
-            Ok(with_inherited(json!({"item": id}), &inherited))
-        })
     }
 
     fn import(&self, file: &Path, dry_run: bool) -> Result<Json, CliError> {
@@ -842,42 +867,11 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     Err(CliError::refused(
         "incomplete-repository",
         format!(
-            "repository record {id} is missing {}; set it with acyclic repo set",
+            "repository record {id} is missing {}; set it with acyclic repo edit",
             missing.join(", ")
         ),
     )
     .with(json!({"missing": missing})))
-}
-
-/// Refuses to create a repository record that lacks a field; editing one may set any subset.
-pub(crate) fn check_new_repository(
-    id: &str,
-    exists: bool,
-    owner: Option<&String>,
-    name: Option<&String>,
-    public: Option<bool>,
-    default_branch: Option<&String>,
-) -> Result<(), CliError> {
-    let missing: Vec<&str> = [
-        ("--owner", owner.is_none()),
-        ("--name", name.is_none()),
-        ("--public", public.is_none()),
-        ("--default-branch", default_branch.is_none()),
-    ]
-    .into_iter()
-    .filter_map(|(flag, absent)| absent.then_some(flag))
-    .collect();
-    if exists || missing.is_empty() {
-        return Ok(());
-    }
-    Err(CliError::new(
-        "usage",
-        exit::USAGE,
-        format!(
-            "creating repository {id} needs --owner, --name, --public and --default-branch (missing: {})",
-            missing.join(", ")
-        ),
-    ))
 }
 
 /// Whether recording `evidence` would replace different evidence on an item that is already done.
@@ -1006,11 +1000,11 @@ fn run_order<'a>(model: &Model, items: BTreeSet<&'a str>) -> BTreeMap<&'a str, u
     order
 }
 
-fn not_found(id: &str) -> CliError {
+pub(crate) fn not_found(id: &str) -> CliError {
     CliError::new("not-found", exit::NOT_FOUND, format!("no item {id}"))
 }
 
-fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
+pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     let key = model::item_key(id)?;
     if replica.state().entity(&key).is_none() {
         return Err(not_found(id));
@@ -1019,7 +1013,7 @@ fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
 }
 
 /// A field's value when it holds exactly one; a clear holds none.
-fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
+pub(crate) fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
     match register {
         Some(register) if register.len() == 1 => {
             register.values().next().map(|v| v.value.clone()).filter(|value| !value.is_null())
@@ -1030,7 +1024,10 @@ fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
 
 /// Whether a field holds only `value`, or, for `None`, nothing but clears. A conflict holds neither, so writing
 /// either resolves it.
-fn holds_only(register: Option<&acyclic_core::state::Register>, value: Option<Json>) -> bool {
+pub(crate) fn holds_only(
+    register: Option<&acyclic_core::state::Register>,
+    value: Option<Json>,
+) -> bool {
     let values: Vec<&Json> = register.into_iter().flatten().map(|(_, v)| &v.value).collect();
     match value {
         // Equal values written apart read as one, so they hold it too.
@@ -1040,7 +1037,7 @@ fn holds_only(register: Option<&acyclic_core::state::Register>, value: Option<Js
 }
 
 /// Sets a field unless it already holds exactly that value; `None` leaves it alone.
-fn set_if<T: Serialize>(
+pub(crate) fn set_if<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
     name: &str,
@@ -1056,7 +1053,7 @@ fn set_if<T: Serialize>(
 }
 
 /// Adds or removes a set element unless it already is so.
-fn element_if(
+pub(crate) fn element_if(
     replica: &mut Replica,
     key: &Key,
     set: SetField,
@@ -1170,7 +1167,7 @@ fn set_origin(
 }
 
 /// Adds the items that joined a thread passed down to them, or asked to, to a command's data, when there are any.
-fn with_inherited(mut data: Json, inherited: &[place::Inherited]) -> Json {
+pub(crate) fn with_inherited(mut data: Json, inherited: &[place::Inherited]) -> Json {
     if !inherited.is_empty() {
         data["inherited"] = json!(inherited);
     }

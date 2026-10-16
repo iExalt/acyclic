@@ -19,7 +19,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
 {
   "data": {
     "changed": true,
-    "item": "a1"
+    "item": "a1",
+    "proposals": []
   },
   "ok": true
 }

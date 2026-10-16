@@ -158,7 +158,7 @@ fn the_server_runs_only_the_commands_it_allows() {
     let (status, code) = post(&pass, r#"{"show": {"items": ["a"]}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     // So does a write.
-    let (status, code) = post(&pass, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#);
+    let (status, code) = post(&pass, r#"{"item": {"add": {"item": "a", "title": "A"}}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     assert_eq!(
         post(&pass, r#"{"sync": {"with-usage": true}}"#),
@@ -169,6 +169,14 @@ fn the_server_runs_only_the_commands_it_allows() {
         (StatusCode::BAD_REQUEST, "usage".into())
     );
     assert_eq!(post(&pass, r#"{"serve": {}}"#), (StatusCode::BAD_REQUEST, "usage".into()));
+    // The commands that grammar replaced are refused, not guessed at.
+    for old in [
+        r#"{"thread": {"set": {"id": "t", "title": "T"}}}"#,
+        r#"{"item": {"move": {"id": "a", "parent": "b"}}}"#,
+        r#"{"item": {"add": {"id": "a", "title": "A"}}}"#,
+    ] {
+        assert_eq!(post(&pass, old), (StatusCode::BAD_REQUEST, "usage".into()), "{old}");
+    }
     assert_eq!(
         post(&pass[..2], r#""list""#),
         (StatusCode::UNSUPPORTED_MEDIA_TYPE, "not-json".into())
@@ -187,19 +195,27 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"show": {"items": ["a"]}}),
         json!({"thread": "list"}),
         json!({"thread": {"show": {"threads": ["t"]}}}),
+        json!({"repo": "list"}),
+        json!({"repo": {"show": {"repositories": ["r"]}}}),
+        json!({"proposal": {"show": {"proposals": ["p"]}}}),
+        json!({"level": {}}),
     ] {
         assert_eq!(classify(read.clone()), Use::Read, "{read}");
     }
     for write in [
-        json!({"claim": {"id": "a"}}),
-        json!({"release": {"id": "a"}}),
-        json!({"done": {"id": "a", "note": "n"}}),
+        json!({"claim": {"item": "a"}}),
+        json!({"release": {"item": "a"}}),
+        json!({"done": {"item": "a", "note": "n"}}),
         json!({"level": {"level": "blockers"}}),
-        json!({"item": {"add": {"id": "a", "title": "A"}}}),
-        json!({"item": {"archive": {"id": "a"}}}),
+        json!({"item": {"add": {"item": "a", "title": "A"}}}),
+        json!({"item": {"edit": {"item": "a", "no-thread": true, "area": ["x"]}}}),
+        json!({"item": {"archive": {"item": "a"}}}),
         json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
         json!({"thread": {"approve": {"thread": "t"}}}),
-        json!({"repo": {"attach": {"repository": "r", "item": "a"}}}),
+        json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
+        json!({"thread": {"edit": {"thread": "t", "no-level": true}}}),
+        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main", "public": true}}}),
+        json!({"repo": {"edit": {"repository": "r", "private": true}}}),
         json!({"proposal": {"keep": {"proposal": "p"}}}),
     ] {
         assert_eq!(classify(write.clone()), Use::Write, "{write}");
@@ -228,7 +244,7 @@ fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
         Method::POST,
         "/api/command",
         &pass,
-        r#"{"item": {"add": {"id": "a", "title": "A"}}}"#,
+        r#"{"item": {"add": {"item": "a", "title": "A"}}}"#,
     );
     assert_eq!((status, code(&body)), (StatusCode::SERVICE_UNAVAILABLE, "busy".into()));
     // Reads don't wait for it.

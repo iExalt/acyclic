@@ -16,7 +16,7 @@ pub use apply::{ApplyError, Report, apply};
 pub const FORMAT: &str = "acyclic-import";
 
 /// The newest version this build reads. Version 2 names link kinds `waits-for`, `follows` and `relates-to`; version 1,
-/// still read, names them `blocks`, `after` and `relates`.
+/// still read, names them `blocks`, `after` and `relates` (and takes the new names too).
 pub const VERSION: u32 = 2;
 
 /// An annotated version 2 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
@@ -186,7 +186,7 @@ pub enum LinkKind {
 }
 
 /// The names version 1 gave link kinds, with the ones that replaced them.
-const VERSION_1_LINK_KINDS: [(&str, &str); 3] =
+pub const RENAMED_LINK_KINDS: [(&str, &str); 3] =
     [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")];
 
 /// A link between two items: `from` depends on, follows or relates to `to`.
@@ -386,7 +386,7 @@ impl Import {
             for link in value.get_mut("links").and_then(|l| l.as_array_mut()).into_iter().flatten()
             {
                 let renamed = link.get("kind").and_then(|k| k.as_str()).and_then(|old| {
-                    VERSION_1_LINK_KINDS.iter().find(|(name, _)| *name == old).map(|(_, new)| *new)
+                    RENAMED_LINK_KINDS.iter().find(|(name, _)| *name == old).map(|(_, new)| *new)
                 });
                 if let Some(new) = renamed {
                     link["kind"] = new.into();
@@ -705,6 +705,7 @@ mod tests {
         ] {
             assert_eq!(read(1, old).unwrap().links[0].kind, expected, "{old}");
             assert_eq!(read(2, new).unwrap().links[0].kind, expected, "{new}");
+            assert_eq!(read(1, new).unwrap().links[0].kind, expected, "version 1 takes {new} too");
             assert!(matches!(read(2, old), Err(ParseError::Json(_))), "{old} is version 1's");
         }
         // A left-out state is the backlog, in either version.

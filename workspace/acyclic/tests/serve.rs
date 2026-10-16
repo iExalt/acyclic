@@ -124,7 +124,7 @@ fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
     let (_server, address) = serve(&server, &["--sync-every", "1"]);
 
     // A write through the server is the user's, and reaches the shared repository at once.
-    let (status, added) = command(&address, r#"{"item": {"add": {"id": "a", "title": "A"}}}"#);
+    let (status, added) = command(&address, r#"{"item": {"add": {"item": "a", "title": "A"}}}"#);
     assert_eq!(status, 200, "{added}");
     let shared = dir.path().join("shared.git");
     let logs = git(&shared, &["for-each-ref", "--format=%(refname)", "refs/heads/log/server/"]);
