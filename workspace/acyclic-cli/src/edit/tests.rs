@@ -199,3 +199,37 @@ fn every_proposal_a_write_leaves_is_listed_including_the_placement_ones() {
         [placed, "z-1".to_owned()]
     );
 }
+
+#[test]
+fn an_import_that_places_into_an_approved_thread_lists_the_proposal() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let go = |line: &str, actor: &str| {
+        let mut env = crate::Env::default();
+        for (name, value) in [
+            ("ACYCLIC_NOW", "1792022400000"),
+            ("ACYCLIC_TRACKER", "tracker"),
+            ("ACYCLIC_ACTOR", actor),
+        ] {
+            env.vars.insert(name.to_owned(), value.to_owned());
+        }
+        env.cwd = dir.path().to_path_buf();
+        let out =
+            crate::execute(["acyclic"].into_iter().chain(line.split(' ')).map(Into::into), &env);
+        assert_eq!(out.code, 0, "{line}: {}", out.stdout);
+        serde_json::from_str::<Json>(&out.stdout).unwrap()["data"].clone()
+    };
+    go("init tracker --replica mac", "session/mac");
+    go("thread add t --title T --as-user", "session/mac");
+    go("item add a --title A --thread t --as-user", "session/mac");
+    go("thread approve t --as-user", "session/mac");
+    let plan = json!({"format": "acyclic-import", "version": 1, "items": [
+        {"key": "a", "title": "A", "state": "backlog"},
+        {"key": "c", "title": "C", "state": "backlog", "parent": "a"}]});
+    std::fs::write(dir.path().join("plan.json"), plan.to_string()).unwrap();
+    // An agent's item under a member of the approved thread would join it, which waits for the user.
+    for line in ["import plan.json --dry-run", "import plan.json"] {
+        let data = go(line, "session/mac");
+        let placed = data["placed"][0]["proposal"].as_str().unwrap();
+        assert_eq!(data["proposals"], json!([placed]), "{line}: {data}");
+    }
+}

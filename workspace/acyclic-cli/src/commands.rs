@@ -1124,7 +1124,7 @@ fn import_json(report: &import::Report, inherited: &[place::Inherited], dry_run:
             "fields": report.fields,
         },
         "changes": report.changes,
-        "proposals": report.proposals,
+        "proposals": crate::edit::all_proposals(&report.proposals, inherited),
         "placed": placed(inherited),
     });
     if dry_run {
