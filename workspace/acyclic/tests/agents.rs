@@ -149,7 +149,7 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
         "format": "acyclic-import",
         "version": 1,
         "items": items().iter().map(|key| json!({"key": key, "title": key, "state": "backlog"})).collect::<Vec<_>>(),
-        "links": WAITS.iter().map(|(from, to)| json!({"from": from, "to": to, "kind": "blocks"})).collect::<Vec<_>>(),
+        "links": WAITS.iter().map(|(from, to)| json!({"from": from, "to": to, "kind": "waits-for"})).collect::<Vec<_>>(),
     });
     let file = dir.path().join("plan.json");
     std::fs::write(&file, plan.to_string()).unwrap();

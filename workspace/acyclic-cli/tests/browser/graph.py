@@ -51,7 +51,7 @@ def page_file(tracker, directory, renderer, *scope):
         str(path),
         *scope,
     )
-    return path, summary["data"]["items"] + summary["data"]["ghosts"]
+    return path, summary["data"]["counts"]["items"] + summary["data"]["counts"]["ghosts"]
 
 
 def small_tracker(directory):
@@ -73,7 +73,7 @@ def small_tracker(directory):
             *(["--parent", parent] if parent else []),
         )
     acyclic(tracker, "link", "add", "paint", "waits-for", "buy")
-    acyclic(tracker, "link", "add", "paint", "relates", "tiles")
+    acyclic(tracker, "link", "add", "paint", "relates-to", "tiles")
     acyclic(tracker, "thread", "add", "kitchen", "--title", "Kitchen </script>")
     acyclic(tracker, "item", "edit", "paint", "--thread", "kitchen")
     return tracker
