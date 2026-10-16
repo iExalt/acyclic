@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 acyclic-cli.workspace = true
+acyclic-server.workspace = true
 
 [features]
 # Timing marks in the binary, for `mise run bench:store:phases`.

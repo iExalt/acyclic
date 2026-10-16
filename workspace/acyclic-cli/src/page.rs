@@ -8,7 +8,8 @@ mod renderers {
 const TEMPLATE: &str = include_str!("../assets/page.html");
 
 /// What lays the graph out in the page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Renderer {
     /// Graphviz, from a DOT document.
     Graphviz,

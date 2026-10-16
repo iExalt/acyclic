@@ -54,6 +54,13 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Prime = &cli.command {
         return Ok(Output::Text(prime()));
     }
+    if let Command::Serve(_) = &cli.command {
+        return Err(CliError::new(
+            "no-server",
+            exit::CONFIG,
+            "this build of acyclic has no server",
+        ));
+    }
     let session = Session::open(cli, env)?;
     if let Command::Graph { format, renderer, open, root, thread, include_archived, output } =
         &cli.command
@@ -99,7 +106,7 @@ impl<'a> Session<'a> {
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
     fn dispatch(&self, command: &Command) -> Result<Json, CliError> {
         match command {
-            Command::Init { .. } | Command::Prime | Command::Graph { .. } => {
+            Command::Init { .. } | Command::Prime | Command::Graph { .. } | Command::Serve(_) => {
                 unreachable!("handled before dispatch")
             },
             Command::Ready { include_archived, approved } => {

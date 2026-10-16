@@ -301,3 +301,65 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
     assert_eq!(listed("u"), [("cleared", true), ("raced", true)]);
     assert_eq!(listed("v"), [("raced", true)]);
 }
+
+/// Every argument under `command` that the parser constrains and deserializing doesn't, as `<command path>:
+/// <argument>`. Deserializing already refuses a missing field that isn't optional or a list.
+fn constrained(command: &clap::Command, path: &str, found: &mut Vec<String>) {
+    for arg in command.get_arguments() {
+        let debug = format!("{arg:?}");
+        let constrained = (arg.is_required_set()
+            && matches!(arg.get_action(), clap::ArgAction::Append))
+            || !command.get_arg_conflicts_with(arg).is_empty()
+            || ["requires: []", "r_unless: []", "r_ifs: []"]
+                .iter()
+                .any(|empty| !debug.contains(empty));
+        if constrained {
+            found.push(format!("{path}: {}", arg.get_id()));
+        }
+    }
+    for sub in command.get_subcommands() {
+        constrained(sub, format!("{path} {}", sub.get_name()).trim_start(), found);
+    }
+}
+
+#[test]
+fn deserialized_commands_are_checked_as_the_parser_checks_them() {
+    // `Command::validate` repeats these for commands that arrive deserialized, as the server's do; a new constraint
+    // needs a rule there before it joins this list. `serve` is never deserialized.
+    let mut found = Vec::new();
+    for sub in args::command().get_subcommands().filter(|sub| sub.get_name() != "serve") {
+        constrained(sub, sub.get_name(), &mut found);
+    }
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            "done: commit",
+            "done: repository",
+            "repo attach: item",
+            "repo detach: item",
+            "show: items",
+            "thread show: threads",
+        ]
+    );
+    let refused = |value: Value| {
+        let command: args::Command = serde_json::from_value(value).unwrap();
+        command.validate().map_err(|err| err.code)
+    };
+    assert_eq!(refused(json!({"show": {"items": []}})), Err("usage"));
+    assert_eq!(refused(json!({"thread": {"show": {"threads": []}}})), Err("usage"));
+    assert_eq!(refused(json!({"done": {"id": "a", "commit": "c"}})), Err("usage"));
+    assert_eq!(refused(json!({"repo": {"attach": {"repository": "r"}}})), Err("usage"));
+    assert_eq!(
+        refused(json!({"repo": {"detach": {"repository": "r", "item": "a", "thread": "t"}}})),
+        Err("usage")
+    );
+    assert_eq!(refused(json!({"done": {"id": "a", "repository": "r", "commit": "c"}})), Ok(()));
+    assert_eq!(refused(json!({"repo": {"attach": {"repository": "r", "thread": "t"}}})), Ok(()));
+    // Unknown fields and the server's own command are refused when deserializing.
+    assert!(
+        serde_json::from_value::<args::Command>(json!({"show": {"items": ["a"], "force": true}}))
+            .is_err()
+    );
+    assert!(serde_json::from_value::<args::Command>(json!({"serve": {"login": "x"}})).is_err());
+}

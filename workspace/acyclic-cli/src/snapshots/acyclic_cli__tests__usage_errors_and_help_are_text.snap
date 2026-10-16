@@ -30,6 +30,7 @@ Other Commands:
   graph     Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
   level     Sets the autonomy level, globally or for a thread (the user's)
   doctor    Lists entities that can't be read
+  serve     Serves the JSON API and the app, refusing any request without the user's Tailscale identity
 
 Options:
       --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in ~/.config/acyclic/trackers.toml

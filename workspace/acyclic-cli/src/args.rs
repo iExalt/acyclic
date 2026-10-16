@@ -8,6 +8,9 @@ use std::fmt::Write as _;
 use clap::{CommandFactory, Parser, Subcommand};
 
 pub use crate::page::Renderer;
+use serde::Deserialize;
+
+use crate::error::{CliError, exit};
 use serde::de::DeserializeOwned;
 
 /// The acyclic tracker. Every command that runs prints one JSON document.
@@ -33,7 +36,7 @@ pub struct Cli {
 pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Common Commands", &["ready", "list", "show", "claim", "release", "done", "needs"]),
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
-    ("Other Commands", &["init", "sync", "prime", "import", "graph", "level", "doctor"]),
+    ("Other Commands", &["init", "sync", "prime", "import", "graph", "level", "doctor", "serve"]),
 ];
 
 /// The command line, with its top-level help in [`SECTIONS`] rather than one list.
@@ -63,7 +66,8 @@ fn kebab<T: DeserializeOwned>(text: &str) -> Result<T, String> {
 }
 
 /// The commands: the ones every session uses at the top, the rest grouped by what they act on.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum Command {
     /// Sets up a tracker clone as a new replica, creating the repository if there is none.
     Init {
@@ -84,9 +88,11 @@ pub enum Command {
     Ready {
         /// Judge archived work as if it weren't archived.
         #[arg(long)]
+        #[serde(default)]
         include_archived: bool,
         /// Only items in threads the user approved, with the item among what the approval saw.
         #[arg(long)]
+        #[serde(default)]
         approved: bool,
     },
     /// Lists every item, by id.
@@ -95,6 +101,7 @@ pub enum Command {
     Show {
         /// The items.
         #[arg(required = true)]
+        #[serde(default)]
         items: Vec<String>,
     },
     /// Claims a ready leaf, or renews the actor's claim.
@@ -106,6 +113,7 @@ pub enum Command {
         lease: Option<u32>,
         /// Claim even when the item isn't ready.
         #[arg(long)]
+        #[serde(default)]
         force: bool,
     },
     /// Releases the actor's claim on an item, leaving anyone else's.
@@ -128,6 +136,7 @@ pub enum Command {
         note: Option<String>,
         /// Finish it although it isn't ready or someone else holds it.
         #[arg(long)]
+        #[serde(default)]
         force: bool,
     },
     /// Lists what needs the user.
@@ -147,6 +156,7 @@ pub enum Command {
         file: PathBuf,
         /// Report what would change without writing it.
         #[arg(long)]
+        #[serde(default)]
         dry_run: bool,
     },
     /// Lists entities that can't be read.
@@ -161,6 +171,7 @@ pub enum Command {
         renderer: Option<Renderer>,
         /// Write the HTML page into the clone's acyclic directory and open it in the default browser.
         #[arg(long)]
+        #[serde(default)]
         open: bool,
         /// Only this item and its descendants.
         #[arg(long)]
@@ -170,6 +181,7 @@ pub enum Command {
         thread: Option<String>,
         /// Draw archived items too.
         #[arg(long)]
+        #[serde(default)]
         include_archived: bool,
         /// Write the document here and print a JSON summary instead.
         #[arg(long)]
@@ -190,10 +202,63 @@ pub enum Command {
     /// Keeps or drops proposals (the user's).
     #[command(subcommand)]
     Proposal(ProposalCommand),
+    /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
+    #[serde(skip_deserializing)]
+    Serve(Serve),
+}
+
+/// The server's settings.
+#[derive(Debug, Clone, clap::Args)]
+pub struct Serve {
+    /// Where to listen. Whatever reaches this address directly can forge the identity header, so keep it on localhost
+    /// behind `tailscale serve`, or reachable only from the proxy that sets the header.
+    #[arg(long, default_value = "127.0.0.1:7477")]
+    pub listen: std::net::SocketAddr,
+    /// The user's Tailscale login, which every request's `Tailscale-User-Login` header must equal.
+    #[arg(long)]
+    pub login: String,
+    /// The name every request's `Host` header must carry, such as the server's `.ts.net` name, with a port only if
+    /// requests carry one.
+    #[arg(long)]
+    pub host: String,
+    /// The origin a browser's request must come from; `https://<host>` by default.
+    #[arg(long)]
+    pub origin: Option<String>,
+    /// A directory of static files to serve, such as the built app.
+    #[arg(long = "static")]
+    pub static_dir: Option<PathBuf>,
+}
+
+impl Command {
+    /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
+    /// that require or exclude each other.
+    ///
+    /// # Errors
+    ///
+    /// A usage error naming the missing or clashing arguments.
+    pub fn validate(&self) -> Result<(), CliError> {
+        let usage = |message: &str| Err(CliError::new("usage", exit::USAGE, message));
+        match self {
+            Self::Show { items } if items.is_empty() => usage("show needs at least one item"),
+            Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
+                usage("thread show needs at least one thread")
+            },
+            Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
+                usage("done takes --repository and --commit together")
+            },
+            Self::Repo(RepoCommand::Attach(attachment) | RepoCommand::Detach(attachment))
+                if attachment.item.is_some() == attachment.thread.is_some() =>
+            {
+                usage("name either an item or a thread")
+            },
+            _ => Ok(()),
+        }
+    }
 }
 
 /// A graph document's format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum GraphFormat {
     /// Graphviz DOT.
     Dot,
@@ -204,7 +269,8 @@ pub enum GraphFormat {
 }
 
 /// The item commands.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ItemCommand {
     /// Adds an item.
     Add {
@@ -235,15 +301,19 @@ pub enum ItemCommand {
         size: Option<Size>,
         /// Areas to add.
         #[arg(long)]
+        #[serde(default)]
         area: Vec<String>,
         /// Areas to remove.
         #[arg(long)]
+        #[serde(default)]
         no_area: Vec<String>,
         /// Named resources to add.
         #[arg(long)]
+        #[serde(default)]
         resource: Vec<String>,
         /// Named resources to remove.
         #[arg(long)]
+        #[serde(default)]
         no_resource: Vec<String>,
     },
     /// Moves an item under a parent, or to the top level.
@@ -274,7 +344,8 @@ pub enum ItemCommand {
 }
 
 /// The link commands.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum LinkCommand {
     /// Links two items: `from` blocks on, follows (`after`) or relates to `to`.
     Add {
@@ -299,7 +370,8 @@ pub enum LinkCommand {
 }
 
 /// The thread commands.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
     /// Lists every thread, by id, with its approval, its members and its heads: the open leaves nothing in it orders.
     List,
@@ -307,6 +379,7 @@ pub enum ThreadCommand {
     Show {
         /// The threads.
         #[arg(required = true)]
+        #[serde(default)]
         threads: Vec<String>,
     },
     /// Creates or edits a thread.
@@ -345,7 +418,8 @@ pub enum ThreadCommand {
 }
 
 /// The repository commands.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum RepoCommand {
     /// Creates or edits a repository record.
     Set {
@@ -371,7 +445,8 @@ pub enum RepoCommand {
 }
 
 /// A repository record and the item or thread it attaches to.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Attachment {
     /// The repository record.
     pub repository: String,
@@ -384,7 +459,8 @@ pub struct Attachment {
 }
 
 /// The proposal commands (the user's).
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
     /// Keeps a proposal.
     Keep {

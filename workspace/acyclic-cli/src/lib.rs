@@ -3,7 +3,7 @@
 
 pub mod error;
 
-mod args;
+pub mod args;
 mod commands;
 mod context;
 mod page;
@@ -13,11 +13,15 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use acyclic_core::time::{TIMESTAMP_KEYS, rfc3339};
 
-use crate::error::exit;
+use crate::args::{Cli, Command, Serve};
+use crate::error::{CliError, exit};
+
+/// Starts the server for `acyclic serve` on a tracker clone, and returns when it stops.
+pub type ServeHook = fn(&Serve, PathBuf, &Env) -> Result<(), CliError>;
 
 /// What a command sees of its process: environment variables and the working directory.
 #[derive(Debug, Clone, Default)]
@@ -42,7 +46,12 @@ impl Env {
 
 /// Runs the CLI with the process's arguments, the first being the program name, and prints its output.
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
-    let outcome = execute(args, &Env::from_process());
+    run_with(args, None)
+}
+
+/// Runs the CLI as [`run`] does, with the server that `acyclic serve` starts, if this binary has one.
+pub fn run_with(args: impl IntoIterator<Item = OsString>, serve: Option<ServeHook>) -> ExitCode {
+    let outcome = execute_with(args, &Env::from_process(), serve);
     print!("{}", outcome.stdout);
     eprint!("{}", outcome.stderr);
     acyclic_core::probe::mark("print output");
@@ -71,6 +80,14 @@ impl Outcome {
 /// `prime` print text instead, and a command line that doesn't parse prints its error and usage as text to standard
 /// error, with exit code 2, as other command-line tools do.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
+    execute_with(args, env, None)
+}
+
+fn execute_with(
+    args: impl IntoIterator<Item = OsString>,
+    env: &Env,
+    serve: Option<ServeHook>,
+) -> Outcome {
     use clap::FromArgMatches;
     use clap::error::ErrorKind;
     acyclic_core::probe::mark("start");
@@ -94,6 +111,12 @@ pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
             return Outcome { code: exit::USAGE, stdout: String::new(), stderr: err.to_string() };
         },
     };
+    if let (Command::Serve(options), Some(serve)) = (&cli.command, serve) {
+        return match serve_with(&cli, options, env, serve) {
+            Ok(()) => Outcome::out(exit::OK, String::new()),
+            Err(err) => Outcome::out(err.exit, render(&err.envelope())),
+        };
+    }
     let result = commands::run(&cli, env);
     acyclic_core::probe::mark("command");
     match result {
@@ -105,6 +128,33 @@ pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
         Ok(commands::Output::Text(text)) => Outcome::out(exit::OK, text),
         Err(err) => Outcome::out(err.exit, render(&err.envelope())),
     }
+}
+
+fn serve_with(cli: &Cli, options: &Serve, env: &Env, serve: ServeHook) -> Result<(), CliError> {
+    if cli.actor.is_some() || cli.as_user {
+        return Err(CliError::new(
+            "usage",
+            exit::USAGE,
+            "serve takes no --actor or --as-user: the server acts as the user only for requests carrying their identity",
+        ));
+    }
+    serve(options, context::tracker(cli, env)?, env)
+}
+
+/// Runs one command for another front end, such as the server: on the tracker clone at `tracker`, as the user or
+/// else as `env`'s actor, on `env`'s clock. Returns the exit code and the envelope, with times as RFC 3339 in UTC; a
+/// command that prints text returns it as the envelope's data.
+#[must_use]
+pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8, Value) {
+    let cli = Cli { tracker: Some(tracker), actor: None, as_user, command };
+    let result = cli.command.validate().and_then(|()| commands::run(&cli, env));
+    let (code, mut envelope) = match result {
+        Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),
+        Ok(commands::Output::Text(text)) => (exit::OK, json!({"ok": true, "data": text})),
+        Err(err) => (err.exit, err.envelope()),
+    };
+    timestamps(&mut envelope);
+    (code, envelope)
 }
 
 fn render(value: &serde_json::Value) -> String {
