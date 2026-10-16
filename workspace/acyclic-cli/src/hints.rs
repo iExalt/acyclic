@@ -36,7 +36,7 @@ struct Removed {
     flag: Option<&'static str>,
     /// At least this many words mark the old form, for a command that is still there with other arguments.
     at_least: usize,
-    /// What to use instead.
+    /// What to use instead, with each command in backticks.
     instead: &'static str,
 }
 
@@ -45,49 +45,49 @@ const REMOVED: [Removed; 8] = [
         words: &["item", "move"],
         flag: None,
         at_least: 0,
-        instead: "acyclic item edit <ITEM> --parent <PARENT>, or --no-parent for the top level",
+        instead: "`acyclic item edit <ITEM> --parent <PARENT>`, or `--no-parent` for the top level",
     },
     Removed {
         words: &["item", "state"],
         flag: None,
         at_least: 0,
-        instead: "acyclic item edit <ITEM> --state <STATE>",
+        instead: "`acyclic item edit <ITEM> --state <STATE>`",
     },
     Removed {
         words: &["thread", "set"],
         flag: None,
         at_least: 0,
-        instead: "acyclic thread add <THREAD> --title <TITLE> to create one, or acyclic thread edit <THREAD> to change one",
+        instead: "`acyclic thread add <THREAD> --title <TITLE>` to create one, or `acyclic thread edit <THREAD>` to change one",
     },
     Removed {
         words: &["thread", "add"],
         flag: None,
         at_least: 4,
-        instead: "acyclic item edit <ITEM> --thread <THREAD> (thread add now creates a thread: acyclic thread add <THREAD> --title <TITLE>)",
+        instead: "`acyclic item edit <ITEM> --thread <THREAD>` (`thread add` now creates a thread: `acyclic thread add <THREAD> --title <TITLE>`)",
     },
     Removed {
         words: &["thread", "remove"],
         flag: None,
         at_least: 0,
-        instead: "acyclic item edit <ITEM> --no-thread",
+        instead: "`acyclic item edit <ITEM> --no-thread`",
     },
     Removed {
         words: &["repo", "set"],
         flag: None,
         at_least: 0,
-        instead: "acyclic repo add <REPOSITORY> --owner <OWNER> --name <NAME> --default-branch <BRANCH> (--public | --private) to create one, or acyclic repo edit <REPOSITORY> to change one",
+        instead: "`acyclic repo add <REPOSITORY> --owner <OWNER> --name <NAME> --default-branch <BRANCH> (--public | --private)` to create one, or `acyclic repo edit <REPOSITORY>` to change one",
     },
     Removed {
         words: &["repo", "attach"],
         flag: None,
         at_least: 0,
-        instead: "acyclic item edit <ITEM> --repository <REPOSITORY>, or acyclic thread edit <THREAD> --repository <REPOSITORY>",
+        instead: "`acyclic item edit <ITEM> --repository <REPOSITORY>`, or `acyclic thread edit <THREAD> --repository <REPOSITORY>`",
     },
     Removed {
         words: &["repo", "detach"],
         flag: None,
         at_least: 0,
-        instead: "acyclic item edit <ITEM> --no-repository <REPOSITORY>, or acyclic thread edit <THREAD> --no-repository <REPOSITORY>",
+        instead: "`acyclic item edit <ITEM> --no-repository <REPOSITORY>`, or `acyclic thread edit <THREAD> --no-repository <REPOSITORY>`",
     },
 ];
 
@@ -96,7 +96,7 @@ const LEVEL_FLAG: Removed = Removed {
     words: &["level"],
     flag: Some("--thread"),
     at_least: 0,
-    instead: "acyclic thread edit <THREAD> --level <LEVEL>, or --no-level",
+    instead: "`acyclic thread edit <THREAD> --level <LEVEL>`, or `--no-level`",
 };
 
 /// A message for a command line that failed to parse because it used a replaced name or form, if it did.
@@ -116,8 +116,8 @@ pub fn hint(args: &[OsString]) -> Option<String> {
     if let Some(removed) = removed {
         let old = removed.words.join(" ");
         return Some(match removed.flag {
-            Some(flag) => format!("`acyclic {old} {flag}` is gone: use `{}`", removed.instead),
-            None => format!("`acyclic {old}` is gone: use `{}`", removed.instead),
+            Some(flag) => format!("`acyclic {old} {flag}` is gone: use {}", removed.instead),
+            None => format!("`acyclic {old}` is gone: use {}", removed.instead),
         });
     }
     done_state(args, &words).or_else(|| link_word(&words))

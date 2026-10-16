@@ -427,6 +427,11 @@ pub enum ItemCommand {
         /// The subtree's root.
         item: String,
     },
+    /// Deletes an item nothing refers to: no children or links, not done, not claimed.
+    Delete {
+        /// The item.
+        item: String,
+    },
 }
 
 /// What `item edit` changes.

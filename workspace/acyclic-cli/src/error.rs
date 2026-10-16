@@ -3,6 +3,7 @@
 use std::fmt;
 
 use acyclic_core::archive::ArchiveError;
+use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
@@ -105,6 +106,7 @@ impl From<WriteError> for CliError {
             WriteError::State(err) => err.into(),
             WriteError::InvalidName(_) => Self::new("invalid-name", exit::USAGE, message),
             WriteError::NoItem(_) => Self::new("not-found", exit::NOT_FOUND, message),
+            WriteError::Deleted(_) => Self::refused("deleted", message),
             WriteError::ParentCycle(_) => Self::refused("parent-cycle", message),
             WriteError::LinkCycle(path) => {
                 Self::refused("link-cycle", message).with(json!({"path": path}))
@@ -152,6 +154,19 @@ impl From<ScopeError> for CliError {
             ScopeError::NotTheUser(_) => Self::refused("user-only", message),
             ScopeError::NoProposal(_) => Self::new("not-found", exit::NOT_FOUND, message),
             ScopeError::Decided(_) => Self::refused("decided", message),
+        }
+    }
+}
+
+impl From<DeleteError> for CliError {
+    fn from(err: DeleteError) -> Self {
+        let message = err.to_string();
+        match err {
+            DeleteError::Write(err) => err.into(),
+            DeleteError::NotAllowed { .. } => Self::refused("user-only", message),
+            DeleteError::InUse(reasons) => {
+                Self::refused("in-use", message).with(json!({"reasons": reasons}))
+            },
         }
     }
 }

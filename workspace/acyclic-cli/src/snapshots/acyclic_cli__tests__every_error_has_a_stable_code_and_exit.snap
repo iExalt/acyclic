@@ -16,6 +16,7 @@ expression: table
 6 unreadable
 2 invalid-name
 3 not-found
+1 deleted
 1 parent-cycle
 1 link-cycle
 1 checked-field
@@ -26,6 +27,8 @@ expression: table
 1 user-only
 3 not-found
 1 decided
+1 in-use
+1 user-only
 1 ineligible
 1 not-done
 1 not-allowed
