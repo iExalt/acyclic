@@ -1126,7 +1126,11 @@ pub(crate) fn placed(inherited: &[place::Inherited]) -> Json {
 
 /// An import's result: what it changed, in counts and field by field, the proposals it left and the threads items
 /// joined. A dry run changes nothing.
-fn import_json(report: &import::Report, inherited: &[place::Inherited], dry_run: bool) -> Json {
+pub(crate) fn import_json(
+    report: &import::Report,
+    inherited: &[place::Inherited],
+    dry_run: bool,
+) -> Json {
     let mut data = json!({
         "dry_run": dry_run,
         "counts": {

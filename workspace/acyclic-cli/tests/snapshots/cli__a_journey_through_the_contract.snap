@@ -282,6 +282,59 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread nope
   "ok": false
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --title Renamed --parent nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no item nope"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic show a2
+# exit 0
+{
+  "data": [
+    {
+      "archived": false,
+      "areas": [],
+      "children": [],
+      "claims": [],
+      "done_at": null,
+      "evidence": null,
+      "gate": null,
+      "id": "a2",
+      "links": {
+        "followed_by": [],
+        "follows": [],
+        "related_from": [],
+        "relates_to": [],
+        "waited_on_by": [],
+        "waits_for": [
+          "a1"
+        ]
+      },
+      "notes": null,
+      "parent": null,
+      "readiness": {
+        "rank": 0,
+        "status": "ready"
+      },
+      "reopened": false,
+      "repositories": [],
+      "resources": [],
+      "role": "item",
+      "size": null,
+      "state": "backlog",
+      "thread": null,
+      "title": "Second"
+    }
+  ],
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
 # exit 0
 {
