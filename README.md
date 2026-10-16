@@ -22,6 +22,9 @@ The tracker itself is a library with its CLI, and works without the app or the c
 
 The [glossary](GLOSSARY.md) defines the vocabulary.
 
+A tracker syncs through a shared Git repository. On GitHub, `sh scripts/tracker-ruleset.sh <owner>/<repository>`
+keeps that repository's audit logs append-only; run it before the first sync.
+
 ## Licence
 
 [MIT](LICENSE).
