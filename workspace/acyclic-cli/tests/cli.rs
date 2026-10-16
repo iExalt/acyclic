@@ -268,4 +268,28 @@ fn two_machines_sync_through_a_shared_repository() {
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
     sh.run("sync", AGENT);
     assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+    // The user's move to the top racing the other machine's move is a conflict, and moving it again settles it.
+    sh.run("item move a1 a2", AGENT);
+    sh.run("sync", AGENT);
+    sh.run("sync", pi);
+    sh.run("item move a1 --as-user", AGENT);
+    sh.run("item move a1 b1", pi);
+    sh.run("sync", pi);
+    sh.run("sync", AGENT);
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["entry"], "conflict");
+    let (_, out) = sh.output("item move a1 --as-user", AGENT);
+    assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+    // Likewise taking an item out of a thread while the other machine puts it in one.
+    sh.run("thread add a1 t1", AGENT);
+    sh.run("sync", AGENT);
+    sh.run("sync", pi);
+    sh.run("thread remove a1 --as-user", AGENT);
+    sh.run("thread add a1 t2", pi);
+    sh.run("sync", pi);
+    sh.run("sync", AGENT);
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["field"], "thread");
+    let (_, out) = sh.output("thread remove a1 --as-user", AGENT);
+    assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
+    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
 }

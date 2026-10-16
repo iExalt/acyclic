@@ -142,9 +142,10 @@ impl<'a> Session<'a> {
             Command::Item(ItemCommand::Move { id, parent }) => self.write(|replica, by| {
                 let key = existing(replica, id)?;
                 let mut inherited = Vec::new();
-                if single(replica.state().field(&key, field::PARENT))
-                    != parent.as_ref().map(|p| json!(p))
-                {
+                if !holds_only(
+                    replica.state().field(&key, field::PARENT),
+                    parent.as_ref().map(|p| json!(p)),
+                ) {
                     model::set_parent(replica, id, parent.as_deref(), by)?;
                     inherited = place::place(replica, std::slice::from_ref(id), by)?;
                 }
@@ -311,7 +312,11 @@ impl<'a> Session<'a> {
     fn member(&self, item: &str, thread: Option<&String>) -> Result<Json, CliError> {
         let change = ScopeEdit::Member { item: item.to_owned(), thread: thread.cloned() };
         self.scope_edit(&change, |state, model| {
-            if model.items.get(item).is_none_or(|i| i.thread.one() != thread) {
+            // Read the register itself: a conflict reads as no single thread, which `thread remove` must still settle.
+            let key = model::item_key(item)?;
+            if !model.items.contains_key(item)
+                || !holds_only(state.field(&key, field::THREAD), thread.map(|t| json!(t)))
+            {
                 return Ok(false);
             }
             // The user putting an unapproved member in its thread again keeps it, so it writes; an agent's repeat
@@ -682,6 +687,17 @@ fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
             register.values().next().map(|v| v.value.clone()).filter(|value| !value.is_null())
         },
         _ => None,
+    }
+}
+
+/// Whether a field holds only `value`, or, for `None`, nothing but clears. A conflict holds neither, so writing
+/// either resolves it.
+fn holds_only(register: Option<&acyclic_core::state::Register>, value: Option<Json>) -> bool {
+    let values: Vec<&Json> = register.into_iter().flatten().map(|(_, v)| &v.value).collect();
+    match value {
+        // Equal values written apart read as one, so they hold it too.
+        Some(value) => !values.is_empty() && values.iter().all(|held| **held == value),
+        None => values.iter().all(|held| held.is_null()),
     }
 }
 
