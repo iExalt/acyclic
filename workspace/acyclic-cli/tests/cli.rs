@@ -114,7 +114,10 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
     let (code, out) = sh.output("thread remove a2 --as-user", AGENT);
     assert_eq!((code, out["data"]["edit"]["thread"].is_null()), (0, true));
-    assert_eq!(sh.run("repo set r1 --name code", AGENT), 0);
+    assert_eq!(sh.run("repo set r1 --name code", AGENT), 2, "a new record needs every field");
+    let full = "repo set r1 --owner me --name code --public true --default-branch main";
+    assert_eq!(sh.run(full, AGENT), 0);
+    assert_eq!(sh.run("repo set r1 --default-branch trunk", AGENT), 0, "an edit takes any subset");
     for (verb, present) in [("attach", true), ("detach", false)] {
         let (code, out) = sh.output(&format!("repo {verb} r1 --item a2"), AGENT);
         let edit = (out["data"]["outcome"].as_str(), out["data"]["edit"]["present"].as_bool());
