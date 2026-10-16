@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
-use acyclic_core::model::{Item, ItemState, Link, LinkKind, Model, Value};
+use acyclic_core::model::{Heads, Item, ItemState, Link, LinkKind, Model, Value};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{Readiness, ReadyThread};
 use acyclic_core::scope::{self, Decision, Proposal, ScopeEdit};
@@ -101,6 +101,7 @@ impl View<'_> {
         only_approved: bool,
     ) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
+        let heads = self.model.heads_index();
         let mut rows = Vec::new();
         for ReadyThread { thread, items } in ready {
             let mut found = Vec::new();
@@ -112,7 +113,7 @@ impl View<'_> {
             }
             if !found.is_empty() {
                 let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
-                rows.push(with(thread_row(self.model, thread, listed), json!({"items": found})));
+                rows.push(with(thread_row(&heads, thread, listed), json!({"items": found})));
             }
         }
         Ok(rows)
@@ -161,7 +162,7 @@ impl View<'_> {
         }
         let thread = self.model.threads.get(id);
         Ok(with(
-            thread_row(self.model, id, listed),
+            thread_row(&self.model.heads_index(), id, listed),
             json!({
                 "readiness": self.readiness.thread(id)?,
                 "claims": claims,
@@ -180,9 +181,10 @@ impl View<'_> {
     /// proposal embedding what `proposal show` returns, and a conflict listing its `values` and how to `resolve` it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
+        let heads = self.model.heads_index();
         let proposals = scope::proposals(self.state)?;
         let thread =
-            |id: &str| thread_row(self.model, id, members.get(id).map_or(&[][..], Vec::as_slice));
+            |id: &str| thread_row(&heads, id, members.get(id).map_or(&[][..], Vec::as_slice));
         let items = |ids: &[String]| -> Result<Json, CliError> {
             Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
         };
@@ -397,7 +399,8 @@ fn links(all: &[Link], id: &str) -> Json {
 
 /// The thread summary: `{id, title, approved, heads, counts: {members, done, conflicted}}`. A thread only an item
 /// names has no title and isn't approved. `approved` is whether the approval holds, so a conflict counts as not.
-pub(crate) fn thread_row(model: &Model, id: &str, members: &[Member<'_>]) -> Json {
+pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
+    let model = heads.model();
     let thread = model.threads.get(id);
     let done = members.iter().filter(|m| model.items[m.item].is_done()).count();
     let conflicted = members.iter().filter(|m| m.conflict).count();
@@ -405,14 +408,18 @@ pub(crate) fn thread_row(model: &Model, id: &str, members: &[Member<'_>]) -> Jso
         "id": id,
         "title": thread.map(|t| &t.title),
         "approved": thread.is_some_and(|t| t.approved.one() == Some(&true)),
-        "heads": model.heads(id),
+        "heads": heads.of(id),
         "counts": {"members": members.len(), "done": done, "conflicted": conflicted},
     })
 }
 
 /// Every thread's summary, in id order.
 pub(crate) fn thread_rows(model: &Model) -> Vec<Json> {
-    thread_members(model).into_iter().map(|(id, members)| thread_row(model, id, &members)).collect()
+    let heads = model.heads_index();
+    thread_members(model)
+        .into_iter()
+        .map(|(id, members)| thread_row(&heads, id, &members))
+        .collect()
 }
 
 /// The repository summary: `{id, owner, name, public, default_branch}`.
@@ -747,7 +754,7 @@ mod tests {
                 .collect();
             assert_eq!(members, [("a", true), ("b", true), ("late", false)]);
             assert_eq!(shown["members"][2]["conflicted"], false);
-            let row = thread_row(view.model, "t", &listed["t"]);
+            let row = thread_row(&view.model.heads_index(), "t", &listed["t"]);
             for (name, value) in row.as_object().unwrap() {
                 assert_eq!(&shown[name], value, "{name}");
             }
@@ -768,7 +775,11 @@ mod tests {
         };
         conflicted.join(other.state()).unwrap();
         let model = Model::read(conflicted.state()).unwrap();
-        assert_eq!(thread_row(&model, "t", &[])["approved"], false, "a conflict isn't an approval");
+        assert_eq!(
+            thread_row(&model.heads_index(), "t", &[])["approved"],
+            false,
+            "a conflict isn't an approval"
+        );
         assert_eq!(approval(&model, "a"), (Some("t".to_owned()), false));
     }
 

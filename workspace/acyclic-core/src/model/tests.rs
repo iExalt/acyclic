@@ -284,6 +284,67 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     assert_eq!(heads(&r), ["d"]);
 }
 
+/// Heads as their definition reads, walking every link from each leaf with nothing gathered ahead.
+fn heads_by_definition<'a>(m: &'a Model, thread: &str) -> Vec<&'a str> {
+    let open: Vec<&str> = m
+        .members(thread)
+        .into_iter()
+        .filter(|id| !m.items[*id].is_done() && !m.is_archived(id))
+        .collect();
+    let lift = |id: &'a str| std::iter::once(id).chain(m.ancestors(id));
+    let follows_another = |leaf: &'a str| {
+        let others: BTreeSet<&str> =
+            open.iter().filter(|member| **member != leaf).flat_map(|member| lift(member)).collect();
+        let mut seen: BTreeSet<&str> = lift(leaf).collect();
+        let mut frontier: Vec<&str> = seen.iter().copied().collect();
+        while let Some(node) = frontier.pop() {
+            for link in m.links.iter().filter(|link| link.kind.orders() && link.from == node) {
+                if others.contains(link.to.as_str()) {
+                    return true;
+                }
+                for reached in lift(&link.to) {
+                    if seen.insert(reached) {
+                        frontier.push(reached);
+                    }
+                }
+            }
+        }
+        false
+    };
+    open.iter().copied().filter(|id| m.children(id).is_empty() && !follows_another(id)).collect()
+}
+
+#[hegel::test]
+fn heads_match_their_definition(tc: hegel::TestCase) {
+    use hegel::generators as gs;
+    let below = |n: usize| tc.draw(gs::integers::<usize>().max_value(n - 1));
+    let n = 2 + below(6);
+    let ids: Vec<String> = (0..n).map(|i| format!("i{i}")).collect();
+    let mut r = replica("a");
+    items(&mut r, &ids.iter().map(String::as_str).collect::<Vec<_>>());
+    for (i, id) in ids.iter().enumerate() {
+        let parent = below(i + 1);
+        if parent < i {
+            set_parent(&mut r, id, Some(&ids[parent]), by(2)).unwrap();
+        }
+        if let Some(thread) = [None, Some("t"), Some("u")][below(3)] {
+            put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&thread), by(2)).unwrap();
+        }
+        if below(4) == 0 {
+            set_state(&mut r, id, ItemState::Done, by(3)).unwrap();
+        }
+    }
+    for _ in 0..below(9) {
+        let (from, to) = (below(n), below(n));
+        // A link that would close a cycle is refused, as it is for anyone.
+        let _ = link(&mut r, &ids[from], &ids[to], LinkKind::Blocks, by(4));
+    }
+    let m = model(&r);
+    for thread in ["t", "u"] {
+        assert_eq!(m.heads(thread), heads_by_definition(&m, thread), "{thread}: {:?}", m.links);
+    }
+}
+
 #[test]
 fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
     let (mut a, mut b) = pair(&["x"]);

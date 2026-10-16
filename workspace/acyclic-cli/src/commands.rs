@@ -920,21 +920,33 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
             threads.entry(thread.as_str()).or_default().push(member);
         }
     }
-    for members in threads.values_mut() {
-        let order = run_order(model, members.iter().map(|m| m.item).collect());
+    // Each thread's blocks links among its own members, gathered in one pass rather than once per thread.
+    let mut links: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+    let threads_of =
+        |id: &str| model.items.get(id).map(|item| item.thread.all()).unwrap_or_default();
+    for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+        let to = threads_of(&link.to);
+        for thread in threads_of(&link.from).into_iter().filter(|thread| to.contains(thread)) {
+            links.entry(thread.as_str()).or_default().push((&link.from, &link.to));
+        }
+    }
+    for (thread, members) in &mut threads {
+        let among = links.get(thread).map_or(&[][..], Vec::as_slice);
+        let order = run_order(members.iter().map(|m| m.item).collect(), among);
         members.sort_by_key(|m| order[m.item]);
     }
     threads
 }
 
-/// Each item's place when `items` run along their blocks links among themselves.
-fn run_order<'a>(model: &Model, items: BTreeSet<&'a str>) -> BTreeMap<&'a str, usize> {
+/// Each item's place when `items` run along `links`, the blocks links among them as `(from, to)`.
+fn run_order<'a>(
+    items: BTreeSet<&'a str>,
+    links: &[(&'a str, &'a str)],
+) -> BTreeMap<&'a str, usize> {
     let mut waits: BTreeMap<&str, usize> = items.iter().map(|id| (*id, 0)).collect();
     let mut unblocks: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for link in &model.links {
-        if let (LinkKind::Blocks, Some(&from), Some(&to)) =
-            (link.kind, items.get(link.from.as_str()), items.get(link.to.as_str()))
-        {
+    for (from, to) in links {
+        if let (Some(&from), Some(&to)) = (items.get(from), items.get(to)) {
             *waits.get_mut(from).expect("a member") += 1;
             unblocks.entry(to).or_default().push(from);
         }

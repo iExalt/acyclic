@@ -288,6 +288,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
         }
     }
     let cycles = place::thread_cycles(model);
+    let heads = model.heads_index();
     for (id, thread) in &model.threads {
         let Some(&count) = members.get(id.as_str()) else { continue };
         if thread.is_approved() {
@@ -303,7 +304,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             thread: id.clone(),
             members: count,
             waits_with: waits_with.into_iter().cloned().collect(),
-            heads: model.heads(id).into_iter().map(str::to_owned).collect(),
+            heads: heads.of(id).into_iter().map(str::to_owned).collect(),
         });
     }
 }

@@ -636,49 +636,33 @@ impl Model {
         None
     }
 
-    /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
-    /// when a path of blocks links, from the leaf or an ancestor, reaches that member or one of its
-    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
-    /// unsaid: they may run in parallel, or a link is missing.
+    /// A thread's heads; see [`Heads`]. To list many threads' heads, build [`Model::heads_index`] once.
     #[must_use]
     pub fn heads(&self, thread: &str) -> Vec<&str> {
-        let open: Vec<&str> = self
-            .members(thread)
-            .into_iter()
-            .filter(|id| !self.items[*id].is_done() && !self.is_archived(id))
-            .collect();
+        self.heads_index().of(thread)
+    }
+
+    /// What finding heads reads, gathered in one pass over the items and links, for every thread at once.
+    #[must_use]
+    pub fn heads_index(&self) -> Heads<'_> {
+        let mut open: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for item in self.items.values() {
+            if let Some(thread) = item.thread.one()
+                && !item.is_done()
+                && !self.is_archived(&item.id)
+            {
+                open.entry(thread.as_str()).or_default().push(item.id.as_str());
+            }
+        }
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        let mut prev: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for link in self.links.iter().filter(|link| link.kind.orders()) {
             next.entry(link.from.as_str()).or_default().push(link.to.as_str());
-        }
-        let follows_another = |leaf: &str| {
-            let others: BTreeSet<&str> = open
-                .iter()
-                .filter(|member| **member != leaf)
-                .flat_map(|member| std::iter::once(*member).chain(self.ancestors(member)))
-                .collect();
-            let mut seen: BTreeSet<&str> =
-                std::iter::once(leaf).chain(self.ancestors(leaf)).collect();
-            let mut frontier: Vec<&str> = seen.iter().copied().collect();
-            while let Some(node) = frontier.pop() {
-                for &to in next.get(node).into_iter().flatten() {
-                    if others.contains(to) {
-                        return true;
-                    }
-                    // What waits on `to` waits on its ancestors' dependencies too.
-                    for reached in std::iter::once(to).chain(self.ancestors(to)) {
-                        if seen.insert(reached) {
-                            frontier.push(reached);
-                        }
-                    }
-                }
+            for reached in std::iter::once(link.to.as_str()).chain(self.ancestors(&link.to)) {
+                prev.entry(reached).or_default().push(link.from.as_str());
             }
-            false
-        };
-        open.iter()
-            .copied()
-            .filter(|id| self.children(id).is_empty() && !follows_another(id))
-            .collect()
+        }
+        Heads { model: self, open, next, prev }
     }
 
     /// The cycles among parents, which only a join can make, each sorted.
@@ -1260,6 +1244,76 @@ fn elements(state: &State, key: &Key, prefix: &str) -> BTreeSet<String> {
         .filter_map(|(name, _)| name.strip_prefix(prefix))
         .map(str::to_owned)
         .collect()
+}
+
+/// Every thread's open members and the ordering links, read once, to find threads' heads.
+pub struct Heads<'a> {
+    model: &'a Model,
+    open: BTreeMap<&'a str, Vec<&'a str>>,
+    next: BTreeMap<&'a str, Vec<&'a str>>,
+    /// The nodes a link reaches, each with the nodes that link from: what waits on a node reaches its ancestors too.
+    prev: BTreeMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> Heads<'a> {
+    /// The model it reads.
+    #[must_use]
+    pub fn model(&self) -> &'a Model {
+        self.model
+    }
+
+    /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
+    /// when a path of blocks links, from the leaf or an ancestor, reaches that member or one of its
+    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
+    /// unsaid: they may run in parallel, or a link is missing.
+    #[must_use]
+    pub fn of(&self, thread: &str) -> Vec<&'a str> {
+        let model = self.model;
+        let open = self.open.get(thread).map_or(&[][..], Vec::as_slice);
+        // Each node, with the open members it is or is an ancestor of, built once rather than per leaf.
+        let mut covers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for &member in open {
+            for node in std::iter::once(member).chain(model.ancestors(member)) {
+                covers.entry(node).or_default().insert(member);
+            }
+        }
+        // Only the nodes that can reach a member are worth walking from, so a leaf's walk stays near the thread.
+        let mut toward: BTreeSet<&str> = covers.keys().copied().collect();
+        let mut back: Vec<&str> = toward.iter().copied().collect();
+        while let Some(node) = back.pop() {
+            for &from in self.prev.get(node).into_iter().flatten() {
+                if toward.insert(from) {
+                    back.push(from);
+                }
+            }
+        }
+        let follows_another = |leaf: &str| {
+            let reaches_another = |node: &str| {
+                covers.get(node).is_some_and(|members| members.iter().any(|m| *m != leaf))
+            };
+            let mut seen: BTreeSet<&str> =
+                std::iter::once(leaf).chain(model.ancestors(leaf)).collect();
+            let mut frontier: Vec<&str> = seen.iter().copied().collect();
+            while let Some(node) = frontier.pop() {
+                for &to in self.next.get(node).into_iter().flatten() {
+                    if reaches_another(to) {
+                        return true;
+                    }
+                    // What waits on `to` waits on its ancestors' dependencies too.
+                    for reached in std::iter::once(to).chain(model.ancestors(to)) {
+                        if toward.contains(reached) && seen.insert(reached) {
+                            frontier.push(reached);
+                        }
+                    }
+                }
+            }
+            false
+        };
+        open.iter()
+            .copied()
+            .filter(|id| model.children(id).is_empty() && !follows_another(id))
+            .collect()
+    }
 }
 
 #[cfg(test)]
