@@ -96,13 +96,23 @@ pub(crate) struct Written {
 impl Written {
     /// An item's data: the item, the proposals its scope changes left, and the threads items joined.
     pub fn item(self, id: &str) -> Json {
-        json!({"item": id, "proposals": self.proposals, "placed": placed(&self.inherited)})
+        json!({"item": id, "proposals": all_proposals(&self.proposals, &self.inherited),
+               "placed": placed(&self.inherited)})
     }
 
     /// A thread's data: the thread and the proposals its scope changes left.
     pub fn thread(self, id: &str) -> Json {
         json!({"thread": id, "proposals": self.proposals})
     }
+}
+
+/// Every proposal a write left: those of its own edits and those that hold the placements it made, each once.
+pub(crate) fn all_proposals(direct: &[String], placed: &[Inherited]) -> Vec<String> {
+    let mut all: Vec<String> =
+        direct.iter().cloned().chain(placed.iter().filter_map(|p| p.proposal.clone())).collect();
+    all.sort();
+    all.dedup();
+    all
 }
 
 /// An add that names other values than the entity holds, which `edit` is for.
