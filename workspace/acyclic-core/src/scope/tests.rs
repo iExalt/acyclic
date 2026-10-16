@@ -143,6 +143,62 @@ fn the_user_keeps_or_drops_a_proposal_once() {
     assert!(model.threads["ok"].repositories.is_empty());
 }
 
+/// Whether the approval of `ok` saw `item`.
+fn seen(r: &Replica, item: &str) -> Option<bool> {
+    Model::read(&r.state).unwrap().threads["ok"].approved_member(item)
+}
+
+#[test]
+fn a_member_applied_to_an_approved_thread_joins_its_approval() {
+    let mut r = setup();
+    approve(&mut r, "ok", true, by(USER, 2)).unwrap();
+    assert_eq!(seen(&r, "x"), Some(true));
+    // Proposed, so not applied and not seen, until it is kept.
+    let Outcome::Proposed(id) =
+        edit(&mut r, &member("y", Some("ok")), by("run/worker", 3)).unwrap()
+    else {
+        panic!("proposed")
+    };
+    assert_eq!(seen(&r, "y"), Some(false));
+    keep(&mut r, &id, by(USER, 4)).unwrap();
+    assert_eq!(seen(&r, "y"), Some(true), "keeping extends the approval");
+    // The user's own edit and a project manager's apply at once and extend it too.
+    for (item, actor) in [("a", USER), ("b", "run/boss")] {
+        add_item(&mut r, item, item, by(USER, 5)).unwrap();
+        assert_eq!(
+            edit(&mut r, &member(item, Some("ok")), by(actor, 6)).unwrap(),
+            Outcome::Applied
+        );
+        assert_eq!(seen(&r, item), Some(true), "{actor}");
+    }
+    // An unapproved thread has no approval to extend.
+    edit(&mut r, &member("a", Some("draft")), by(USER, 7)).unwrap();
+    assert_eq!(Model::read(&r.state).unwrap().threads["draft"].approved_member("a"), None);
+}
+
+#[test]
+fn an_approval_without_a_record_of_members_stays_without_one() {
+    let mut r = setup();
+    edit(&mut r, &member("y", Some("ok")), by(USER, 2)).unwrap();
+    assert_eq!(seen(&r, "y"), None, "it already counts every member");
+}
+
+#[test]
+fn competing_records_of_members_are_united_with_the_new_member() {
+    let mut mac = setup();
+    approve(&mut mac, "ok", true, by(USER, 2)).unwrap();
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state.clone());
+    for (r, item) in [(&mut mac, "a"), (&mut pi, "b")] {
+        add_item(r, item, item, by(USER, 3)).unwrap();
+        edit(r, &member(item, Some("ok")), by(USER, 4)).unwrap();
+    }
+    mac.join(&pi.state).unwrap();
+    assert!(Model::read(&mac.state).unwrap().threads["ok"].approved_members.is_conflict());
+    edit(&mut mac, &member("y", Some("ok")), by(USER, 5)).unwrap();
+    let members = &Model::read(&mac.state).unwrap().threads["ok"].approved_members;
+    assert_eq!(members, &Value::One(["a", "b", "x", "y"].map(str::to_owned).to_vec()));
+}
+
 struct NoAncestry;
 
 impl Ancestry for NoAncestry {

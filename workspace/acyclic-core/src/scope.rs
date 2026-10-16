@@ -421,7 +421,11 @@ fn apply(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), Wr
     match change {
         ScopeEdit::Member { item, thread } => {
             let key = model::item_key(item)?;
-            model::put(replica, &key, field::THREAD, thread.as_ref(), by)
+            model::put(replica, &key, field::THREAD, thread.as_ref(), by)?;
+            match thread {
+                Some(thread) => see_member(replica, thread, item, by),
+                None => Ok(()),
+            }
         },
         ScopeEdit::ItemRepository { item, repository, present } => {
             let key = model::item_key(item)?;
@@ -432,6 +436,33 @@ fn apply(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), Wr
             model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
         },
     }
+}
+
+/// Extends an approved thread's approval to a member applied to it, so work the user kept, or the user or a
+/// project manager added, counts as approved. The approval records members and nothing else, so a repository edit
+/// has nothing to extend. Competing records of members, which approvals on two replicas leave, are united. A thread
+/// that isn't approved, or whose approval recorded no members and so counts every member, is left alone.
+fn see_member(
+    replica: &mut Replica,
+    thread: &str,
+    item: &str,
+    by: By<'_>,
+) -> Result<(), WriteError> {
+    let key = Key::new(kind::THREAD, thread)?;
+    let approved: Value<bool> = model::value(&replica.state, &key, thread_field::APPROVED)?;
+    if !approved.all().into_iter().any(|approved| *approved) {
+        return Ok(());
+    }
+    let seen: Value<Vec<String>> =
+        model::value(&replica.state, &key, thread_field::APPROVED_MEMBERS)?;
+    let mut members: Vec<String> = seen.all().into_iter().flatten().cloned().collect();
+    if seen == Value::None || (members.iter().any(|member| member == item) && !seen.is_conflict()) {
+        return Ok(());
+    }
+    members.push(item.to_owned());
+    members.sort();
+    members.dedup();
+    model::put(replica, &key, thread_field::APPROVED_MEMBERS, Some(&members), by)
 }
 
 #[cfg(test)]
