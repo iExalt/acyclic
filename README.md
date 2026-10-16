@@ -24,6 +24,22 @@ The [glossary](GLOSSARY.md) defines the vocabulary.
 A tracker syncs through a shared Git repository. On GitHub, `sh scripts/tracker-ruleset.sh <owner>/<repository>`
 keeps that repository's audit logs append-only; run it before the first sync.
 
+## Install
+
+Each [release](https://github.com/iExalt/acyclic/releases) carries a static `acyclic` for Linux on x86-64 and arm64,
+and for macOS on Apple silicon. With [mise](https://mise.jdx.dev):
+
+```sh
+mise use -g github:iExalt/acyclic
+```
+
+mise holds a release back for its first day; name the version, such as `github:iExalt/acyclic@0.2.0`, to take it
+sooner.
+
+From a clone, `mise run install` fetches the graph page's renderers and installs `acyclic` into `~/.cargo/bin`.
+
+The server's image is `ghcr.io/iexalt/acyclic-server`, tagged with each release's tag, such as `v0.2.0`, and `latest`.
+
 ## Licence
 
 [MIT](LICENSE).
