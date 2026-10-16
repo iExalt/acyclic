@@ -55,6 +55,13 @@ fn an_add_repeated_changes_nothing_and_one_that_differs_is_refused() {
         assert_eq!(code(add_item(&mut r, "a", &other, AGENT)), "already-exists", "{what}");
     }
     assert_eq!(r.changes(), before);
+    // The refusal names the flags that differ and the command that changes them.
+    let notes = ItemFields { notes: Change::Set("m".into()), ..titled("A") };
+    let refused = add_item(&mut r, "a", &notes, AGENT).unwrap_err();
+    assert!(
+        refused.message.ends_with("; change it with `acyclic item edit a --notes …`"),
+        "{refused}"
+    );
 }
 
 #[test]

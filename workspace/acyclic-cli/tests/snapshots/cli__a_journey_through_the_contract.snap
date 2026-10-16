@@ -57,7 +57,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
         "--title"
       ]
     },
-    "message": "item a2 exists with other --title"
+    "message": "item a2 exists with other --title; change it with `acyclic item edit a2 --title …`"
   },
   "ok": false
 }
@@ -253,7 +253,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Other
         "--title"
       ]
     },
-    "message": "thread t1 exists with other --title"
+    "message": "thread t1 exists with other --title; change it with `acyclic thread edit t1 --title …`"
   },
   "ok": false
 }
@@ -626,7 +626,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
         "--public/--private"
       ]
     },
-    "message": "repository record r1 exists with other --public/--private"
+    "message": "repository record r1 exists with other --public/--private; change it with `acyclic repo edit r1 --public|--private`"
   },
   "ok": false
 }
@@ -976,7 +976,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --paren
         "--parent"
       ]
     },
-    "message": "item a3 exists with other --parent"
+    "message": "item a3 exists with other --parent; change it with `acyclic item edit a3 --parent …`"
   },
   "ok": false
 }
