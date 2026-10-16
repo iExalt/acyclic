@@ -12,6 +12,7 @@
 
 ## Working here
 
+- Use the `acyclic` CLI for project management: finding, claiming and finishing work. Run `acyclic prime` first.
 - Use mise for tools: `mise run check` is the routine check (format, Clippy, tests) and must stay under 60 seconds on
   a warm cache.
 - Most behaviour is covered by unit tests in the core library; integration tests cover contracts; browser journeys
