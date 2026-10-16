@@ -203,6 +203,15 @@ impl<'a> Session<'a> {
                             commit: commit.clone(),
                             note: note.clone(),
                         };
+                        let model = Model::read(replica.state())?;
+                        check_evidence(&model, &evidence)?;
+                        if !force && overwrites(&model.items[id], &evidence) {
+                            return Err(CliError::refused(
+                                "already-done",
+                                format!("item {id} is done with other evidence; pass --force to replace it"),
+                            )
+                            .with(json!({"evidence": model.items[id].evidence})));
+                        }
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
                     model::set_state(replica, id, ItemState::Done, by)?;
@@ -773,6 +782,54 @@ pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
         Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
         _ => false,
     }
+}
+
+/// Refuses evidence that could never verify, without asking the network: the commit must look like an object id and
+/// name a complete repository record.
+pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), CliError> {
+    let looks_like_object_id = |commit: &String| {
+        (7..=64).contains(&commit.len()) && commit.bytes().all(|b| b.is_ascii_hexdigit())
+    };
+    if evidence.commit.as_ref().is_some_and(|commit| !looks_like_object_id(commit)) {
+        return Err(CliError::new(
+            "invalid-commit",
+            exit::USAGE,
+            "a commit is 7 to 64 hexadecimal characters, as git prints it",
+        ));
+    }
+    let Some(id) = &evidence.repository else { return Ok(()) };
+    let Some(record) = model.repositories.get(id) else {
+        return Err(CliError::new(
+            "not-found",
+            exit::NOT_FOUND,
+            format!("no repository record {id}"),
+        ));
+    };
+    let missing: Vec<&str> = [
+        ("owner", record.owner.one().is_some()),
+        ("name", record.name.one().is_some()),
+        ("public", record.public.one().is_some()),
+        ("default-branch", record.default_branch.one().is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(field, set)| (!set).then_some(field))
+    .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(CliError::refused(
+        "incomplete-repository",
+        format!(
+            "repository record {id} is missing {}; set it with acyclic repo set",
+            missing.join(", ")
+        ),
+    )
+    .with(json!({"missing": missing})))
+}
+
+/// Whether recording `evidence` would replace different evidence on an item that is already done.
+pub(crate) fn overwrites(item: &model::Item, evidence: &Evidence) -> bool {
+    item.is_done() && !item.evidence.all().is_empty() && item.evidence.one() != Some(evidence)
 }
 
 /// Refuses to let an agent finish an item that isn't ready or that someone else holds; the user may finish anything.
