@@ -228,7 +228,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!("prime"),
         json!({"import": {"file": "/etc/passwd"}}),
         json!("doctor"),
-        json!({"graph": {"output": "/tmp/graph.dot"}}),
+        json!({"graph": {"file": "/tmp/graph.dot"}}),
     ] {
         assert_eq!(classify(refused.clone()), Use::Refused, "{refused}");
     }

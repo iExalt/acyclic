@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 
 /// The command words and positional arguments: what comes before the first option of the command's own, with the
-/// options every command takes, `--tracker`, `--actor` and `--as-user`, set aside. A hint is a courtesy, not a parse.
+/// options every command takes, `--tracker`, `--actor`, `--as-user` and `--output`, set aside. A hint is a courtesy, not a parse.
 fn words(args: &[OsString]) -> Vec<String> {
     let mut words = Vec::new();
     let mut skip = false;
@@ -12,12 +12,14 @@ fn words(args: &[OsString]) -> Vec<String> {
         if std::mem::take(&mut skip) {
             continue;
         }
-        if matches!(&*arg, "--tracker" | "--actor") {
+        if matches!(&*arg, "--tracker" | "--actor" | "--output" | "-o") {
             skip = true;
         } else if arg.starts_with('-') {
             // The other options every command takes are set aside; any other is the command's own.
-            let global =
-                arg == "--as-user" || arg.starts_with("--tracker=") || arg.starts_with("--actor=");
+            let global = arg == "--as-user"
+                || ["--tracker=", "--actor=", "--output="]
+                    .iter()
+                    .any(|prefix| arg.starts_with(prefix));
             if !global {
                 break;
             }
@@ -99,13 +101,23 @@ const LEVEL_FLAG: Removed = Removed {
     instead: "`acyclic thread edit <THREAD> --level <LEVEL>`, or `--no-level`",
 };
 
+/// `graph --output <FILE>` became `--file`, since `--output` says how every command prints. A value it takes, `json`
+/// or `pretty`, parses as that, so only another one reaches this hint.
+const GRAPH_OUTPUT: Removed = Removed {
+    words: &["graph"],
+    flag: Some("--output"),
+    at_least: 0,
+    instead: "`acyclic graph --file <FILE>` (`--output` now says how to print: `json` or `pretty`)",
+};
+
 /// A message for a command line that failed to parse because it used a replaced name or form, if it did.
 #[must_use]
 pub fn hint(args: &[OsString]) -> Option<String> {
     let words = words(args);
-    let removed = REMOVED.iter().chain([&LEVEL_FLAG]).find(|removed| {
+    let removed = REMOVED.iter().chain([&LEVEL_FLAG, &GRAPH_OUTPUT]).find(|removed| {
         words.starts_with(&removed.words.iter().map(ToString::to_string).collect::<Vec<_>>())
             && words.len() >= removed.at_least
+            && !(removed.words == GRAPH_OUTPUT.words && says_how_to_print(args))
             && removed.flag.is_none_or(|flag| {
                 args.iter().any(|arg| {
                     let arg = arg.to_string_lossy();
@@ -125,6 +137,14 @@ pub fn hint(args: &[OsString]) -> Option<String> {
         });
     }
     done_state(args, &words).or_else(|| link_word(&words))
+}
+
+/// Whether `--output` names a way to print, so the command line failed for another reason than graph's old flag.
+fn says_how_to_print(args: &[OsString]) -> bool {
+    let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let format = |value: &str| ["json", "pretty"].contains(&value);
+    args.iter().any(|arg| arg.strip_prefix("--output=").is_some_and(format))
+        || args.windows(2).any(|pair| pair[0] == "--output" && format(&pair[1]))
 }
 
 /// `--state done` finishes nothing: `acyclic done` records evidence.

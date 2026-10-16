@@ -776,6 +776,47 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic list -o pretty
+# exit 0
+ID  TITLE   STATE    THREAD  READINESS
+a1  First   done     t1      done
+a2  Second  backlog  t1      ready
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready -o pretty
+# exit 0
+THREAD   ITEM  TITLE   APPROVED
+t1 Work  a2    Second  yes
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread list -o pretty
+# exit 0
+ID  TITLE  APPROVED  MEMBERS  DONE  HEADS
+t0  Start  no        0        0
+t1  Work   yes       2        1     a2
+
+$ ACYCLIC_ACTOR=session/mac acyclic show a1 -o pretty
+# exit 0
+id         a1
+title      First
+archived   no
+done_at    2026-10-15T00:00:00Z
+evidence   note shipped
+links      waited_on_by a2
+readiness  done
+reopened   no
+role       item
+state      done
+thread     t1
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First -o pretty
+# exit 0
+no change to item a1
+
+$ ACYCLIC_ACTOR=session/mac acyclic show nope -o pretty
+# exit 3
+
+# stderr
+error: no item nope [not-found]
+
 $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
 # exit 0
 {
@@ -1128,7 +1169,7 @@ digraph acyclic {
   }
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --output graph.mmd
+$ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --file graph.mmd
 # exit 0
 {
   "data": {
@@ -1161,7 +1202,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic graph --format html
   "error": {
     "code": "usage",
     "details": null,
-    "message": "an HTML page is too large for standard output: pass --output <file> or --open"
+    "message": "an HTML page is too large for standard output: pass --file <FILE> or --open"
   },
   "ok": false
 }

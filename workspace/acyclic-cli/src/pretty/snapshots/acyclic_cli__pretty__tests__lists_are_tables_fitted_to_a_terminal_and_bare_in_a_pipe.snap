@@ -1,0 +1,17 @@
+---
+source: workspace/acyclic-cli/src/pretty/tests.rs
+expression: "format!(\"{piped}\\n{narrow}\")"
+---
+ID     TITLE                                        STATE    THREAD  READINESS
+beds   Build the raised beds along the south fence  backlog  t1      ready
+plant  Plant tomatoes                               backlog  t1      blocked (waiting beds why open)
+
+ ID      TITLE            STATE     THREAD   READINESS      
+────────────────────────────────────────────────────────────
+ beds    Build the        backlog   t1       ready          
+         raised beds                                        
+         along the                                          
+         south fence                                        
+ plant   Plant tomatoes   backlog   t1       blocked        
+                                             (waiting beds  
+                                             why open)

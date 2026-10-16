@@ -21,7 +21,8 @@ impl Shell {
     }
 
     fn env(&self, extra: &[(&str, &str)]) -> Env {
-        let mut env = Env { vars: Default::default(), cwd: self.dir.path().to_path_buf() };
+        let mut env =
+            Env { vars: Default::default(), cwd: self.dir.path().to_path_buf(), terminal: None };
         for (name, value) in
             [("ACYCLIC_NOW", NOW), ("ACYCLIC_TRACKER", "tracker"), ("HOME", "/nonexistent")]
                 .iter()
@@ -138,6 +139,18 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("list", AGENT), 0);
     // a1 joined after the approval, so the approval didn't see it.
     assert_eq!(sh.run("thread list", AGENT), 0);
+    // JSON stays the default, byte for byte, and `-o pretty` prints the same data for people, an error on stderr.
+    for line in ["list", "ready", "thread list", "show a1", "show nope"] {
+        let stdout = |line: String| {
+            let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
+            execute(args, &sh.env(AGENT)).stdout
+        };
+        assert_eq!(stdout(format!("{line} -o json")), stdout(line.to_owned()), "{line}");
+    }
+    for line in ["list", "ready", "thread list", "show a1", "item add a1 --title First"] {
+        assert_eq!(sh.run(&format!("{line} -o pretty"), AGENT), 0, "{line}");
+    }
+    assert_eq!(sh.run("show nope -o pretty", AGENT), 3);
     assert_eq!(sh.run("thread show t1", AGENT), 0);
     assert_eq!(
         sh.run("thread show t1 nope", AGENT),
@@ -171,7 +184,7 @@ fn a_journey_through_the_contract() {
     let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
     assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
-    let (code, out) = sh.output("graph --format mermaid --output graph.mmd", AGENT);
+    let (code, out) = sh.output("graph --format mermaid --file graph.mmd", AGENT);
     assert_eq!((code, out["data"]["counts"]["items"].as_u64()), (0, Some(2)));
     let mermaid = std::fs::read_to_string(sh.path().join("graph.mmd")).unwrap();
     assert!(mermaid.starts_with("flowchart TB\n"), "{mermaid}");

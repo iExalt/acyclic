@@ -25,8 +25,8 @@ Every command's inputs follow these rules, so you can guess a command from its n
 5. **Relations are fields.** An item has `--parent`, `--thread`, `--repository` and `--state`; a thread has
    `--repository` and `--level`. An agent's change to an approved thread's membership or repositories doesn't apply:
    it waits as a proposal, listed in the result's `proposals`, for the user to `proposal keep` or `proposal drop`.
-6. **Global options** (`--tracker`, `--actor`, `--as-user`) are listed under their own heading on every help page.
-   `acyclic help` and `acyclic help <command> [<subcommand>]` show a command's help.
+6. **Global options** (`--tracker`, `--actor`, `--as-user`, `--output`) are listed under their own heading on every
+   help page. `acyclic help` and `acyclic help <command> [<subcommand>]` show a command's help.
 7. **Enum-valued inputs** list their values in help, and a wrong value's error lists them again.
 8. **Completions.** `acyclic completions <SHELL>` prints a script for bash, zsh, fish, elvish or PowerShell; for zsh,
    `acyclic completions zsh > ~/.zfunc/_acyclic` with `~/.zfunc` on `fpath`.
@@ -39,8 +39,11 @@ are `waits-for`, which holds work back, and `relates-to`, which is context only.
 Every command's output follows these rules, so you can guess a key from the inputs.
 
 1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Every
-   command prints one, except `prime`, `completions`, `graph` without `--output`, `import --schema` and help and
-   version text, which print text; errors are always JSON. Times are RFC 3339 in UTC and their keys end in `_at`.
+   command prints one, except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and
+   version text, which print text; errors are JSON too. Times are RFC 3339 in UTC and their keys end in `_at`.
+   `-o pretty` prints the same data for people instead: a table for `list`, `ready` and `thread list`, a block of
+   fields for each record, one line for a write, and an error as one line on standard error with the same exit code.
+   Tables fit the terminal's width, and print without borders or wrapping when piped.
 2. **Naming.** A record carries its own id as `id`. A reference is named for the entity it points to, in the plural for
    a list: `parent`, `thread`, `item`, `repository`, `proposal`, `repositories`. Keys match the input flags, in snake
    case; enum values are kebab-case. A reference that can name several kinds of entity is `{entity, id}`, as in a
@@ -53,7 +56,7 @@ Every command's output follows these rules, so you can guess a key from the inpu
    its details added at the top level, so a thread's
    `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`. `proposal list`
    returns every proposal, open ones first, as `proposal show` does, with the item its edit names under `item`.
-4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor`, `graph --output`
+4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor`, `graph --file`
    and `import`. An absent scalar is `null`, an absent set is `[]`, and a flag such as `approved`, `archived`,
    `reopened`, `public` or `conflicted` is always `true` or `false`. A scalar whose replicas disagree reads
    `{"conflict": […]}`, and `needs` lists it.

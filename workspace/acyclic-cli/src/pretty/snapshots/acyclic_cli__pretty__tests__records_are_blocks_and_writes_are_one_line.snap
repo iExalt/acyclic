@@ -1,0 +1,15 @@
+---
+source: workspace/acyclic-cli/src/pretty/tests.rs
+expression: "format!(\"{}\\n{}{}\", render(&command(\"show plant\"), &shown, None),\nrender(&command(\"item edit plant --thread t1\"), &edited, None),\nrender(&command(\"thread add t1 --title T\"), &unchanged, None))"
+---
+id        plant
+title     Plant
+archived  no
+links     waits_for beds
+
+claims:
+HOLDER     LEASE_EXPIRES_AT      LEASE_STARTED_AT      REPLICA
+session/s  2026-10-15T01:00:00Z  2026-10-15T00:00:00Z  mac
+
+changed item plant · proposals mac-9 (thread)
+no change to thread t1

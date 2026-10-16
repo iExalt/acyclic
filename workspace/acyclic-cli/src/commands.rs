@@ -69,7 +69,7 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
         ));
     }
     let session = Session::open(cli, env)?;
-    if let Command::Graph { format, renderer, open, root, thread, include_archived, output } =
+    if let Command::Graph { format, renderer, open, root, thread, include_archived, file } =
         &cli.command
     {
         let scope = export::Scope {
@@ -86,7 +86,7 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
             ));
         }
         let renderer = renderer.unwrap_or(Renderer::Graphviz);
-        return session.graph(format, renderer, &scope, output.as_deref(), *open);
+        return session.graph(format, renderer, &scope, file.as_deref(), *open);
     }
     session.dispatch(&cli.command).map(Output::Json)
 }
@@ -496,7 +496,7 @@ impl<'a> Session<'a> {
         }
         if format == GraphFormat::Html && output.is_none() && !open {
             return Err(usage(
-                "an HTML page is too large for standard output: pass --output <file> or --open",
+                "an HTML page is too large for standard output: pass --file <FILE> or --open",
             ));
         }
         let (_, model) = self.read()?;

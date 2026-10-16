@@ -17,8 +17,8 @@ use serde::Serialize;
 /// The heading the options that every command takes sit under in its help.
 const GLOBAL_OPTIONS: &str = "Global options";
 
-/// The acyclic tracker. Every command prints one JSON document, except `prime`, `completions`, `graph` without
-/// `--output`, `import --schema` and help and version text.
+/// The acyclic tracker. Every command prints one JSON document, or with `-o pretty` text for people, except `prime`,
+/// `completions`, `graph` without `--file`, `import --schema` and help and version text.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -32,9 +32,35 @@ pub struct Cli {
     /// Act as the user.
     #[arg(long, global = true, conflicts_with = "actor", help_heading = GLOBAL_OPTIONS)]
     pub as_user: bool,
+    /// How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error.
+    #[arg(
+        short = 'o',
+        long,
+        global = true,
+        value_parser = values(&Format::ALL),
+        default_value = "json",
+        help_heading = GLOBAL_OPTIONS
+    )]
+    pub output: Format,
     /// The command.
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// How a command prints.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Format {
+    /// One JSON document.
+    #[default]
+    Json,
+    /// Tables and summaries, fitted to the terminal's width, with no borders when not printing to one.
+    Pretty,
+}
+
+impl Format {
+    /// Every format, in the order help lists them.
+    pub const ALL: [Self; 2] = [Self::Json, Self::Pretty];
 }
 
 /// The top level's help sections, in order: what every session uses, the groups, then the rest.
@@ -208,7 +234,7 @@ pub enum Command {
     Doctor,
     /// Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser.
     Graph {
-        /// The document's format: DOT by default, HTML with `--open`. HTML needs `--output` or `--open`.
+        /// The document's format: DOT by default, HTML with `--open`. HTML needs `--file` or `--open`.
         #[arg(long, value_enum)]
         format: Option<GraphFormat>,
         /// What lays out the HTML page: Graphviz by default.
@@ -230,7 +256,7 @@ pub enum Command {
         include_archived: bool,
         /// Write the document here and print a JSON summary instead.
         #[arg(long)]
-        output: Option<PathBuf>,
+        file: Option<PathBuf>,
     },
     /// Adds, edits, reopens, archives and deletes items.
     #[command(subcommand)]

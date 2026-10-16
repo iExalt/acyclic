@@ -18,6 +18,7 @@ fn env(vars: &[(&str, &str)]) -> Env {
     Env {
         vars: vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
         cwd: PathBuf::from("/"),
+        terminal: None,
     }
 }
 
@@ -638,13 +639,12 @@ fn every_command_follows_the_input_conventions() {
                     "{path}: positional <{shown}> is neither an entity's id nor a listed exception"
                 );
             }
-            // A short flag is its long's initial, apart from the usual `-n` for a dry run; `-o` is left for output.
+            // A short flag is its long's initial, apart from the usual `-n` for a dry run.
             if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
                 assert!(
                     long.starts_with(short) || (short, long) == ('n', "dry-run"),
                     "{path}: -{short} for --{long}"
                 );
-                assert_ne!(short, 'o', "{path}: -o is kept for output");
             }
             // A flag that clears or removes has the flag that sets or adds.
             if let Some(field) = arg.get_long().and_then(|long| long.strip_prefix("no-")) {
@@ -691,6 +691,8 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         ("acyclic repo attach r1 --item a1", "acyclic item edit <ITEM> --repository <REPOSITORY>"),
         ("acyclic repo detach r1 --thread t1", "acyclic thread edit <THREAD> --no-repository"),
         ("acyclic level --thread t1 blockers", "acyclic thread edit <THREAD> --level <LEVEL>"),
+        ("acyclic graph --output graph.dot", "acyclic graph --file <FILE>"),
+        ("acyclic -o pretty item move a1 b1", "acyclic item edit <ITEM> --parent <PARENT>"),
         ("acyclic item edit a1 --state done", "acyclic done <ITEM>"),
         ("acyclic item add a1 --title T --state=done", "acyclic done <ITEM>"),
     ] {
@@ -705,6 +707,9 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         "acyclic level blockers",
         "acyclic thread edit t1 --level blockers",
         "acyclic repo edit r1 --private",
+        // A way to print parses as one, so a graph line failing with it failed for another reason.
+        "acyclic graph --output pretty --bogus",
+        "acyclic --output=json graph --bogus",
     ] {
         assert_eq!(hint(line), None, "{line}");
     }

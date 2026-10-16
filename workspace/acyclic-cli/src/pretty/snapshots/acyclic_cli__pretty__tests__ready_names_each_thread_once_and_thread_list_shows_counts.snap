@@ -1,0 +1,12 @@
+---
+source: workspace/acyclic-cli/src/pretty/tests.rs
+expression: "format!(\"{}\\n{}\", render(&command(\"ready\"), &ready, None),\nrender(&command(\"thread list\"), &threads, None))"
+---
+THREAD      ITEM  TITLE  APPROVED
+t1 Garden   beds  Beds   yes
+            path  Path   yes
+t2 Kitchen  tap   Tap
+
+ID  TITLE    APPROVED  MEMBERS  DONE  HEADS
+t1  Garden   yes       2        0     beds
+t2  Kitchen  no        1        0     tap
