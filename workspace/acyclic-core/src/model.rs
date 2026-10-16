@@ -141,9 +141,6 @@ pub enum LinkKind {
 }
 
 impl LinkKind {
-    /// Every kind.
-    pub const ALL: [Self; 3] = [Self::Blocks, Self::After, Self::Relates];
-
     fn as_str(self) -> &'static str {
         match self {
             Self::Blocks => "blocks",

@@ -378,9 +378,11 @@ impl Generator {
             let hard = self.rng.poisson(EXP_MINUS_1_3);
             let soft = usize::from(self.rng.chance(0.1));
             let related = usize::from(self.rng.chance(0.05));
-            for (kind, n) in
-                [(LinkKind::Blocks, hard), (LinkKind::After, soft), (LinkKind::Relates, related)]
-            {
+            for (kind, n) in [
+                (LinkKind::WaitsFor, hard),
+                (LinkKind::Follows, soft),
+                (LinkKind::RelatesTo, related),
+            ] {
                 for _ in 0..n {
                     let pool: &[usize] = match owner[from] {
                         Some(thread) if self.rng.chance(0.75) => &by_thread[&thread],
@@ -489,9 +491,9 @@ mod tests {
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;
-        assert!(near(stats.link_rate(LinkKind::Blocks), 1.2, 0.3), "{at}");
-        assert!(near(stats.link_rate(LinkKind::After), 0.1, 0.3), "{at}");
-        assert!(near(stats.link_rate(LinkKind::Relates), 0.05, 0.5), "{at}");
+        assert!(near(stats.link_rate(LinkKind::WaitsFor), 1.2, 0.3), "{at}");
+        assert!(near(stats.link_rate(LinkKind::Follows), 0.1, 0.3), "{at}");
+        assert!(near(stats.link_rate(LinkKind::RelatesTo), 0.05, 0.5), "{at}");
         stats
     }
 
@@ -522,9 +524,9 @@ mod tests {
 
     #[test]
     fn a_seed_gives_the_same_plan_everywhere() {
-        // A deliberate change to the generator updates this digest; anything else changing it is a bug.
+        // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (135_247, 16_335_080_223_692_117_457));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (136_532, 17_947_965_402_746_079_840));
     }
 
     #[test]

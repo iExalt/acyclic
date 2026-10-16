@@ -352,6 +352,9 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
         [
             "done: commit",
             "done: repository",
+            "import: dry_run",
+            "import: file",
+            "import: schema",
             "repo attach: item",
             "repo detach: item",
             "show: items",
@@ -365,6 +368,11 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(refused(json!({"show": {"items": []}})), Err("usage"));
     assert_eq!(refused(json!({"thread": {"show": {"threads": []}}})), Err("usage"));
     assert_eq!(refused(json!({"done": {"id": "a", "commit": "c"}})), Err("usage"));
+    assert_eq!(refused(json!({"import": {}})), Err("usage"));
+    assert_eq!(refused(json!({"import": {"file": "p", "schema": true}})), Err("usage"));
+    assert_eq!(refused(json!({"import": {"schema": true, "dry-run": true}})), Err("usage"));
+    assert_eq!(refused(json!({"import": {"schema": true}})), Ok(()));
+    assert_eq!(refused(json!({"import": {"file": "p", "dry-run": true}})), Ok(()));
     assert_eq!(refused(json!({"repo": {"attach": {"repository": "r"}}})), Err("usage"));
     assert_eq!(
         refused(json!({"repo": {"detach": {"repository": "r", "item": "a", "thread": "t"}}})),
@@ -461,6 +469,9 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
         assert!(err.to_string().contains("1..=480"), "{err}");
     }
     assert!(args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", "480"]).is_ok());
+    // The help text says the same bound.
+    let help = run("acyclic help claim").stdout;
+    assert!(help.contains(&format!("1 to {}", args::LEASE_MAX_MINUTES)), "{help}");
 }
 
 #[test]
@@ -475,4 +486,51 @@ fn creating_a_repository_record_needs_every_field_and_editing_any() {
     assert!(err.message.contains("(missing: --name, --public)"), "{err}");
     assert!(check(false, Some(&o), Some(&n), Some(true), Some(&main)).is_ok());
     assert!(check(true, Some(&o), None, None, None).is_ok());
+}
+
+#[test]
+fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
+    use acyclic_core::model::LinkKind;
+    for (word, kind) in [
+        (args::LinkWord::WaitsFor, LinkKind::Blocks),
+        (args::LinkWord::Follows, LinkKind::After),
+        (args::LinkWord::RelatesTo, LinkKind::Relates),
+    ] {
+        assert_eq!(word.kind(), kind);
+    }
+    // Exhaustive, so a new word must be listed.
+    for word in args::LinkWord::ALL {
+        match word {
+            args::LinkWord::WaitsFor | args::LinkWord::Follows | args::LinkWord::RelatesTo => {},
+        }
+    }
+    for (old, new) in [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")] {
+        let out = run(&format!("acyclic link add a2 {old} a1"));
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{old}");
+        assert!(
+            out.stderr
+                .contains(&format!("`{old}` is now `{new}`: use `acyclic link add a2 {new} a1`")),
+            "{out:?}"
+        );
+    }
+    // The hint follows a global option, and a word that was never a kind gets the usual error.
+    let out = run("acyclic --actor session/mac link remove a2 blocks a1");
+    assert!(out.stderr.contains("use `acyclic link remove a2 waits-for a1`"), "{out:?}");
+    assert!(run("acyclic link add a2 sideways a1").stderr.contains("[possible values: waits-for"));
+    let help = run("acyclic help link add").stdout;
+    assert!(help.contains("`<FROM>` waits for, follows, or relates to `<TO>`"), "{help}");
+    assert!(help.contains("acyclic link add plant waits-for beds"), "{help}");
+}
+
+#[test]
+fn import_schema_prints_an_example_as_text_and_takes_no_file() {
+    let out = run("acyclic import --schema");
+    assert_eq!((out.code, out.stdout.as_str()), (exit::OK, acyclic_core::import::SCHEMA));
+    assert!(run("acyclic help import").stdout.contains("--schema"));
+    for line in
+        ["acyclic import --schema plan.json", "acyclic import", "acyclic import --schema --dry-run"]
+    {
+        let out = run(line);
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
+    }
 }

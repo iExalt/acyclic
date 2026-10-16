@@ -44,8 +44,8 @@ older copy.
    commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
    are done; don't use `--force` to finish someone else's work.
 4. `acyclic item` (`add`, `edit`, `move`, `state`) and `acyclic link` (`add`, `remove`) shape the plan;
-   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change. Only `blocks`
-   and `after` links order work: ids, numbering and thread membership never do, so link every dependency you mean.
+   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change. Only `waits-for`
+   and `follows` links order work: ids, numbering and thread membership never do, so link every dependency you mean.
    Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent,
    links and thread it belongs with.
    `acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than

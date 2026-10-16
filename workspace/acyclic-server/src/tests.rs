@@ -197,7 +197,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"level": {"level": "blockers"}}),
         json!({"item": {"add": {"id": "a", "title": "A"}}}),
         json!({"item": {"archive": {"id": "a"}}}),
-        json!({"link": {"add": {"from": "a", "kind": "blocks", "to": "b"}}}),
+        json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
         json!({"thread": {"approve": {"thread": "t"}}}),
         json!({"repo": {"attach": {"repository": "r", "item": "a"}}}),
         json!({"proposal": {"keep": {"proposal": "p"}}}),

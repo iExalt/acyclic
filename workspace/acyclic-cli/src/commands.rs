@@ -54,6 +54,9 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Prime = &cli.command {
         return Ok(Output::Text(prime()));
     }
+    if let Command::Import { schema: true, .. } = &cli.command {
+        return Ok(Output::Text(import::SCHEMA.to_owned()));
+    }
     if let Command::Serve(_) = &cli.command {
         return Err(CliError::new(
             "no-server",
@@ -106,7 +109,11 @@ impl<'a> Session<'a> {
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
     fn dispatch(&self, command: &Command) -> Result<Json, CliError> {
         match command {
-            Command::Init { .. } | Command::Prime | Command::Graph { .. } | Command::Serve(_) => {
+            Command::Init { .. }
+            | Command::Prime
+            | Command::Graph { .. }
+            | Command::Import { file: None, .. }
+            | Command::Serve(_) => {
                 unreachable!("handled before dispatch")
             },
             Command::Ready { include_archived, approved } => {
@@ -167,20 +174,26 @@ impl<'a> Session<'a> {
                     }),
                     None => error,
                 }),
-            Command::Link(LinkCommand::Add { from, kind, to }) => self.write(|replica, by| {
-                let key = model::link_key(from, to, *kind)?;
-                if replica.state().field(&key, link_field::PRESENT).is_none() {
-                    model::link(replica, from, to, *kind, by)?;
-                }
-                Ok(json!({"from": from, "kind": kind, "to": to}))
-            }),
-            Command::Link(LinkCommand::Remove { from, kind, to }) => self.write(|replica, by| {
-                let key = model::link_key(from, to, *kind)?;
-                if replica.state().field(&key, link_field::PRESENT).is_some() {
-                    model::unlink(replica, from, to, *kind, by)?;
-                }
-                Ok(json!({"from": from, "kind": kind, "to": to}))
-            }),
+            Command::Link(LinkCommand::Add { from, kind: word, to }) => {
+                self.write(|replica, by| {
+                    let kind = word.kind();
+                    let key = model::link_key(from, to, kind)?;
+                    if replica.state().field(&key, link_field::PRESENT).is_none() {
+                        model::link(replica, from, to, kind, by)?;
+                    }
+                    Ok(json!({"from": from, "kind": word, "to": to}))
+                })
+            },
+            Command::Link(LinkCommand::Remove { from, kind: word, to }) => {
+                self.write(|replica, by| {
+                    let kind = word.kind();
+                    let key = model::link_key(from, to, kind)?;
+                    if replica.state().field(&key, link_field::PRESENT).is_some() {
+                        model::unlink(replica, from, to, kind, by)?;
+                    }
+                    Ok(json!({"from": from, "kind": word, "to": to}))
+                })
+            },
             Command::Item(ItemCommand::State { state: ItemState::Done, .. }) => Err(CliError::new(
                 "usage",
                 exit::USAGE,
@@ -285,7 +298,7 @@ impl<'a> Session<'a> {
                 set_if(replica, &key, name, Some(level), by)?;
                 Ok(json!({"thread": id, "level": level}))
             }),
-            Command::Import { file, dry_run } => self.import(file, *dry_run),
+            Command::Import { file: Some(file), dry_run, .. } => self.import(file, *dry_run),
             Command::Item(ItemCommand::Archive { id }) => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);

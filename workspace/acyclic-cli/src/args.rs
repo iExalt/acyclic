@@ -181,14 +181,20 @@ pub enum Command {
         #[arg(long)]
         thread: Option<String>,
     },
-    /// Imports a plan: adds and updates what the document names, and never deletes.
+    /// Imports a plan: adds and updates what the document names, and never deletes. `--schema` prints an
+    /// annotated example of the document.
     Import {
         /// The import document.
-        file: PathBuf,
+        #[arg(required_unless_present = "schema")]
+        file: Option<PathBuf>,
         /// Report what would change without writing it.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "schema")]
         #[serde(default)]
         dry_run: bool,
+        /// Print an annotated example of the document's current version as text, and import nothing.
+        #[arg(long, conflicts_with = "file")]
+        #[serde(default)]
+        schema: bool,
     },
     /// Lists entities that can't be read.
     Doctor,
@@ -281,6 +287,13 @@ impl Command {
             },
             Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
                 usage(&format!("--lease is 1 to {LEASE_MAX_MINUTES} minutes"))
+            },
+            Self::Import { file: None, schema: false, .. } => {
+                usage("import needs a file, or --schema for an example of one")
+            },
+            Self::Import { file: Some(_), schema: true, .. }
+            | Self::Import { dry_run: true, schema: true, .. } => {
+                usage("--schema prints an example: it takes no file and no --dry-run")
             },
             Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
                 usage("done takes --repository and --commit together")
@@ -382,28 +395,68 @@ pub enum ItemCommand {
     },
 }
 
+/// A link's kind as the command line names it. The stored names are the model's [`LinkKind`], which are kept as they
+/// are on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LinkWord {
+    /// `<FROM>` can't start until `<TO>` is done.
+    WaitsFor,
+    /// `<FROM>` is better done after `<TO>`, but may go first.
+    Follows,
+    /// Context only: neither orders the other.
+    RelatesTo,
+}
+
+impl LinkWord {
+    /// Every word.
+    pub const ALL: [Self; 3] = [Self::WaitsFor, Self::Follows, Self::RelatesTo];
+
+    /// The model's kind for the word.
+    #[must_use]
+    pub fn kind(self) -> LinkKind {
+        match self {
+            Self::WaitsFor => LinkKind::Blocks,
+            Self::Follows => LinkKind::After,
+            Self::RelatesTo => LinkKind::Relates,
+        }
+    }
+}
+
+/// What the link commands' help shows beside their arguments.
+const LINK_EXAMPLE: &str = concat!(
+    "Kinds:\n",
+    "  waits-for   <FROM> can't start until <TO> is done\n",
+    "  follows     <FROM> is better done after <TO>, but may go first\n",
+    "  relates-to  context only: neither orders the other\n",
+    "\n",
+    "Example: acyclic link add plant waits-for beds (plant can't start until beds is done)"
+);
+
 /// The link commands.
 #[derive(Debug, Subcommand, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum LinkCommand {
-    /// Links two items: `from` blocks on, follows (`after`) or relates to `to`.
+    /// Links two items: `<FROM>` waits for, follows, or relates to `<TO>`.
+    #[command(after_help = LINK_EXAMPLE)]
     Add {
-        /// The dependent item.
+        /// The item that waits, follows or relates.
         from: String,
-        /// `blocks`, `after` or `relates`.
-        #[arg(value_parser = values(&LinkKind::ALL))]
-        kind: LinkKind,
-        /// The item it depends on.
+        /// How `<FROM>` stands to `<TO>`.
+        #[arg(value_parser = values(&LinkWord::ALL))]
+        kind: LinkWord,
+        /// The item it stands to.
         to: String,
     },
-    /// Removes a link.
+    /// Removes a link: `<FROM>` no longer waits for, follows, or relates to `<TO>`.
+    #[command(after_help = LINK_EXAMPLE)]
     Remove {
-        /// The dependent item.
+        /// The item that waits, follows or relates.
         from: String,
-        /// `blocks`, `after` or `relates`.
-        #[arg(value_parser = values(&LinkKind::ALL))]
-        kind: LinkKind,
-        /// The item it depends on.
+        /// How `<FROM>` stands to `<TO>`.
+        #[arg(value_parser = values(&LinkWord::ALL))]
+        kind: LinkWord,
+        /// The item it stands to.
         to: String,
     },
 }

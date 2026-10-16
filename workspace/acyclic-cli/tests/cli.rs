@@ -68,7 +68,7 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0);
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("item add a2 --title Other", AGENT), 1);
-    assert_eq!(sh.run("link add a2 blocks a1", AGENT), 0);
+    assert_eq!(sh.run("link add a2 waits-for a1", AGENT), 0);
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
     assert_eq!(sh.run("done a2", AGENT), 1, "nor can it be finished");
@@ -139,7 +139,7 @@ fn a_journey_through_the_contract() {
     let page = std::fs::read_to_string(path).unwrap();
     assert!(page.contains("data-renderer=\"graphviz\""));
     assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
-    let (code, unlinked) = sh.output("link remove a2 blocks a1", AGENT);
+    let (code, unlinked) = sh.output("link remove a2 waits-for a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
     assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
     // a2 left t1; an agent groups it into a new thread, which the user then sees awaiting approval.

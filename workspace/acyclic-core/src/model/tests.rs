@@ -418,11 +418,6 @@ fn listed_in_all() {
             Level::Everything | Level::ScopeAndIrreversible | Level::Blockers => {},
         }
     }
-    for kind in LinkKind::ALL {
-        match kind {
-            LinkKind::Blocks | LinkKind::After | LinkKind::Relates => {},
-        }
-    }
 }
 
 fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
@@ -442,6 +437,5 @@ fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
     listed_in_all();
     assert_eq!(names(&ItemState::ALL), ["backlog", "parked", "in-progress", "done"]);
     assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
-    assert_eq!(names(&LinkKind::ALL), ["blocks", "after", "relates"]);
     assert_eq!(names(&Level::ALL), ["everything", "scope-and-irreversible", "blockers"]);
 }

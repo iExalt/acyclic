@@ -211,8 +211,8 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     record(&mut row, "claim again", &times(&|_| format!("claim {}", leaves[0]), true));
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
-            let sample = tracker.time(&format!("link add {item} blocks bench-target"), false);
-            tracker.run(&format!("link remove {item} blocks bench-target"), false);
+            let sample = tracker.time(&format!("link add {item} waits-for bench-target"), false);
+            tracker.run(&format!("link remove {item} waits-for bench-target"), false);
             sample
         })
         .collect();
