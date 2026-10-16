@@ -355,6 +355,12 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
         refused(json!({"repo": {"detach": {"repository": "r", "item": "a", "thread": "t"}}})),
         Err("usage")
     );
+    for lease in [0, 481] {
+        assert_eq!(refused(json!({"claim": {"id": "a", "lease": lease}})), Err("usage"));
+    }
+    for lease in [1, 480] {
+        assert_eq!(refused(json!({"claim": {"id": "a", "lease": lease}})), Ok(()));
+    }
     assert_eq!(refused(json!({"done": {"id": "a", "repository": "r", "commit": "c"}})), Ok(()));
     assert_eq!(refused(json!({"repo": {"attach": {"repository": "r", "thread": "t"}}})), Ok(()));
     // Unknown fields and the server's own command are refused when deserializing.
@@ -430,4 +436,28 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     assert!(!overwrites(&mac, &first), "the same evidence");
     assert!(overwrites(&mac, &evidence("r", "def5678")));
     assert!(overwrites(&mac, &Evidence { note: Some("n".into()), ..Evidence::default() }));
+}
+
+#[test]
+fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
+    for lease in ["0", "481", "999"] {
+        let err =
+            args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", lease]).unwrap_err();
+        assert!(err.to_string().contains("1..=480"), "{err}");
+    }
+    assert!(args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", "480"]).is_ok());
+}
+
+#[test]
+fn creating_a_repository_record_needs_every_field_and_editing_any() {
+    let (o, n, main) = ("o".to_owned(), "n".to_owned(), "main".to_owned());
+    let check = |exists, owner, name, public, branch| {
+        commands::check_new_repository("r", exists, owner, name, public, branch)
+    };
+    let err = check(false, Some(&o), None, None, Some(&main)).unwrap_err();
+    assert_eq!((err.code, err.exit), ("usage", error::exit::USAGE));
+    assert!(err.message.contains("creating repository r needs"), "{err}");
+    assert!(err.message.contains("(missing: --name, --public)"), "{err}");
+    assert!(check(false, Some(&o), Some(&n), Some(true), Some(&main)).is_ok());
+    assert!(check(true, Some(&o), None, None, None).is_ok());
 }
