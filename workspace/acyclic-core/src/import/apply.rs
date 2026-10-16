@@ -29,7 +29,7 @@ pub struct Report {
     /// Fields written, the created records' included.
     pub fields: usize,
     /// Proposals for edits to approved scope: made now, or the actor's still pending from before.
-    pub proposals: Vec<String>,
+    pub proposals: Vec<crate::scope::Proposed>,
     /// Each record the import creates or changes, and each edit it proposes, in the order they were met.
     pub changes: Vec<Change>,
 }
@@ -249,8 +249,9 @@ impl Writer<'_, '_> {
         for record in &doc.links {
             let kind = match record.kind {
                 LinkKind::WaitsFor => model::LinkKind::Blocks,
-                LinkKind::Follows => model::LinkKind::After,
                 LinkKind::RelatesTo => model::LinkKind::Relates,
+                // Validation refuses it.
+                LinkKind::Follows => continue,
             };
             let key = model::link_key(&record.from, &record.to, kind)?;
             if self.replica.state.field(&key, link::PRESENT).is_none() {
@@ -478,7 +479,9 @@ impl Writer<'_, '_> {
                 self.row(entity, id).fields.insert(field.to_owned(), edit);
             },
             Outcome::Proposed(proposal) => {
-                self.report.proposals.push(proposal.clone());
+                self.report
+                    .proposals
+                    .push(crate::scope::Proposed { id: proposal.clone(), field: field.to_owned() });
                 let held =
                     self.report.changes.iter().any(|c| c.proposal.as_ref() == Some(proposal));
                 if !held {

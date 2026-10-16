@@ -36,7 +36,7 @@ fn model() -> Model {
     set_state(&mut r, "b", ItemState::Done, USER).unwrap();
     write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(true));
     link(&mut r, "a", "b", LinkKind::Blocks, USER).unwrap();
-    link(&mut r, "c", "a", LinkKind::After, USER).unwrap();
+    crate::model::store_after_link(&mut r, "c", "a", USER);
     link(&mut r, "a", "z", LinkKind::Relates, USER).unwrap();
     link(&mut r, "c", "x", LinkKind::Blocks, USER).unwrap();
     Model::read(r.state()).unwrap()
@@ -95,6 +95,11 @@ fn each_scope_has_its_own_page_name() {
 fn dot_escapes_titles_and_clusters_threads() {
     let m = model();
     insta::assert_snapshot!(dot(&m, &view(&m, &Scope::default()).unwrap()));
+    // Read on its own, DOT carries a legend for those styles, just before the document ends.
+    let legended = dot_with_legend(&m, &view(&m, &Scope::default()).unwrap());
+    let plain = dot(&m, &view(&m, &Scope::default()).unwrap());
+    assert_eq!(legended.replace(DOT_LEGEND, ""), plain);
+    assert!(legended.ends_with("  }\n}\n") && legended.contains("cluster_legend"));
 }
 
 #[test]

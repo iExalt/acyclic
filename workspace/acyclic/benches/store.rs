@@ -6,7 +6,8 @@
 //! `mise run bench:store:phases -- …` builds it with timing marks and splits each command's time into phases.
 //! `--batches` adds that many one-field edits after the first measurements, then times edits and reads again.
 //!
-//! A claim takes a different ready leaf each run; claiming again renews. The sync columns run against a bare repository
+//! A claim takes a different thread with ready work each run; claiming again renews. Small trackers, filled by single
+//! adds into no thread, have no ready work, so they time no claims. The sync columns run against a bare repository
 //! on the same disk, so they time the work around the network rather than the network: the first sync sends the whole
 //! store, "sync" joins another replica's one new item, and "sync, idle" finds nothing new. "join, full" is a fresh
 //! replica's first sync, joining the whole tracker, and "join back" the tracker's next sync, joining that replica's
@@ -198,17 +199,19 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .collect();
     record(&mut row, "show after edit", &fresh);
     let (ready, _) = tracker.run("ready", false);
-    let leaves: Vec<String> = ready["data"]["ready"]
+    let threads: Vec<String> = ready["data"]["ready"]
         .as_array()
         .expect("a ready list")
         .iter()
         .take(runs)
-        .map(|leaf| leaf["id"].as_str().expect("an item id").to_owned())
+        .map(|thread| thread["id"].as_str().expect("a thread id").to_owned())
         .collect();
-    let claims: Vec<Sample> =
-        leaves.iter().map(|leaf| tracker.time(&format!("claim {leaf}"), true)).collect();
-    record(&mut row, "claim", &claims);
-    record(&mut row, "claim again", &times(&|_| format!("claim {}", leaves[0]), true));
+    if let Some(first) = threads.first() {
+        let claims: Vec<Sample> =
+            threads.iter().map(|thread| tracker.time(&format!("claim {thread}"), true)).collect();
+        record(&mut row, "claim", &claims);
+        record(&mut row, "claim again", &times(&|_| format!("claim {first}"), true));
+    }
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
             let sample = tracker.time(&format!("link add {item} waits-for bench-target"), false);

@@ -232,18 +232,18 @@ pub enum Error {
         /// The replica applying it.
         applied_by: String,
     },
-    /// The item already has a live claim in the writer's view.
+    /// The thread already has a live claim in the writer's view.
     Claimed(Key),
-    /// Only leaves are claimed; the item has children.
-    NotALeaf(Key),
+    /// Only threads are claimed, and this one has no record.
+    NoThread(String),
     /// A holder other than a run claimed without a time lease.
     LeaseRequired(String),
-    /// Another holder's live claim on another item holds a named resource this item needs.
+    /// Another holder's live claim on another thread holds a named resource this thread's open work needs.
     ResourceHeld {
         /// The resource.
         resource: String,
-        /// The item holding it.
-        item: Key,
+        /// The thread holding it.
+        thread: String,
         /// Its holder.
         holder: String,
     },
@@ -282,11 +282,9 @@ impl fmt::Display for Error {
             Self::LeaseRequired(holder) => {
                 write!(f, "{holder} isn't a run, so its claim needs a time lease")
             },
-            Self::NotALeaf(key) => {
-                write!(f, "{} {} has children; claim one of them", key.kind, key.id)
-            },
-            Self::ResourceHeld { resource, item, holder } => {
-                write!(f, "{holder} holds {resource} through {} {}", item.kind, item.id)
+            Self::NoThread(thread) => write!(f, "no thread {thread}; claim a thread, not an item"),
+            Self::ResourceHeld { resource, thread, holder } => {
+                write!(f, "{holder} holds {resource} through thread {thread}")
             },
             Self::Format(message) => write!(f, "unreadable state: {message}"),
         }

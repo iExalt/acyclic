@@ -10,7 +10,7 @@ expression: table
 1 sequence-gap
 1 wrong-replica
 1 claimed
-1 not-a-leaf
+3 not-found
 1 lease-required
 1 resource-held
 6 unreadable

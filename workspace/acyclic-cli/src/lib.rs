@@ -9,6 +9,7 @@ mod context;
 mod edit;
 mod hints;
 mod page;
+mod pretty;
 mod view;
 
 use std::collections::BTreeMap;
@@ -20,7 +21,7 @@ use serde_json::{Value, json};
 
 use acyclic_core::time::rfc3339;
 
-use crate::args::{Cli, Command, Serve};
+use crate::args::{Cli, Command, Format, Serve};
 use crate::error::{CliError, exit};
 
 /// Starts the server for `acyclic serve` on a tracker clone, and returns when it stops.
@@ -33,13 +34,25 @@ pub struct Env {
     pub vars: BTreeMap<String, String>,
     /// The working directory.
     pub cwd: PathBuf,
+    /// The terminal's width in columns when standard output is one, which `-o pretty` fits its tables to.
+    pub terminal: Option<u16>,
 }
 
 impl Env {
     /// The current process's environment.
     #[must_use]
     pub fn from_process() -> Self {
-        Self { vars: std::env::vars().collect(), cwd: std::env::current_dir().unwrap_or_default() }
+        use std::io::IsTerminal as _;
+        let stdout = std::io::stdout();
+        let terminal = stdout
+            .is_terminal()
+            .then(|| terminal_size::terminal_size_of(&stdout).map(|(width, _)| width.0))
+            .flatten();
+        Self {
+            vars: std::env::vars().collect(),
+            cwd: std::env::current_dir().unwrap_or_default(),
+            terminal,
+        }
     }
 
     fn var(&self, name: &str) -> Option<&str> {
@@ -91,9 +104,11 @@ impl Outcome {
 }
 
 /// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
-/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Help and version text,
-/// `prime`, `graph` without `--output` and `import --schema` print text instead, and a command line that doesn't parse prints its error and usage as text to standard
-/// error, with exit code 2, as other command-line tools do.
+/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. With `-o pretty` it prints
+/// the same data as text for people instead, and an error as a line on standard error with the same exit code. Help and
+/// version text, `prime`, `completions`, `graph` without `--file` and `import --schema` print text instead, and a
+/// command line that doesn't parse prints its error and usage as text to standard error, with exit code 2, as other
+/// command-line tools do.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
     execute_with(args, env, None)
 }
@@ -131,25 +146,39 @@ fn execute_with(
             return Outcome { code: exit::USAGE, stdout: String::new(), stderr };
         },
     };
+    let failed = |err: CliError| match cli.output {
+        Format::Json => Outcome::out(err.exit, render(&err.envelope())),
+        Format::Pretty => Outcome {
+            code: err.exit,
+            stdout: String::new(),
+            stderr: pretty::error(&err.envelope()),
+        },
+    };
     if let Err(err) = cli.command.validate() {
-        return Outcome::out(err.exit, render(&err.envelope()));
+        return failed(err);
     }
     if let (Command::Serve(options), Some(serve)) = (&cli.command, serve) {
         return match serve_with(&cli, options, env, serve) {
             Ok(()) => Outcome::out(exit::OK, String::new()),
-            Err(err) => Outcome::out(err.exit, render(&err.envelope())),
+            Err(err) => failed(err),
         };
     }
     let result = commands::run(&cli, env);
     acyclic_core::probe::mark("command");
     match result {
-        Ok(commands::Output::Json(data)) => {
-            let output = render(&json!({"ok": true, "data": data}));
+        Ok(commands::Output::Json(mut data)) => {
+            let output = match cli.output {
+                Format::Json => render(&json!({"ok": true, "data": data})),
+                Format::Pretty => {
+                    timestamps(&mut data);
+                    pretty::render(&cli.command, &data, env.terminal)
+                },
+            };
             acyclic_core::probe::mark("render output");
             Outcome::out(exit::OK, output)
         },
         Ok(commands::Output::Text(text)) => Outcome::out(exit::OK, text),
-        Err(err) => Outcome::out(err.exit, render(&err.envelope())),
+        Err(err) => failed(err),
     }
 }
 
@@ -169,7 +198,7 @@ fn serve_with(cli: &Cli, options: &Serve, env: &Env, serve: ServeHook) -> Result
 /// command that prints text returns it as the envelope's data.
 #[must_use]
 pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8, Value) {
-    let cli = Cli { tracker: Some(tracker), actor: None, as_user, command };
+    let cli = Cli { tracker: Some(tracker), actor: None, as_user, output: Format::Json, command };
     let result = cli.command.validate().and_then(|()| commands::run(&cli, env));
     let (code, mut envelope) = match result {
         Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),

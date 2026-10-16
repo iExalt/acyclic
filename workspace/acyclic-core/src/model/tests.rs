@@ -134,11 +134,10 @@ fn ordering_links_never_close_a_cycle_locally() {
     let mut r = replica("a");
     items(&mut r, &["a", "b", "c"]);
     link(&mut r, "a", "b", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "b", "c", LinkKind::After, by(2)).unwrap();
-    // Hard and soft links count together.
+    link(&mut r, "b", "c", LinkKind::Blocks, by(2)).unwrap();
     let err = link(&mut r, "c", "a", LinkKind::Blocks, by(3)).unwrap_err();
     assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
-    for kind in [LinkKind::Blocks, LinkKind::After, LinkKind::Relates] {
+    for kind in [LinkKind::Blocks, LinkKind::Relates] {
         assert_eq!(link(&mut r, "a", "a", kind, by(3)), Err(WriteError::SelfLink("a".into())));
     }
     // Context links don't order anything.
@@ -147,10 +146,39 @@ fn ordering_links_never_close_a_cycle_locally() {
 }
 
 #[test]
+fn a_stored_after_link_reads_as_relates_once_orders_nothing_and_is_removed_as_relates() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b"]);
+    assert_eq!(link(&mut r, "a", "b", LinkKind::After, by(2)), Err(WriteError::FollowsRetired));
+    store_after_link(&mut r, "a", "b", by(2));
+    let relates = Link { from: "a".into(), to: "b".into(), kind: LinkKind::Relates };
+    assert_eq!(model(&r).links, std::slice::from_ref(&relates));
+    // Alongside a relates link between the same items, it is still one link.
+    link(&mut r, "a", "b", LinkKind::Relates, by(3)).unwrap();
+    assert_eq!(model(&r).links, [relates]);
+    // It orders nothing: the reverse waits-for closes no cycle, and the thread has two heads.
+    link(&mut r, "b", "a", LinkKind::Blocks, by(4)).unwrap();
+    assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
+    unlink(&mut r, "b", "a", LinkKind::Blocks, by(5)).unwrap();
+    for id in ["a", "b"] {
+        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
+    }
+    assert_eq!(model(&r).heads("t"), ["a", "b"]);
+    // Removing the relates link removes both, and removing it again writes nothing.
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(6)), Ok(true));
+    assert_eq!(model(&r).links, []);
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(7)), Ok(false));
+    // An after link stored alone goes the same way.
+    store_after_link(&mut r, "b", "a", by(8));
+    assert_eq!(unlink(&mut r, "b", "a", LinkKind::Relates, by(9)), Ok(true));
+    assert_eq!(model(&r).links, []);
+}
+
+#[test]
 fn a_link_cycle_made_by_a_join_is_derived() {
     let (mut a, mut b) = pair(&["x", "y"]);
     link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::After, by(2)).unwrap();
+    link(&mut b, "y", "x", LinkKind::Blocks, by(2)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).link_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
 }
@@ -240,8 +268,8 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     assert_eq!(heads(&r), ["a", "b", "c", "d"], "membership alone orders nothing");
     link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
     link(&mut r, "a", "d", LinkKind::Relates, by(3)).unwrap();
-    // Through an item outside the thread, a soft link orders too.
-    link(&mut r, "c", "x", LinkKind::After, by(3)).unwrap();
+    // Through an item outside the thread, a link orders too.
+    link(&mut r, "c", "x", LinkKind::Blocks, by(3)).unwrap();
     link(&mut r, "x", "a", LinkKind::Blocks, by(3)).unwrap();
     // A parent's links order what is under it.
     set_parent(&mut r, "d", Some("p"), by(3)).unwrap();
@@ -252,8 +280,69 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(5)).unwrap();
     // A parent in the thread is never a head, and following it follows what is under it.
     put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
-    link(&mut r, "b", "p", LinkKind::After, by(5)).unwrap();
+    link(&mut r, "b", "p", LinkKind::Blocks, by(5)).unwrap();
     assert_eq!(heads(&r), ["d"]);
+}
+
+/// Heads as their definition reads, walking every link from each leaf with nothing gathered ahead.
+fn heads_by_definition<'a>(m: &'a Model, thread: &str) -> Vec<&'a str> {
+    let open: Vec<&str> = m
+        .members(thread)
+        .into_iter()
+        .filter(|id| !m.items[*id].is_done() && !m.is_archived(id))
+        .collect();
+    let lift = |id: &'a str| std::iter::once(id).chain(m.ancestors(id));
+    let follows_another = |leaf: &'a str| {
+        let others: BTreeSet<&str> =
+            open.iter().filter(|member| **member != leaf).flat_map(|member| lift(member)).collect();
+        let mut seen: BTreeSet<&str> = lift(leaf).collect();
+        let mut frontier: Vec<&str> = seen.iter().copied().collect();
+        while let Some(node) = frontier.pop() {
+            for link in m.links.iter().filter(|link| link.kind.orders() && link.from == node) {
+                if others.contains(link.to.as_str()) {
+                    return true;
+                }
+                for reached in lift(&link.to) {
+                    if seen.insert(reached) {
+                        frontier.push(reached);
+                    }
+                }
+            }
+        }
+        false
+    };
+    open.iter().copied().filter(|id| m.children(id).is_empty() && !follows_another(id)).collect()
+}
+
+#[hegel::test]
+fn heads_match_their_definition(tc: hegel::TestCase) {
+    use hegel::generators as gs;
+    let below = |n: usize| tc.draw(gs::integers::<usize>().max_value(n - 1));
+    let n = 2 + below(6);
+    let ids: Vec<String> = (0..n).map(|i| format!("i{i}")).collect();
+    let mut r = replica("a");
+    items(&mut r, &ids.iter().map(String::as_str).collect::<Vec<_>>());
+    for (i, id) in ids.iter().enumerate() {
+        let parent = below(i + 1);
+        if parent < i {
+            set_parent(&mut r, id, Some(&ids[parent]), by(2)).unwrap();
+        }
+        if let Some(thread) = [None, Some("t"), Some("u")][below(3)] {
+            put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&thread), by(2)).unwrap();
+        }
+        if below(4) == 0 {
+            set_state(&mut r, id, ItemState::Done, by(3)).unwrap();
+        }
+    }
+    for _ in 0..below(9) {
+        let (from, to) = (below(n), below(n));
+        // A link that would close a cycle is refused, as it is for anyone.
+        let _ = link(&mut r, &ids[from], &ids[to], LinkKind::Blocks, by(4));
+    }
+    let m = model(&r);
+    for thread in ["t", "u"] {
+        assert_eq!(m.heads(thread), heads_by_definition(&m, thread), "{thread}: {:?}", m.links);
+    }
 }
 
 #[test]

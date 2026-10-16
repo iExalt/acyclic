@@ -47,7 +47,7 @@ def page_file(tracker, directory, renderer, *scope):
         "html",
         "--renderer",
         renderer,
-        "--output",
+        "--file",
         str(path),
         *scope,
     )

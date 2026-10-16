@@ -231,8 +231,8 @@ pub fn dot(model: &Model, view: &View) -> String {
         let style = match edge.kind {
             EdgeKind::Tree => "color=gray, arrowhead=none",
             EdgeKind::Link(LinkKind::Blocks) => "style=solid",
-            EdgeKind::Link(LinkKind::After) => "style=dashed",
-            EdgeKind::Link(LinkKind::Relates) => "style=dotted, arrowhead=none",
+            // The model reads a stored after link as relates.
+            EdgeKind::Link(LinkKind::After | LinkKind::Relates) => "style=dotted, arrowhead=none",
         };
         writeln!(
             out,
@@ -243,6 +243,38 @@ pub fn dot(model: &Model, view: &View) -> String {
         .expect("a String takes writes");
     }
     out.push_str("}\n");
+    out
+}
+
+/// A legend for [`dot`]'s styles, a cluster of sample nodes and edges, for DOT read on its own; the HTML page draws
+/// its own.
+const DOT_LEGEND: &str = r##"  subgraph "cluster_legend" {
+    label="Legend"; style=dashed; color=gray; fontcolor=gray;
+    node [fontcolor=gray, color=gray];
+    "legend_first" [label="done first"];
+    "legend_waits" [label="waits for it"];
+    "legend_first" -> "legend_waits" [style=solid];
+    "legend_relates" [label="relates to"];
+    "legend_related" [label="related item"];
+    "legend_relates" -> "legend_related" [style=dotted, arrowhead=none];
+    "legend_parent" [label="parent"];
+    "legend_child" [label="child"];
+    "legend_parent" -> "legend_child" [color=gray, arrowhead=none];
+    "legend_done" [label="done", style="rounded,filled", fillcolor="#e8e8e8"];
+    "legend_ghost" [label="outside the view", style="rounded,dashed"];
+  }
+"##;
+
+/// [`dot`] with a legend for its styles.
+///
+/// # Panics
+///
+/// Never: [`dot`] always ends with the closing brace.
+#[must_use]
+pub fn dot_with_legend(model: &Model, view: &View) -> String {
+    let mut out = dot(model, view);
+    let end = out.rfind('}').expect("a DOT document ends with a brace");
+    out.insert_str(end, DOT_LEGEND);
     out
 }
 
@@ -306,8 +338,7 @@ pub fn mermaid(model: &Model, view: &View) -> String {
                 "---"
             },
             EdgeKind::Link(LinkKind::Blocks) => "-->",
-            EdgeKind::Link(LinkKind::After) => "-.->",
-            EdgeKind::Link(LinkKind::Relates) => "-.-",
+            EdgeKind::Link(LinkKind::After | LinkKind::Relates) => "-.-",
         };
         writeln!(out, "  {} {arrow} {}", node_id('n', &edge.from), node_id('n', &edge.to))
             .expect("a String takes writes");

@@ -1,4 +1,5 @@
 use crate::model::SetField;
+use crate::state::Key;
 use serde_json::json;
 
 use super::*;
@@ -113,6 +114,13 @@ fn the_state_puts_its_problems_on_the_list() {
         model::set_element(&mut a, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by)
             .unwrap();
     }
+    // Threads to claim: one each for x, the two gpu items and kid.
+    for (item, held) in [("x", "tx"), ("gpu1", "t1"), ("gpu2", "t2"), ("kid", "tk")] {
+        model::set(&mut a, &Key::new(kind::THREAD, held).unwrap(), thread::TITLE, Some(&held), by)
+            .unwrap();
+        edit(&mut a, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
+            .unwrap();
+    }
     set_parent(&mut a, "kid", Some("p"), by).unwrap();
     model::set_state(&mut a, "p", ItemState::Done, by).unwrap();
     // A dangling parent and repository, written as if by an older or newer replica.
@@ -142,11 +150,11 @@ fn the_state_puts_its_problems_on_the_list() {
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", LinkKind::Blocks, user(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::After, user(2)).unwrap();
-    claim::claim(&mut a, &item_key("x").unwrap(), "session/a", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut b, &item_key("x").unwrap(), "session/b", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut a, &item_key("gpu1").unwrap(), "session/a", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut b, &item_key("gpu2").unwrap(), "session/b", 2, Some(NOW), NOW).unwrap();
+    link(&mut b, "y", "x", LinkKind::Blocks, user(2)).unwrap();
+    claim::claim(&mut a, "tx", "session/a", 2, Some(NOW), NOW).unwrap();
+    claim::claim(&mut b, "tx", "session/b", 2, Some(NOW), NOW).unwrap();
+    claim::claim(&mut a, "t1", "session/a", 2, Some(NOW), NOW).unwrap();
+    claim::claim(&mut b, "t2", "session/b", 2, Some(NOW), NOW).unwrap();
     start_run(&mut a, "r1", "ok", user(2)).unwrap();
     start_run(&mut b, "r2", "ok", user(2)).unwrap();
     a.join(&b.state).unwrap();
@@ -158,19 +166,19 @@ fn the_state_puts_its_problems_on_the_list() {
         By { actor: "run/r1", at: 3 },
     )
     .unwrap();
-    claim::claim(&mut a, &item_key("kid").unwrap(), "run/ghost", 3, None, NOW).unwrap();
+    claim::claim(&mut a, "tk", "run/ghost", 3, None, NOW).unwrap();
 
     let entries = list(&a);
     let has = |want: &Entry| assert!(entries.contains(want), "missing {want:?} in {entries:#?}");
     has(&Entry::Conflict { kind: "item".into(), id: "x".into(), field: "title".into() });
     has(&Entry::LinkCycle { items: vec!["x".into(), "y".into()] });
     has(&Entry::Contest {
-        item: "x".into(),
+        thread: "tx".into(),
         holders: vec!["session/a".into(), "session/b".into()],
     });
     has(&Entry::ResourceClash {
         resource: "gpu".into(),
-        holders: vec![("gpu1".into(), "session/a".into()), ("gpu2".into(), "session/b".into())],
+        holders: vec![("t1".into(), "session/a".into()), ("t2".into(), "session/b".into())],
     });
     has(&Entry::RunClash { thread: "ok".into(), runs: vec!["r1".into(), "r2".into()] });
     has(&Entry::NewBlocker { item: "work".into(), thread: "ok".into(), blocker: "x".into() });
@@ -183,7 +191,7 @@ fn the_state_puts_its_problems_on_the_list() {
         "a repeat changes nothing"
     );
     assert!(entries.iter().any(|e| matches!(e, Entry::Proposal { actor, threads, .. } if actor == "run/r1" && threads == &["ok"])));
-    has(&Entry::UnknownRun { item: "kid".into(), holder: "run/ghost".into() });
+    has(&Entry::UnknownRun { thread: "tk".into(), holder: "run/ghost".into() });
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
     has(&Entry::Dangling {
         kind: "item".into(),
@@ -198,6 +206,35 @@ fn the_state_puts_its_problems_on_the_list() {
         target: "nowhere".into(),
     });
     assert!(entries.iter().any(|e| matches!(e, Entry::Unverified { item, repository, .. } if item == "dep" && repository == "nowhere")));
+}
+
+#[test]
+fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
+    let mut r = replica("a");
+    let by = user(1);
+    for id in ["loose", "ghostly", "waiting", "parked", "done", "member", "goal", "kid"] {
+        add_item(&mut r, id, id, by).unwrap();
+    }
+    model::set(&mut r, &Key::new(kind::THREAD, "t").unwrap(), thread::TITLE, Some(&"T"), by)
+        .unwrap();
+    for (item, held) in [("member", "t"), ("kid", "t"), ("ghostly", "ghost")] {
+        edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
+            .unwrap();
+    }
+    link(&mut r, "waiting", "loose", LinkKind::Blocks, by).unwrap();
+    model::set_state(&mut r, "parked", ItemState::Parked, by).unwrap();
+    model::set_state(&mut r, "done", ItemState::Done, by).unwrap();
+    set_parent(&mut r, "kid", Some("goal"), by).unwrap();
+    let listed: Vec<(String, String)> = list(&r)
+        .into_iter()
+        .filter_map(|e| match e {
+            Entry::Unthreaded { item, fix } => Some((item, fix)),
+            _ => None,
+        })
+        .collect();
+    let fix = |id: &str| (id.to_owned(), format!("acyclic item edit {id} --thread <THREAD>"));
+    // Whatever else holds it back; never a parked or done item, a member or a parent.
+    assert_eq!(listed, [fix("ghostly"), fix("loose"), fix("waiting")]);
 }
 
 #[test]

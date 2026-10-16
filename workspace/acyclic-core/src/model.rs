@@ -134,7 +134,8 @@ pub struct Evidence {
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     Blocks,
-    /// A soft dependency: `from` prefers to follow `to`.
+    /// A retired soft dependency, still in stored state: the model reads it as [`LinkKind::Relates`], and no write
+    /// adds one.
     After,
     /// Context only.
     Relates,
@@ -162,7 +163,7 @@ impl LinkKind {
     /// Whether the kind orders work, so it counts in cycle checks.
     #[must_use]
     pub fn orders(self) -> bool {
-        matches!(self, Self::Blocks | Self::After)
+        self == Self::Blocks
     }
 }
 
@@ -399,6 +400,8 @@ impl Model {
             model.add(state, key)?;
         }
         model.links.sort();
+        // A stored after link reads as relates-to, so a pair holding both is one link.
+        model.links.dedup();
         Ok(model)
     }
 
@@ -416,6 +419,7 @@ impl Model {
             }
         }
         model.links.sort();
+        model.links.dedup();
         (model, unreadable)
     }
 
@@ -455,6 +459,7 @@ impl Model {
                 ) else {
                     return Err(Error::Format(format!("link {} lacks its ends or kind", key.id)));
                 };
+                let kind = if kind == LinkKind::After { LinkKind::Relates } else { kind };
                 self.links.push(Link { from, to, kind });
             },
             kind::THREAD => {
@@ -589,7 +594,7 @@ impl Model {
         repositories
     }
 
-    /// The cycles among blocks and after links, each sorted.
+    /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {
         let edges: Vec<(String, String)> = self
@@ -601,7 +606,7 @@ impl Model {
         graph::cycles(&edges)
     }
 
-    /// A path of blocks and after links from `from` to `to`, both included; a single item when they are the same.
+    /// A path of blocks links from `from` to `to`, both included; a single item when they are the same.
     #[must_use]
     pub fn ordering_path(&self, from: &str, to: &str) -> Option<Vec<String>> {
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -631,49 +636,33 @@ impl Model {
         None
     }
 
-    /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
-    /// when a path of blocks and after links, from the leaf or an ancestor, reaches that member or one of its
-    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
-    /// unsaid: they may run in parallel, or a link is missing.
+    /// A thread's heads; see [`Heads`]. To list many threads' heads, build [`Model::heads_index`] once.
     #[must_use]
     pub fn heads(&self, thread: &str) -> Vec<&str> {
-        let open: Vec<&str> = self
-            .members(thread)
-            .into_iter()
-            .filter(|id| !self.items[*id].is_done() && !self.is_archived(id))
-            .collect();
+        self.heads_index().of(thread)
+    }
+
+    /// What finding heads reads, gathered in one pass over the items and links, for every thread at once.
+    #[must_use]
+    pub fn heads_index(&self) -> Heads<'_> {
+        let mut open: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for item in self.items.values() {
+            if let Some(thread) = item.thread.one()
+                && !item.is_done()
+                && !self.is_archived(&item.id)
+            {
+                open.entry(thread.as_str()).or_default().push(item.id.as_str());
+            }
+        }
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        let mut prev: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for link in self.links.iter().filter(|link| link.kind.orders()) {
             next.entry(link.from.as_str()).or_default().push(link.to.as_str());
-        }
-        let follows_another = |leaf: &str| {
-            let others: BTreeSet<&str> = open
-                .iter()
-                .filter(|member| **member != leaf)
-                .flat_map(|member| std::iter::once(*member).chain(self.ancestors(member)))
-                .collect();
-            let mut seen: BTreeSet<&str> =
-                std::iter::once(leaf).chain(self.ancestors(leaf)).collect();
-            let mut frontier: Vec<&str> = seen.iter().copied().collect();
-            while let Some(node) = frontier.pop() {
-                for &to in next.get(node).into_iter().flatten() {
-                    if others.contains(to) {
-                        return true;
-                    }
-                    // What waits on `to` waits on its ancestors' dependencies too.
-                    for reached in std::iter::once(to).chain(self.ancestors(to)) {
-                        if seen.insert(reached) {
-                            frontier.push(reached);
-                        }
-                    }
-                }
+            for reached in std::iter::once(link.to.as_str()).chain(self.ancestors(&link.to)) {
+                prev.entry(reached).or_default().push(link.from.as_str());
             }
-            false
-        };
-        open.iter()
-            .copied()
-            .filter(|id| self.children(id).is_empty() && !follows_another(id))
-            .collect()
+        }
+        Heads { model: self, open, next, prev }
     }
 
     /// The cycles among parents, which only a join can make, each sorted.
@@ -736,7 +725,7 @@ pub enum WriteError {
     Deleted(String),
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
-    /// The link would close a cycle of blocks and after links, through these items.
+    /// The link would close a cycle of blocks links, through these items.
     LinkCycle(Vec<String>),
     /// The field has invariants: write it with its checked write.
     Checked {
@@ -754,6 +743,8 @@ pub enum WriteError {
     },
     /// An item can't link to itself.
     SelfLink(String),
+    /// Follows links are retired: nothing adds one.
+    FollowsRetired,
     /// A run's state can't move that way.
     RunTransition {
         /// The run.
@@ -789,6 +780,11 @@ impl fmt::Display for WriteError {
             },
             Self::UserOnly { field, actor } => write!(f, "only the user sets {field}, not {actor}"),
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
+            Self::FollowsRetired => write!(
+                f,
+                "follows links are retired: use waits-for when one item can't start before the other is done, \
+                 or relates-to for context"
+            ),
             Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
@@ -1040,8 +1036,8 @@ pub fn set_parent(
 ///
 /// # Errors
 ///
-/// Fails when either item doesn't exist, when a blocks or after link would close a cycle, or when the state layer
-/// refuses.
+/// Fails on an after link, which is retired, when either item doesn't exist, when a blocks link would close a cycle,
+/// or when the state layer refuses.
 pub fn link(
     replica: &mut Replica,
     from: &str,
@@ -1049,6 +1045,9 @@ pub fn link(
     kind: LinkKind,
     by: By<'_>,
 ) -> Result<Key, WriteError> {
+    if kind == LinkKind::After {
+        return Err(WriteError::FollowsRetired);
+    }
     existing(&replica.state, from)?;
     existing(&replica.state, to)?;
     if from == to {
@@ -1069,7 +1068,23 @@ pub fn link(
     Ok(key)
 }
 
-/// Removes a link; a concurrent re-add survives.
+/// Stores an after link as older versions wrote one, for tests of how the model reads it.
+#[cfg(test)]
+pub(crate) fn store_after_link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) {
+    let key = link_key(from, to, LinkKind::After).unwrap();
+    for (name, value) in [
+        (link::FROM, to_json(&from)),
+        (link::TO, to_json(&to)),
+        (link::KIND, to_json(&LinkKind::After)),
+        (link::PRESENT, to_json(&true)),
+    ] {
+        replica.write(&key, name, by.actor, by.at, Some(value)).unwrap();
+    }
+}
+
+/// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Removing a relates link also
+/// removes a stored after link between the same items, since the model reads one as the other. Returns whether it
+/// wrote.
 ///
 /// # Errors
 ///
@@ -1080,11 +1095,22 @@ pub fn unlink(
     to: &str,
     kind: LinkKind,
     by: By<'_>,
-) -> Result<(), WriteError> {
-    let key = link_key(from, to, kind)?;
-    // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
-    replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
-    Ok(())
+) -> Result<bool, WriteError> {
+    let mut kinds = vec![kind];
+    if kind == LinkKind::Relates {
+        kinds.push(LinkKind::After);
+    }
+    let mut wrote = false;
+    for kind in kinds {
+        let key = link_key(from, to, kind)?;
+        if replica.state.field(&key, link::PRESENT).is_none() {
+            continue;
+        }
+        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
+        replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+        wrote = true;
+    }
+    Ok(wrote)
 }
 
 /// Records a run starting on a thread.
@@ -1218,6 +1244,76 @@ fn elements(state: &State, key: &Key, prefix: &str) -> BTreeSet<String> {
         .filter_map(|(name, _)| name.strip_prefix(prefix))
         .map(str::to_owned)
         .collect()
+}
+
+/// Every thread's open members and the ordering links, read once, to find threads' heads.
+pub struct Heads<'a> {
+    model: &'a Model,
+    open: BTreeMap<&'a str, Vec<&'a str>>,
+    next: BTreeMap<&'a str, Vec<&'a str>>,
+    /// The nodes a link reaches, each with the nodes that link from: what waits on a node reaches its ancestors too.
+    prev: BTreeMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> Heads<'a> {
+    /// The model it reads.
+    #[must_use]
+    pub fn model(&self) -> &'a Model {
+        self.model
+    }
+
+    /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
+    /// when a path of blocks links, from the leaf or an ancestor, reaches that member or one of its
+    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
+    /// unsaid: they may run in parallel, or a link is missing.
+    #[must_use]
+    pub fn of(&self, thread: &str) -> Vec<&'a str> {
+        let model = self.model;
+        let open = self.open.get(thread).map_or(&[][..], Vec::as_slice);
+        // Each node, with the open members it is or is an ancestor of, built once rather than per leaf.
+        let mut covers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for &member in open {
+            for node in std::iter::once(member).chain(model.ancestors(member)) {
+                covers.entry(node).or_default().insert(member);
+            }
+        }
+        // Only the nodes that can reach a member are worth walking from, so a leaf's walk stays near the thread.
+        let mut toward: BTreeSet<&str> = covers.keys().copied().collect();
+        let mut back: Vec<&str> = toward.iter().copied().collect();
+        while let Some(node) = back.pop() {
+            for &from in self.prev.get(node).into_iter().flatten() {
+                if toward.insert(from) {
+                    back.push(from);
+                }
+            }
+        }
+        let follows_another = |leaf: &str| {
+            let reaches_another = |node: &str| {
+                covers.get(node).is_some_and(|members| members.iter().any(|m| *m != leaf))
+            };
+            let mut seen: BTreeSet<&str> =
+                std::iter::once(leaf).chain(model.ancestors(leaf)).collect();
+            let mut frontier: Vec<&str> = seen.iter().copied().collect();
+            while let Some(node) = frontier.pop() {
+                for &to in self.next.get(node).into_iter().flatten() {
+                    if reaches_another(to) {
+                        return true;
+                    }
+                    // What waits on `to` waits on its ancestors' dependencies too.
+                    for reached in std::iter::once(to).chain(model.ancestors(to)) {
+                        if toward.contains(reached) && seen.insert(reached) {
+                            frontier.push(reached);
+                        }
+                    }
+                }
+            }
+            false
+        };
+        open.iter()
+            .copied()
+            .filter(|id| model.children(id).is_empty() && !follows_another(id))
+            .collect()
+    }
 }
 
 #[cfg(test)]

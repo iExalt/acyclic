@@ -1,0 +1,11 @@
+---
+source: workspace/acyclic-cli/src/pretty/tests.rs
+expression: "format!(\"{}{}{}\", render(&command(\"needs\"), &needs, None),\nrender(&command(\"proposal list\"), &empty, None),\nrender(&command(\"show a1\"), &noted, None))"
+---
+KIND               COUNTS          THREAD  FIX                                     ITEM
+awaiting-approval  open_members 1  t1 (T)
+unthreaded                                 acyclic item edit a1 --thread <THREAD>  a1
+none
+id     a1
+notes  first line
+       second line

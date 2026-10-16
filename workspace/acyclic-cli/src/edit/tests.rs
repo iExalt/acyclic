@@ -108,7 +108,8 @@ fn an_agents_membership_and_repository_edits_to_approved_scope_wait_as_proposals
         ..ItemFields::default()
     };
     let written = edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
-    assert_eq!(written.proposals.len(), 2, "membership and repository: {written:?}");
+    let fields: Vec<&str> = written.proposals.iter().map(|p| p.field.as_str()).collect();
+    assert_eq!(fields, ["thread", "repositories"], "membership and repository: {written:?}");
     let held = item(&r, "a");
     assert_eq!(
         (
@@ -125,7 +126,7 @@ fn an_agents_membership_and_repository_edits_to_approved_scope_wait_as_proposals
     assert_eq!((again.proposals, r.changes()), (written.proposals, before));
     let written = edit_item(&mut r, "a", &out_of_t, USER_BY).unwrap();
     assert_eq!(item(&r, "a").thread.one(), None);
-    assert_eq!(written.proposals, Vec::<String>::new());
+    assert_eq!(written.proposals, []);
     // A thread's own repositories are scope too, and an agent's add of one waits.
     let more = ThreadFields {
         repositories: Delta { add: vec!["r".into()], remove: vec![] },
@@ -183,20 +184,21 @@ fn every_proposal_a_write_leaves_is_listed_including_the_placement_ones() {
     // An agent's item under a member of the approved thread would join it, which waits as a proposal.
     let under = ItemFields { parent: Change::Set("a".into()), ..titled("B") };
     let written = add_item(&mut r, "b", &under, AGENT).unwrap();
-    assert_eq!(written.proposals, Vec::<String>::new(), "no edit of its own proposed anything");
+    assert_eq!(written.proposals, [], "no edit of its own proposed anything");
     let data = written.item("b");
     let placed = data["placed"][0]["proposal"].as_str().unwrap().to_owned();
     assert_eq!(
         (&data["placed"][0]["outcome"], &data["proposals"]),
-        (&json!("proposed"), &json!([placed]))
+        (&json!("proposed"), &json!([{"id": placed, "field": "thread"}]))
     );
     // Together with its own edits' proposals, each once and in order.
+    let proposed = |id: &str, field: &str| Proposed { id: id.into(), field: field.into() };
     assert_eq!(
         all_proposals(
-            &["z-1".to_owned(), placed.clone()],
+            &[proposed("z-1", "repositories"), proposed(&placed, "thread")],
             &[Inherited { item: "b".into(), thread: "t".into(), proposal: Some(placed.clone()) }]
         ),
-        [placed, "z-1".to_owned()]
+        [proposed(&placed, "thread"), proposed("z-1", "repositories")]
     );
 }
 
@@ -218,7 +220,7 @@ fn an_import_that_places_into_an_approved_thread_lists_the_proposal() {
         acyclic_core::place::place(&mut r, &["a".to_owned(), "c".to_owned()], AGENT).unwrap();
     let data = crate::commands::import_json(&report, &placed, false);
     let proposal = data["placed"][0]["proposal"].as_str().unwrap();
-    assert_eq!(data["proposals"], json!([proposal]), "{data}");
+    assert_eq!(data["proposals"], json!([{"id": proposal, "field": "thread"}]), "{data}");
 }
 
 #[test]

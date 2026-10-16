@@ -5,7 +5,7 @@ use std::process::Command;
 
 use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model};
 use acyclic_core::ready::{GitAncestry, Readiness, Status, Wait};
-use acyclic_core::schema::{item, kind, repository};
+use acyclic_core::schema::{item, kind, repository, thread as thread_field};
 use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Error, Key, ReplicaId};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -52,6 +52,11 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
             let record = Key::new(kind::REPOSITORY, "code").unwrap();
             model::set(replica, &record, repository::DEFAULT_BRANCH, Some(&"main"), by)
                 .map_err(state_error)?;
+            for thread in ["t1", "t2"] {
+                let record = Key::new(kind::THREAD, thread).unwrap();
+                model::set(replica, &record, thread_field::TITLE, Some(&thread), by)
+                    .map_err(state_error)?;
+            }
             for (id, thread) in [("dep", "t1"), ("same", "t1"), ("other", "t2")] {
                 model::add_item(replica, id, id, by).map_err(state_error)?;
                 let member =
@@ -79,14 +84,14 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
         let model = Model::read(&state).unwrap();
         Readiness::new(&state, &model, NOW, &ancestry).of(id).unwrap().unwrap()
     };
-    assert_eq!(check("same"), Status::Ready { rank: 0 }, "met at done inside its thread");
+    assert_eq!(check("same"), Status::Ready, "met at done inside its thread");
     assert!(
         matches!(check("other"), Status::Blocked { waiting } if waiting["dep"] == Wait::InReview)
     );
     assert_eq!(check("dep"), Status::InReview);
 
     git(&code, &["merge", "-q", "--ff-only", "feature"]);
-    assert_eq!(check("other"), Status::Ready { rank: 0 }, "met once merged");
+    assert_eq!(check("other"), Status::Ready, "met once merged");
     assert_eq!(check("dep"), Status::Done);
 
     // A clone of the repository reads the default branch from its remote-tracking ref.
@@ -97,7 +102,7 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
     let model = Model::read(&state).unwrap();
     assert_eq!(
         Readiness::new(&state, &model, NOW, &cloned).of("other").unwrap(),
-        Some(Status::Ready { rank: 0 })
+        Some(Status::Ready)
     );
 }
 

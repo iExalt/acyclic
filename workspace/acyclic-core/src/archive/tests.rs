@@ -31,6 +31,11 @@ fn setup() -> Replica {
     for id in ["a", "b"] {
         set_parent(&mut r, id, Some("g"), user(1)).unwrap();
     }
+    // Only threaded work is ready.
+    let outside = Key::new(kind::THREAD, "outside").unwrap();
+    model::set(&mut r, &outside, crate::schema::thread::TITLE, Some(&"Outside"), user(1)).unwrap();
+    model::put(&mut r, &item_key("outside").unwrap(), field::THREAD, Some(&"outside"), user(1))
+        .unwrap();
     done(&mut r, "a", Some("aaaa111"), DAY);
     done(&mut r, "b", None, DAY);
     done(&mut r, "g", None, DAY);
@@ -76,7 +81,7 @@ fn open_unmerged_and_depended_on_subtrees_say_why() {
     add_item(&mut r, "c", "c", user(2)).unwrap();
     set_parent(&mut r, "c", Some("g"), user(2)).unwrap();
     done(&mut r, "a", Some("bbbb222"), 2 * DAY);
-    link(&mut r, "outside", "b", LinkKind::After, user(2)).unwrap();
+    link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
     assert_eq!(
         reasons(&r, "g", 3 * DAY),
         vec![
@@ -130,7 +135,7 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
     reopen(&mut r, "a", user(now)).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(!model.is_archived("a"), "the archived root above it is cleared");
-    assert_eq!(status(&r, "outside", now), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, "outside", now), Status::Ready);
     assert!(
         needs(&r, now)
             .contains(&Entry::Reopened { item: "a".into(), dependents: vec!["outside".into()] })
@@ -144,7 +149,7 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
 fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     let mut r = setup();
     link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
-    assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready { rank: 0 });
+    assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready);
     // Any actor may reopen: an agent may find a defect in finished work.
     reopen(&mut r, "b", By { actor: "run/worker", at: 2 * DAY }).unwrap();
     assert!(

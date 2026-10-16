@@ -8,7 +8,7 @@
 use acyclic_core::model::{self, By, ItemState, Level, Model, SetField, Size, Value};
 use acyclic_core::place::{self, Inherited};
 use acyclic_core::schema::{item as field, kind, repository as repo_field, thread as thread_field};
-use acyclic_core::scope::{self, Outcome, ScopeEdit};
+use acyclic_core::scope::{self, Outcome, Proposed, ScopeEdit};
 use acyclic_core::state::{Key, Replica, State};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
@@ -89,7 +89,7 @@ pub(crate) struct RepositoryFields {
 /// What a write did beyond writing: the proposals it left for the user, and the threads items inherited.
 #[derive(Debug, Default)]
 pub(crate) struct Written {
-    pub proposals: Vec<String>,
+    pub proposals: Vec<Proposed>,
     pub inherited: Vec<Inherited>,
 }
 
@@ -106,10 +106,13 @@ impl Written {
     }
 }
 
-/// Every proposal a write left: those of its own edits and those that hold the placements it made, each once.
-pub(crate) fn all_proposals(direct: &[String], placed: &[Inherited]) -> Vec<String> {
-    let mut all: Vec<String> =
-        direct.iter().cloned().chain(placed.iter().filter_map(|p| p.proposal.clone())).collect();
+/// Every proposal a write left, each with the field it would change: those of its own edits and those that hold the
+/// placements it made, each once.
+pub(crate) fn all_proposals(direct: &[Proposed], placed: &[Inherited]) -> Vec<Proposed> {
+    let held = placed
+        .iter()
+        .filter_map(|p| p.proposal.clone().map(|id| Proposed { id, field: "thread".to_owned() }));
+    let mut all: Vec<Proposed> = direct.iter().cloned().chain(held).collect();
     all.sort();
     all.dedup();
     all
@@ -274,14 +277,14 @@ fn scope_step(
     replica: &mut Replica,
     change: &ScopeEdit,
     by: By<'_>,
-    proposals: &mut Vec<String>,
+    proposals: &mut Vec<Proposed>,
 ) -> Result<(), CliError> {
     let model = Model::read(replica.state())?;
     if scope_already(replica.state(), &model, by.actor, change)? {
         return Ok(());
     }
     if let Outcome::Proposed(id) = scope::edit(replica, change, by)? {
-        proposals.push(id);
+        proposals.push(Proposed { id, field: change.field().to_owned() });
     }
     Ok(())
 }
@@ -398,8 +401,8 @@ fn repeat_item(
     // The same proposal again is reported again, and nothing is written.
     let mut written = Written::default();
     for change in &changes {
-        if let Some(proposal) = pending(state, change, by.actor)? {
-            written.proposals.push(proposal);
+        if let Some(id) = pending(state, change, by.actor)? {
+            written.proposals.push(Proposed { id, field: change.field().to_owned() });
         }
     }
     Ok(written)
@@ -481,8 +484,8 @@ pub(crate) fn add_thread(
     }
     let mut written = Written::default();
     for change in &changes {
-        if let Some(proposal) = pending(state, change, by.actor)? {
-            written.proposals.push(proposal);
+        if let Some(id) = pending(state, change, by.actor)? {
+            written.proposals.push(Proposed { id, field: change.field().to_owned() });
         }
     }
     Ok(written)

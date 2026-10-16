@@ -13,7 +13,7 @@ flowchart TB
   n_p["p · Project"]
   n_x["x · Outside"]
   n_z["z · Old"]:::ghost
-  n_a -.-> n_c
+  n_a -.- n_c
   n_b --> n_a
   n_p --- n_a
   n_p --- n_b

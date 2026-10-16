@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
-use acyclic_core::model::{Item, ItemState, Link, LinkKind, Model, Value};
+use acyclic_core::model::{Heads, Item, ItemState, Link, LinkKind, Model, Value};
 use acyclic_core::needs::Entry;
-use acyclic_core::ready::Readiness;
+use acyclic_core::ready::{Readiness, ReadyThread};
 use acyclic_core::scope::{self, Decision, Proposal, ScopeEdit};
 use acyclic_core::state::{Key, Millis, State};
 use serde_json::{Map, Value as Json, json};
@@ -92,14 +92,28 @@ impl View<'_> {
         }))
     }
 
-    /// The rows of the items that are ready, each with whether its work is `approved`; the same rows, filtered by
-    /// their own `approved`, when only approved work is asked for. The rank is in the row's `readiness`.
-    pub fn ready_rows(&self, ready: &[String], only_approved: bool) -> Result<Vec<Json>, CliError> {
+    /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
+    /// item row with whether its work is `approved`. When only approved work is asked for, the items are filtered by
+    /// their own `approved`, and a thread left with none is dropped.
+    pub fn ready_rows(
+        &self,
+        ready: &[ReadyThread],
+        only_approved: bool,
+    ) -> Result<Vec<Json>, CliError> {
+        let members = thread_members(self.model);
+        let heads = self.model.heads_index();
         let mut rows = Vec::new();
-        for id in ready {
-            let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
-            if row["approved"] == true || !only_approved {
-                rows.push(row);
+        for ReadyThread { thread, items } in ready {
+            let mut found = Vec::new();
+            for id in items {
+                let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
+                if row["approved"] == true || !only_approved {
+                    found.push(row);
+                }
+            }
+            if !found.is_empty() {
+                let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
+                rows.push(with(thread_row(&heads, thread, listed), json!({"items": found})));
             }
         }
         Ok(rows)
@@ -109,8 +123,8 @@ impl View<'_> {
     pub fn item(&self, id: &str, item: &Item) -> Result<Json, CliError> {
         let model = self.model;
         let alive = |holder: &str| model.run_alive(holder);
-        let claims =
-            claim::live_with(self.state, &acyclic_core::model::item_key(id)?, self.now, &alive)?;
+        // An item's claims are its thread's.
+        let claims = claim::covering(self.state, model, id, self.now, &alive)?;
         let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         Ok(with(
             self.item_row(id)?,
@@ -133,9 +147,12 @@ impl View<'_> {
         ))
     }
 
-    /// A thread in full: its summary, and each member as an item summary that also says whether its work is
-    /// `approved` and whether it is `conflicted`, listed under each thread it was put in.
+    /// A thread in full: its summary, its `readiness` and live `claims`, and each member as an item summary that also
+    /// says whether its work is `approved` and whether it is `conflicted`, listed under each thread it was put in.
     pub fn thread(&self, id: &str, listed: &[Member<'_>]) -> Result<Json, CliError> {
+        let alive = |holder: &str| self.model.run_alive(holder);
+        let claims = claim::live_with(self.state, &claim::thread_key(id)?, self.now, &alive)?;
+        let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         let mut members = Vec::new();
         for &Member { item, conflict } in listed {
             members.push(with(
@@ -145,8 +162,10 @@ impl View<'_> {
         }
         let thread = self.model.threads.get(id);
         Ok(with(
-            thread_row(self.model, id, listed),
+            thread_row(&self.model.heads_index(), id, listed),
             json!({
+                "readiness": self.readiness.thread(id)?,
+                "claims": claims,
                 "brief": thread.map(|t| &t.brief),
                 "level": thread.map(|t| &t.autonomy),
                 "pm": thread.is_some_and(acyclic_core::model::Thread::is_pm),
@@ -162,9 +181,10 @@ impl View<'_> {
     /// proposal embedding what `proposal show` returns, and a conflict listing its `values` and how to `resolve` it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
+        let heads = self.model.heads_index();
         let proposals = scope::proposals(self.state)?;
         let thread =
-            |id: &str| thread_row(self.model, id, members.get(id).map_or(&[][..], Vec::as_slice));
+            |id: &str| thread_row(&heads, id, members.get(id).map_or(&[][..], Vec::as_slice));
         let items = |ids: &[String]| -> Result<Json, CliError> {
             Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
         };
@@ -182,21 +202,24 @@ impl View<'_> {
                 Entry::ParentCycle { items: ids } => {
                     json!({"kind": "parent-cycle", "items": items(ids)?})
                 },
-                Entry::Contest { item, holders } => {
-                    json!({"kind": "contest", "item": self.item_row(item)?, "holders": holders})
+                Entry::Contest { thread: id, holders } => {
+                    json!({"kind": "contest", "thread": thread(id), "holders": holders})
                 },
                 Entry::ResourceClash { resource, holders } => {
-                    let holders = holders
+                    let holders: Vec<Json> = holders
                         .iter()
-                        .map(|(item, holder)| Ok(json!({"item": self.item_row(item)?, "holder": holder})))
-                        .collect::<Result<Vec<Json>, CliError>>()?;
+                        .map(|(id, holder)| json!({"thread": thread(id), "holder": holder}))
+                        .collect();
                     json!({"kind": "resource-clash", "resource": resource, "holders": holders})
                 },
-                Entry::ClockAhead { item, holder } => {
-                    json!({"kind": "clock-ahead", "item": self.item_row(item)?, "holder": holder})
+                Entry::ClockAhead { thread: id, holder } => {
+                    json!({"kind": "clock-ahead", "thread": thread(id), "holder": holder})
                 },
-                Entry::UnknownRun { item, holder } => {
-                    json!({"kind": "unknown-run", "item": self.item_row(item)?, "holder": holder})
+                Entry::UnknownRun { thread: id, holder } => {
+                    json!({"kind": "unknown-run", "thread": thread(id), "holder": holder})
+                },
+                Entry::Unthreaded { item, fix } => {
+                    json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
                 },
                 Entry::RunClash { thread: id, runs } => {
                     json!({"kind": "run-clash", "thread": thread(id), "runs": runs})
@@ -336,11 +359,8 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
                 found.as_str().map(str::to_owned)
             };
             let (from, to, kind) = (read("from")?, read("to")?, read("kind")?);
-            let word = match kind.as_str() {
-                "blocks" => "waits-for",
-                "after" => "follows",
-                _ => "relates-to",
-            };
+            // A stored after link reads as relates-to, and removing that clears it.
+            let word = if kind == "blocks" { "waits-for" } else { "relates-to" };
             Some(format!("acyclic link add|remove {from} {word} {to}"))
         },
         _ => None,
@@ -350,16 +370,14 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
 /// An item's links to and from other items, by the words the commands use.
 fn links(all: &[Link], id: &str) -> Json {
     let mut found: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for kind in
-        ["waits_for", "follows", "relates_to", "waited_on_by", "followed_by", "related_from"]
-    {
+    for kind in ["waits_for", "relates_to", "waited_on_by", "related_from"] {
         found.insert(kind, Vec::new());
     }
     for link in all {
         let (out, back) = match link.kind {
             LinkKind::Blocks => ("waits_for", "waited_on_by"),
-            LinkKind::After => ("follows", "followed_by"),
-            LinkKind::Relates => ("relates_to", "related_from"),
+            // The model reads a stored after link as relates.
+            LinkKind::After | LinkKind::Relates => ("relates_to", "related_from"),
         };
         if link.from == id {
             found.entry(out).or_default().push(&link.to);
@@ -378,7 +396,8 @@ fn links(all: &[Link], id: &str) -> Json {
 
 /// The thread summary: `{id, title, approved, heads, counts: {members, done, conflicted}}`. A thread only an item
 /// names has no title and isn't approved. `approved` is whether the approval holds, so a conflict counts as not.
-pub(crate) fn thread_row(model: &Model, id: &str, members: &[Member<'_>]) -> Json {
+pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
+    let model = heads.model();
     let thread = model.threads.get(id);
     let done = members.iter().filter(|m| model.items[m.item].is_done()).count();
     let conflicted = members.iter().filter(|m| m.conflict).count();
@@ -386,14 +405,18 @@ pub(crate) fn thread_row(model: &Model, id: &str, members: &[Member<'_>]) -> Jso
         "id": id,
         "title": thread.map(|t| &t.title),
         "approved": thread.is_some_and(|t| t.approved.one() == Some(&true)),
-        "heads": model.heads(id),
+        "heads": heads.of(id),
         "counts": {"members": members.len(), "done": done, "conflicted": conflicted},
     })
 }
 
 /// Every thread's summary, in id order.
 pub(crate) fn thread_rows(model: &Model) -> Vec<Json> {
-    thread_members(model).into_iter().map(|(id, members)| thread_row(model, id, &members)).collect()
+    let heads = model.heads_index();
+    thread_members(model)
+        .into_iter()
+        .map(|(id, members)| thread_row(&heads, id, &members))
+        .collect()
 }
 
 /// The repository summary: `{id, owner, name, public, default_branch}`.
@@ -515,7 +538,7 @@ mod tests {
     }
 
     /// Items `goal` > `a` and `b` in approved thread `t`, `late` an agent's raced add to it, `c` waiting for `a`
-    /// and following `b`, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
+    /// and relating to `b` through an after link as older versions stored one, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
     fn tracker() -> Replica {
         let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
         let user = by(USER);
@@ -526,7 +549,15 @@ mod tests {
             set_parent(&mut r, id, Some("goal"), user).unwrap();
         }
         link(&mut r, "c", "a", LinkKind::Blocks, user).unwrap();
-        link(&mut r, "c", "b", LinkKind::After, user).unwrap();
+        let after = model::link_key("c", "b", LinkKind::After).unwrap();
+        for (field, value) in [
+            ("from", json!("c")),
+            ("to", json!("b")),
+            ("kind", json!("after")),
+            ("present", json!(true)),
+        ] {
+            r.write(&after, field, USER, 1, Some(value)).unwrap();
+        }
         let repo = key(kind::REPOSITORY, "r");
         for (field, value) in [
             (repository::OWNER, json!("me")),
@@ -546,8 +577,7 @@ mod tests {
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
-        claim::claim(&mut r, &key(kind::ITEM, "a"), "session/pi", NOW, Some(60_000), 480 * 60_000)
-            .unwrap();
+        claim::claim(&mut r, "t", "session/pi", NOW, Some(60_000), 480 * 60_000).unwrap();
         r
     }
 
@@ -585,7 +615,7 @@ mod tests {
                     {
                         assert!(inner.is_boolean(), "{here}: {inner}");
                     }
-                    if inner.is_i64() && name != "rank" {
+                    if inner.is_i64() {
                         assert!(
                             TIMESTAMP_KEYS.contains(&name.as_str()),
                             "{here}: a number that isn't counted"
@@ -620,10 +650,10 @@ mod tests {
                 view.item("c", &view.model.items["c"]).unwrap()["links"]["waits_for"],
                 json!(["a"])
             );
-            assert_eq!(
-                view.item("c", &view.model.items["c"]).unwrap()["links"]["follows"],
-                json!(["b"])
-            );
+            // A stored after link shows as relates-to, and there is no follows key.
+            let links = &view.item("c", &view.model.items["c"]).unwrap()["links"];
+            assert_eq!(links["relates_to"], json!(["b"]));
+            assert_eq!(links.get("follows"), None);
             assert_eq!(shown["claims"][0]["holder"], "session/pi");
             assert_eq!(
                 (&shown["archived"], &shown["reopened"], &shown["done_at"]),
@@ -651,7 +681,7 @@ mod tests {
                 match value {
                     Json::Object(map) => {
                         for (name, inner) in map {
-                            if inner.is_i64() && name != "rank" && name != "members" {
+                            if inner.is_i64() && name != "members" {
                                 keys.insert(name.clone());
                             }
                             go(inner, keys);
@@ -674,20 +704,31 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_row_is_approved_exactly_when_ready_approved_lists_it() {
+    fn a_ready_row_is_a_thread_whose_items_are_approved_exactly_when_ready_approved_lists_them() {
         let r = tracker();
         viewing(&r, |view| {
-            let ready: Vec<String> = ["a", "b", "c", "late"].map(str::to_owned).to_vec();
+            let items = ["a", "b", "late"].map(str::to_owned).to_vec();
+            let ready = [ReadyThread { thread: "t".into(), items }];
             let all = view.ready_rows(&ready, false).unwrap();
             let approved = view.ready_rows(&ready, true).unwrap();
-            let flags: Vec<(&str, bool)> = all
+            assert_eq!(
+                (all[0]["id"].as_str(), all[0]["approved"].as_bool()),
+                (Some("t"), Some(true))
+            );
+            let flags: Vec<(&str, bool)> = all[0]["items"]
+                .as_array()
+                .unwrap()
                 .iter()
                 .map(|row| (row["id"].as_str().unwrap(), row["approved"].as_bool().unwrap()))
                 .collect();
-            // The agent's raced add was never seen by the approval, and c has no thread.
-            assert_eq!(flags, [("a", true), ("b", true), ("c", false), ("late", false)]);
-            assert!(approved.iter().all(|row| row["approved"] == true), "{approved:?}");
-            assert_eq!(approved.len(), 2);
+            // The agent's raced add was never seen by the approval.
+            assert_eq!(flags, [("a", true), ("b", true), ("late", false)]);
+            let kept = approved[0]["items"].as_array().unwrap();
+            assert!(kept.iter().all(|row| row["approved"] == true), "{approved:?}");
+            assert_eq!(kept.len(), 2);
+            // A thread left with no approved work isn't listed.
+            let unapproved = [ReadyThread { thread: "t".into(), items: vec!["late".into()] }];
+            assert_eq!(view.ready_rows(&unapproved, true).unwrap(), Vec::<Json>::new());
             for row in &all {
                 follows_the_conventions(row, "ready");
             }
@@ -710,7 +751,7 @@ mod tests {
                 .collect();
             assert_eq!(members, [("a", true), ("b", true), ("late", false)]);
             assert_eq!(shown["members"][2]["conflicted"], false);
-            let row = thread_row(view.model, "t", &listed["t"]);
+            let row = thread_row(&view.model.heads_index(), "t", &listed["t"]);
             for (name, value) in row.as_object().unwrap() {
                 assert_eq!(&shown[name], value, "{name}");
             }
@@ -731,7 +772,11 @@ mod tests {
         };
         conflicted.join(other.state()).unwrap();
         let model = Model::read(conflicted.state()).unwrap();
-        assert_eq!(thread_row(&model, "t", &[])["approved"], false, "a conflict isn't an approval");
+        assert_eq!(
+            thread_row(&model.heads_index(), "t", &[])["approved"],
+            false,
+            "a conflict isn't an approval"
+        );
         assert_eq!(approval(&model, "a"), (Some("t".to_owned()), false));
     }
 
@@ -832,6 +877,19 @@ mod tests {
                 follows_the_conventions(entry, "needs");
             }
         });
+    }
+
+    #[test]
+    fn a_conflicted_link_that_an_older_version_stored_resolves_as_relates_to() {
+        let mut mac = tracker();
+        let link_key = key("link", "after-1-a-b");
+        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "after")] {
+            mac.write(&link_key, field, USER, 1, Some(json!(value))).unwrap();
+        }
+        assert_eq!(
+            resolve(mac.state(), "link", "after-1-a-b", "present").as_deref(),
+            Some("acyclic link add|remove a relates-to b")
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ use crate::place;
 use crate::ready::{Readiness, Status, Wait};
 use crate::schema::{kind, question, set};
 use crate::scope;
-use crate::state::{Error, Key, Millis, State};
+use crate::state::{Error, Millis, State};
 
 /// What kind of question an agent asks; the exact classes are settled with the app's mockups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -67,7 +67,7 @@ pub enum Entry {
         /// The remote.
         remote: String,
     },
-    /// Links of blocks and after kinds form a cycle.
+    /// Blocks links form a cycle.
     LinkCycle {
         /// The items on it.
         items: Vec<String>,
@@ -77,33 +77,40 @@ pub enum Entry {
         /// The items on it.
         items: Vec<String>,
     },
-    /// Holders that didn't see each other claim one item.
+    /// Holders that didn't see each other claim one thread.
     Contest {
-        /// The item.
-        item: String,
+        /// The thread.
+        thread: String,
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// Claims on items sharing a named resource belong to different holders.
+    /// Claims on threads whose open members name one resource belong to different holders.
     ResourceClash {
         /// The resource.
         resource: String,
-        /// Each item and its holder.
+        /// Each thread and its holder.
         holders: Vec<(String, String)>,
     },
     /// A claim's lease starts in the reader's future: the writer's clock ran ahead.
     ClockAhead {
-        /// The item.
-        item: String,
+        /// The thread.
+        thread: String,
         /// The holder.
         holder: String,
     },
     /// A run's claim names a run with no record.
     UnknownRun {
-        /// The item.
-        item: String,
+        /// The thread.
+        thread: String,
         /// The holder.
         holder: String,
+    },
+    /// An open leaf in no thread, or in one with no record, which is never ready until it joins one.
+    Unthreaded {
+        /// The item.
+        item: String,
+        /// The command that puts it in a thread.
+        fix: String,
     },
     /// A thread has more than one active run.
     RunClash {
@@ -147,7 +154,7 @@ pub enum Entry {
     Reopened {
         /// The item.
         item: String,
-        /// Its dependents, by hard or soft link.
+        /// Its dependents, by waits-for link.
         dependents: Vec<String>,
     },
     /// A parent marked done while children are open.
@@ -241,6 +248,7 @@ pub fn needs_you(
         if item.is_done() || !model.children(id).is_empty() {
             continue;
         }
+        unthreaded(model, item, &mut entries);
         if let Some(Status::Blocked { waiting }) = readiness.of(id)? {
             for (dependency, wait) in waiting {
                 if let Wait::Unverified { repository, reason } = wait {
@@ -251,6 +259,22 @@ pub fn needs_you(
     }
     questions(state, model, &mut entries)?;
     Ok(entries.into_iter().collect())
+}
+
+/// An open, unarchived, unparked leaf that no thread with a record holds, whatever else holds it back: `ready` never
+/// lists it. A conflicted thread is left to its conflict entry.
+fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) {
+    let parked = item.state == Value::One(model::ItemState::Parked);
+    if parked || item.thread.is_conflict() || model.is_archived(&item.id) {
+        return;
+    }
+    if item.thread.one().is_some_and(|thread| model.threads.contains_key(thread)) {
+        return;
+    }
+    entries.insert(Entry::Unthreaded {
+        fix: format!("acyclic item edit {} --thread <THREAD>", item.id),
+        item: item.id.clone(),
+    });
 }
 
 /// Unapproved threads with open work, each with the threads it would deadlock with. Finished or archived members
@@ -264,6 +288,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
         }
     }
     let cycles = place::thread_cycles(model);
+    let heads = model.heads_index();
     for (id, thread) in &model.threads {
         let Some(&count) = members.get(id.as_str()) else { continue };
         if thread.is_approved() {
@@ -279,7 +304,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             thread: id.clone(),
             members: count,
             waits_with: waits_with.into_iter().cloned().collect(),
-            heads: model.heads(id).into_iter().map(str::to_owned).collect(),
+            heads: heads.of(id).into_iter().map(str::to_owned).collect(),
         });
     }
 }
@@ -313,16 +338,16 @@ fn claims(
     entries: &mut BTreeSet<Entry>,
 ) -> Result<(), Error> {
     let alive = |holder: &str| model.run_alive(holder);
-    for id in model.items.keys() {
-        let key = Key::new(kind::ITEM, id)?;
-        let live = claim::live_with(state, &key, now, &alive)?;
+    for id in model.threads.keys() {
+        let live = claim::live_with(state, &claim::thread_key(id)?, now, &alive)?;
         let mut holders: Vec<String> = Vec::new();
         for held in &live {
             if !holders.contains(&held.holder) {
                 holders.push(held.holder.clone());
             }
             if held.starts_in_future(now) {
-                entries.insert(Entry::ClockAhead { item: id.clone(), holder: held.holder.clone() });
+                entries
+                    .insert(Entry::ClockAhead { thread: id.clone(), holder: held.holder.clone() });
             }
             let unknown = held.lease_expires.is_none()
                 && held
@@ -330,11 +355,12 @@ fn claims(
                     .strip_prefix("run/")
                     .is_some_and(|run| !model.runs.contains_key(run));
             if unknown {
-                entries.insert(Entry::UnknownRun { item: id.clone(), holder: held.holder.clone() });
+                entries
+                    .insert(Entry::UnknownRun { thread: id.clone(), holder: held.holder.clone() });
             }
         }
         if holders.len() > 1 {
-            entries.insert(Entry::Contest { item: id.clone(), holders });
+            entries.insert(Entry::Contest { thread: id.clone(), holders });
         }
     }
     Ok(())

@@ -86,7 +86,7 @@ impl From<StateError> for CliError {
             StateError::Gap { .. } => ("sequence-gap", exit::REFUSED),
             StateError::WrongReplica { .. } => ("wrong-replica", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
-            StateError::NotALeaf(_) => ("not-a-leaf", exit::REFUSED),
+            StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
             StateError::LeaseRequired(_) => ("lease-required", exit::REFUSED),
             StateError::ResourceHeld { .. } => ("resource-held", exit::REFUSED),
             StateError::Format(_) => ("unreadable", exit::UNREADABLE),
@@ -114,6 +114,7 @@ impl From<WriteError> for CliError {
             WriteError::Checked { .. } => Self::refused("checked-field", message),
             WriteError::UserOnly { .. } => Self::refused("user-only", message),
             WriteError::SelfLink(_) => Self::refused("self-link", message),
+            WriteError::FollowsRetired => Self::refused("follows-retired", message),
             WriteError::RunTransition { .. } => Self::refused("run-transition", message),
             WriteError::RunActive { .. } => Self::refused("run-active", message),
         }

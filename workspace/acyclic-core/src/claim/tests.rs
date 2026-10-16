@@ -1,9 +1,10 @@
 use super::*;
 use crate::model::SetField;
 use crate::model::{
-    By, RunState, add_item, item_key, set, set_element, set_parent, set_run_state, start_run,
+    By, ItemState, RunState, add_item, item_key, put, set, set_element, set_run_state, set_state,
+    start_run,
 };
-use crate::schema::item as field;
+use crate::schema::{item as field, thread as thread_field};
 use crate::state::ReplicaId;
 
 const LEASE: Millis = 1_000;
@@ -16,9 +17,12 @@ fn by(actor: &'static str, at: Millis) -> By<'static> {
     By { actor, at }
 }
 
-fn items(r: &mut Replica, ids: &[&str]) {
-    for id in ids {
-        add_item(r, id, id, by("actor/user", 1)).unwrap();
+/// A thread record holding the given new items.
+fn thread(r: &mut Replica, id: &str, members: &[&str]) {
+    set(r, &thread_key(id).unwrap(), thread_field::TITLE, Some(&id), by("actor/user", 1)).unwrap();
+    for member in members {
+        add_item(r, member, member, by("actor/user", 1)).unwrap();
+        put(r, &item_key(member).unwrap(), field::THREAD, Some(&id), by("actor/user", 1)).unwrap();
     }
 }
 
@@ -27,107 +31,146 @@ fn holds(r: &mut Replica, id: &str, resource: &str) {
         .unwrap();
 }
 
-fn holder(r: &Replica, id: &str, now: Millis) -> Option<String> {
+fn holder(r: &Replica, thread: &str, now: Millis) -> Option<String> {
     let model = Model::read(&r.state).unwrap();
-    winner_with(&r.state, &item_key(id).unwrap(), now, &|h| model.run_alive(h))
+    winner_with(&r.state, &thread_key(thread).unwrap(), now, &|h| model.run_alive(h))
         .unwrap()
         .map(|c| c.holder)
 }
 
 #[test]
-fn only_leaves_are_claimed() {
+fn only_threads_with_a_record_are_claimed_and_their_claim_covers_every_member() {
     let mut r = replica("a");
-    items(&mut r, &["goal", "leaf"]);
-    set_parent(&mut r, "leaf", Some("goal"), by("actor/user", 2)).unwrap();
-    let goal = item_key("goal").unwrap();
-    assert_eq!(
-        claim(&mut r, &goal, "session/s", 10, Some(LEASE), LEASE),
-        Err(Error::NotALeaf(goal))
-    );
-    claim(&mut r, &item_key("leaf").unwrap(), "session/s", 10, Some(LEASE), LEASE).unwrap();
+    thread(&mut r, "t", &["x", "y"]);
+    add_item(&mut r, "loose", "loose", by("actor/user", 1)).unwrap();
+    put(&mut r, &item_key("loose").unwrap(), field::THREAD, Some(&"ghost"), by("actor/user", 1))
+        .unwrap();
+    for missing in ["ghost", "x"] {
+        assert_eq!(
+            claim(&mut r, missing, "session/s", 10, Some(LEASE), LEASE),
+            Err(Error::NoThread(missing.into()))
+        );
+    }
+    claim(&mut r, "t", "session/s", 10, Some(LEASE), LEASE).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    for id in ["x", "y"] {
+        let covering = covering(&r.state, &model, id, 20, &|_| true).unwrap();
+        assert_eq!(covering.iter().map(|c| c.holder.as_str()).collect::<Vec<_>>(), ["session/s"]);
+    }
+    assert_eq!(covering(&r.state, &model, "loose", 20, &|_| true).unwrap(), []);
 }
 
 #[test]
-fn a_named_resource_is_held_by_one_holder_at_a_time() {
+fn claims_older_versions_kept_on_items_are_never_read() {
     let mut r = replica("a");
-    items(&mut r, &["x", "y", "z"]);
-    for id in ["x", "y"] {
+    thread(&mut r, "t", &["x"]);
+    let old = Claim {
+        holder: "session/old".into(),
+        replica: "a".into(),
+        lease_start: 0,
+        lease_expires: Some(10_000),
+    };
+    r.write(
+        &item_key("x").unwrap(),
+        FIELD,
+        "session/old",
+        5,
+        Some(serde_json::to_value(old).unwrap()),
+    )
+    .unwrap();
+    let model = Model::read(&r.state).unwrap();
+    assert_eq!(covering(&r.state, &model, "x", 20, &|_| true).unwrap(), []);
+    claim(&mut r, "t", "session/new", 20, Some(LEASE), LEASE).unwrap();
+    // The old holder keeps writing, yet its item claim is never renewed.
+    set(&mut r, &item_key("x").unwrap(), field::NOTES, Some(&"busy"), by("session/old", 900))
+        .unwrap();
+    assert_eq!(renew_leases(&mut r, 9_900, LEASE, LEASE).unwrap(), []);
+}
+
+#[test]
+fn a_named_resource_is_held_by_one_thread_at_a_time_through_its_open_members() {
+    let mut r = replica("a");
+    thread(&mut r, "one", &["x", "x2"]);
+    thread(&mut r, "two", &["y"]);
+    thread(&mut r, "three", &["z"]);
+    // Members of one thread share a resource freely.
+    for id in ["x", "x2", "y"] {
         holds(&mut r, id, "gpu");
     }
-    claim(&mut r, &item_key("x").unwrap(), "session/one", 10, Some(LEASE), LEASE).unwrap();
-    let y = item_key("y").unwrap();
+    claim(&mut r, "one", "session/one", 10, Some(LEASE), LEASE).unwrap();
     assert_eq!(
-        claim(&mut r, &y, "session/two", 20, Some(LEASE), LEASE),
+        claim(&mut r, "two", "session/two", 20, Some(LEASE), LEASE),
         Err(Error::ResourceHeld {
             resource: "gpu".into(),
-            item: item_key("x").unwrap(),
+            thread: "one".into(),
             holder: "session/one".into()
         })
     );
     // The same holder may take both, and anyone may once the lease ends.
-    claim(&mut r, &y, "session/one", 20, Some(LEASE), LEASE).unwrap();
-    claim(&mut r, &item_key("z").unwrap(), "session/two", 20, Some(LEASE), LEASE).unwrap();
+    claim(&mut r, "two", "session/one", 20, Some(LEASE), LEASE).unwrap();
+    claim(&mut r, "three", "session/two", 20, Some(LEASE), LEASE).unwrap();
     let mut later = replica("b");
     later.join(&r.state).unwrap();
-    claim(&mut later, &y, "session/two", 2_000, Some(LEASE), LEASE).unwrap();
-    claim(&mut later, &item_key("x").unwrap(), "session/two", 2_000, Some(LEASE), LEASE).unwrap();
+    claim(&mut later, "two", "session/two", 2_000, Some(LEASE), LEASE).unwrap();
+    // Finished work holds nothing: once one's members are done, its claim holds no resource.
+    let mut done = replica("c");
+    done.join(&r.state).unwrap();
+    for id in ["x", "x2"] {
+        set_state(&mut done, id, ItemState::Done, by("session/one", 30)).unwrap();
+    }
+    release(&mut done, &thread_key("two").unwrap(), "session/one");
+    claim(&mut done, "two", "session/two", 40, Some(LEASE), LEASE).unwrap();
 }
 
 #[test]
 fn only_a_run_claims_without_a_lease() {
     let mut r = replica("a");
-    items(&mut r, &["x"]);
-    let x = item_key("x").unwrap();
+    thread(&mut r, "t", &["x"]);
     assert_eq!(
-        claim(&mut r, &x, "session/s", 10, None, LEASE),
+        claim(&mut r, "t", "session/s", 10, None, LEASE),
         Err(Error::LeaseRequired("session/s".into()))
     );
-    claim(&mut r, &x, "run/r1", 10, None, LEASE).unwrap();
+    claim(&mut r, "t", "run/r1", 10, None, LEASE).unwrap();
 }
 
 #[test]
 fn a_runs_claim_lapses_when_its_run_ends() {
     let mut r = replica("a");
-    items(&mut r, &["x"]);
-    let x = item_key("x").unwrap();
-    start_run(&mut r, "r1", "t1", by("actor/user", 2)).unwrap();
-    claim(&mut r, &x, "run/r1", 10, None, LEASE).unwrap();
-    assert_eq!(holder(&r, "x", 1_000_000), Some("run/r1".into()), "no lease: held while alive");
+    thread(&mut r, "t", &["x"]);
+    start_run(&mut r, "r1", "t", by("actor/user", 2)).unwrap();
+    claim(&mut r, "t", "run/r1", 10, None, LEASE).unwrap();
+    assert_eq!(holder(&r, "t", 1_000_000), Some("run/r1".into()), "no lease: held while alive");
     set_run_state(&mut r, "r1", RunState::Stopped, by("actor/user", 20)).unwrap();
-    assert_eq!(holder(&r, "x", 30), None);
-    claim(&mut r, &x, "session/s", 30, Some(LEASE), LEASE).unwrap();
+    assert_eq!(holder(&r, "t", 30), None);
+    claim(&mut r, "t", "session/s", 30, Some(LEASE), LEASE).unwrap();
 }
 
 #[test]
 fn sync_renews_only_the_leases_of_holders_still_at_work() {
     let (mut a, mut b) = (replica("a"), replica("b"));
-    items(&mut a, &["busy", "idle"]);
+    thread(&mut a, "busy", &["x"]);
+    thread(&mut a, "idle", &["y"]);
     b.join(&a.state).unwrap();
-    items(&mut b, &["theirs"]);
-    claim(&mut a, &item_key("busy").unwrap(), "session/busy", 0, Some(LEASE), LEASE).unwrap();
-    claim(&mut a, &item_key("idle").unwrap(), "session/idle", 0, Some(LEASE), LEASE).unwrap();
-    claim(&mut b, &item_key("theirs").unwrap(), "session/busy", 0, Some(LEASE), LEASE).unwrap();
+    thread(&mut b, "theirs", &["z"]);
+    claim(&mut a, "busy", "session/busy", 0, Some(LEASE), LEASE).unwrap();
+    claim(&mut a, "idle", "session/idle", 0, Some(LEASE), LEASE).unwrap();
+    claim(&mut b, "theirs", "session/busy", 0, Some(LEASE), LEASE).unwrap();
     a.join(&b.state).unwrap();
     // Only the busy session writes anything else.
-    set(
-        &mut a,
-        &item_key("busy").unwrap(),
-        field::NOTES,
-        Some(&"progress"),
-        by("session/busy", 600),
-    )
-    .unwrap();
+    set(&mut a, &item_key("x").unwrap(), field::NOTES, Some(&"progress"), by("session/busy", 600))
+        .unwrap();
 
     assert!(
         renew_leases(&mut a, 400, LEASE, LEASE).unwrap().is_empty(),
         "over half the lease is left"
     );
+    let busy = thread_key("busy").unwrap();
     let renewed = renew_leases(&mut a, 900, LEASE, LEASE).unwrap();
-    assert_eq!(renewed, vec![item_key("busy").unwrap()], "not the idle one, nor another replica's");
-    let busy = winner(&a.state, &item_key("busy").unwrap(), 1_500).unwrap().unwrap();
-    assert_eq!((busy.lease_start, busy.lease_expires), (0, Some(1_900)));
+    assert_eq!(renewed, vec![busy.clone()], "not the idle one, nor another replica's");
+    let claim = winner(&a.state, &busy, 1_500).unwrap().unwrap();
+    assert_eq!((claim.lease_start, claim.lease_expires), (0, Some(1_900)));
     assert!(
-        winner(&a.state, &item_key("idle").unwrap(), 1_000).unwrap().is_none(),
+        winner(&a.state, &thread_key("idle").unwrap(), 1_000).unwrap().is_none(),
         "expired after one lease"
     );
     // Renewed once a burst of syncs, then not again until half the new lease has passed.
@@ -135,28 +178,32 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
     // Renewals are the replica's writes, so they don't keep a holder looking busy.
     assert_eq!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap(), Vec::<Key>::new());
     // A renewed claim is still its holder's to release, though the replica wrote it.
-    assert!(release(&mut a, &item_key("busy").unwrap(), "session/busy"));
-    assert!(winner(&a.state, &item_key("busy").unwrap(), 1_500).unwrap().is_none());
+    assert!(release(&mut a, &busy, "session/busy"));
+    assert!(winner(&a.state, &busy, 1_500).unwrap().is_none());
 }
 
 #[test]
 fn claims_made_apart_on_one_resource_are_a_clash() {
     let mut a = replica("a");
-    items(&mut a, &["x", "y"]);
+    thread(&mut a, "one", &["x"]);
+    thread(&mut a, "two", &["y"]);
     for id in ["x", "y"] {
         holds(&mut a, id, "gpu");
     }
     let mut b = replica("b");
     b.join(&a.state).unwrap();
-    claim(&mut a, &item_key("x").unwrap(), "session/one", 10, Some(LEASE), LEASE).unwrap();
-    claim(&mut b, &item_key("y").unwrap(), "session/two", 10, Some(LEASE), LEASE).unwrap();
+    claim(&mut a, "one", "session/one", 10, Some(LEASE), LEASE).unwrap();
+    claim(&mut b, "two", "session/two", 10, Some(LEASE), LEASE).unwrap();
     a.join(&b.state).unwrap();
     let model = Model::read(&a.state).unwrap();
     assert_eq!(
         clashes(&a.state, &model, 20).unwrap(),
         vec![Clash {
             resource: "gpu".into(),
-            holders: vec![("x".into(), "session/one".into()), ("y".into(), "session/two".into())]
+            holders: vec![
+                ("one".into(), "session/one".into()),
+                ("two".into(), "session/two".into())
+            ]
         }]
     );
     assert!(clashes(&a.state, &model, 2_000).unwrap().is_empty(), "gone when the leases end");
@@ -164,20 +211,20 @@ fn claims_made_apart_on_one_resource_are_a_clash() {
 
 #[test]
 fn a_release_drops_only_its_holders_claim_whatever_races_it() {
+    let t = thread_key("t").unwrap();
     let holders = |r: &Replica| -> Vec<String> {
-        live(&r.state, &item_key("x").unwrap(), 50).unwrap().into_iter().map(|c| c.holder).collect()
+        live(&r.state, &t, 50).unwrap().into_iter().map(|c| c.holder).collect()
     };
-    let x = item_key("x").unwrap();
     // A contest seen on both: one claimed first, so one wins.
     let contest = || {
         let mut a = replica("a");
-        items(&mut a, &["x"]);
+        thread(&mut a, "t", &["x"]);
         let mut b = replica("b");
         b.join(&a.state).unwrap();
         let mut c = replica("c");
         c.join(&a.state).unwrap();
-        claim(&mut a, &x, "session/one", 10, Some(LEASE), LEASE).unwrap();
-        claim(&mut b, &x, "session/two", 20, Some(LEASE), LEASE).unwrap();
+        claim(&mut a, "t", "session/one", 10, Some(LEASE), LEASE).unwrap();
+        claim(&mut b, "t", "session/two", 20, Some(LEASE), LEASE).unwrap();
         a.join(&b.state).unwrap();
         b.join(&a.state).unwrap();
         assert_eq!(holders(&a), ["session/one", "session/two"]);
@@ -185,9 +232,9 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
     };
     // The loser steps aside while the winner renews: both drop the loser's claim.
     let (mut a, mut b, _) = contest();
-    assert!(release(&mut b, &x, "session/two"));
-    assert!(!release(&mut b, &x, "session/two"), "nothing left to release");
-    claim(&mut a, &x, "session/one", 30, Some(LEASE), LEASE).unwrap();
+    assert!(release(&mut b, &t, "session/two"));
+    assert!(!release(&mut b, &t, "session/two"), "nothing left to release");
+    claim(&mut a, "t", "session/one", 30, Some(LEASE), LEASE).unwrap();
     a.join(&b.state).unwrap();
     b.join(&a.state).unwrap();
     assert_eq!(
@@ -196,13 +243,13 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
     );
     // A claim the release never saw survives it.
     let (_, mut b, mut c) = contest();
-    claim(&mut c, &x, "session/three", 40, Some(LEASE), LEASE).unwrap();
-    assert!(release(&mut b, &x, "session/two"));
+    claim(&mut c, "t", "session/three", 40, Some(LEASE), LEASE).unwrap();
+    assert!(release(&mut b, &t, "session/two"));
     b.join(&c.state).unwrap();
     assert_eq!(holders(&b), ["session/one", "session/three"]);
-    // The winner stepping aside leaves the item to the loser, on every replica.
+    // The winner stepping aside leaves the thread to the loser, on every replica.
     let (mut a, b, _) = contest();
-    assert!(release(&mut a, &x, "session/one"));
+    assert!(release(&mut a, &t, "session/one"));
     a.join(&b.state).unwrap();
-    assert_eq!(holder(&a, "x", 50).as_deref(), Some("session/two"));
+    assert_eq!(holder(&a, "t", 50).as_deref(), Some("session/two"));
 }

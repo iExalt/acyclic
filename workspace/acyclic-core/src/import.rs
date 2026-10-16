@@ -15,8 +15,9 @@ pub use apply::{ApplyError, Report, apply};
 /// The value of the document's `format` field.
 pub const FORMAT: &str = "acyclic-import";
 
-/// The newest version this build reads. Version 2 names link kinds `waits-for`, `follows` and `relates-to`; version 1,
-/// still read, names them `blocks`, `after` and `relates` (and takes the new names too).
+/// The newest version this build reads. Version 2 names link kinds `waits-for` and `relates-to`; version 1, still
+/// read, names them `blocks` and `relates` (and takes the new names too). Both versions refuse the retired soft link,
+/// `follows` in version 2 and `after` in version 1.
 pub const VERSION: u32 = 2;
 
 /// An annotated version 2 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
@@ -38,7 +39,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
     {"key": "beds", "title": "Build the beds", "size": "m", "repositories": ["code"]},
     {"key": "plant", "title": "Plant the seeds", "areas": ["garden"]}
   ],
-  // "from" waits-for, follows or relates-to "to": plant can't start until beds is done.
+  // "from" waits-for or relates-to "to": plant can't start until beds is done.
   "links": [
     {"from": "plant", "kind": "waits-for", "to": "beds"}
   ],
@@ -179,7 +180,7 @@ pub struct Item {
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     WaitsFor,
-    /// A soft dependency: `from` prefers to follow `to`.
+    /// A retired soft dependency, read only so validation can refuse it with the words to use instead.
     Follows,
     /// Context only.
     RelatesTo,
@@ -189,7 +190,7 @@ pub enum LinkKind {
 pub const RENAMED_LINK_KINDS: [(&str, &str); 3] =
     [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")];
 
-/// A link between two items: `from` depends on, follows or relates to `to`.
+/// A link between two items: `from` depends on or relates to `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
@@ -300,10 +301,12 @@ pub enum ValidationError {
     ParentCycle(String),
     /// A link joins an item to itself.
     SelfLink(String),
-    /// Hard and soft dependencies among exactly these items form a cycle.
+    /// Dependencies among exactly these items form a cycle.
     DependencyCycle(Vec<String>),
     /// The same link appears twice.
     DuplicateLink(Link),
+    /// A follows link, which is retired.
+    FollowsRetired(Link),
     /// An item is a member of several threads.
     ItemInSeveralThreads {
         /// The item.
@@ -347,6 +350,12 @@ impl fmt::Display for ValidationError {
             Self::DuplicateLink(link) => {
                 write!(f, "link {:?} to {:?} ({:?}) appears twice", link.from, link.to, link.kind)
             },
+            Self::FollowsRetired(link) => write!(
+                f,
+                "link {:?} to {:?}: follows links are retired; use waits-for when {:?} can't start before {:?} is \
+                 done, or relates-to for context",
+                link.from, link.to, link.from, link.to
+            ),
             Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
             Self::InvalidName { at, name } => write!(
                 f,
@@ -524,9 +533,12 @@ impl Import {
             if !seen.insert((&link.from, &link.to, link.kind)) {
                 errors.push(ValidationError::DuplicateLink(link.clone()));
             }
+            if link.kind == LinkKind::Follows {
+                errors.push(ValidationError::FollowsRetired(link.clone()));
+            }
             if link.from == link.to {
                 errors.push(ValidationError::SelfLink(link.from.clone()));
-            } else if link.kind != LinkKind::RelatesTo {
+            } else if link.kind == LinkKind::WaitsFor {
                 edges.push((link.from.as_str(), link.to.as_str()));
             }
         }
@@ -709,6 +721,22 @@ mod tests {
             ("after", "follows", LinkKind::Follows),
             ("relates", "relates-to", LinkKind::RelatesTo),
         ] {
+            if expected == LinkKind::Follows {
+                // Read, so validation can name the words to use instead.
+                for (version, word) in [(1, old), (2, new)] {
+                    let doc = read(version, word).unwrap();
+                    assert_eq!(
+                        doc.validate(),
+                        vec![ValidationError::FollowsRetired(doc.links[0].clone())],
+                        "{word}"
+                    );
+                    let message = doc.validate()[0].to_string();
+                    assert!(
+                        message.contains("waits-for") && message.contains("relates-to"),
+                        "{message}"
+                    );
+                }
+            }
             assert_eq!(read(1, old).unwrap().links[0].kind, expected, "{old}");
             assert_eq!(read(2, new).unwrap().links[0].kind, expected, "{new}");
             assert_eq!(read(1, new).unwrap().links[0].kind, expected, "version 1 takes {new} too");
@@ -734,7 +762,7 @@ mod tests {
         import.items.push(item("a", State::Backlog, Some("nowhere")));
         import.items.push(item("", State::Backlog, None));
         import.threads.push(thread("t", &["ghost"]));
-        import.links.push(link("a", "missing", LinkKind::Follows));
+        import.links.push(link("a", "missing", LinkKind::RelatesTo));
         let errors = import.validate();
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Item, "a".to_owned())));
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Thread, "t".to_owned())));
@@ -764,13 +792,14 @@ mod tests {
     }
 
     #[test]
-    fn hard_and_soft_links_together_must_be_acyclic() {
+    fn waits_for_links_must_be_acyclic_and_relates_to_links_never_close_a_cycle() {
         let mut import = valid();
-        import.links.push(link("b", "a", LinkKind::Follows));
+        import.links.push(link("b", "a", LinkKind::WaitsFor));
         assert_eq!(
             import.validate(),
             vec![ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()])]
         );
+        // The valid document's relates-to link from b to a closes none.
         import.links.pop();
         import.links.push(link("a", "a", LinkKind::RelatesTo));
         assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
@@ -782,8 +811,8 @@ mod tests {
         import.items.push(item("c", State::Backlog, None));
         import.items.push(item("d", State::Backlog, None));
         import.items.push(item("e", State::Backlog, None));
-        // a blocks on b already; b after a closes a cycle that c and d only reach.
-        import.links.push(link("b", "a", LinkKind::Follows));
+        // a blocks on b already; b waiting for a closes a cycle that c and d only reach.
+        import.links.push(link("b", "a", LinkKind::WaitsFor));
         import.links.push(link("c", "a", LinkKind::WaitsFor));
         import.links.push(link("a", "e", LinkKind::WaitsFor));
         import.links.push(link("d", "e", LinkKind::WaitsFor));

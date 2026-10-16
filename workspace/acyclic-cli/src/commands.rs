@@ -55,6 +55,9 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Prime = &cli.command {
         return Ok(Output::Text(prime()));
     }
+    if let Command::Completions { shell } = &cli.command {
+        return Ok(Output::Text(completions(*shell)));
+    }
     if let Command::Import { schema: true, .. } = &cli.command {
         return Ok(Output::Text(import::SCHEMA.to_owned()));
     }
@@ -66,7 +69,7 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
         ));
     }
     let session = Session::open(cli, env)?;
-    if let Command::Graph { format, renderer, open, root, thread, include_archived, output } =
+    if let Command::Graph { format, renderer, open, root, thread, include_archived, file } =
         &cli.command
     {
         let scope = export::Scope {
@@ -83,7 +86,7 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
             ));
         }
         let renderer = renderer.unwrap_or(Renderer::Graphviz);
-        return session.graph(format, renderer, &scope, output.as_deref(), *open);
+        return session.graph(format, renderer, &scope, file.as_deref(), *open);
     }
     session.dispatch(&cli.command).map(Output::Json)
 }
@@ -114,7 +117,8 @@ impl<'a> Session<'a> {
             | Command::Prime
             | Command::Graph { .. }
             | Command::Import { file: None, .. }
-            | Command::Serve(_) => {
+            | Command::Serve(_)
+            | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
             Command::Ready { include_archived, approved } => {
@@ -204,11 +208,7 @@ impl<'a> Session<'a> {
             },
             Command::Link(LinkCommand::Remove { from, kind: word, to }) => {
                 self.write(|replica, by| {
-                    let kind = word.kind();
-                    let key = model::link_key(from, to, kind)?;
-                    if replica.state().field(&key, link_field::PRESENT).is_some() {
-                        model::unlink(replica, from, to, kind, by)?;
-                    }
+                    model::unlink(replica, from, to, word.kind(), by)?;
                     Ok(json!({"from": from, "kind": word, "to": to}))
                 })
             },
@@ -237,20 +237,21 @@ impl<'a> Session<'a> {
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
                     model::set_state(replica, id, ItemState::Done, by)?;
-                    // Finished work holds nothing, not even the resources its claim named.
-                    claim::release(replica, &key, by.actor);
-                    Ok(json!({"item": id, "state": ItemState::Done}))
+                    // The evidence it holds now, so a caller sees what was recorded.
+                    let model = Model::read(replica.state())?;
+                    let evidence = view::evidence(&model.items[id].evidence);
+                    Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
                 })
             },
-            Command::Release { item: id } => self.write(|replica, by| {
-                let key = existing(replica, id)?;
-                Ok(json!({"item": id, "released": claim::release(replica, &key, by.actor)}))
+            Command::Release { thread } => self.write(|replica, by| {
+                let key = existing_thread(replica, thread)?;
+                Ok(json!({"thread": thread, "released": claim::release(replica, &key, by.actor)}))
             }),
             Command::Item(ItemCommand::Reopen { item: id }) => self.write(|replica, by| {
                 archive::reopen(replica, id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Claim { item: id, lease, force } => self.claim(id, *lease, *force),
+            Command::Claim { thread, lease, force } => self.claim(thread, *lease, *force),
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
             Command::Thread(ThreadCommand::Add { thread, title, brief, repository, level }) => {
@@ -473,9 +474,8 @@ impl<'a> Session<'a> {
 
     fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
         self.with_view(|view| {
-            let ready = view.readiness.ready(include_archived)?;
+            let ready = view.readiness.ready(include_archived, &self.actor)?;
             acyclic_core::probe::mark("readiness");
-            let ready: Vec<String> = ready.into_iter().map(|(id, _)| id).collect();
             Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
         })
     }
@@ -496,16 +496,16 @@ impl<'a> Session<'a> {
         }
         if format == GraphFormat::Html && output.is_none() && !open {
             return Err(usage(
-                "an HTML page is too large for standard output: pass --output <file> or --open",
+                "an HTML page is too large for standard output: pass --file <FILE> or --open",
             ));
         }
         let (_, model) = self.read()?;
         let view = export::view(&model, scope)
             .map_err(|err| CliError::new("not-found", exit::NOT_FOUND, err.to_string()))?;
         let document = match (format, renderer) {
-            (GraphFormat::Dot, _) | (GraphFormat::Html, Renderer::Graphviz) => {
-                export::dot(&model, &view)
-            },
+            (GraphFormat::Dot, _) => export::dot_with_legend(&model, &view),
+            // The page draws its own legend.
+            (GraphFormat::Html, Renderer::Graphviz) => export::dot(&model, &view),
             (GraphFormat::Mermaid, _) | (GraphFormat::Html, Renderer::Mermaid) => {
                 export::mermaid(&model, &view)
             },
@@ -751,7 +751,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn claim(&self, id: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
+    fn claim(&self, thread: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
         let is_run = self.actor.starts_with("run/");
         let lease = match (lease, is_run) {
             (None, true) => None,
@@ -761,32 +761,35 @@ impl<'a> Session<'a> {
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         self.write(|replica, by| {
-            let key = existing(replica, id)?;
+            let key = existing_thread(replica, thread)?;
             if !force {
                 let model = Model::read(replica.state())?;
-                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).of(id)?;
-                if !may_claim(status.as_ref(), by.actor) {
+                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).thread(thread)?;
+                if !status.claimable_by(by.actor) {
                     return Err(CliError::refused(
                         "not-ready",
-                        format!("item {id} isn't ready to claim; `acyclic show {id}` says why"),
+                        format!(
+                            "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it or \
+                             a resource it needs; `acyclic thread show {thread}` says why"
+                        ),
                     )
                     .with(json!({"readiness": status})));
                 }
             }
-            claim::claim(replica, &key, by.actor, by.at, lease, MAX_LEASE)?;
+            claim::claim(replica, thread, by.actor, by.at, lease, MAX_LEASE)?;
             let model = Model::read(replica.state())?;
             let alive = |holder: &str| model.run_alive(holder);
             let held = claim::winner_with(replica.state(), &key, by.at, &alive)?;
-            Ok(json!({"item": id, "claim": held.as_ref().map(view::claim_json)}))
+            Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
 }
 
-/// Whether `actor` may claim an item in `status` without forcing: when it's ready, or when what stands in the way is
-/// the actor's own claim, as winner of a contest or as holder of a shared resource. Core allows the same.
+/// Whether `actor` may work on an item in `status` without forcing: when it's ready, or when what stands in the way is
+/// the actor's own claim on its thread, as winner of a contest, or on the thread holding a resource it needs.
 pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
     match status {
-        Some(Status::Ready { .. }) => true,
+        Some(Status::Ready) => true,
         Some(Status::Claimed { holder } | Status::ResourceBusy { holder, .. }) => holder == actor,
         Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
         _ => false,
@@ -888,6 +891,15 @@ pub(crate) fn prime() -> String {
     include_str!("prime.md").replace("{version}", acyclic_core::VERSION)
 }
 
+/// A completion script for `shell`. It completes from the plain command line, because the sectioned help hides the
+/// subcommands from clap's own list, and a generator leaves hidden ones out.
+pub(crate) fn completions(shell: clap_complete::Shell) -> String {
+    use clap::CommandFactory as _;
+    let mut script = Vec::new();
+    clap_complete::generate(shell, &mut crate::args::Cli::command(), "acyclic", &mut script);
+    String::from_utf8(script).expect("a completion script is UTF-8")
+}
+
 /// An item as a thread lists it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Member<'a> {
@@ -908,21 +920,33 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
             threads.entry(thread.as_str()).or_default().push(member);
         }
     }
-    for members in threads.values_mut() {
-        let order = run_order(model, members.iter().map(|m| m.item).collect());
+    // Each thread's blocks links among its own members, gathered in one pass rather than once per thread.
+    let mut links: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+    let threads_of =
+        |id: &str| model.items.get(id).map(|item| item.thread.all()).unwrap_or_default();
+    for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+        let to = threads_of(&link.to);
+        for thread in threads_of(&link.from).into_iter().filter(|thread| to.contains(thread)) {
+            links.entry(thread.as_str()).or_default().push((&link.from, &link.to));
+        }
+    }
+    for (thread, members) in &mut threads {
+        let among = links.get(thread).map_or(&[][..], Vec::as_slice);
+        let order = run_order(members.iter().map(|m| m.item).collect(), among);
         members.sort_by_key(|m| order[m.item]);
     }
     threads
 }
 
-/// Each item's place when `items` run along their blocks links among themselves.
-fn run_order<'a>(model: &Model, items: BTreeSet<&'a str>) -> BTreeMap<&'a str, usize> {
+/// Each item's place when `items` run along `links`, the blocks links among them as `(from, to)`.
+fn run_order<'a>(
+    items: BTreeSet<&'a str>,
+    links: &[(&'a str, &'a str)],
+) -> BTreeMap<&'a str, usize> {
     let mut waits: BTreeMap<&str, usize> = items.iter().map(|id| (*id, 0)).collect();
     let mut unblocks: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for link in &model.links {
-        if let (LinkKind::Blocks, Some(&from), Some(&to)) =
-            (link.kind, items.get(link.from.as_str()), items.get(link.to.as_str()))
-        {
+    for (from, to) in links {
+        if let (Some(&from), Some(&to)) = (items.get(from), items.get(to)) {
             *waits.get_mut(from).expect("a member") += 1;
             unblocks.entry(to).or_default().push(from);
         }
@@ -955,6 +979,19 @@ pub(crate) fn not_found(id: &str) -> CliError {
 /// An item's key, refusing one that doesn't exist or was deleted.
 pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     Ok(model::existing(replica.state(), id)?)
+}
+
+/// A thread's key, when the thread has a record; naming an item in a thread says which thread was meant.
+pub(crate) fn existing_thread(replica: &Replica, thread: &str) -> Result<Key, CliError> {
+    let model = Model::read(replica.state())?;
+    if !model.threads.contains_key(thread) {
+        let error: CliError = acyclic_core::state::Error::NoThread(thread.to_owned()).into();
+        return Err(match model.thread_of(thread) {
+            Some(meant) => error.with(json!({"thread": meant})),
+            None => error,
+        });
+    }
+    Ok(claim::thread_key(thread)?)
 }
 
 /// A field's value when it holds exactly one; a clear holds none.

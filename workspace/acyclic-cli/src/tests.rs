@@ -18,6 +18,7 @@ fn env(vars: &[(&str, &str)]) -> Env {
     Env {
         vars: vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
         cwd: PathBuf::from("/"),
+        terminal: None,
     }
 }
 
@@ -70,10 +71,14 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::Gap { run: "r".into(), expected: 1, got: 2 }.into(),
         StateError::WrongReplica { run: "r".into(), applied_by: "mac".into() }.into(),
         StateError::Claimed(key.clone()).into(),
-        StateError::NotALeaf(key.clone()).into(),
+        StateError::NoThread("t".into()).into(),
         StateError::LeaseRequired("session/s".into()).into(),
-        StateError::ResourceHeld { resource: "gpu".into(), item: key, holder: "session/s".into() }
-            .into(),
+        StateError::ResourceHeld {
+            resource: "gpu".into(),
+            thread: "t".into(),
+            holder: "session/s".into(),
+        }
+        .into(),
         StateError::Format("bad".into()).into(),
         WriteError::InvalidName("A".into()).into(),
         WriteError::NoItem("a1".into()).into(),
@@ -213,12 +218,12 @@ fn the_help_sections_hold_every_command_once() {
 
 #[test]
 fn times_print_as_rfc3339_in_utc() {
-    let mut out = json!({"eligible_at": 0, "rank": 0,
+    let mut out = json!({"eligible_at": 0, "members": 0,
                          "claims": [{"lease_expires_at": null, "lease_started_at": 0}]});
     timestamps(&mut out);
     assert_eq!(
         out,
-        json!({"eligible_at": "1970-01-01T00:00:00Z", "rank": 0,
+        json!({"eligible_at": "1970-01-01T00:00:00Z", "members": 0,
                "claims": [{"lease_expires_at": null,
                            "lease_started_at": "1970-01-01T00:00:00Z"}]})
     );
@@ -232,14 +237,14 @@ fn an_actor_may_claim_past_its_own_claims_only() {
     let claimed = |holder: &str| Status::Claimed { holder: holder.into() };
     let busy = |holder: &str| Status::ResourceBusy {
         resource: "gpu".into(),
-        item: "other".into(),
+        thread: "other".into(),
         holder: holder.into(),
     };
     let contested = |first: &str, second: &str| Status::Contested {
         holders: vec![first.into(), second.into()],
     };
     for (status, may) in [
-        (Status::Ready { rank: 0 }, true),
+        (Status::Ready, true),
         (claimed(me), true),
         (claimed("run/r1"), false),
         (contested(me, "run/r1"), true),
@@ -384,6 +389,7 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     // needs a rule there before it joins this list. `serve` is never deserialized.
     let mut found = Vec::new();
     for sub in args::command().get_subcommands().filter(|sub| sub.get_name() != "serve") {
+        // `completions` is never deserialized either, but has nothing to check.
         constrained(sub, sub.get_name(), &mut found);
     }
     found.sort();
@@ -416,10 +422,10 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(refused(json!({"repo": {"show": {"repositories": []}}})), Err("usage"));
     assert_eq!(refused(json!({"proposal": {"show": {"proposals": []}}})), Err("usage"));
     for lease in [0, 481] {
-        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Err("usage"));
+        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Err("usage"));
     }
     for lease in [1, 480] {
-        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Ok(()));
+        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Ok(()));
     }
     assert_eq!(refused(json!({"done": {"item": "a", "repository": "r", "commit": "c"}})), Ok(()));
     // Unknown fields and the server's own command are refused when deserializing.
@@ -428,6 +434,9 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             .is_err()
     );
     assert!(serde_json::from_value::<args::Command>(json!({"serve": {"login": "x"}})).is_err());
+    assert!(
+        serde_json::from_value::<args::Command>(json!({"completions": {"shell": "zsh"}})).is_err()
+    );
 }
 
 #[test]
@@ -512,11 +521,10 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
 }
 
 #[test]
-fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
+fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
     use acyclic_core::model::LinkKind;
     for (word, kind) in [
         (args::LinkWord::WaitsFor, LinkKind::Blocks),
-        (args::LinkWord::Follows, LinkKind::After),
         (args::LinkWord::RelatesTo, LinkKind::Relates),
     ] {
         assert_eq!(word.kind(), kind);
@@ -524,10 +532,24 @@ fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
     // Exhaustive, so a new word must be listed.
     for word in args::LinkWord::ALL {
         match word {
-            args::LinkWord::WaitsFor | args::LinkWord::Follows | args::LinkWord::RelatesTo => {},
+            args::LinkWord::WaitsFor | args::LinkWord::RelatesTo => {},
         }
     }
-    for (old, new) in [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")] {
+    let out = run("acyclic link remove a2 follows a1");
+    assert!(out.stderr.contains("use `acyclic link remove a2 relates-to a1`"), "{out:?}");
+    // Soft links are retired, under either name, with the words to use instead.
+    for retired in ["follows", "after"] {
+        let out = run(&format!("acyclic link add a2 {retired} a1"));
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{retired}");
+        assert!(
+            out.stderr.contains(&format!(
+                "`{retired}` links are retired: use `acyclic link add a2 waits-for a1` when a2 can't start until a1 \
+                 is done, or `relates-to` for context"
+            )),
+            "{out:?}"
+        );
+    }
+    for (old, new) in [("blocks", "waits-for"), ("relates", "relates-to")] {
         let out = run(&format!("acyclic link add a2 {old} a1"));
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{old}");
         assert!(
@@ -541,8 +563,24 @@ fn links_are_named_waits_for_follows_and_relates_to_and_the_old_words_say_so() {
     assert!(out.stderr.contains("use `acyclic link remove a2 waits-for a1`"), "{out:?}");
     assert!(run("acyclic link add a2 sideways a1").stderr.contains("[possible values: waits-for"));
     let help = run("acyclic help link add").stdout;
-    assert!(help.contains("`<FROM>` waits for, follows, or relates to `<TO>`"), "{help}");
+    assert!(help.contains("`<FROM>` waits for or relates to `<TO>`"), "{help}");
+    assert!(!help.contains("follows"), "{help}");
     assert!(help.contains("acyclic link add plant waits-for beds"), "{help}");
+}
+
+#[test]
+fn completions_are_text_that_reaches_nested_commands_and_short_flags() {
+    for (shell, nested, short) in [
+        ("bash", "subcmd__item__subcmd__edit", "-t"),
+        ("zsh", "(edit)", "'-t+["),
+        ("fish", "from edit\" -s t", "-l dry-run"),
+    ] {
+        let out = run(&format!("acyclic completions {shell}"));
+        assert_eq!((out.code, out.stderr.as_str()), (exit::OK, ""), "{shell}");
+        assert!(out.stdout.contains(nested) && out.stdout.contains(short), "{shell}");
+        assert!(out.stdout.contains("dry-run") && out.stdout.contains("completions"), "{shell}");
+    }
+    assert_eq!(run("acyclic completions tcsh").code, exit::USAGE);
 }
 
 #[test]
@@ -576,6 +614,7 @@ fn every_command_follows_the_input_conventions() {
     // Positionals are the subject's id, named for the entity; these are the only others.
     let exceptions = [
         ("init", "path"),
+        ("completions", "shell"),
         ("import", "file"),
         ("level", "level"),
         ("link add", "from"),
@@ -600,12 +639,19 @@ fn every_command_follows_the_input_conventions() {
                     "{path}: positional <{shown}> is neither an entity's id nor a listed exception"
                 );
             }
+            // A short flag is its long's initial, apart from the usual `-n` for a dry run.
+            if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
+                assert!(
+                    long.starts_with(short) || (short, long) == ('n', "dry-run"),
+                    "{path}: -{short} for --{long}"
+                );
+            }
             // A flag that clears or removes has the flag that sets or adds.
             if let Some(field) = arg.get_long().and_then(|long| long.strip_prefix("no-")) {
                 assert!(longs.contains(&field), "{path}: --no-{field} without --{field}");
             }
             // An input that takes one of the model's enums lists its values.
-            if ["size", "state", "level", "kind", "format", "renderer"].contains(&id) {
+            if ["size", "state", "level", "kind", "format", "renderer", "shell"].contains(&id) {
                 assert!(!arg.get_possible_values().is_empty(), "{path}: {id} lists no values");
             }
         }
@@ -645,6 +691,8 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         ("acyclic repo attach r1 --item a1", "acyclic item edit <ITEM> --repository <REPOSITORY>"),
         ("acyclic repo detach r1 --thread t1", "acyclic thread edit <THREAD> --no-repository"),
         ("acyclic level --thread t1 blockers", "acyclic thread edit <THREAD> --level <LEVEL>"),
+        ("acyclic graph --output graph.dot", "acyclic graph --file <FILE>"),
+        ("acyclic -o pretty item move a1 b1", "acyclic item edit <ITEM> --parent <PARENT>"),
         ("acyclic item edit a1 --state done", "acyclic done <ITEM>"),
         ("acyclic item add a1 --title T --state=done", "acyclic done <ITEM>"),
     ] {
@@ -659,6 +707,9 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         "acyclic level blockers",
         "acyclic thread edit t1 --level blockers",
         "acyclic repo edit r1 --private",
+        // A way to print parses as one, so a graph line failing with it failed for another reason.
+        "acyclic graph --output pretty --bogus",
+        "acyclic --output=json graph --bogus",
     ] {
         assert_eq!(hint(line), None, "{line}");
     }
