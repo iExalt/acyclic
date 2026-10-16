@@ -31,12 +31,19 @@ older copy.
 
 1. `acyclic ready` lists ready leaves, best first, each with its thread and whether the user approved its work;
    `acyclic ready --approved` lists only approved work. `acyclic list` lists every item. `acyclic show <item>...`
-   explains items, as an array in the order given: their readiness, children and claims.
-2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by
-   default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the
-   tracker; re-run `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work.
-   If `claim`, `ready` or `show` says another holder wins a contest for your item, stop and run
-   `acyclic release <item>`: it drops only your claim.
+   explains items, as an array in the order given: their readiness, children and claims. A done item counts for what
+   waits on it from another thread, or outside any thread, only once each commit in its evidence is on that repository's
+   default branch, as last fetched in your clone (named in `~/.config/acyclic/clones.toml`). Until then they wait on it
+   as `in-review`; run `git fetch` there before `acyclic ready`. They wait as `unverified`, with a reason, when the
+   commit can't be checked, such as with no clone mapped: fix the mapping, since fetching won't help. Work finished
+   without a commit counts at once.
+2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
+   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker; re-run
+   `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work. If `claim`, `ready`
+   or `show` says another holder wins a contest for your item, stop and run `acyclic release <item>`: it drops only your
+   claim. A claim refused with readiness `resource-busy` means another item's claim holds a resource yours needs: wait
+   for that work, and don't force it. A lapsed lease frees your item and its resources, so renew after any pause, and
+   before work that needs a resource, check that `acyclic show <item>` still names you as holder.
 3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
    commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
    are done; don't use `--force` to finish someone else's work.
@@ -49,9 +56,12 @@ older copy.
 5. `acyclic thread` and `acyclic repo` group work into threads and attach repositories. `acyclic thread list` lists
    the threads with their members, and `acyclic thread show <thread>` shows each member's state and readiness.
    `acyclic <group> --help` lists a group's commands.
-6. Grouping work into threads is yours: create threads with `acyclic thread set`, fill them with `acyclic thread
-   add`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
-   its parent passes down, or else the one its siblings share; an add, move or import reports it as `inherited`.
+6. Grouping work into threads is yours: create threads with `acyclic thread set`, fill them with `acyclic thread add`,
+   give each a title and brief, and leave approving them to the user. New or moved work joins the thread its parent
+   passes down, or else the one its siblings share; an add, move or import reports it as `inherited`. Once the user
+   approves a thread, your change to its members or repositories doesn't apply unless you are a run on a
+   project-management thread: it waits in `acyclic needs` as a proposal for the user. Thread and repo commands report
+   `"outcome": "proposed"`, and an add, move or import lists the proposal in its report. Carry on with other work.
 7. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With
