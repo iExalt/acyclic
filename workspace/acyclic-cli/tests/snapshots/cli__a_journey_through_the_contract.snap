@@ -277,7 +277,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread nope
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no thread nope; add it with acyclic thread add nope --title <TITLE>"
+    "message": "no thread nope; add it with `acyclic thread add nope --title <TITLE>`"
   },
   "ok": false
 }
@@ -755,7 +755,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo edit nope --private
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no repository record nope"
+    "message": "no repository record nope; `acyclic repo list` lists them"
   },
   "ok": false
 }
