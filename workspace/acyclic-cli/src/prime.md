@@ -3,6 +3,21 @@
 This block matches the installed `acyclic`; run `acyclic prime` again after an upgrade rather than relying on an
 older copy.
 
+## The loop
+
+Set `ACYCLIC_ACTOR` first (see "Who you are"), then:
+
+```sh
+acyclic ready
+acyclic claim <item>
+# ...do the work...
+acyclic done <item> --repository <record> --commit <id>
+acyclic done <item> --note "what was done"
+```
+
+`ready` lists ready leaves, best first. Finish with the `--repository` and `--commit` form, or with `--note` when the
+result isn't a commit.
+
 ## Who you are
 
 - Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`, or `run/<id>`
@@ -10,14 +25,51 @@ older copy.
   `agent/undeclared`.
 - You are never the user. `--as-user` is for the user alone; don't pass it.
 
+## Links
+
+`acyclic link add plant waits-for beds` means plant can't start until beds is done. Links read left to right:
+
+- `waits-for` holds work back.
+- `follows` doesn't hold work back; it only orders the ranking.
+- `relates-to` is context only.
+
+Only `waits-for` and `follows` order work: ids, numbering and thread membership never do, so link every dependency
+you mean.
+
+## Shaping the plan
+
+`acyclic item add` and `acyclic item edit` take the same field flags:
+
+- `--field <VALUE>` sets a scalar field, or adds to a set; repeat it for more.
+- `--no-field` clears a scalar field and takes no value. `--no-field <VALUE>` removes from a set; repeat it for more.
+- Naming `--field` and `--no-field` together is a usage error.
+
+For example, `acyclic item edit beds --thread garden --no-notes --area soil --no-area clay` moves `beds` into the
+`garden` thread, clears its notes, adds the area `soil` and removes the area `clay`. Thread membership is
+`acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
+
+`acyclic item` also has `reopen` and `archive`, and `acyclic link` has `add` and `remove`. `acyclic import <file>`
+applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the
+plan format.
+
+Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
+and thread it belongs with.
+
+`acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
+standard output.
+
 ## Output
 
-- Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
-- Every command but `prime`, `--help`, `--version` and a bare group (which prints its help) prints one JSON
-  document: `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Branch on
-  `error.code`, not on the message.
+- `prime`, `import --schema`, help and version text, and `graph` without `--output`, print documents or text. Every
+  other command prints one JSON document: `{"ok": true, "data": …}` or
+  `{"ok": false, "error": {"code", "message", "details"}}`. Errors are always JSON. Branch on `error.code`, not on the
+  message.
+- A bare group such as `acyclic item` prints its help.
 - A command line that doesn't parse prints its error as text on standard error, with exit code 2; run
-  `acyclic <command> --help` to see the command's arguments.
+  `acyclic <command> --help` to see the command's arguments. `acyclic help <command>` shows them too.
+- Records carry their own id as `id`. `list` and `show` return the same rows, and `show` adds details. Entries in
+  `needs` embed the rows they are about.
+- Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
 - Writes report `changed`. A repeated command changes nothing of its own; it can still commit when a claim's lease
@@ -27,12 +79,8 @@ older copy.
 
 1. `acyclic ready` lists ready leaves, best first, each with its thread and whether the user approved its work;
    `acyclic ready --approved` lists only approved work. `acyclic list` lists every item. `acyclic show <item>...`
-   explains items, as an array in the order given: their readiness, children and claims. A done item counts for what
-   waits on it from another thread, or outside any thread, only once each commit in its evidence is on that repository's
-   default branch, as last fetched in your clone (named in `~/.config/acyclic/clones.toml`). Until then they wait on it
-   as `in-review`; run `git fetch` there before `acyclic ready`. They wait as `unverified`, with a reason, when the
-   commit can't be checked, such as with no clone mapped: fix the mapping, since fetching won't help. Work finished
-   without a commit counts at once.
+   explains items, as an array in the order given: their readiness, children and claims. See "Details" for work
+   that waits as `in-review` or `unverified`.
 2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker; re-run
    `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work. If `claim`, `ready`
@@ -43,26 +91,27 @@ older copy.
 3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
    commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
    are done; don't use `--force` to finish someone else's work.
-4. `acyclic item` (`add`, `edit`, `reopen`, `archive`) and `acyclic link` (`add`, `remove`) shape the plan;
-   `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change. Only `waits-for`
-   and `follows` links order work: ids, numbering and thread membership never do, so link every dependency you mean.
-   Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent,
-   links and thread it belongs with.
-   `acyclic graph --output <file>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
-   standard output.
-5. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
+4. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
    with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
    `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
    open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
-   link them. `acyclic help <command>` shows a command's arguments.
-6. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
+   link them.
+5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
    its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
    reports it as `placed`. Once the user approves a thread, your change to its members or repositories doesn't
    apply unless you are a run on a project-management thread: it waits in `acyclic needs` as a proposal for the user.
    An item or thread edit, and an import, list their proposals in `proposals`. Carry on with other work.
-7. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
+6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With
    `git config acyclic.pushAfterWrite true` in the tracker clone, every write pushes too and reports `push`; a push that
    fails leaves the write in place and shows in `acyclic needs` until a sync.
+
+## Details
+
+A done item counts for what waits on it from another thread, or outside any thread, only once each commit in its
+evidence is on that repository's default branch, as last fetched in your clone (named in
+`~/.config/acyclic/clones.toml`). Until then they wait on it as `in-review`; run `git fetch` there before
+`acyclic ready`. They wait as `unverified`, with a reason, when the commit can't be checked, such as with no clone
+mapped: fix the mapping, since fetching won't help. Work finished without a commit counts at once.
