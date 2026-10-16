@@ -137,10 +137,11 @@ fn every_route_is_behind_the_identity_check() {
     );
     assert_eq!(send(&router, Method::GET, "/missing", &[host, user], "").0, StatusCode::NOT_FOUND);
     // Static files can't reach outside their directory.
-    assert_eq!(
-        send(&router, Method::GET, "/../Cargo.toml", &[host, user], "").0,
-        StatusCode::NOT_FOUND
-    );
+    for path in ["/../secret", "/%2e%2e/secret", "/..%2fsecret"] {
+        let (status, body) = send(&router, Method::GET, path, &[host, user], "");
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert!(!body.contains("outside"), "{path}");
+    }
 }
 
 #[test]
