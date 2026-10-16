@@ -106,6 +106,14 @@ fn a_journey_through_the_contract() {
     let proposal = proposed["data"]["proposal"].as_str().unwrap();
     assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
     assert_eq!(sh.run("list", AGENT), 0);
+    // a1 joined after the approval, so the approval didn't see it.
+    assert_eq!(sh.run("thread list", AGENT), 0);
+    assert_eq!(sh.run("thread show t1", AGENT), 0);
+    assert_eq!(
+        sh.run("thread show t1 nope", AGENT),
+        3,
+        "one missing thread fails the whole command"
+    );
     let (code, shown) = sh.output("show a1 a2", AGENT);
     assert_eq!(
         (code, shown["data"][1]["item"]["id"].as_str()),

@@ -2,6 +2,7 @@
 //! repeated command changes nothing and commits nothing.
 
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command as Process;
 
@@ -9,7 +10,7 @@ use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::export;
 use acyclic_core::import::{self, Import};
-use acyclic_core::model::{self, By, Evidence, ItemState, Model, SetField};
+use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
@@ -206,6 +207,8 @@ impl<'a> Session<'a> {
                 Ok(json!({"item": id}))
             }),
             Command::Claim { id, lease, force } => self.claim(id, *lease, *force),
+            Command::Thread(ThreadCommand::List) => self.threads(),
+            Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
             Command::Thread(ThreadCommand::Set { id, title, brief }) => {
                 self.write(|replica, by| {
                     let key = Key::new(kind::THREAD, id)?;
@@ -517,6 +520,61 @@ impl<'a> Session<'a> {
         Ok(Json::Array(shown))
     }
 
+    fn threads(&self) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let threads: Vec<Json> = thread_members(&model)
+            .into_iter()
+            .map(|(id, members)| {
+                let done = members.iter().filter(|m| model.items[m.item].is_done()).count();
+                let conflicted: Vec<&str> =
+                    members.iter().filter(|m| m.conflict).map(|m| m.item).collect();
+                let thread = model.threads.get(id);
+                json!({
+                    "thread": id,
+                    "title": thread.map(|t| &t.title),
+                    "approved": thread.map(|t| &t.approved),
+                    "members": members.iter().map(|m| m.item).collect::<Vec<_>>(),
+                    "conflicted": conflicted,
+                    "done": done,
+                })
+            })
+            .collect();
+        Ok(json!({"threads": threads}))
+    }
+
+    fn show_threads(&self, ids: &[String]) -> Result<Json, CliError> {
+        let (state, model) = self.read()?;
+        let clones = context::clones(self.env)?;
+        let ancestry = GitAncestry::new(clones);
+        let readiness = Readiness::new(&state, &model, self.now, &ancestry);
+        let known = thread_members(&model);
+        let mut shown = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(listed) = known.get(id.as_str()) else {
+                return Err(CliError::new("not-found", exit::NOT_FOUND, format!("no thread {id}")));
+            };
+            let thread = model.threads.get(id);
+            let mut members = Vec::new();
+            for &Member { item: member, conflict } in listed {
+                let item = &model.items[member];
+                members.push(json!({
+                    "item": member,
+                    "title": item.title,
+                    "state": item.state,
+                    "readiness": readiness.of(member)?,
+                    "in_approval": thread.and_then(|t| t.approved_member(member)),
+                    "conflict": conflict,
+                }));
+            }
+            shown.push(json!({
+                "thread": thread.map_or_else(|| json!({"id": id}), |t| json!(t)),
+                "repositories": model.repository_set(id),
+                "members": members,
+            }));
+        }
+        Ok(Json::Array(shown))
+    }
+
     fn needs(&self) -> Result<Json, CliError> {
         let (state, model) = self.read()?;
         let clones = context::clones(self.env)?;
@@ -740,6 +798,66 @@ pub(crate) fn may_finish(status: Option<&Status>, actor: &str) -> bool {
 /// The agent block, with this build's version.
 pub(crate) fn prime() -> String {
     include_str!("prime.md").replace("{version}", acyclic_core::VERSION)
+}
+
+/// An item as a thread lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Member<'a> {
+    pub item: &'a str,
+    /// Its thread is conflicted, so it is listed under each thread it was put in.
+    pub conflict: bool,
+}
+
+/// Every thread by id, those with fields and those only named by an item, with its members in the order its blocks
+/// links run them: ties by id, and members on a cycle last. An item raced into two threads is in both.
+pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
+    let mut threads: BTreeMap<&str, Vec<Member<'_>>> =
+        model.threads.keys().map(|id| (id.as_str(), Vec::new())).collect();
+    for item in model.items.values() {
+        let named = item.thread.all();
+        for thread in &named {
+            let member = Member { item: &item.id, conflict: item.thread.is_conflict() };
+            threads.entry(thread.as_str()).or_default().push(member);
+        }
+    }
+    for members in threads.values_mut() {
+        let order = run_order(model, members.iter().map(|m| m.item).collect());
+        members.sort_by_key(|m| order[m.item]);
+    }
+    threads
+}
+
+/// Each item's place when `items` run along their blocks links among themselves.
+fn run_order<'a>(model: &Model, items: BTreeSet<&'a str>) -> BTreeMap<&'a str, usize> {
+    let mut waits: BTreeMap<&str, usize> = items.iter().map(|id| (*id, 0)).collect();
+    let mut unblocks: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for link in &model.links {
+        if let (LinkKind::Blocks, Some(&from), Some(&to)) =
+            (link.kind, items.get(link.from.as_str()), items.get(link.to.as_str()))
+        {
+            *waits.get_mut(from).expect("a member") += 1;
+            unblocks.entry(to).or_default().push(from);
+        }
+    }
+    let mut free: BTreeSet<&str> =
+        waits.iter().filter(|(_, n)| **n == 0).map(|(id, _)| *id).collect();
+    let mut order = BTreeMap::new();
+    while let Some(id) = free.pop_first() {
+        order.insert(id, order.len());
+        for next in unblocks.get(id).into_iter().flatten() {
+            let left = waits.get_mut(next).expect("a member");
+            *left -= 1;
+            if *left == 0 {
+                free.insert(next);
+            }
+        }
+    }
+    // What a cycle holds never frees.
+    for id in items {
+        let at = order.len();
+        order.entry(id).or_insert(at);
+    }
+    order
 }
 
 fn not_found(id: &str) -> CliError {

@@ -301,6 +301,14 @@ pub enum LinkCommand {
 /// The thread commands.
 #[derive(Debug, Subcommand)]
 pub enum ThreadCommand {
+    /// Lists every thread, by id, with its approval and its members.
+    List,
+    /// Shows threads with each member's title, state and readiness, as an array in the order given.
+    Show {
+        /// The threads.
+        #[arg(required = true)]
+        threads: Vec<String>,
+    },
     /// Creates or edits a thread.
     Set {
         /// The thread's id.

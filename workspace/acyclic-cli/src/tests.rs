@@ -258,3 +258,46 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
         assert_eq!(commands::approval(&model, item), expected, "{item}");
     }
 }
+
+#[test]
+fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() {
+    use acyclic_core::model::{By, LinkKind, Model, add_item, link};
+    use acyclic_core::scope::{ScopeEdit, USER, edit};
+    use acyclic_core::state::{Replica, State};
+    let user = By { actor: USER, at: 1 };
+    let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    let join = |replica: &mut Replica, item: &str, thread: &str| {
+        let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
+        edit(replica, &member, user).unwrap();
+    };
+    for id in ["s-1", "s-2", "s-10", "c-1", "c-2", "raced", "cleared"] {
+        add_item(&mut mac, id, id, user).unwrap();
+        join(&mut mac, id, "t");
+    }
+    // By id, s-10 would come before s-2; its links run it last.
+    link(&mut mac, "s-2", "s-1", LinkKind::Blocks, user).unwrap();
+    link(&mut mac, "s-10", "s-2", LinkKind::Blocks, user).unwrap();
+    // Each replica closes half of a cycle, and each puts the raced item in another thread.
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+    link(&mut mac, "c-1", "c-2", LinkKind::Blocks, user).unwrap();
+    link(&mut pi, "c-2", "c-1", LinkKind::Blocks, user).unwrap();
+    join(&mut mac, "raced", "u");
+    join(&mut pi, "raced", "v");
+    // One replica moves it on while the other takes it out of every thread.
+    join(&mut mac, "cleared", "u");
+    edit(&mut pi, &ScopeEdit::Member { item: "cleared".to_owned(), thread: None }, user).unwrap();
+    mac.join(pi.state()).unwrap();
+    let model = Model::read(mac.state()).unwrap();
+    let threads = commands::thread_members(&model);
+    let listed = |thread: &str| -> Vec<(&str, bool)> {
+        threads[thread].iter().map(|m| (m.item, m.conflict)).collect()
+    };
+    assert_eq!(
+        listed("t"),
+        [("s-1", false), ("s-2", false), ("s-10", false), ("c-1", false), ("c-2", false)]
+    );
+    // Neither u nor v has fields of its own: an item names each.
+    assert!(!model.threads.contains_key("u") && !model.threads.contains_key("v"));
+    assert_eq!(listed("u"), [("cleared", true), ("raced", true)]);
+    assert_eq!(listed("v"), [("raced", true)]);
+}

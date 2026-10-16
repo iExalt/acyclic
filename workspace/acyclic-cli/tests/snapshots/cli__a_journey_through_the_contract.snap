@@ -350,6 +350,84 @@ $ ACYCLIC_ACTOR=session/mac acyclic list
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic thread list
+# exit 0
+{
+  "data": {
+    "threads": [
+      {
+        "approved": true,
+        "conflicted": [],
+        "done": 1,
+        "members": [
+          "a1",
+          "a2"
+        ],
+        "thread": "t1",
+        "title": "Work"
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread show t1
+# exit 0
+{
+  "data": [
+    {
+      "members": [
+        {
+          "conflict": false,
+          "in_approval": false,
+          "item": "a1",
+          "readiness": {
+            "status": "done"
+          },
+          "state": "done",
+          "title": "First"
+        },
+        {
+          "conflict": false,
+          "in_approval": true,
+          "item": "a2",
+          "readiness": {
+            "rank": 0,
+            "status": "ready"
+          },
+          "state": "backlog",
+          "title": "Second"
+        }
+      ],
+      "repositories": [],
+      "thread": {
+        "approved": true,
+        "approved_members": [
+          "a2"
+        ],
+        "autonomy": null,
+        "brief": null,
+        "id": "t1",
+        "pm_flag": null,
+        "repositories": [],
+        "title": "Work"
+      }
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread show t1 nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no thread nope"
+  },
+  "ok": false
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
 # exit 0
 {
