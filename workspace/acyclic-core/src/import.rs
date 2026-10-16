@@ -239,8 +239,14 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Json(err) => write!(f, "not a valid import document: {err}"),
-            Self::NotAnImport => write!(f, "not an import document: `format` must be {FORMAT:?}"),
+            Self::Json(err) => write!(
+                f,
+                "not a valid import document: {err}; `acyclic import --schema` shows the format"
+            ),
+            Self::NotAnImport => write!(
+                f,
+                "not an import document: `format` must be {FORMAT:?}; `acyclic import --schema` shows an example"
+            ),
             Self::UnsupportedVersion { found } => {
                 write!(
                     f,
