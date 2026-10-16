@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use super::*;
 use crate::import::State as Planned;
 use crate::import::tests::{item, valid};
@@ -26,6 +28,25 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
         (report.repositories, report.items, report.links, report.threads, report.proposals.len()),
         (1, 3, 2, 1, 0)
     );
+    // Each record is a creation with the fields it was given; a set shows whole, and a link names its ends.
+    let changes = serde_json::to_value(&report.changes).unwrap();
+    let find = |entity: &str, id: &str| {
+        changes.as_array().unwrap().iter().find(|c| c["entity"] == entity && c["id"] == id).unwrap()
+    };
+    assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 3 + 2);
+    assert_eq!(find("repository", "r")["action"], "create");
+    assert_eq!(
+        find("repository", "r")["fields"]["default_branch"],
+        json!({"from": null, "to": "main"})
+    );
+    assert_eq!(find("item", "a")["fields"]["repositories"], json!({"from": [], "to": ["r"]}));
+    assert_eq!(find("item", "a")["fields"]["parent"], json!({"from": null, "to": "goal"}));
+    assert_eq!(find("item", "b")["fields"]["thread"], json!({"from": null, "to": "t"}));
+    let link = changes.as_array().unwrap().iter().find(|c| c["entity"] == "link").unwrap();
+    assert_eq!(
+        (&link["from"], &link["kind"], &link["action"], &link["fields"]),
+        (&json!("a"), &json!("waits-for"), &json!("create"), &json!({}))
+    );
     let model = Model::read(&r.state).unwrap();
     let a = &model.items["a"];
     assert_eq!(a.title, Value::One("Item a".to_owned()));
@@ -52,6 +73,11 @@ fn a_changed_title_is_one_write_and_what_the_document_omits_is_kept() {
     doc.items[1].title = "Renamed".to_owned();
     let report = apply(&doc, &mut r, by(USER, 3)).unwrap();
     assert_eq!((report.items, report.fields), (0, 1));
+    assert_eq!(
+        serde_json::to_value(&report.changes).unwrap(),
+        json!([{"entity": "item", "id": "a", "action": "update",
+                "fields": {"title": {"from": "Item a", "to": "Renamed"}}}])
+    );
     let a = &Model::read(&r.state).unwrap().items["a"];
     assert_eq!(a.title, Value::One("Renamed".to_owned()));
     assert_eq!(a.notes, Value::One("kept".to_owned()));
@@ -90,6 +116,14 @@ fn an_agents_addition_to_approved_scope_is_proposed() {
     doc.threads[0].items.push("c".to_owned());
     let report = apply(&doc, &mut r, by("run/worker", 3)).unwrap();
     assert_eq!((report.items, report.proposals.len()), (1, 1));
+    // The new item is created; its place in the approved thread is a proposal of its own.
+    let changes = serde_json::to_value(&report.changes).unwrap();
+    assert_eq!(changes[0]["action"], "create");
+    assert_eq!(
+        changes[1],
+        json!({"entity": "item", "id": "c", "action": "propose", "proposal": report.proposals[0],
+               "fields": {"thread": {"from": null, "to": "t"}}})
+    );
     assert_eq!(Model::read(&r.state).unwrap().thread_of("c"), None);
     // Importing again while the proposal waits files nothing new.
     let before = r.state.clone();
