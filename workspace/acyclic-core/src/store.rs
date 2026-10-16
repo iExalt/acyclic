@@ -1014,6 +1014,7 @@ impl Tracker {
         for tip in tips {
             others.push(read_state(&self.git, tip)?);
         }
+        crate::probe::mark("join: read states");
         let _lock = self.lock()?;
         let started = Instant::now();
         let mut retries = 0;
@@ -1027,9 +1028,11 @@ impl Tracker {
                 None => self.load()?,
             };
             let mut replica = Replica::open(self.replica.clone(), before.clone());
+            crate::probe::mark("join: load own state");
             for other in &others {
                 replica.join(other)?;
             }
+            crate::probe::mark("join: join");
             if replica.state == before {
                 if !markers.is_empty() {
                     let mut transaction = self.git.transaction()?;
@@ -1043,6 +1046,7 @@ impl Tracker {
             }
             let at = replica.state.context.clocks.get(&self.replica).copied().unwrap_or(0);
             let commit = self.commit_state(tip.as_deref(), &before, &replica.state, at, "join")?;
+            crate::probe::mark("join: commit");
             let mut transaction = self.git.transaction()?;
             transaction.update(&state_ref(&self.replica), &commit, tip.as_deref())?;
             for (marker, tip) in markers {
@@ -1050,6 +1054,7 @@ impl Tracker {
             }
             match transaction.prepare().and_then(|()| transaction.commit()) {
                 Ok(()) => {
+                    crate::probe::mark("join: update refs");
                     self.cache()?.write(&commit, &replica.state);
                     return Ok(Outcome::Committed { commit, retries });
                 },
@@ -1082,6 +1087,7 @@ impl Tracker {
         let mine = state_ref(&self.replica);
         let last_seen = self.git.resolve(&own)?;
         self.fetch(remote)?;
+        crate::probe::mark("sync: fetch");
         // One listing serves the whole sync: what was fetched, what was joined before, and what a push compares.
         let base = remote_base(remote);
         let segments = self.segment_prefixes();
@@ -1150,8 +1156,10 @@ impl Tracker {
         }
         // Right after the fetch, its refs say what the remote holds, so the push needn't ask.
         let pushed = self.send(remote, &theirs, local)?;
+        crate::probe::mark("sync: push");
         // Fetch and push skip git's own upkeep, so a clone that mostly syncs gets the store's here.
         self.maintain();
+        crate::probe::mark("sync: upkeep");
         let replicas = fetched.keys().map(|name| name[prefix.len()..].to_owned()).collect();
         Ok(Synced { fetched: replicas, joined, pushed })
     }

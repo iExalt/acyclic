@@ -8,8 +8,11 @@
 //!
 //! A claim takes a different ready leaf each run; claiming again renews. The sync columns run against a bare repository
 //! on the same disk, so they time the work around the network rather than the network: the first sync sends the whole
-//! store, "sync" joins another replica's one new item, and "sync, idle" finds nothing new. "show after edit" is the
-//! first read of files the edit just wrote, which an on-access scanner may inspect; repeated reads hide that cost.
+//! store, "sync" joins another replica's one new item, and "sync, idle" finds nothing new. "join, full" is a fresh
+//! replica's first sync, joining the whole tracker, and "join back" the tracker's next sync, joining that replica's
+//! full state; "join, twin" is one replica that imported the same plan on its own syncing, so every field conflicts.
+//! "show after edit" is the first read of files the edit just wrote, which an on-access scanner may inspect; repeated
+//! reads hide that cost.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -277,6 +280,33 @@ fn sync(tracker: &Tracker, row: &mut Row, runs: usize) {
     row.times.insert("sync", report("sync", &moved));
     let idle: Vec<Sample> = (0..runs).map(|_| tracker.time("sync", false)).collect();
     row.times.insert("sync, idle", report("sync, idle", &idle));
+    // A full join each way: a fresh replica's first sync joins the whole tracker and pushes it back as its own state,
+    // which the tracker's next sync reads and joins.
+    let (mut joins, mut backs) = (Vec::new(), Vec::new());
+    for n in 0..runs {
+        let fresh = Tracker::new();
+        fresh.run(&format!("init tracker --replica fresh-{n} --remote {url}"), false);
+        joins.push(fresh.time("sync", false));
+        backs.push(tracker.time("sync", false));
+        // Gone again, so the next fresh replica joins the same two replicas rather than one more each time.
+        let dropped = Command::new("git")
+            .args(["update-ref", "-d", &format!("refs/heads/state/fresh-{n}")])
+            .current_dir(&remote)
+            .status();
+        assert!(dropped.expect("git runs").success(), "the fresh replica's state dropped");
+    }
+    row.times.insert("join, full", report("join, full", &joins));
+    row.times.insert("join back", report("join back", &backs));
+    // A stress case rather than how replicas come to hold full state: a replica that imported the same plan on its
+    // own holds a second value for every field, so its first sync joins a conflict into each.
+    let plan = tracker.path().join("plan.json");
+    if plan.exists() {
+        let twin = Tracker::new();
+        twin.run(&format!("init tracker --replica twin --remote {url}"), false);
+        std::fs::copy(&plan, twin.path().join("plan.json")).expect("the plan");
+        twin.run("import plan.json", false);
+        row.times.insert("join, twin", report("join, twin", &[twin.time("sync", false)]));
+    }
 }
 
 /// Prints an operation's median and, with timing marks, the median of each phase; returns the median in ms.
@@ -372,6 +402,9 @@ fn print_table(rows: &[Row], batches: usize) {
         "sync, first",
         "sync",
         "sync, idle",
+        "join, full",
+        "join back",
+        "join, twin",
     ];
     if batches > 0 {
         columns.extend(["edit after batches", "show after batches"]);
