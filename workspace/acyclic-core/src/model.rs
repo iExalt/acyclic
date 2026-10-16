@@ -1098,8 +1098,9 @@ pub(crate) fn store_after_link(replica: &mut Replica, from: &str, to: &str, by: 
     }
 }
 
-/// Removes a link; a concurrent re-add survives. Removing a relates link also removes a stored after link between
-/// the same items, since the model reads one as the other.
+/// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Removing a relates link also
+/// removes a stored after link between the same items, since the model reads one as the other. Returns whether it
+/// wrote.
 ///
 /// # Errors
 ///
@@ -1110,20 +1111,22 @@ pub fn unlink(
     to: &str,
     kind: LinkKind,
     by: By<'_>,
-) -> Result<(), WriteError> {
+) -> Result<bool, WriteError> {
     let mut kinds = vec![kind];
     if kind == LinkKind::Relates {
         kinds.push(LinkKind::After);
     }
+    let mut wrote = false;
     for kind in kinds {
         let key = link_key(from, to, kind)?;
-        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
-        if kind == LinkKind::After && replica.state.field(&key, link::PRESENT).is_none() {
+        if replica.state.field(&key, link::PRESENT).is_none() {
             continue;
         }
+        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
         replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+        wrote = true;
     }
-    Ok(())
+    Ok(wrote)
 }
 
 /// Records a run starting on a thread.

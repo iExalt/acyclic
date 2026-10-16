@@ -147,6 +147,12 @@ fn link_word(words: &[String]) -> Option<String> {
         return None;
     }
     if ["follows", "after"].contains(&kind.as_str()) {
+        // A stored one reads as relates-to, and goes with it.
+        if verb == "remove" {
+            return Some(format!(
+                "`{kind}` links are retired and read as relates-to: use `acyclic link remove {from} relates-to {to}`"
+            ));
+        }
         return Some(format!(
             "`{kind}` links are retired: use `acyclic link {verb} {from} waits-for {to}` when {from} can't start \
              until {to} is done, or `relates-to` for context"

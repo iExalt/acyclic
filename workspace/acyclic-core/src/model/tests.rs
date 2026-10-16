@@ -164,8 +164,13 @@ fn a_stored_after_link_reads_as_relates_once_orders_nothing_and_is_removed_as_re
         put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
     }
     assert_eq!(model(&r).heads("t"), ["a", "b"]);
-    // Removing the relates link removes both.
-    unlink(&mut r, "a", "b", LinkKind::Relates, by(6)).unwrap();
+    // Removing the relates link removes both, and removing it again writes nothing.
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(6)), Ok(true));
+    assert_eq!(model(&r).links, []);
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(7)), Ok(false));
+    // An after link stored alone goes the same way.
+    store_after_link(&mut r, "b", "a", by(8));
+    assert_eq!(unlink(&mut r, "b", "a", LinkKind::Relates, by(9)), Ok(true));
     assert_eq!(model(&r).links, []);
 }
 

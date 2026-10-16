@@ -526,6 +526,8 @@ fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
             args::LinkWord::WaitsFor | args::LinkWord::RelatesTo => {},
         }
     }
+    let out = run("acyclic link remove a2 follows a1");
+    assert!(out.stderr.contains("use `acyclic link remove a2 relates-to a1`"), "{out:?}");
     // Soft links are retired, under either name, with the words to use instead.
     for retired in ["follows", "after"] {
         let out = run(&format!("acyclic link add a2 {retired} a1"));

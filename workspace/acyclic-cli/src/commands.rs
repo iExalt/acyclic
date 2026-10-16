@@ -204,11 +204,7 @@ impl<'a> Session<'a> {
             },
             Command::Link(LinkCommand::Remove { from, kind: word, to }) => {
                 self.write(|replica, by| {
-                    let kind = word.kind();
-                    let key = model::link_key(from, to, kind)?;
-                    if replica.state().field(&key, link_field::PRESENT).is_some() {
-                        model::unlink(replica, from, to, kind, by)?;
-                    }
+                    model::unlink(replica, from, to, word.kind(), by)?;
                     Ok(json!({"from": from, "kind": word, "to": to}))
                 })
             },
