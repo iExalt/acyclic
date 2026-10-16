@@ -86,7 +86,7 @@ impl From<StateError> for CliError {
             StateError::Gap { .. } => ("sequence-gap", exit::REFUSED),
             StateError::WrongReplica { .. } => ("wrong-replica", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
-            StateError::NotALeaf(_) => ("not-a-leaf", exit::REFUSED),
+            StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
             StateError::LeaseRequired(_) => ("lease-required", exit::REFUSED),
             StateError::ResourceHeld { .. } => ("resource-held", exit::REFUSED),
             StateError::Format(_) => ("unreadable", exit::UNREADABLE),

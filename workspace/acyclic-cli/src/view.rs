@@ -109,8 +109,8 @@ impl View<'_> {
     pub fn item(&self, id: &str, item: &Item) -> Result<Json, CliError> {
         let model = self.model;
         let alive = |holder: &str| model.run_alive(holder);
-        let claims =
-            claim::live_with(self.state, &acyclic_core::model::item_key(id)?, self.now, &alive)?;
+        // An item's claims are its thread's.
+        let claims = claim::covering(self.state, model, id, self.now, &alive)?;
         let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         Ok(with(
             self.item_row(id)?,
@@ -133,9 +133,12 @@ impl View<'_> {
         ))
     }
 
-    /// A thread in full: its summary, and each member as an item summary that also says whether its work is
-    /// `approved` and whether it is `conflicted`, listed under each thread it was put in.
+    /// A thread in full: its summary, its `readiness` and live `claims`, and each member as an item summary that also
+    /// says whether its work is `approved` and whether it is `conflicted`, listed under each thread it was put in.
     pub fn thread(&self, id: &str, listed: &[Member<'_>]) -> Result<Json, CliError> {
+        let alive = |holder: &str| self.model.run_alive(holder);
+        let claims = claim::live_with(self.state, &claim::thread_key(id)?, self.now, &alive)?;
+        let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         let mut members = Vec::new();
         for &Member { item, conflict } in listed {
             members.push(with(
@@ -147,6 +150,8 @@ impl View<'_> {
         Ok(with(
             thread_row(self.model, id, listed),
             json!({
+                "readiness": self.readiness.thread(id)?,
+                "claims": claims,
                 "brief": thread.map(|t| &t.brief),
                 "level": thread.map(|t| &t.autonomy),
                 "pm": thread.is_some_and(acyclic_core::model::Thread::is_pm),
@@ -182,21 +187,24 @@ impl View<'_> {
                 Entry::ParentCycle { items: ids } => {
                     json!({"kind": "parent-cycle", "items": items(ids)?})
                 },
-                Entry::Contest { item, holders } => {
-                    json!({"kind": "contest", "item": self.item_row(item)?, "holders": holders})
+                Entry::Contest { thread: id, holders } => {
+                    json!({"kind": "contest", "thread": thread(id), "holders": holders})
                 },
                 Entry::ResourceClash { resource, holders } => {
-                    let holders = holders
+                    let holders: Vec<Json> = holders
                         .iter()
-                        .map(|(item, holder)| Ok(json!({"item": self.item_row(item)?, "holder": holder})))
-                        .collect::<Result<Vec<Json>, CliError>>()?;
+                        .map(|(id, holder)| json!({"thread": thread(id), "holder": holder}))
+                        .collect();
                     json!({"kind": "resource-clash", "resource": resource, "holders": holders})
                 },
-                Entry::ClockAhead { item, holder } => {
-                    json!({"kind": "clock-ahead", "item": self.item_row(item)?, "holder": holder})
+                Entry::ClockAhead { thread: id, holder } => {
+                    json!({"kind": "clock-ahead", "thread": thread(id), "holder": holder})
                 },
-                Entry::UnknownRun { item, holder } => {
-                    json!({"kind": "unknown-run", "item": self.item_row(item)?, "holder": holder})
+                Entry::UnknownRun { thread: id, holder } => {
+                    json!({"kind": "unknown-run", "thread": thread(id), "holder": holder})
+                },
+                Entry::Unthreaded { item, fix } => {
+                    json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
                 },
                 Entry::RunClash { thread: id, runs } => {
                     json!({"kind": "run-clash", "thread": thread(id), "runs": runs})
@@ -552,8 +560,7 @@ mod tests {
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
-        claim::claim(&mut r, &key(kind::ITEM, "a"), "session/pi", NOW, Some(60_000), 480 * 60_000)
-            .unwrap();
+        claim::claim(&mut r, "t", "session/pi", NOW, Some(60_000), 480 * 60_000).unwrap();
         r
     }
 

@@ -233,20 +233,18 @@ impl<'a> Session<'a> {
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
                     model::set_state(replica, id, ItemState::Done, by)?;
-                    // Finished work holds nothing, not even the resources its claim named.
-                    claim::release(replica, &key, by.actor);
                     Ok(json!({"item": id, "state": ItemState::Done}))
                 })
             },
-            Command::Release { item: id } => self.write(|replica, by| {
-                let key = existing(replica, id)?;
-                Ok(json!({"item": id, "released": claim::release(replica, &key, by.actor)}))
+            Command::Release { thread } => self.write(|replica, by| {
+                let key = existing_thread(replica, thread)?;
+                Ok(json!({"thread": thread, "released": claim::release(replica, &key, by.actor)}))
             }),
             Command::Item(ItemCommand::Reopen { item: id }) => self.write(|replica, by| {
                 archive::reopen(replica, id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Claim { item: id, lease, force } => self.claim(id, *lease, *force),
+            Command::Claim { thread, lease, force } => self.claim(thread, *lease, *force),
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
             Command::Thread(ThreadCommand::Add { thread, title, brief, repository, level }) => {
@@ -469,7 +467,7 @@ impl<'a> Session<'a> {
 
     fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
         self.with_view(|view| {
-            let ready = view.readiness.ready(include_archived)?;
+            let ready = view.readiness.ready(include_archived, &self.actor)?;
             acyclic_core::probe::mark("readiness");
             Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
         })
@@ -746,7 +744,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn claim(&self, id: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
+    fn claim(&self, thread: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
         let is_run = self.actor.starts_with("run/");
         let lease = match (lease, is_run) {
             (None, true) => None,
@@ -756,29 +754,32 @@ impl<'a> Session<'a> {
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         self.write(|replica, by| {
-            let key = existing(replica, id)?;
+            let key = existing_thread(replica, thread)?;
             if !force {
                 let model = Model::read(replica.state())?;
-                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).of(id)?;
-                if !may_claim(status.as_ref(), by.actor) {
+                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).thread(thread)?;
+                if !status.claimable_by(by.actor) {
                     return Err(CliError::refused(
                         "not-ready",
-                        format!("item {id} isn't ready to claim; `acyclic show {id}` says why"),
+                        format!(
+                            "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it or \
+                             a resource it needs; `acyclic thread show {thread}` says why"
+                        ),
                     )
                     .with(json!({"readiness": status})));
                 }
             }
-            claim::claim(replica, &key, by.actor, by.at, lease, MAX_LEASE)?;
+            claim::claim(replica, thread, by.actor, by.at, lease, MAX_LEASE)?;
             let model = Model::read(replica.state())?;
             let alive = |holder: &str| model.run_alive(holder);
             let held = claim::winner_with(replica.state(), &key, by.at, &alive)?;
-            Ok(json!({"item": id, "claim": held.as_ref().map(view::claim_json)}))
+            Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
 }
 
-/// Whether `actor` may claim an item in `status` without forcing: when it's ready, or when what stands in the way is
-/// the actor's own claim, as winner of a contest or as holder of a shared resource. Core allows the same.
+/// Whether `actor` may work on an item in `status` without forcing: when it's ready, or when what stands in the way is
+/// the actor's own claim on its thread, as winner of a contest, or on the thread holding a resource it needs.
 pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
     match status {
         Some(Status::Ready) => true,
@@ -950,6 +951,19 @@ pub(crate) fn not_found(id: &str) -> CliError {
 /// An item's key, refusing one that doesn't exist or was deleted.
 pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     Ok(model::existing(replica.state(), id)?)
+}
+
+/// A thread's key, when the thread has a record; naming an item in a thread says which thread was meant.
+pub(crate) fn existing_thread(replica: &Replica, thread: &str) -> Result<Key, CliError> {
+    let model = Model::read(replica.state())?;
+    if !model.threads.contains_key(thread) {
+        let error: CliError = acyclic_core::state::Error::NoThread(thread.to_owned()).into();
+        return Err(match model.thread_of(thread) {
+            Some(meant) => error.with(json!({"thread": meant})),
+            None => error,
+        });
+    }
+    Ok(claim::thread_key(thread)?)
 }
 
 /// A field's value when it holds exactly one; a clear holds none.

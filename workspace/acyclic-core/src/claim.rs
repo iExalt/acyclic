@@ -1,18 +1,19 @@
-//! Claims on items, kept as a field so concurrent claims survive a join as a contest that every replica resolves the
-//! same way.
+//! Claims on threads, kept as a field so concurrent claims survive a join as a contest that every replica resolves
+//! the same way. A thread is the unit of work: its holder works every member without claiming items, and its claim
+//! holds the named resources of every open member. Claims older versions kept on items are never read.
 
 use serde::{Deserialize, Serialize};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Model;
 use crate::schema::kind;
 use crate::state::{CLOCK_SKEW_MS, Dot, Error, Key, Millis, Replica, State};
 
-/// The field holding an item's claims.
+/// The field holding a thread's claims.
 pub const FIELD: &str = "claim";
 
-/// One claim on an item.
+/// One claim on a thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Claim {
@@ -44,7 +45,7 @@ impl Claim {
 /// Whether a claim without a time lease is still held: the run behind it is alive.
 pub type Alive<'a> = &'a dyn Fn(&str) -> bool;
 
-/// Every claim on an item that holds at `now`, in the order that decides a contest: earliest lease, then replica.
+/// Every claim on an entity that holds at `now`, in the order that decides a contest: earliest lease, then replica.
 /// Claims without a time lease all count as held.
 ///
 /// # Errors
@@ -84,7 +85,7 @@ pub fn live_with(
 }
 
 /// The claim that wins at `now`: the same on every replica holding the same state. A contest's loser must check this
-/// rather than assume it holds the item.
+/// rather than assume it holds the thread.
 ///
 /// # Errors
 ///
@@ -107,7 +108,7 @@ pub fn winner_with(
     Ok(live_with(state, item, now, alive)?.into_iter().next())
 }
 
-/// Releases `holder`'s claims on an item and no one else's, so a contest's loser can step aside without taking the
+/// Releases `holder`'s claims on an entity and no one else's, so a contest's loser can step aside without taking the
 /// winner's claim with it, as any write to the field would. Returns whether it held one.
 pub fn release(replica: &mut Replica, item: &Key, holder: &str) -> bool {
     replica.retain(item, FIELD, |stamped| {
@@ -116,10 +117,79 @@ pub fn release(replica: &mut Replica, item: &Key, holder: &str) -> bool {
     })
 }
 
-/// Claims a leaf item for `holder`, or renews the claim `holder` already wins. A time lease runs for `lease` from
-/// `at`, capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its
-/// write supersedes the other contestants' values: an ordinary resolving write. Run liveness comes from the run
-/// records (see [`Model::run_alive`]).
+/// The key a thread's claims are kept on.
+///
+/// # Errors
+///
+/// Fails on an invalid thread id.
+pub fn thread_key(thread: &str) -> Result<Key, Error> {
+    Key::new(kind::THREAD, thread)
+}
+
+/// The live claims that cover an item: those on its thread, when it is in exactly one thread that has a record.
+///
+/// # Errors
+///
+/// Fails when a claim can't be read.
+pub fn covering(
+    state: &State,
+    model: &Model,
+    item: &str,
+    now: Millis,
+    alive: Alive<'_>,
+) -> Result<Vec<Claim>, Error> {
+    match model.thread_of(item).filter(|thread| model.threads.contains_key(*thread)) {
+        Some(thread) => live_with(state, &thread_key(thread)?, now, alive),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The resources a claim on a thread holds: those its open members name. Finished or archived work holds nothing.
+#[must_use]
+pub fn resources<'m>(model: &'m Model, thread: &str) -> BTreeSet<&'m str> {
+    model
+        .members(thread)
+        .into_iter()
+        .filter(|id| !model.items[*id].is_done() && !model.is_archived(id))
+        .flat_map(|id| model.items[id].resources.iter().map(String::as_str))
+        .collect()
+}
+
+/// A resource the thread's open members name that another thread's winning claim, held by someone other than
+/// `holder`, holds: the resource, that thread and its holder. With no `holder`, any other thread's winner counts.
+///
+/// # Errors
+///
+/// Fails when a claim can't be read.
+pub fn resource_held(
+    state: &State,
+    model: &Model,
+    thread: &str,
+    holder: Option<&str>,
+    now: Millis,
+    alive: Alive<'_>,
+) -> Result<Option<(String, String, String)>, Error> {
+    let wanted = resources(model, thread);
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    for other in model.threads.keys().filter(|other| *other != thread) {
+        let Some(resource) = resources(model, other).intersection(&wanted).next().copied() else {
+            continue;
+        };
+        if let Some(claim) = winner_with(state, &thread_key(other)?, now, alive)?
+            && holder != Some(claim.holder.as_str())
+        {
+            return Ok(Some((resource.to_owned(), other.clone(), claim.holder)));
+        }
+    }
+    Ok(None)
+}
+
+/// Claims a thread for `holder`, or renews the claim `holder` already wins. A time lease runs for `lease` from `at`,
+/// capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its write
+/// supersedes the other contestants' values: an ordinary resolving write. Run liveness comes from the run records
+/// (see [`Model::run_alive`]).
 ///
 /// # Panics
 ///
@@ -127,13 +197,13 @@ pub fn release(replica: &mut Replica, item: &Key, holder: &str) -> bool {
 ///
 /// # Errors
 ///
-/// Fails when a holder other than a run claims without a time lease, when the item has children, when another
-/// holder wins the item in this replica's view (so a claim never silently replaces one it has seen; only claims made
-/// without seeing each other contest), when another holder's winning claim on another item holds one of this item's
-/// named resources, or on an unreadable claim.
+/// Fails when a holder other than a run claims without a time lease, when the thread has no record, when another
+/// holder wins the thread in this replica's view (so a claim never silently replaces one it has seen; only claims made
+/// without seeing each other contest), when another holder's winning claim on another thread holds a resource one of
+/// this thread's open members names, or on an unreadable claim.
 pub fn claim(
     replica: &mut Replica,
-    item: &Key,
+    thread: &str,
     holder: &str,
     at: Millis,
     lease: Option<Millis>,
@@ -144,31 +214,19 @@ pub fn claim(
         return Err(Error::LeaseRequired(holder.to_owned()));
     }
     let model = Model::read(&replica.state)?;
-    if !model.children(&item.id).is_empty() {
-        return Err(Error::NotALeaf(item.clone()));
+    if !model.threads.contains_key(thread) {
+        return Err(Error::NoThread(thread.to_owned()));
     }
+    let key = thread_key(thread)?;
     let alive = |holder: &str| model.run_alive(holder);
-    let current = winner_with(&replica.state, item, at, &alive)?;
+    let current = winner_with(&replica.state, &key, at, &alive)?;
     if current.as_ref().is_some_and(|claim| claim.holder != holder) {
-        return Err(Error::Claimed(item.clone()));
+        return Err(Error::Claimed(key));
     }
-    if let Some(held) = model.items.get(&item.id) {
-        for resource in &held.resources {
-            for other in
-                model.items.values().filter(|o| o.id != item.id && o.resources.contains(resource))
-            {
-                let key = Key::new(kind::ITEM, &other.id)?;
-                if let Some(claim) = winner_with(&replica.state, &key, at, &alive)?
-                    && claim.holder != holder
-                {
-                    return Err(Error::ResourceHeld {
-                        resource: resource.clone(),
-                        item: key,
-                        holder: claim.holder,
-                    });
-                }
-            }
-        }
+    if let Some((resource, thread, holder)) =
+        resource_held(&replica.state, &model, thread, Some(holder), at, &alive)?
+    {
+        return Err(Error::ResourceHeld { resource, thread, holder });
     }
     let claim = Claim {
         holder: holder.to_owned(),
@@ -177,11 +235,11 @@ pub fn claim(
         lease_expires: lease.map(|lease| at.saturating_add(lease.clamp(0, max_lease))),
     };
     let value = serde_json::to_value(claim).expect("a claim always serializes");
-    let dot = replica.write(item, FIELD, holder, at, Some(value))?;
+    let dot = replica.write(&key, FIELD, holder, at, Some(value))?;
     Ok(dot.expect("a write with a value mints a dot"))
 }
 
-/// Renews, at a sync, the time leases this replica recorded whose holders are still at work: each winning claim with
+/// Renews, at a sync, the time leases this replica recorded whose holders are still at work: each winning thread claim with
 /// less than half of `lease` left whose holder wrote something other than a claim within the last `lease`. A holder that stopped writing, such as a
 /// session that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
 ///
@@ -208,7 +266,8 @@ pub fn renew_leases(
     let mine = replica.id().as_str().to_owned();
     let mut renewals = Vec::new();
     for (key, entity) in replica.state.entities() {
-        if !entity.contains_key(FIELD) {
+        // Claims older versions kept on items are never read, so never renewed.
+        if key.kind != kind::THREAD || !entity.contains_key(FIELD) {
             continue;
         }
         let Some(claim) = winner(&replica.state, key, now)? else { continue };
@@ -234,12 +293,13 @@ pub fn renew_leases(
     Ok(renewals.into_iter().map(|(key, _)| key).collect())
 }
 
-/// Items sharing a named resource whose winning claims belong to different holders: a clash only a join makes.
+/// Threads holding a named resource through open members whose winning claims belong to different holders: a clash
+/// only a join makes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clash {
     /// The resource.
     pub resource: String,
-    /// Each claimed item holding it, with its winning holder.
+    /// Each claimed thread holding it, with its winning holder.
     pub holders: Vec<(String, String)>,
 }
 
@@ -251,14 +311,17 @@ pub struct Clash {
 pub fn clashes(state: &State, model: &Model, now: Millis) -> Result<Vec<Clash>, Error> {
     let alive = |holder: &str| model.run_alive(holder);
     let mut by_resource: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
-    for item in model.items.values().filter(|item| !item.resources.is_empty()) {
-        let key = Key::new(kind::ITEM, &item.id)?;
-        if let Some(claim) = winner_with(state, &key, now, &alive)? {
-            for resource in &item.resources {
+    for thread in model.threads.keys() {
+        let held = resources(model, thread);
+        if held.is_empty() {
+            continue;
+        }
+        if let Some(claim) = winner_with(state, &thread_key(thread)?, now, &alive)? {
+            for resource in held {
                 by_resource
                     .entry(resource)
                     .or_default()
-                    .push((item.id.clone(), claim.holder.clone()));
+                    .push((thread.clone(), claim.holder.clone()));
             }
         }
     }

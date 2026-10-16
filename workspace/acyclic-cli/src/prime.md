@@ -9,14 +9,17 @@ Set `ACYCLIC_ACTOR` first (see "Who you are"), then:
 
 ```sh
 acyclic ready
-acyclic claim <item>
-# ...do the work...
+acyclic claim <thread>
+# ...work its ready items, finishing each:
 acyclic done <item> --repository <record> --commit <id>
 acyclic done <item> --note "what was done"
+# ...and when no item of it is left ready:
+acyclic release <thread>
 ```
 
-`ready` lists ready leaves, best first. Finish with the `--repository` and `--commit` form, or with `--note` when the
-result isn't a commit.
+A thread is the unit of work: you claim a whole thread, and you and your subagents work every member without
+claiming items. `ready` lists the ready items in the threads you may claim. Finish with the `--repository` and
+`--commit` form, or with `--note` when the result isn't a commit.
 
 ## Setting up a clone
 
@@ -26,7 +29,7 @@ shared repository as its `origin`. `acyclic sync` then pulls in what other machi
 ## Who you are
 
 - Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`, or `run/<id>`
-  for a run. Two sessions sharing a name share claims, and both would work the same item. Without it you act as
+  for a run. Two sessions sharing a name share claims, and both would work the same thread. Without it you act as
   `agent/undeclared`.
 - You are never the user. `--as-user` is for the user alone; don't pass it.
 
@@ -52,7 +55,7 @@ For example, `acyclic item edit beds --thread garden --no-notes --area soil --no
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence
-or a live claim, and in an approved thread only the user may delete. `acyclic link` has `add` and `remove`.
+or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic link` has `add` and `remove`.
 `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would change.
 `acyclic import --schema` prints the plan format.
 
@@ -81,20 +84,23 @@ standard output.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists ready leaves, best first, each with its thread and whether the user approved its work;
-   `acyclic ready --approved` lists only approved work. `acyclic list` lists every item. `acyclic show <item>...`
-   explains items, as an array in the order given: their readiness, children and claims. See "Details" for work
-   that waits as `in-review` or `unverified`.
-2. `acyclic claim <item>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
-   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker; re-run
-   `acyclic claim <item>` to renew it before then. Don't use `--force` to take someone else's work. If `claim`, `ready`
-   or `show` says another holder wins a contest for your item, stop and run `acyclic release <item>`: it drops only your
-   claim. A claim refused with readiness `resource-busy` means another item's claim holds a resource yours needs: wait
-   for that work, and don't force it. A lapsed lease frees your item and its resources, so renew after any pause, and
-   before work that needs a resource, check that `acyclic show <item>` still names you as holder.
-3. `acyclic done <item> --repository <record> --commit <id>` when finished, or `--note` when the result isn't a
-   commit. It releases your claim. It finishes only what you hold, or what is ready, and a parent once its children
-   are done; don't use `--force` to finish someone else's work.
+1. `acyclic ready` lists the ready items in your own thread and in threads nobody holds, each with its thread and
+   whether the user approved its work; `acyclic ready --approved` lists only approved work. An item in no thread is
+   never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic list` lists every item. `acyclic show
+   <item>...` explains items, as an array in the order given: their readiness, children and their thread's claims.
+   See "Details" for work that waits as `in-review` or `unverified`.
+2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by
+   default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker,
+   which renews it at each write while you work. Don't use `--force` to take someone else's work. If `claim`, `ready`
+   or `acyclic thread show <thread>` says another holder wins a contest for your thread, stop and run `acyclic release
+   <thread>`: it drops only your claim. A claim refused with readiness `resource-busy` means another thread's claim
+   holds a resource one of your thread's open items names: wait for that work, and don't force it. A lapsed lease
+   frees your thread and its resources, so before work that needs a resource after a pause, check that `acyclic
+   thread show <thread>` still names you as holder.
+3. `acyclic done <item> --repository <record> --commit <id>` when an item is finished, or `--note` when the result
+   isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are done;
+   don't use `--force` to finish someone else's work. Finished items hold no resources. `acyclic release <thread>`
+   once none of its items is left ready.
 4. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
    with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
    `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its

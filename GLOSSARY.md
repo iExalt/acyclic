@@ -82,7 +82,8 @@ What an agent receives when a thread is deployed: the work, its context and its 
 _Avoid_: orders, prompt (for the whole brief)
 
 **Claim**:
-An agent's time-limited hold on an item or thread it is working on.
+An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member, and the
+claim holds the resources the thread's open members name.
 _Avoid_: lock, assignment
 
 **Dispatcher**:
@@ -160,6 +161,7 @@ _Avoid_: merge conflict (nothing blocks a sync)
 - An **Item** has at most one parent **Item**, and at most one **Thread**
 - A **Thread** may hold **Items** from different branches of the outcome tree
 - A **Thread** has one **Run** at a time; each **Run** continues the thread's conversation
+- A **Thread** is the unit of work: one agent holds a **Claim** on it, and an item in no thread is never ready
 - A **Goal** is an **Item** whose **Gate** must pass before it is done
 - **Hard dependencies** (`waits-for`) never form a cycle
 

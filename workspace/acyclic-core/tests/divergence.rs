@@ -152,6 +152,20 @@ fn item(id: &str) -> Key {
     model::item_key(id).unwrap()
 }
 
+/// A thread record holding `item`.
+fn threaded(
+    replica: &mut Replica,
+    by: By<'_>,
+    thread: &str,
+    item: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    model::set(replica, &Key::new(kind::THREAD, thread)?, thread::TITLE, Some(&thread), by)?;
+    let member =
+        acyclic_core::scope::ScopeEdit::Member { item: item.into(), thread: Some(thread.into()) };
+    acyclic_core::scope::edit(replica, &member, by)?;
+    Ok(())
+}
+
 fn add(
     replica: &mut Replica,
     by: By<'_>,
@@ -265,7 +279,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     let model = Model::read(&state).unwrap();
     assert_eq!(place::inherited_thread(&model, "c"), None);
     assert_eq!(place::thread_cycles(&model), Vec::<std::collections::BTreeSet<String>>::new());
-    Readiness::new(&state, &model, NOW, &Unmapped).ready(false).unwrap();
+    Readiness::new(&state, &model, NOW, &Unmapped).ready(false, "session/mac").unwrap();
     let view = export::view(&model, &Scope::default()).unwrap();
     assert!(!export::dot(&model, &view).is_empty());
     Pair::edit(&pair.mac, "session/mac", NOW, &|r, by| {
@@ -282,11 +296,14 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
 #[test]
 fn claims_that_never_saw_each_other_contest_alike_on_both_until_the_loser_steps_aside() {
     let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
+    pair.user(&pair.mac, &|r, by| {
+        add(r, by, "x", None)?;
+        threaded(r, by, "t", "x")
+    });
     pair.spread(&pair.mac);
     for (tracker, holder) in [(&pair.mac, "session/mac"), (&pair.pi, "session/pi")] {
         Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, &item("x"), by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE)
+            Ok(claim::claim(r, "t", by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE)
                 .map(|_| ())?)
         });
     }
@@ -294,21 +311,22 @@ fn claims_that_never_saw_each_other_contest_alike_on_both_until_the_loser_steps_
     pair.assert_settled();
     let contests: Vec<Entry> =
         pair.needs(NOW).into_iter().filter(|e| matches!(e, Entry::Contest { .. })).collect();
-    let [Entry::Contest { item: contested, holders }] = contests.as_slice() else {
+    let [Entry::Contest { thread: contested, holders }] = contests.as_slice() else {
         panic!("{contests:?}")
     };
-    assert_eq!((contested.as_str(), holders.len()), ("x", 2));
+    assert_eq!((contested.as_str(), holders.len()), ("t", 2));
     let loser = holders[1].clone();
     let (tracker, winner) =
         if loser == "session/mac" { (&pair.mac, "session/pi") } else { (&pair.pi, "session/mac") };
     Pair::edit(tracker, &loser, NOW + MINUTE, &|r, by| {
-        assert!(claim::release(r, &item("x"), by.actor));
+        assert!(claim::release(r, &claim::thread_key("t")?, by.actor));
         Ok(())
     });
     pair.exchange();
     let state = pair.assert_settled();
     assert!(!pair.needs(NOW + MINUTE).iter().any(|e| matches!(e, Entry::Contest { .. })));
-    let held = claim::winner(&state, &item("x"), NOW + MINUTE).unwrap().unwrap();
+    let held =
+        claim::winner(&state, &claim::thread_key("t").unwrap(), NOW + MINUTE).unwrap().unwrap();
     assert_eq!(held.holder, winner, "the winner's claim stands");
 }
 
@@ -319,6 +337,7 @@ fn claims_on_one_resource_clash_on_both() {
         for id in ["gpu1", "gpu2"] {
             add(r, by, id, None)?;
             model::set_element(r, &item(id), SetField::Resource, "gpu", true, by)?;
+            threaded(r, by, id, id)?;
         }
         Ok(())
     });
@@ -327,8 +346,7 @@ fn claims_on_one_resource_clash_on_both() {
         [(&pair.mac, "session/mac", "gpu1"), (&pair.pi, "session/pi", "gpu2")]
     {
         Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, &item(id), by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE)
-                .map(|_| ())?)
+            Ok(claim::claim(r, id, by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE).map(|_| ())?)
         });
     }
     pair.exchange();
@@ -365,16 +383,18 @@ fn two_runs_on_one_thread_clash_until_one_stops() {
 #[test]
 fn a_claim_from_a_clock_running_ahead_is_listed_until_time_catches_up() {
     let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
+    pair.user(&pair.mac, &|r, by| {
+        add(r, by, "x", None)?;
+        threaded(r, by, "t", "x")
+    });
     pair.spread(&pair.mac);
     let ahead = NOW + 30 * MINUTE;
     Pair::edit(&pair.pi, "session/pi", ahead, &|r, by| {
-        Ok(claim::claim(r, &item("x"), by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE)
-            .map(|_| ())?)
+        Ok(claim::claim(r, "t", by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE).map(|_| ())?)
     });
     pair.exchange();
     pair.assert_settled();
-    let entry = Entry::ClockAhead { item: "x".into(), holder: "session/pi".into() };
+    let entry = Entry::ClockAhead { thread: "t".into(), holder: "session/pi".into() };
     assert!(pair.needs(NOW).contains(&entry));
     assert!(!pair.needs(ahead).contains(&entry));
 }

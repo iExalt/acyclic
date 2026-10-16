@@ -7,12 +7,12 @@ The acyclic tracker. Every command prints one JSON document, except `prime`, `gr
 Usage: acyclic [OPTIONS] <COMMAND>
 
 Common Commands:
-  ready     Lists ready leaves, best first
+  ready     Lists ready leaves in the threads the actor may claim, by id
   list      Lists every item, by id
   show      Shows items with their role, readiness and claims, as an array in the order given
-  claim     Claims a ready leaf, or renews the actor's claim
-  release   Releases the actor's claim on an item, leaving anyone else's
-  done      Marks an item done, with evidence, and releases the actor's claim on it
+  claim     Claims a thread with ready work, or renews the actor's claim on it
+  release   Releases the actor's claim on a thread, leaving anyone else's
+  done      Marks an item done, with evidence
   needs     Lists what needs the user
 
 Command Groups:

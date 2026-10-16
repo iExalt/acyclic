@@ -5,7 +5,7 @@ use std::process::Command;
 
 use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model};
 use acyclic_core::ready::{GitAncestry, Readiness, Status, Wait};
-use acyclic_core::schema::{item, kind, repository};
+use acyclic_core::schema::{item, kind, repository, thread as thread_field};
 use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Error, Key, ReplicaId};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -52,6 +52,11 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
             let record = Key::new(kind::REPOSITORY, "code").unwrap();
             model::set(replica, &record, repository::DEFAULT_BRANCH, Some(&"main"), by)
                 .map_err(state_error)?;
+            for thread in ["t1", "t2"] {
+                let record = Key::new(kind::THREAD, thread).unwrap();
+                model::set(replica, &record, thread_field::TITLE, Some(&thread), by)
+                    .map_err(state_error)?;
+            }
             for (id, thread) in [("dep", "t1"), ("same", "t1"), ("other", "t2")] {
                 model::add_item(replica, id, id, by).map_err(state_error)?;
                 let member =

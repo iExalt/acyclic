@@ -31,6 +31,11 @@ fn setup() -> Replica {
     for id in ["a", "b"] {
         set_parent(&mut r, id, Some("g"), user(1)).unwrap();
     }
+    // Only threaded work is ready.
+    let outside = Key::new(kind::THREAD, "outside").unwrap();
+    model::set(&mut r, &outside, crate::schema::thread::TITLE, Some(&"Outside"), user(1)).unwrap();
+    model::put(&mut r, &item_key("outside").unwrap(), field::THREAD, Some(&"outside"), user(1))
+        .unwrap();
     done(&mut r, "a", Some("aaaa111"), DAY);
     done(&mut r, "b", None, DAY);
     done(&mut r, "g", None, DAY);

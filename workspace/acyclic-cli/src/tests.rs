@@ -70,10 +70,14 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::Gap { run: "r".into(), expected: 1, got: 2 }.into(),
         StateError::WrongReplica { run: "r".into(), applied_by: "mac".into() }.into(),
         StateError::Claimed(key.clone()).into(),
-        StateError::NotALeaf(key.clone()).into(),
+        StateError::NoThread("t".into()).into(),
         StateError::LeaseRequired("session/s".into()).into(),
-        StateError::ResourceHeld { resource: "gpu".into(), item: key, holder: "session/s".into() }
-            .into(),
+        StateError::ResourceHeld {
+            resource: "gpu".into(),
+            thread: "t".into(),
+            holder: "session/s".into(),
+        }
+        .into(),
         StateError::Format("bad".into()).into(),
         WriteError::InvalidName("A".into()).into(),
         WriteError::NoItem("a1".into()).into(),
@@ -232,7 +236,7 @@ fn an_actor_may_claim_past_its_own_claims_only() {
     let claimed = |holder: &str| Status::Claimed { holder: holder.into() };
     let busy = |holder: &str| Status::ResourceBusy {
         resource: "gpu".into(),
-        item: "other".into(),
+        thread: "other".into(),
         holder: holder.into(),
     };
     let contested = |first: &str, second: &str| Status::Contested {
@@ -416,10 +420,10 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(refused(json!({"repo": {"show": {"repositories": []}}})), Err("usage"));
     assert_eq!(refused(json!({"proposal": {"show": {"proposals": []}}})), Err("usage"));
     for lease in [0, 481] {
-        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Err("usage"));
+        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Err("usage"));
     }
     for lease in [1, 480] {
-        assert_eq!(refused(json!({"claim": {"item": "a", "lease": lease}})), Ok(()));
+        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Ok(()));
     }
     assert_eq!(refused(json!({"done": {"item": "a", "repository": "r", "commit": "c"}})), Ok(()));
     // Unknown fields and the server's own command are refused when deserializing.

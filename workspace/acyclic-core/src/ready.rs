@@ -102,23 +102,25 @@ pub enum Status {
         /// What each unmet dependency waits for.
         waiting: BTreeMap<String, Wait>,
     },
-    /// Claimed by one holder.
+    /// In no thread, or in one with no record, so never ready: threads are the unit of work.
+    Unthreaded,
+    /// Its thread is claimed by one holder.
     Claimed {
         /// The winning holder.
         holder: String,
     },
-    /// Claimed by several holders that didn't see each other; the first is the winner.
+    /// Its thread is claimed by several holders that didn't see each other; the first is the winner.
     Contested {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// Unclaimed, but another item's winning claim holds one of its named resources.
+    /// Its thread is unclaimed, but another thread's winning claim holds one of its named resources.
     ResourceBusy {
         /// The resource.
         resource: String,
-        /// The item holding it.
-        item: String,
-        /// That item's holder.
+        /// The thread holding it.
+        thread: String,
+        /// That thread's holder.
         holder: String,
     },
     /// On a cycle of links or parents, which pauses it.
@@ -145,6 +147,68 @@ pub enum Status {
     },
     /// It or an ancestor is archived.
     Archived,
+}
+
+/// A thread's readiness: whether it can be claimed, and its members that would be ready while it is held.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "status")]
+pub enum ThreadStatus {
+    /// No thread has this id.
+    Missing,
+    /// Unclaimed, with members ready to work on.
+    Ready {
+        /// The ready members, by id.
+        items: Vec<String>,
+    },
+    /// Unclaimed, with no member ready to work on.
+    NothingReady,
+    /// Claimed by one holder.
+    Claimed {
+        /// The winning holder.
+        holder: String,
+        /// The members ready to work on, by id.
+        items: Vec<String>,
+    },
+    /// Claimed by several holders that didn't see each other; the first is the winner.
+    Contested {
+        /// The holders, winner first.
+        holders: Vec<String>,
+        /// The members ready to work on, by id.
+        items: Vec<String>,
+    },
+    /// Unclaimed, but another thread's winning claim holds a resource one of its open members names.
+    ResourceBusy {
+        /// The resource.
+        resource: String,
+        /// The thread holding it.
+        thread: String,
+        /// That thread's holder.
+        holder: String,
+    },
+}
+
+impl ThreadStatus {
+    /// Whether `actor` may claim the thread without forcing: when it is ready, or when `actor` already wins it.
+    #[must_use]
+    pub fn claimable_by(&self, actor: &str) -> bool {
+        match self {
+            Self::Ready { .. } => true,
+            Self::Claimed { holder, .. } => holder == actor,
+            Self::Contested { holders, .. } => holders.first().is_some_and(|h| h == actor),
+            _ => false,
+        }
+    }
+
+    /// The members ready to work on while the thread is held.
+    #[must_use]
+    pub fn items(&self) -> &[String] {
+        match self {
+            Self::Ready { items } | Self::Claimed { items, .. } | Self::Contested { items, .. } => {
+                items
+            },
+            _ => &[],
+        }
+    }
 }
 
 /// Readiness over one state, with ancestry checks cached by repository and commit.
@@ -194,45 +258,12 @@ impl<'a> Readiness<'a> {
     /// Fails when a claim can't be read.
     pub fn of(&self, id: &str) -> Result<Option<Status>, Error> {
         let Some(item) = self.model.items.get(id) else { return Ok(None) };
-        if self.is_archived(id) {
-            return Ok(Some(Status::Archived));
+        if let Some(status) = self.unclaimed(id, item) {
+            return Ok(Some(status));
         }
-        let fields: Vec<String> =
-            [("state", item.state.is_conflict()), ("thread", item.thread.is_conflict())]
-                .into_iter()
-                .filter(|(_, conflicted)| *conflicted)
-                .map(|(name, _)| name.to_owned())
-                .collect();
-        if !fields.is_empty() {
-            return Ok(Some(Status::Conflicted { fields }));
-        }
-        if item.is_done() {
-            return Ok(Some(match self.own_wait(item) {
-                None => Status::Done,
-                Some(Wait::InReview | Wait::Open) => Status::InReview,
-                Some(Wait::Unverified { repository, reason }) => {
-                    Status::Unverified { repository, reason }
-                },
-            }));
-        }
-        if !self.model.children(id).is_empty() {
-            return Ok(Some(Status::Parent));
-        }
-        if self.cyclic.contains(id) {
-            return Ok(Some(Status::InCycle));
-        }
-        if item.state == Value::One(ItemState::Parked) {
-            return Ok(Some(Status::Parked));
-        }
-        let waiting = self.waiting(id);
-        if !waiting.is_empty() {
-            return Ok(Some(Status::Blocked { waiting }));
-        }
-        let key = crate::model::item_key(id).map_err(|_| Error::InvalidName(id.to_owned()))?;
         let alive = |holder: &str| self.model.run_alive(holder);
-        let claims = claim::live_with(self.state, &key, self.now, &alive)?;
         let mut holders: Vec<String> = Vec::new();
-        for claim in claims {
+        for claim in claim::covering(self.state, self.model, id, self.now, &alive)? {
             if !holders.contains(&claim.holder) {
                 holders.push(claim.holder);
             }
@@ -249,13 +280,99 @@ impl<'a> Readiness<'a> {
         }))
     }
 
-    /// The ready, unclaimed leaves, by id. Archived subtrees are left out unless
-    /// `include_archived` is set, which judges every item as if nothing were archived.
+    /// An item's readiness as though no thread were claimed, or `None` when it would be ready.
+    fn unclaimed(&self, id: &str, item: &Item) -> Option<Status> {
+        if self.is_archived(id) {
+            return Some(Status::Archived);
+        }
+        let fields: Vec<String> =
+            [("state", item.state.is_conflict()), ("thread", item.thread.is_conflict())]
+                .into_iter()
+                .filter(|(_, conflicted)| *conflicted)
+                .map(|(name, _)| name.to_owned())
+                .collect();
+        if !fields.is_empty() {
+            return Some(Status::Conflicted { fields });
+        }
+        if item.is_done() {
+            return Some(match self.own_wait(item) {
+                None => Status::Done,
+                Some(Wait::InReview | Wait::Open) => Status::InReview,
+                Some(Wait::Unverified { repository, reason }) => {
+                    Status::Unverified { repository, reason }
+                },
+            });
+        }
+        if !self.model.children(id).is_empty() {
+            return Some(Status::Parent);
+        }
+        if self.cyclic.contains(id) {
+            return Some(Status::InCycle);
+        }
+        if item.state == Value::One(ItemState::Parked) {
+            return Some(Status::Parked);
+        }
+        let waiting = self.waiting(id);
+        if !waiting.is_empty() {
+            return Some(Status::Blocked { waiting });
+        }
+        let threaded =
+            item.thread.one().is_some_and(|thread| self.model.threads.contains_key(thread));
+        (!threaded).then_some(Status::Unthreaded)
+    }
+
+    /// A thread's readiness.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn ready(&self, include_archived: bool) -> Result<Vec<String>, Error> {
+    pub fn thread(&self, thread: &str) -> Result<ThreadStatus, Error> {
+        if !self.model.threads.contains_key(thread) {
+            return Ok(ThreadStatus::Missing);
+        }
+        let items: Vec<String> = self
+            .model
+            .members(thread)
+            .into_iter()
+            // Finished work is skipped before its merge is checked.
+            .filter(|id| !self.model.items[*id].is_done())
+            .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
+            .map(str::to_owned)
+            .collect();
+        let alive = |holder: &str| self.model.run_alive(holder);
+        let key = claim::thread_key(thread)?;
+        let mut holders: Vec<String> = Vec::new();
+        for claim in claim::live_with(self.state, &key, self.now, &alive)? {
+            if !holders.contains(&claim.holder) {
+                holders.push(claim.holder);
+            }
+        }
+        if holders.len() > 1 {
+            return Ok(ThreadStatus::Contested { holders, items });
+        }
+        if let Some(holder) = holders.pop() {
+            return Ok(ThreadStatus::Claimed { holder, items });
+        }
+        if let Some((resource, thread, holder)) =
+            claim::resource_held(self.state, self.model, thread, None, self.now, &alive)?
+        {
+            return Ok(ThreadStatus::ResourceBusy { resource, thread, holder });
+        }
+        Ok(if items.is_empty() {
+            ThreadStatus::NothingReady
+        } else {
+            ThreadStatus::Ready { items }
+        })
+    }
+
+    /// The leaves `actor` may work on, by id: the ready members of every thread it may claim, which are its own and
+    /// the unclaimed ones. Archived subtrees are left out unless `include_archived` is set, which judges every item as
+    /// if nothing were archived.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn ready(&self, include_archived: bool, actor: &str) -> Result<Vec<String>, Error> {
         if include_archived {
             let mut model = self.model.clone();
             for item in model.items.values_mut() {
@@ -271,17 +388,16 @@ impl<'a> Readiness<'a> {
                 links_from: self.links_from.clone(),
                 archived: RefCell::default(),
             };
-            return unarchived.ready(false);
+            return unarchived.ready(false, actor);
         }
         let mut ready = Vec::new();
-        for (id, item) in &self.model.items {
-            if item.is_done() || !self.model.children(id).is_empty() {
-                continue;
-            }
-            if let Some(Status::Ready) = self.of(id)? {
-                ready.push(id.clone());
+        for thread in self.model.threads.keys() {
+            let status = self.thread(thread)?;
+            if status.claimable_by(actor) {
+                ready.extend(status.items().iter().cloned());
             }
         }
+        ready.sort();
         Ok(ready)
     }
 
@@ -330,20 +446,21 @@ impl<'a> Readiness<'a> {
             .collect()
     }
 
-    /// The first named resource of an unclaimed item that another item's winning claim holds.
+    /// The first named resource of an item in an unclaimed thread that another thread's winning claim holds.
     fn resource_busy(&self, item: &Item) -> Result<Option<Status>, Error> {
         let alive = |holder: &str| self.model.run_alive(holder);
+        let Some(own) = item.thread.one() else { return Ok(None) };
         for resource in &item.resources {
-            for other in self.model.items.values() {
-                if other.id == item.id || !other.resources.contains(resource) {
+            for thread in self.model.threads.keys().filter(|thread| *thread != own) {
+                if !claim::resources(self.model, thread).contains(resource.as_str()) {
                     continue;
                 }
-                let key = crate::model::item_key(&other.id)
-                    .map_err(|_| Error::InvalidName(other.id.clone()))?;
-                if let Some(claim) = claim::winner_with(self.state, &key, self.now, &alive)? {
+                if let Some(claim) =
+                    claim::winner_with(self.state, &claim::thread_key(thread)?, self.now, &alive)?
+                {
                     return Ok(Some(Status::ResourceBusy {
                         resource: resource.clone(),
-                        item: other.id.clone(),
+                        thread: thread.clone(),
                         holder: claim.holder,
                     }));
                 }

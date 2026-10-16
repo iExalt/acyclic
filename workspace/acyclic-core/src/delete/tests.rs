@@ -6,6 +6,7 @@ use crate::needs::{Entry, needs_you};
 use crate::ready::{Ancestry, Readiness};
 use crate::schema::kind;
 use crate::scope::{ScopeEdit, edit};
+use crate::state::Key;
 use crate::state::{Millis, ReplicaId, State};
 
 use super::*;
@@ -44,18 +45,31 @@ fn refusal(r: &mut Replica, id: &str, by: By<'_>) -> Vec<String> {
 
 #[test]
 fn only_an_item_nothing_refers_to_is_deleted() {
-    let mut r = with_items(&["parent", "kid", "a", "b", "done", "claimed", "free"]);
+    let mut r = with_items(&["parent", "kid", "a", "b", "done", "claimed", "mine", "free"]);
     set_parent(&mut r, "kid", Some("parent"), user(2)).unwrap();
     link(&mut r, "a", "b", crate::model::LinkKind::Blocks, user(2)).unwrap();
     set_state(&mut r, "done", ItemState::Done, user(2)).unwrap();
-    let held = Key::new(kind::ITEM, "claimed").unwrap();
-    claim::claim(&mut r, &held, "session/pi", NOW, Some(60_000), 480 * 60_000).unwrap();
+    let held = Key::new(kind::THREAD, "held").unwrap();
+    crate::model::set(&mut r, &held, crate::schema::thread::TITLE, Some(&"Held"), user(2)).unwrap();
+    for id in ["claimed", "mine"] {
+        crate::model::put(
+            &mut r,
+            &item_key(id).unwrap(),
+            crate::schema::item::THREAD,
+            Some(&"held"),
+            user(2),
+        )
+        .unwrap();
+    }
+    claim::claim(&mut r, "held", "session/pi", NOW, Some(60_000), 480 * 60_000).unwrap();
     assert_eq!(refusal(&mut r, "parent", user(NOW)), ["has-children"]);
     // A link either way, and a link of any kind.
     assert_eq!(refusal(&mut r, "a", user(NOW)), ["linked"]);
     assert_eq!(refusal(&mut r, "b", user(NOW)), ["linked"]);
     assert_eq!(refusal(&mut r, "done", user(NOW)), ["finished"]);
+    // Someone else's claim on its thread holds it; the deleter's own doesn't.
     assert_eq!(refusal(&mut r, "claimed", user(NOW)), ["claimed"]);
+    assert_eq!(delete_item(&mut r, "mine", By { actor: "session/pi", at: NOW }), Ok(true));
     // The refusal says why in one line.
     let message = delete_item(&mut r, "parent", user(NOW)).unwrap_err().to_string();
     assert_eq!(message, "parent can't be deleted: it has children (kid)");
@@ -138,7 +152,7 @@ impl Ancestry for Unmapped {
 fn needs_of(r: &Replica) -> Vec<Entry> {
     let model = Model::read(r.state()).unwrap();
     let readiness = Readiness::new(r.state(), &model, NOW, &Unmapped);
-    let _ = readiness.ready(false).unwrap();
+    let _ = readiness.ready(false, "session/mac").unwrap();
     for id in model.items.keys() {
         let _ = readiness.of(id).unwrap();
         let _ = (model.role(id), model.ancestors(id));

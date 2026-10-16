@@ -127,7 +127,7 @@ pub fn hint(args: &[OsString]) -> Option<String> {
     done_state(args, &words).or_else(|| link_word(&words))
 }
 
-/// `--state done` finishes nothing: `acyclic done` records evidence and releases the claim.
+/// `--state done` finishes nothing: `acyclic done` records evidence.
 fn done_state(args: &[OsString], words: &[String]) -> Option<String> {
     if !matches!(words, [item, add_or_edit, ..] if item == "item" && ["add", "edit"].contains(&add_or_edit.as_str()))
     {
@@ -136,9 +136,7 @@ fn done_state(args: &[OsString], words: &[String]) -> Option<String> {
     let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
     let done = args.iter().any(|arg| arg == "--state=done")
         || args.windows(2).any(|pair| pair[0] == "--state" && pair[1] == "done");
-    done.then(|| {
-        "finish an item with `acyclic done <ITEM>`, which records its evidence and releases its claim".to_owned()
-    })
+    done.then(|| "finish an item with `acyclic done <ITEM>`, which records its evidence".to_owned())
 }
 
 fn link_word(words: &[String]) -> Option<String> {

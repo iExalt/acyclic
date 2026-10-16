@@ -81,6 +81,50 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
 # exit 0
 {
   "data": {
+    "ready": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread add t0 --title Start
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "proposals": [],
+    "thread": "t0"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t0
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a1",
+    "placed": [],
+    "proposals": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t0
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a2",
+    "placed": [],
+    "proposals": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic ready
+# exit 0
+{
+  "data": {
     "ready": [
       {
         "approved": false,
@@ -90,7 +134,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
           "status": "ready"
         },
         "state": "backlog",
-        "thread": null,
+        "thread": "t0",
         "title": "First"
       }
     ]
@@ -98,24 +142,33 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim a2
-# exit 1
+$ ACYCLIC_ACTOR=session/mac acyclic claim a1
+# exit 3
 {
   "error": {
-    "code": "not-ready",
+    "code": "not-found",
     "details": {
-      "readiness": {
-        "status": "blocked",
-        "waiting": {
-          "a1": {
-            "why": "open"
-          }
-        }
-      }
+      "thread": "t0"
     },
-    "message": "item a2 isn't ready to claim; `acyclic show a2` says why"
+    "message": "no thread a1; claim a thread, not an item"
   },
   "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic claim t0
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "claim": {
+      "holder": "session/mac",
+      "lease_expires_at": "2026-10-15T01:00:00Z",
+      "lease_started_at": "2026-10-15T00:00:00Z",
+      "replica": "mac"
+    },
+    "thread": "t0"
+  },
+  "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic done a2
@@ -142,24 +195,27 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --state done
 # exit 2
 
 # stderr
-error: finish an item with `acyclic done <ITEM>`, which records its evidence and releases its claim
+error: finish an item with `acyclic done <ITEM>`, which records its evidence
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim a1
-# exit 0
+$ ACYCLIC_ACTOR=session/pi acyclic claim t0
+# exit 1
 {
-  "data": {
-    "changed": true,
-    "claim": {
-      "holder": "session/mac",
-      "lease_expires_at": "2026-10-15T01:00:00Z",
-      "lease_started_at": "2026-10-15T00:00:00Z",
-      "replica": "mac"
+  "error": {
+    "code": "not-ready",
+    "details": {
+      "readiness": {
+        "holder": "session/mac",
+        "items": [
+          "a1"
+        ],
+        "status": "claimed"
+      }
     },
-    "item": "a1"
+    "message": "thread t0 isn't ready to claim: it has no ready work, or someone else holds it or a resource it needs; `acyclic thread show t0` says why"
   },
-  "ok": true
+  "ok": false
 }
 
 $ ACYCLIC_ACTOR=session/pi acyclic done a1
@@ -200,13 +256,91 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic release a1
+$ ACYCLIC_ACTOR=session/mac acyclic thread show t0
+# exit 0
+{
+  "data": [
+    {
+      "approved": false,
+      "brief": null,
+      "claims": [
+        {
+          "holder": "session/mac",
+          "lease_expires_at": "2026-10-15T01:00:00Z",
+          "lease_started_at": "2026-10-15T00:00:00Z",
+          "replica": "mac"
+        }
+      ],
+      "counts": {
+        "conflicted": 0,
+        "done": 1,
+        "members": 2
+      },
+      "heads": [
+        "a2"
+      ],
+      "id": "t0",
+      "level": null,
+      "members": [
+        {
+          "approved": false,
+          "conflicted": false,
+          "id": "a1",
+          "parent": null,
+          "readiness": {
+            "status": "done"
+          },
+          "state": "done",
+          "thread": "t0",
+          "title": "First"
+        },
+        {
+          "approved": false,
+          "conflicted": false,
+          "id": "a2",
+          "parent": null,
+          "readiness": {
+            "holder": "session/mac",
+            "status": "claimed"
+          },
+          "state": "backlog",
+          "thread": "t0",
+          "title": "Second"
+        }
+      ],
+      "pm": false,
+      "readiness": {
+        "holder": "session/mac",
+        "items": [
+          "a2"
+        ],
+        "status": "claimed"
+      },
+      "repositories": [],
+      "title": "Start"
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic release t0
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "released": true,
+    "thread": "t0"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic release t0
 # exit 0
 {
   "data": {
     "changed": false,
-    "item": "a1",
-    "released": false
+    "released": false,
+    "thread": "t0"
   },
   "ok": true
 }
@@ -224,7 +358,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
           "status": "ready"
         },
         "state": "backlog",
-        "thread": null,
+        "thread": "t0",
         "title": "Second"
       }
     ]
@@ -323,7 +457,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a2
       "role": "item",
       "size": null,
       "state": "backlog",
-      "thread": null,
+      "thread": "t0",
       "title": "Second"
     }
   ],
@@ -393,7 +527,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
     "item": "a1",
     "placed": [],
     "proposals": [
-      "mac-16"
+      "mac-19"
     ]
   },
   "ok": true
@@ -412,7 +546,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
             "status": "done"
           },
           "state": "done",
-          "thread": null,
+          "thread": "t0",
           "title": "First"
         },
         "kind": "proposal",
@@ -421,12 +555,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
           "decision": null,
           "edit": {
             "after": "t1",
-            "before": null,
+            "before": "t0",
             "field": "thread",
             "item": "a1",
             "kind": "member"
           },
-          "id": "mac-16",
+          "id": "mac-19",
           "threads": [
             "t1"
           ]
@@ -437,7 +571,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-16
+$ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-19
 # exit 0
 {
   "data": [
@@ -446,12 +580,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-16
       "decision": null,
       "edit": {
         "after": "t1",
-        "before": null,
+        "before": "t0",
         "field": "thread",
         "item": "a1",
         "kind": "member"
       },
-      "id": "mac-16",
+      "id": "mac-19",
       "threads": [
         "t1"
       ]
@@ -470,12 +604,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal list
         "decision": null,
         "edit": {
           "after": "t1",
-          "before": null,
+          "before": "t0",
           "field": "thread",
           "item": "a1",
           "kind": "member"
         },
-        "id": "mac-16",
+        "id": "mac-19",
         "item": {
           "id": "a1",
           "parent": null,
@@ -483,7 +617,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal list
             "status": "done"
           },
           "state": "done",
-          "thread": null,
+          "thread": "t0",
           "title": "First"
         },
         "threads": [
@@ -506,7 +640,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal show nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-16 --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-19 --as-user
 # exit 0
 {
   "data": {
@@ -514,7 +648,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-16 --as-user
     "changed": true,
     "decision": "keep",
     "item": "a1",
-    "proposal": "mac-16",
+    "proposal": "mac-19",
     "thread": "t1"
   },
   "ok": true
@@ -556,6 +690,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
   "data": {
     "threads": [
       {
+        "approved": false,
+        "counts": {
+          "conflicted": 0,
+          "done": 0,
+          "members": 0
+        },
+        "heads": [],
+        "id": "t0",
+        "title": "Start"
+      },
+      {
         "approved": true,
         "counts": {
           "conflicted": 0,
@@ -580,6 +725,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
     {
       "approved": true,
       "brief": null,
+      "claims": [],
       "counts": {
         "conflicted": 0,
         "done": 1,
@@ -617,6 +763,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
         }
       ],
       "pm": false,
+      "readiness": {
+        "items": [
+          "a2"
+        ],
+        "status": "ready"
+      },
       "repositories": [],
       "title": "Work"
     }
@@ -1209,7 +1361,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim g1-a
+$ ACYCLIC_ACTOR=session/mac acyclic item edit g1-a --thread t2
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "g1-a",
+    "placed": [],
+    "proposals": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic claim t2
 # exit 0
 {
   "data": {
@@ -1220,7 +1384,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim g1-a
       "lease_started_at": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
-    "item": "g1-a"
+    "thread": "t2"
   },
   "ok": true
 }

@@ -124,7 +124,7 @@ pub enum Command {
     },
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
-    /// Lists ready leaves, best first.
+    /// Lists ready leaves in the threads the actor may claim, by id.
     Ready {
         /// Judge archived work as if it weren't archived.
         #[arg(long)]
@@ -144,24 +144,24 @@ pub enum Command {
         #[serde(default)]
         items: Vec<String>,
     },
-    /// Claims a ready leaf, or renews the actor's claim.
+    /// Claims a thread with ready work, or renews the actor's claim on it.
     Claim {
-        /// The item.
-        item: String,
+        /// The thread.
+        thread: String,
         /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
         #[arg(long, value_parser = lease_minutes)]
         lease: Option<u32>,
-        /// Claim even when the item isn't ready.
+        /// Claim even when the thread has no ready work.
         #[arg(long)]
         #[serde(default)]
         force: bool,
     },
-    /// Releases the actor's claim on an item, leaving anyone else's.
+    /// Releases the actor's claim on a thread, leaving anyone else's.
     Release {
-        /// The item.
-        item: String,
+        /// The thread.
+        thread: String,
     },
-    /// Marks an item done, with evidence, and releases the actor's claim on it.
+    /// Marks an item done, with evidence.
     Done {
         /// The item.
         item: String,

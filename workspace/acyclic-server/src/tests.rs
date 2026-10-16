@@ -204,8 +204,8 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         assert_eq!(classify(read.clone()), Use::Read, "{read}");
     }
     for write in [
-        json!({"claim": {"item": "a"}}),
-        json!({"release": {"item": "a"}}),
+        json!({"claim": {"thread": "t"}}),
+        json!({"release": {"thread": "t"}}),
         json!({"done": {"item": "a", "note": "n"}}),
         json!({"level": {"level": "blockers"}}),
         json!({"item": {"add": {"item": "a", "title": "A"}}}),

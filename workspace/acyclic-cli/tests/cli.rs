@@ -70,21 +70,41 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("item add a2 --title Other", AGENT), 1);
     assert_eq!(sh.run("link add a2 waits-for a1", AGENT), 0);
+    let (_, ready) = sh.output("ready", AGENT);
+    assert_eq!(ready["data"]["ready"], json!([]), "nothing is ready outside a thread");
+    assert_eq!(sh.run("thread add t0 --title Start", AGENT), 0);
+    for id in ["a1", "a2"] {
+        assert_eq!(sh.run(&format!("item edit {id} --thread t0"), AGENT), 0);
+    }
     assert_eq!(sh.run("ready", AGENT), 0);
-    assert_eq!(sh.run("claim a2", AGENT), 1, "a2 waits on a1");
-    assert_eq!(sh.run("done a2", AGENT), 1, "nor can it be finished");
+    let (code, out) = sh.output("claim a1", AGENT);
+    assert_eq!(
+        (code, &out["error"]["details"]["thread"]),
+        (3, &json!("t0")),
+        "threads are claimed, not items"
+    );
+    assert_eq!(sh.run("claim t0", AGENT), 0);
+    assert_eq!(sh.run("done a2", AGENT), 1, "a2 waits on a1");
     assert_eq!(sh.run("item edit a2 --state done", AGENT), 2, "done finishes items");
-    assert_eq!(sh.run("claim a1", AGENT), 0);
     let pi = [("ACYCLIC_ACTOR", "session/pi")];
-    assert_eq!(sh.run("done a1", &pi), 1, "another agent's claim");
+    assert_eq!(sh.run("claim t0", &pi), 1, "another agent's claim");
+    assert_eq!(sh.run("done a1", &pi), 1, "and its items");
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0);
     assert_eq!(sh.run("done a1 --note shipped", AGENT), 0, "finishing again changes nothing");
-    let (code, released) = sh.output("release a1", AGENT);
+    let (code, shown) = sh.output("thread show t0", AGENT);
     assert_eq!(
-        (code, released["data"]["released"].as_bool(), released["data"]["changed"].as_bool()),
-        (0, Some(false), Some(false)),
-        "done released the claim already, and releasing nothing isn't an error"
+        (code, &shown["data"][0]["claims"][0]["holder"]),
+        (0, &json!("session/mac")),
+        "done releases nothing"
     );
+    for (released, changed) in [(true, true), (false, false)] {
+        let (code, out) = sh.output("release t0", AGENT);
+        assert_eq!(
+            (code, out["data"]["released"].as_bool(), out["data"]["changed"].as_bool()),
+            (0, Some(released), Some(changed)),
+            "releasing nothing isn't an error"
+        );
+    }
     assert_eq!(sh.run("ready", AGENT), 0);
     assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0);
     assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0, "a repeat changes nothing");
@@ -186,7 +206,8 @@ fn a_journey_through_the_contract() {
     sh.run("item add g1-a --title Part --parent g1", AGENT);
     let (code, out) = sh.output("done g1", AGENT);
     assert_eq!((code, &out["error"]["details"]["open"]), (1, &serde_json::json!(["g1-a"])));
-    sh.run("claim g1-a", AGENT);
+    sh.run("item edit g1-a --thread t2", AGENT);
+    sh.run("claim t2", AGENT);
     sh.run("done g1-a", AGENT);
     assert_eq!(sh.run("done g1", AGENT), 0, "a parent is finished once its children are");
     sh.run("item add g2 --title Goal", AGENT);
@@ -373,11 +394,16 @@ fn two_machines_sync_through_a_shared_repository() {
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../nowhere.git"]);
     let (code, out) = sh.output("item add a3 --title Stranded", AGENT);
     assert_eq!((code, out["data"]["push"]["ok"].as_bool()), (0, Some(false)), "the write stands");
-    let (_, out) = sh.output("needs", AGENT);
-    assert_eq!(out["data"]["needs"][0]["kind"], "unpushed");
+    // The needs, leaving out the items in no thread, which this test never threads.
+    let needs = |sh: &mut Shell| {
+        let (_, out) = sh.output("needs", AGENT);
+        let all = out["data"]["needs"].as_array().unwrap().clone();
+        all.into_iter().filter(|entry| entry["kind"] != "unthreaded").collect::<Vec<_>>()
+    };
+    assert_eq!(needs(&mut sh)[0]["kind"], "unpushed");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
     sh.run("sync", AGENT);
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+    assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
     // The user's move to the top racing the other machine's move is a conflict, and moving it again settles it.
     sh.run("item edit a1 --parent a2", AGENT);
     sh.run("sync", AGENT);
@@ -386,10 +412,10 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("item edit a1 --parent b1", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["kind"], "conflict");
+    assert_eq!(needs(&mut sh)[0]["kind"], "conflict");
     let (_, out) = sh.output("item edit a1 --no-parent --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+    assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
     // Likewise taking an item out of a thread while the other machine puts it in one.
     sh.run("thread add t1 --title One", AGENT);
     sh.run("thread add t2 --title Two", AGENT);
@@ -400,8 +426,8 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("item edit a1 --thread t2", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"][0]["field"], "thread");
+    assert_eq!(needs(&mut sh)[0]["field"], "thread");
     let (_, out) = sh.output("item edit a1 --no-thread --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
-    assert_eq!(sh.output("needs", AGENT).1["data"]["needs"], serde_json::json!([]));
+    assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
 }

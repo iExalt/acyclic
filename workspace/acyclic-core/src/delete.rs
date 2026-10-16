@@ -13,8 +13,8 @@
 //! fields.
 //!
 //! Only an item that nothing refers to is deleted, judged against the replica's own view: no children, no link either
-//! way, not done and with no evidence, and no live claim. In an approved thread only the user deletes, as only the
-//! user may change its scope.
+//! way, not done and with no evidence, and no live claim on its thread but the deleter's own. In an approved thread
+//! only the user deletes, as only the user may change its scope.
 
 use std::fmt;
 
@@ -22,9 +22,9 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, By, LinkKind, Model, Thread, Value, WriteError};
-use crate::schema::{item as field, kind};
+use crate::schema::item as field;
 use crate::scope::USER;
-use crate::state::{Error, Key, Replica};
+use crate::state::{Error, Replica};
 
 /// Why an item isn't deleted.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -47,7 +47,7 @@ pub enum Reason {
     },
     /// It is done, or holds evidence of it.
     Finished,
-    /// Someone holds a live claim on it.
+    /// Someone else holds a live claim on its thread.
     Claimed {
         /// The holder.
         holder: String,
@@ -64,7 +64,7 @@ impl fmt::Display for Reason {
             Self::Finished => {
                 write!(f, "it is done, or holds evidence of it, and finished work stays")
             },
-            Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
+            Self::Claimed { holder } => write!(f, "{holder} holds a claim on its thread"),
         }
     }
 }
@@ -123,7 +123,8 @@ impl From<Error> for DeleteError {
     }
 }
 
-/// Why `id` can't be deleted in `model`; empty when it can.
+/// Why `actor` can't delete `id` in `model`; empty when it can. The actor's own claim on the item's thread is no
+/// reason.
 ///
 /// # Errors
 ///
@@ -132,6 +133,7 @@ pub fn reasons(
     replica: &Replica,
     model: &Model,
     id: &str,
+    actor: &str,
     now: crate::state::Millis,
 ) -> Result<Vec<Reason>, Error> {
     let mut found = Vec::new();
@@ -152,8 +154,10 @@ pub fn reasons(
         found.push(Reason::Finished);
     }
     let alive = |holder: &str| model.run_alive(holder);
-    for held in claim::live_with(&replica.state, &Key::new(kind::ITEM, id)?, now, &alive)? {
-        found.push(Reason::Claimed { holder: held.holder });
+    for held in claim::covering(&replica.state, model, id, now, &alive)? {
+        if held.holder != actor {
+            found.push(Reason::Claimed { holder: held.holder });
+        }
     }
     Ok(found)
 }
@@ -181,7 +185,7 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     {
         return Err(DeleteError::NotAllowed { actor: by.actor.to_owned(), thread: thread.clone() });
     }
-    let reasons = reasons(replica, &model, id, by.at)?;
+    let reasons = reasons(replica, &model, id, by.actor, by.at)?;
     if !reasons.is_empty() {
         return Err(DeleteError::InUse { item: id.to_owned(), reasons });
     }
