@@ -275,10 +275,57 @@ fn empty(value: &Json) -> bool {
     }
 }
 
-/// A value on one line: text as it is, a list joined with commas, an embedded record by its `id`, and another
-/// record's fields that say something as `name value`, its `status` first and alone, as a readiness reads.
+/// A readiness, an item's or a thread's, as a phrase: `blocked by a (not done)`, `claimed by session/s`, and so on.
+/// `None` for a status this build doesn't know, which then prints field by field.
+fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
+    let text = |key: &str| fields.get(key).map(compact).unwrap_or_default();
+    // A thread's readiness lists the members that would be ready while it is held.
+    let ready = match fields.get("items") {
+        Some(items) if !empty(items) => format!("; ready: {}", compact(items)),
+        _ => String::new(),
+    };
+    let phrase = match fields.get("status")?.as_str()? {
+        "blocked" => {
+            let waiting = fields.get("waiting")?.as_object()?;
+            let each = waiting.iter().map(|(id, wait)| {
+                let why = match wait["why"].as_str() {
+                    Some("open") => "not done".to_owned(),
+                    Some("in-review") => "in review".to_owned(),
+                    Some("unverified") => format!("merge unverified: {}", compact(&wait["reason"])),
+                    _ => compact(wait),
+                };
+                format!("{id} ({why})")
+            });
+            format!("blocked by {}", each.collect::<Vec<_>>().join(", "))
+        },
+        "ready" if ready.is_empty() => "ready".to_owned(),
+        "ready" => format!("ready: {}", compact(&fields["items"])),
+        "claimed" => format!("claimed by {}{ready}", text("holder")),
+        "contested" => format!("contested by {}{ready}", text("holders")),
+        "resource-busy" => format!(
+            "waiting for {}, held by thread {} ({})",
+            text("resource"),
+            text("thread"),
+            text("holder")
+        ),
+        "conflicted" => format!("conflicted: {}", text("fields")),
+        "unverified" => {
+            format!("done, merge unverified: {} ({})", text("reason"), text("repository"))
+        },
+        "in-cycle" => "in a cycle".to_owned(),
+        "nothing-ready" => "nothing ready".to_owned(),
+        // The rest say all there is in their name.
+        other if fields.len() == 1 => other.replace('-', " "),
+        _ => return None,
+    };
+    Some(phrase)
+}
+
+/// A value on one line: text as it is, a list joined with commas, an embedded record by its `id`, a readiness as a
+/// phrase, and another record's fields that say something as `name value`, its `status` first.
 fn compact(value: &Json) -> String {
     match value {
+        Json::Object(fields) if let Some(phrase) = readiness(fields) => phrase,
         Json::Null => String::new(),
         Json::Bool(yes) => (if *yes { "yes" } else { "no" }).to_owned(),
         Json::String(text) => text.clone(),

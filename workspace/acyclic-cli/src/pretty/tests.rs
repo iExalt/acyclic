@@ -119,3 +119,70 @@ fn a_lone_list_is_its_table_and_notes_keep_their_column() {
         "details": {"thread": "t"}}});
     assert_eq!(error(&details), "error: no thread a1 [not-found] (thread t)\n");
 }
+
+#[test]
+fn every_readiness_reads_as_a_phrase() {
+    use acyclic_core::ready::{Status, ThreadStatus, Wait};
+    let phrase = |status: Json| readiness(status.as_object().unwrap());
+    let s = |text: &str| text.to_owned();
+    let waiting = [
+        (s("a"), Wait::Open),
+        (s("b"), Wait::InReview),
+        (s("c"), Wait::Unverified { repository: s("r"), reason: s("no clone") }),
+    ];
+    let items: Vec<(Json, &str)> = vec![
+        (json!(Status::Ready), "ready"),
+        (
+            json!(Status::Blocked { waiting: waiting.into_iter().collect() }),
+            "blocked by a (not done), b (in review), c (merge unverified: no clone)",
+        ),
+        (json!(Status::Unthreaded), "unthreaded"),
+        (json!(Status::Claimed { holder: s("session/s") }), "claimed by session/s"),
+        (
+            json!(Status::Contested { holders: vec![s("run/1"), s("run/2")] }),
+            "contested by run/1, run/2",
+        ),
+        (
+            json!(Status::ResourceBusy { resource: s("gpu"), thread: s("t"), holder: s("run/1") }),
+            "waiting for gpu, held by thread t (run/1)",
+        ),
+        (json!(Status::InCycle), "in a cycle"),
+        (
+            json!(Status::Conflicted { fields: vec![s("state"), s("thread")] }),
+            "conflicted: state, thread",
+        ),
+        (json!(Status::Parent), "parent"),
+        (json!(Status::Parked), "parked"),
+        (json!(Status::Done), "done"),
+        (json!(Status::InReview), "in review"),
+        (
+            json!(Status::Unverified { repository: s("r"), reason: s("no clone") }),
+            "done, merge unverified: no clone (r)",
+        ),
+        (json!(Status::Archived), "archived"),
+        (json!(ThreadStatus::Missing), "missing"),
+        (json!(ThreadStatus::Ready { items: vec![s("a"), s("b")] }), "ready: a, b"),
+        (json!(ThreadStatus::NothingReady), "nothing ready"),
+        (
+            json!(ThreadStatus::Claimed { holder: s("session/s"), items: vec![s("a")] }),
+            "claimed by session/s; ready: a",
+        ),
+        (
+            json!(ThreadStatus::Claimed { holder: s("session/s"), items: vec![] }),
+            "claimed by session/s",
+        ),
+        (
+            json!(ThreadStatus::Contested {
+                holders: vec![s("run/1"), s("run/2")],
+                items: vec![s("a")]
+            }),
+            "contested by run/1, run/2; ready: a",
+        ),
+    ];
+    for (status, expected) in items {
+        assert_eq!(phrase(status.clone()).as_deref(), Some(expected), "{status}");
+    }
+    // A status a later build adds, with fields, still prints field by field rather than as its name alone.
+    assert_eq!(phrase(json!({"status": "new-kind", "detail": "x"})), None);
+    assert_eq!(compact(&json!({"status": "new-kind", "detail": "x"})), "new-kind (detail x)");
+}
