@@ -25,6 +25,24 @@ fn podman(args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("podman prints UTF-8")
 }
 
+/// Removes the run's container and secrets however the test ends, so a failure never leaves real values behind.
+struct Cleanup {
+    run: String,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let quiet = |args: &[&str]| Command::new("podman").args(args).output().ok();
+        quiet(&["rm", "--force", "--ignore", &format!("acyclic-{}", self.run)]);
+        let label = format!("label=acyclic.run={}", self.run);
+        if let Some(listed) = quiet(&["secret", "ls", "--filter", &label, "--quiet"]) {
+            for id in String::from_utf8_lossy(&listed.stdout).split_whitespace() {
+                quiet(&["secret", "rm", id]);
+            }
+        }
+    }
+}
+
 fn fingerprint(value: &str) -> String {
     let hex: String =
         Sha256::digest(value.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
@@ -38,6 +56,7 @@ fn a_container_sees_each_value_exactly_and_inspect_shows_none() {
         PathBuf::from(std::env::var("ACYCLIC_SECRETS_FILE").expect("ACYCLIC_SECRETS_FILE is set"));
     let secrets = sops::decrypt(&SystemRunner, &file).expect("the secrets file decrypts");
     let run = format!("live-{}", std::process::id());
+    let _cleanup = Cleanup { run: run.clone() };
     let mut created =
         RunSecrets::create(&SystemRunner, &run, &secrets, &GRANTS).expect("secrets are created");
 
@@ -54,11 +73,12 @@ fn a_container_sees_each_value_exactly_and_inspect_shows_none() {
     let container = podman(&create.iter().map(String::as_str).collect::<Vec<_>>());
     let container = container.trim();
 
-    let exposed = [
-        podman(&["inspect", container]),
-        podman(&["secret", "inspect", &format!("acyclic-{run}-anthropic_auth_token")]),
-    ];
+    let mut exposed = vec![podman(&["inspect", container])];
+    for (secret, _) in created.names() {
+        exposed.push(podman(&["secret", "inspect", secret]));
+    }
     let seen = podman(&["start", "--attach", container]);
+    exposed.push(podman(&["inspect", container]));
     podman(&["rm", container]);
     created.remove(&SystemRunner).expect("secrets are removed");
 

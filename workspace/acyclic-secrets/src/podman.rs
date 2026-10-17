@@ -72,6 +72,11 @@ impl RunSecrets {
             .collect()
     }
 
+    /// The Podman secrets created, each with the environment variable it becomes.
+    pub fn names(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.created.iter().map(|(secret, target)| (secret.as_str(), target.as_str()))
+    }
+
     /// The run these secrets belong to.
     #[must_use]
     pub fn run(&self) -> &str {
@@ -180,6 +185,20 @@ mod tests {
             calls[2].args,
             ["secret", "rm", "acyclic-r1-anthropic_auth_token", "acyclic-r1-anthropic_base_url"]
         );
+    }
+
+    #[test]
+    fn a_failed_create_removes_the_secrets_already_made_and_returns_its_own_error() {
+        let runner = FakeRunner::answering(&[
+            (true, "", ""),
+            (false, "", "Error: no space\n"),
+            (true, "", ""),
+        ]);
+        let error = RunSecrets::create(&runner, "r1", &secrets(), &GRANTS).unwrap_err();
+        assert_eq!(error.to_string(), "`podman secret create` failed: Error: no space");
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[2].args, ["secret", "rm", "acyclic-r1-anthropic_auth_token"]);
     }
 
     #[test]

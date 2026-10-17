@@ -43,16 +43,20 @@ impl Runner for SystemRunner {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(spawn_error)?;
-        if let Some(bytes) = stdin {
-            // Taking the pipe closes it when the block ends, so the program sees the end of its input.
-            let mut pipe = child.stdin.take().expect("standard input is piped");
-            pipe.write_all(bytes).map_err(spawn_error)?;
-        }
+        // Taking the pipe closes it at the end of the block, so the program sees the end of its input. A program that
+        // exits early breaks the pipe; it is still waited for, and the run counts as failed.
+        let written = stdin.map_or(Ok(()), |bytes| {
+            child.stdin.take().expect("standard input is piped").write_all(bytes)
+        });
         let output = child.wait_with_output().map_err(spawn_error)?;
+        let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if let Err(error) = &written {
+            stderr = format!("{stderr}\n(its standard input wasn't fully written: {error})");
+        }
         Ok(Output {
-            success: output.status.success(),
+            success: output.status.success() && written.is_ok(),
             stdout: Zeroizing::new(output.stdout),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stderr,
         })
     }
 }
@@ -71,30 +75,29 @@ pub(crate) mod fake {
         pub stdin: Option<Vec<u8>>,
     }
 
-    /// Answers every call with the same output and records the calls.
+    /// Answers calls in turn from a list of outputs, repeating the last, and records the calls.
     pub struct FakeRunner {
         pub calls: RefCell<Vec<Call>>,
-        success: bool,
-        stdout: Vec<u8>,
-        stderr: String,
+        answers: Vec<(bool, String, String)>,
     }
 
     impl FakeRunner {
         pub fn ok(stdout: &str) -> Self {
-            Self {
-                calls: RefCell::default(),
-                success: true,
-                stdout: stdout.into(),
-                stderr: String::new(),
-            }
+            Self::answering(&[(true, stdout, "")])
         }
 
         pub fn failing(stderr: &str) -> Self {
+            Self::answering(&[(false, "", stderr)])
+        }
+
+        /// Answers with `(success, stdout, stderr)` for each call in turn.
+        pub fn answering(answers: &[(bool, &str, &str)]) -> Self {
             Self {
                 calls: RefCell::default(),
-                success: false,
-                stdout: Vec::new(),
-                stderr: stderr.into(),
+                answers: answers
+                    .iter()
+                    .map(|&(ok, out, err)| (ok, out.into(), err.into()))
+                    .collect(),
             }
         }
     }
@@ -106,10 +109,12 @@ pub(crate) mod fake {
                 args: args.iter().map(|a| (*a).to_owned()).collect(),
                 stdin: stdin.map(<[u8]>::to_vec),
             });
+            let calls = self.calls.borrow().len();
+            let (success, stdout, stderr) = &self.answers[(calls - 1).min(self.answers.len() - 1)];
             Ok(Output {
-                success: self.success,
-                stdout: Zeroizing::new(self.stdout.clone()),
-                stderr: self.stderr.clone(),
+                success: *success,
+                stdout: Zeroizing::new(stdout.clone().into_bytes()),
+                stderr: stderr.clone(),
             })
         }
     }

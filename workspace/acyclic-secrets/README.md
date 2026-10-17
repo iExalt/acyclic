@@ -15,8 +15,9 @@ Each line is `NAME=value`. `sops decrypt` needs the age identity, which SOPS fin
 2. Each value a run needs goes to `podman secret create --label acyclic.run=<run> <name> -` on standard input, byte
    for byte, with no trailing newline.
 3. The container gets it with `--secret <name>,type=env,target=<VARIABLE>`, so it appears in the container's
-   environment but not in its configuration or `podman inspect`.
-4. The secret is removed with `podman secret rm` when the run ends.
+   environment but not in `podman inspect`.
+4. The secret is removed with `podman secret rm` when the run ends, and so is the container.
 
-While a secret exists, Podman's file driver keeps it unencrypted on the machine's disk, and anyone who can reach
-Podman's socket can read it with `podman secret inspect --showsecret`; that is why secrets live for one run.
+Each value still rests unencrypted on the machine's disk for a while: in Podman's file driver, as base64, until the
+secret is removed, and anyone who can reach Podman's socket can read it with `podman secret inspect --showsecret`;
+and in the container's runtime configuration until the container is removed. That is why both live for one run.
