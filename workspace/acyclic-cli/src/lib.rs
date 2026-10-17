@@ -104,8 +104,9 @@ impl Outcome {
 }
 
 /// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
-/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. With `-o pretty` it prints
-/// the same data as text for people instead, and an error as a line on standard error with the same exit code. Help and
+/// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Pretty output, the default
+/// at a terminal, prints the same data as text for people instead, and an error as a line on standard error with the
+/// same exit code. Help and
 /// version text, `prime`, `completions`, `graph` without `--file` and `import --schema` print text instead, and a
 /// command line that doesn't parse prints its error and usage as text to standard error, with exit code 2, as other
 /// command-line tools do.
@@ -146,7 +147,12 @@ fn execute_with(
             return Outcome { code: exit::USAGE, stdout: String::new(), stderr };
         },
     };
-    let failed = |err: CliError| match cli.output {
+    // An unreadable `ACYCLIC_OUTPUT` is reported as JSON, which every reader can take.
+    let output = match context::output(&cli, env) {
+        Ok(output) => output,
+        Err(err) => return Outcome::out(err.exit, render(&err.envelope())),
+    };
+    let failed = |err: CliError| match output {
         Format::Json => Outcome::out(err.exit, render(&err.envelope())),
         Format::Pretty => Outcome {
             code: err.exit,
@@ -167,7 +173,7 @@ fn execute_with(
     acyclic_core::probe::mark("command");
     match result {
         Ok(commands::Output::Json(mut data)) => {
-            let output = match cli.output {
+            let output = match output {
                 Format::Json => render(&json!({"ok": true, "data": data})),
                 Format::Pretty => {
                     timestamps(&mut data);
@@ -198,7 +204,8 @@ fn serve_with(cli: &Cli, options: &Serve, env: &Env, serve: ServeHook) -> Result
 /// command that prints text returns it as the envelope's data.
 #[must_use]
 pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8, Value) {
-    let cli = Cli { tracker: Some(tracker), actor: None, as_user, output: Format::Json, command };
+    let cli =
+        Cli { tracker: Some(tracker), actor: None, as_user, output: Some(Format::Json), command };
     let result = cli.command.validate().and_then(|()| commands::run(&cli, env));
     let (code, mut envelope) = match result {
         Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),

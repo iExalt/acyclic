@@ -40,6 +40,35 @@ fn the_user_is_never_inherited_from_the_environment() {
 }
 
 #[test]
+fn output_is_pretty_at_a_terminal_and_json_in_a_pipe_unless_said_otherwise() {
+    use args::Format::{Json, Pretty};
+    let output = |line: &str, vars: &[(&str, &str)], terminal: Option<u16>| {
+        let cli = args::Cli::try_parse_from(line.split(' ')).unwrap();
+        context::output(&cli, &Env { terminal, ..env(vars) }).map_err(|e| e.code)
+    };
+    let (tty, pipe) = (Some(80), None);
+    let (json, pretty) = ([("ACYCLIC_OUTPUT", "json")], [("ACYCLIC_OUTPUT", "pretty")]);
+    // An agent's tool reads a pipe, so agents get JSON without asking.
+    assert_eq!(output("acyclic list", &[], pipe), Ok(Json));
+    assert_eq!(output("acyclic list", &[], tty), Ok(Pretty));
+    // The environment overrides the terminal, and the flag overrides both.
+    assert_eq!(output("acyclic list", &json, tty), Ok(Json));
+    assert_eq!(output("acyclic list", &pretty, pipe), Ok(Pretty));
+    assert_eq!(output("acyclic list -o json", &pretty, tty), Ok(Json));
+    assert_eq!(output("acyclic list -o pretty", &json, pipe), Ok(Pretty));
+    assert_eq!(output("acyclic list", &[("ACYCLIC_OUTPUT", "yaml")], tty), Err("usage"));
+    // At a terminal, an error is pretty's line on standard error, and a bad setting is still JSON on standard output.
+    let at = |vars: &[(&str, &str)]| {
+        let args = ["acyclic", "show", "a1", "--tracker", "/nonexistent"].map(Into::into);
+        execute(args, &Env { terminal: tty, ..env(vars) })
+    };
+    let out = at(&[]);
+    assert!(out.stdout.is_empty() && out.stderr.starts_with("error: "), "{out:?}");
+    let out = at(&[("ACYCLIC_OUTPUT", "yaml")]);
+    assert!(out.stdout.contains("ACYCLIC_OUTPUT is yaml") && out.stderr.is_empty(), "{out:?}");
+}
+
+#[test]
 fn a_tracker_clone_needs_no_home_or_mapping() {
     let dir = tempfile::TempDir::new().unwrap();
     let git = |args: &[&str]| {

@@ -17,8 +17,8 @@ use serde::Serialize;
 /// The heading the options that every command takes sit under in its help.
 const GLOBAL_OPTIONS: &str = "Global options";
 
-/// The acyclic tracker. Every command prints one JSON document, or with `-o pretty` text for people, except `prime`,
-/// `completions`, `graph` without `--file`, `import --schema` and help and version text.
+/// The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o`
+/// chooses), except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and version text.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -32,27 +32,26 @@ pub struct Cli {
     /// Act as the user.
     #[arg(long, global = true, conflicts_with = "actor", help_heading = GLOBAL_OPTIONS)]
     pub as_user: bool,
-    /// How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error.
+    /// How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error;
+    /// otherwise `ACYCLIC_OUTPUT`, else pretty on a terminal and json when piped.
     #[arg(
         short = 'o',
         long,
         global = true,
         value_parser = values(&Format::ALL),
-        default_value = "json",
         help_heading = GLOBAL_OPTIONS
     )]
-    pub output: Format,
+    pub output: Option<Format>,
     /// The command.
     #[command(subcommand)]
     pub command: Command,
 }
 
 /// How a command prints.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Format {
     /// One JSON document.
-    #[default]
     Json,
     /// Tables and summaries, fitted to the terminal's width, with no borders when not printing to one.
     Pretty,
