@@ -41,9 +41,10 @@ Every command's output follows these rules, so you can guess a key from the inpu
 1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Every
    command prints one, except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and
    version text, which print text; errors are JSON too. Times are RFC 3339 in UTC and their keys end in `_at`.
-   `-o pretty` prints the same data for people instead: a table for `list`, `ready` and `thread list`, a block of
+   Pretty output prints the same data for people instead: a table for `list`, `ready` and `thread list`, a block of
    fields for each record, one line for a write, and an error as one line on standard error with the same exit code.
-   Tables fit the terminal's width, and print without borders or wrapping when piped.
+   Tables fit the terminal's width, and print without borders or wrapping when piped. Output is pretty at a terminal
+   and JSON when piped; `ACYCLIC_OUTPUT=json|pretty` changes that default, and `-o json|pretty` overrides both.
 2. **Naming.** A record carries its own id as `id`. A reference is named for the entity it points to, in the plural for
    a list: `parent`, `thread`, `item`, `repository`, `proposal`, `repositories`. Keys match the input flags, in snake
    case; enum values are kebab-case. A reference that can name several kinds of entity is `{entity, id}`, as in a

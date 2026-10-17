@@ -10,11 +10,30 @@ use acyclic_core::state::Millis;
 use serde::Deserialize;
 
 use crate::Env;
-use crate::args::Cli;
+use crate::args::{Cli, Format};
 use crate::error::{CliError, exit};
 
 /// The actor when none is declared: an agent, never the user.
 pub const UNDECLARED: &str = "agent/undeclared";
+
+/// How to print: `--output`, else `ACYCLIC_OUTPUT`, else pretty for a person at a terminal and JSON for whatever
+/// reads a pipe, as an agent's tool does.
+pub fn output(cli: &Cli, env: &Env) -> Result<Format, CliError> {
+    if let Some(format) = cli.output {
+        return Ok(format);
+    }
+    match env.var("ACYCLIC_OUTPUT") {
+        Some("json") => Ok(Format::Json),
+        Some("pretty") => Ok(Format::Pretty),
+        Some(other) => Err(CliError::new(
+            "usage",
+            exit::USAGE,
+            format!("ACYCLIC_OUTPUT is {other}: set it to json or pretty, or unset it"),
+        )),
+        None if env.terminal.is_some() => Ok(Format::Pretty),
+        None => Ok(Format::Json),
+    }
+}
 
 /// The actor: `--as-user` or `--actor`, else `ACYCLIC_ACTOR`, else [`UNDECLARED`]. The environment may not name the
 /// user: a shell profile setting it would make every agent started from that shell the user.

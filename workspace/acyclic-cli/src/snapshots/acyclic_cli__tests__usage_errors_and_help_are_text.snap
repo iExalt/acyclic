@@ -2,7 +2,7 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document, or with `-o pretty` text for people, except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and version text
+The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and version text
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
@@ -41,6 +41,6 @@ Global options:
       --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in ~/.config/acyclic/trackers.toml
       --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
       --as-user            Act as the user
-  -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error [default: json] [possible values: json, pretty]
+  -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error; otherwise `ACYCLIC_OUTPUT`, else pretty on a terminal and json when piped [possible values: json, pretty]
 
 Run 'acyclic help <command>' for more information on a command.
