@@ -2,8 +2,15 @@
 
 use crate::{Error, Runner, Secrets};
 
-/// The label marking a secret with the run it belongs to, so secrets a crash left behind can be found.
+/// The label marking a secret with the run it belongs to. Podman 6.1's `secret ls` ignores label filters, so find a
+/// run's secrets by name with [`name_filter`].
 pub const RUN_LABEL: &str = "acyclic.run";
+
+/// The `podman secret ls --filter` that lists a run's secrets, such as those a crash left behind.
+#[must_use]
+pub fn name_filter(run: &str) -> String {
+    format!("name=^acyclic-{run}-")
+}
 
 /// One value to hand a run's container: the name in the secrets file and the environment variable it becomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +94,7 @@ impl RunSecrets {
     ///
     /// # Errors
     ///
-    /// The error from running Podman; the secrets it couldn't remove still carry the run's label.
+    /// The error from running Podman; the secrets it couldn't remove are still listed by [`name_filter`].
     pub fn remove(&mut self, runner: &impl Runner) -> Result<(), Error> {
         if self.created.is_empty() {
             return Ok(());
