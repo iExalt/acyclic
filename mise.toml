@@ -9,7 +9,7 @@ ruff = "0.17.0"
 "github:nextest-rs/nextest" = { version = "0.9.148", version_prefix = "cargo-nextest-" }
 # The pre-push guard's secret scanner.
 "aqua:gitleaks/gitleaks" = "8.30.1"
-# Podman runs agent containers on macOS; its machine helpers arrive with the Podman executor.
+# Podman runs agent containers on macOS; gvproxy and vfkit, pinned below, are its machine's helpers.
 podman = { version = "6.1.4", os = ["macos"] }
 "aqua:rvben/rumdl" = "0.2.79"
 # Collects the Rust crates' licences for the release's notices.
@@ -17,6 +17,10 @@ podman = { version = "6.1.4", os = ["macos"] }
 # Lints the workflows, with ShellCheck for their scripts.
 "aqua:rhysd/actionlint" = "1.7.12"
 "aqua:koalaman/shellcheck" = "0.11.0"
+# Podman's machine helpers at the versions its 6.1.4 installer bundles; the vfkit release is signed with the
+# virtualization entitlement the applehv provider needs.
+"github:containers/gvisor-tap-vsock" = { version = "0.9.0", asset_pattern = "gvproxy-darwin", bin = "gvproxy", os = ["macos"] }
+"github:crc-org/vfkit" = { version = "0.6.4", asset_pattern = "vfkit", bin = "vfkit", os = ["macos"] }
 
 [tasks.check]
 description = "Routine check: format, Clippy and every crate's unit tests (budget: 60 seconds on a warm cache)"
@@ -87,6 +91,13 @@ description = "Install the pre-push guard for this clone"
 run = "git config core.hooksPath .githooks"
 
 [env]
+# Podman on macOS fails at startup when XDG_RUNTIME_DIR names a directory that doesn't exist, as a Linux-style
+# /run/user/<uid> does; unset, it keeps its sockets under the macOS temporary directory.
+XDG_RUNTIME_DIR = false
+# Podman's machine uses Apple's hypervisor through vfkit, which it finds on PATH; gvproxy it finds only in its helper
+# directories, so point it at mise's copy.
+CONTAINERS_MACHINE_PROVIDER = "applehv"
+CONTAINERS_HELPER_BINARY_DIR = { value = "{{ exec(command='d=$(command -v gvproxy) && dirname \"$d\" || true') }}", tools = true }
 # Keep uv project environments outside the checkout so repository moves do not relocate them.
 UV_PROJECT_ENVIRONMENT = "{{ env.HOME }}/.virtualenvs/{{ config_root | basename }}"
 # Create and activate a seeded central environment so Python and pip both resolve inside it.
