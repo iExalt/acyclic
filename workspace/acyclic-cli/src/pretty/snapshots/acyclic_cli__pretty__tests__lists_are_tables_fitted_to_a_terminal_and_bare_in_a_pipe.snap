@@ -4,14 +4,13 @@ expression: "format!(\"{piped}\\n{narrow}\")"
 ---
 ID     TITLE                                        STATE    THREAD  READINESS
 beds   Build the raised beds along the south fence  backlog  t1      ready
-plant  Plant tomatoes                               backlog  t1      blocked (waiting beds why open)
+plant  Plant tomatoes                               backlog  t1      blocked by beds (not done)
 
- ID      TITLE            STATE     THREAD   READINESS      
+ ID      TITLE                STATE     THREAD   READINESS  
 ────────────────────────────────────────────────────────────
- beds    Build the        backlog   t1       ready          
-         raised beds                                        
-         along the                                          
+ beds    Build the raised     backlog   t1       ready      
+         beds along the                                     
          south fence                                        
- plant   Plant tomatoes   backlog   t1       blocked        
-                                             (waiting beds  
-                                             why open)
+ plant   Plant tomatoes       backlog   t1       blocked by 
+                                                 beds (not  
+                                                 done)
