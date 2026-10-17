@@ -21,6 +21,8 @@ podman = { version = "6.1.4", os = ["macos"] }
 # virtualization entitlement the applehv provider needs.
 "github:containers/gvisor-tap-vsock" = { version = "0.9.0", asset_pattern = "gvproxy-darwin", bin = "gvproxy", os = ["macos"] }
 "github:crc-org/vfkit" = { version = "0.6.4", asset_pattern = "vfkit", bin = "vfkit", os = ["macos"] }
+# Decrypts the Mac's secrets file for acyclic-secrets; CI's tests use a stand-in.
+sops = { version = "3.13.0", os = ["macos"] }
 
 [tasks.check]
 description = "Routine check: format, Clippy and every crate's unit tests (budget: 60 seconds on a warm cache)"
@@ -60,6 +62,10 @@ description = "Like bench:store, with timing marks splitting each command into p
 depends = ["vendor:graph"]
 env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
+
+[tasks."check:secrets-live"]
+description = "Hands the secrets file named by ACYCLIC_SECRETS_FILE to a container on the running Podman machine; SOPS must find the age identity"
+run = '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p acyclic-secrets --test live --run-ignored only --locked'
 
 [tasks."check:browser"]
 description = "Draws graph pages in headless Chromium and WebKit with the network blocked; downloads Playwright's browsers"

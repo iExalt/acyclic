@@ -1,0 +1,12 @@
+[package]
+name = "acyclic-secrets"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true
+
+[dependencies]
+zeroize.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
