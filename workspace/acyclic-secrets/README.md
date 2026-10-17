@@ -16,9 +16,9 @@ Each line is `NAME=value`. `sops decrypt` needs the age identity, which SOPS fin
    for byte, with no trailing newline.
 3. The container gets it with `--secret <name>,type=env,target=<VARIABLE>`, so it appears in the container's
    environment but not in `podman inspect`.
-4. The secret is removed with `podman secret rm` when the run ends, and so is the container. A run's secrets are
-   named `acyclic-<run>-<variable>`, so `podman secret ls --filter name=^acyclic-<run>-` finds any a crash left
-   behind; Podman 6.1 ignores label filters on secrets.
+4. The secret is removed with `podman secret rm` when the run ends, and so is the container. Any a crash left
+   behind are found by their `acyclic.run` label, read with `podman secret inspect`, since Podman 6.1's
+   `secret ls` ignores label filters and a name prefix would also match runs whose ids extend another's.
 
 Each value still rests unencrypted on the machine's disk for a while: in Podman's file driver, as base64, until the
 secret is removed, and anyone who can reach Podman's socket can read it with `podman secret inspect --showsecret`;

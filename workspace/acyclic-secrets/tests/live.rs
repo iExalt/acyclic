@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use acyclic_secrets::podman::{Grant, RunSecrets, name_filter};
+use acyclic_secrets::podman::{Grant, RunSecrets, find, sweep};
 use acyclic_secrets::{SystemRunner, sops};
 use sha2::{Digest, Sha256};
 
@@ -34,13 +34,7 @@ impl Drop for Cleanup {
     fn drop(&mut self) {
         let quiet = |args: &[&str]| Command::new("podman").args(args).output().ok();
         quiet(&["rm", "--force", "--ignore", &format!("acyclic-{}", self.run)]);
-        if let Some(listed) =
-            quiet(&["secret", "ls", "--filter", &name_filter(&self.run), "--quiet"])
-        {
-            for id in String::from_utf8_lossy(&listed.stdout).split_whitespace() {
-                quiet(&["secret", "rm", id]);
-            }
-        }
+        let _ = sweep(&SystemRunner, &self.run);
     }
 }
 
@@ -74,8 +68,8 @@ fn a_container_sees_each_value_exactly_and_inspect_shows_none() {
     let container = podman(&create.iter().map(String::as_str).collect::<Vec<_>>());
     let container = container.trim();
 
-    let listed = podman(&["secret", "ls", "--filter", &name_filter(&run), "--quiet"]);
-    assert_eq!(listed.lines().count(), GRANTS.len(), "the name filter finds the run's secrets");
+    let found = find(&SystemRunner, &run).expect("secrets are listed");
+    assert_eq!(found.len(), GRANTS.len(), "find sees the run's secrets");
     let mut exposed = vec![podman(&["inspect", container])];
     for (secret, _) in created.names() {
         exposed.push(podman(&["secret", "inspect", secret]));
@@ -94,6 +88,5 @@ fn a_container_sees_each_value_exactly_and_inspect_shows_none() {
     let expected: Vec<_> =
         GRANTS.iter().map(|g| fingerprint(secrets.get(g.name).unwrap())).collect();
     assert_eq!(seen.lines().collect::<Vec<_>>(), expected);
-    let left = podman(&["secret", "ls", "--filter", &name_filter(&run), "--quiet"]);
-    assert_eq!(left.trim(), "", "the run's secrets are gone");
+    assert_eq!(find(&SystemRunner, &run).expect("secrets are listed"), Vec::<String>::new());
 }

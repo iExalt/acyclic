@@ -1,15 +1,53 @@
 //! Podman secrets that carry one run's credentials into its container.
 
+use crate::runner::Output;
 use crate::{Error, Runner, Secrets};
 
-/// The label marking a secret with the run it belongs to. Podman 6.1's `secret ls` ignores label filters, so find a
-/// run's secrets by name with [`name_filter`].
+/// The label marking a secret with the run it belongs to, which [`find`] matches exactly.
 pub const RUN_LABEL: &str = "acyclic.run";
 
-/// The `podman secret ls --filter` that lists a run's secrets, such as those a crash left behind.
-#[must_use]
-pub fn name_filter(run: &str) -> String {
-    format!("name=^acyclic-{run}-")
+/// The names of the secrets labelled with `run`, such as those a crash left behind.
+///
+/// Podman 6.1's `secret ls` ignores label filters and doesn't show labels, and a name prefix would also match runs
+/// whose ids extend `run`, so this lists acyclic's secrets and reads each one's label.
+///
+/// # Errors
+///
+/// The error from running Podman.
+pub fn find(runner: &impl Runner, run: &str) -> Result<Vec<String>, Error> {
+    let listed = podman_output(runner, &["secret", "ls", "--format", "{{.Name}}"])?;
+    let mut args = vec![
+        "secret",
+        "inspect",
+        "--format",
+        "{{.Spec.Name}}\t{{index .Spec.Labels \"acyclic.run\"}}",
+    ];
+    args.extend(listed.lines().filter(|name| name.starts_with("acyclic-")));
+    if args.len() == 4 {
+        return Ok(Vec::new());
+    }
+    let labelled = podman_output(runner, &args)?;
+    Ok(labelled
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(_, label)| *label == run)
+        .map(|(name, _)| name.to_owned())
+        .collect())
+}
+
+/// Removes every secret labelled with `run`, returning how many there were.
+///
+/// # Errors
+///
+/// The error from running Podman.
+pub fn sweep(runner: &impl Runner, run: &str) -> Result<usize, Error> {
+    let found = find(runner, run)?;
+    if !found.is_empty() {
+        let mut args = vec!["secret", "rm"];
+        args.extend(found.iter().map(String::as_str));
+        podman(runner, &args, None)?;
+    }
+    Ok(found.len())
 }
 
 /// One value to hand a run's container: the name in the secrets file and the environment variable it becomes.
@@ -94,7 +132,7 @@ impl RunSecrets {
     ///
     /// # Errors
     ///
-    /// The error from running Podman; the secrets it couldn't remove are still listed by [`name_filter`].
+    /// The error from running Podman; the secrets it couldn't remove are still found by [`find`].
     pub fn remove(&mut self, runner: &impl Runner) -> Result<(), Error> {
         if self.created.is_empty() {
             return Ok(());
@@ -108,9 +146,19 @@ impl RunSecrets {
 }
 
 fn podman(runner: &impl Runner, args: &[&str], stdin: Option<&[u8]>) -> Result<(), Error> {
+    run_podman(runner, args, stdin).map(drop)
+}
+
+/// Runs Podman for output that holds no secret values, such as names and labels.
+fn podman_output(runner: &impl Runner, args: &[&str]) -> Result<String, Error> {
+    run_podman(runner, args, None)
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn run_podman(runner: &impl Runner, args: &[&str], stdin: Option<&[u8]>) -> Result<Output, Error> {
     let output = runner.run("podman", args, stdin)?;
     if output.success {
-        Ok(())
+        Ok(output)
     } else {
         Err(Error::Failed {
             command: format!("podman {} {}", args[0], args[1]),
@@ -206,6 +254,26 @@ mod tests {
         let calls = runner.calls.borrow();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[2].args, ["secret", "rm", "acyclic-r1-anthropic_auth_token"]);
+    }
+
+    #[test]
+    fn find_matches_the_run_label_exactly_and_skips_other_secrets() {
+        let runner = FakeRunner::answering(&[
+            (true, "acyclic-r1-a\nacyclic-r1-2-a\nacyclic-r1-b\nsomeone-else\n", ""),
+            (true, "acyclic-r1-a\tr1\nacyclic-r1-2-a\tr1-2\nacyclic-r1-b\tr1\n", ""),
+            (true, "", ""),
+        ]);
+        assert_eq!(sweep(&runner, "r1").unwrap(), 2);
+        let calls = runner.calls.borrow();
+        assert_eq!(&calls[1].args[4..], ["acyclic-r1-a", "acyclic-r1-2-a", "acyclic-r1-b"]);
+        assert_eq!(calls[2].args, ["secret", "rm", "acyclic-r1-a", "acyclic-r1-b"]);
+    }
+
+    #[test]
+    fn find_without_acyclic_secrets_inspects_nothing() {
+        let runner = FakeRunner::ok("someone-else\n");
+        assert_eq!(sweep(&runner, "r1").unwrap(), 0);
+        assert_eq!(runner.calls.borrow().len(), 1);
     }
 
     #[test]
