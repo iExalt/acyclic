@@ -350,8 +350,24 @@ pub struct Up {
     pub rotate: bool,
     /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
     /// Give the same --port as the server, if it has one.
-    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every"])]
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
     pub link: bool,
+    /// Also serve through `tailscale serve`, pointed at a Unix socket that only the user can open, to requests carrying
+    /// the user's Tailscale identity. Run `tailscale serve --bg unix:<socket>` as the output says.
+    #[arg(long, requires_all = ["login", "host"])]
+    pub tailscale: bool,
+    /// The user's Tailscale login, which every request through the socket must carry in `Tailscale-User-Login`.
+    #[arg(long, requires = "tailscale")]
+    pub login: Option<String>,
+    /// The machine's `.ts.net` name, which every request through the socket must carry in `Host`.
+    #[arg(long, requires = "tailscale")]
+    pub host: Option<String>,
+    /// The origin a browser's request through the socket must come from; `https://<host>` by default.
+    #[arg(long, requires = "tailscale")]
+    pub origin: Option<String>,
+    /// The socket; ~/.config/acyclic/up/tailscale.sock by default. Its directory should be open to the user alone.
+    #[arg(long, requires = "tailscale")]
+    pub socket: Option<PathBuf>,
 }
 
 /// A usage error.

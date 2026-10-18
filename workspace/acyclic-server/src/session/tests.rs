@@ -22,6 +22,15 @@ fn the_session_is_made_private_once_and_kept_until_rotated() {
 }
 
 #[test]
+fn only_a_session_already_made_exists() {
+    let home = tempfile::tempdir().unwrap();
+    assert_eq!(existing(home.path()).unwrap_err().code, "no-session");
+    assert!(!home.path().join(DIR).join("session").exists());
+    let (token, _) = open(home.path(), false).unwrap();
+    assert_eq!(existing(home.path()).unwrap().0, token);
+}
+
+#[test]
 fn a_session_others_could_read_or_that_holds_no_token_is_refused() {
     let refused = |prepare: &dyn Fn(&Path)| {
         let home = tempfile::tempdir().unwrap();

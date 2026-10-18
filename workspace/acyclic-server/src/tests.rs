@@ -246,6 +246,12 @@ fn every_route_is_behind_the_listeners_check() {
         send(&router, Method::GET, "/index.html", &[host, ("authorization", &bearer)], ""),
         (StatusCode::OK, "the app".into())
     );
+    // No page may frame the app, or a refusal.
+    for pairs in [vec![host, ("authorization", bearer.as_str())], vec![host]] {
+        let (_, headers) = exchange(&router, "/index.html", &pairs);
+        assert_eq!(headers[CONTENT_SECURITY_POLICY], "frame-ancestors 'none'");
+        assert_eq!(headers[X_FRAME_OPTIONS], "DENY");
+    }
 }
 
 #[test]

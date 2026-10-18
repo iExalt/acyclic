@@ -15,10 +15,10 @@ use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
 use axum::http::header::{
-    AUTHORIZATION, CONTENT_TYPE, COOKIE as COOKIE_HEADER, HOST, LOCATION, ORIGIN, SET_COOKIE,
-    WWW_AUTHENTICATE,
+    AUTHORIZATION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE as COOKIE_HEADER, HOST, LOCATION,
+    ORIGIN, SET_COOKIE, WWW_AUTHENTICATE, X_FRAME_OPTIONS,
 };
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -69,19 +69,19 @@ pub enum Access {
 }
 
 impl Access {
-    /// The access `acyclic serve` was given.
+    /// Access through Tailscale for `login` at `host`, from `origin`, by default `https://<host>`.
     ///
     /// # Errors
     ///
     /// A usage error when the login or the host is empty.
-    pub fn tailscale(options: &Serve) -> Result<Self, CliError> {
-        if options.login.is_empty() || options.host.is_empty() {
+    pub fn tailscale(login: &str, host: &str, origin: Option<&str>) -> Result<Self, CliError> {
+        if login.is_empty() || host.is_empty() {
             return Err(CliError::new("usage", exit::USAGE, "--login and --host may not be empty"));
         }
         Ok(Self::Tailscale {
-            login: options.login.clone(),
-            host: options.host.clone(),
-            origin: options.origin.clone().unwrap_or_else(|| format!("https://{}", options.host)),
+            login: login.to_owned(),
+            host: host.to_owned(),
+            origin: origin.map_or_else(|| format!("https://{host}"), str::to_owned),
         })
     }
 
@@ -512,6 +512,15 @@ async fn command(
     (status(code), Json(envelope)).into_response()
 }
 
+/// Forbids every page to frame any response, refusals included: a page from another local server is the same site as
+/// the app's, so a paired browser would send its cookie into a frame, and the frame could be clicked into writes.
+async fn unframed(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
+    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    response
+}
+
 /// The server's routes for one listener, every one behind its [`Access`].
 pub fn router(config: Config, access: Access) -> Router {
     routes(Arc::new(Server::new(config)), access)
@@ -523,7 +532,10 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
         router = router.fallback_service(ServeDir::new(dir));
     }
     let listener = Arc::new(Listener { server, access, spent: session::Spent::default() });
-    router.layer(middleware::from_fn_with_state(listener.clone(), guard)).with_state(listener)
+    router
+        .layer(middleware::from_fn_with_state(listener.clone(), guard))
+        .layer(middleware::map_response(unframed))
+        .with_state(listener)
 }
 
 fn failed(what: &str, err: impl std::fmt::Display) -> CliError {
@@ -549,7 +561,7 @@ pub fn start(start: Start<'_>, tracker: PathBuf, env: &Env) -> Result<(), CliErr
 ///
 /// When the settings are wrong or the address can't be bound.
 pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
-    let access = Access::tailscale(options)?;
+    let access = Access::tailscale(&options.login, &options.host, options.origin.as_deref())?;
     if !options.listen.ip().is_loopback() {
         eprintln!(
             "acyclic: {} isn't a loopback address: whatever reaches it without passing through Tailscale can forge \
@@ -558,7 +570,7 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
         );
     }
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
-    run(config, options.sync_every, options.listen, |address| {
+    run(config, options.sync_every, options.listen, None, |address| {
         Ok((access, json!({"listening": address.to_string()})))
     })
 }
@@ -574,27 +586,44 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
     let home = env.vars.get("HOME").filter(|home| !home.is_empty()).ok_or_else(|| {
         CliError::new("session", exit::CONFIG, "HOME isn't set, so the session has nowhere to live")
     })?;
-    let (token, path) = session::open(home.as_ref(), options.rotate)?;
     if options.link {
+        let (token, _) = session::existing(home.as_ref())?;
         let link = link(options.port, &token, env)?;
         println!("{}", json!({"ok": true, "data": {"link": link}}));
         return Ok(());
     }
+    let (token, path) = session::open(home.as_ref(), options.rotate)?;
+    let tailscale = match (options.tailscale, &options.login, &options.host) {
+        (true, Some(login), Some(host)) => {
+            let access = Access::tailscale(login, host, options.origin.as_deref())?;
+            let socket =
+                options.socket.clone().unwrap_or_else(|| path.with_file_name("tailscale.sock"));
+            Some((socket, access))
+        },
+        _ => None,
+    };
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
     let link = |port| link(port, &token, env);
-    run(config, options.sync_every, bind, |address| {
-        let started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
+    let socket = tailscale.as_ref().map(|(socket, _)| socket.clone());
+    run(config, options.sync_every, bind, tailscale, |address| {
+        let mut started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
+        if let Some(socket) = socket {
+            let serve = format!("tailscale serve --bg unix:{}", socket.display());
+            started["tailscale"] = json!({"socket": socket, "serve": serve});
+        }
         Ok((Access::Session { port: address.port(), token: token.clone() }, started))
     })
 }
 
-/// Binds `bind`, gives the bound address to `access` for the listener's access and the line to print, prints it, and
-/// serves until interrupted, syncing every `sync_every` seconds unless that is 0.
+/// Binds `bind`, and the Unix socket with its own access if given, gives the bound address to `access` for the
+/// listener's access and the line to print, prints it, and serves until interrupted, syncing every `sync_every`
+/// seconds unless that is 0.
 fn run(
     config: Config,
     sync_every: u64,
     bind: SocketAddr,
+    socket: Option<(PathBuf, Access)>,
     access: impl FnOnce(SocketAddr) -> Result<(Access, Value), CliError>,
 ) -> Result<(), CliError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -607,6 +636,9 @@ fn run(
             .await
             .map_err(|err| failed(&format!("listening on {bind}"), err))?;
         let address = listener.local_addr().map_err(|err| failed("reading the address", err))?;
+        let unix = socket
+            .map(|(path, access)| bind_socket(&path).map(|listener| (listener, access)))
+            .transpose()?;
         let (access, started) = access(address)?;
         if sync_every > 0 {
             tokio::spawn(sync(server.clone(), Duration::from_secs(sync_every)));
@@ -615,11 +647,53 @@ fn run(
         writeln!(stdout, "{}", json!({"ok": true, "data": started}))
             .and_then(|()| stdout.flush())
             .map_err(|err| failed("printing the address", err))?;
-        axum::serve(listener, routes(server, access))
-            .with_graceful_shutdown(stopped())
-            .await
-            .map_err(|err| failed("serving", err))
+        let tcp =
+            axum::serve(listener, routes(server.clone(), access)).with_graceful_shutdown(stopped());
+        match unix {
+            None => tcp.await,
+            Some((unix, access)) => {
+                let unix =
+                    axum::serve(unix, routes(server, access)).with_graceful_shutdown(stopped());
+                tokio::try_join!(tcp.into_future(), unix.into_future()).map(|_| ())
+            },
+        }
+        .map_err(|err| failed("serving", err))
     })
+}
+
+/// The longest path a Unix socket can have on macOS, the shortest limit of the systems acyclic runs on.
+const SOCKET_PATH_MAX: usize = 103;
+
+/// Binds a Unix socket at `path`, replacing a socket left by an earlier server, and makes it the user's alone.
+fn bind_socket(path: &std::path::Path) -> Result<tokio::net::UnixListener, CliError> {
+    use std::os::unix::fs::{FileTypeExt as _, PermissionsExt as _};
+    let named = || path.display().to_string();
+    if path.as_os_str().len() > SOCKET_PATH_MAX {
+        return Err(failed(
+            &format!("listening on {}", named()),
+            format!(
+                "a Unix socket's path can be at most {SOCKET_PATH_MAX} bytes: give a shorter --socket"
+            ),
+        ));
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            std::fs::remove_file(path)
+                .map_err(|err| failed(&format!("replacing {}", named()), err))?;
+        },
+        Ok(_) => {
+            return Err(failed(
+                &format!("listening on {}", named()),
+                "something other than a socket is there",
+            ));
+        },
+        Err(_) => {},
+    }
+    let listener = tokio::net::UnixListener::bind(path)
+        .map_err(|err| failed(&format!("listening on {}", named()), err))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|err| failed(&format!("restricting {}", named()), err))?;
+    Ok(listener)
 }
 
 /// Syncs the clone with its `origin` every `every`, fetching every writer's usage records too, each sync after the last

@@ -46,7 +46,19 @@ impl Drop for Server {
 
 /// Sends one HTTP/1.1 request and returns the status and the body.
 fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
-    let mut stream = TcpStream::connect(address).unwrap();
+    exchange(TcpStream::connect(address).unwrap(), headers, body)
+}
+
+/// Sends one HTTP/1.1 request through a Unix socket, as `tailscale serve` does.
+fn request_unix(socket: &Path, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
+    exchange(std::os::unix::net::UnixStream::connect(socket).unwrap(), headers, body)
+}
+
+fn exchange(
+    mut stream: impl std::io::Read + std::io::Write,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (u16, Value) {
     let mut head = format!(
         "POST /api/command HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -88,10 +100,11 @@ fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
 
 /// Starts `acyclic up` on `tracker` with `home` as the home directory, and returns it with the address it listens on
 /// and the session's file.
-fn up(tracker: &Path, home: &Path) -> (Server, String, PathBuf) {
+fn up(tracker: &Path, home: &Path, extra: &[&str]) -> (Server, String, PathBuf) {
     let mut child = acyclic(tracker)
         .env("HOME", home)
         .args(["up", "--port", "0"])
+        .args(extra)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
@@ -148,7 +161,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     cli(&tracker, "item add a --title A --as-user");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
-    let (server, address, session) = up(&tracker, &home);
+    let (server, address, session) = up(&tracker, &home, &[]);
     let token = std::fs::read_to_string(&session).unwrap();
     let bearer = format!("Bearer {}", token.trim_end());
     let show = r#"{"show": {"items": ["a"]}}"#;
@@ -191,11 +204,27 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
 
     // A restart keeps the session, so whatever held it still gets in.
     drop(server);
-    let (_server, address, _) = up(&tracker, &home);
+    // The socket's path is short, as a Unix socket's must be.
+    let short = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+    let socket = short.path().join("ts.sock");
+    let socket_arg = socket.to_str().unwrap();
+    let tailscale = ["--tailscale", "--login", LOGIN, "--host", HOST, "--socket", socket_arg];
+    let (_server, address, _) = up(&tracker, &home, &tailscale);
     assert_eq!(std::fs::read_to_string(&session).unwrap(), token);
     let (status, shown) =
         request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
     assert_eq!(status, 200, "{shown}");
+
+    // Through the socket, Tailscale's identity is what counts, and the session is nothing; on the port, the reverse.
+    let identity = [("Host", HOST), ("Tailscale-User-Login", LOGIN), json];
+    let (status, shown) = request_unix(&socket, &identity, show);
+    assert_eq!(status, 200, "{shown}");
+    let (status, refused) =
+        request_unix(&socket, &[("Host", HOST), ("Authorization", &bearer), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
+    let (status, refused) =
+        request(&address, &[("Host", &address), ("Tailscale-User-Login", LOGIN), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (401, &Value::from("no-session")));
 }
 
 #[test]

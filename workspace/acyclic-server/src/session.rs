@@ -6,7 +6,8 @@
 //! session rather than the session itself, so rotating the session shuts the browser out too, and a link left in the
 //! browser's history is spent. Browsers send a cookie for `localhost` to every port on it, and treat every such port
 //! as the same site, so a page from any other local server carries the cookie too: a write that the cookie
-//! authenticates must therefore come from the listener's own origin, and one without an `Origin` is refused.
+//! authenticates must therefore come from the listener's own origin, and one without an `Origin` is refused; and no
+//! page may frame the app, or it could be clicked into writes that its own origin sends.
 //!
 //! The file outlives the server, so a browser paired once stays paired across restarts; `acyclic up --rotate`
 //! replaces it, and a server already running keeps the old token until it restarts. Whatever can read the file holds
@@ -229,6 +230,24 @@ pub fn open(home: &Path, rotate: bool) -> Result<(Token, PathBuf), CliError> {
         },
         Err(err) => Err(failed(format!("can't write {}: {err}", path.display()))),
     }
+}
+
+/// The session that already exists in the home directory `home`, with the file's path.
+///
+/// # Errors
+///
+/// When there is none, or it would be refused as [`open`] refuses it.
+pub fn existing(home: &Path) -> Result<(Token, PathBuf), CliError> {
+    let dir = home.join(DIR);
+    let path = dir.join("session");
+    if !private(&dir, true)? || !private(&path, false)? {
+        return Err(CliError::new(
+            "no-session",
+            exit::CONFIG,
+            "there is no session yet: start acyclic up first",
+        ));
+    }
+    read(&path).map(|token| (token, path))
 }
 
 fn read(path: &Path) -> Result<Token, CliError> {
