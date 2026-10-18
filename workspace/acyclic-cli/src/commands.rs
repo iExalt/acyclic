@@ -1,7 +1,7 @@
 //! The commands. Reads build one model; writes run as one batch each and write nothing that is already so, so a
 //! repeated command changes nothing and commits nothing.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command as Process;
@@ -17,7 +17,7 @@ use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::schema::{GLOBAL, item as field, kind, link as link_field, settings};
 use acyclic_core::scope;
-use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
+use acyclic_core::state::{Context, Key, Millis, Replica, ReplicaId, Sequence, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
@@ -46,6 +46,50 @@ const MINUTE: Millis = 60 * 1000;
 const LEASE: Millis = 60 * MINUTE;
 /// The longest time lease.
 const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
+
+/// Checks that `op` is the run's next operation, refusing a duplicate with [`DUPLICATE`] and its recorded outcome.
+fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
+    match replica.sequence(&op.run, op.seq)? {
+        Sequence::Next => Ok(()),
+        Sequence::Duplicate(outcome) => {
+            Err(CliError::new(DUPLICATE, exit::OK, "the operation was applied already")
+                .with(outcome.unwrap_or(Json::Null)))
+        },
+    }
+}
+
+/// Applies a run's operation: its command, as the run, in a batch that checks and records its number. A command
+/// that writes nothing still has its number recorded, in a batch of its own.
+///
+/// # Errors
+///
+/// The command's error, or [`DUPLICATE`] with the recorded outcome when the number was applied already.
+pub fn apply(cli: &Cli, env: &Env, operation: Operation) -> Result<Json, CliError> {
+    let mut session = Session::open(cli, env)?;
+    session.operation = Some(operation);
+    let data = session.dispatch(&cli.command)?;
+    if !session.recorded.get() {
+        session.record(&json!({"ok": true}))?;
+    }
+    Ok(data)
+}
+
+/// Records a run's operation whose command the tracker refused, with the refusal as its outcome, so that sending it
+/// again gets the same answer rather than running it again, and the run's later operations aren't stuck behind it.
+///
+/// # Errors
+///
+/// When the store fails, or [`DUPLICATE`] when the number was recorded meanwhile.
+pub fn refuse(
+    cli: &Cli,
+    env: &Env,
+    operation: Operation,
+    refusal: &CliError,
+) -> Result<(), CliError> {
+    let mut session = Session::open(cli, env)?;
+    session.operation = Some(operation);
+    session.record(&json!({"ok": false, "code": refusal.code}))
+}
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
@@ -96,7 +140,26 @@ struct Session<'a> {
     actor: String,
     now: Millis,
     env: &'a Env,
+    /// The run's operation this session applies, if it applies one.
+    operation: Option<Operation>,
+    /// Whether the operation's number has been recorded.
+    recorded: Cell<bool>,
 }
+
+/// A run's operation: one command, numbered in the run's sequence from 1, with the run's view of the tracker when it
+/// made it. The command's batch checks the number, writes under the run's view, and records the number with it.
+#[derive(Debug, Clone)]
+pub struct Operation {
+    /// The run's id.
+    pub run: String,
+    /// Its number in the run's sequence.
+    pub seq: u64,
+    /// What the run had seen.
+    pub seen: Context,
+}
+
+/// The code of the error that says an operation was applied already; its details are the recorded outcome.
+pub const DUPLICATE: &str = "duplicate-operation";
 
 impl<'a> Session<'a> {
     fn open(cli: &Cli, env: &'a Env) -> Result<Self, CliError> {
@@ -107,7 +170,14 @@ impl<'a> Session<'a> {
             // A clone without its own state took a fresh id; say so once, but carry on.
             eprintln!("acyclic: this clone is now replica {renamed}");
         }
-        Ok(Self { tracker, actor, now: context::now(env), env })
+        Ok(Self {
+            tracker,
+            actor,
+            now: context::now(env),
+            env,
+            operation: None,
+            recorded: Cell::new(false),
+        })
     }
 
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
@@ -368,6 +438,17 @@ impl<'a> Session<'a> {
         Ok((state, model))
     }
 
+    /// Records the operation's number alone, in a batch that checks it again.
+    fn record(&self, outcome: &Json) -> Result<(), CliError> {
+        let Some(op) = &self.operation else { return Ok(()) };
+        let meta = Meta { actor: self.actor.clone(), run: Some((op.run.clone(), op.seq)) };
+        self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
+            next(replica, op)?;
+            Ok::<_, CliError>(replica.record(&op.run, op.seq, outcome, at)?)
+        })?;
+        Ok(())
+    }
+
     /// Runs one batch as the actor. Sync's lease renewal rides along; `changed` says whether the command itself
     /// changed anything.
     fn write(
@@ -375,15 +456,27 @@ impl<'a> Session<'a> {
         apply: impl Fn(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
-        let meta = Meta { actor: self.actor.clone(), run: None };
+        let meta = Meta {
+            actor: self.actor.clone(),
+            run: self.operation.as_ref().map(|op| (op.run.clone(), op.seq)),
+        };
+        let operation = self.operation.as_ref();
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
+            if let Some(op) = operation {
+                next(replica, op)?;
+            }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();
-            let data = apply(replica, By { actor: &self.actor, at, seen: None })?;
+            let seen = operation.map(|op| &op.seen);
+            let data = apply(replica, By { actor: &self.actor, at, seen })?;
             *result.borrow_mut() = (data, replica.changes() != before);
+            if let Some(op) = operation {
+                replica.record(&op.run, op.seq, &json!({"ok": true}), at)?;
+            }
             Ok(())
         })?;
+        self.recorded.set(operation.is_some());
         let (mut data, changed) = result.into_inner();
         if let Json::Object(map) = &mut data {
             map.insert("changed".to_owned(), Json::Bool(changed));

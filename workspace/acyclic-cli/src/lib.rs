@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Format, Serve, Up};
+pub use crate::commands::Operation;
 pub use crate::context::now;
 use crate::error::{CliError, exit};
 
@@ -236,6 +237,69 @@ pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8
     };
     timestamps(&mut envelope);
     (code, envelope)
+}
+
+/// What applying a run's operation did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Applied {
+    /// The command ran, or the tracker refused it: either way its number is spent. The exit code and the envelope.
+    Ran(u8, Value),
+    /// The number was applied already, so nothing ran: the outcome recorded for it, if it was the run's latest.
+    Duplicate(Option<Value>),
+}
+
+/// Applies a run's operation to the tracker clone at `tracker`: `command`, as `run/<run>`, writing under the run's
+/// view and spending its number in the same batch. A command the tracker refuses spends its number too, with the
+/// refusal as its outcome, so the run's later operations aren't stuck behind it.
+///
+/// # Errors
+///
+/// A failure that says nothing about the command, such as the store failing, a gap in the run's numbers, or a
+/// replica that doesn't apply this run, as its exit code and envelope. The number stays unspent, so the run can send
+/// the operation again.
+pub fn apply(
+    operation: Operation,
+    command: Command,
+    tracker: PathBuf,
+    env: &Env,
+) -> Result<Applied, (u8, Value)> {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(format!("run/{}", operation.run)),
+        as_user: false,
+        output: Some(Format::Json),
+        command,
+    };
+    let duplicate =
+        |err: CliError| Applied::Duplicate(Some(err.details).filter(|details| !details.is_null()));
+    let failed = |err: CliError| (err.exit, err.envelope());
+    match cli.command.validate().and_then(|()| commands::apply(&cli, env, operation.clone())) {
+        Ok(data) => {
+            let mut envelope = json!({"ok": true, "data": data});
+            timestamps(&mut envelope);
+            Ok(Applied::Ran(exit::OK, envelope))
+        },
+        Err(err) if err.code == commands::DUPLICATE => Ok(duplicate(err)),
+        Err(err) if spends(&err) => match commands::refuse(&cli, env, operation, &err) {
+            Ok(()) => Ok(Applied::Ran(err.exit, err.envelope())),
+            Err(again) if again.code == commands::DUPLICATE => Ok(duplicate(again)),
+            Err(again) => Err(failed(again)),
+        },
+        Err(err) => Err(failed(err)),
+    }
+}
+
+/// Whether a failed operation spends its number: when the command itself was refused, as it would be again, but not
+/// when the store, the setup, the clock or the run's numbering failed, which a later try may get past.
+fn spends(err: &CliError) -> bool {
+    match err.exit {
+        exit::USAGE | exit::NOT_FOUND => true,
+        exit::REFUSED => !matches!(
+            err.code,
+            "sequence-gap" | "wrong-replica" | "clock-jump" | "not-continuous" | "id-reused"
+        ),
+        _ => false,
+    }
 }
 
 fn render(value: &serde_json::Value) -> String {

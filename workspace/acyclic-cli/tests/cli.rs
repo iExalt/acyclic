@@ -3,7 +3,9 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use acyclic_cli::{Env, execute};
+use acyclic_cli::{Applied, Env, Operation, execute};
+use acyclic_core::state::{Context, Key, State};
+use acyclic_core::store::Tracker;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -452,4 +454,94 @@ fn two_machines_sync_through_a_shared_repository() {
     let (_, out) = sh.output("item edit a1 --no-thread --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
+}
+
+/// A run's operation applied to the shell's tracker as run `r1`.
+fn operation(
+    sh: &Shell,
+    seq: u64,
+    seen: &Context,
+    command: serde_json::Value,
+    extra: &[(&str, &str)],
+) -> Result<Applied, (u8, serde_json::Value)> {
+    let operation = Operation { run: "r1".into(), seq, seen: seen.clone() };
+    let command = serde_json::from_value(command).unwrap();
+    acyclic_cli::apply(operation, command, sh.path().join("tracker"), &sh.env(extra))
+}
+
+fn state(sh: &Shell) -> State {
+    Tracker::open(&sh.path().join("tracker")).unwrap().0.load().unwrap().1
+}
+
+/// Who wrote each of an item's titles, in order.
+fn titles(sh: &Shell, item: &str) -> Vec<(String, serde_json::Value)> {
+    let key = Key::new("item", item).unwrap();
+    let state = state(sh);
+    state
+        .field(&key, "title")
+        .into_iter()
+        .flatten()
+        .map(|(_, v)| (v.actor.clone(), v.value.clone()))
+        .collect()
+}
+
+#[test]
+fn a_runs_operations_apply_once_each_as_the_run() {
+    let mut sh = Shell::new();
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    for line in [
+        "thread add t0 --title T",
+        "item add a1 --title One --thread t0",
+        "item add a2 --title Two",
+    ] {
+        assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
+    }
+    let base = state(&sh).context;
+    let ok =
+        |code: u8| move |applied: &Applied| matches!(applied, Applied::Ran(c, _) if *c == code);
+    let edit = |item: &str, title: &str| json!({"item": {"edit": {"item": item, "title": title}}});
+
+    // The run's edit is its own, whatever actor it might claim elsewhere.
+    let first =
+        operation(&sh, 1, &base, edit("a1", "Run's"), &[("ACYCLIC_ACTOR", "session/other")])
+            .unwrap();
+    assert!(ok(0)(&first), "{first:?}");
+    assert_eq!(titles(&sh, "a1"), [("run/r1".to_owned(), json!("Run's"))]);
+    // Sent again, it applies nothing and says how it went.
+    let before = state(&sh);
+    let again = operation(&sh, 1, &base, edit("a1", "Changed"), &[]).unwrap();
+    assert_eq!(again, Applied::Duplicate(Some(json!({"ok": true}))));
+    assert_eq!(state(&sh), before);
+
+    // A gap, or a clock that stepped back, says nothing of the command, so the number stays unspent.
+    let (code, gap) = operation(&sh, 3, &base, edit("a1", "Later"), &[]).unwrap_err();
+    assert_eq!((code, &gap["error"]["code"]), (1, &json!("sequence-gap")));
+    let (_, stepped) =
+        operation(&sh, 2, &base, edit("a1", "Early"), &[("ACYCLIC_NOW", "1000")]).unwrap_err();
+    assert_eq!(stepped["error"]["code"], "clock-jump");
+
+    // A refused command spends its number, so the run moves on, and sending it again gets the same refusal.
+    let approve = json!({"thread": {"approve": {"thread": "t0"}}});
+    let refused = operation(&sh, 2, &base, approve.clone(), &[]).unwrap();
+    let Applied::Ran(1, envelope) = &refused else { panic!("{refused:?}") };
+    let code = envelope["error"]["code"].clone();
+    assert_eq!(
+        operation(&sh, 2, &base, approve, &[]).unwrap(),
+        Applied::Duplicate(Some(json!({"ok": false, "code": code})))
+    );
+    // So does a usage error, which never reaches the tracker.
+    let usage = operation(&sh, 3, &base, json!({"show": {"items": []}}), &[]).unwrap();
+    assert!(ok(2)(&usage), "{usage:?}");
+    // A command that writes nothing still spends its number.
+    assert!(ok(0)(&operation(&sh, 4, &base, json!({"show": {"items": ["a1"]}}), &[]).unwrap()));
+    assert!(matches!(operation(&sh, 4, &base, json!("list"), &[]), Ok(Applied::Duplicate(_))));
+
+    // An edit the run never saw survives beside the run's own; the run's earlier edit doesn't.
+    assert_eq!(sh.run("item edit a2 --title Mine --as-user", &[]), 0);
+    assert!(ok(0)(&operation(&sh, 5, &base, edit("a2", "Run's first"), &[]).unwrap()));
+    assert!(ok(0)(&operation(&sh, 6, &base, edit("a2", "Run's"), &[]).unwrap()));
+    assert_eq!(
+        titles(&sh, "a2"),
+        [("actor/user".to_owned(), json!("Mine")), ("run/r1".to_owned(), json!("Run's"))]
+    );
 }

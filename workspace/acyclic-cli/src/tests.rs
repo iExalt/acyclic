@@ -793,3 +793,60 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         assert_eq!(check(line), Ok(()), "{line}");
     }
 }
+
+#[test]
+fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = Env { cwd: dir.path().to_path_buf(), ..env(&[("ACYCLIC_NOW", "1792022400000")]) };
+    let init = execute(["acyclic", "init", "tracker", "--replica", "mac"].map(Into::into), &env);
+    assert_eq!(init.code, 0, "{}", init.stdout);
+    let tracker = dir.path().join("tracker");
+    let cli = |command| Cli {
+        tracker: Some(tracker.clone()),
+        actor: Some("run/r1".into()),
+        as_user: false,
+        output: Some(args::Format::Json),
+        command,
+    };
+    let op = commands::Operation {
+        run: "r1".into(),
+        seq: 1,
+        seen: acyclic_core::state::Context::default(),
+    };
+    // The refused command's first batch found number 1 unspent; before its second, the same number was applied.
+    let add = || -> Command {
+        serde_json::from_value(json!({"thread": {"add": {"thread": "t", "title": "T"}}})).unwrap()
+    };
+    commands::apply(&cli(add()), &env, op.clone()).unwrap();
+    let refusal = CliError::refused("refused", "");
+    let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
+    assert_eq!((err.code, err.details), (commands::DUPLICATE, json!({"ok": true})));
+}
+
+#[test]
+fn a_refused_command_spends_its_number_and_a_failure_of_anything_else_doesnt() {
+    let spent = [
+        CliError::new("usage", exit::USAGE, ""),
+        CliError::new("not-found", exit::NOT_FOUND, ""),
+        CliError::refused("user-only", ""),
+        CliError::refused("claimed", ""),
+        CliError::refused("checked-field", ""),
+    ];
+    let unspent = [
+        CliError::refused("sequence-gap", ""),
+        CliError::refused("wrong-replica", ""),
+        CliError::refused("clock-jump", ""),
+        CliError::refused("not-continuous", ""),
+        CliError::refused("id-reused", ""),
+        CliError::new("busy", exit::STORE, ""),
+        CliError::new("config", exit::CONFIG, ""),
+        CliError::new("unreadable", exit::UNREADABLE, ""),
+        CliError::new("internal", exit::UNREADABLE, ""),
+    ];
+    for err in &spent {
+        assert!(spends(err), "{}", err.code);
+    }
+    for err in &unspent {
+        assert!(!spends(err), "{}", err.code);
+    }
+}
