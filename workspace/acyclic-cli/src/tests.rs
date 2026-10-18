@@ -899,3 +899,36 @@ fn readiness_checks_a_repository_without_a_mapped_clone_against_the_servers_mirr
         assert_eq!(context::mirror(&env(&[("HOME", home)]), id), None, "{id}");
     }
 }
+
+#[test]
+fn a_run_reaches_a_repository_by_its_threads_records_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = dir.path().join("tracker");
+    let vars = [("ACYCLIC_NOW", "1792022400000"), ("ACYCLIC_TRACKER", tracker.to_str().unwrap())];
+    let env = Env { cwd: dir.path().to_path_buf(), ..env(&vars) };
+    let run = |line: &str| {
+        let args = ["acyclic"].into_iter().chain(line.split(' ')).chain(["--as-user"]);
+        let done = execute(args.map(Into::into), &env);
+        assert_eq!(done.code, 0, "{line}: {}", done.stdout);
+    };
+    let init = execute(["acyclic", "init", "tracker", "--replica", "mac"].map(Into::into), &env);
+    assert_eq!(init.code, 0, "{}", init.stdout);
+    // Two records name the same repository, differing in case; only one is in t0.
+    for line in [
+        "repo add mine --owner o1 --name app --default-branch main --public",
+        "repo add theirs --owner O1 --name App --default-branch main --public",
+        "thread add t0 --title T0 --repository mine",
+        "thread add t1 --title T1",
+    ] {
+        run(line);
+    }
+    commands::start_run(&tracker, &env, "operator/mac", "r0", "t0").unwrap();
+    commands::start_run(&tracker, &env, "operator/mac", "r1", "t1").unwrap();
+    let reach =
+        |run: &str, thread: &str| commands::reach(&tracker, run, thread, "o1", "APP").unwrap();
+    assert!(matches!(reach("r0", "t0"), commands::Reach::Found(record) if record.id == "mine"));
+    assert_eq!(reach("r1", "t1"), commands::Reach::NotInThread);
+    assert_eq!(reach("r9", "t0"), commands::Reach::Inactive);
+    run("thread edit t0 --repository theirs");
+    assert_eq!(reach("r0", "t0"), commands::Reach::Ambiguous);
+}

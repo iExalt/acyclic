@@ -273,7 +273,7 @@ pub enum Reach {
     Inactive,
     /// No repository record names it, or the run's thread doesn't hold it.
     NotInThread,
-    /// More than one record names it, differing only in case.
+    /// More than one record in the run's thread names it, differing only in case.
     Ambiguous,
     /// The record, in the run's thread.
     Found(model::Repository),
@@ -293,12 +293,16 @@ pub fn reach(
         return Ok(Reach::Inactive);
     }
     let model = Model::read(&state)?;
-    let named = model.repositories_named(owner, name);
+    // Only records in the thread count, so a run learns nothing of those outside it.
+    let set = model.repository_set(thread);
+    let named: Vec<_> = model
+        .repositories_named(owner, name)
+        .into_iter()
+        .filter(|record| set.contains(&record.id))
+        .collect();
     Ok(match named.as_slice() {
-        [record] if model.repository_set(thread).contains(&record.id) => {
-            Reach::Found((*record).clone())
-        },
-        [] | [_] => Reach::NotInThread,
+        [] => Reach::NotInThread,
+        [record] => Reach::Found((*record).clone()),
         _ => Reach::Ambiguous,
     })
 }
