@@ -31,6 +31,7 @@ Other Commands:
   level        Prints the autonomy levels; with a level, sets the global one (user only)
   doctor       Lists entities that can't be read
   serve        Serves the JSON API and the app, refusing any request without the user's Tailscale identity
+  up           Serves the JSON API and the app on this machine, to whoever holds its session
   completions  Prints a completion script for a shell, as text
 
 Options:

@@ -1,5 +1,6 @@
-//! `acyclic serve` as a process: it says where it listens, refuses a request without the user's identity, answers a
-//! read as the CLI does, writes as the user, and syncs with the other replicas.
+//! `acyclic serve` and `acyclic up` as processes: each says where it listens, refuses a request without the user's
+//! identity or session, and answers a read as the CLI does; `serve` writes as the user and syncs with the other
+//! replicas, and `up` keeps its session across restarts.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
@@ -76,6 +77,23 @@ fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
     (server, started["data"]["listening"].as_str().unwrap().to_owned())
 }
 
+/// Starts `acyclic up` on `tracker` with `home` as the home directory, and returns it with the address it listens on
+/// and the session's file.
+fn up(tracker: &Path, home: &Path) -> (Server, String, PathBuf) {
+    let mut child = acyclic(tracker)
+        .env("HOME", home)
+        .args(["up", "--port", "0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let server = Server(child);
+    let started: Value = serde_json::from_str(&line).unwrap();
+    let address = started["data"]["listening"].as_str().unwrap().to_owned();
+    (server, address, PathBuf::from(started["data"]["session"].as_str().unwrap()))
+}
+
 /// Sends a command as the user.
 fn command(address: &str, body: &str) -> (u16, Value) {
     let headers =
@@ -112,6 +130,44 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let (status, shown) = command(&address, r#"{"show": {"items": ["a"]}}"#);
     assert_eq!(status, 200, "{shown}");
     assert_eq!(shown, cli(&tracker, "show a"));
+}
+
+#[test]
+fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = init(dir.path(), "mac", None);
+    cli(&tracker, "item add a --title A --as-user");
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let (server, address, session) = up(&tracker, &home);
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!((mode(session.parent().unwrap()), mode(&session)), (0o700, 0o600));
+    let token = std::fs::read_to_string(&session).unwrap();
+    let bearer = format!("Bearer {}", token.trim_end());
+    let show = r#"{"show": {"items": ["a"]}}"#;
+    let json = ("Content-Type", "application/json");
+
+    let (status, refused) = request(&address, &[("Host", &address), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (401, &Value::from("no-session")));
+    let (status, shown) =
+        request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
+    assert_eq!(status, 200, "{shown}");
+    assert_eq!(shown, cli(&tracker, "show a"));
+
+    // A second server can't take the same port, and says so.
+    let port = address.rsplit_once(':').unwrap().1;
+    let taken = acyclic(&tracker).env("HOME", &home).args(["up", "--port", port]).output().unwrap();
+    let refused: Value = serde_json::from_slice(&taken.stdout).unwrap();
+    assert_eq!(refused["error"]["code"], "serve", "{refused}");
+
+    // A restart keeps the session, so whatever held it still gets in.
+    drop(server);
+    let (_server, address, _) = up(&tracker, &home);
+    assert_eq!(std::fs::read_to_string(&session).unwrap(), token);
+    let (status, shown) =
+        request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
+    assert_eq!(status, 200, "{shown}");
 }
 
 #[test]

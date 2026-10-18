@@ -72,6 +72,7 @@ version = "0.2.0"
 dependencies = [
  "acyclic-cli",
  "axum",
+ "getrandom",
  "serde_json",
  "tempfile",
  "tokio",

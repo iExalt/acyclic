@@ -68,7 +68,18 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
     (
         "Other Commands",
-        &["init", "sync", "prime", "import", "graph", "level", "doctor", "serve", "completions"],
+        &[
+            "init",
+            "sync",
+            "prime",
+            "import",
+            "graph",
+            "level",
+            "doctor",
+            "serve",
+            "up",
+            "completions",
+        ],
     ),
 ];
 
@@ -275,6 +286,12 @@ pub enum Command {
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip_deserializing)]
     Serve(Serve),
+    /// Serves the JSON API and the app on this machine, to whoever holds its session.
+    ///
+    /// The session lives in ~/.config/acyclic/up/session, readable only by the user, and a request presents it as
+    /// `Authorization: Bearer <session>`.
+    #[serde(skip_deserializing)]
+    Up(Up),
     /// Prints a completion script for a shell, as text.
     ///
     /// For zsh, write it to a directory on `fpath`: `acyclic completions zsh > ~/.zfunc/_acyclic`.
@@ -311,6 +328,25 @@ pub struct Serve {
     /// `acyclic.pushAfterWrite` says so.
     #[arg(long, default_value_t = 30)]
     pub sync_every: u64,
+}
+
+/// The settings of `acyclic up`.
+#[derive(Debug, Clone, clap::Args)]
+pub struct Up {
+    /// The port to listen on, on 127.0.0.1 only; 0 picks a free one.
+    #[arg(long, default_value_t = 7478)]
+    pub port: u16,
+    /// A directory of static files to serve, such as the built app. Symbolic links in it are followed, so it should
+    /// hold only what acyclic's own build put there.
+    #[arg(long = "static")]
+    pub static_dir: Option<PathBuf>,
+    /// Seconds between syncs with the clone's `origin`; 0, the default, never syncs, so the clone syncs only when
+    /// told to, as it does without the server.
+    #[arg(long, default_value_t = 0)]
+    pub sync_every: u64,
+    /// Replace the session with a new one before serving, so whatever held the old one is shut out.
+    #[arg(long)]
+    pub rotate: bool,
 }
 
 /// A usage error.

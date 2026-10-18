@@ -9,15 +9,23 @@ use super::*;
 const LOGIN: &str = "user@example.com";
 const HOST_NAME: &str = "acyclic.example.ts.net";
 
+const PORT: u16 = 7478;
+const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn config(static_dir: Option<PathBuf>) -> Config {
-    Config {
+    Config { tracker: PathBuf::from("/nonexistent/tracker"), env: Env::default(), static_dir }
+}
+
+fn tailscale() -> Access {
+    Access::Tailscale {
         login: LOGIN.into(),
         host: HOST_NAME.into(),
         origin: format!("https://{HOST_NAME}"),
-        tracker: PathBuf::from("/nonexistent/tracker"),
-        env: Env::default(),
-        static_dir,
     }
+}
+
+fn session() -> Access {
+    Access::Session { port: PORT, token: Token::parse(TOKEN).unwrap() }
 }
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -33,8 +41,8 @@ fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
 
 #[test]
 fn only_the_user_through_tailscale_for_this_host_passes() {
-    let config = config(None);
-    let check = |pairs: &[(&str, &str)]| identity(&headers(pairs), &config);
+    let access = tailscale();
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
     let user = (IDENTITY, LOGIN);
     let host = ("host", HOST_NAME);
     assert_eq!(check(&[user, host]), Ok(()));
@@ -49,18 +57,73 @@ fn only_the_user_through_tailscale_for_this_host_passes() {
     assert_eq!(check(&[user, ("host", "other.example.ts.net")]), Err(Refusal::WrongHost));
     // A port counts: none configured refuses one sent, and one configured must be sent.
     assert_eq!(check(&[user, ("host", "acyclic.example.ts.net:8080")]), Err(Refusal::WrongHost));
-    let ported = Config { host: format!("{HOST_NAME}:8080"), ..config.clone() };
-    assert_eq!(
-        identity(&headers(&[user, ("host", "acyclic.example.ts.net:8080")]), &ported),
-        Ok(())
-    );
-    assert_eq!(identity(&headers(&[user, host]), &ported), Err(Refusal::WrongHost));
+    let ported = Access::Tailscale {
+        login: LOGIN.into(),
+        host: format!("{HOST_NAME}:8080"),
+        origin: format!("https://{HOST_NAME}"),
+    };
+    assert_eq!(ported.check(&headers(&[user, ("host", "acyclic.example.ts.net:8080")])), Ok(()));
+    assert_eq!(ported.check(&headers(&[user, host])), Err(Refusal::WrongHost));
+}
+
+#[test]
+fn only_the_session_for_this_port_passes_on_the_machine() {
+    let access = session();
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
+    let bearer = format!("Bearer {TOKEN}");
+    let session = ("authorization", bearer.as_str());
+    let host = ("host", "127.0.0.1:7478");
+    assert_eq!(check(&[session, host]), Ok(()));
+    assert_eq!(check(&[session, ("host", "localhost:7478")]), Ok(()));
+    assert_eq!(check(&[session, ("host", "LOCALHOST:7478")]), Ok(()));
+    assert_eq!(check(&[session, ("host", "[::1]:7478")]), Ok(()));
+    let lower = format!("bearer {TOKEN}");
+    assert_eq!(check(&[("authorization", lower.as_str()), host]), Ok(()));
+    // A name that merely resolves to the machine, another port, or a spelling that isn't one of the three is refused,
+    // so a page from elsewhere can't rebind its name to the loopback address.
+    for other in [
+        "evil.example:7478",
+        "localhost:7479",
+        "localhost",
+        "localhost.:7478",
+        "127.0.0.1:7478.",
+        "127.0.0.1:07478",
+        "::1:7478",
+    ] {
+        assert_eq!(check(&[session, ("host", other)]), Err(Refusal::WrongHost), "{other}");
+    }
+    assert_eq!(check(&[session]), Err(Refusal::WrongHost));
+    assert_eq!(check(&[session, host, host]), Err(Refusal::WrongHost));
+    let short = &TOKEN[1..];
+    let long = format!("{TOKEN}0");
+    let wrong = format!("1{short}");
+    let upper = TOKEN.to_uppercase();
+    for presented in [
+        String::new(),
+        "Bearer".into(),
+        "Bearer ".into(),
+        format!("Bearer {short}"),
+        format!("Bearer {long}"),
+        format!("Bearer {wrong}"),
+        format!("Bearer {upper}"),
+        format!("Bearer  {TOKEN}"),
+        format!("Bearer {TOKEN} "),
+        format!("Basic {TOKEN}"),
+        TOKEN.into(),
+    ] {
+        let sent = check(&[("authorization", presented.as_str()), host]);
+        assert_eq!(sent, Err(Refusal::NoSession), "{presented:?}");
+    }
+    assert_eq!(check(&[host]), Err(Refusal::NoSession));
+    assert_eq!(check(&[session, session, host]), Err(Refusal::NoSession));
+    // Tailscale's header counts for nothing here.
+    assert_eq!(check(&[(IDENTITY, LOGIN), host]), Err(Refusal::NoSession));
 }
 
 #[test]
 fn commands_come_as_json_from_no_other_origin() {
-    let config = config(None);
-    let check = |pairs: &[(&str, &str)]| same_origin(&headers(pairs), &config);
+    let access = tailscale();
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs));
     let json = ("content-type", "application/json");
     assert_eq!(check(&[json]), Ok(()));
     assert_eq!(check(&[("content-type", "Application/JSON; charset=utf-8")]), Ok(()));
@@ -78,6 +141,17 @@ fn commands_come_as_json_from_no_other_origin() {
         check(&[json, ("origin", "https://acyclic.example.ts.net:444")]),
         Err(Refusal::WrongOrigin)
     );
+    // On the machine, a page from the listener's own names and port.
+    let access = session();
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs));
+    assert_eq!(check(&[json]), Ok(()));
+    assert_eq!(check(&[json, ("origin", "http://127.0.0.1:7478")]), Ok(()));
+    assert_eq!(check(&[json, ("origin", "http://localhost:7478")]), Ok(()));
+    for other in
+        ["http://localhost:3000", "https://127.0.0.1:7478", "http://evil.example:7478", "null"]
+    {
+        assert_eq!(check(&[json, ("origin", other)]), Err(Refusal::WrongOrigin), "{other}");
+    }
 }
 
 /// Sends one request through the router and returns its status and body.
@@ -110,13 +184,13 @@ fn code(body: &str) -> String {
 }
 
 #[test]
-fn every_route_is_behind_the_identity_check() {
+fn every_route_is_behind_the_listeners_check() {
     let dir = tempfile::tempdir().unwrap();
     let www = dir.path().join("www");
     std::fs::create_dir(&www).unwrap();
     std::fs::write(www.join("index.html"), "the app").unwrap();
     std::fs::write(dir.path().join("secret"), "outside").unwrap();
-    let router = router(config(Some(www)));
+    let router = router(config(Some(www.clone())), tailscale());
     let host = ("host", HOST_NAME);
     let user = (IDENTITY, LOGIN);
     for (method, path) in [
@@ -144,11 +218,32 @@ fn every_route_is_behind_the_identity_check() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
         assert!(!body.contains("outside"), "{path}");
     }
+    // On the machine, the session stands in for the identity, and a preflight without it is refused, so no other
+    // page's script is ever let in.
+    let router = super::router(config(Some(www)), session());
+    let host = ("host", "127.0.0.1:7478");
+    let bearer = format!("Bearer {TOKEN}");
+    for (method, path) in [
+        (Method::GET, "/index.html"),
+        (Method::OPTIONS, "/api/command"),
+        (Method::POST, "/api/command"),
+    ] {
+        let (status, body) = send(&router, method.clone(), path, &[host, (IDENTITY, LOGIN)], "");
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::UNAUTHORIZED, "no-session".into()),
+            "{method} {path}"
+        );
+    }
+    assert_eq!(
+        send(&router, Method::GET, "/index.html", &[host, ("authorization", &bearer)], ""),
+        (StatusCode::OK, "the app".into())
+    );
 }
 
 #[test]
 fn the_server_runs_only_the_commands_it_allows() {
-    let router = router(config(None));
+    let router = router(config(None), tailscale());
     let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
     let post = |pairs: &[(&str, &str)], body: &str| {
         let (status, body) = send(&router, Method::POST, "/api/command", pairs, body);
@@ -169,6 +264,7 @@ fn the_server_runs_only_the_commands_it_allows() {
         (StatusCode::BAD_REQUEST, "usage".into())
     );
     assert_eq!(post(&pass, r#"{"serve": {}}"#), (StatusCode::BAD_REQUEST, "usage".into()));
+    assert_eq!(post(&pass, r#"{"up": {}}"#), (StatusCode::BAD_REQUEST, "usage".into()));
     // The commands that grammar replaced are refused, not guessed at.
     for old in [
         r#"{"thread": {"set": {"id": "t", "title": "T"}}}"#,
@@ -237,7 +333,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
 #[test]
 fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
     let server = Arc::new(Server { turn: Duration::from_millis(50), ..Server::new(config(None)) });
-    let router = routes(server.clone());
+    let router = routes(server.clone(), tailscale());
     let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
     // A sync holds the turn throughout.
     let _sync = server.turns.clone().try_lock_owned().unwrap();

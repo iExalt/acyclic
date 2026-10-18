@@ -2,18 +2,19 @@
 #![warn(clippy::all, clippy::pedantic, missing_docs)]
 
 use std::io::Write as _;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use acyclic_cli::Env;
 use acyclic_cli::args::{
-    Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, Serve, ThreadCommand,
+    Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, Serve, ThreadCommand, Up,
 };
 use acyclic_cli::error::{CliError, exit};
+use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
-use axum::http::header::{CONTENT_TYPE, HOST, ORIGIN};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, HOST, ORIGIN, WWW_AUTHENTICATE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -23,18 +24,16 @@ use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower_http::services::ServeDir;
 
+pub mod session;
+
+use session::Token;
+
 /// The header Tailscale sets to the login of the user behind a request.
 pub const IDENTITY: &str = "Tailscale-User-Login";
 
-/// What the server checks requests against, and what it serves.
+/// What the server serves, whichever listener a request arrives on.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The user's login, which [`IDENTITY`] must equal.
-    pub login: String,
-    /// The name `Host` must carry, compared without regard to case, with its port if it has one.
-    pub host: String,
-    /// The origin a browser's request must come from, such as `https://<host>`.
-    pub origin: String,
     /// The tracker clone every command runs on.
     pub tracker: PathBuf,
     /// The environment every command runs in.
@@ -43,24 +42,114 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
 }
 
-impl Config {
-    /// The configuration `acyclic serve` was given.
+/// Who a listener lets in, and how it tells.
+#[derive(Debug, Clone)]
+pub enum Access {
+    /// Requests through Tailscale, which sets [`IDENTITY`] from its own lookup. Whatever reaches the listener without
+    /// passing through Tailscale can forge the header, so only Tailscale may be able to reach it.
+    Tailscale {
+        /// The user's login, which [`IDENTITY`] must equal.
+        login: String,
+        /// The name `Host` must carry, compared without regard to case, with its port if it has one.
+        host: String,
+        /// The origin a browser's request must come from, such as `https://<host>`.
+        origin: String,
+    },
+    /// Requests on 127.0.0.1 presenting the session `acyclic up` issued. Every process on the machine, and every
+    /// container, can reach a loopback port, so the address proves nothing and the session is what counts.
+    Session {
+        /// The port the listener is bound to, which `Host` must carry.
+        port: u16,
+        /// The session.
+        token: Token,
+    },
+}
+
+impl Access {
+    /// The access `acyclic serve` was given.
     ///
     /// # Errors
     ///
     /// A usage error when the login or the host is empty.
-    pub fn new(options: &Serve, tracker: PathBuf, env: &Env) -> Result<Self, CliError> {
+    pub fn tailscale(options: &Serve) -> Result<Self, CliError> {
         if options.login.is_empty() || options.host.is_empty() {
             return Err(CliError::new("usage", exit::USAGE, "--login and --host may not be empty"));
         }
-        Ok(Self {
+        Ok(Self::Tailscale {
             login: options.login.clone(),
             host: options.host.clone(),
             origin: options.origin.clone().unwrap_or_else(|| format!("https://{}", options.host)),
-            tracker,
-            env: env.clone(),
-            static_dir: options.static_dir.clone(),
         })
+    }
+
+    /// The names `Host` may carry on a session listener: the loopback address and `localhost`, with the listener's
+    /// port, so that a page from another name that resolves to 127.0.0.1 can't reach it.
+    fn local_hosts(port: u16) -> [String; 3] {
+        [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")]
+    }
+
+    /// Checks that a request comes from the user, by the listener's own means, for this server.
+    ///
+    /// # Errors
+    ///
+    /// Why the request is refused.
+    pub fn check(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+        match self {
+            Self::Tailscale { login, host, .. } => {
+                match single(headers, IDENTITY) {
+                    None => return Err(Refusal::NoIdentity),
+                    Some(sent) if sent != login.as_bytes() => return Err(Refusal::WrongIdentity),
+                    Some(_) => {},
+                }
+                match single(headers, HOST) {
+                    Some(sent) if sent.eq_ignore_ascii_case(host.as_bytes()) => Ok(()),
+                    _ => Err(Refusal::WrongHost),
+                }
+            },
+            Self::Session { port, token } => {
+                let host = single(headers, HOST).is_some_and(|sent| {
+                    Self::local_hosts(*port)
+                        .iter()
+                        .any(|name| sent.eq_ignore_ascii_case(name.as_bytes()))
+                });
+                if !host {
+                    return Err(Refusal::WrongHost);
+                }
+                match bearer(headers) {
+                    Some(presented) if token.matches(presented) => Ok(()),
+                    _ => Err(Refusal::NoSession),
+                }
+            },
+        }
+    }
+
+    /// Checks that a command's request is JSON and, when a browser sent it, that it comes from the server's own
+    /// origin, so that no other site can make the user's browser send one.
+    ///
+    /// # Errors
+    ///
+    /// Why the request is refused.
+    pub fn same_origin(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+        let json = single(headers, CONTENT_TYPE).is_some_and(|value| {
+            let media = value.split(|byte| *byte == b';').next().unwrap_or_default();
+            media.trim_ascii().eq_ignore_ascii_case(b"application/json")
+        });
+        if !json {
+            return Err(Refusal::NotJson);
+        }
+        if headers.get(ORIGIN).is_none() {
+            return Ok(());
+        }
+        let allowed = |origin: &[u8]| match self {
+            Self::Tailscale { origin: own, .. } => origin.eq_ignore_ascii_case(own.as_bytes()),
+            Self::Session { port, .. } => Self::local_hosts(*port)
+                .iter()
+                .any(|name| origin.eq_ignore_ascii_case(format!("http://{name}").as_bytes())),
+        };
+        match single(headers, ORIGIN) {
+            Some(origin) if allowed(origin) => Ok(()),
+            _ => Err(Refusal::WrongOrigin),
+        }
     }
 }
 
@@ -69,6 +158,8 @@ impl Config {
 pub enum Refusal {
     /// No identity header, or more than one.
     NoIdentity,
+    /// No session, another one, or more than one.
+    NoSession,
     /// Another login.
     WrongIdentity,
     /// No `Host`, more than one, or another name.
@@ -85,6 +176,7 @@ impl Refusal {
     fn code(self) -> &'static str {
         match self {
             Self::NoIdentity => "no-identity",
+            Self::NoSession => "no-session",
             Self::WrongIdentity => "wrong-identity",
             Self::WrongHost => "wrong-host",
             Self::WrongOrigin => "wrong-origin",
@@ -96,6 +188,7 @@ impl Refusal {
     fn message(self) -> &'static str {
         match self {
             Self::NoIdentity => "the request carries no single Tailscale identity",
+            Self::NoSession => "the request carries no session: present the one acyclic up issued",
             Self::WrongIdentity => "the request's Tailscale identity isn't the user's",
             Self::WrongHost => "the request is for another host",
             Self::WrongOrigin => "the request comes from another origin",
@@ -107,13 +200,15 @@ impl Refusal {
 
 impl IntoResponse for Refusal {
     fn into_response(self) -> Response {
-        let status = if self == Self::NotJson {
-            StatusCode::UNSUPPORTED_MEDIA_TYPE
-        } else {
-            StatusCode::FORBIDDEN
-        };
         let envelope = json!({"ok": false, "error": {"code": self.code(), "message": self.message(), "details": null}});
-        (status, Json(envelope)).into_response()
+        match self {
+            Self::NotJson => (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(envelope)).into_response(),
+            Self::NoSession => {
+                (StatusCode::UNAUTHORIZED, [(WWW_AUTHENTICATE, "Bearer")], Json(envelope))
+                    .into_response()
+            },
+            _ => (StatusCode::FORBIDDEN, Json(envelope)).into_response(),
+        }
     }
 }
 
@@ -126,44 +221,12 @@ fn single(headers: &HeaderMap, name: impl axum::http::header::AsHeaderName) -> O
     }
 }
 
-/// Checks that a request comes from the user, through Tailscale, for this server.
-///
-/// # Errors
-///
-/// Why the request is refused.
-pub fn identity(headers: &HeaderMap, config: &Config) -> Result<(), Refusal> {
-    match single(headers, IDENTITY) {
-        None => return Err(Refusal::NoIdentity),
-        Some(login) if login != config.login.as_bytes() => return Err(Refusal::WrongIdentity),
-        Some(_) => {},
-    }
-    match single(headers, HOST) {
-        Some(host) if host.eq_ignore_ascii_case(config.host.as_bytes()) => Ok(()),
-        _ => Err(Refusal::WrongHost),
-    }
-}
-
-/// Checks that a command's request is JSON and, when a browser sent it, that it comes from the server's own origin, so
-/// that no other site can make the user's browser send one.
-///
-/// # Errors
-///
-/// Why the request is refused.
-pub fn same_origin(headers: &HeaderMap, config: &Config) -> Result<(), Refusal> {
-    let json = single(headers, CONTENT_TYPE).is_some_and(|value| {
-        let media = value.split(|byte| *byte == b';').next().unwrap_or_default();
-        media.trim_ascii().eq_ignore_ascii_case(b"application/json")
-    });
-    if !json {
-        return Err(Refusal::NotJson);
-    }
-    if headers.get(ORIGIN).is_none() {
-        return Ok(());
-    }
-    match single(headers, ORIGIN) {
-        Some(origin) if origin.eq_ignore_ascii_case(config.origin.as_bytes()) => Ok(()),
-        _ => Err(Refusal::WrongOrigin),
-    }
+/// The token of the request's one `Authorization` header, if it says `Bearer` and one space then the token.
+fn bearer(headers: &HeaderMap) -> Option<&[u8]> {
+    let value = single(headers, AUTHORIZATION)?;
+    let space = value.iter().position(|byte| *byte == b' ')?;
+    let (scheme, token) = value.split_at(space);
+    scheme.eq_ignore_ascii_case(b"Bearer").then_some(&token[1..])
 }
 
 /// What a command does, for the server.
@@ -188,6 +251,7 @@ fn classify(command: &Command) -> Use {
         | Command::Doctor
         | Command::Graph { .. }
         | Command::Serve(_)
+        | Command::Up(_)
         | Command::Completions { .. } => Use::Refused,
         Command::Ready { .. }
         | Command::List
@@ -234,7 +298,9 @@ fn status(code: u8) -> StatusCode {
     }
 }
 
-/// How long a write waits for its turn before the server answers that it is busy.
+/// How long a write waits for its turn before the server answers that it is busy. It covers only this server's own
+/// writes and syncs: once a command has its turn, it may still wait, without limit, for the clone's lock while the
+/// CLI or another process writes.
 const TURN: Duration = Duration::from_secs(15);
 
 /// A running server's state.
@@ -282,15 +348,25 @@ impl Server {
     }
 }
 
-async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) -> Response {
-    match identity(request.headers(), &server.config) {
+/// A listener's state: the server, and who the listener lets in.
+struct Listener {
+    server: Arc<Server>,
+    access: Access,
+}
+
+async fn guard(State(listener): State<Arc<Listener>>, request: Request, next: Next) -> Response {
+    match listener.access.check(request.headers()) {
         Ok(()) => next.run(request).await,
         Err(refusal) => refusal.into_response(),
     }
 }
 
-async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(refusal) = same_origin(&headers, &server.config) {
+async fn command(
+    State(listener): State<Arc<Listener>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
     let command: Command = match serde_json::from_slice(&body) {
@@ -300,6 +376,7 @@ async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
             return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
         },
     };
+    let server = &listener.server;
     let (code, envelope) = match classify(&command) {
         Use::Refused => return Refusal::NotAllowed.into_response(),
         Use::Read => server.call(command, None).await,
@@ -311,27 +388,44 @@ async fn command(State(server): State<Arc<Server>>, headers: HeaderMap, body: By
     (status(code), Json(envelope)).into_response()
 }
 
-/// The server's routes, every one behind [`identity`].
-pub fn router(config: Config) -> Router {
-    routes(Arc::new(Server::new(config)))
+/// The server's routes for one listener, every one behind its [`Access`].
+pub fn router(config: Config, access: Access) -> Router {
+    routes(Arc::new(Server::new(config)), access)
 }
 
-fn routes(server: Arc<Server>) -> Router {
+fn routes(server: Arc<Server>, access: Access) -> Router {
     let mut router = Router::new().route("/api/command", post(command));
     if let Some(dir) = &server.config.static_dir {
         router = router.fallback_service(ServeDir::new(dir));
     }
-    router.layer(middleware::from_fn_with_state(server.clone(), guard)).with_state(server)
+    let listener = Arc::new(Listener { server, access });
+    router.layer(middleware::from_fn_with_state(listener.clone(), guard)).with_state(listener)
 }
 
-/// Serves the tracker clone at `tracker` until interrupted: `acyclic serve`. Prints one JSON line with the address
-/// it listens on once it does, and syncs with the clone's `origin` as the settings say.
+fn failed(what: &str, err: impl std::fmt::Display) -> CliError {
+    CliError::new("serve", exit::CONFIG, format!("{what}: {err}"))
+}
+
+/// Starts a server: `acyclic serve` or `acyclic up`, on the tracker clone at `tracker`, until interrupted.
+///
+/// # Errors
+///
+/// When the settings are wrong or the address can't be bound.
+pub fn start(start: Start<'_>, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
+    match start {
+        Start::Serve(options) => serve(options, tracker, env),
+        Start::Up(options) => up(options, tracker, env),
+    }
+}
+
+/// Serves the tracker clone at `tracker` behind Tailscale until interrupted: `acyclic serve`. Prints one JSON line
+/// with the address it listens on once it does, and syncs with the clone's `origin` as the settings say.
 ///
 /// # Errors
 ///
 /// When the settings are wrong or the address can't be bound.
 pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
-    let config = Config::new(options, tracker, env)?;
+    let access = Access::tailscale(options)?;
     if !options.listen.ip().is_loopback() {
         eprintln!(
             "acyclic: {} isn't a loopback address: whatever reaches it without passing through Tailscale can forge \
@@ -339,27 +433,58 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
             options.listen
         );
     }
-    let failed = |what: &str, err: std::io::Error| {
-        CliError::new("serve", exit::CONFIG, format!("{what}: {err}"))
-    };
+    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
+    run(config, options.sync_every, options.listen, |address| {
+        (access, json!({"listening": address.to_string()}))
+    })
+}
+
+/// Serves the tracker clone at `tracker` on 127.0.0.1 to whoever holds the session, until interrupted: `acyclic up`.
+/// Prints one JSON line with the address it listens on and the session's file once it does, never the session.
+///
+/// # Errors
+///
+/// When the home directory or the session's file is wrong, or the port can't be bound.
+pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
+    let home = env.vars.get("HOME").filter(|home| !home.is_empty()).ok_or_else(|| {
+        CliError::new("session", exit::CONFIG, "HOME isn't set, so the session has nowhere to live")
+    })?;
+    let (token, path) = session::open(home.as_ref(), options.rotate)?;
+    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
+    let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
+    run(config, options.sync_every, bind, |address| {
+        let access = Access::Session { port: address.port(), token };
+        (access, json!({"listening": address.to_string(), "session": path}))
+    })
+}
+
+/// Binds `bind`, gives the bound address to `access` for the listener's access and the line to print, prints it, and
+/// serves until interrupted, syncing every `sync_every` seconds unless that is 0.
+fn run(
+    config: Config,
+    sync_every: u64,
+    bind: SocketAddr,
+    access: impl FnOnce(SocketAddr) -> (Access, Value),
+) -> Result<(), CliError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|err| failed("starting the runtime", err))?;
     let server = Arc::new(Server::new(config));
     runtime.block_on(async {
-        let listener = tokio::net::TcpListener::bind(options.listen)
+        let listener = tokio::net::TcpListener::bind(bind)
             .await
-            .map_err(|err| failed(&format!("listening on {}", options.listen), err))?;
+            .map_err(|err| failed(&format!("listening on {bind}"), err))?;
         let address = listener.local_addr().map_err(|err| failed("reading the address", err))?;
-        if options.sync_every > 0 {
-            tokio::spawn(sync(server.clone(), Duration::from_secs(options.sync_every)));
+        let (access, started) = access(address);
+        if sync_every > 0 {
+            tokio::spawn(sync(server.clone(), Duration::from_secs(sync_every)));
         }
         let mut stdout = std::io::stdout();
-        writeln!(stdout, "{}", json!({"ok": true, "data": {"listening": address.to_string()}}))
+        writeln!(stdout, "{}", json!({"ok": true, "data": started}))
             .and_then(|()| stdout.flush())
             .map_err(|err| failed("printing the address", err))?;
-        axum::serve(listener, routes(server))
+        axum::serve(listener, routes(server, access))
             .with_graceful_shutdown(stopped())
             .await
             .map_err(|err| failed("serving", err))

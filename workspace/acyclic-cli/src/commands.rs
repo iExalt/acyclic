@@ -61,7 +61,7 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Import { schema: true, .. } = &cli.command {
         return Ok(Output::Text(import::SCHEMA.to_owned()));
     }
-    if let Command::Serve(_) = &cli.command {
+    if let Command::Serve(_) | Command::Up(_) = &cli.command {
         return Err(CliError::new(
             "no-server",
             exit::CONFIG,
@@ -118,6 +118,7 @@ impl<'a> Session<'a> {
             | Command::Graph { .. }
             | Command::Import { file: None, .. }
             | Command::Serve(_)
+            | Command::Up(_)
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
