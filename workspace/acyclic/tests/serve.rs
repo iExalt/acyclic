@@ -66,9 +66,11 @@ fn exchange(
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
-    write!(stream, "{head}\r\n{body}").unwrap();
+    // In one write: a server that refuses on the headers alone may close before reading the body, and a body
+    // written after that fails while the refusal waits to be read.
+    let _ = stream.write_all(format!("{head}\r\n{body}").as_bytes());
     let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
+    let _ = stream.read_to_string(&mut response);
     let status = response[9..12].parse().unwrap();
     let (_, body) = response.split_once("\r\n\r\n").unwrap();
     (status, serde_json::from_str(body).unwrap())
