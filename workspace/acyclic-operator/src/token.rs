@@ -206,7 +206,7 @@ fn random<const N: usize>() -> Result<[u8; N], Error> {
 }
 
 /// Bytes as lowercase hex digits.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     bytes
         .iter()

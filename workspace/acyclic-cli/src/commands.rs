@@ -91,6 +91,75 @@ pub fn refuse(
     session.record(&json!({"ok": false, "code": refusal.code}))
 }
 
+/// Starts run `run` on `thread`, as the operator `operator`, which no command line may name.
+///
+/// # Errors
+///
+/// When the tracker can't be opened, the thread already has a run under way, or the store fails.
+pub fn start_run(
+    tracker: &Path,
+    env: &Env,
+    operator: &str,
+    run: &str,
+    thread: &str,
+) -> Result<Json, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let session = Session {
+        tracker: opened,
+        actor: operator.to_owned(),
+        now: context::now(env),
+        env,
+        operation: None,
+        recorded: Cell::new(false),
+    };
+    session.write(|replica, by| {
+        model::start_run(replica, run, thread, by)?;
+        Ok(json!({"run": run, "thread": thread}))
+    })
+}
+
+/// Moves run `run` to `state`, as the operator `operator`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened, the run can't move that way, or the store fails.
+pub fn set_run_state(
+    tracker: &Path,
+    env: &Env,
+    operator: &str,
+    run: &str,
+    state: model::RunState,
+) -> Result<Json, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let session = Session {
+        tracker: opened,
+        actor: operator.to_owned(),
+        now: context::now(env),
+        env,
+        operation: None,
+        recorded: Cell::new(false),
+    };
+    session.write(|replica, by| {
+        model::set_run_state(replica, run, state, by)?;
+        Ok(json!({"run": run, "state": state}))
+    })
+}
+
+/// Whether run `run` is under way on `thread` in the clone at `tracker`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read.
+pub fn run_active(tracker: &Path, run: &str, thread: &str) -> Result<bool, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let (_, state) = opened.load()?;
+    let model = Model::read(&state)?;
+    Ok(model
+        .runs
+        .get(run)
+        .is_some_and(|found| found.is_active() && found.thread.all().iter().any(|t| *t == thread)))
+}
+
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     if let Command::Init { path, replica, remote } = &cli.command {

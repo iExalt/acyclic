@@ -14,7 +14,7 @@ mod view;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
@@ -287,6 +287,76 @@ pub fn apply(
         },
         Err(err) => Err(failed(err)),
     }
+}
+
+/// Spends a run's operation without running its command, with `refusal` as its outcome: for a command the operator
+/// refuses to forward, so that the run's later operations aren't stuck behind it.
+///
+/// # Errors
+///
+/// As [`apply`]'s.
+pub fn refuse(
+    operation: Operation,
+    refusal: &CliError,
+    tracker: PathBuf,
+    env: &Env,
+) -> Result<Applied, (u8, Value)> {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(format!("run/{}", operation.run)),
+        as_user: false,
+        output: Some(Format::Json),
+        command: Command::List,
+    };
+    match commands::refuse(&cli, env, operation, refusal) {
+        Ok(()) => Ok(Applied::Ran(refusal.exit, refusal.envelope())),
+        Err(err) if err.code == commands::DUPLICATE => {
+            Ok(Applied::Duplicate(Some(err.details).filter(|details| !details.is_null())))
+        },
+        Err(err) => Err((err.exit, err.envelope())),
+    }
+}
+
+/// Starts run `run` on `thread` in the clone at `tracker`, as the operator `operator` (`operator/<id>`).
+///
+/// # Errors
+///
+/// When the thread already has a run under way, or the tracker can't be opened or written, as an exit code and
+/// envelope.
+pub fn start_run(
+    operator: &str,
+    run: &str,
+    thread: &str,
+    tracker: &Path,
+    env: &Env,
+) -> Result<Value, (u8, Value)> {
+    commands::start_run(tracker, env, operator, run, thread)
+        .map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Moves run `run` to `state` in the clone at `tracker`, as the operator `operator`.
+///
+/// # Errors
+///
+/// When the run can't move that way, or the tracker can't be opened or written, as an exit code and envelope.
+pub fn set_run_state(
+    operator: &str,
+    run: &str,
+    state: acyclic_core::model::RunState,
+    tracker: &Path,
+    env: &Env,
+) -> Result<Value, (u8, Value)> {
+    commands::set_run_state(tracker, env, operator, run, state)
+        .map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Whether run `run` is under way on `thread` in the clone at `tracker`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn run_active(run: &str, thread: &str, tracker: &Path) -> Result<bool, (u8, Value)> {
+    commands::run_active(tracker, run, thread).map_err(|err| (err.exit, err.envelope()))
 }
 
 /// Whether a failed operation spends its number: when the command itself was refused, as it would be again, but not

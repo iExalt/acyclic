@@ -62,6 +62,7 @@ dependencies = [
 name = "acyclic-operator"
 version = "0.2.0"
 dependencies = [
+ "acyclic-cli",
  "acyclic-core",
  "ed25519-dalek",
  "getrandom",

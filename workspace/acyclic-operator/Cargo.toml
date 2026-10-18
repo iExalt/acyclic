@@ -6,6 +6,7 @@ readme = "README.md"
 license.workspace = true
 
 [dependencies]
+acyclic-cli.workspace = true
 acyclic-core.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
