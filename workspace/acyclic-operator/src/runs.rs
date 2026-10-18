@@ -2,6 +2,7 @@
 //! the server checks that token on every request the run makes, and applies its writes as the run. Ending a run
 //! revokes its token, whatever the token's own expiry, since the server refuses a run that isn't under way.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use acyclic_cli::Env;
@@ -114,3 +115,36 @@ impl<T: Tracker> Operator<T> {
 
 #[cfg(test)]
 mod tests;
+
+/// The environment a run works in, given the runners' listener at `server`, such as `http://<host>:<port>`, the run's
+/// `token`, and the `owners` of the tracker's repository records: the CLI's remote mode, and git settings, as
+/// `GIT_CONFIG_*` variables, that send every repository of those owners on the forge, by any of its URLs, to the
+/// server with the run's token. Other repositories, such as public dependencies, go to the forge as they are, with no
+/// credentials.
+#[must_use]
+pub fn environment(
+    server: &str,
+    token: &str,
+    owners: &BTreeSet<String>,
+) -> BTreeMap<String, String> {
+    let server = server.trim_end_matches('/');
+    let mut settings =
+        vec![(format!("http.{server}/.extraHeader"), format!("Authorization: Bearer {token}"))];
+    for owner in owners {
+        for forge in ["https://github.com/", "git@github.com:", "ssh://git@github.com/"] {
+            settings
+                .push((format!("url.{server}/git/{owner}/.insteadOf"), format!("{forge}{owner}/")));
+        }
+    }
+    let mut vars = BTreeMap::from([
+        ("ACYCLIC_REMOTE".to_owned(), server.to_owned()),
+        ("ACYCLIC_TOKEN".to_owned(), token.to_owned()),
+        ("GIT_TERMINAL_PROMPT".to_owned(), "0".to_owned()),
+        ("GIT_CONFIG_COUNT".to_owned(), settings.len().to_string()),
+    ]);
+    for (index, (key, value)) in settings.into_iter().enumerate() {
+        vars.insert(format!("GIT_CONFIG_KEY_{index}"), key);
+        vars.insert(format!("GIT_CONFIG_VALUE_{index}"), value);
+    }
+    vars
+}

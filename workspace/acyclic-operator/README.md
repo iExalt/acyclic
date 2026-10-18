@@ -6,4 +6,5 @@ makes to the server presents that token, so its writes are its own whatever it c
 
 - `token` mints and checks run tokens.
 - `runs` starts and ends runs. Starting one records it in the tracker and mints its token; ending one revokes the token,
-  since the server refuses a run that isn't under way.
+  since the server refuses a run that isn't under way. `runs::environment` is what a run works in: the CLI's remote
+  mode, and git settings that send its owners' repositories on the forge to the server's mirrors.
