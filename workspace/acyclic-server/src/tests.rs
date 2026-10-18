@@ -457,3 +457,23 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     let bearer = format!("Bearer {TOKEN}");
     assert!(ran(post(&[host, json, ("authorization", &bearer)])));
 }
+
+#[test]
+fn a_socket_replaces_only_one_no_server_listens_on() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap();
+    let _entered = runtime.enter();
+    let dir = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+    let long = dir.path().join("s".repeat(SOCKET_PATH_MAX));
+    assert!(bind_socket(&long).unwrap_err().message.contains("at most"));
+    let file = dir.path().join("file");
+    std::fs::write(&file, "kept").unwrap();
+    assert!(bind_socket(&file).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "kept");
+    let socket = dir.path().join("s.sock");
+    drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+    let live = bind_socket(&socket).unwrap();
+    assert_eq!(std::fs::metadata(&socket).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(bind_socket(&socket).unwrap_err().message.contains("another server"));
+    drop(live);
+}

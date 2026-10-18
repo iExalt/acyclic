@@ -27,7 +27,9 @@ localhost, so a write it authenticates must come from the listener's own origin,
 `up --tailscale --login <login> --host <name>.ts.net` also listens on a Unix socket only the user can open
 (`--socket`, `~/.config/acyclic/up/tailscale.sock` by default), checked as `serve` checks requests. Point Tailscale
 at it with `tailscale serve --bg unix:<socket>`, as `up` prints; no container can reach the socket. The phone then
-reaches the Mac while it is awake.
+reaches the Mac while it is awake. Not yet checked against a real tailnet: that `tailscale serve` replaces any
+`Tailscale-User-Login` a client sends and passes the original `Host` on, and that the Tailscale daemon can open a
+socket under `~/.config`; if it can't, give `--socket` a path it can reach.
 
 `up` doesn't sync on a timer unless given `--sync-every`, so the clone syncs when told to, as it does without a
 server. It shares the clone with the CLI, whose writes queue with its own.

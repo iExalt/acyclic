@@ -664,7 +664,9 @@ fn run(
 /// The longest path a Unix socket can have on macOS, the shortest limit of the systems acyclic runs on.
 const SOCKET_PATH_MAX: usize = 103;
 
-/// Binds a Unix socket at `path`, replacing a socket left by an earlier server, and makes it the user's alone.
+/// Binds a Unix socket at `path`, replacing one an earlier server left but refusing one a server still listens on, and
+/// makes it the user's alone. Until then it has the umask's mode, which lets no one else connect under the usual
+/// umask, and the default path sits in a directory only the user can enter.
 fn bind_socket(path: &std::path::Path) -> Result<tokio::net::UnixListener, CliError> {
     use std::os::unix::fs::{FileTypeExt as _, PermissionsExt as _};
     let named = || path.display().to_string();
@@ -678,8 +680,17 @@ fn bind_socket(path: &std::path::Path) -> Result<tokio::net::UnixListener, CliEr
     }
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_socket() => {
-            std::fs::remove_file(path)
-                .map_err(|err| failed(&format!("replacing {}", named()), err))?;
+            match std::os::unix::net::UnixStream::connect(path) {
+                Ok(_) => {
+                    let what = format!("listening on {}", named());
+                    return Err(failed(&what, "another server is listening there"));
+                },
+                Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    std::fs::remove_file(path)
+                        .map_err(|err| failed(&format!("replacing {}", named()), err))?;
+                },
+                Err(err) => return Err(failed(&format!("listening on {}", named()), err)),
+            }
         },
         Ok(_) => {
             return Err(failed(
