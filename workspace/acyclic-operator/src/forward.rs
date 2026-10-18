@@ -230,7 +230,8 @@ impl<T: Tracker> Operator<T> {
         }
         let mut forwarded = Forwarded { applied: Vec::new(), failed: None };
         for Sent { seq, seen, command } in sent {
-            let operation = Operation { run: claims.run.clone(), seq, seen };
+            let operation =
+                Operation { run: claims.run.clone(), thread: claims.thread.clone(), seq, seen };
             let result = if allowed(&command) {
                 self.tracker.apply(operation, command)
             } else {

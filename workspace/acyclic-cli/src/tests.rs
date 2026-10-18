@@ -91,6 +91,7 @@ fn a_tracker_clone_needs_no_home_or_mapping() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "one line per error")]
 fn every_error_has_a_stable_code_and_exit() {
     let key = Key::new("item", "a1").unwrap();
     // One of each variant, so a renamed code shows here.
@@ -152,6 +153,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
+        CliError::refused("not-in-thread", ""),
+        CliError::refused("not-the-runs", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("unwritable", ""),
         CliError::refused("unopenable", ""),
@@ -812,6 +815,7 @@ fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
     };
     let op = commands::Operation {
         run: "r1".into(),
+        thread: "t".into(),
         seq: 1,
         seen: acyclic_core::state::Context::default(),
     };

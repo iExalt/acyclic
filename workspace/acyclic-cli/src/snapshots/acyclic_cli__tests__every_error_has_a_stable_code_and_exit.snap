@@ -52,6 +52,8 @@ expression: table
 1 not-ready spends
 1 already-exists spends
 1 already-done spends
+1 not-in-thread spends
+1 not-the-runs spends
 1 incomplete-repository spends
 1 unwritable spends
 1 unopenable spends

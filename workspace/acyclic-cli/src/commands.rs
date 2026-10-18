@@ -47,6 +47,105 @@ const LEASE: Millis = 60 * MINUTE;
 /// The longest time lease.
 const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
 
+/// What a run's command must find in the tracker, inside the batch that writes it, to stay within the run's thread.
+#[derive(Debug)]
+enum Within {
+    /// The item is in the thread.
+    Item(String),
+    /// The link is the run's own: only the run wrote it.
+    OwnLink(String, model::LinkKind, String),
+}
+
+fn outside(thread: &str, what: impl std::fmt::Display) -> CliError {
+    CliError::refused("not-in-thread", format!("{what} is outside this run's thread {thread}"))
+}
+
+/// What `command` must find to stay within `thread`, or why it can't: a claim or a release of another thread, an add
+/// outside the thread, or an edit that moves an item's thread or drops its parent, which only the user does.
+fn within(command: &Command, thread: &str) -> Result<Vec<Within>, CliError> {
+    use Within::{Item, OwnLink};
+    let parent = |parent: &Option<String>| {
+        parent.iter().map(|parent| Item(parent.clone())).collect::<Vec<_>>()
+    };
+    match command {
+        Command::Claim { thread: named, .. } | Command::Release { thread: named } => {
+            if named == thread {
+                Ok(vec![])
+            } else {
+                Err(outside(thread, format!("thread {named}")))
+            }
+        },
+        Command::Done { item, .. } | Command::Item(ItemCommand::Reopen { item }) => {
+            Ok(vec![Item(item.clone())])
+        },
+        Command::Item(ItemCommand::Add { item, thread: named, parent: up, .. }) => {
+            if named.as_deref() == Some(thread) {
+                Ok(parent(up))
+            } else {
+                Err(outside(thread, format!("new item {item}, added with no thread or another")))
+            }
+        },
+        Command::Item(ItemCommand::Edit(edit)) => {
+            if edit.thread.is_some() || edit.no_thread || edit.no_parent {
+                return Err(outside(
+                    thread,
+                    format!("moving {} between threads or out from its parent", edit.item),
+                ));
+            }
+            Ok([Item(edit.item.clone())].into_iter().chain(parent(&edit.parent)).collect())
+        },
+        Command::Link(LinkCommand::Add { from, .. }) => Ok(vec![Item(from.clone())]),
+        Command::Link(LinkCommand::Remove { from, kind, to }) => {
+            Ok(vec![Item(from.clone()), OwnLink(from.clone(), kind.kind(), to.clone())])
+        },
+        _ => Ok(vec![]),
+    }
+}
+
+/// Refuses what `within` asks of the state now: an item counts as in the thread only when every value of its thread
+/// field names it, so a conflict over its thread keeps it out.
+fn check_within(
+    replica: &Replica,
+    needs: &[Within],
+    thread: &str,
+    actor: &str,
+) -> Result<(), CliError> {
+    if needs.is_empty() {
+        return Ok(());
+    }
+    let model = Model::read(replica.state())?;
+    for need in needs {
+        match need {
+            Within::Item(id) => {
+                let inside = model.items.get(id).is_some_and(|item| match &item.thread {
+                    Value::One(named) => named == thread,
+                    Value::Conflict(values) => {
+                        values.iter().all(|named| named.as_deref() == Some(thread))
+                    },
+                    Value::None => false,
+                });
+                if !inside {
+                    return Err(outside(thread, format!("item {id}")));
+                }
+            },
+            Within::OwnLink(from, kind, to) => {
+                let key = model::link_key(from, to, *kind)?;
+                let writers =
+                    replica.state().field(&key, link_field::PRESENT).into_iter().flatten();
+                if !writers.map(|(_, value)| value.actor.as_str()).all(|writer| writer == actor) {
+                    return Err(CliError::refused(
+                        "not-the-runs",
+                        format!(
+                            "the link from {from} to {to} is someone else's: a run removes only its own links"
+                        ),
+                    ));
+                }
+            },
+        }
+    }
+    Ok(())
+}
+
 /// Checks that `op` is the run's next operation, refusing a duplicate with [`DUPLICATE`] and its recorded outcome.
 fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
     match replica.sequence(&op.run, op.seq)? {
@@ -71,6 +170,7 @@ fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
 /// The command's error, or [`DUPLICATE`] with the recorded outcome when the number was applied already.
 pub fn apply(cli: &Cli, env: &Env, operation: Operation) -> Result<Json, CliError> {
     let mut session = Session::open(cli, env)?;
+    session.within = within(&cli.command, &operation.thread)?;
     session.operation = Some(operation);
     let data = session.dispatch(&cli.command)?;
     if !session.recorded.get() {
@@ -116,6 +216,7 @@ pub fn start_run(
         env,
         operation: None,
         recorded: Cell::new(false),
+        within: Vec::new(),
     };
     session.write(|replica, by| {
         model::start_run(replica, run, thread, by)?;
@@ -143,6 +244,7 @@ pub fn set_run_state(
         env,
         operation: None,
         recorded: Cell::new(false),
+        within: Vec::new(),
     };
     session.write(|replica, by| {
         model::set_run_state(replica, run, state, by)?;
@@ -218,6 +320,8 @@ struct Session<'a> {
     operation: Option<Operation>,
     /// Whether the operation's number has been recorded.
     recorded: Cell<bool>,
+    /// What the operation's command must find to stay within the run's thread.
+    within: Vec<Within>,
 }
 
 /// A run's operation: one command, numbered in the run's sequence from 1, with the run's view of the tracker when it
@@ -226,6 +330,8 @@ struct Session<'a> {
 pub struct Operation {
     /// The run's id.
     pub run: String,
+    /// The thread the run works on, which its operations may not reach outside.
+    pub thread: String,
     /// Its number in the run's sequence.
     pub seq: u64,
     /// What the run had seen.
@@ -251,6 +357,7 @@ impl<'a> Session<'a> {
             env,
             operation: None,
             recorded: Cell::new(false),
+            within: Vec::new(),
         })
     }
 
@@ -538,6 +645,7 @@ impl<'a> Session<'a> {
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             if let Some(op) = operation {
                 next(replica, op)?;
+                check_within(replica, &self.within, &op.thread, &self.actor)?;
             }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");

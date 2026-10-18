@@ -464,7 +464,7 @@ fn operation(
     command: serde_json::Value,
     extra: &[(&str, &str)],
 ) -> Result<Applied, (u8, serde_json::Value)> {
-    let operation = Operation { run: "r1".into(), seq, seen: seen.clone() };
+    let operation = Operation { run: "r1".into(), thread: "t0".into(), seq, seen: seen.clone() };
     let command = serde_json::from_value(command).unwrap();
     acyclic_cli::apply(operation, command, sh.path().join("tracker"), &sh.env(extra))
 }
@@ -492,7 +492,7 @@ fn a_runs_operations_apply_once_each_as_the_run() {
     for line in [
         "thread add t0 --title T",
         "item add a1 --title One --thread t0",
-        "item add a2 --title Two",
+        "item add a2 --title Two --thread t0",
     ] {
         assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
     }
@@ -544,4 +544,66 @@ fn a_runs_operations_apply_once_each_as_the_run() {
         titles(&sh, "a2"),
         [("actor/user".to_owned(), json!("Mine")), ("run/r1".to_owned(), json!("Run's"))]
     );
+}
+
+#[test]
+fn a_run_writes_only_within_its_thread() {
+    let mut sh = Shell::new();
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    for line in [
+        "thread add t0 --title Mine",
+        "thread add t9 --title Other",
+        "item add a --title A --thread t0",
+        "item add b --title B --thread t0",
+        "item add x --title X --thread t9",
+        "link add b waits-for a",
+    ] {
+        assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
+    }
+    let base = state(&sh).context;
+    let mut seq = 0;
+    let mut send = |command: serde_json::Value| {
+        seq += 1;
+        match operation(&sh, seq, &base, command.clone(), &[]).unwrap() {
+            Applied::Ran(0, _) => "ok".to_owned(),
+            Applied::Ran(_, envelope) => envelope["error"]["code"].as_str().unwrap().to_owned(),
+            Applied::Duplicate(_) => panic!("{command}"),
+        }
+    };
+    let edit = |item: &str, extra: serde_json::Value| {
+        let mut edit = json!({"item": item});
+        edit.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        json!({"item": {"edit": edit}})
+    };
+    for (command, expected) in [
+        (json!({"claim": {"thread": "t9"}}), "not-in-thread"),
+        (json!({"item": {"add": {"item": "n", "title": "N"}}}), "not-in-thread"),
+        (json!({"item": {"add": {"item": "n", "title": "N", "thread": "t9"}}}), "not-in-thread"),
+        (
+            json!({"item": {"add": {"item": "n", "title": "N", "thread": "t0", "parent": "x"}}}),
+            "not-in-thread",
+        ),
+        (
+            json!({"item": {"add": {"item": "n", "title": "N", "thread": "t0", "parent": "a"}}}),
+            "ok",
+        ),
+        (edit("x", json!({"title": "Mine now"})), "not-in-thread"),
+        (edit("a", json!({"thread": "t9"})), "not-in-thread"),
+        (edit("a", json!({"no-thread": true})), "not-in-thread"),
+        (edit("n", json!({"no-parent": true})), "not-in-thread"),
+        (edit("a", json!({"parent": "x"})), "not-in-thread"),
+        (edit("a", json!({"title": "Better"})), "ok"),
+        (json!({"done": {"item": "x", "note": "n"}}), "not-in-thread"),
+        (json!({"link": {"add": {"from": "x", "kind": "waits-for", "to": "a"}}}), "not-in-thread"),
+        // A run may make its own work wait on another thread's, and undo that, but not the user's ordering.
+        (json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "x"}}}), "ok"),
+        (json!({"link": {"remove": {"from": "a", "kind": "waits-for", "to": "x"}}}), "ok"),
+        (
+            json!({"link": {"remove": {"from": "b", "kind": "waits-for", "to": "a"}}}),
+            "not-the-runs",
+        ),
+        (json!({"claim": {"thread": "t0"}}), "ok"),
+    ] {
+        assert_eq!(send(command.clone()), expected, "{command}");
+    }
 }
