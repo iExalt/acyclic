@@ -25,6 +25,9 @@ const SKEW: Millis = 30 * 1000;
 /// The key's file, under the home directory.
 const KEY_PATH: &str = ".config/acyclic/operator/key";
 
+/// The public key's file, under the home directory, which the server checks run tokens with.
+pub const PUBLIC_PATH: &str = ".config/acyclic/operator/key.pub";
+
 /// What a token says.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,7 +115,13 @@ impl Signer {
         let seed = unhex(text.strip_suffix('\n').unwrap_or(&text))
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
             .ok_or_else(|| Error::Key(format!("{} holds no key", path.display())))?;
-        Ok((Self(SigningKey::from_bytes(&seed)), path))
+        let signer = Self(SigningKey::from_bytes(&seed));
+        let public = home.join(PUBLIC_PATH);
+        let written = format!("{}\n", signer.verifier().hex());
+        if private::read(&public).ok().as_deref() != Some(written.as_str()) {
+            private::place(&public, written.as_bytes(), true).map_err(key)?;
+        }
+        Ok((signer, path))
     }
 
     /// A key from its 32 secret bytes.
@@ -168,6 +177,32 @@ impl Signer {
 pub struct Verifier(VerifyingKey);
 
 impl Verifier {
+    /// The public key kept in the home directory `home`, which the operator writes beside its key.
+    ///
+    /// # Errors
+    ///
+    /// When the file or its directory is open to other users or isn't what it should be, is missing, or holds no key:
+    /// whoever could replace it could mint tokens.
+    pub fn open(home: &Path) -> Result<Self, Error> {
+        let path = home.join(PUBLIC_PATH);
+        let text = private::read(&path).map_err(|err| Error::Key(err.to_string()))?;
+        Self::parse(text.strip_suffix('\n').unwrap_or(&text))
+            .ok_or_else(|| Error::Key(format!("{} holds no public key", path.display())))
+    }
+
+    /// A public key from its hex digits.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let bytes = <[u8; 32]>::try_from(unhex(text)?).ok()?;
+        VerifyingKey::from_bytes(&bytes).ok().map(Self)
+    }
+
+    /// The public key as hex digits.
+    #[must_use]
+    pub fn hex(&self) -> String {
+        hex(self.0.as_bytes())
+    }
+
     /// The token's claims, if this operator signed it and it is valid at `now`. The version is checked before
     /// anything else, and the signature before the claims are read.
     ///

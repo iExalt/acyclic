@@ -259,11 +259,14 @@ pub fn set_run_state(
 pub fn run_active(tracker: &Path, run: &str, thread: &str) -> Result<bool, CliError> {
     let (opened, _) = Tracker::open(tracker)?;
     let (_, state) = opened.load()?;
-    let model = Model::read(&state)?;
-    Ok(model
-        .runs
-        .get(run)
-        .is_some_and(|found| found.is_active() && found.thread.all().iter().any(|t| *t == thread)))
+    Ok(model::run_active(&state, run, thread))
+}
+
+/// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.
+pub fn applied(tracker: &Path, run: &str) -> Result<u64, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let (_, state) = opened.load()?;
+    Ok(state.applied_seq(run)?)
 }
 
 /// Runs a parsed command.
@@ -644,6 +647,14 @@ impl<'a> Session<'a> {
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             if let Some(op) = operation {
                 next(replica, op)?;
+                // Checked again here, on the state the write goes into: a run ended since its request arrived writes
+                // nothing more.
+                if !model::run_active(replica.state(), &op.run, &op.thread) {
+                    return Err(CliError::refused(
+                        "inactive",
+                        format!("run {} isn't under way on thread {}", op.run, op.thread),
+                    ));
+                }
                 check_within(replica, &self.within, &op.thread, &self.actor)?;
             }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;

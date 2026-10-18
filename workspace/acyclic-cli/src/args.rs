@@ -351,7 +351,7 @@ pub struct Up {
     pub rotate: bool,
     /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
     /// Give the same --port as the server, if it has one.
-    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale", "runners"])]
     pub link: bool,
     /// Also serve through `tailscale serve`, pointed at a Unix socket that only the user can open, to requests carrying
     /// the user's Tailscale identity. Run `tailscale serve --bg unix:<socket>` as the output says.
@@ -369,6 +369,11 @@ pub struct Up {
     /// The socket; ~/.config/acyclic/up/tailscale.sock by default. Its directory should be open to the user alone.
     #[arg(long, requires = "tailscale")]
     pub socket: Option<PathBuf>,
+    /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
+    /// the writes of their own work, applied as the run. Needs the operator's public key, which the operator writes
+    /// to ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
+    #[arg(long, value_name = "PORT")]
+    pub runners: Option<u16>,
 }
 
 /// A usage error.

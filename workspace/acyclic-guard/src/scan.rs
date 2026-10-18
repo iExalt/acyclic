@@ -122,6 +122,49 @@ pub fn scan_push(
     Ok(report)
 }
 
+/// Scans `text` that a run sent, such as a command's JSON, as `object`: for deny-listed terms and, with Gitleaks
+/// reading it from standard input, for secrets. Gitleaks's own report is dropped, since the text's sender would see it.
+///
+/// # Errors
+///
+/// Fails when Gitleaks can't run or fails for a reason other than a leak.
+pub fn scan_text(text: &str, object: &str, list: &DenyList) -> Result<Report, Error> {
+    let findings = find(list, text, Channel::Content, object);
+    let dir = PrivateDir::new()?;
+    let config = dir.0.join("gitleaks.toml");
+    std::fs::write(&config, GITLEAKS_CONFIG)
+        .map_err(|err| Error(format!("can't write gitleaks' configuration: {err}")))?;
+    let mut child = Command::new("gitleaks")
+        .args(["stdin", "--no-banner", "--redact", "--exit-code"])
+        .arg(GITLEAKS_LEAK_EXIT.to_string())
+        .arg("--config")
+        .arg(&config)
+        .arg("--gitleaks-ignore-path")
+        .arg(&dir.0)
+        .current_dir(&dir.0)
+        .env_remove("GITLEAKS_CONFIG")
+        .env_remove("GITLEAKS_CONFIG_TOML")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| Error(format!("gitleaks can't run: {err}")))?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return Err(Error("gitleaks took no input".to_owned()));
+    };
+    let written = std::io::Write::write_all(&mut stdin, text.as_bytes());
+    drop(stdin);
+    let status = child.wait().map_err(|err| Error(format!("gitleaks can't run: {err}")))?;
+    written.map_err(|err| Error(format!("gitleaks didn't take the text: {err}")))?;
+    let leaks = match status.code() {
+        Some(0) => false,
+        Some(GITLEAKS_LEAK_EXIT) => true,
+        _ => return Err(Error(format!("gitleaks failed: {status}"))),
+    };
+    Ok(Report { findings, leaks })
+}
+
 /// The `rev-list` arguments selecting commits the remote doesn't have yet.
 fn outgoing_range(repo: &Path, remote: &str, update: &RefUpdate) -> Result<Vec<String>, Error> {
     let mut range =

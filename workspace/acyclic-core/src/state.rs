@@ -314,6 +314,19 @@ fn join_registers(a: &Register, a_seen: &Context, b: &Register, b_seen: &Context
 }
 
 impl State {
+    /// The latest operation of run `run` applied in this state, 0 for none.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `run` isn't a valid id.
+    pub fn applied_seq(&self, run: &str) -> Result<u64, Error> {
+        let key = Key::new("run", run)?;
+        Ok(self
+            .field(&key, RUN_APPLIED_SEQ)
+            .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
+            .unwrap_or(0))
+    }
+
     /// An empty state.
     #[must_use]
     pub fn new() -> Self {
@@ -685,11 +698,7 @@ impl Replica {
                 applied_by: applied_by.to_owned(),
             });
         }
-        let last = self
-            .state
-            .field(&key, RUN_APPLIED_SEQ)
-            .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
-            .unwrap_or(0);
+        let last = self.state.applied_seq(run)?;
         if seq <= last {
             let latest = seq == last;
             let refusal = one(RUN_APPLIED_REFUSAL)

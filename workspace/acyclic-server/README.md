@@ -34,6 +34,20 @@ socket under `~/.config`; if it can't, give `--socket` a path it can reach.
 `up` doesn't sync on a timer unless given `--sync-every`, so the clone syncs when told to, as it does without a
 server. It shares the clone with the CLI, whose writes queue with its own.
 
+## Runs, on `up --runners <port>`
+
+`up --runners <port>` also listens on that port of `127.0.0.1` for runs, each presenting the token the operator gave
+it as `Authorization: Bearer <token>`. It needs the operator's public key, `~/.config/acyclic/operator/key.pub`, which
+the operator writes and only the user may be able to change, and the deny-list, `~/.config/acyclic/deny-list`; it
+reads the key once, so a new operator key needs `up` restarted. `Host` isn't checked there: a container names the Mac
+as `host.containers.internal`, and the check guards a browser's cookie, which no run has.
+
+A run's token counts only there, and only while its run is under way. It reads the tracker as the run, and sends the
+writes of its own work in its thread, each with its number in `Acyclic-Operation: <seq>`, counting from 1. A write is
+scanned for the deny-list's terms and, with Gitleaks, for secrets, then applied as the run, once: sent again, it is
+answered `duplicate`. It supersedes only what the tracker held when the run last read, as the server recorded it.
+`GET /api/run` says the run, its thread and the latest of its operations applied.
+
 ## The API
 
 `POST /api/command` takes one of the CLI's commands as JSON, such as `{"show": {"items": ["a"]}}` or

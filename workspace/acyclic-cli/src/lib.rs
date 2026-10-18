@@ -229,7 +229,24 @@ fn serve_with(cli: &Cli, start: Start<'_>, env: &Env, serve: ServeHook) -> Resul
 pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8, Value) {
     let cli =
         Cli { tracker: Some(tracker), actor: None, as_user, output: Some(Format::Json), command };
-    let result = cli.command.validate().and_then(|()| commands::run(&cli, env));
+    answer(&cli, env)
+}
+
+/// Runs one command as [`call`] does, as `actor`.
+#[must_use]
+pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u8, Value) {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(actor.to_owned()),
+        as_user: false,
+        output: Some(Format::Json),
+        command,
+    };
+    answer(&cli, env)
+}
+
+fn answer(cli: &Cli, env: &Env) -> (u8, Value) {
+    let result = cli.command.validate().and_then(|()| commands::run(cli, env));
     let (code, mut envelope) = match result {
         Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),
         Ok(commands::Output::Text(text)) => (exit::OK, json!({"ok": true, "data": text})),
@@ -289,34 +306,6 @@ pub fn apply(
     }
 }
 
-/// Spends a run's operation without running its command, with `refusal` as its outcome: for a command the operator
-/// refuses to forward, so that the run's later operations aren't stuck behind it.
-///
-/// # Errors
-///
-/// As [`apply`]'s.
-pub fn refuse(
-    operation: Operation,
-    refusal: &CliError,
-    tracker: PathBuf,
-    env: &Env,
-) -> Result<Applied, (u8, Value)> {
-    let cli = Cli {
-        tracker: Some(tracker),
-        actor: Some(format!("run/{}", operation.run)),
-        as_user: false,
-        output: Some(Format::Json),
-        command: Command::List,
-    };
-    match commands::refuse(&cli, env, operation, refusal) {
-        Ok(()) => Ok(Applied::Ran(refusal.exit, refusal.envelope())),
-        Err(err) if err.code == commands::DUPLICATE => {
-            Ok(Applied::Duplicate(Some(err.details).filter(|details| !details.is_null())))
-        },
-        Err(err) => Err((err.exit, err.envelope())),
-    }
-}
-
 /// Starts run `run` on `thread` in the clone at `tracker`, as the operator `operator` (`operator/<id>`).
 ///
 /// # Errors
@@ -359,6 +348,15 @@ pub fn run_active(run: &str, thread: &str, tracker: &Path) -> Result<bool, (u8, 
     commands::run_active(tracker, run, thread).map_err(|err| (err.exit, err.envelope()))
 }
 
+/// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn applied(run: &str, tracker: &Path) -> Result<u64, (u8, Value)> {
+    commands::applied(tracker, run).map_err(|err| (err.exit, err.envelope()))
+}
+
 /// Whether a failed operation spends its number: when the command itself was refused, as it would be again, but not
 /// when the store, the setup, the clock or the run's numbering failed, which a later try may get past.
 fn spends(err: &CliError) -> bool {
@@ -366,7 +364,12 @@ fn spends(err: &CliError) -> bool {
         exit::USAGE | exit::NOT_FOUND => true,
         exit::REFUSED => !matches!(
             err.code,
-            "sequence-gap" | "wrong-replica" | "clock-jump" | "not-continuous" | "id-reused"
+            "sequence-gap"
+                | "wrong-replica"
+                | "clock-jump"
+                | "not-continuous"
+                | "id-reused"
+                | "inactive"
         ),
         _ => false,
     }

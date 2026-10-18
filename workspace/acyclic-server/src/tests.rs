@@ -43,7 +43,7 @@ fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
 #[test]
 fn only_the_user_through_tailscale_for_this_host_passes() {
     let access = tailscale();
-    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs), 0);
     let user = (IDENTITY, LOGIN);
     let host = ("host", HOST_NAME);
     assert_eq!(check(&[user, host]), Ok(Credential::Identity));
@@ -64,16 +64,16 @@ fn only_the_user_through_tailscale_for_this_host_passes() {
         origin: format!("https://{HOST_NAME}"),
     };
     assert_eq!(
-        ported.check(&headers(&[user, ("host", "acyclic.example.ts.net:8080")])),
+        ported.check(&headers(&[user, ("host", "acyclic.example.ts.net:8080")]), 0),
         Ok(Credential::Identity)
     );
-    assert_eq!(ported.check(&headers(&[user, host])), Err(Refusal::WrongHost));
+    assert_eq!(ported.check(&headers(&[user, host]), 0), Err(Refusal::WrongHost));
 }
 
 #[test]
 fn only_the_session_for_this_port_passes_on_the_machine() {
     let access = session();
-    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs), 0);
     let bearer = format!("Bearer {TOKEN}");
     let session = ("authorization", bearer.as_str());
     let host = ("host", "127.0.0.1:7478");
@@ -127,7 +127,7 @@ fn only_the_session_for_this_port_passes_on_the_machine() {
 #[test]
 fn commands_come_as_json_from_no_other_origin() {
     let access = tailscale();
-    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), Credential::Identity);
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), &Credential::Identity);
     let json = ("content-type", "application/json");
     assert_eq!(check(&[json]), Ok(()));
     assert_eq!(check(&[("content-type", "Application/JSON; charset=utf-8")]), Ok(()));
@@ -147,7 +147,7 @@ fn commands_come_as_json_from_no_other_origin() {
     );
     // On the machine, a page from the listener's own names and port.
     let access = session();
-    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), Credential::Bearer);
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), &Credential::Bearer);
     assert_eq!(check(&[json]), Ok(()));
     assert_eq!(check(&[json, ("origin", "http://127.0.0.1:7478")]), Ok(()));
     assert_eq!(check(&[json, ("origin", "http://localhost:7478")]), Ok(()));
@@ -156,6 +156,43 @@ fn commands_come_as_json_from_no_other_origin() {
     {
         assert_eq!(check(&[json, ("origin", other)]), Err(Refusal::WrongOrigin), "{other}");
     }
+}
+
+#[test]
+fn a_runners_listener_lets_in_a_valid_run_token_by_any_name_and_no_browser() {
+    use acyclic_operator::token::Signer;
+    const NOW: Millis = 1_792_022_400_000;
+    let signer = Signer::from_seed([3; 32]);
+    let access = Access::Run { verifier: signer.verifier(), deny: DenyList::parse("term\n") };
+    let token = signer.mint("r1", "t1", NOW, 60_000).unwrap();
+    let forged = Signer::from_seed([4; 32]).mint("r1", "t1", NOW, 60_000).unwrap();
+    let bearer = format!("Bearer {token}");
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs), NOW);
+    // A container names the Mac as it can, and a pod names a service.
+    for host in ["host.containers.internal:7479", "acyclic.runners.svc:7479", "127.0.0.1:7479"] {
+        let claims = check(&[("authorization", &bearer), ("host", host)]);
+        assert!(matches!(claims, Ok(Credential::Run(claims)) if claims.run == "r1"), "{host}");
+    }
+    let forged = format!("Bearer {forged}");
+    assert_eq!(check(&[("authorization", &forged)]), Err(Refusal::NoToken));
+    assert_eq!(check(&[("authorization", &format!("Bearer {TOKEN}"))]), Err(Refusal::NoToken));
+    assert_eq!(check(&[]), Err(Refusal::NoToken));
+    assert_eq!(
+        access.check(&headers(&[("authorization", &bearer)]), NOW + 60_000),
+        Err(Refusal::NoToken)
+    );
+    // The session is no run token, and a run token no session.
+    let session = session();
+    let host = ("host", "127.0.0.1:7478");
+    assert_eq!(
+        session.check(&headers(&[("authorization", &bearer), host]), NOW),
+        Err(Refusal::NoSession)
+    );
+    let run = Credential::Run(signer.verifier().verify(&token, NOW).unwrap());
+    let json = ("content-type", "application/json");
+    assert_eq!(access.same_origin(&headers(&[json]), &run), Ok(()));
+    let from = ("origin", "http://127.0.0.1:7479");
+    assert_eq!(access.same_origin(&headers(&[json, from]), &run), Err(Refusal::WrongOrigin));
 }
 
 /// Sends one request through the router and returns its status and body.

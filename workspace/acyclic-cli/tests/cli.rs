@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use acyclic_cli::{Applied, Env, Operation, execute};
+use acyclic_core::model::RunState;
 use acyclic_core::state::{Context, Key, State};
 use acyclic_core::store::Tracker;
 use serde_json::json;
@@ -496,6 +497,8 @@ fn a_runs_operations_apply_once_each_as_the_run() {
     ] {
         assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
     }
+    acyclic_cli::start_run("operator/mac", "r1", "t0", &sh.path().join("tracker"), &sh.env(&[]))
+        .unwrap();
     let base = state(&sh).context;
     let ok =
         |code: u8| move |applied: &Applied| matches!(applied, Applied::Ran(c, _) if *c == code);
@@ -544,6 +547,13 @@ fn a_runs_operations_apply_once_each_as_the_run() {
         titles(&sh, "a2"),
         [("actor/user".to_owned(), json!("Mine")), ("run/r1".to_owned(), json!("Run's"))]
     );
+    // An ended run writes nothing more, whatever it was let in on, and its number stays unspent.
+    let tracker = sh.path().join("tracker");
+    acyclic_cli::set_run_state("operator/mac", "r1", RunState::Done, &tracker, &sh.env(&[]))
+        .unwrap();
+    let ended = operation(&sh, 7, &base, edit("a2", "Late"), &[]).unwrap_err();
+    assert_eq!(ended.1["error"]["code"], "inactive");
+    assert_eq!(acyclic_cli::applied("r1", &tracker).unwrap(), 6);
 }
 
 #[test]
@@ -560,6 +570,8 @@ fn a_run_writes_only_within_its_thread() {
     ] {
         assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
     }
+    acyclic_cli::start_run("operator/mac", "r1", "t0", &sh.path().join("tracker"), &sh.env(&[]))
+        .unwrap();
     let base = state(&sh).context;
     let mut seq = 0;
     let mut send = |command: serde_json::Value| {

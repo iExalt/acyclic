@@ -155,6 +155,7 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("already-done", ""),
         CliError::refused("not-in-thread", ""),
         CliError::refused("not-the-runs", ""),
+        CliError::refused("inactive", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("unwritable", ""),
         CliError::refused("unopenable", ""),
@@ -823,6 +824,7 @@ fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
     let add = || -> Command {
         serde_json::from_value(json!({"thread": {"add": {"thread": "t", "title": "T"}}})).unwrap()
     };
+    commands::start_run(&tracker, &env, "operator/mac", "r1", "t").unwrap();
     commands::apply(&cli(add()), &env, op.clone()).unwrap();
     let refusal = CliError::refused("refused", "");
     let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
