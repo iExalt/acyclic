@@ -189,7 +189,7 @@ fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_ref
     // Not the branches, nor another run's refs.
     refused(&git(&a, &vars_a, &["push", "origin", "HEAD:refs/heads/main"]), "alone");
     let theirs = format!("HEAD:refs/runs/{run_b}/work");
-    assert!(!git(&a, &vars_a, &["push", "origin", &theirs]).status.success());
+    refused(&git(&a, &vars_a, &["push", "origin", &theirs]), "hidden ref");
     // Nor a term the deny-list holds, in a public repository.
     commit(&a, &none, "notes", &format!("{TERM}\n"));
     refused(
@@ -208,15 +208,17 @@ fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_ref
     let b = dir.join("b");
     let listed = ok(&git(&b, &vars_b, &["ls-remote", "origin"]));
     assert!(listed.contains("refs/heads/main") && !listed.contains("refs/runs/"), "{listed}");
-    assert!(
-        !git(&b, &vars_b, &["-c", "protocol.version=2", "fetch", "origin", &work]).status.success()
-    );
+    let by_id = git(&b, &vars_b, &["-c", "protocol.version=2", "fetch", "origin", &work]);
+    refused(&by_id, "unadvertised object");
     let empty = git(&b, &none, &["pack-objects", "--stdout"]).stdout;
     let zero = "0".repeat(40);
     let update = format!("{zero} {work} refs/runs/{run_b}/stolen");
     let response = push_without_objects(&runners, &token_b, &update, &empty);
     assert!(response.contains("can't see") && !response.contains("ok refs/"), "{response}");
     assert!(!ok(&git(&b, &vars_b, &["ls-remote", "origin"])).contains("stolen"));
+    // Work of its own that happens to match A's is B's to push.
+    commit(&b, &none, "work", "a's work\n");
+    ok(&git(&b, &vars_b, &["push", "-q", "origin", &format!("HEAD:refs/runs/{run_b}/same")]));
 
     // The forge moves on; a fetch brings it, and A's ref is still there.
     let moved = commit(&seed, &none, "later", "later\n");

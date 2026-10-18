@@ -78,7 +78,7 @@ pub struct Code {
     fetched: Mutex<BTreeMap<String, Instant>>,
     /// One lock per mirror, held while it is made or fetched.
     fetching: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// The runs with a push under way.
+    /// The runs with a push under way, with the repository's record: `<run> <record>`.
     pushing: Arc<Mutex<BTreeSet<String>>>,
     fetches: Arc<tokio::sync::Semaphore>,
 }
@@ -204,31 +204,47 @@ impl Code {
         if made && (fresh || !refresh) {
             return Ok(mirror);
         }
+        // A new mirror is fetched where it is made, and moved into place only once it holds the forge's branches.
+        let staged = self.root.join(format!(".{}.{}.new", record.id, std::process::id()));
+        let target = if made { mirror.clone() } else { staged.clone() };
         if !made {
-            let staged = self.root.join(format!(".{}.{}.new", record.id, std::process::id()));
             let _ = std::fs::remove_dir_all(&staged);
             let mut init = self.git();
             init.args(["init", "-q", "--bare", "--template="]).arg(&staged);
             self.run(init, "making the mirror").await?;
-            std::fs::rename(&staged, &mirror).map_err(|err| {
-                let _ = std::fs::remove_dir_all(&staged);
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("making the mirror: {err}"))
-            })?;
         }
         let began = Instant::now();
         let mut fetch = self.git();
         fetch
             .arg("-C")
-            .arg(&mirror)
+            .arg(&target)
             .args(["fetch", "-q", "--prune", "--no-write-fetch-head", "--"])
             .arg(format!("{}/{owner}/{name}.git", self.upstream))
             .args(["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"]);
-        self.run(fetch, &format!("fetching {owner}/{name}")).await?;
+        if let Err(failure) = self.run(fetch, &format!("fetching {owner}/{name}")).await {
+            if made {
+                // The forge being away shouldn't stop runs: they get the mirror as it was last fetched.
+                eprintln!("acyclic: {}; serving the mirror as last fetched", failure.1);
+                return Ok(mirror);
+            }
+            let _ = std::fs::remove_dir_all(&staged);
+            return Err(failure);
+        }
         if let Some(branch) = record.default_branch.one().filter(|branch| segment(branch)) {
             let mut head = self.git();
-            head.arg("-C").arg(&mirror).args(["symbolic-ref", "HEAD"]);
+            head.arg("-C").arg(&target).args(["symbolic-ref", "HEAD"]);
             head.arg(format!("refs/heads/{branch}"));
             self.run(head, "naming the mirror's default branch").await?;
+        }
+        if !made && std::fs::rename(&staged, &mirror).is_err() {
+            // Another server made it first.
+            let _ = std::fs::remove_dir_all(&staged);
+            if !mirror.is_dir() {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "the mirror couldn't be made".into(),
+                ));
+            }
         }
         self.fetched.lock().map_err(|_| internal())?.insert(record.id.clone(), began);
         Ok(mirror)
@@ -268,6 +284,9 @@ impl Code {
             ("receive.advertisePushOptions", "false".to_owned()),
             ("receive.fsckObjects", "true".to_owned()),
             ("receive.maxInputSize", MOST_PUSHED.to_string()),
+            // Every push is kept as a pack in quarantine, its objects all there, even those the mirror has: the hook
+            // tells what the push brought by what the quarantine holds.
+            ("receive.unpackLimit", "1".to_owned()),
         ] {
             command.arg("-c").arg(format!("{key}={value}"));
         }
@@ -359,12 +378,12 @@ impl Drop for Group {
         if self.armed
             && let Some(id) = self.child.id()
         {
-            // The hook and what it runs too, which killing git alone would leave running.
-            let _ = std::process::Command::new("kill")
-                .args(["-KILL", "--", &format!("-{id}")])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            // The hook and what it runs too, which killing git alone would leave running. Git leads its group, and
+            // until it is reaped, which `id` says it isn't, its id can't be another's.
+            if let Ok(group) = libc::pid_t::try_from(id) {
+                // SAFETY: killpg takes plain integers and touches no memory of this process.
+                unsafe { libc::killpg(group, libc::SIGKILL) };
+            }
             let _ = self.child.start_kill();
         }
     }
@@ -512,10 +531,10 @@ async fn exchange(
                     "send the push uncompressed".to_owned(),
                 ));
             }
-            let Some(busy) = Busy::take(&code.pushing, &run) else {
+            let Some(busy) = Busy::take(&code.pushing, &format!("{run} {}", record.id)) else {
                 return text((
                     StatusCode::TOO_MANY_REQUESTS,
-                    "this run has a push under way".to_owned(),
+                    "this run has a push to this repository under way".to_owned(),
                 ));
             };
             stream(command, Input::Body(body), None, None, Some(busy))
@@ -569,7 +588,7 @@ enum Input {
     Body(Body),
 }
 
-/// Marks a run's push under way until dropped.
+/// Marks a run's push to a repository under way until dropped.
 struct Busy(Arc<Mutex<BTreeSet<String>>>, String);
 
 impl Busy {

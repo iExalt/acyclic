@@ -71,7 +71,7 @@ fn check(
         if zero(new) {
             continue;
         }
-        if git(repo, &["cat-file", "-t", new], None)?.trim() != "commit" {
+        if git(repo, &["cat-file", "-t", new])?.trim() != "commit" {
             return Err(format!("{reference} must name a commit"));
         }
         news.push(new.to_owned());
@@ -84,15 +84,14 @@ fn check(
     if news.is_empty() {
         return Ok(());
     }
-    let visible = git(
-        repo,
-        &["for-each-ref", "--format=%(objectname)", "refs/heads/", "refs/tags/", &own],
-        None,
-    )?;
+    // What the run could see before the push: the branches, the tags and its own refs, none of another run's.
     let mut range = news.clone();
-    range.push("--not".to_owned());
-    range.extend(visible.lines().map(str::to_owned));
-    let listed = git(repo, &["rev-list", "--objects", "--stdin"], Some(&range.join("\n")))?;
+    range.extend(
+        ["--not", "--exclude=refs/runs/*", "--all", &format!("--glob={own}*")].map(str::to_owned),
+    );
+    let mut listing = vec!["rev-list", "--objects"];
+    listing.extend(range.iter().map(String::as_str));
+    let listed = git(repo, &listing)?;
     let objects: Vec<&str> = listed.lines().filter_map(|line| line.split(' ').next()).collect();
     let found = quarantined(repo, &objects, quarantine)?;
     if found.lines().any(|line| line.ends_with(" missing")) {
@@ -143,29 +142,17 @@ fn quarantined(repo: &Path, objects: &[&str], quarantine: &str) -> Result<String
     String::from_utf8(output.stdout).map_err(|_| "git printed something not UTF-8".to_owned())
 }
 
-/// Runs git in the mirror, as the hook's environment points it, quarantine included, with `input` if given.
-fn git(repo: &Path, args: &[&str], input: Option<&str>) -> Result<String, String> {
-    let mut child = Command::new("git")
+/// Runs git in the mirror, as the hook's environment points it, quarantine included.
+fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
         .env("LC_ALL", "C")
-        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
+        .stdin(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
+        .output()
         .map_err(|err| format!("git can't run: {err}"))?;
-    let writer = match (input, child.stdin.take()) {
-        (Some(input), Some(mut stdin)) => {
-            let input = input.to_owned();
-            Some(std::thread::spawn(move || stdin.write_all(input.as_bytes())))
-        },
-        _ => None,
-    };
-    let output = child.wait_with_output().map_err(|err| format!("git can't run: {err}"))?;
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
     if !output.status.success() {
         return Err(format!("git {} failed", args.first().unwrap_or(&"")));
     }

@@ -92,6 +92,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "getrandom",
+ "libc",
  "serde_json",
  "sha2",
  "tempfile",
