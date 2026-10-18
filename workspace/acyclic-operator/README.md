@@ -23,8 +23,10 @@ alone.
 
 A run's clone queues its writes rather than making them: with `git config acyclic.operations <run>`, each write a run
 may send becomes `ops/<seq>.json`, holding `{"seq", "seen", "command"}`, added by one commit on the clone's `ops`
-branch, and any other write is refused. `acyclic ops push` pushes the branch to `refs/runs/<run>/ops`. The receiver
-reports each operation it forwarded on a line `acyclic-op <seq> ok`, `refused <code>` (spent) or `failed <code>` (not
-spent), and ends with `acyclic-push forwarded <n>` or `acyclic-push refused <code>`; the clone marks how far the tracker
-got. Push again after a failure that may pass; `acyclic ops reset` drops what the tracker didn't spend, to abandon it,
-and waits while a push's outcome is unknown. `acyclic sync` in such a clone fetches and joins, and pushes nothing.
+branch, and any other write is refused. `acyclic ops push` pushes the branch to `refs/runs/<run>/ops`, at most 200
+operations past the last push taken at a time. The receiver reports each operation it forwarded on a line
+`acyclic-op <seq> ok`, `refused <code>` (spent) or `failed <code>` (not spent), and ends with
+`acyclic-push forwarded <n>` or `acyclic-push refused <code>`; the clone marks how far the tracker got. Push again after
+a failure that may pass, the operator's own included; `acyclic ops reset` drops what the tracker didn't spend, to
+abandon what the operator will never take, and waits while a push's outcome is unknown. `acyclic sync` in such a clone
+fetches and joins, and pushes nothing.
