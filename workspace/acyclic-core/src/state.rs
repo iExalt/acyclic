@@ -474,36 +474,26 @@ pub struct Replica {
     pub(crate) state: State,
 }
 
-/// An operation from a run, applied by the replica that runs it under the replica's own dot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Op {
-    /// The run's id.
-    pub run: String,
-    /// The run's sequence number for this operation, from 1.
-    pub seq: u64,
-    /// The entity written.
-    pub key: Key,
-    /// The field written.
-    pub field: String,
-    /// The new value, or `None` to clear the field.
-    pub value: Option<Json>,
-    /// The dots of the field's values the run had seen; they are superseded, and others survive as conflicts.
-    pub seen: Vec<Dot>,
-}
-
-/// What applying a run operation did.
+/// Where a run's operation stands with the replica that applies the run's operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Applied {
-    /// Applied, under this dot unless it cleared the field.
-    Applied(Option<Dot>),
-    /// Already applied; nothing changed.
-    Duplicate,
+pub enum Sequence {
+    /// It is the next one: apply it, then [`Replica::record`] it.
+    Next,
+    /// It was applied already; apply nothing.
+    Duplicate {
+        /// Whether it was the run's latest.
+        latest: bool,
+        /// The refusal recorded for it, if it was the latest and was refused.
+        refusal: Option<Json>,
+    },
 }
 
 /// The run entity's field holding the last applied sequence number.
 pub const RUN_APPLIED_SEQ: &str = "applied-seq";
 /// The run entity's field naming the replica that applies the run.
 pub const RUN_APPLIED_BY: &str = "applied-by";
+/// The run entity's field holding the latest refused operation's number and refusal, for a run that sends it again.
+pub const RUN_APPLIED_REFUSAL: &str = "applied-refusal";
 
 impl Replica {
     /// A replica whose own state is intact.
@@ -644,64 +634,101 @@ impl Replica {
         Ok(Some(dot))
     }
 
-    /// Applies a run's operation. Sequence numbers must arrive in order from 1: a repeat is a duplicate and a gap is
-    /// refused. The new value supersedes the values the run saw and the run's own earlier values; values it didn't
-    /// see survive beside it as a conflict.
+    /// Writes a field as [`Replica::write`] does, but superseding only the values `seen` covers and the actor's own:
+    /// values others wrote that it didn't see survive beside the new one as a conflict, and a run, whose view never
+    /// holds its own writes as this replica applied them, never conflicts with itself. With `seen` covering everything
+    /// this replica has seen, it is exactly [`Replica::write`] with a value.
     ///
     /// # Errors
     ///
-    /// Fails on a gap, on a run applied by another replica, on a non-integer number, or when the replica can't mint.
-    pub fn apply(&mut self, op: &Op, at: Millis) -> Result<Applied, Error> {
-        let run = Key::new("run", &op.run)?;
-        let applied_by = self
+    /// Fails on a non-integer number or when the replica can't mint dots yet.
+    pub fn write_seen(
+        &mut self,
+        key: &Key,
+        field: &str,
+        actor: &str,
+        at: Millis,
+        value: Json,
+        seen: &Context,
+    ) -> Result<Dot, Error> {
+        check_value(&value)?;
+        let mut register: Register = self
             .state
-            .field(&run, RUN_APPLIED_BY)
-            .and_then(|r| r.values().find_map(|v| v.value.as_str().map(str::to_owned)));
-        if let Some(applied_by) = applied_by
+            .field(key, field)
+            .into_iter()
+            .flatten()
+            .filter(|(dot, value)| !seen.covers(dot) && value.actor != actor)
+            .map(|(dot, value)| (dot.clone(), value.clone()))
+            .collect();
+        let (dot, at) = self.mint(at)?;
+        register.insert(dot.clone(), Stamped { actor: actor.to_owned(), at, value });
+        self.set(key, field, register);
+        Ok(dot)
+    }
+
+    /// Where the run's operation `seq` stands: sequence numbers arrive in order from 1, so a number already recorded
+    /// is a duplicate and one past the next is a gap. Only the replica that recorded the run's first operation
+    /// applies the rest, so that its numbers stay in one place.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a gap or a run applied by another replica.
+    pub fn sequence(&self, run: &str, seq: u64) -> Result<Sequence, Error> {
+        let key = Key::new("run", run)?;
+        let one =
+            |field| self.state.field(&key, field).and_then(|r| r.values().next()).map(|v| &v.value);
+        if let Some(applied_by) = one(RUN_APPLIED_BY).and_then(Json::as_str)
             && applied_by != self.id.as_str()
         {
-            return Err(Error::WrongReplica { run: op.run.clone(), applied_by });
+            return Err(Error::WrongReplica {
+                run: run.to_owned(),
+                applied_by: applied_by.to_owned(),
+            });
         }
         let last = self
             .state
-            .field(&run, RUN_APPLIED_SEQ)
+            .field(&key, RUN_APPLIED_SEQ)
             .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
             .unwrap_or(0);
-        if op.seq <= last {
-            return Ok(Applied::Duplicate);
+        if seq <= last {
+            let latest = seq == last;
+            let refusal = one(RUN_APPLIED_REFUSAL)
+                .filter(|recorded| latest && recorded["seq"] == seq)
+                .map(|recorded| recorded["refusal"].clone());
+            return Ok(Sequence::Duplicate { latest, refusal });
         }
-        if op.seq != last + 1 {
-            return Err(Error::Gap { run: op.run.clone(), expected: last + 1, got: op.seq });
+        if seq != last + 1 {
+            return Err(Error::Gap { run: run.to_owned(), expected: last + 1, got: seq });
         }
-        if let Some(value) = &op.value {
-            check_value(value)?;
-        }
+        Ok(Sequence::Next)
+    }
 
-        let actor = format!("run/{}", op.run);
-        let seen: BTreeSet<&Dot> = op.seen.iter().collect();
-        let mut register: Register = self
-            .state
-            .field(&op.key, &op.field)
-            .into_iter()
-            .flatten()
-            .filter(|(dot, value)| !seen.contains(dot) && value.actor != actor)
-            .map(|(dot, value)| (dot.clone(), value.clone()))
-            .collect();
-        let dot = match op.value.clone() {
-            Some(value) => {
-                let (dot, at) = self.mint(at)?;
-                register.insert(dot.clone(), Stamped { actor: actor.clone(), at, value });
-                Some(dot)
-            },
-            None => None,
-        };
-        self.set(&op.key, &op.field, register);
+    /// Records the run's operation `seq` as applied, or as refused with `refusal`, under this replica's own actor. Call
+    /// it in the same batch as the operation's writes, after [`Replica::sequence`] said it was next. Only a refusal is
+    /// stored beside the number, so an applied operation costs one write; keep a refusal small, and its numbers
+    /// integers.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the replica can't mint dots yet, or on a refusal holding a number that isn't an integer.
+    pub fn record(
+        &mut self,
+        run: &str,
+        seq: u64,
+        refusal: Option<&Json>,
+        at: Millis,
+    ) -> Result<(), Error> {
+        let key = Key::new("run", run)?;
         let system = format!("replica/{}", self.id);
-        self.write(&run, RUN_APPLIED_SEQ, &system, at, Some(Json::from(op.seq)))?;
-        if self.state.field(&run, RUN_APPLIED_BY).is_none() {
-            self.write(&run, RUN_APPLIED_BY, &system, at, Some(Json::from(self.id.as_str())))?;
+        self.write(&key, RUN_APPLIED_SEQ, &system, at, Some(Json::from(seq)))?;
+        if let Some(refusal) = refusal {
+            let recorded = serde_json::json!({"seq": seq, "refusal": refusal});
+            self.write(&key, RUN_APPLIED_REFUSAL, &system, at, Some(recorded))?;
         }
-        Ok(Applied::Applied(dot))
+        if self.state.field(&key, RUN_APPLIED_BY).is_none() {
+            self.write(&key, RUN_APPLIED_BY, &system, at, Some(Json::from(self.id.as_str())))?;
+        }
+        Ok(())
     }
 }
 

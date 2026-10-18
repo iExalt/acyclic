@@ -37,6 +37,10 @@ fn the_user_is_never_inherited_from_the_environment() {
     assert_eq!(actor("acyclic needs --as-user", &user), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor actor/user", &session), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor nobody", &[]), Err("invalid-actor"));
+    // Nor is the operator, from anywhere.
+    let operator = [("ACYCLIC_ACTOR", "operator/mac")];
+    assert_eq!(actor("acyclic needs", &operator), Err("operator-actor"));
+    assert_eq!(actor("acyclic needs --actor operator/mac", &[]), Err("operator-actor"));
 }
 
 #[test]
@@ -119,6 +123,7 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::SelfLink("a1".into()).into(),
         WriteError::RunTransition { run: "r".into(), to: RunState::Running }.into(),
         WriteError::RunActive { thread: "t".into(), run: "r".into() }.into(),
+        WriteError::RunWriter("run/r".into()).into(),
         ScopeError::NotTheUser("session/s".into()).into(),
         ScopeError::NoProposal("p".into()).into(),
         ScopeError::Decided("p".into()).into(),
@@ -156,13 +161,16 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("invalid-commit", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("user-from-environment", exit::USAGE, ""),
+        CliError::new("operator-actor", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
         CliError::new("no-server", exit::CONFIG, ""),
     ];
     let mut table = String::new();
     for error in &errors {
-        writeln!(table, "{} {}", error.exit, error.code).unwrap();
+        // Whether a run's operation that fails this way spends its number: a new code takes a side here.
+        let spent = if spends(error) { " spends" } else { "" };
+        writeln!(table, "{} {}{spent}", error.exit, error.code).unwrap();
     }
     insta::assert_snapshot!(table);
     // Every code a command can raise is in the table above, so the next one added there must be added here.
@@ -311,7 +319,7 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
     use acyclic_core::schema::{kind, thread};
     use acyclic_core::scope::ScopeEdit;
     use acyclic_core::state::Replica;
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
+    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
     let thread_key = |id: &str| Key::new(kind::THREAD, id).unwrap();
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), acyclic_core::state::State::new());
     for id in ["x", "y", "z", "late", "raced"] {
@@ -352,7 +360,7 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
     use acyclic_core::model::{By, LinkKind, Model, add_item, link};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: USER, at: 1 };
+    let user = By { actor: USER, at: 1, seen: None };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     let join = |replica: &mut Replica, item: &str, thread: &str| {
         let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
@@ -493,7 +501,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     use acyclic_core::model::{By, Evidence, ItemState, Model, add_item, set, set_state};
     use acyclic_core::schema::{item, kind, repository};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
+    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     add_item(&mut mac, "a", "A", user).unwrap();
     let repo = Key::new(kind::REPOSITORY, "r").unwrap();
@@ -786,4 +794,33 @@ fn flags_that_contradict_each_other_are_usage_errors() {
     ] {
         assert_eq!(check(line), Ok(()), "{line}");
     }
+}
+
+#[test]
+fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = Env { cwd: dir.path().to_path_buf(), ..env(&[("ACYCLIC_NOW", "1792022400000")]) };
+    let init = execute(["acyclic", "init", "tracker", "--replica", "mac"].map(Into::into), &env);
+    assert_eq!(init.code, 0, "{}", init.stdout);
+    let tracker = dir.path().join("tracker");
+    let cli = |command| Cli {
+        tracker: Some(tracker.clone()),
+        actor: Some("run/r1".into()),
+        as_user: false,
+        output: Some(args::Format::Json),
+        command,
+    };
+    let op = commands::Operation {
+        run: "r1".into(),
+        seq: 1,
+        seen: acyclic_core::state::Context::default(),
+    };
+    // The refused command's first batch found number 1 unspent; before its second, the same number was applied.
+    let add = || -> Command {
+        serde_json::from_value(json!({"thread": {"add": {"thread": "t", "title": "T"}}})).unwrap()
+    };
+    commands::apply(&cli(add()), &env, op.clone()).unwrap();
+    let refusal = CliError::refused("refused", "");
+    let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
+    assert_eq!((err.code, err.details), (commands::DUPLICATE, json!({"ok": true})));
 }

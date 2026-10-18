@@ -13,6 +13,7 @@ acyclic-cli = { path = "workspace/acyclic-cli" }
 acyclic-core = { path = "workspace/acyclic-core" }
 acyclic-fixtures = { path = "workspace/acyclic-fixtures" }
 acyclic-guard = { path = "workspace/acyclic-guard" }
+acyclic-operator = { path = "workspace/acyclic-operator" }
 acyclic-secrets = { path = "workspace/acyclic-secrets" }
 acyclic-server = { path = "workspace/acyclic-server" }
 # HTTP/1 only: Tailscale's proxy speaks it to the server, and HTTP/2 would carry the host outside `Host`.
@@ -21,6 +22,8 @@ clap = { version = "4.6.7", features = ["derive", "string"] }
 clap_complete = "4.6.11"
 # The terminal's width comes from `terminal_size`, so the table needs no terminal library of its own.
 comfy-table = { version = "8.0.1", default-features = false }
+# Run tokens are signed with Ed25519, so a server can check them without being able to mint them.
+ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 # The engine is linked in, so tests need no shared library at run time.
 hegeltest = { version = "0.49.8", features = ["static-engine"] }

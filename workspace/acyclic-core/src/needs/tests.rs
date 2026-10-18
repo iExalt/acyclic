@@ -20,7 +20,7 @@ impl Ancestry for Unmapped {
 }
 
 fn user(at: Millis) -> By<'static> {
-    By { actor: USER, at }
+    By { actor: USER, at, seen: None }
 }
 
 fn replica(name: &str) -> Replica {
@@ -163,7 +163,7 @@ fn the_state_puts_its_problems_on_the_list() {
     edit(
         &mut a,
         &ScopeEdit::Member { item: "y".into(), thread: Some("ok".into()) },
-        By { actor: "run/r1", at: 3 },
+        By { actor: "run/r1", at: 3, seen: None },
     )
     .unwrap();
     claim::claim(&mut a, "tk", "run/ghost", 3, None, NOW).unwrap();
@@ -287,7 +287,7 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
 
 #[test]
 fn an_agents_member_the_approval_never_saw_is_the_users_to_keep_or_drop() {
-    let agent = By { actor: "session/pi", at: 2 };
+    let agent = By { actor: "session/pi", at: 2, seen: None };
     let unapproved = |r: &Replica| -> Vec<String> {
         list(r)
             .into_iter()

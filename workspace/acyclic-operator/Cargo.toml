@@ -1,0 +1,17 @@
+[package]
+name = "acyclic-operator"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true
+
+[dependencies]
+acyclic-cli.workspace = true
+acyclic-core.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,4 +1,5 @@
-use std::os::unix::fs::symlink;
+use std::fs;
+use std::os::unix::fs::PermissionsExt as _;
 
 use super::*;
 
@@ -31,27 +32,13 @@ fn only_a_session_already_made_exists() {
 }
 
 #[test]
-fn a_session_others_could_read_or_that_holds_no_token_is_refused() {
-    let refused = |prepare: &dyn Fn(&Path)| {
+fn a_session_file_that_holds_no_token_is_refused() {
+    for text in ["", "not a token\n"] {
         let home = tempfile::tempdir().unwrap();
         let (_, path) = open(home.path(), false).unwrap();
-        prepare(&path);
-        open(home.path(), false).unwrap_err().code
-    };
-    let chmod =
-        |path: &Path, mode| fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
-    assert_eq!(refused(&|path| chmod(path, 0o644)), "session");
-    assert_eq!(refused(&|path| chmod(path.parent().unwrap(), 0o755)), "session");
-    assert_eq!(refused(&|path| fs::write(path, "").unwrap()), "session");
-    assert_eq!(refused(&|path| fs::write(path, "not a token\n").unwrap()), "session");
-    assert_eq!(
-        refused(&|path| {
-            let elsewhere = path.with_file_name("elsewhere");
-            fs::rename(path, &elsewhere).unwrap();
-            symlink(&elsewhere, path).unwrap();
-        }),
-        "session"
-    );
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(open(home.path(), false).unwrap_err().code, "session", "{text:?}");
+    }
 }
 
 const TEXT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

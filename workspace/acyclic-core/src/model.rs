@@ -12,7 +12,7 @@ use serde_json::Value as Json;
 
 use crate::graph;
 use crate::schema::{item as field, kind, link, repository, run, set, thread};
-use crate::state::{Error, Key, Millis, Replica, State};
+use crate::state::{Context, Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
 pub const MAX_ID_LEN: usize = 64;
@@ -752,6 +752,8 @@ pub enum WriteError {
         /// The refused state.
         to: RunState,
     },
+    /// Only the user or an operator starts or moves a run.
+    RunWriter(String),
     /// The thread already has an active run.
     RunActive {
         /// The thread.
@@ -786,6 +788,9 @@ impl fmt::Display for WriteError {
                  or relates-to for context"
             ),
             Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
+            Self::RunWriter(actor) => {
+                write!(f, "only the user or an operator starts or moves a run, not {actor}")
+            },
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
             },
@@ -808,6 +813,11 @@ pub struct By<'a> {
     pub actor: &'a str,
     /// The write's timestamp.
     pub at: Millis,
+    /// For a run's write, what the run had seen: a field set through [`set`] supersedes only the values this covers,
+    /// so values written meanwhile that the run never saw survive beside its own as a conflict. `None` supersedes
+    /// every value this replica has seen, as every other writer does. Writes that read the field and decide, such
+    /// as a state's move or a claim, supersede what they read either way.
+    pub seen: Option<&'a Context>,
 }
 
 /// A checked id or element name: a valid key id of at most [`MAX_ID_LEN`] characters.
@@ -868,7 +878,8 @@ const USER_ONLY: [(&str, &str); 7] = [
 
 /// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
 /// archived flag and reopen flag, a link's fields, a run's thread and state) are refused: use their checked writes.
-/// A thread's approval, flags and choices and the global settings are the user's alone.
+/// A thread's approval, flags and choices and the global settings are the user's alone. A run's write supersedes only
+/// what it had seen ([`By::seen`]).
 ///
 /// # Errors
 ///
@@ -892,7 +903,14 @@ pub fn set<T: Serialize>(
     if user_only && by.actor != crate::scope::USER {
         return Err(WriteError::UserOnly { field: name.to_owned(), actor: by.actor.to_owned() });
     }
-    put(replica, key, name, value, by)
+    match by.seen {
+        Some(seen) => {
+            let value = value.map_or(Json::Null, to_json);
+            replica.write_seen(key, name, by.actor, by.at, value, seen)?;
+            Ok(())
+        },
+        None => put(replica, key, name, value, by),
+    }
 }
 
 /// Writes a single-valued field. A clear writes `null` rather than nothing, so a set it never saw conflicts with it
@@ -1113,17 +1131,33 @@ pub fn unlink(
     Ok(wrote)
 }
 
+/// Refuses a run's start or move by anyone but the user or an operator: a run on a project-management thread acts as
+/// a project manager, so whoever could start one could grant themselves that.
+///
+/// It stops actors that arrive from a run's token, which are never the user or an operator, and mistakes; the CLI
+/// refuses to declare an operator, but a process with the tracker clone can write anything, so the real boundary is
+/// that runs get a token and never the clone.
+fn run_writer(by: By<'_>) -> Result<(), WriteError> {
+    if by.actor == crate::scope::USER || by.actor.starts_with(crate::scope::OPERATOR) {
+        Ok(())
+    } else {
+        Err(WriteError::RunWriter(by.actor.to_owned()))
+    }
+}
+
 /// Records a run starting on a thread.
 ///
 /// # Errors
 ///
-/// Fails when the thread already has an active run in this replica's view, or the state layer refuses.
+/// Fails when anyone but the user or an operator starts it, when the thread already has an active run in this
+/// replica's view, or when the state layer refuses.
 pub fn start_run(
     replica: &mut Replica,
     id: &str,
     thread: &str,
     by: By<'_>,
 ) -> Result<Key, WriteError> {
+    run_writer(by)?;
     let model = Model::read(&replica.state)?;
     if let Some(active) = model
         .runs
@@ -1143,13 +1177,15 @@ pub fn start_run(
 ///
 /// # Errors
 ///
-/// Fails on an unknown run, a move backward or out of an ended state, or when the state layer refuses.
+/// Fails when anyone but the user or an operator moves it, on an unknown run, a move backward or out of an ended
+/// state, or when the state layer refuses.
 pub fn set_run_state(
     replica: &mut Replica,
     id: &str,
     state: RunState,
     by: By<'_>,
 ) -> Result<(), WriteError> {
+    run_writer(by)?;
     let key = Key::new(kind::RUN, name(id)?)?;
     let current = value::<RunState>(&replica.state, &key, run::STATE)?;
     let allowed = current.all().into_iter().all(|from| {

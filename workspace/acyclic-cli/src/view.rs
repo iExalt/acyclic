@@ -530,7 +530,7 @@ mod tests {
     const NOW: Millis = 1_000;
 
     fn by(actor: &str) -> By<'_> {
-        By { actor, at: NOW }
+        By { actor, at: NOW, seen: None }
     }
 
     fn key(kind: &str, id: &str) -> Key {

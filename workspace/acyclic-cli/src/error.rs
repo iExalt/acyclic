@@ -117,6 +117,7 @@ impl From<WriteError> for CliError {
             WriteError::FollowsRetired => Self::refused("follows-retired", message),
             WriteError::RunTransition { .. } => Self::refused("run-transition", message),
             WriteError::RunActive { .. } => Self::refused("run-active", message),
+            WriteError::RunWriter(_) => Self::refused("run-writer", message),
         }
     }
 }

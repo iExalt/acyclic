@@ -48,7 +48,7 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
     let meta = Meta { actor: "actor/user".to_owned(), run: None };
     tracker
         .batch(&meta, NOW, false, &|_, _| None, |replica, at| {
-            let by = By { actor: "actor/user", at };
+            let by = By { actor: "actor/user", at, seen: None };
             let record = Key::new(kind::REPOSITORY, "code").unwrap();
             model::set(replica, &record, repository::DEFAULT_BRANCH, Some(&"main"), by)
                 .map_err(state_error)?;

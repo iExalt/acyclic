@@ -90,7 +90,9 @@ impl Pair {
     fn edit(tracker: &Tracker, actor: &str, now: Millis, edit: Edit<'_>) {
         let meta = Meta { actor: actor.to_owned(), run: None };
         tracker
-            .batch(&meta, now, false, &|_, _| None, |replica, at| edit(replica, By { actor, at }))
+            .batch(&meta, now, false, &|_, _| None, |replica, at| {
+                edit(replica, By { actor, at, seen: None })
+            })
             .unwrap();
     }
 

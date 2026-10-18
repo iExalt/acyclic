@@ -15,6 +15,7 @@ pub mod model;
 pub mod natural;
 pub mod needs;
 pub mod place;
+pub mod private;
 #[doc(hidden)]
 pub mod probe;
 pub mod ready;

@@ -32,10 +32,6 @@ fn values(state: &State, key: &Key, field: &str) -> Vec<Json> {
     state.field(key, field).into_iter().flatten().map(|(_, v)| v.value.clone()).collect()
 }
 
-fn op(run: &str, seq: u64, key: &Key, field: &str, value: Option<Json>, seen: Vec<Dot>) -> Op {
-    Op { run: run.to_owned(), seq, key: key.clone(), field: field.to_owned(), value, seen }
-}
-
 fn round_trip(state: &State) -> State {
     State::from_files(&state.to_files()).unwrap()
 }
@@ -228,16 +224,33 @@ fn an_intact_replica_writes_offline() {
     assert_eq!(dot, Some(Dot(id("a"), 1)));
 }
 
+/// A run's operation as the applying replica runs it: checked against the run's numbers, written under the run's
+/// own actor from what it saw, and recorded.
+fn run_op(
+    server: &mut Replica,
+    run: &str,
+    seq: u64,
+    item: &Key,
+    value: Json,
+    seen: &Context,
+) -> Option<Dot> {
+    if server.sequence(run, seq).unwrap() != Sequence::Next {
+        return None;
+    }
+    let dot = server.write_seen(item, "title", &format!("run/{run}"), 3, value, seen).unwrap();
+    server.record(run, seq, None, 3).unwrap();
+    Some(dot)
+}
+
 #[test]
 fn a_stale_run_conflicts_instead_of_losing_an_edit() {
     let item = key("item", "a1");
     let mut server = replica("server");
-    let base = server.write(&item, "title", "user", 1, Some(json!("v1"))).unwrap().unwrap();
+    server.write(&item, "title", "user", 1, Some(json!("v1"))).unwrap();
+    let base = server.state.context.clone();
     // The user edits after the run read its base.
     server.write(&item, "title", "user", 2, Some(json!("user edit"))).unwrap();
-    let applied =
-        server.apply(&op("r1", 1, &item, "title", Some(json!("run edit")), vec![base]), 3).unwrap();
-    assert!(matches!(applied, Applied::Applied(_)));
+    run_op(&mut server, "r1", 1, &item, json!("run edit"), &base).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("user edit"), json!("run edit")]);
 }
 
@@ -245,11 +258,12 @@ fn a_stale_run_conflicts_instead_of_losing_an_edit() {
 fn a_run_that_saw_the_current_values_replaces_them() {
     let item = key("item", "a1");
     let mut server = replica("server");
-    let x = server.write(&item, "title", "user", 1, Some(json!("x"))).unwrap().unwrap();
+    server.write(&item, "title", "user", 1, Some(json!("x"))).unwrap();
     let mut mac = replica("mac");
-    let y = mac.write(&item, "title", "user", 1, Some(json!("y"))).unwrap().unwrap();
+    mac.write(&item, "title", "user", 1, Some(json!("y"))).unwrap();
     server.join(&mac.state).unwrap();
-    server.apply(&op("r1", 1, &item, "title", Some(json!("merged")), vec![x, y]), 2).unwrap();
+    let seen = server.state.context.clone();
+    run_op(&mut server, "r1", 1, &item, json!("merged"), &seen).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("merged")]);
 }
 
@@ -257,28 +271,41 @@ fn a_run_that_saw_the_current_values_replaces_them() {
 fn a_run_supersedes_itself_and_a_resent_op_applies_once() {
     let item = key("item", "a1");
     let mut server = replica("server");
-    let first = op("r1", 1, &item, "title", Some(json!("one")), vec![]);
-    server.apply(&first, 1).unwrap();
+    let nothing = Context::default();
+    run_op(&mut server, "r1", 1, &item, json!("one"), &nothing).unwrap();
     let after_first = server.state.clone();
-    assert_eq!(server.apply(&first, 2), Ok(Applied::Duplicate));
+    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: true, refusal: None }));
+    assert_eq!(run_op(&mut server, "r1", 1, &item, json!("again"), &nothing), None);
     assert_eq!(server.state, after_first);
-    server.apply(&op("r1", 2, &item, "title", Some(json!("two")), vec![]), 3).unwrap();
+    // The run's view never held its own first write, yet the second replaces it.
+    run_op(&mut server, "r1", 2, &item, json!("two"), &nothing).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("two")]);
+    // Only the latest refusal is kept, and an older number is merely spent.
+    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: false, refusal: None }));
+    let check = server.state.context.clone();
+    assert!(run_op(&mut server, "r1", 3, &item, json!("three"), &check).is_some());
+    server.record("r1", 4, Some(&json!({"code": "user-only"})), 4).unwrap();
+    let refused = Some(json!({"code": "user-only"}));
+    assert_eq!(
+        server.sequence("r1", 4),
+        Ok(Sequence::Duplicate { latest: true, refusal: refused })
+    );
+    assert_eq!(server.sequence("r1", 3), Ok(Sequence::Duplicate { latest: false, refusal: None }));
 }
 
 #[test]
 fn a_gap_or_another_replica_is_refused() {
     let item = key("item", "a1");
     let mut server = replica("server");
-    server.apply(&op("r1", 1, &item, "f", Some(json!(1)), vec![]), 1).unwrap();
+    run_op(&mut server, "r1", 1, &item, json!(1), &Context::default()).unwrap();
     assert_eq!(
-        server.apply(&op("r1", 3, &item, "f", Some(json!(3)), vec![]), 2),
+        server.sequence("r1", 3),
         Err(Error::Gap { run: "r1".to_owned(), expected: 2, got: 3 })
     );
     let mut other = replica("other");
     other.join(&server.state).unwrap();
     assert_eq!(
-        other.apply(&op("r1", 2, &item, "f", Some(json!(2)), vec![]), 3),
+        other.sequence("r1", 2),
         Err(Error::WrongReplica { run: "r1".to_owned(), applied_by: "server".to_owned() })
     );
 }
@@ -292,8 +319,7 @@ fn context_size_does_not_grow_with_runs() {
         server.join(&mac.state).unwrap();
         for run in 0..runs {
             let item = key("item", &format!("i{}", run % 10));
-            server
-                .apply(&op(&format!("r{run}"), 1, &item, "f", Some(json!(run)), vec![]), 2)
+            run_op(&mut server, &format!("r{run}"), 1, &item, json!(run), &Context::default())
                 .unwrap();
         }
         (server.state.context.seen.len(), server.state.context.clocks.len())
@@ -429,7 +455,7 @@ const REPLICAS: [&str; 3] = ["r0", "r1", "r2"];
 enum Step {
     Write { replica: usize, entity: usize, field: usize, value: Option<i64> },
     Join { into: usize, from: usize },
-    RunOp { run: usize, entity: usize, field: usize, value: Option<i64>, seen_mask: u8 },
+    RunOp { run: usize, entity: usize, field: usize, value: Option<i64>, view: usize },
     Resend { run: usize, back: usize },
 }
 
@@ -460,15 +486,15 @@ fn steps(tc: &TestCase) -> Vec<Step> {
                 entity: below(tc, 4),
                 field: below(tc, 3),
                 value: value(tc),
-                seen_mask: tc.draw(gs::integers::<u8>()),
+                view: tc.draw(gs::integers::<usize>().max_value(64)),
             },
             _ => Step::Resend { run: below(tc, 4), back: below(tc, 4) },
         })
         .collect()
 }
 
-/// Runs the steps; each run is applied by replica `run % 3`, with a random subset of the field's current dots as
-/// what it saw, so many runs are stale.
+/// Runs the steps; each run is applied by replica `run % 3`, with one of that replica's earlier contexts as what it
+/// saw, so many runs are stale.
 fn play(steps: &[Step]) -> Vec<Replica> {
     let mut play = Play::new();
     for step in steps {
@@ -478,13 +504,16 @@ fn play(steps: &[Step]) -> Vec<Replica> {
 }
 
 /// Three replicas part way through a list of steps. Each step checks what it promises as it goes: a run's operation
-/// replaces exactly the values its run saw, and a resent one changes nothing.
+/// replaces exactly the values its run saw and its own, and a resent one changes nothing.
+/// How many of each replica's latest contexts a run may take as its view.
+const VIEWS: usize = 4;
+
 struct Play {
     replicas: Vec<Replica>,
-    /// Each run's operations, in order.
-    sent: [Vec<Op>; 4],
-    /// Every dot each replica's fields have held, so a run can have seen values written over since.
-    held: BTreeMap<(usize, Key, String), BTreeSet<Dot>>,
+    /// How many operations each run has sent.
+    sent: [u64; 4],
+    /// Every context each replica has had, so a run's view can be any earlier one: a stale run.
+    views: [Vec<Context>; 3],
     at: Millis,
 }
 
@@ -492,14 +521,14 @@ impl Play {
     fn new() -> Self {
         Self {
             replicas: REPLICAS.iter().map(|name| replica(name)).collect(),
-            sent: Default::default(),
-            held: BTreeMap::new(),
+            sent: [0; 4],
+            views: Default::default(),
             at: 0,
         }
     }
 
     fn step(&mut self, step: &Step) {
-        let Self { replicas, sent, held, at } = self;
+        let Self { replicas, sent, views, at } = self;
         let at = std::mem::replace(at, *at + 1);
         match step {
             Step::Write { replica, entity, field, value } => {
@@ -512,39 +541,30 @@ impl Play {
                 let other = replicas[*from].state.clone();
                 replicas[*into].join(&other).unwrap();
             },
-            Step::RunOp { run, entity, field, value, seen_mask } => {
+            Step::RunOp { run, entity, field, value, view } => {
                 let applier = &mut replicas[run % 3];
                 let item = key("item", &format!("e{entity}"));
                 let field = format!("f{field}");
-                // A random subset of what the field has held here, current or written over: a stale run's view.
-                let seen = held
-                    .get(&(run % 3, item.clone(), field.clone()))
-                    .into_iter()
-                    .flatten()
-                    .enumerate()
-                    .filter(|(i, _)| seen_mask & (1 << (i % 8)) != 0)
-                    .map(|(_, dot)| dot.clone())
-                    .collect::<Vec<_>>();
-                let actor = format!("run/run{run}");
+                let seen = views[run % 3]
+                    .get(*view % views[run % 3].len().max(1))
+                    .cloned()
+                    .unwrap_or_default();
+                let name = format!("run{run}");
+                let actor = format!("run/{name}");
+                let seq = sent[*run] + 1;
+                assert_eq!(applier.sequence(&name, seq), Ok(Sequence::Next));
                 // What it didn't see, and didn't write itself, stays beside its value as a conflict.
                 let mut kept: BTreeSet<Dot> = applier
                     .state
                     .field(&item, &field)
                     .into_iter()
                     .flatten()
-                    .filter(|(dot, stamped)| !seen.contains(dot) && stamped.actor != actor)
+                    .filter(|(dot, stamped)| !seen.covers(dot) && stamped.actor != actor)
                     .map(|(dot, _)| dot.clone())
                     .collect();
-                let op = op(
-                    &format!("run{run}"),
-                    sent[*run].len() as u64 + 1,
-                    &item,
-                    &field,
-                    value.map(Json::from),
-                    seen,
-                );
-                let Ok(Applied::Applied(dot)) = applier.apply(&op, at) else { panic!("{op:?}") };
-                kept.extend(dot);
+                let value = value.map_or(Json::Null, Json::from);
+                kept.insert(applier.write_seen(&item, &field, &actor, at, value, &seen).unwrap());
+                applier.record(&name, seq, None, at).unwrap();
                 let now: BTreeSet<Dot> = applier
                     .state
                     .field(&item, &field)
@@ -552,24 +572,26 @@ impl Play {
                     .flatten()
                     .map(|(d, _)| d.clone())
                     .collect();
-                assert_eq!(now, kept, "an operation replaces exactly what its run saw");
-                sent[*run].push(op);
+                assert_eq!(now, kept, "an operation replaces exactly what its run saw and its own");
+                sent[*run] = seq;
             },
             Step::Resend { run, back } => {
-                let Some(op) = sent[*run].iter().rev().nth(*back) else { return };
-                let applier = &mut replicas[run % 3];
-                let before = applier.state.clone();
-                assert_eq!(applier.apply(op, at), Ok(Applied::Duplicate));
-                assert_eq!(applier.state, before, "a resent operation changes nothing");
+                let Some(seq) = sent[*run].checked_sub(*back as u64).filter(|seq| *seq > 0) else {
+                    return;
+                };
+                let applier = &replicas[run % 3];
+                assert!(matches!(
+                    applier.sequence(&format!("run{run}"), seq),
+                    Ok(Sequence::Duplicate { .. })
+                ));
             },
         }
+        // A run's view is one of its replica's last few contexts: stale enough to miss writes, few enough to copy.
         for (index, replica) in replicas.iter().enumerate() {
-            for (key, entity) in replica.state.entities() {
-                for (field, register) in entity {
-                    let dots = held.entry((index, key.clone(), field.clone())).or_default();
-                    dots.extend(register.keys().cloned());
-                }
+            if views[index].len() == VIEWS {
+                views[index].remove(0);
             }
+            views[index].push(replica.state.context.clone());
         }
     }
 }
@@ -665,6 +687,39 @@ fn a_journal_records_exactly_what_changed(tc: TestCase) {
     assert_eq!(after, before);
     after.swap(&mut journal);
     assert_eq!(after, later);
+}
+
+/// A run's write supersedes exactly the values its view covers: with this replica's whole context it is a plain write,
+/// and with another replica's, older view, whatever that view never saw survives beside the new value.
+#[hegel::test]
+fn a_write_supersedes_exactly_what_its_view_saw(tc: TestCase) {
+    let replicas = play(&steps(&tc));
+    let (writer, viewer) = (below(&tc, 3), below(&tc, 3));
+    let item = key("item", &format!("e{}", below(&tc, 4)));
+    let field = format!("f{}", below(&tc, 3));
+    let value = json!(tc.draw(gs::integers::<i64>().min_value(0).max_value(4)));
+    let base = &replicas[writer];
+    let (mut plain, mut seen) = (base.clone(), base.clone());
+    plain.write(&item, &field, "run/r", 5, Some(value.clone())).unwrap();
+    let context = base.state.context.clone();
+    seen.write_seen(&item, &field, "run/r", 5, value.clone(), &context).unwrap();
+    assert_eq!(seen.state, plain.state, "a view of everything is a plain write");
+
+    let view = replicas[viewer].state.context.clone();
+    let mut stale = base.clone();
+    // Two writes from the same old view, as a run makes before it fetches again: the second replaces the first.
+    stale.write_seen(&item, &field, "run/r", 5, json!("first"), &view).unwrap();
+    let dot = stale.write_seen(&item, &field, "run/r", 6, value, &view).unwrap();
+    let dots = |state: &State| -> BTreeSet<Dot> {
+        state.field(&item, &field).into_iter().flatten().map(|(d, _)| d.clone()).collect()
+    };
+    let unseen: BTreeSet<Dot> = dots(&base.state).into_iter().filter(|d| !view.covers(d)).collect();
+    assert_eq!(
+        dots(&stale.state),
+        unseen.into_iter().chain([dot]).collect(),
+        "only what the view saw, and the writer's own, is superseded"
+    );
+    assert!(stale.state.check().is_ok());
 }
 
 /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.

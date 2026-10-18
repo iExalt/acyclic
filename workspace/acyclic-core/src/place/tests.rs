@@ -5,7 +5,7 @@ use crate::model::{ItemState, add_item, item_key, link, set_parent, set_state};
 use crate::schema::{item as field, kind, thread};
 use crate::state::{Key, ReplicaId, State};
 
-const USER: By<'static> = By { actor: "actor/user", at: 1 };
+const USER: By<'static> = By { actor: "actor/user", at: 1, seen: None };
 
 fn replica_named(name: &str) -> Replica {
     Replica::open(ReplicaId::new(name).unwrap(), State::new())
@@ -42,12 +42,12 @@ fn model(r: &Replica) -> Model {
 }
 
 fn place_one(r: &mut Replica, item: &str, actor: &'static str) -> Vec<Inherited> {
-    place(r, &[item.to_owned()], By { actor, at: 9 }).unwrap()
+    place(r, &[item.to_owned()], By { actor, at: 9, seen: None }).unwrap()
 }
 
 #[test]
 fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
-    let user = By { actor: USER.actor, at: 1 };
+    let user = By { actor: USER.actor, at: 1, seen: None };
     let mut r = group(1);
     for (thread, approved, pm) in [("ok", true, false), ("loose", false, false), ("pm", true, true)]
     {
@@ -85,8 +85,10 @@ fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
     let mut other = replica_named("pi");
     add(&mut r, "torn", None);
     other.join(r.state()).unwrap();
-    set_parent(&mut r, "torn", Some("g1-00"), By { actor: USER.actor, at: 20 }).unwrap();
-    set_parent(&mut other, "torn", Some("p"), By { actor: USER.actor, at: 20 }).unwrap();
+    set_parent(&mut r, "torn", Some("g1-00"), By { actor: USER.actor, at: 20, seen: None })
+        .unwrap();
+    set_parent(&mut other, "torn", Some("p"), By { actor: USER.actor, at: 20, seen: None })
+        .unwrap();
     r.join(other.state()).unwrap();
     assert_eq!(inherited_thread(&model(&r), "torn"), None);
 }
@@ -142,7 +144,7 @@ fn an_agents_sibling_join_into_approved_scope_is_a_proposal() {
     write(&mut r, &ok, thread::APPROVED, json!(true));
     set_thread(&mut r, "g1-00", "ok");
     add(&mut r, "late", Some("g1"));
-    let agent = By { actor: "session/mac", at: 9 };
+    let agent = By { actor: "session/mac", at: 9, seen: None };
     let placed = place(&mut r, &["late".to_owned()], agent).unwrap();
     let [joined] = placed.as_slice() else { panic!("{placed:?}") };
     assert_eq!((joined.thread.as_str(), joined.proposal.is_some()), ("ok", true));

@@ -7,8 +7,8 @@ fn replica() -> Replica {
     Replica::open(ReplicaId::new("mac").unwrap(), State::new())
 }
 
-const AGENT: By<'static> = By { actor: "session/mac", at: 2 };
-const USER_BY: By<'static> = By { actor: USER, at: 1 };
+const AGENT: By<'static> = By { actor: "session/mac", at: 2, seen: None };
+const USER_BY: By<'static> = By { actor: USER, at: 1, seen: None };
 
 fn titled(title: &str) -> ItemFields {
     ItemFields { title: Some(title.to_owned()), ..ItemFields::default() }

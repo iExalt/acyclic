@@ -57,6 +57,14 @@ pub fn actor(cli: &Cli, env: &Env) -> Result<String, CliError> {
 }
 
 fn checked_actor(actor: &str) -> Result<String, CliError> {
+    // The operator writes through the library with its own identity; a command line naming it could start runs.
+    if actor.starts_with(acyclic_core::scope::OPERATOR) {
+        return Err(CliError::new(
+            "operator-actor",
+            exit::USAGE,
+            format!("{actor} is the operator's identity, which no command line may claim"),
+        ));
+    }
     let valid = actor.split_once('/').is_some_and(|(kind, id)| !kind.is_empty() && !id.is_empty())
         && !actor.chars().any(char::is_whitespace);
     if valid {

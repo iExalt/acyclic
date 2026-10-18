@@ -14,7 +14,7 @@ mod view;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Format, Serve, Up};
+pub use crate::commands::Operation;
 pub use crate::context::now;
 use crate::error::{CliError, exit};
 
@@ -236,6 +237,139 @@ pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8
     };
     timestamps(&mut envelope);
     (code, envelope)
+}
+
+/// What applying a run's operation did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Applied {
+    /// The command ran, or the tracker refused it: either way its number is spent. The exit code and the envelope.
+    Ran(u8, Value),
+    /// The number was applied already, so nothing ran: the outcome recorded for it, if it was the run's latest.
+    Duplicate(Option<Value>),
+}
+
+/// Applies a run's operation to the tracker clone at `tracker`: `command`, as `run/<run>`, writing under the run's
+/// view and spending its number in the same batch. A command the tracker refuses spends its number too, with the
+/// refusal as its outcome, so the run's later operations aren't stuck behind it.
+///
+/// # Errors
+///
+/// A failure that says nothing about the command, such as the store failing, a gap in the run's numbers, or a
+/// replica that doesn't apply this run, as its exit code and envelope. The number stays unspent, so the run can send
+/// the operation again.
+pub fn apply(
+    operation: Operation,
+    command: Command,
+    tracker: PathBuf,
+    env: &Env,
+) -> Result<Applied, (u8, Value)> {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(format!("run/{}", operation.run)),
+        as_user: false,
+        output: Some(Format::Json),
+        command,
+    };
+    let duplicate =
+        |err: CliError| Applied::Duplicate(Some(err.details).filter(|details| !details.is_null()));
+    let failed = |err: CliError| (err.exit, err.envelope());
+    match cli.command.validate().and_then(|()| commands::apply(&cli, env, operation.clone())) {
+        Ok(data) => {
+            let mut envelope = json!({"ok": true, "data": data});
+            timestamps(&mut envelope);
+            Ok(Applied::Ran(exit::OK, envelope))
+        },
+        Err(err) if err.code == commands::DUPLICATE => Ok(duplicate(err)),
+        Err(err) if spends(&err) => match commands::refuse(&cli, env, operation, &err) {
+            Ok(()) => Ok(Applied::Ran(err.exit, err.envelope())),
+            Err(again) if again.code == commands::DUPLICATE => Ok(duplicate(again)),
+            Err(again) => Err(failed(again)),
+        },
+        Err(err) => Err(failed(err)),
+    }
+}
+
+/// Spends a run's operation without running its command, with `refusal` as its outcome: for a command the operator
+/// refuses to forward, so that the run's later operations aren't stuck behind it.
+///
+/// # Errors
+///
+/// As [`apply`]'s.
+pub fn refuse(
+    operation: Operation,
+    refusal: &CliError,
+    tracker: PathBuf,
+    env: &Env,
+) -> Result<Applied, (u8, Value)> {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(format!("run/{}", operation.run)),
+        as_user: false,
+        output: Some(Format::Json),
+        command: Command::List,
+    };
+    match commands::refuse(&cli, env, operation, refusal) {
+        Ok(()) => Ok(Applied::Ran(refusal.exit, refusal.envelope())),
+        Err(err) if err.code == commands::DUPLICATE => {
+            Ok(Applied::Duplicate(Some(err.details).filter(|details| !details.is_null())))
+        },
+        Err(err) => Err((err.exit, err.envelope())),
+    }
+}
+
+/// Starts run `run` on `thread` in the clone at `tracker`, as the operator `operator` (`operator/<id>`).
+///
+/// # Errors
+///
+/// When the thread already has a run under way, or the tracker can't be opened or written, as an exit code and
+/// envelope.
+pub fn start_run(
+    operator: &str,
+    run: &str,
+    thread: &str,
+    tracker: &Path,
+    env: &Env,
+) -> Result<Value, (u8, Value)> {
+    commands::start_run(tracker, env, operator, run, thread)
+        .map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Moves run `run` to `state` in the clone at `tracker`, as the operator `operator`.
+///
+/// # Errors
+///
+/// When the run can't move that way, or the tracker can't be opened or written, as an exit code and envelope.
+pub fn set_run_state(
+    operator: &str,
+    run: &str,
+    state: acyclic_core::model::RunState,
+    tracker: &Path,
+    env: &Env,
+) -> Result<Value, (u8, Value)> {
+    commands::set_run_state(tracker, env, operator, run, state)
+        .map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Whether run `run` is under way on `thread` in the clone at `tracker`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn run_active(run: &str, thread: &str, tracker: &Path) -> Result<bool, (u8, Value)> {
+    commands::run_active(tracker, run, thread).map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Whether a failed operation spends its number: when the command itself was refused, as it would be again, but not
+/// when the store, the setup, the clock or the run's numbering failed, which a later try may get past.
+fn spends(err: &CliError) -> bool {
+    match err.exit {
+        exit::USAGE | exit::NOT_FOUND => true,
+        exit::REFUSED => !matches!(
+            err.code,
+            "sequence-gap" | "wrong-replica" | "clock-jump" | "not-continuous" | "id-reused"
+        ),
+        _ => false,
+    }
 }
 
 fn render(value: &serde_json::Value) -> String {

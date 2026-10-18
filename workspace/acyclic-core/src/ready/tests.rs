@@ -32,7 +32,7 @@ impl Ancestry for Fake {
 }
 
 fn by(at: Millis) -> By<'static> {
-    By { actor: "actor/user", at }
+    By { actor: "actor/user", at, seen: None }
 }
 
 fn replica(name: &str) -> Replica {

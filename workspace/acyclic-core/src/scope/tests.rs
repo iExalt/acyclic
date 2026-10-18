@@ -13,7 +13,7 @@ fn replica(name: &str) -> Replica {
 }
 
 fn by(actor: &str, at: Millis) -> By<'_> {
-    By { actor, at }
+    By { actor, at, seen: None }
 }
 
 fn thread_key(id: &str) -> Key {
