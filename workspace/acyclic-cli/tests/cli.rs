@@ -614,11 +614,13 @@ fn a_run_queues_its_writes_and_pushes_them_as_operations() {
     let mut sh = Shell::new();
     let shared = sh.path().join("shared.git");
     git(sh.path(), &["init", "-q", "--bare", "shared.git"]);
-    // The receiver stands in for the operator: it prints what `reply` holds and exits with `exit`.
+    // The receiver stands in for the operator: it prints what `reply` holds and exits with `exit`, then takes up
+    // `reply.next` and `exit.next` for the next push, if there are any.
     let hook = shared.join("hooks/pre-receive");
     std::fs::write(
         &hook,
-        "#!/bin/sh\ncat \"$GIT_DIR/reply\" >&2\nexit \"$(cat \"$GIT_DIR/exit\")\"\n",
+        "#!/bin/sh\ncd \"$GIT_DIR\"\ncat reply >&2\ncode=\"$(cat exit)\"\n\
+         [ -f reply.next ] && mv reply.next reply && mv exit.next exit\nexit \"$code\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
@@ -723,4 +725,16 @@ fn a_run_queues_its_writes_and_pushes_them_as_operations() {
     reply(&[ok(6), summary_line(&Summary::Forwarded(1))], 0);
     assert_eq!(sh.output("ops push", AGENT).1["data"]["settled"], 6);
     assert_eq!(sh.output("ops reset", AGENT).1["data"]["dropped"], 0);
+
+    // A receiver that lost what it took is pushed from the start, once.
+    assert_eq!(queue(&mut sh, "item edit a --title Again"), 7);
+    reply(&[summary_line(&Summary::Refused("too-many".into()))], 1);
+    std::fs::write(
+        shared.join("reply.next"),
+        [ok(7), summary_line(&Summary::Forwarded(1))].join("\n"),
+    )
+    .unwrap();
+    std::fs::write(shared.join("exit.next"), "0").unwrap();
+    let (status, out) = sh.output("ops push", AGENT);
+    assert_eq!((status, &out["data"]["settled"]), (0, &json!(7)), "{out}");
 }

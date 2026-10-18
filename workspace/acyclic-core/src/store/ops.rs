@@ -34,6 +34,26 @@ pub fn chunk(taken: u64, queued: u64) -> u64 {
     queued.min(taken.saturating_add(MOST_PUSHED))
 }
 
+/// Why a chunk didn't follow on from the remote's ref.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stale {
+    /// The receiver counted more than [`MOST_PUSHED`] new operations: it lacks some the clone took it to have.
+    TooMany,
+    /// Git refused the chunk as not a fast-forward: the remote has more than the clone took it to have.
+    Behind,
+}
+
+/// Where the last push taken should be after a stale chunk, from where the clone took it to be, `accepted`, and the
+/// last operation known spent, `settled`; `None` when moving it can't help. A remote missing operations is pushed
+/// from the start; one with more is pushed from the last operation spent, which a push the remote took never passes.
+#[must_use]
+pub fn carry_on(stale: Stale, accepted: u64, settled: u64) -> Option<u64> {
+    match stale {
+        Stale::TooMany => (accepted > 0).then_some(0),
+        Stale::Behind => (settled > accepted).then_some(settled),
+    }
+}
+
 /// What a run should do after the receiver refused its push outright, by the refusal's code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Next {
@@ -295,6 +315,7 @@ impl Tracker {
         };
         let Some(tip) = self.git.resolve(QUEUE)? else { return Ok(pushed) };
         pushed.queued = self.highest(&tip)?;
+        let mut healed = false;
         loop {
             let taken = match self.git.resolve(ACCEPTED)? {
                 Some(commit) => self.highest(&commit)?,
@@ -306,7 +327,31 @@ impl Tracker {
             }
             let commit =
                 self.git.text(["rev-parse", &format!("{tip}~{}", pushed.queued - upto)])?;
-            let once = self.push_once(remote, run, &commit, upto)?;
+            let (once, behind) = self.push_once(remote, run, &commit, upto)?;
+            // A chunk the remote refused for not following on from where the clone thought it was: the remote lost
+            // its ref, or this clone its record of the last push taken. Carry on from where it must be, once.
+            let stale = if behind {
+                Some(Stale::Behind)
+            } else if once.report.summary == Some(Summary::Refused("too-many".to_owned())) {
+                Some(Stale::TooMany)
+            } else {
+                None
+            };
+            if let Some(stale) = stale.filter(|_| !healed) {
+                healed = true;
+                let settled = self.git.resolve(SETTLED)?;
+                match (carry_on(stale, taken, self.settled()?), settled) {
+                    (Some(0), _) => {
+                        self.git.run(["update-ref", "-d", ACCEPTED], None, &[])?;
+                        continue;
+                    },
+                    (Some(_), Some(settled)) => {
+                        self.git.run(["update-ref", ACCEPTED, &settled], None, &[])?;
+                        continue;
+                    },
+                    _ => {},
+                }
+            }
             pushed.report.ops.extend(once.report.ops);
             pushed.report.summary = once.report.summary;
             let room = MOST_MESSAGES.saturating_sub(pushed.report.messages.len());
@@ -328,7 +373,7 @@ impl Tracker {
         run: &str,
         commit: &str,
         upto: u64,
-    ) -> Result<Pushed, StoreError> {
+    ) -> Result<(Pushed, bool), StoreError> {
         let settled = self.settled()?;
         if upto > settled {
             self.git.run(["update-ref", UNKNOWN, commit], None, &[])?;
@@ -362,14 +407,15 @@ impl Tracker {
             let rejected = stdout.lines().find(|line| line.starts_with('!'));
             escape(rejected.unwrap_or_else(|| stderr.trim()))
         });
-        Ok(Pushed {
+        let pushed = Pushed {
             accepted,
             report,
             settled: reached.max(now_settled),
             queued: upto,
             unknown,
             reason,
-        })
+        };
+        Ok((pushed, unsent))
     }
 
     /// Drops every queued operation after the last one known to be spent.
@@ -488,6 +534,14 @@ mod tests {
         assert_eq!(chunk(MOST_PUSHED, 450), 2 * MOST_PUSHED);
         assert_eq!(chunk(400, 450), 450);
         assert_eq!(chunk(450, 450), 450);
+    }
+
+    #[test]
+    fn a_stale_chunk_carries_on_from_where_the_remote_must_be() {
+        assert_eq!(carry_on(Stale::TooMany, 400, 400), Some(0));
+        assert_eq!(carry_on(Stale::TooMany, 0, 300), None);
+        assert_eq!(carry_on(Stale::Behind, 0, 250), Some(250));
+        assert_eq!(carry_on(Stale::Behind, 250, 250), None);
     }
 
     #[test]
