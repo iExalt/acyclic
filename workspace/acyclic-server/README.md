@@ -56,7 +56,8 @@ other is refused as not in this thread.
 
 Each repository has a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by default under `~/.local/share`), made on
 first use and fetched from `https://github.com/<owner>/<name>.git` (`ACYCLIC_UPSTREAM` names another forge) whenever a
-run fetches, and every 5 minutes unless `--sync-every 0`; when the forge can't be reached, runs get the mirror as last
+run fetches, unless another fetch began in the last 5 seconds (`ACYCLIC_MIRROR_FRESH`), and every 5 minutes unless
+`--sync-every 0`; when the forge can't be reached, runs get the mirror as last
 fetched. Git runs there with no settings or credentials of the user's, so only public repositories can be mirrored for
 now. Readiness checks whether a commit is merged against the mirror of a repository with no clone mapped in
 `~/.config/acyclic/clones.toml`.
@@ -65,8 +66,8 @@ No run reaches a mirror itself: each thread has a repository of its own beside i
 and holds its runs' pushes. A run sees the forge's branches and tags and its thread's runs' refs, so one replacing
 another picks up its work, and nothing of another thread's. It pushes only to its own refs, `refs/runs/<run>/*`, and
 only commits; a push's hook scans the new commits for the deny-list's terms, in a public repository, and with
-Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB, and a run one push at a time to each
-repository.
+Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB and 64 refs, and a run one push at a time to
+each repository.
 
 Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, the
 repositories of finished threads, those with every item done and no run under way, are removed once every run's ref

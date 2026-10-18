@@ -164,6 +164,8 @@ fn runs_reach_their_threads_code_alone_and_push_only_their_own_refs() {
         .env("ACYCLIC_NOW", NOW)
         .env("ACYCLIC_TRACKER", dir.join("tracker"))
         .env("ACYCLIC_UPSTREAM", format!("file://{}", upstream.display()))
+        // Every fetch reaches the forge, so the forge moving on shows at once.
+        .env("ACYCLIC_MIRROR_FRESH", "0")
         .env("HOME", &home)
         .env("XDG_DATA_HOME", dir.join("data"))
         .env("GIT_CONFIG_NOSYSTEM", "1")

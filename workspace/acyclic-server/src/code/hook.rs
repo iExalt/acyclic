@@ -21,6 +21,9 @@ pub const PUBLIC: &str = "ACYCLIC_PUBLIC";
 /// The deny-list file, readable by the user alone.
 pub const DENY: &str = "ACYCLIC_DENY_FILE";
 
+/// The most refs one push may update: the new commits go to Gitleaks on its command line, which must stay short.
+const MOST_UPDATES: usize = 64;
+
 /// Runs the hook in this process, as git runs it under `git receive-pack`.
 #[must_use]
 pub fn main() -> ExitCode {
@@ -53,7 +56,11 @@ fn check(repo: &Path, input: &str, run: &str, public: bool, deny: &Path) -> Resu
     let zero = |id: &str| id.bytes().all(|byte| byte == b'0');
     let mut news = Vec::new();
     let mut names = Vec::new();
-    for line in input.lines().filter(|line| !line.is_empty()) {
+    let lines: Vec<&str> = input.lines().filter(|line| !line.is_empty()).collect();
+    if lines.len() > MOST_UPDATES {
+        return Err(format!("a push updates at most {MOST_UPDATES} refs"));
+    }
+    for line in lines {
         let [_, new, reference] = line.split(' ').collect::<Vec<_>>()[..] else {
             return Err("the hook couldn't read the push's updates".to_owned());
         };
@@ -67,7 +74,9 @@ fn check(repo: &Path, input: &str, run: &str, public: bool, deny: &Path) -> Resu
         if git(repo, &["cat-file", "-t", new])?.trim() != "commit" {
             return Err(format!("{reference} must name a commit"));
         }
-        news.push(new.to_owned());
+        if !news.iter().any(|seen| seen == new) {
+            news.push(new.to_owned());
+        }
     }
     // Loaded before anything else is read, so it fails closed, and nothing refused echoes its terms.
     let list = private::check(deny, false)

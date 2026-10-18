@@ -57,6 +57,10 @@ const FETCHES: usize = 8;
 /// How long a fetch waits for one of the [`FETCHES`] before it is refused.
 const FETCH_WAIT: Duration = Duration::from_secs(30);
 
+/// How long a mirror's fetch serves the runs' fetches that follow, in seconds, unless `ACYCLIC_MIRROR_FRESH` says
+/// otherwise: runs fetching one after another share a fetch from the forge rather than each queueing behind it.
+pub const FRESH: u64 = 5;
+
 /// The upstream every mirror is fetched from, `<upstream>/<owner>/<name>.git`, unless `ACYCLIC_UPSTREAM` names another.
 pub const UPSTREAM: &str = "https://github.com";
 
@@ -81,6 +85,8 @@ pub struct Code {
     path: String,
     /// When each mirror's last successful fetch began, by record id.
     fetched: Mutex<BTreeMap<String, Instant>>,
+    /// How long a fetch serves those that follow.
+    fresh: Duration,
     /// One lock per repository, held while its mirror or a thread's repository of it is made, fetched or removed.
     fetching: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// The runs with a push under way, with the repository's record: `<run> <record>`.
@@ -125,6 +131,12 @@ impl Code {
             .map_or(UPSTREAM, String::as_str)
             .trim_end_matches('/')
             .to_owned();
+        let fresh = settings.env.vars.get("ACYCLIC_MIRROR_FRESH").map_or(Ok(FRESH), |seconds| {
+            seconds
+                .parse()
+                .map_err(|_| format!("ACYCLIC_MIRROR_FRESH is {seconds}: give whole seconds"))
+        })?;
+        let fresh = Duration::from_secs(fresh);
         let path = settings.env.vars.get("PATH").cloned().unwrap_or_else(|| "/usr/bin:/bin".into());
         Ok(Self {
             settings,
@@ -132,6 +144,7 @@ impl Code {
             upstream,
             path,
             fetched: Mutex::default(),
+            fresh,
             fetching: Mutex::default(),
             pushing: Arc::default(),
             fetches: Arc::new(tokio::sync::Semaphore::new(FETCHES)),
@@ -269,8 +282,8 @@ impl Code {
         Ok(repository)
     }
 
-    /// Fetches the mirror at `mirror` from the forge if it is missing, or if `refresh` and no fetch begun since
-    /// `asked` finished meanwhile, so fetches asked for together share one. A new mirror is fetched where it is made
+    /// Fetches the mirror at `mirror` from the forge if it is missing, or if `refresh` and neither a fetch begun since
+    /// `asked` nor one begun within the last [`FRESH`] seconds finished, so fetches asked for together or soon after share one. A new mirror is fetched where it is made
     /// and moved into place only once it holds the forge's branches; it never prunes objects on its own, since the
     /// threads' repositories borrow them. Called with the record's lock held.
     async fn fetch(
@@ -288,7 +301,7 @@ impl Code {
             .lock()
             .map_err(|_| internal())?
             .get(&record.id)
-            .is_some_and(|began| *began >= asked);
+            .is_some_and(|began| *began >= asked || began.elapsed() < self.fresh);
         if made && (fresh || !refresh) {
             return Ok(());
         }
@@ -926,5 +939,49 @@ mod tests {
         collect(&git, &mirror, &threads, &finished);
         assert!(borrowers(&threads).is_empty());
         assert!(!kept());
+    }
+
+    #[tokio::test]
+    async fn runs_fetching_soon_after_another_share_its_fetch_from_the_forge() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let upstream = temp.path().join("forge/o1/app.git");
+        std::fs::create_dir_all(&upstream).unwrap();
+        run(&upstream, &["init", "-q", "--bare"]);
+        let tree = object(&upstream, "tree", b"");
+        let first = run(&upstream, &["commit-tree", &tree, "-m", "first"]);
+        run(&upstream, &["update-ref", "refs/heads/main", &first]);
+        let code = |fresh: &str| {
+            let vars = [
+                ("HOME", temp.path().display().to_string()),
+                ("PATH", std::env::var("PATH").unwrap()),
+                ("ACYCLIC_UPSTREAM", format!("file://{}", temp.path().join("forge").display())),
+                ("ACYCLIC_MIRROR_FRESH", fresh.to_owned()),
+            ];
+            let env = Env {
+                vars: vars.into_iter().map(|(key, value)| (key.to_owned(), value)).collect(),
+                ..Env::default()
+            };
+            let deny = temp.path().join("deny-list");
+            Code::new(Settings { env, executable: "/bin/sh".into(), deny }).unwrap()
+        };
+        let one = |value: &str| acyclic_core::model::Value::One(value.to_owned());
+        let record = Repository {
+            id: "app".into(),
+            owner: one("o1"),
+            name: one("app"),
+            public: acyclic_core::model::Value::One(true),
+            default_branch: one("main"),
+            installation: acyclic_core::model::Value::None,
+        };
+        let main = |repository: &Path| run(repository, &["rev-parse", "refs/heads/main"]);
+        let shared = code("60");
+        let repository = shared.workspace(&record, "t0", true).await.unwrap();
+        assert_eq!(main(&repository), first);
+        let second = run(&upstream, &["commit-tree", &tree, "-p", &first, "-m", "second"]);
+        run(&upstream, &["update-ref", "refs/heads/main", &second]);
+        shared.workspace(&record, "t0", true).await.unwrap();
+        assert_eq!(main(&repository), first, "within the minute, the last fetch serves");
+        code("0").workspace(&record, "t0", true).await.unwrap();
+        assert_eq!(main(&repository), second);
     }
 }
