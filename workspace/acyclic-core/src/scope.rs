@@ -16,6 +16,10 @@ use crate::state::{Error, Key, Replica, State};
 /// The user's actor id.
 pub const USER: &str = "actor/user";
 
+/// The prefix of an operator's actor id, such as `operator/mac`: the one other actor that starts and moves runs.
+/// Anywhere else it counts as an agent.
+pub const OPERATOR: &str = "operator/";
+
 /// Who an edit comes from, as far as scope is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {

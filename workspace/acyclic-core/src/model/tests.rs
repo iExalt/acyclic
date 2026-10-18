@@ -364,6 +364,23 @@ fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
 }
 
 #[test]
+fn only_the_user_or_an_operator_starts_or_moves_a_run() {
+    let (mut a, _) = pair(&[]);
+    let operator = By { actor: "operator/mac", at: 1 };
+    start_run(&mut a, "r1", "t1", operator).unwrap();
+    for actor in ["run/r1", "agent/x", "session/mac", "operatorx/mac"] {
+        let agent = By { actor, at: 2 };
+        assert_eq!(start_run(&mut a, "r2", "t2", agent), Err(WriteError::RunWriter(actor.into())));
+        assert_eq!(
+            set_run_state(&mut a, "r1", RunState::Done, agent),
+            Err(WriteError::RunWriter(actor.into()))
+        );
+    }
+    set_run_state(&mut a, "r1", RunState::Running, operator).unwrap();
+    set_run_state(&mut a, "r1", RunState::Done, by(3)).unwrap();
+}
+
+#[test]
 fn a_thread_runs_one_run_at_a_time() {
     let (mut a, mut b) = pair(&[]);
     start_run(&mut a, "r1", "t1", by(1)).unwrap();

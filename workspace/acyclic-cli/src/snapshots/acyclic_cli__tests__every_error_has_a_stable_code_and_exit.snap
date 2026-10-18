@@ -24,6 +24,7 @@ expression: table
 1 self-link
 1 run-transition
 1 run-active
+1 run-writer
 1 user-only
 3 not-found
 1 decided
@@ -60,6 +61,7 @@ expression: table
 2 invalid-commit
 2 invalid-actor
 2 user-from-environment
+2 operator-actor
 5 config
 5 no-remote
 5 no-server

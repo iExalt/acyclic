@@ -37,6 +37,10 @@ fn the_user_is_never_inherited_from_the_environment() {
     assert_eq!(actor("acyclic needs --as-user", &user), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor actor/user", &session), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor nobody", &[]), Err("invalid-actor"));
+    // Nor is the operator, from anywhere.
+    let operator = [("ACYCLIC_ACTOR", "operator/mac")];
+    assert_eq!(actor("acyclic needs", &operator), Err("operator-actor"));
+    assert_eq!(actor("acyclic needs --actor operator/mac", &[]), Err("operator-actor"));
 }
 
 #[test]
@@ -119,6 +123,7 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::SelfLink("a1".into()).into(),
         WriteError::RunTransition { run: "r".into(), to: RunState::Running }.into(),
         WriteError::RunActive { thread: "t".into(), run: "r".into() }.into(),
+        WriteError::RunWriter("run/r".into()).into(),
         ScopeError::NotTheUser("session/s".into()).into(),
         ScopeError::NoProposal("p".into()).into(),
         ScopeError::Decided("p".into()).into(),
@@ -156,6 +161,7 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("invalid-commit", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("user-from-environment", exit::USAGE, ""),
+        CliError::new("operator-actor", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
         CliError::new("no-server", exit::CONFIG, ""),

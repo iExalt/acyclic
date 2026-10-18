@@ -752,6 +752,8 @@ pub enum WriteError {
         /// The refused state.
         to: RunState,
     },
+    /// Only the user or an operator starts or moves a run.
+    RunWriter(String),
     /// The thread already has an active run.
     RunActive {
         /// The thread.
@@ -786,6 +788,9 @@ impl fmt::Display for WriteError {
                  or relates-to for context"
             ),
             Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
+            Self::RunWriter(actor) => {
+                write!(f, "only the user or an operator starts or moves a run, not {actor}")
+            },
             Self::RunActive { thread, run } => {
                 write!(f, "thread {thread} already has run {run} under way")
             },
@@ -1113,17 +1118,33 @@ pub fn unlink(
     Ok(wrote)
 }
 
+/// Refuses a run's start or move by anyone but the user or an operator: a run on a project-management thread acts as
+/// a project manager, so whoever could start one could grant themselves that.
+///
+/// It stops actors that arrive from a run's token, which are never the user or an operator, and mistakes; the CLI
+/// refuses to declare an operator, but a process with the tracker clone can write anything, so the real boundary is
+/// that runs get a token and never the clone.
+fn run_writer(by: By<'_>) -> Result<(), WriteError> {
+    if by.actor == crate::scope::USER || by.actor.starts_with(crate::scope::OPERATOR) {
+        Ok(())
+    } else {
+        Err(WriteError::RunWriter(by.actor.to_owned()))
+    }
+}
+
 /// Records a run starting on a thread.
 ///
 /// # Errors
 ///
-/// Fails when the thread already has an active run in this replica's view, or the state layer refuses.
+/// Fails when anyone but the user or an operator starts it, when the thread already has an active run in this
+/// replica's view, or when the state layer refuses.
 pub fn start_run(
     replica: &mut Replica,
     id: &str,
     thread: &str,
     by: By<'_>,
 ) -> Result<Key, WriteError> {
+    run_writer(by)?;
     let model = Model::read(&replica.state)?;
     if let Some(active) = model
         .runs
@@ -1143,13 +1164,15 @@ pub fn start_run(
 ///
 /// # Errors
 ///
-/// Fails on an unknown run, a move backward or out of an ended state, or when the state layer refuses.
+/// Fails when anyone but the user or an operator moves it, on an unknown run, a move backward or out of an ended
+/// state, or when the state layer refuses.
 pub fn set_run_state(
     replica: &mut Replica,
     id: &str,
     state: RunState,
     by: By<'_>,
 ) -> Result<(), WriteError> {
+    run_writer(by)?;
     let key = Key::new(kind::RUN, name(id)?)?;
     let current = value::<RunState>(&replica.state, &key, run::STATE)?;
     let allowed = current.all().into_iter().all(|from| {
