@@ -10,6 +10,7 @@ mod edit;
 mod hints;
 mod page;
 mod pretty;
+pub mod remote;
 mod view;
 
 use std::collections::BTreeMap;
@@ -173,6 +174,27 @@ fn execute_with(
     };
     if let Err(err) = cli.command.validate() {
         return failed(err);
+    }
+    let local = matches!(
+        cli.command,
+        Command::Prime | Command::Completions { .. } | Command::Import { schema: true, .. }
+    );
+    if let Some(url) = env.var(remote::REMOTE).filter(|_| !local) {
+        return match remote::run(&cli, env, url) {
+            Ok(mut data) => match output {
+                Format::Json => Outcome::out(exit::OK, render(&json!({"ok": true, "data": data}))),
+                Format::Pretty => {
+                    timestamps(&mut data);
+                    Outcome::out(exit::OK, pretty::render(&cli.command, &data, env.terminal))
+                },
+            },
+            Err((code, envelope)) => match output {
+                Format::Json => Outcome::out(code, render(&envelope)),
+                Format::Pretty => {
+                    Outcome { code, stdout: String::new(), stderr: pretty::error(&envelope) }
+                },
+            },
+        };
     }
     let start = match &cli.command {
         Command::Serve(options) => Some(Start::Serve(options)),
