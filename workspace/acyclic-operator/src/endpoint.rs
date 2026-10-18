@@ -4,10 +4,12 @@
 //! protocol keeps no session. Each run has an inbox of its own, a bare repository under the operator's directory that
 //! refuses deletions and rewrites and runs only the operator's hook ([`crate::hook`]), which checks and forwards the
 //! push before git takes it. `git receive-pack` runs with an environment of the endpoint's making, nothing inherited,
-//! and one at a time per run, within a time limit.
+//! and one at a time per run, within a time limit; past it, receive-pack and its hook are killed together, in their own
+//! process group.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -206,6 +208,7 @@ impl Endpoint {
         }
         let mut child = command
             .arg(inbox)
+            .process_group(0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -228,6 +231,9 @@ impl Endpoint {
                     std::thread::sleep(Duration::from_millis(20));
                 },
                 _ => {
+                    // The hook too, which would otherwise carry on forwarding.
+                    let group = format!("-{}", child.id());
+                    let _ = Command::new("kill").args(["-KILL", "--", &group]).status();
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err("the push took too long".to_owned());

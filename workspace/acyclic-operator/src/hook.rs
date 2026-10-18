@@ -29,8 +29,9 @@ pub const OPERATOR: &str = "ACYCLIC_OPERATOR_ID";
 /// The deny-list file, readable by the user alone.
 pub const DENY: &str = "ACYCLIC_DENY_FILE";
 
-/// The most operations one push may carry.
-const MOST_OPS: usize = 1000;
+/// The most operations one push may carry: few enough to forward, one batch each, well within the endpoint's time
+/// limit.
+const MOST_OPS: usize = 200;
 /// The largest operation file, in bytes.
 const MOST_BYTES: u64 = 64 * 1024;
 

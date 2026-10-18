@@ -163,6 +163,9 @@ fn a_runs_push_reaches_the_tracker_once_through_the_operator() {
     assert_eq!(status(&address, &get("git-receive-pack", &forged)), 401);
     assert_eq!(status(&address, &post(&forged)), 401);
     assert_eq!(status(&address, &get("git-upload-pack", &token)), 403);
+    let gzipped =
+        post(&token).replace("Content-Length", "Content-Encoding: gzip\r\nContent-Length");
+    assert_eq!(status(&address, &gzipped), 415);
     assert!(!inboxes.exists(), "a refused request starts no receive-pack");
 
     // The run's writes reach the tracker as the run.
