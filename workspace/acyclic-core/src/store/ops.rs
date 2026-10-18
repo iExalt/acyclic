@@ -151,6 +151,25 @@ fn code(text: &str) -> &str {
     if is_code(text) { text } else { "unknown" }
 }
 
+/// The last operation known spent after a report, from `settled` before it: each operation reported applied or
+/// refused right after the last one counts, until one failed or a number is skipped. A push the receiver rejected
+/// leaves its ref where it was, so the next push sends the earlier operations again, and they are reported again,
+/// applied already; they are passed over, not taken for a gap.
+#[must_use]
+pub fn reach(settled: u64, ops: &[(u64, Outcome)]) -> u64 {
+    let mut reached = settled;
+    for (seq, outcome) in ops {
+        if *seq <= reached {
+            continue;
+        }
+        if *seq != reached + 1 || matches!(outcome, Outcome::Failed(_)) {
+            break;
+        }
+        reached = *seq;
+    }
+    reached
+}
+
 /// What a push did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pushed {
@@ -243,17 +262,7 @@ impl Tracker {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let report = parse(&stderr);
         let accepted = output.status.success();
-        let mut reached = settled;
-        if accepted {
-            reached = queued;
-        } else {
-            for (seq, outcome) in &report.ops {
-                if *seq != reached + 1 || matches!(outcome, Outcome::Failed(_)) {
-                    break;
-                }
-                reached = *seq;
-            }
-        }
+        let reached = if accepted { queued } else { reach(settled, &report.ops).min(queued) };
         let _lock = self.lock()?;
         let now_settled = self.settled()?;
         if reached > now_settled {
@@ -367,6 +376,22 @@ mod tests {
         assert_eq!(parse(&op_line(4, &odd)).ops, [(4, Outcome::Refused("unknown".into()))]);
         for summary in [Summary::Forwarded(2), Summary::Refused("secret".into())] {
             assert_eq!(parse(&summary_line(&summary)).summary, Some(summary));
+        }
+    }
+
+    #[test]
+    fn a_report_settles_what_follows_on_until_a_failure_or_a_gap() {
+        let busy = || Outcome::Failed("busy".into());
+        let refused = || Outcome::Refused("not-in-thread".into());
+        for (settled, ops, reached) in [
+            (0, vec![(1, Outcome::Ok), (2, refused()), (3, busy())], 2),
+            // Resent after a rejected push: the earlier ones come back applied already.
+            (1, vec![(1, Outcome::Ok), (2, Outcome::Ok), (3, busy())], 2),
+            (1, vec![(3, Outcome::Ok)], 1),
+            (2, vec![(1, busy()), (3, Outcome::Ok)], 3),
+            (0, vec![], 0),
+        ] {
+            assert_eq!(reach(settled, &ops), reached, "{settled} {ops:?}");
         }
     }
 

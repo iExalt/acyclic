@@ -696,20 +696,27 @@ fn a_run_queues_its_writes_and_pushes_them_as_operations() {
         "{out}"
     );
 
+    // Pushed again, what was applied comes back applied already, and what follows it still settles.
+    assert_eq!(queue(&mut sh, "item edit a --title Final"), 6);
+    let busy = op_line(6, &Outcome::Failed("busy".into()));
+    reply(&[ok(4), ok(5), busy, summary_line(&Summary::Forwarded(3))], 1);
+    let (_, out) = sh.output("ops push", AGENT);
+    assert_eq!(out["error"]["details"]["settled"], 5, "{out}");
+
     // A push the operator refused outright spends nothing, and abandoning it reuses the numbers it held.
     reply(&[summary_line(&Summary::Refused("secret".into()))], 1);
     let (_, out) = sh.output("ops push", AGENT);
     assert_eq!(out["error"]["details"]["next"], "reset", "{out}");
     let (_, out) = sh.output("ops reset", AGENT);
     assert_eq!(out["data"]["dropped"], 1, "{out}");
-    assert_eq!(queue(&mut sh, "item edit a --title Fine"), 5);
+    assert_eq!(queue(&mut sh, "item edit a --title Fine"), 6);
 
     // A push that heard no report may have spent anything it sent, so reset waits for a push that hears one.
     reply(&[], 1);
     let (_, out) = sh.output("ops push", AGENT);
     assert_eq!(out["error"]["details"]["next"], "push", "{out}");
     assert_eq!(code(&sh.output("ops reset", AGENT).1).as_deref(), Some("push-unknown"));
-    reply(&[ok(5), summary_line(&Summary::Forwarded(1))], 0);
-    assert_eq!(sh.output("ops push", AGENT).1["data"]["settled"], 5);
+    reply(&[ok(6), summary_line(&Summary::Forwarded(1))], 0);
+    assert_eq!(sh.output("ops push", AGENT).1["data"]["settled"], 6);
     assert_eq!(sh.output("ops reset", AGENT).1["data"]["dropped"], 0);
 }
