@@ -5,6 +5,9 @@
 //! takes the run from the token alone: an operation names no run. It forwards only the commands a run may send
 //! ([`allowed`]); the tracker applies each as the run, through the CLI's own checks, once. Ending a run therefore
 //! revokes its token, whatever the token's own expiry.
+//!
+//! What a run says it had seen is its own word: a run could claim to have seen everything and so supersede a value it
+//! never saw. Keeping such values as conflicts protects against a stale run's mistakes, not against a hostile one.
 
 use std::path::PathBuf;
 
@@ -107,14 +110,17 @@ impl Tracker for Clone {
 #[must_use]
 pub fn allowed(command: &Command) -> bool {
     match command {
-        Command::Claim { .. }
+        Command::Claim { force: false, .. }
         | Command::Release { .. }
-        | Command::Done { .. }
+        | Command::Done { force: false, .. }
         | Command::Item(
             ItemCommand::Add { .. } | ItemCommand::Edit(_) | ItemCommand::Reopen { .. },
         )
         | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => true,
-        Command::Init { .. }
+        // Forcing a claim past readiness, or a finish past its checks, is the user's to do.
+        Command::Claim { force: true, .. }
+        | Command::Done { force: true, .. }
+        | Command::Init { .. }
         | Command::Sync { .. }
         | Command::Prime
         | Command::Ready { .. }

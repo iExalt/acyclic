@@ -238,7 +238,7 @@ fn run_op(
         return None;
     }
     let dot = server.write_seen(item, "title", &format!("run/{run}"), 3, value, seen).unwrap();
-    server.record(run, seq, &json!({"ok": true}), 3).unwrap();
+    server.record(run, seq, None, 3).unwrap();
     Some(dot)
 }
 
@@ -274,14 +274,23 @@ fn a_run_supersedes_itself_and_a_resent_op_applies_once() {
     let nothing = Context::default();
     run_op(&mut server, "r1", 1, &item, json!("one"), &nothing).unwrap();
     let after_first = server.state.clone();
-    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate(Some(json!({"ok": true})))));
+    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: true, refusal: None }));
     assert_eq!(run_op(&mut server, "r1", 1, &item, json!("again"), &nothing), None);
     assert_eq!(server.state, after_first);
     // The run's view never held its own first write, yet the second replaces it.
     run_op(&mut server, "r1", 2, &item, json!("two"), &nothing).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("two")]);
-    // Only the latest outcome is kept.
-    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate(None)));
+    // Only the latest refusal is kept, and an older number is merely spent.
+    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: false, refusal: None }));
+    let check = server.state.context.clone();
+    assert!(run_op(&mut server, "r1", 3, &item, json!("three"), &check).is_some());
+    server.record("r1", 4, Some(&json!({"code": "user-only"})), 4).unwrap();
+    let refused = Some(json!({"code": "user-only"}));
+    assert_eq!(
+        server.sequence("r1", 4),
+        Ok(Sequence::Duplicate { latest: true, refusal: refused })
+    );
+    assert_eq!(server.sequence("r1", 3), Ok(Sequence::Duplicate { latest: false, refusal: None }));
 }
 
 #[test]
@@ -496,6 +505,9 @@ fn play(steps: &[Step]) -> Vec<Replica> {
 
 /// Three replicas part way through a list of steps. Each step checks what it promises as it goes: a run's operation
 /// replaces exactly the values its run saw and its own, and a resent one changes nothing.
+/// How many of each replica's latest contexts a run may take as its view.
+const VIEWS: usize = 4;
+
 struct Play {
     replicas: Vec<Replica>,
     /// How many operations each run has sent.
@@ -552,7 +564,7 @@ impl Play {
                     .collect();
                 let value = value.map_or(Json::Null, Json::from);
                 kept.insert(applier.write_seen(&item, &field, &actor, at, value, &seen).unwrap());
-                applier.record(&name, seq, &json!({"ok": true}), at).unwrap();
+                applier.record(&name, seq, None, at).unwrap();
                 let now: BTreeSet<Dot> = applier
                     .state
                     .field(&item, &field)
@@ -570,11 +582,15 @@ impl Play {
                 let applier = &replicas[run % 3];
                 assert!(matches!(
                     applier.sequence(&format!("run{run}"), seq),
-                    Ok(Sequence::Duplicate(_))
+                    Ok(Sequence::Duplicate { .. })
                 ));
             },
         }
+        // A run's view is one of its replica's last few contexts: stale enough to miss writes, few enough to copy.
         for (index, replica) in replicas.iter().enumerate() {
+            if views[index].len() == VIEWS {
+                views[index].remove(0);
+            }
             views[index].push(replica.state.context.clone());
         }
     }

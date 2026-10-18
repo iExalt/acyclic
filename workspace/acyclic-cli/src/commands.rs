@@ -51,9 +51,14 @@ const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
 fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
     match replica.sequence(&op.run, op.seq)? {
         Sequence::Next => Ok(()),
-        Sequence::Duplicate(outcome) => {
+        Sequence::Duplicate { latest, refusal } => {
+            let outcome = match (latest, refusal) {
+                (true, Some(refusal)) => json!({"ok": false, "code": refusal["code"]}),
+                (true, None) => json!({"ok": true}),
+                (false, _) => Json::Null,
+            };
             Err(CliError::new(DUPLICATE, exit::OK, "the operation was applied already")
-                .with(outcome.unwrap_or(Json::Null)))
+                .with(outcome))
         },
     }
 }
@@ -69,7 +74,7 @@ pub fn apply(cli: &Cli, env: &Env, operation: Operation) -> Result<Json, CliErro
     session.operation = Some(operation);
     let data = session.dispatch(&cli.command)?;
     if !session.recorded.get() {
-        session.record(&json!({"ok": true}))?;
+        session.record(None)?;
     }
     Ok(data)
 }
@@ -88,7 +93,7 @@ pub fn refuse(
 ) -> Result<(), CliError> {
     let mut session = Session::open(cli, env)?;
     session.operation = Some(operation);
-    session.record(&json!({"ok": false, "code": refusal.code}))
+    session.record(Some(&json!({"code": refusal.code})))
 }
 
 /// Starts run `run` on `thread`, as the operator `operator`, which no command line may name.
@@ -508,12 +513,12 @@ impl<'a> Session<'a> {
     }
 
     /// Records the operation's number alone, in a batch that checks it again.
-    fn record(&self, outcome: &Json) -> Result<(), CliError> {
+    fn record(&self, refusal: Option<&Json>) -> Result<(), CliError> {
         let Some(op) = &self.operation else { return Ok(()) };
         let meta = Meta { actor: self.actor.clone(), run: Some((op.run.clone(), op.seq)) };
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             next(replica, op)?;
-            Ok::<_, CliError>(replica.record(&op.run, op.seq, outcome, at)?)
+            Ok::<_, CliError>(replica.record(&op.run, op.seq, refusal, at)?)
         })?;
         Ok(())
     }
@@ -541,7 +546,7 @@ impl<'a> Session<'a> {
             let data = apply(replica, By { actor: &self.actor, at, seen })?;
             *result.borrow_mut() = (data, replica.changes() != before);
             if let Some(op) = operation {
-                replica.record(&op.run, op.seq, &json!({"ok": true}), at)?;
+                replica.record(&op.run, op.seq, None, at)?;
             }
             Ok(())
         })?;

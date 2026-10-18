@@ -168,7 +168,9 @@ fn every_error_has_a_stable_code_and_exit() {
     ];
     let mut table = String::new();
     for error in &errors {
-        writeln!(table, "{} {}", error.exit, error.code).unwrap();
+        // Whether a run's operation that fails this way spends its number: a new code takes a side here.
+        let spent = if spends(error) { " spends" } else { "" };
+        writeln!(table, "{} {}{spent}", error.exit, error.code).unwrap();
     }
     insta::assert_snapshot!(table);
     // Every code a command can raise is in the table above, so the next one added there must be added here.
@@ -821,32 +823,4 @@ fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
     let refusal = CliError::refused("refused", "");
     let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
     assert_eq!((err.code, err.details), (commands::DUPLICATE, json!({"ok": true})));
-}
-
-#[test]
-fn a_refused_command_spends_its_number_and_a_failure_of_anything_else_doesnt() {
-    let spent = [
-        CliError::new("usage", exit::USAGE, ""),
-        CliError::new("not-found", exit::NOT_FOUND, ""),
-        CliError::refused("user-only", ""),
-        CliError::refused("claimed", ""),
-        CliError::refused("checked-field", ""),
-    ];
-    let unspent = [
-        CliError::refused("sequence-gap", ""),
-        CliError::refused("wrong-replica", ""),
-        CliError::refused("clock-jump", ""),
-        CliError::refused("not-continuous", ""),
-        CliError::refused("id-reused", ""),
-        CliError::new("busy", exit::STORE, ""),
-        CliError::new("config", exit::CONFIG, ""),
-        CliError::new("unreadable", exit::UNREADABLE, ""),
-        CliError::new("internal", exit::UNREADABLE, ""),
-    ];
-    for err in &spent {
-        assert!(spends(err), "{}", err.code);
-    }
-    for err in &unspent {
-        assert!(!spends(err), "{}", err.code);
-    }
 }

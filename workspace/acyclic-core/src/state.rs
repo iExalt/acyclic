@@ -479,16 +479,21 @@ pub struct Replica {
 pub enum Sequence {
     /// It is the next one: apply it, then [`Replica::record`] it.
     Next,
-    /// It was applied already, with this outcome if it was the latest; apply nothing.
-    Duplicate(Option<Json>),
+    /// It was applied already; apply nothing.
+    Duplicate {
+        /// Whether it was the run's latest.
+        latest: bool,
+        /// The refusal recorded for it, if it was the latest and was refused.
+        refusal: Option<Json>,
+    },
 }
 
 /// The run entity's field holding the last applied sequence number.
 pub const RUN_APPLIED_SEQ: &str = "applied-seq";
 /// The run entity's field naming the replica that applies the run.
 pub const RUN_APPLIED_BY: &str = "applied-by";
-/// The run entity's field holding the latest operation's number and outcome, for a run that sends it again.
-pub const RUN_APPLIED_OUTCOME: &str = "applied-outcome";
+/// The run entity's field holding the latest refused operation's number and refusal, for a run that sends it again.
+pub const RUN_APPLIED_REFUSAL: &str = "applied-refusal";
 
 impl Replica {
     /// A replica whose own state is intact.
@@ -686,10 +691,11 @@ impl Replica {
             .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
             .unwrap_or(0);
         if seq <= last {
-            let latest = one(RUN_APPLIED_OUTCOME)
-                .filter(|recorded| recorded["seq"] == seq)
-                .map(|recorded| recorded["outcome"].clone());
-            return Ok(Sequence::Duplicate(latest));
+            let latest = seq == last;
+            let refusal = one(RUN_APPLIED_REFUSAL)
+                .filter(|recorded| latest && recorded["seq"] == seq)
+                .map(|recorded| recorded["refusal"].clone());
+            return Ok(Sequence::Duplicate { latest, refusal });
         }
         if seq != last + 1 {
             return Err(Error::Gap { run: run.to_owned(), expected: last + 1, got: seq });
@@ -697,18 +703,28 @@ impl Replica {
         Ok(Sequence::Next)
     }
 
-    /// Records the run's operation `seq` as applied, with its outcome, under this replica's own actor. Call it in the
-    /// same batch as the operation's writes, after [`Replica::sequence`] said it was next.
+    /// Records the run's operation `seq` as applied, or as refused with `refusal`, under this replica's own actor. Call
+    /// it in the same batch as the operation's writes, after [`Replica::sequence`] said it was next. Only a refusal is
+    /// stored beside the number, so an applied operation costs one write; keep a refusal small, and its numbers
+    /// integers.
     ///
     /// # Errors
     ///
-    /// Fails when the replica can't mint dots yet.
-    pub fn record(&mut self, run: &str, seq: u64, outcome: &Json, at: Millis) -> Result<(), Error> {
+    /// Fails when the replica can't mint dots yet, or on a refusal holding a number that isn't an integer.
+    pub fn record(
+        &mut self,
+        run: &str,
+        seq: u64,
+        refusal: Option<&Json>,
+        at: Millis,
+    ) -> Result<(), Error> {
         let key = Key::new("run", run)?;
         let system = format!("replica/{}", self.id);
         self.write(&key, RUN_APPLIED_SEQ, &system, at, Some(Json::from(seq)))?;
-        let recorded = serde_json::json!({"seq": seq, "outcome": outcome});
-        self.write(&key, RUN_APPLIED_OUTCOME, &system, at, Some(recorded))?;
+        if let Some(refusal) = refusal {
+            let recorded = serde_json::json!({"seq": seq, "refusal": refusal});
+            self.write(&key, RUN_APPLIED_REFUSAL, &system, at, Some(recorded))?;
+        }
         if self.state.field(&key, RUN_APPLIED_BY).is_none() {
             self.write(&key, RUN_APPLIED_BY, &system, at, Some(Json::from(self.id.as_str())))?;
         }

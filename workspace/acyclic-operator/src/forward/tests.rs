@@ -155,6 +155,8 @@ fn a_run_sends_only_the_writes_of_its_own_work() {
         json!({"proposal": {"keep": {"proposal": "p"}}}),
         json!({"sync": {}}),
         json!({"import": {"file": "/tmp/x"}}),
+        json!({"claim": {"thread": "t", "force": true}}),
+        json!({"done": {"item": "a", "note": "n", "force": true}}),
     ] {
         assert!(!allowed(&command(refused.clone())), "{refused}");
     }
