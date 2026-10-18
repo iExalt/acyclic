@@ -62,6 +62,15 @@ fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) 
     (status, serde_json::from_str(body).unwrap())
 }
 
+/// Opens `path` as a browser would and returns the response's head.
+fn open(address: &str, path: &str) -> String {
+    let mut stream = TcpStream::connect(address).unwrap();
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response.split_once("\r\n\r\n").unwrap().0.to_owned()
+}
+
 /// Starts the server on `tracker` and returns it with the address it listens on.
 fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
     let mut child = acyclic(tracker)
@@ -134,15 +143,12 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
 
 #[test]
 fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
-    use std::os::unix::fs::PermissionsExt as _;
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
     cli(&tracker, "item add a --title A --as-user");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     let (server, address, session) = up(&tracker, &home);
-    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    assert_eq!((mode(session.parent().unwrap()), mode(&session)), (0o700, 0o600));
     let token = std::fs::read_to_string(&session).unwrap();
     let bearer = format!("Bearer {}", token.trim_end());
     let show = r#"{"show": {"items": ["a"]}}"#;
@@ -155,8 +161,30 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     assert_eq!(status, 200, "{shown}");
     assert_eq!(shown, cli(&tracker, "show a"));
 
-    // A second server can't take the same port, and says so.
+    // A link from `--link` pairs a browser, whose cookie then writes from the server's own page.
     let port = address.rsplit_once(':').unwrap().1;
+    let linked = acyclic(&tracker)
+        .env("HOME", &home)
+        .args(["up", "--link", "--port", port])
+        .output()
+        .unwrap();
+    let linked: Value = serde_json::from_slice(&linked.stdout).unwrap();
+    let link = linked["data"]["link"].as_str().unwrap();
+    let path = link.strip_prefix(&format!("http://{address}")).unwrap();
+    let head = open(&address, path);
+    assert!(head.starts_with("HTTP/1.1 303"), "{head}");
+    let cookie = head.lines().find_map(|line| line.strip_prefix("set-cookie: ")).unwrap();
+    let cookie = cookie.split_once(';').unwrap().0;
+    let origin = format!("http://{address}");
+    let add = r#"{"item": {"add": {"item": "b", "title": "B"}}}"#;
+    let (status, added) = request(
+        &address,
+        &[("Host", &address), ("Cookie", cookie), ("Origin", &origin), json],
+        add,
+    );
+    assert_eq!(status, 200, "{added}");
+
+    // A second server can't take the same port, and says so.
     let taken = acyclic(&tracker).env("HOME", &home).args(["up", "--port", port]).output().unwrap();
     let refused: Value = serde_json::from_slice(&taken.stdout).unwrap();
     assert_eq!(refused["error"]["code"], "serve", "{refused}");

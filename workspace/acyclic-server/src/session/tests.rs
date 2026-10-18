@@ -66,3 +66,53 @@ fn comparing_takes_every_byte_into_account() {
     assert!(!equal(b"abcd", b"abc"));
     assert!(!equal(b"", b"a"));
 }
+
+#[test]
+fn hmac_matches_rfc_4231() {
+    assert_eq!(
+        hex(&hmac(b"Jefe", b"what do ya want for nothing?")),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+    let key = [0xaa; 131];
+    assert_eq!(
+        hex(&hmac(&key, b"Test Using Larger Than Block-Size Key - Hash Key First")),
+        "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+    );
+}
+
+#[test]
+fn a_code_is_good_only_for_its_session_and_its_few_minutes() {
+    let token = Token::parse(TEXT).unwrap();
+    let other = Token::parse(&TEXT.replace('0', "1")).unwrap();
+    let now = 1_792_022_400_000;
+    let code = token.code(now, [9; 8]);
+    assert_eq!(token.verify(&code, now), Some(now));
+    assert_eq!(token.verify(&code, now + CODE_LIFE), Some(now));
+    assert_eq!(token.verify(&code, now + CODE_LIFE + 1), None);
+    assert_eq!(token.verify(&code, now - CODE_SKEW), Some(now));
+    assert_eq!(token.verify(&code, now - CODE_SKEW - 1), None);
+    assert_eq!(other.verify(&code, now), None);
+    let (stamped, mac) = code.rsplit_once('.').unwrap();
+    let (made, nonce) = stamped.split_once('.').unwrap();
+    let later = (now + 1).to_string();
+    for forged in [
+        format!("{later}.{nonce}.{mac}"),
+        format!("{made}.{}.{mac}", "1".repeat(16)),
+        format!("{made}.{nonce}.{}", "0".repeat(64)),
+        format!("{made}.{nonce}"),
+        format!("{made}.{}.{mac}", &nonce[2..]),
+        String::new(),
+    ] {
+        assert_eq!(token.verify(&forged, now), None, "{forged}");
+    }
+    assert_ne!(token.browser(), other.browser());
+}
+
+#[test]
+fn a_code_is_spent_once_and_forgotten_once_expired() {
+    let spent = Spent::default();
+    assert!(spent.spend("a", 0, 0));
+    assert!(!spent.spend("a", 0, CODE_LIFE));
+    assert!(spent.spend("b", CODE_LIFE, CODE_LIFE + 1));
+    assert_eq!(spent.0.lock().unwrap().len(), 1);
+}

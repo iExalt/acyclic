@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Format, Serve, Up};
+pub use crate::context::now;
 use crate::error::{CliError, exit};
 
 /// Starts the server for `acyclic serve` or `acyclic up` on a tracker clone, and returns when it stops.

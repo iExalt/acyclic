@@ -344,9 +344,14 @@ pub struct Up {
     /// told to, as it does without the server.
     #[arg(long, default_value_t = 0)]
     pub sync_every: u64,
-    /// Replace the session with a new one before serving, so whatever held the old one is shut out.
+    /// Replace the session with a new one before serving, so whatever held the old one, paired browsers included, is
+    /// shut out. A server already running keeps the old session until it restarts.
     #[arg(long)]
     pub rotate: bool,
+    /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
+    /// Give the same --port as the server, if it has one.
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every"])]
+    pub link: bool,
 }
 
 /// A usage error.

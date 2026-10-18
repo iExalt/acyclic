@@ -72,6 +72,7 @@ fn checked_actor(actor: &str) -> Result<String, CliError> {
 
 /// The clock. Debug builds honour `ACYCLIC_NOW` (milliseconds) so tests are repeatable; release builds never do,
 /// since a caller could otherwise stamp leases far into the future.
+#[must_use]
 pub fn now(env: &Env) -> Millis {
     #[cfg(debug_assertions)]
     if let Some(now) = env.var("ACYCLIC_NOW").and_then(|now| now.parse().ok()) {

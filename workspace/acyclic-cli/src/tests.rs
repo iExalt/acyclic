@@ -415,9 +415,11 @@ fn constrained(command: &clap::Command, path: &str, found: &mut Vec<String>) {
 #[test]
 fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     // `Command::validate` repeats these for commands that arrive deserialized, as the server's do; a new constraint
-    // needs a rule there before it joins this list. `serve` is never deserialized.
+    // needs a rule there before it joins this list. `serve` and `up` are never deserialized.
     let mut found = Vec::new();
-    for sub in args::command().get_subcommands().filter(|sub| sub.get_name() != "serve") {
+    for sub in
+        args::command().get_subcommands().filter(|sub| !["serve", "up"].contains(&sub.get_name()))
+    {
         // `completions` is never deserialized either, but has nothing to check.
         constrained(sub, sub.get_name(), &mut found);
     }

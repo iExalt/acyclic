@@ -14,12 +14,15 @@ use acyclic_cli::error::{CliError, exit};
 use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, HOST, ORIGIN, WWW_AUTHENTICATE};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{
+    AUTHORIZATION, CONTENT_TYPE, COOKIE as COOKIE_HEADER, HOST, LOCATION, ORIGIN, SET_COOKIE,
+    WWW_AUTHENTICATE,
+};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower_http::services::ServeDir;
@@ -88,54 +91,84 @@ impl Access {
         [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")]
     }
 
-    /// Checks that a request comes from the user, by the listener's own means, for this server.
+    /// Checks that a request is for this server: on a session listener, that it names the listener's own address.
     ///
     /// # Errors
     ///
     /// Why the request is refused.
-    pub fn check(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+    pub fn host(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+        let sent = single(headers, HOST);
+        let ok = match self {
+            Self::Tailscale { host, .. } => {
+                sent.is_some_and(|sent| sent.eq_ignore_ascii_case(host.as_bytes()))
+            },
+            Self::Session { port, .. } => sent.is_some_and(|sent| {
+                Self::local_hosts(*port)
+                    .iter()
+                    .any(|name| sent.eq_ignore_ascii_case(name.as_bytes()))
+            }),
+        };
+        if ok { Ok(()) } else { Err(Refusal::WrongHost) }
+    }
+
+    /// Checks that a request comes from the user, by the listener's own means, for this server, and says how.
+    ///
+    /// # Errors
+    ///
+    /// Why the request is refused.
+    pub fn check(&self, headers: &HeaderMap) -> Result<Credential, Refusal> {
         match self {
-            Self::Tailscale { login, host, .. } => {
+            Self::Tailscale { login, .. } => {
                 match single(headers, IDENTITY) {
                     None => return Err(Refusal::NoIdentity),
                     Some(sent) if sent != login.as_bytes() => return Err(Refusal::WrongIdentity),
                     Some(_) => {},
                 }
-                match single(headers, HOST) {
-                    Some(sent) if sent.eq_ignore_ascii_case(host.as_bytes()) => Ok(()),
-                    _ => Err(Refusal::WrongHost),
-                }
+                self.host(headers)?;
+                Ok(Credential::Identity)
             },
-            Self::Session { port, token } => {
-                let host = single(headers, HOST).is_some_and(|sent| {
-                    Self::local_hosts(*port)
-                        .iter()
-                        .any(|name| sent.eq_ignore_ascii_case(name.as_bytes()))
-                });
-                if !host {
-                    return Err(Refusal::WrongHost);
+            Self::Session { token, .. } => {
+                self.host(headers)?;
+                if headers.contains_key(AUTHORIZATION) {
+                    return match bearer(headers) {
+                        Some(presented) if token.matches(presented) => Ok(Credential::Bearer),
+                        _ => Err(Refusal::NoSession),
+                    };
                 }
-                match bearer(headers) {
-                    Some(presented) if token.matches(presented) => Ok(()),
-                    _ => Err(Refusal::NoSession),
+                let browser = token.browser();
+                if cookies(headers).any(|value| session::equal(value, browser.as_bytes())) {
+                    return Ok(Credential::Cookie);
                 }
+                Err(Refusal::NoSession)
             },
         }
     }
 
     /// Checks that a command's request is JSON and, when a browser sent it, that it comes from the server's own
-    /// origin, so that no other site can make the user's browser send one.
+    /// origin, so that no other site can make the user's browser send one. A request the cookie let in must say
+    /// where it comes from: the cookie goes to every port on the machine, so any local page could otherwise send one.
     ///
     /// # Errors
     ///
     /// Why the request is refused.
-    pub fn same_origin(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+    pub fn same_origin(&self, headers: &HeaderMap, credential: Credential) -> Result<(), Refusal> {
         let json = single(headers, CONTENT_TYPE).is_some_and(|value| {
             let media = value.split(|byte| *byte == b';').next().unwrap_or_default();
             media.trim_ascii().eq_ignore_ascii_case(b"application/json")
         });
         if !json {
             return Err(Refusal::NotJson);
+        }
+        if credential == Credential::Cookie {
+            let site = single(headers, "sec-fetch-site");
+            if headers.contains_key("sec-fetch-site") && site != Some(b"same-origin".as_slice()) {
+                return Err(Refusal::WrongOrigin);
+            }
+            let own = single(headers, HOST).map(|host| [b"http://".as_slice(), host].concat());
+            return match (single(headers, ORIGIN), own) {
+                (Some(origin), Some(own)) if origin.eq_ignore_ascii_case(&own) => Ok(()),
+                _ => Err(Refusal::WrongOrigin),
+            };
         }
         if headers.get(ORIGIN).is_none() {
             return Ok(());
@@ -151,6 +184,33 @@ impl Access {
             _ => Err(Refusal::WrongOrigin),
         }
     }
+}
+
+/// How a request showed it comes from the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Credential {
+    /// Tailscale's identity header.
+    Identity,
+    /// The session, in `Authorization`.
+    Bearer,
+    /// A paired browser's cookie.
+    Cookie,
+}
+
+/// The cookie a paired browser holds.
+const COOKIE: &str = "acyclic-up";
+
+/// The values of every cookie named [`COOKIE`] in the request. Another local server can set one of the same name, which
+/// can only fail to match, so each is tried.
+fn cookies(headers: &HeaderMap) -> impl Iterator<Item = &[u8]> {
+    headers.get_all(COOKIE_HEADER).into_iter().flat_map(|value| {
+        value.as_bytes().split(|byte| *byte == b';').filter_map(|pair| {
+            let (name, value) = pair
+                .trim_ascii()
+                .split_at(pair.trim_ascii().iter().position(|byte| *byte == b'=')?);
+            (name == COOKIE.as_bytes()).then_some(&value[1..])
+        })
+    })
 }
 
 /// Why a request was refused.
@@ -348,25 +408,89 @@ impl Server {
     }
 }
 
-/// A listener's state: the server, and who the listener lets in.
+/// A listener's state: the server, who the listener lets in, and the pairing codes spent on it.
 struct Listener {
     server: Arc<Server>,
     access: Access,
+    spent: session::Spent,
 }
 
-async fn guard(State(listener): State<Arc<Listener>>, request: Request, next: Next) -> Response {
-    match listener.access.check(request.headers()) {
-        Ok(()) => next.run(request).await,
+/// The path a pairing link opens.
+const LOGIN: &str = "/login";
+
+/// How long a paired browser keeps its cookie: 400 days, the most browsers allow.
+const COOKIE_AGE: u32 = 400 * 24 * 60 * 60;
+
+async fn guard(
+    State(listener): State<Arc<Listener>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let access = &listener.access;
+    if let Access::Session { token, .. } = access
+        && request.uri().path() == LOGIN
+    {
+        return match access.host(request.headers()) {
+            Ok(()) => pair(&listener, token, request.uri().query()),
+            Err(refusal) => refusal.into_response(),
+        };
+    }
+    match access.check(request.headers()) {
+        Ok(credential) => {
+            request.extensions_mut().insert(credential);
+            next.run(request).await
+        },
+        Err(Refusal::NoSession)
+            if request.method() == Method::GET && !request.uri().path().starts_with("/api/") =>
+        {
+            page(StatusCode::UNAUTHORIZED, UNPAIRED)
+        },
         Err(refusal) => refusal.into_response(),
     }
 }
 
+const UNPAIRED: &str = "This browser isn't paired with acyclic up. Run acyclic up --link, with the same --port as the \
+                        server if it has one, and open the link it prints within five minutes.";
+
+const SPENT: &str =
+    "This pairing link has expired or was already used. Run acyclic up --link for a new one.";
+
+/// A short page for people.
+fn page(status: StatusCode, text: &'static str) -> Response {
+    (status, [(CONTENT_TYPE, "text/plain; charset=utf-8")], format!("{text}\n")).into_response()
+}
+
+/// Pairs a browser that opened a link with a valid, unspent code, by giving it the cookie, and sends it home.
+fn pair(listener: &Listener, token: &Token, query: Option<&str>) -> Response {
+    let now = acyclic_cli::now(&listener.server.config.env);
+    let code = query.and_then(|query| query.strip_prefix("code="));
+    let made = code.and_then(|code| Some((code, token.verify(code, now)?)));
+    match made {
+        Some((code, made)) if listener.spent.spend(code, made, now) => {
+            let cookie = format!(
+                "{COOKIE}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_AGE}",
+                token.browser()
+            );
+            (StatusCode::SEE_OTHER, [(SET_COOKIE, cookie), (LOCATION, "/".to_owned())])
+                .into_response()
+        },
+        _ => page(StatusCode::FORBIDDEN, SPENT),
+    }
+}
+
+/// A pairing link for the session listener on `port`.
+fn link(port: u16, token: &Token, env: &Env) -> Result<String, CliError> {
+    let code = token.code(acyclic_cli::now(env), session::nonce()?);
+    Ok(format!("http://127.0.0.1:{port}{LOGIN}?code={code}"))
+}
+
 async fn command(
     State(listener): State<Arc<Listener>>,
+    Extension(credential): Extension<Credential>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = listener.access.same_origin(&headers) {
+    if let Err(refusal) = listener.access.same_origin(&headers, credential) {
         return refusal.into_response();
     }
     let command: Command = match serde_json::from_slice(&body) {
@@ -398,7 +522,7 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
     if let Some(dir) = &server.config.static_dir {
         router = router.fallback_service(ServeDir::new(dir));
     }
-    let listener = Arc::new(Listener { server, access });
+    let listener = Arc::new(Listener { server, access, spent: session::Spent::default() });
     router.layer(middleware::from_fn_with_state(listener.clone(), guard)).with_state(listener)
 }
 
@@ -435,12 +559,13 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
     }
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
     run(config, options.sync_every, options.listen, |address| {
-        (access, json!({"listening": address.to_string()}))
+        Ok((access, json!({"listening": address.to_string()})))
     })
 }
 
 /// Serves the tracker clone at `tracker` on 127.0.0.1 to whoever holds the session, until interrupted: `acyclic up`.
-/// Prints one JSON line with the address it listens on and the session's file once it does, never the session.
+/// Prints one JSON line once it listens, with the address, the session's file and a pairing link, never the session.
+/// With `--link`, prints only a fresh pairing link instead, and serves nothing.
 ///
 /// # Errors
 ///
@@ -450,11 +575,17 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
         CliError::new("session", exit::CONFIG, "HOME isn't set, so the session has nowhere to live")
     })?;
     let (token, path) = session::open(home.as_ref(), options.rotate)?;
+    if options.link {
+        let link = link(options.port, &token, env)?;
+        println!("{}", json!({"ok": true, "data": {"link": link}}));
+        return Ok(());
+    }
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
+    let link = |port| link(port, &token, env);
     run(config, options.sync_every, bind, |address| {
-        let access = Access::Session { port: address.port(), token };
-        (access, json!({"listening": address.to_string(), "session": path}))
+        let started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
+        Ok((Access::Session { port: address.port(), token: token.clone() }, started))
     })
 }
 
@@ -464,7 +595,7 @@ fn run(
     config: Config,
     sync_every: u64,
     bind: SocketAddr,
-    access: impl FnOnce(SocketAddr) -> (Access, Value),
+    access: impl FnOnce(SocketAddr) -> Result<(Access, Value), CliError>,
 ) -> Result<(), CliError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -476,7 +607,7 @@ fn run(
             .await
             .map_err(|err| failed(&format!("listening on {bind}"), err))?;
         let address = listener.local_addr().map_err(|err| failed("reading the address", err))?;
-        let (access, started) = access(address);
+        let (access, started) = access(address)?;
         if sync_every > 0 {
             tokio::spawn(sync(server.clone(), Duration::from_secs(sync_every)));
         }
