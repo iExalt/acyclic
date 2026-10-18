@@ -155,6 +155,10 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("already-done", ""),
         CliError::refused("not-in-thread", ""),
         CliError::refused("not-the-runs", ""),
+        CliError::new("not-operations", exit::CONFIG, ""),
+        CliError::refused("not-for-runs", ""),
+        CliError::refused("push-unknown", ""),
+        CliError::refused("push-refused", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("unwritable", ""),
         CliError::refused("unopenable", ""),
@@ -827,4 +831,42 @@ fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
     let refusal = CliError::refused("refused", "");
     let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
     assert_eq!((err.code, err.details), (commands::DUPLICATE, json!({"ok": true})));
+}
+
+#[test]
+fn a_run_sends_only_the_writes_of_its_own_work() {
+    let command = |value: serde_json::Value| serde_json::from_value::<Command>(value).unwrap();
+    for ok in [
+        json!({"claim": {"thread": "t"}}),
+        json!({"release": {"thread": "t"}}),
+        json!({"done": {"item": "a", "note": "n"}}),
+        json!({"item": {"add": {"item": "a", "title": "A"}}}),
+        json!({"item": {"edit": {"item": "a", "title": "T"}}}),
+        json!({"item": {"reopen": {"item": "a"}}}),
+        json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
+        json!({"link": {"remove": {"from": "a", "kind": "waits-for", "to": "b"}}}),
+    ] {
+        let sent = command(ok.clone());
+        assert!(sent.run_may_send(), "{ok}");
+        // A queued operation is the command serialized, so it must read back as itself.
+        let queued = serde_json::to_value(&sent).unwrap();
+        assert_eq!(serde_json::to_value(command(queued.clone())).unwrap(), queued, "{ok}");
+    }
+    for refused in [
+        json!("list"),
+        json!({"show": {"items": ["a"]}}),
+        json!({"level": {"level": "blockers"}}),
+        json!({"item": {"archive": {"item": "a"}}}),
+        json!({"item": {"delete": {"item": "a"}}}),
+        json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
+        json!({"thread": {"approve": {"thread": "t"}}}),
+        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main", "public": true}}}),
+        json!({"proposal": {"keep": {"proposal": "p"}}}),
+        json!({"sync": {}}),
+        json!({"import": {"file": "/tmp/x"}}),
+        json!({"claim": {"thread": "t", "force": true}}),
+        json!({"done": {"item": "a", "note": "n", "force": true}}),
+    ] {
+        assert!(!command(refused.clone()).run_may_send(), "{refused}");
+    }
 }

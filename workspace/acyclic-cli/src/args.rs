@@ -71,6 +71,7 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
         &[
             "init",
             "sync",
+            "ops",
             "prime",
             "import",
             "graph",
@@ -140,7 +141,7 @@ fn lease_minutes(text: &str) -> Result<u32, String> {
 }
 
 /// The commands: the ones every session uses at the top, the rest grouped by what they act on.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum Command {
     /// Sets up a tracker clone as a new replica, creating the repository if there is none.
@@ -283,19 +284,26 @@ pub enum Command {
     /// Lists and shows proposals, and keeps or drops them (user only).
     #[command(subcommand)]
     Proposal(ProposalCommand),
+    /// Pushes a run's queued operations, or drops the ones the tracker hasn't spent.
+    ///
+    /// `git config acyclic.operations <run>` sets a clone to queue run <run>'s writes as operations instead of making
+    /// them, and to sync without pushing.
+    #[command(subcommand)]
+    #[serde(skip)]
+    Ops(OpsCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Serve(Serve),
     /// Serves the JSON API and the app on this machine, to whoever holds its session.
     ///
     /// The session lives in ~/.config/acyclic/up/session, readable only by the user, and a request presents it as
     /// `Authorization: Bearer <session>`.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Up(Up),
     /// Prints a completion script for a shell, as text.
     ///
     /// For zsh, write it to a directory on `fpath`: `acyclic completions zsh > ~/.zfunc/_acyclic`.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Completions {
         /// The shell.
         #[arg(value_enum)]
@@ -392,7 +400,60 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
     }
 }
 
+/// What a run does with its queue of operations.
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub enum OpsCommand {
+    /// Pushes the queue for the operator to apply, and says how far the tracker got.
+    ///
+    /// A push the operator refused in part leaves the operations it applied spent. Push again after a failure that
+    /// may pass, such as a busy tracker: what was applied is found applied, and the rest is sent again.
+    Push,
+    /// Drops the queued operations after the last one the tracker spent, to abandon them.
+    ///
+    /// For operations the run won't send as they are, such as one the operator refused to forward; not for a failure
+    /// that may pass, which a push retries. Refused while a push's outcome is unknown: push again first.
+    Reset,
+}
+
 impl Command {
+    /// Whether a run may send this command as an operation: the writes of its own work, and nothing that approves,
+    /// configures, reaches outside the tracker or reshapes threads. With no catch-all arm, a new command fails to
+    /// compile until it is placed.
+    #[must_use]
+    pub fn run_may_send(&self) -> bool {
+        match self {
+            Self::Claim { force: false, .. }
+            | Self::Release { .. }
+            | Self::Done { force: false, .. }
+            | Self::Item(
+                ItemCommand::Add { .. } | ItemCommand::Edit(_) | ItemCommand::Reopen { .. },
+            )
+            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => true,
+            // Forcing a claim past readiness, or a finish past its checks, is the user's to do.
+            Self::Claim { force: true, .. }
+            | Self::Done { force: true, .. }
+            | Self::Init { .. }
+            | Self::Sync { .. }
+            | Self::Prime
+            | Self::Ready { .. }
+            | Self::List
+            | Self::Show { .. }
+            | Self::Needs
+            | Self::Level { .. }
+            | Self::Import { .. }
+            | Self::Graph { .. }
+            | Self::Doctor
+            | Self::Item(ItemCommand::Archive { .. } | ItemCommand::Delete { .. })
+            | Self::Thread(_)
+            | Self::Repo(_)
+            | Self::Proposal(_)
+            | Self::Ops(_)
+            | Self::Serve(_)
+            | Self::Up(_)
+            | Self::Completions { .. } => false,
+        }
+    }
+
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
     /// that require or exclude each other, and the flags that clear what another sets.
     ///
@@ -438,7 +499,7 @@ impl Command {
 }
 
 /// A graph document's format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GraphFormat {
     /// Graphviz DOT.
@@ -477,7 +538,7 @@ impl StateWord {
 }
 
 /// The item commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ItemCommand {
     /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused.
@@ -538,7 +599,7 @@ pub enum ItemCommand {
 }
 
 /// What `item edit` changes.
-#[derive(Debug, clap::Args, Deserialize)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 #[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemEdit {
@@ -659,7 +720,7 @@ const LINK_EXAMPLE: &str = concat!(
 );
 
 /// The link commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum LinkCommand {
     /// Links two items: `<FROM>` waits for or relates to `<TO>`.
@@ -687,7 +748,7 @@ pub enum LinkCommand {
 }
 
 /// The thread commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
     /// Lists every thread, by id, with its approval, its members and its heads: the open leaves nothing in it orders.
@@ -732,7 +793,7 @@ pub enum ThreadCommand {
 }
 
 /// What `thread edit` changes.
-#[derive(Debug, clap::Args, Deserialize)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThreadEdit {
     /// The thread.
@@ -773,7 +834,7 @@ impl ThreadEdit {
 }
 
 /// The repository commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum RepoCommand {
     /// Lists every repository record, by id.
@@ -833,7 +894,7 @@ pub enum RepoCommand {
 }
 
 /// The proposal commands (user only).
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
     /// Lists every proposal, open ones first and then decided ones, each by id, with who proposed it, its edit and its

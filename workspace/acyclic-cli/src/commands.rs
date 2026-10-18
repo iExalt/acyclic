@@ -24,8 +24,8 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Cli, Command, GraphFormat, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, ProposalCommand,
-    Renderer, RepoCommand, StateWord, ThreadCommand,
+    Cli, Command, GraphFormat, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, OpsCommand,
+    ProposalCommand, Renderer, RepoCommand, StateWord, ThreadCommand,
 };
 use crate::context;
 use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
@@ -289,6 +289,34 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
         ));
     }
     let session = Session::open(cli, env)?;
+    if let Some(run) = session.tracker.operations() {
+        let run = run.to_owned();
+        Key::new(kind::RUN, &run).map_err(|err| {
+            CliError::new(
+                "config",
+                exit::CONFIG,
+                format!("{} names no run: {err}", store::ops::OPERATIONS_CONFIG),
+            )
+        })?;
+        if cli.command.run_may_send() {
+            return session.queue(&run, &cli.command).map(Output::Json);
+        }
+        match &cli.command {
+            Command::Sync { .. } => return session.pull().map(Output::Json),
+            Command::Ops(ops) => return session.ops(&run, *ops).map(Output::Json),
+            // Reads run as usual; any write is refused where it would be made.
+            _ => {},
+        }
+    } else if let Command::Ops(_) = &cli.command {
+        return Err(CliError::new(
+            "not-operations",
+            exit::CONFIG,
+            format!(
+                "this clone makes its own writes; `git config {} <run>` sets it to queue a run's",
+                store::ops::OPERATIONS_CONFIG
+            ),
+        ));
+    }
     if let Command::Graph { format, renderer, open, root, thread, include_archived, file } =
         &cli.command
     {
@@ -372,6 +400,9 @@ impl<'a> Session<'a> {
             | Command::Up(_)
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
+            },
+            Command::Ops(_) => {
+                unreachable!("refused outside operations mode, handled in it")
             },
             Command::Ready { include_archived, approved } => {
                 self.ready(*include_archived, *approved)
@@ -636,6 +667,14 @@ impl<'a> Session<'a> {
         &self,
         apply: impl Fn(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
+        if let Some(run) = self.tracker.operations() {
+            return Err(CliError::refused(
+                "not-for-runs",
+                format!(
+                    "this clone queues run {run}'s operations, and a run may not send this command"
+                ),
+            ));
+        }
         let result = RefCell::new((Json::Null, false));
         let meta = Meta {
             actor: self.actor.clone(),
@@ -968,6 +1007,90 @@ impl<'a> Session<'a> {
             "pushed": synced.pushed,
             "changed": synced.joined,
         }))
+    }
+
+    /// Queues `command` as run `run`'s next operation, with what this clone has seen.
+    fn queue(&self, run: &str, command: &Command) -> Result<Json, CliError> {
+        let seq = self.tracker.queue(self.now, |seq, seen| {
+            let mut file =
+                serde_json::to_vec(&json!({"seq": seq, "seen": seen, "command": command}))
+                    .expect("an operation always serializes");
+            file.push(b'\n');
+            file
+        })?;
+        Ok(json!({"run": run, "queued": seq, "changed": false}))
+    }
+
+    /// Fetches and joins, pushing nothing: a run's writes reach the tracker only as operations.
+    fn pull(&self) -> Result<Json, CliError> {
+        let remote = self.remote()?;
+        let synced = self.tracker.pull(remote)?;
+        Ok(json!({
+            "remote": remote,
+            "fetched": synced.fetched,
+            "joined": synced.joined,
+            "pushed": 0,
+            "changed": synced.joined,
+        }))
+    }
+
+    fn ops(&self, run: &str, ops: OpsCommand) -> Result<Json, CliError> {
+        match ops {
+            OpsCommand::Push => self.push_queue(run),
+            OpsCommand::Reset => match self.tracker.reset_queue()? {
+                store::ops::Reset::Dropped(dropped) => {
+                    Ok(json!({"run": run, "dropped": dropped, "changed": dropped > 0}))
+                },
+                store::ops::Reset::Unknown => Err(CliError::refused(
+                    "push-unknown",
+                    "a push's outcome is unknown, so the tracker may have spent more: `acyclic ops push` first",
+                )),
+            },
+        }
+    }
+
+    fn push_queue(&self, run: &str) -> Result<Json, CliError> {
+        use store::ops::{Outcome, Summary};
+        let remote = self.remote()?;
+        let pushed = self.tracker.push_queue(remote, run)?;
+        let ops: Vec<Json> = pushed
+            .report
+            .ops
+            .iter()
+            .map(|(seq, outcome)| match outcome {
+                Outcome::Ok => json!({"seq": seq, "ok": true}),
+                Outcome::Refused(code) => {
+                    json!({"seq": seq, "ok": false, "code": code, "spent": true})
+                },
+                Outcome::Failed(code) => {
+                    json!({"seq": seq, "ok": false, "code": code, "spent": false})
+                },
+            })
+            .collect();
+        let mut data = json!({
+            "run": run,
+            "queued": pushed.queued,
+            "settled": pushed.settled,
+            "ops": ops,
+        });
+        if pushed.accepted {
+            data["changed"] = json!(false);
+            return Ok(data);
+        }
+        // What to do next: abandon what the operator wouldn't forward, or push again after anything that may pass.
+        let (next, message) = match &pushed.report.summary {
+            _ if pushed.unknown => ("push", "the push's outcome is unknown: push again".to_owned()),
+            Some(Summary::Refused(code)) => (
+                "reset",
+                format!(
+                    "the operator forwarded nothing ({code}): `acyclic ops reset` drops the queued operations"
+                ),
+            ),
+            _ => ("push", "the push stopped at a failure that may pass: push again".to_owned()),
+        };
+        data["next"] = json!(next);
+        data["reason"] = json!(pushed.reason);
+        Err(CliError::refused("push-refused", message).with(data))
     }
 
     /// The remote to sync with, or a configuration error naming how to add one.

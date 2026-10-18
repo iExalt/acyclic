@@ -607,3 +607,109 @@ fn a_run_writes_only_within_its_thread() {
         assert_eq!(send(command.clone()), expected, "{command}");
     }
 }
+
+#[test]
+fn a_run_queues_its_writes_and_pushes_them_as_operations() {
+    use acyclic_core::store::ops::{Outcome, Summary, op_line, summary_line};
+    let mut sh = Shell::new();
+    let shared = sh.path().join("shared.git");
+    git(sh.path(), &["init", "-q", "--bare", "shared.git"]);
+    // The receiver stands in for the operator: it prints what `reply` holds and exits with `exit`.
+    let hook = shared.join("hooks/pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ncat \"$GIT_DIR/reply\" >&2\nexit \"$(cat \"$GIT_DIR/exit\")\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let reply = |lines: &[String], exit: u8| {
+        std::fs::write(shared.join("reply"), lines.join("\n") + "\n").unwrap();
+        std::fs::write(shared.join("exit"), exit.to_string()).unwrap();
+    };
+    assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    for line in ["thread add t0 --title Mine", "item add a --title A --thread t0"] {
+        assert_eq!(sh.run(&format!("{line} --as-user"), &[]), 0, "{line}");
+    }
+    reply(&[], 0);
+    assert_eq!(sh.run("sync", AGENT), 0);
+    git(&sh.path().join("tracker"), &["config", "acyclic.operations", "r1"]);
+    let code = |out: &serde_json::Value| out["error"]["code"].as_str().map(str::to_owned);
+    let queue = |sh: &mut Shell, line: &str| {
+        let (status, out) = sh.output(line, AGENT);
+        assert_eq!(status, 0, "{line}: {out}");
+        out["data"]["queued"].as_u64().unwrap()
+    };
+
+    // A run's writes queue as numbered operations; anything else that writes is refused, and reads still read.
+    assert_eq!(queue(&mut sh, "item edit a --title Better"), 1);
+    assert_eq!(queue(&mut sh, "claim t0"), 2);
+    assert_eq!(queue(&mut sh, "item add n --title N --thread t0"), 3);
+    for line in ["claim t0 --force", "thread add t5 --title Five", "item archive a"] {
+        assert_eq!(code(&sh.output(line, AGENT).1).as_deref(), Some("not-for-runs"), "{line}");
+    }
+    let (_, out) = sh.output("show a", AGENT);
+    assert_eq!(out["data"][0]["title"], "A", "queued, not applied");
+    let first = std::process::Command::new("git")
+        .args(["-C", sh.path().join("tracker").to_str().unwrap(), "show", "ops:ops/1.json"])
+        .output()
+        .unwrap();
+    let first: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(
+        (&first["seq"], &first["command"]["item"]["edit"]["title"]),
+        (&json!(1), &json!("Better"))
+    );
+    assert!(first["seen"].is_object(), "{first}");
+    // Syncing fetches and joins but never pushes the run's own state.
+    let mine = |sh: &Shell| {
+        let out = std::process::Command::new("git")
+            .args(["-C", sh.path().join("shared.git").to_str().unwrap(), "for-each-ref"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let before = mine(&sh);
+    let (status, out) = sh.output("sync", AGENT);
+    assert_eq!((status, out["data"]["pushed"].as_u64()), (0, Some(0)));
+    assert_eq!(mine(&sh), before);
+
+    // An accepted push settles every operation.
+    let ok = |seq| op_line(seq, &Outcome::Ok);
+    reply(&[ok(1), ok(2), ok(3), summary_line(&Summary::Forwarded(3))], 0);
+    let (status, out) = sh.output("ops push", AGENT);
+    assert_eq!((status, &out["data"]["settled"]), (0, &json!(3)), "{out}");
+    assert!(mine(&sh).contains("refs/runs/r1/ops"));
+
+    // A failure that may pass leaves what was applied settled and says to push again.
+    assert_eq!(queue(&mut sh, "release t0"), 4);
+    assert_eq!(queue(&mut sh, "item edit a --title Best"), 5);
+    let busy = op_line(5, &Outcome::Failed("busy".into()));
+    reply(&[ok(4), busy, summary_line(&Summary::Forwarded(2))], 1);
+    let (status, out) = sh.output("ops push", AGENT);
+    assert_eq!(
+        (
+            status,
+            code(&out).as_deref(),
+            &out["error"]["details"]["settled"],
+            &out["error"]["details"]["next"]
+        ),
+        (1, Some("push-refused"), &json!(4), &json!("push")),
+        "{out}"
+    );
+
+    // A push the operator refused outright spends nothing, and abandoning it reuses the numbers it held.
+    reply(&[summary_line(&Summary::Refused("secret".into()))], 1);
+    let (_, out) = sh.output("ops push", AGENT);
+    assert_eq!(out["error"]["details"]["next"], "reset", "{out}");
+    let (_, out) = sh.output("ops reset", AGENT);
+    assert_eq!(out["data"]["dropped"], 1, "{out}");
+    assert_eq!(queue(&mut sh, "item edit a --title Fine"), 5);
+
+    // A push that heard no report may have spent anything it sent, so reset waits for a push that hears one.
+    reply(&[], 1);
+    let (_, out) = sh.output("ops push", AGENT);
+    assert_eq!(out["error"]["details"]["next"], "push", "{out}");
+    assert_eq!(code(&sh.output("ops reset", AGENT).1).as_deref(), Some("push-unknown"));
+    reply(&[ok(5), summary_line(&Summary::Forwarded(1))], 0);
+    assert_eq!(sh.output("ops push", AGENT).1["data"]["settled"], 5);
+    assert_eq!(sh.output("ops reset", AGENT).1["data"]["dropped"], 0);
+}

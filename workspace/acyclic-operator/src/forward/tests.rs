@@ -127,37 +127,3 @@ fn an_operation_names_no_run() {
     let named = json!({"seq": 1, "seen": Context::default(), "command": edit(), "run": "r9"});
     assert!(serde_json::from_value::<Sent>(named).is_err());
 }
-
-#[test]
-fn a_run_sends_only_the_writes_of_its_own_work() {
-    let command = |value: Value| serde_json::from_value::<Command>(value).unwrap();
-    for ok in [
-        json!({"claim": {"thread": "t"}}),
-        json!({"release": {"thread": "t"}}),
-        json!({"done": {"item": "a", "note": "n"}}),
-        json!({"item": {"add": {"item": "a", "title": "A"}}}),
-        edit(),
-        json!({"item": {"reopen": {"item": "a"}}}),
-        json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
-        json!({"link": {"remove": {"from": "a", "kind": "waits-for", "to": "b"}}}),
-    ] {
-        assert!(allowed(&command(ok.clone())), "{ok}");
-    }
-    for refused in [
-        json!("list"),
-        json!({"show": {"items": ["a"]}}),
-        json!({"level": {"level": "blockers"}}),
-        json!({"item": {"archive": {"item": "a"}}}),
-        json!({"item": {"delete": {"item": "a"}}}),
-        json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
-        json!({"thread": {"approve": {"thread": "t"}}}),
-        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main", "public": true}}}),
-        json!({"proposal": {"keep": {"proposal": "p"}}}),
-        json!({"sync": {}}),
-        json!({"import": {"file": "/tmp/x"}}),
-        json!({"claim": {"thread": "t", "force": true}}),
-        json!({"done": {"item": "a", "note": "n", "force": true}}),
-    ] {
-        assert!(!allowed(&command(refused.clone())), "{refused}");
-    }
-}

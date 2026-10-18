@@ -54,6 +54,10 @@ expression: table
 1 already-done spends
 1 not-in-thread spends
 1 not-the-runs spends
+5 not-operations
+1 not-for-runs spends
+1 push-unknown spends
+1 push-refused spends
 1 incomplete-repository spends
 1 unwritable spends
 1 unopenable spends

@@ -3,7 +3,7 @@
 //! A run sends its writes as operations: each one of the CLI's commands, numbered from 1, with the run's view of the
 //! tracker when it made it. The operator checks the run's token first, then that the run is still under way, and
 //! takes the run from the token alone: an operation names no run. It forwards only the commands a run may send
-//! ([`allowed`]); the tracker applies each as the run, through the CLI's own checks, once. Ending a run therefore
+//! ([`Command::run_may_send`]); the tracker applies each as the run, through the CLI's own checks, once. Ending a run therefore
 //! revokes its token, whatever the token's own expiry.
 //!
 //! What a run says it had seen is its own word: a run could claim to have seen everything and so supersede a value it
@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use acyclic_cli::args::{Command, ItemCommand, LinkCommand};
+use acyclic_cli::args::Command;
 use acyclic_cli::error::CliError;
 use acyclic_cli::{Applied, Env, Operation};
 use acyclic_core::model::RunState;
@@ -102,42 +102,6 @@ impl Tracker for Clone {
 
     fn refuse(&self, operation: Operation, refusal: &CliError) -> Result<Applied, Failure> {
         acyclic_cli::refuse(operation, refusal, self.tracker.clone(), &self.env)
-    }
-}
-
-/// Whether a run may send `command`: the writes of its own work, and nothing that approves, configures, reaches
-/// outside the tracker or reshapes threads. With no catch-all arm, a new command fails to compile until it is placed.
-#[must_use]
-pub fn allowed(command: &Command) -> bool {
-    match command {
-        Command::Claim { force: false, .. }
-        | Command::Release { .. }
-        | Command::Done { force: false, .. }
-        | Command::Item(
-            ItemCommand::Add { .. } | ItemCommand::Edit(_) | ItemCommand::Reopen { .. },
-        )
-        | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => true,
-        // Forcing a claim past readiness, or a finish past its checks, is the user's to do.
-        Command::Claim { force: true, .. }
-        | Command::Done { force: true, .. }
-        | Command::Init { .. }
-        | Command::Sync { .. }
-        | Command::Prime
-        | Command::Ready { .. }
-        | Command::List
-        | Command::Show { .. }
-        | Command::Needs
-        | Command::Level { .. }
-        | Command::Import { .. }
-        | Command::Graph { .. }
-        | Command::Doctor
-        | Command::Item(ItemCommand::Archive { .. } | ItemCommand::Delete { .. })
-        | Command::Thread(_)
-        | Command::Repo(_)
-        | Command::Proposal(_)
-        | Command::Serve(_)
-        | Command::Up(_)
-        | Command::Completions { .. } => false,
     }
 }
 
@@ -232,7 +196,7 @@ impl<T: Tracker> Operator<T> {
         for Sent { seq, seen, command } in sent {
             let operation =
                 Operation { run: claims.run.clone(), thread: claims.thread.clone(), seq, seen };
-            let result = if allowed(&command) {
+            let result = if command.run_may_send() {
                 self.tracker.apply(operation, command)
             } else {
                 let refusal = CliError::refused("not-for-runs", "a run may not send this command");
