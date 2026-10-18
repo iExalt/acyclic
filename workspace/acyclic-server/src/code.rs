@@ -282,10 +282,11 @@ impl Code {
         Ok(repository)
     }
 
-    /// Fetches the mirror at `mirror` from the forge if it is missing, or if `refresh` and neither a fetch begun since
-    /// `asked` nor one begun within the last [`FRESH`] seconds finished, so fetches asked for together or soon after share one. A new mirror is fetched where it is made
-    /// and moved into place only once it holds the forge's branches; it never prunes objects on its own, since the
-    /// threads' repositories borrow them. Called with the record's lock held.
+    /// Fetches the mirror at `mirror` from the forge if it is missing, or if `refresh` and neither a fetch begun
+    /// since `asked` nor one begun within the last [`FRESH`] seconds finished, so fetches asked for together or soon
+    /// after share one. A new mirror is fetched where it is made and moved into place only once it holds the forge's
+    /// branches; it never prunes objects on its own, since the threads' repositories borrow them. Called with the
+    /// record's lock held.
     async fn fetch(
         &self,
         record: &Repository,
@@ -981,7 +982,12 @@ mod tests {
         run(&upstream, &["update-ref", "refs/heads/main", &second]);
         shared.workspace(&record, "t0", true).await.unwrap();
         assert_eq!(main(&repository), first, "within the minute, the last fetch serves");
-        code("0").workspace(&record, "t0", true).await.unwrap();
+        let every = code("0");
+        every.workspace(&record, "t0", true).await.unwrap();
         assert_eq!(main(&repository), second);
+        let third = run(&upstream, &["commit-tree", &tree, "-p", &second, "-m", "third"]);
+        run(&upstream, &["update-ref", "refs/heads/main", &third]);
+        every.workspace(&record, "t0", true).await.unwrap();
+        assert_eq!(main(&repository), third, "with no window, every fetch reaches the forge");
     }
 }
