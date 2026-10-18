@@ -360,28 +360,32 @@ impl Code {
             }
             if let Ok(_held) = self.lock(&record.id).await {
                 let git = self.blocking_git();
-                let _ =
-                    tokio::task::spawn_blocking(move || collect(git, &mirror, &threads, &finished))
-                        .await;
+                let _ = tokio::task::spawn_blocking(move || {
+                    collect(&git, &mirror, &threads, &finished);
+                })
+                .await;
             }
         }
     }
 
     /// [`Self::git`], for the blocking pool.
-    fn blocking_git(&self) -> std::process::Command {
-        let mut command = std::process::Command::new("git");
-        command
-            .env_clear()
-            .env("PATH", &self.path)
-            .env("HOME", self.root.join(".home"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("LC_ALL", "C")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        command
+    fn blocking_git(&self) -> impl Fn() -> std::process::Command + Send + 'static {
+        let (path, home) = (self.path.clone(), self.root.join(".home"));
+        move || {
+            let mut command = std::process::Command::new("git");
+            command
+                .env_clear()
+                .env("PATH", &path)
+                .env("HOME", &home)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env("LC_ALL", "C")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            command
+        }
     }
 
     /// Git's `upload-pack` or `receive-pack` in a thread's repository for `run`, the pushes' hook in place.
@@ -471,20 +475,37 @@ fn borrowers(threads: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// Removes the repositories under `threads` of the `finished` threads, then, once none is left to borrow from the
-/// mirror at `mirror`, lets the mirror drop what the forge no longer has. Called with the record's lock held.
+/// Removes the repositories under `threads` of the `finished` threads whose runs' refs are all on the forge, as the
+/// mirror at `mirror` last fetched it, then, once none is left to borrow from the mirror, lets it drop what the forge
+/// no longer has. A run's refs hold its work until it lands, so a thread with work the forge lacks keeps its
+/// repository. Called with the record's lock held.
 fn collect(
-    mut git: std::process::Command,
+    git: &dyn Fn() -> std::process::Command,
     mirror: &Path,
     threads: &Path,
     finished: &BTreeSet<String>,
 ) {
     let mut removed = false;
     for thread in finished.iter().filter(|thread| segment(thread)) {
-        removed |= std::fs::remove_dir_all(threads.join(format!("{thread}.git"))).is_ok();
+        let repository = threads.join(format!("{thread}.git"));
+        let unlanded = git()
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-list", "--max-count=1", "--glob=refs/runs/*", "--not", "--alternate-refs"])
+            .stdout(Stdio::piped())
+            .output();
+        match unlanded {
+            Ok(output) if output.status.success() && output.stdout.is_empty() => {
+                removed |= std::fs::remove_dir_all(&repository).is_ok();
+            },
+            _ => eprintln!(
+                "acyclic: keeping {}: its runs' work isn't all on the forge",
+                repository.display()
+            ),
+        }
     }
     if removed && borrowers(threads).is_empty() {
-        let _ = git
+        let _ = git()
             .arg("-C")
             .arg(mirror)
             .args(["-c", "gc.pruneExpire=now", "gc", "-q", "--prune=now"])
@@ -830,50 +851,79 @@ fn stream(
 mod tests {
     use super::*;
 
-    fn git(dir: &Path) -> std::process::Command {
+    fn git() -> std::process::Command {
         let mut command = std::process::Command::new("git");
         command
-            .arg("-C")
-            .arg(dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Run")
+            .env("GIT_AUTHOR_EMAIL", "run@example.com")
+            .env("GIT_COMMITTER_NAME", "Run")
+            .env("GIT_COMMITTER_EMAIL", "run@example.com")
             .stdin(Stdio::null());
         command
     }
 
-    #[test]
-    fn a_mirror_drops_what_the_forge_dropped_once_no_unfinished_thread_borrows_from_it() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let mirror = temp.path().join("app.git");
-        assert!(
-            git(temp.path()).args(["init", "-q", "--bare", "app.git"]).status().unwrap().success()
-        );
-        assert!(
-            git(&mirror).args(["config", "gc.pruneExpire", "never"]).status().unwrap().success()
-        );
-        // An object no ref reaches, as a branch the forge deleted leaves behind.
-        let mut writing = git(&mirror)
-            .args(["hash-object", "-w", "--stdin"])
+    /// Git in `dir` with `args`, and what it printed.
+    fn run(dir: &Path, args: &[&str]) -> String {
+        let output = git().arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    /// Writes `text` as an object in `dir`, returning its id.
+    fn object(dir: &Path, kind: &str, text: &[u8]) -> String {
+        let mut child = git()
+            .arg("-C")
+            .arg(dir)
+            .args(["hash-object", "-w", "-t", kind, "--stdin"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        std::io::Write::write_all(&mut writing.stdin.take().unwrap(), b"dropped\n").unwrap();
-        let output = writing.wait_with_output().unwrap();
-        let dropped = String::from_utf8(output.stdout).unwrap().trim().to_owned();
-        let kept = || git(&mirror).args(["cat-file", "-e", &dropped]).status().unwrap().success();
-        let threads = temp.path().join("app.threads");
-        for thread in ["t0", "t1"] {
-            std::fs::create_dir_all(threads.join(format!("{thread}.git"))).unwrap();
-        }
-        let collected = |finished: &[&str]| {
-            let finished = finished.iter().map(|thread| (*thread).to_owned()).collect();
-            collect(git(temp.path()), &mirror, &threads, &finished);
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), text).unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap().trim().to_owned()
+    }
+
+    #[test]
+    fn a_finished_threads_repository_goes_once_its_work_is_on_the_forge_and_then_the_mirror_drops_what_it_dropped()
+     {
+        let temp = tempfile::TempDir::new().unwrap();
+        let (mirror, threads) = (temp.path().join("app.git"), temp.path().join("app.threads"));
+        run(temp.path(), &["init", "-q", "--bare", "app.git"]);
+        run(&mirror, &["config", "gc.pruneExpire", "never"]);
+        let tree = object(&mirror, "tree", b"");
+        let main = run(&mirror, &["commit-tree", &tree, "-m", "main"]);
+        run(&mirror, &["update-ref", "refs/heads/main", &main]);
+        // An object no ref reaches, as a branch the forge deleted leaves behind.
+        let dropped = object(&mirror, "blob", b"dropped\n");
+        let kept = || {
+            git()
+                .arg("-C")
+                .arg(&mirror)
+                .args(["cat-file", "-e", &dropped])
+                .status()
+                .unwrap()
+                .success()
         };
-        collected(&["t0"]);
-        assert_eq!(borrowers(&threads), ["t1".to_owned()].into());
+        for thread in ["t0", "t1"] {
+            let repository = threads.join(format!("{thread}.git"));
+            run(temp.path(), &["init", "-q", "--bare", repository.to_str().unwrap()]);
+            let borrowed = format!("{}\n", mirror.join("objects").display());
+            std::fs::write(repository.join("objects/info/alternates"), borrowed).unwrap();
+        }
+        // t0's run's work is on the forge; t1's run's is its own alone.
+        run(&threads.join("t0.git"), &["update-ref", "refs/runs/r0/work", &main]);
+        let t1 = threads.join("t1.git");
+        let work = run(&t1, &["commit-tree", &tree, "-p", &main, "-m", "work"]);
+        run(&t1, &["update-ref", "refs/runs/r1/work", &work]);
+        let finished: BTreeSet<String> = ["t0".to_owned(), "t1".to_owned()].into();
+        collect(&git, &mirror, &threads, &finished);
+        assert_eq!(borrowers(&threads), ["t1".to_owned()].into(), "t1's work isn't on the forge");
         assert!(kept(), "t1 may still borrow it");
-        collected(&["t1"]);
+        // t1's work lands.
+        run(&mirror, &["fetch", "-q", t1.to_str().unwrap(), "refs/runs/r1/work:refs/heads/main"]);
+        collect(&git, &mirror, &threads, &finished);
         assert!(borrowers(&threads).is_empty());
         assert!(!kept());
     }

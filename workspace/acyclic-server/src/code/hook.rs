@@ -77,9 +77,9 @@ fn check(repo: &Path, input: &str, run: &str, public: bool, deny: &Path) -> Resu
     if news.is_empty() {
         return Ok(());
     }
-    // The commits new to the thread's repository; the rest were scanned as they came.
+    // The run's own commits: neither the thread's, scanned as they came, nor the forge's, as the mirror has them.
     let mut range = news.clone();
-    range.extend(["--not", "--all"].map(str::to_owned));
+    range.extend(["--not", "--all", "--alternate-refs"].map(str::to_owned));
     let list = if public { list } else { DenyList::parse("") };
     if names.iter().any(|name| !list.matches(name).is_empty()) {
         return Err("a ref's name holds a term the deny-list forbids".to_owned());

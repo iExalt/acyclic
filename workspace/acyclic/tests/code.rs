@@ -210,7 +210,7 @@ fn runs_reach_their_threads_code_alone_and_push_only_their_own_refs() {
     let listed = ok(&git(&b, &vars_b, &["ls-remote", "origin"]));
     assert!(listed.contains("refs/heads/main") && !listed.contains("refs/runs/"), "{listed}");
     let by_id = git(&b, &vars_b, &["-c", "protocol.version=2", "fetch", "origin", &work]);
-    assert!(!by_id.status.success());
+    refused(&by_id, "unadvertised object");
     let empty = git(&b, &none, &["pack-objects", "--stdout"]).stdout;
     let zero = "0".repeat(40);
     let update = format!("{zero} {work} refs/runs/{run_b}/stolen");

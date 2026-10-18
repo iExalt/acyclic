@@ -69,7 +69,8 @@ Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB, and a run
 repository.
 
 Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, the
-repositories of finished threads, those with every item done and no run under way, are removed, and a mirror no
+repositories of finished threads, those with every item done and no run under way, are removed once every run's ref
+in them is on the forge, as the mirror has it, since until then they hold the only copy of that work; and a mirror no
 thread borrows from any more drops what the forge no longer has.
 
 The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
