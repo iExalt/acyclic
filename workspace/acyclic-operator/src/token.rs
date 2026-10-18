@@ -54,6 +54,10 @@ pub enum Error {
     Expired,
     /// A lifetime that isn't between nothing and [`MAX_LIFE`].
     Life(Millis),
+    /// A token for no run or no thread.
+    Unnamed,
+    /// The system gave no randomness.
+    Random(String),
     /// The key file was refused or unreadable.
     Key(String),
 }
@@ -68,6 +72,8 @@ impl fmt::Display for Error {
             Self::Life(life) => {
                 write!(f, "a token lives more than nothing and at most {MAX_LIFE} ms, not {life}")
             },
+            Self::Unnamed => write!(f, "a token names a run and a thread"),
+            Self::Random(reason) => write!(f, "no randomness: {reason}"),
             Self::Key(reason) => write!(f, "the operator's key: {reason}"),
         }
     }
@@ -125,7 +131,8 @@ impl Signer {
     ///
     /// # Errors
     ///
-    /// On a lifetime outside 1 to [`MAX_LIFE`], or when the system has no randomness for the token's id.
+    /// On a lifetime outside 1 to [`MAX_LIFE`], an empty run or thread, or when the system has no randomness for the
+    /// token's id.
     ///
     /// # Panics
     ///
@@ -139,6 +146,9 @@ impl Signer {
     ) -> Result<String, Error> {
         if !(1..=MAX_LIFE).contains(&life) {
             return Err(Error::Life(life));
+        }
+        if run.is_empty() || thread.is_empty() {
+            return Err(Error::Unnamed);
         }
         let claims = Claims {
             id: hex(&random::<16>()?),
@@ -191,7 +201,7 @@ impl Verifier {
 /// `N` random bytes.
 fn random<const N: usize>() -> Result<[u8; N], Error> {
     let mut bytes = [0; N];
-    getrandom::fill(&mut bytes).map_err(|err| Error::Key(format!("no randomness: {err}")))?;
+    getrandom::fill(&mut bytes).map_err(|err| Error::Random(err.to_string()))?;
     Ok(bytes)
 }
 

@@ -26,11 +26,23 @@ fn a_token_names_its_run_and_holds_until_it_expires() {
 }
 
 #[test]
-fn a_lifetime_is_capped() {
+fn a_lifetime_is_capped_and_a_token_names_a_run_and_a_thread() {
     let signer = signer();
     assert!(signer.mint("r", "t", NOW, MAX_LIFE).is_ok());
     for life in [0, -1, MAX_LIFE + 1] {
         assert_eq!(signer.mint("r", "t", NOW, life), Err(Error::Life(life)));
+    }
+    assert_eq!(signer.mint("", "t", NOW, HOUR), Err(Error::Unnamed));
+    assert_eq!(signer.mint("r", "", NOW, HOUR), Err(Error::Unnamed));
+}
+
+#[test]
+fn signed_claims_that_say_more_or_other_than_claims_are_refused() {
+    let signer = signer();
+    let claims = r#"{"id":"i","run":"r","thread":"t","issued":0,"expires":9999999999999,"actor":"actor/user"}"#;
+    for bytes in [claims.as_bytes(), b"not json".as_slice()] {
+        let token = format!("v1.{}.{}", hex(bytes), hex(&signer.0.sign(bytes).to_bytes()));
+        assert_eq!(signer.verifier().verify(&token, NOW), Err(Error::Malformed));
     }
 }
 
