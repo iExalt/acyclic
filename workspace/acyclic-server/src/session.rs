@@ -14,12 +14,10 @@
 //! the session, so it must never be mounted into a container.
 
 use std::fmt::{self, Write as _};
-use std::fs;
-use std::io::Write as _;
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use acyclic_cli::error::{CliError, exit};
+use acyclic_core::private;
 use sha2::{Digest as _, Sha256};
 
 /// The directory under the home directory that holds the session.
@@ -157,29 +155,14 @@ fn failed(message: String) -> CliError {
     CliError::new("session", exit::CONFIG, message)
 }
 
-/// Refuses `path` unless it is a `kind` (not a symbolic link) that no one but its owner can read or write.
-fn private(path: &Path, dir: bool) -> Result<bool, CliError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(failed(format!("can't read {}: {err}", path.display()))),
-    };
-    let kind = if dir { metadata.is_dir() } else { metadata.is_file() };
-    if !kind {
-        let what = if dir { "a directory" } else { "a regular file" };
-        return Err(failed(format!(
-            "{} must be {what}, not a link or anything else",
-            path.display()
-        )));
+/// The session's own refusal, with how to recover from a file that others could open.
+fn refused(err: &private::Error) -> CliError {
+    match err {
+        private::Error::Open { .. } => {
+            failed(format!("{err}, then rotate the session with acyclic up --rotate"))
+        },
+        _ => failed(err.to_string()),
     }
-    if metadata.permissions().mode() & 0o077 != 0 {
-        let mode = if dir { "700" } else { "600" };
-        return Err(failed(format!(
-            "{} is open to other users: run chmod {mode} on it, then rotate the session with acyclic up --rotate",
-            path.display()
-        )));
-    }
-    Ok(true)
 }
 
 /// The session in the home directory `home`, created if there is none and replaced if `rotate` says so, with the
@@ -190,46 +173,16 @@ fn private(path: &Path, dir: bool) -> Result<bool, CliError> {
 /// When the directory or the file is open to other users, isn't what it should be, or holds no token.
 pub fn open(home: &Path, rotate: bool) -> Result<(Token, PathBuf), CliError> {
     let dir = home.join(DIR);
-    if let Some(parent) = dir.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| failed(format!("can't create {}: {err}", parent.display())))?;
-    }
-    if !private(&dir, true)? {
-        match fs::DirBuilder::new().mode(0o700).create(&dir) {
-            Ok(()) => {},
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {},
-            Err(err) => return Err(failed(format!("can't create {}: {err}", dir.display()))),
-        }
-        private(&dir, true)?;
-    }
+    private::dir(&dir).map_err(|err| refused(&err))?;
     let path = dir.join("session");
-    if !rotate && private(&path, false)? {
+    if !rotate && private::check(&path, false).map_err(|err| refused(&err))? {
         return read(&path).map(|token| (token, path));
     }
-    // The token is written whole to a file of its own, then put in place in one step: by a link that fails if
-    // another server got there first, whose token is then the session, or by a rename when rotating.
+    // If another server got there first, its token is the session.
     let token = Token::random()?;
-    let staged = dir.join(format!("session.{}.new", std::process::id()));
-    // One left by a crashed server with the same process id would otherwise stand in the way.
-    let _ = fs::remove_file(&staged);
-    let written =
-        fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&staged).and_then(
-            |mut file| file.write_all(format!("{}\n", token.0).as_bytes()).and(file.sync_all()),
-        );
-    if let Err(err) = written {
-        let _ = fs::remove_file(&staged);
-        return Err(failed(format!("can't write {}: {err}", staged.display())));
-    }
-    let placed = if rotate { fs::rename(&staged, &path) } else { fs::hard_link(&staged, &path) };
-    let _ = fs::remove_file(&staged);
-    match placed {
-        Ok(()) => Ok((token, path)),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            private(&path, false)?;
-            read(&path).map(|token| (token, path))
-        },
-        Err(err) => Err(failed(format!("can't write {}: {err}", path.display()))),
-    }
+    let placed = private::place(&path, format!("{}\n", token.0).as_bytes(), rotate)
+        .map_err(|err| refused(&err))?;
+    if placed { Ok((token, path)) } else { read(&path).map(|token| (token, path)) }
 }
 
 /// The session that already exists in the home directory `home`, with the file's path.
@@ -240,7 +193,8 @@ pub fn open(home: &Path, rotate: bool) -> Result<(Token, PathBuf), CliError> {
 pub fn existing(home: &Path) -> Result<(Token, PathBuf), CliError> {
     let dir = home.join(DIR);
     let path = dir.join("session");
-    if !private(&dir, true)? || !private(&path, false)? {
+    let exists = |path: &Path, dir| private::check(path, dir).map_err(|err| refused(&err));
+    if !exists(&dir, true)? || !exists(&path, false)? {
         return Err(CliError::new(
             "no-session",
             exit::CONFIG,
@@ -251,8 +205,7 @@ pub fn existing(home: &Path) -> Result<(Token, PathBuf), CliError> {
 }
 
 fn read(path: &Path) -> Result<Token, CliError> {
-    let text = fs::read_to_string(path)
-        .map_err(|err| failed(format!("can't read {}: {err}", path.display())))?;
+    let text = private::read(path).map_err(|err| refused(&err))?;
     Token::parse(&text).ok_or_else(|| {
         failed(format!(
             "{} holds no session token: replace it with acyclic up --rotate",

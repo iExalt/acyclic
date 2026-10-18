@@ -71,6 +71,7 @@ name = "acyclic-server"
 version = "0.2.0"
 dependencies = [
  "acyclic-cli",
+ "acyclic-core",
  "axum",
  "getrandom",
  "serde_json",
