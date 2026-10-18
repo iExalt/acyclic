@@ -306,8 +306,9 @@ pub enum Command {
 /// The server's settings.
 #[derive(Debug, Clone, clap::Args)]
 pub struct Serve {
-    /// Where to listen. Whatever reaches this address directly can forge the identity header, so keep it on localhost
-    /// behind `tailscale serve`, or reachable only from the proxy that sets the header.
+    /// Where to listen. Whatever reaches this address directly can forge the identity header, localhost included, which
+    /// every process and container on the machine can reach: keep it reachable only from the proxy that sets the
+    /// header, such as in a pod of its own. On a Mac, use `acyclic up`.
     #[arg(long, default_value = "127.0.0.1:7477")]
     pub listen: std::net::SocketAddr,
     /// The user's Tailscale login, which every request's `Tailscale-User-Login` header must equal.
