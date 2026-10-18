@@ -9,7 +9,6 @@
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde::Serialize;
 
@@ -51,9 +50,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
         let branch =
             repository.default_branch.one().ok_or("the repository has no single default branch")?;
         let git = |args: &[&str]| {
-            Command::new("git")
-                .arg("-C")
-                .arg(&clone)
+            crate::store::git_at(&clone)
                 .args(args)
                 .env("LC_ALL", "C")
                 .output()

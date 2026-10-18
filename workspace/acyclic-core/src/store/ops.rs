@@ -71,7 +71,12 @@ pub struct Report {
     pub ops: Vec<(u64, Outcome)>,
     /// The summary, when the receiver got that far.
     pub summary: Option<Summary>,
+    /// The receiver's other lines, escaped, up to [`MOST_MESSAGES`].
+    pub messages: Vec<String>,
 }
+
+/// The most of the receiver's other lines a report keeps.
+pub const MOST_MESSAGES: usize = 20;
 
 /// The report line for operation `seq`.
 #[must_use]
@@ -99,12 +104,13 @@ pub fn escape(text: &str) -> String {
 }
 
 /// Reads the report from a push's error output. Only lines that are exactly report lines count, with or without the
-/// `remote: ` git puts before them; everything else is ignored.
+/// `remote: ` git puts before them; the receiver's other lines are kept as messages, escaped.
 #[must_use]
 pub fn parse(text: &str) -> Report {
     let mut report = Report::default();
     for line in text.lines() {
-        let line = line.strip_prefix("remote: ").unwrap_or(line).trim_end();
+        let remote = line.strip_prefix("remote: ");
+        let line = remote.unwrap_or(line).trim_end();
         let words: Vec<&str> = line.split(' ').collect();
         match words.as_slice() {
             ["acyclic-op", seq, rest @ ..] => {
@@ -126,7 +132,11 @@ pub fn parse(text: &str) -> Report {
             ["acyclic-push", "refused", code] if is_code(code) => {
                 report.summary = Some(Summary::Refused((*code).to_owned()));
             },
-            _ => {},
+            _ => {
+                if remote.is_some() && !line.is_empty() && report.messages.len() < MOST_MESSAGES {
+                    report.messages.push(escape(line));
+                }
+            },
         }
     }
     report
@@ -346,17 +356,17 @@ mod tests {
             "remote: acyclic-push forwarded 3",
         ]
         .join("\n");
+        let report = parse(&text);
         assert_eq!(
-            parse(&text),
-            Report {
-                ops: vec![
-                    (1, Outcome::Ok),
-                    (2, Outcome::Refused("not-in-thread".into())),
-                    (3, Outcome::Failed("busy".into())),
-                ],
-                summary: Some(Summary::Forwarded(3)),
-            }
+            report.ops,
+            [
+                (1, Outcome::Ok),
+                (2, Outcome::Refused("not-in-thread".into())),
+                (3, Outcome::Failed("busy".into())),
+            ]
         );
+        assert_eq!(report.summary, Some(Summary::Forwarded(3)));
+        assert_eq!(report.messages.len(), 2, "{:?}", report.messages);
         assert_eq!(
             parse("remote: acyclic-push refused secret").summary,
             Some(Summary::Refused("secret".into()))

@@ -27,8 +27,8 @@ impl Git {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new("git");
-        command.arg("-C").arg(&self.repo).args(["-c", "core.quotePath=false"]);
+        let mut command = super::git_at(&self.repo);
+        command.args(["-c", "core.quotePath=false"]);
         // No reflogs for the tracker's refs: each would be another fsynced append per batch, the remote holds the
         // history, and a squash makes it moot.
         command.args(["-c", "core.logAllRefUpdates=false"]);

@@ -30,6 +30,48 @@ use crate::usage;
 use cache::{Cache, Found};
 use git::{Git, NewCommit};
 
+/// The variables by which git finds a repository and its objects other than by the path it is given, or takes
+/// settings from its caller.
+const LOCATING: [&str; 11] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_QUARANTINE_PATH",
+    "GIT_NAMESPACE",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+];
+
+/// Of the variables `names`, those [`git_at`] removes: [`LOCATING`] and the settings `GIT_CONFIG_KEY_<n>` and
+/// `GIT_CONFIG_VALUE_<n>` pass.
+fn unset(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    names
+        .filter(|name| {
+            let name = name.to_string_lossy();
+            LOCATING.contains(&name.as_ref())
+                || name.starts_with("GIT_CONFIG_KEY_")
+                || name.starts_with("GIT_CONFIG_VALUE_")
+        })
+        .collect()
+}
+
+/// `git -C <repo>`, finding the repository by that path alone and taking no settings from the environment, even
+/// when git's environment names another repository, as it does for a hook that writes the tracker while a push to
+/// some other repository waits on it. Every git acyclic runs starts here.
+#[must_use]
+pub fn git_at(repo: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    for name in unset(std::env::vars_os().map(|(name, _)| name)) {
+        command.env_remove(name);
+    }
+    command.arg("-C").arg(repo);
+    command
+}
+
 /// How long a batch keeps retrying lost races.
 const RETRY_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -1511,6 +1553,23 @@ fn backoff(retries: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_finds_the_repository_by_its_path_alone() {
+        let names = [
+            "GIT_DIR",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_PARAMETERS",
+            "PATH",
+            "GIT_TRACE",
+        ];
+        let unset = unset(names.iter().map(std::ffi::OsString::from));
+        assert_eq!(
+            unset,
+            ["GIT_DIR", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS"]
+        );
+    }
 
     #[test]
     fn months_follow_the_utc_calendar() {

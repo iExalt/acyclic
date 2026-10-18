@@ -8,10 +8,13 @@ license.workspace = true
 [dependencies]
 acyclic-cli.workspace = true
 acyclic-core.workspace = true
+acyclic-guard.workspace = true
+axum.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

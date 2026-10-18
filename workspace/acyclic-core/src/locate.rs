@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Deserialize;
 
@@ -249,9 +248,7 @@ impl Settings {
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<std::process::Output, LocateError> {
-    Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    crate::store::git_at(repo)
         .args(args)
         .env("LC_ALL", "C")
         .output()

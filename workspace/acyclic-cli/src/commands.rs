@@ -4,7 +4,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::process::Command as Process;
 
 use acyclic_core::archive;
 use acyclic_core::claim;
@@ -1090,6 +1089,7 @@ impl<'a> Session<'a> {
         };
         data["next"] = json!(next);
         data["reason"] = json!(pushed.reason);
+        data["remote"] = json!(pushed.report.messages);
         Err(CliError::refused("push-refused", message).with(data))
     }
 
@@ -1476,9 +1476,7 @@ fn project_root(state: &State, key: &Key) -> Option<String> {
 /// Creates the tracker repository, or configures an existing clone, as a new replica. Adds no files or hooks.
 fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliError> {
     let id = ReplicaId::new(replica)?;
-    let git = |args: &[&str]| {
-        Process::new("git").arg("-C").arg(path).args(args).env("LC_ALL", "C").output()
-    };
+    let git = |args: &[&str]| store::git_at(path).args(args).env("LC_ALL", "C").output();
     let is_repo =
         path.exists() && git(&["rev-parse", "--git-dir"]).is_ok_and(|out| out.status.success());
     if is_repo {
