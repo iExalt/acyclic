@@ -370,8 +370,9 @@ pub struct Up {
     #[arg(long, requires = "tailscale")]
     pub socket: Option<PathBuf>,
     /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
-    /// the writes of their own work, applied as the run. Needs the operator's public key, which the operator writes
-    /// to ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
+    /// the writes of their own work, applied as the run, and fetch and push their thread's code through mirrors in
+    /// ~/.local/share/acyclic/mirrors. Needs the operator's public key, which the operator writes to
+    /// ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
     #[arg(long, value_name = "PORT")]
     pub runners: Option<u16>,
 }

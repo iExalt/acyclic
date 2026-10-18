@@ -48,6 +48,25 @@ scanned for the deny-list's terms and, with Gitleaks, for secrets, then applied 
 answered `duplicate`. It supersedes only what the tracker held when the run last read, as the server recorded it.
 `GET /api/run` says the run, its thread and the latest of its operations applied.
 
+## Runs' code
+
+The runners' listener also serves git's smart HTTP protocol at `/git/<owner>/<name>.git`, so a run never holds a
+credential for the forge. A run reaches only the repositories of its thread's set as it stands at each request; any
+other is refused as not in this thread. Each is served from a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by
+default under `~/.local/share`), made on first use and fetched from `https://github.com/<owner>/<name>.git`
+(`ACYCLIC_UPSTREAM` names another forge) whenever a run fetches, and every 5 minutes unless `--sync-every 0`. A fetch
+takes `refs/heads/*` and `refs/tags/*` alone, so it never touches the runs' refs. Git runs there with no settings or
+credentials of the user's, so only public repositories can be mirrored for now. Readiness checks whether a commit is
+merged against the mirror of a repository with no clone mapped in `~/.config/acyclic/clones.toml`.
+
+A run sees and fetches only the branches, the tags and its own refs, `refs/runs/<run>/*`, and pushes only to its own
+refs, to commits. A push's hook refuses one that names objects the push didn't bring, which would hand over another
+run's work, then scans the new commits for the deny-list's terms, in a public repository, and with Gitleaks, in every
+one. A request may take 10 minutes, a push 512 MiB, and a run one push at a time.
+
+The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
+any of the forge's URLs, to the server with the run's token.
+
 ## The API
 
 `POST /api/command` takes one of the CLI's commands as JSON, such as `{"show": {"items": ["a"]}}` or

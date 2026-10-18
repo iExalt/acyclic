@@ -31,6 +31,7 @@ use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower_http::services::ServeDir;
 
+pub mod code;
 pub mod session;
 
 use session::Token;
@@ -78,6 +79,8 @@ pub enum Access {
         verifier: Verifier,
         /// The terms no run may write, which every write is scanned for, with Gitleaks besides.
         deny: DenyList,
+        /// The code repositories runs reach through the server, if it serves them.
+        code: Option<Arc<code::Code>>,
     },
 }
 
@@ -763,6 +766,9 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
     {
         router = router.fallback_service(ServeDir::new(dir));
     }
+    if let Access::Run { code: Some(_), .. } = &access {
+        router = router.merge(code::routes());
+    }
     let listener = Arc::new(Listener {
         server,
         access,
@@ -844,7 +850,10 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
         extra.push(Extra::Unix(socket, access));
     }
     if let Some(port) = options.runners {
-        extra.push(Extra::Tcp(SocketAddr::from(([127, 0, 0, 1], port)), runners(home.as_ref())?));
+        extra.push(Extra::Tcp(
+            SocketAddr::from(([127, 0, 0, 1], port)),
+            runners(home.as_ref(), env)?,
+        ));
     }
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
@@ -863,9 +872,9 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
     })
 }
 
-/// The runners' listener's access: the operator's public key and the deny-list, both from the home directory `home`.
-/// The key is read once, so a new operator key needs the server restarted.
-fn runners(home: &std::path::Path) -> Result<Access, CliError> {
+/// The runners' listener's access: the operator's public key and the deny-list, both from the home directory `home`,
+/// and the mirrors of code repositories. The key is read once, so a new operator key needs the server restarted.
+fn runners(home: &std::path::Path, env: &Env) -> Result<Access, CliError> {
     let verifier = Verifier::open(home).map_err(|err| {
         CliError::new(
             "no-operator",
@@ -880,7 +889,17 @@ fn runners(home: &std::path::Path) -> Result<Access, CliError> {
             format!("the runners' listener needs the deny-list: {err}"),
         )
     })?;
-    Ok(Access::Run { verifier, deny })
+    let executable = std::env::current_exe()
+        .map_err(|err| failed("finding the acyclic executable for the mirrors' hook", err))?;
+    let settings = code::Settings {
+        env: env.clone(),
+        executable,
+        deny: acyclic_guard::deny_list::path_under(home),
+    };
+    let code = code::Code::new(settings).map_err(|err| {
+        CliError::new("no-mirrors", exit::CONFIG, format!("the mirrors can't be kept: {err}"))
+    })?;
+    Ok(Access::Run { verifier, deny, code: Some(Arc::new(code)) })
 }
 
 /// A listener besides the main one.
@@ -923,6 +942,10 @@ fn run(
                     });
                 },
                 Extra::Tcp(at, access) => {
+                    if let (Access::Run { code: Some(code), .. }, true) = (&access, sync_every > 0)
+                    {
+                        tokio::spawn(refresh(Arc::clone(code), server.config.tracker.clone()));
+                    }
                     let tcp = tokio::net::TcpListener::bind(at)
                         .await
                         .map_err(|err| failed(&format!("listening on {at}"), err))?;
@@ -1019,6 +1042,19 @@ async fn sync(server: Arc<Server>, every: Duration) {
             return;
         }
         eprintln!("{envelope}");
+    }
+}
+
+/// How often the mirrors are fetched besides runs' fetches, so readiness sees what was merged.
+const REFRESH: Duration = Duration::from_secs(300);
+
+/// Fetches the mirrors every [`REFRESH`].
+async fn refresh(code: Arc<code::Code>, tracker: PathBuf) {
+    let mut ticks = tokio::time::interval(REFRESH);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticks.tick().await;
+        code.refresh_all(&tracker).await;
     }
 }
 

@@ -266,6 +266,50 @@ pub fn run_active(tracker: &Path, run: &str, thread: &str) -> Result<bool, CliEr
     Ok(model::run_active(&state, run, thread))
 }
 
+/// What a run may reach of a repository it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reach {
+    /// The run isn't under way.
+    Inactive,
+    /// No repository record names it, or the run's thread doesn't hold it.
+    NotInThread,
+    /// More than one record names it, differing only in case.
+    Ambiguous,
+    /// The record, in the run's thread.
+    Found(model::Repository),
+}
+
+/// What run `run` on `thread` may reach of repository `owner`/`name` in the clone at `tracker`.
+pub fn reach(
+    tracker: &Path,
+    run: &str,
+    thread: &str,
+    owner: &str,
+    name: &str,
+) -> Result<Reach, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let (_, state) = opened.load()?;
+    if !model::run_active(&state, run, thread) {
+        return Ok(Reach::Inactive);
+    }
+    let model = Model::read(&state)?;
+    let named = model.repositories_named(owner, name);
+    Ok(match named.as_slice() {
+        [record] if model.repository_set(thread).contains(&record.id) => {
+            Reach::Found((*record).clone())
+        },
+        [] | [_] => Reach::NotInThread,
+        _ => Reach::Ambiguous,
+    })
+}
+
+/// The repository records in the clone at `tracker`.
+pub fn repositories(tracker: &Path) -> Result<Vec<model::Repository>, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let (_, state) = opened.load()?;
+    Ok(Model::read(&state)?.repositories.into_values().collect())
+}
+
 /// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.
 pub fn applied(tracker: &Path, run: &str) -> Result<u64, CliError> {
     let (opened, _) = Tracker::open(tracker)?;

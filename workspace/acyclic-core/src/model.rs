@@ -594,6 +594,19 @@ impl Model {
         repositories
     }
 
+    /// The repository records naming `owner`/`name`, compared without regard to case as GitHub does: none, one, or
+    /// several that the caller must not choose between.
+    #[must_use]
+    pub fn repositories_named(&self, owner: &str, name: &str) -> Vec<&Repository> {
+        let same = |value: &Value<String>, wanted: &str| {
+            value.one().is_some_and(|value| value.eq_ignore_ascii_case(wanted))
+        };
+        self.repositories
+            .values()
+            .filter(|record| same(&record.owner, owner) && same(&record.name, name))
+            .collect()
+    }
+
     /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {

@@ -869,3 +869,33 @@ fn a_run_sends_only_the_writes_of_its_own_work() {
         assert!(!command(refused.clone()).run_may_send(), "{refused}");
     }
 }
+
+#[test]
+fn readiness_checks_a_repository_without_a_mapped_clone_against_the_servers_mirror() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let home = temp.path().to_str().unwrap();
+    let record = |id: &str| acyclic_core::model::Repository {
+        id: id.to_owned(),
+        owner: acyclic_core::model::Value::None,
+        name: acyclic_core::model::Value::None,
+        public: acyclic_core::model::Value::None,
+        default_branch: acyclic_core::model::Value::None,
+        installation: acyclic_core::model::Value::None,
+    };
+    let mirrored = temp.path().join(".local/share/acyclic/mirrors/app.git");
+    std::fs::create_dir_all(&mirrored).unwrap();
+    std::fs::create_dir_all(temp.path().join(".config/acyclic")).unwrap();
+    std::fs::write(
+        temp.path().join(".config/acyclic/clones.toml"),
+        "[clones]\nmapped = \"/code/mapped\"\n",
+    )
+    .unwrap();
+    let clone_of = context::clones(&env(&[("HOME", home)])).unwrap();
+    assert_eq!(clone_of(&record("app")), Some(mirrored));
+    assert_eq!(clone_of(&record("mapped")), Some(PathBuf::from("/code/mapped")));
+    assert_eq!(clone_of(&record("unmirrored")), None);
+    // An id that isn't a file's name names no mirror, wherever it would point.
+    for id in ["..", ".hooks", "a/b"] {
+        assert_eq!(context::mirror(&env(&[("HOME", home)]), id), None, "{id}");
+    }
+}
