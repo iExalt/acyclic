@@ -68,7 +68,18 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
     (
         "Other Commands",
-        &["init", "sync", "prime", "import", "graph", "level", "doctor", "serve", "completions"],
+        &[
+            "init",
+            "sync",
+            "prime",
+            "import",
+            "graph",
+            "level",
+            "doctor",
+            "serve",
+            "up",
+            "completions",
+        ],
     ),
 ];
 
@@ -275,6 +286,12 @@ pub enum Command {
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip_deserializing)]
     Serve(Serve),
+    /// Serves the JSON API and the app on this machine, to whoever holds its session.
+    ///
+    /// The session lives in ~/.config/acyclic/up/session, readable only by the user, and a request presents it as
+    /// `Authorization: Bearer <session>`.
+    #[serde(skip_deserializing)]
+    Up(Up),
     /// Prints a completion script for a shell, as text.
     ///
     /// For zsh, write it to a directory on `fpath`: `acyclic completions zsh > ~/.zfunc/_acyclic`.
@@ -289,8 +306,9 @@ pub enum Command {
 /// The server's settings.
 #[derive(Debug, Clone, clap::Args)]
 pub struct Serve {
-    /// Where to listen. Whatever reaches this address directly can forge the identity header, so keep it on localhost
-    /// behind `tailscale serve`, or reachable only from the proxy that sets the header.
+    /// Where to listen. Whatever reaches this address directly can forge the identity header, localhost included, which
+    /// every process and container on the machine can reach: keep it reachable only from the proxy that sets the
+    /// header, such as in a pod of its own. On a Mac, use `acyclic up`.
     #[arg(long, default_value = "127.0.0.1:7477")]
     pub listen: std::net::SocketAddr,
     /// The user's Tailscale login, which every request's `Tailscale-User-Login` header must equal.
@@ -311,6 +329,46 @@ pub struct Serve {
     /// `acyclic.pushAfterWrite` says so.
     #[arg(long, default_value_t = 30)]
     pub sync_every: u64,
+}
+
+/// The settings of `acyclic up`.
+#[derive(Debug, Clone, clap::Args)]
+pub struct Up {
+    /// The port to listen on, on 127.0.0.1 only; 0 picks a free one.
+    #[arg(long, default_value_t = 7478)]
+    pub port: u16,
+    /// A directory of static files to serve, such as the built app. Symbolic links in it are followed, so it should
+    /// hold only what acyclic's own build put there.
+    #[arg(long = "static")]
+    pub static_dir: Option<PathBuf>,
+    /// Seconds between syncs with the clone's `origin`; 0, the default, never syncs, so the clone syncs only when
+    /// told to, as it does without the server.
+    #[arg(long, default_value_t = 0)]
+    pub sync_every: u64,
+    /// Replace the session with a new one before serving, so whatever held the old one, paired browsers included, is
+    /// shut out. A server already running keeps the old session until it restarts.
+    #[arg(long)]
+    pub rotate: bool,
+    /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
+    /// Give the same --port as the server, if it has one.
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
+    pub link: bool,
+    /// Also serve through `tailscale serve`, pointed at a Unix socket that only the user can open, to requests carrying
+    /// the user's Tailscale identity. Run `tailscale serve --bg unix:<socket>` as the output says.
+    #[arg(long, requires_all = ["login", "host"])]
+    pub tailscale: bool,
+    /// The user's Tailscale login, which every request through the socket must carry in `Tailscale-User-Login`.
+    #[arg(long, requires = "tailscale")]
+    pub login: Option<String>,
+    /// The machine's `.ts.net` name, which every request through the socket must carry in `Host`.
+    #[arg(long, requires = "tailscale")]
+    pub host: Option<String>,
+    /// The origin a browser's request through the socket must come from; `https://<host>` by default.
+    #[arg(long, requires = "tailscale")]
+    pub origin: Option<String>,
+    /// The socket; ~/.config/acyclic/up/tailscale.sock by default. Its directory should be open to the user alone.
+    #[arg(long, requires = "tailscale")]
+    pub socket: Option<PathBuf>,
 }
 
 /// A usage error.

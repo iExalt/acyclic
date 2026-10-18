@@ -21,11 +21,21 @@ use serde_json::{Value, json};
 
 use acyclic_core::time::rfc3339;
 
-use crate::args::{Cli, Command, Format, Serve};
+use crate::args::{Cli, Command, Format, Serve, Up};
+pub use crate::context::now;
 use crate::error::{CliError, exit};
 
-/// Starts the server for `acyclic serve` on a tracker clone, and returns when it stops.
-pub type ServeHook = fn(&Serve, PathBuf, &Env) -> Result<(), CliError>;
+/// Starts the server for `acyclic serve` or `acyclic up` on a tracker clone, and returns when it stops.
+pub type ServeHook = fn(Start<'_>, PathBuf, &Env) -> Result<(), CliError>;
+
+/// The command that starts a server.
+#[derive(Debug, Clone, Copy)]
+pub enum Start<'a> {
+    /// `acyclic serve`, behind Tailscale.
+    Serve(&'a Serve),
+    /// `acyclic up`, on this machine.
+    Up(&'a Up),
+}
 
 /// What a command sees of its process: environment variables and the working directory.
 #[derive(Debug, Clone, Default)]
@@ -163,8 +173,13 @@ fn execute_with(
     if let Err(err) = cli.command.validate() {
         return failed(err);
     }
-    if let (Command::Serve(options), Some(serve)) = (&cli.command, serve) {
-        return match serve_with(&cli, options, env, serve) {
+    let start = match &cli.command {
+        Command::Serve(options) => Some(Start::Serve(options)),
+        Command::Up(options) => Some(Start::Up(options)),
+        _ => None,
+    };
+    if let (Some(start), Some(serve)) = (start, serve) {
+        return match serve_with(&cli, start, env, serve) {
             Ok(()) => Outcome::out(exit::OK, String::new()),
             Err(err) => failed(err),
         };
@@ -188,15 +203,22 @@ fn execute_with(
     }
 }
 
-fn serve_with(cli: &Cli, options: &Serve, env: &Env, serve: ServeHook) -> Result<(), CliError> {
+fn serve_with(cli: &Cli, start: Start<'_>, env: &Env, serve: ServeHook) -> Result<(), CliError> {
     if cli.actor.is_some() || cli.as_user {
+        let name = match start {
+            Start::Serve(_) => "serve",
+            Start::Up(_) => "up",
+        };
         return Err(CliError::new(
             "usage",
             exit::USAGE,
-            "serve takes no --actor or --as-user: the server acts as the user only for requests carrying their identity",
+            format!(
+                "{name} takes no --actor or --as-user: the server acts as the user only for requests carrying their \
+                 identity"
+            ),
         ));
     }
-    serve(options, context::tracker(cli, env)?, env)
+    serve(start, context::tracker(cli, env)?, env)
 }
 
 /// Runs one command for another front end, such as the server: on the tracker clone at `tracker`, as the user or

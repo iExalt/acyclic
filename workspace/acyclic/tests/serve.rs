@@ -1,5 +1,6 @@
-//! `acyclic serve` as a process: it says where it listens, refuses a request without the user's identity, answers a
-//! read as the CLI does, writes as the user, and syncs with the other replicas.
+//! `acyclic serve` and `acyclic up` as processes: each says where it listens, refuses a request without the user's
+//! identity or session, and answers a read as the CLI does; `serve` writes as the user and syncs with the other
+//! replicas, and `up` keeps its session across restarts.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
@@ -45,7 +46,19 @@ impl Drop for Server {
 
 /// Sends one HTTP/1.1 request and returns the status and the body.
 fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
-    let mut stream = TcpStream::connect(address).unwrap();
+    exchange(TcpStream::connect(address).unwrap(), headers, body)
+}
+
+/// Sends one HTTP/1.1 request through a Unix socket, as `tailscale serve` does.
+fn request_unix(socket: &Path, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
+    exchange(std::os::unix::net::UnixStream::connect(socket).unwrap(), headers, body)
+}
+
+fn exchange(
+    mut stream: impl std::io::Read + std::io::Write,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (u16, Value) {
     let mut head = format!(
         "POST /api/command HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -61,6 +74,15 @@ fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) 
     (status, serde_json::from_str(body).unwrap())
 }
 
+/// Opens `path` as a browser would and returns the response's head.
+fn open(address: &str, path: &str) -> String {
+    let mut stream = TcpStream::connect(address).unwrap();
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response.split_once("\r\n\r\n").unwrap().0.to_owned()
+}
+
 /// Starts the server on `tracker` and returns it with the address it listens on.
 fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
     let mut child = acyclic(tracker)
@@ -74,6 +96,24 @@ fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
     let server = Server(child);
     let started: Value = serde_json::from_str(&line).unwrap();
     (server, started["data"]["listening"].as_str().unwrap().to_owned())
+}
+
+/// Starts `acyclic up` on `tracker` with `home` as the home directory, and returns it with the address it listens on
+/// and the session's file.
+fn up(tracker: &Path, home: &Path, extra: &[&str]) -> (Server, String, PathBuf) {
+    let mut child = acyclic(tracker)
+        .env("HOME", home)
+        .args(["up", "--port", "0"])
+        .args(extra)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let server = Server(child);
+    let started: Value = serde_json::from_str(&line).unwrap();
+    let address = started["data"]["listening"].as_str().unwrap().to_owned();
+    (server, address, PathBuf::from(started["data"]["session"].as_str().unwrap()))
 }
 
 /// Sends a command as the user.
@@ -112,6 +152,79 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let (status, shown) = command(&address, r#"{"show": {"items": ["a"]}}"#);
     assert_eq!(status, 200, "{shown}");
     assert_eq!(shown, cli(&tracker, "show a"));
+}
+
+#[test]
+fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = init(dir.path(), "mac", None);
+    cli(&tracker, "item add a --title A --as-user");
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let (server, address, session) = up(&tracker, &home, &[]);
+    let token = std::fs::read_to_string(&session).unwrap();
+    let bearer = format!("Bearer {}", token.trim_end());
+    let show = r#"{"show": {"items": ["a"]}}"#;
+    let json = ("Content-Type", "application/json");
+
+    let (status, refused) = request(&address, &[("Host", &address), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (401, &Value::from("no-session")));
+    let (status, shown) =
+        request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
+    assert_eq!(status, 200, "{shown}");
+    assert_eq!(shown, cli(&tracker, "show a"));
+
+    // A link from `--link` pairs a browser, whose cookie then writes from the server's own page.
+    let port = address.rsplit_once(':').unwrap().1;
+    let linked = acyclic(&tracker)
+        .env("HOME", &home)
+        .args(["up", "--link", "--port", port])
+        .output()
+        .unwrap();
+    let linked: Value = serde_json::from_slice(&linked.stdout).unwrap();
+    let link = linked["data"]["link"].as_str().unwrap();
+    let path = link.strip_prefix(&format!("http://{address}")).unwrap();
+    let head = open(&address, path);
+    assert!(head.starts_with("HTTP/1.1 303"), "{head}");
+    let cookie = head.lines().find_map(|line| line.strip_prefix("set-cookie: ")).unwrap();
+    let cookie = cookie.split_once(';').unwrap().0;
+    let origin = format!("http://{address}");
+    let add = r#"{"item": {"add": {"item": "b", "title": "B"}}}"#;
+    let (status, added) = request(
+        &address,
+        &[("Host", &address), ("Cookie", cookie), ("Origin", &origin), json],
+        add,
+    );
+    assert_eq!(status, 200, "{added}");
+
+    // A second server can't take the same port, and says so.
+    let taken = acyclic(&tracker).env("HOME", &home).args(["up", "--port", port]).output().unwrap();
+    let refused: Value = serde_json::from_slice(&taken.stdout).unwrap();
+    assert_eq!(refused["error"]["code"], "serve", "{refused}");
+
+    // A restart keeps the session, so whatever held it still gets in.
+    drop(server);
+    // The socket's path is short, as a Unix socket's must be.
+    let short = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+    let socket = short.path().join("ts.sock");
+    let socket_arg = socket.to_str().unwrap();
+    let tailscale = ["--tailscale", "--login", LOGIN, "--host", HOST, "--socket", socket_arg];
+    let (_server, address, _) = up(&tracker, &home, &tailscale);
+    assert_eq!(std::fs::read_to_string(&session).unwrap(), token);
+    let (status, shown) =
+        request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
+    assert_eq!(status, 200, "{shown}");
+
+    // Through the socket, Tailscale's identity is what counts, and the session is nothing; on the port, the reverse.
+    let identity = [("Host", HOST), ("Tailscale-User-Login", LOGIN), json];
+    let (status, shown) = request_unix(&socket, &identity, show);
+    assert_eq!(status, 200, "{shown}");
+    let (status, refused) =
+        request_unix(&socket, &[("Host", HOST), ("Authorization", &bearer), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
+    let (status, refused) =
+        request(&address, &[("Host", &address), ("Tailscale-User-Login", LOGIN), json], show);
+    assert_eq!((status, &refused["error"]["code"]), (401, &Value::from("no-session")));
 }
 
 #[test]
