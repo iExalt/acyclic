@@ -704,7 +704,11 @@ fn a_run_queues_its_writes_and_pushes_them_as_operations() {
     assert_eq!(out["error"]["details"]["settled"], 5, "{out}");
 
     // A push the operator refused outright spends nothing, and abandoning it reuses the numbers it held.
-    reply(&[summary_line(&Summary::Refused("secret".into()))], 1);
+    // The operator's own trouble is pushed again; content it will never take is abandoned.
+    reply(&[summary_line(&Summary::Refused("scan-failed".into()))], 1);
+    let (_, out) = sh.output("ops push", AGENT);
+    assert_eq!(out["error"]["details"]["next"], "push", "{out}");
+    reply(&[summary_line(&Summary::Refused("deny-listed".into()))], 1);
     let (_, out) = sh.output("ops push", AGENT);
     assert_eq!(out["error"]["details"]["next"], "reset", "{out}");
     let (_, out) = sh.output("ops reset", AGENT);

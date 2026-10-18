@@ -29,9 +29,6 @@ pub const OPERATOR: &str = "ACYCLIC_OPERATOR_ID";
 /// The deny-list file, readable by the user alone.
 pub const DENY: &str = "ACYCLIC_DENY_FILE";
 
-/// The most operations one push may carry: few enough to forward, one batch each, well within the endpoint's time
-/// limit.
-const MOST_OPS: usize = 200;
 /// The largest operation file, in bytes.
 const MOST_BYTES: u64 = 64 * 1024;
 
@@ -145,8 +142,11 @@ fn check(repo: &Path, input: &str, run: &str, deny: &Path) -> Result<Vec<Sent>, 
     let listed =
         git(repo, &["rev-list", "--reverse", "--topo-order", "--parents", new, "--not", "--all"])?;
     let commits: Vec<Vec<&str>> = listed.lines().map(|line| line.split(' ').collect()).collect();
-    if commits.len() > MOST_OPS {
-        return Err(refuse("too-many", format!("a push carries at most {MOST_OPS} operations")));
+    if u64::try_from(commits.len()).unwrap_or(u64::MAX) > ops::MOST_PUSHED {
+        return Err(refuse(
+            "too-many",
+            format!("a push carries at most {} operations", ops::MOST_PUSHED),
+        ));
     }
     let mut previous = old;
     for line in &commits {

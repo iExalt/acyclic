@@ -196,8 +196,10 @@ fn a_runs_push_reaches_the_tracker_once_through_the_operator() {
     assert_eq!(objects(&inbox), before, "the push stayed in quarantine");
     assert_eq!(ok(dir, "run", "ops reset")["data"]["dropped"], 1);
 
-    // Sent again, operations already applied are found applied, not applied twice.
+    // Sent again, as after an acceptance neither side kept, operations already applied are found applied, not
+    // applied twice.
     git(&inbox, &["update-ref", "-d", &format!("refs/runs/{run}/ops")]);
+    git(&clone, &["update-ref", "-d", "refs/acyclic/ops-accepted"]);
     let resent = ok(dir, "run", "ops push");
     assert_eq!(
         resent["data"]["ops"],

@@ -1079,12 +1079,21 @@ impl<'a> Session<'a> {
         // What to do next: abandon what the operator wouldn't forward, or push again after anything that may pass.
         let (next, message) = match &pushed.report.summary {
             _ if pushed.unknown => ("push", "the push's outcome is unknown: push again".to_owned()),
-            Some(Summary::Refused(code)) => (
-                "reset",
-                format!(
-                    "the operator forwarded nothing ({code}): `acyclic ops reset` drops the queued operations"
+            Some(Summary::Refused(code)) => match store::ops::next(code) {
+                store::ops::Next::Reset => (
+                    "reset",
+                    format!(
+                        "the operator won't take these operations ({code}): `acyclic ops reset` drops them"
+                    ),
                 ),
-            ),
+                store::ops::Next::Token => (
+                    "token",
+                    format!("the operator refused the run ({code}): the run needs a new token"),
+                ),
+                store::ops::Next::Push => {
+                    ("push", format!("the operator couldn't take the push ({code}): push again"))
+                },
+            },
             _ => ("push", "the push stopped at a failure that may pass: push again".to_owned()),
         };
         data["next"] = json!(next);

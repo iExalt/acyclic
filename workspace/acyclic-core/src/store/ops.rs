@@ -22,6 +22,39 @@ pub const QUEUE: &str = "refs/heads/ops";
 /// The last operation known to be spent.
 pub const SETTLED: &str = "refs/acyclic/ops-settled";
 
+/// The last operation the remote took, which the next push carries on from.
+pub const ACCEPTED: &str = "refs/acyclic/ops-accepted";
+
+/// The most operations a push carries past the last one the remote took; the receiver refuses more.
+pub const MOST_PUSHED: u64 = 200;
+
+/// The last operation of the next push, when the remote took up to `taken` and `queued` are queued.
+#[must_use]
+pub fn chunk(taken: u64, queued: u64) -> u64 {
+    queued.min(taken.saturating_add(MOST_PUSHED))
+}
+
+/// What a run should do after the receiver refused its push outright, by the refusal's code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Next {
+    /// Push again: the refusal was the operator's trouble, not the operations'.
+    Push,
+    /// Reset, dropping what wasn't spent: the operations will never pass as they are.
+    Reset,
+    /// Get a new token: the run's token or the run itself was refused.
+    Token,
+}
+
+/// What a refused push's code advises: only content that will never pass is abandoned.
+#[must_use]
+pub fn next(code: &str) -> Next {
+    match code {
+        "deny-listed" | "leak" | "not-an-operation" => Next::Reset,
+        "token" | "inactive" => Next::Token,
+        _ => Next::Push,
+    }
+}
+
 /// Set to the pushed tip while a push's outcome is unknown, and cleared once the receiver reports it.
 pub const UNKNOWN: &str = "refs/acyclic/ops-unknown";
 
@@ -245,39 +278,75 @@ impl Tracker {
         Ok(seq)
     }
 
-    /// Pushes the queue to `remote` as run `run`'s and moves [`SETTLED`] past what the receiver reported spent.
+    /// Pushes the queue to `remote` as run `run`'s and moves [`SETTLED`] past what the receiver reported spent: at
+    /// most [`MOST_PUSHED`] operations past the last push the remote took at a time, for as long as it takes them.
     ///
     /// # Errors
     ///
     /// When git fails to run or to move a local ref; a refused push is a [`Pushed`] that wasn't accepted.
     pub fn push_queue(&self, remote: &str, run: &str) -> Result<Pushed, StoreError> {
-        let tip = self.git.resolve(QUEUE)?;
-        let settled = self.settled()?;
-        let Some(tip) = tip else {
-            return Ok(Pushed {
-                accepted: true,
-                report: Report::default(),
-                settled,
-                queued: 0,
-                unknown: false,
-                reason: None,
-            });
+        let mut pushed = Pushed {
+            accepted: true,
+            report: Report::default(),
+            settled: self.settled()?,
+            queued: 0,
+            unknown: self.git.resolve(UNKNOWN)?.is_some(),
+            reason: None,
         };
-        let queued = self.highest(&tip)?;
-        if queued > settled {
-            self.git.run(["update-ref", UNKNOWN, &tip], None, &[])?;
+        let Some(tip) = self.git.resolve(QUEUE)? else { return Ok(pushed) };
+        pushed.queued = self.highest(&tip)?;
+        loop {
+            let taken = match self.git.resolve(ACCEPTED)? {
+                Some(commit) => self.highest(&commit)?,
+                None => 0,
+            };
+            let upto = chunk(taken, pushed.queued);
+            if upto <= taken {
+                return Ok(pushed);
+            }
+            let commit =
+                self.git.text(["rev-parse", &format!("{tip}~{}", pushed.queued - upto)])?;
+            let once = self.push_once(remote, run, &commit, upto)?;
+            pushed.report.ops.extend(once.report.ops);
+            pushed.report.summary = once.report.summary;
+            let room = MOST_MESSAGES.saturating_sub(pushed.report.messages.len());
+            pushed.report.messages.extend(once.report.messages.into_iter().take(room));
+            pushed.accepted = once.accepted;
+            pushed.settled = once.settled;
+            pushed.unknown = once.unknown;
+            pushed.reason = once.reason;
+            if !pushed.accepted || upto >= pushed.queued {
+                return Ok(pushed);
+            }
         }
-        let refspec = format!("{tip}:{}", remote_ref(run));
+    }
+
+    /// Pushes `commit`, operation `upto` of the queue, and settles what the receiver reported.
+    fn push_once(
+        &self,
+        remote: &str,
+        run: &str,
+        commit: &str,
+        upto: u64,
+    ) -> Result<Pushed, StoreError> {
+        let settled = self.settled()?;
+        if upto > settled {
+            self.git.run(["update-ref", UNKNOWN, commit], None, &[])?;
+        }
+        let refspec = format!("{commit}:{}", remote_ref(run));
         let output = self.git.output(["push", "--porcelain", remote, &refspec])?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         let report = parse(&stderr);
         let accepted = output.status.success();
-        let reached = if accepted { queued } else { reach(settled, &report.ops).min(queued) };
+        let reached = if accepted { upto } else { reach(settled, &report.ops).min(upto) };
         let _lock = self.lock()?;
         let now_settled = self.settled()?;
         if reached > now_settled {
-            let commit = self.git.text(["rev-parse", &format!("{tip}~{}", queued - reached)])?;
-            self.git.run(["update-ref", SETTLED, &commit], None, &[])?;
+            let settle = self.git.text(["rev-parse", &format!("{commit}~{}", upto - reached)])?;
+            self.git.run(["update-ref", SETTLED, &settle], None, &[])?;
+        }
+        if accepted {
+            self.git.run(["update-ref", ACCEPTED, commit], None, &[])?;
         }
         // Git refuses a push that isn't a fast-forward before sending anything, so nothing reached the receiver.
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -286,14 +355,21 @@ impl Tracker {
         let known = accepted || unsent || report.summary.is_some();
         if known {
             // Only if no later push marked its own tip meanwhile.
-            let _ = self.git.run(["update-ref", "-d", UNKNOWN, &tip], None, &[]);
+            let _ = self.git.run(["update-ref", "-d", UNKNOWN, commit], None, &[]);
         }
         let unknown = self.git.resolve(UNKNOWN)?.is_some();
         let reason = (!accepted).then(|| {
             let rejected = stdout.lines().find(|line| line.starts_with('!'));
             escape(rejected.unwrap_or_else(|| stderr.trim()))
         });
-        Ok(Pushed { accepted, report, settled: reached.max(now_settled), queued, unknown, reason })
+        Ok(Pushed {
+            accepted,
+            report,
+            settled: reached.max(now_settled),
+            queued: upto,
+            unknown,
+            reason,
+        })
     }
 
     /// Drops every queued operation after the last one known to be spent.
@@ -402,6 +478,32 @@ mod tests {
             (0, vec![], 0),
         ] {
             assert_eq!(reach(settled, &ops), reached, "{settled} {ops:?}");
+        }
+    }
+
+    #[test]
+    fn a_push_carries_at_most_its_share_past_what_the_remote_took() {
+        assert_eq!(chunk(0, 3), 3);
+        assert_eq!(chunk(0, 450), MOST_PUSHED);
+        assert_eq!(chunk(MOST_PUSHED, 450), 2 * MOST_PUSHED);
+        assert_eq!(chunk(400, 450), 450);
+        assert_eq!(chunk(450, 450), 450);
+    }
+
+    #[test]
+    fn only_content_that_never_passes_is_abandoned() {
+        for (code, advice) in [
+            ("deny-listed", Next::Reset),
+            ("leak", Next::Reset),
+            ("not-an-operation", Next::Reset),
+            ("scan-failed", Next::Push),
+            ("tracker", Next::Push),
+            ("git", Next::Push),
+            ("too-many", Next::Push),
+            ("token", Next::Token),
+            ("inactive", Next::Token),
+        ] {
+            assert_eq!(next(code), advice, "{code}");
         }
     }
 
