@@ -1,13 +1,16 @@
 //! Runs' code repositories, over git's smart HTTP protocol on the runners' listener. A run never holds a credential
-//! for the forge: it fetches each repository of its thread from a mirror the server keeps, and pushes only to its own
-//! refs in that mirror, `refs/runs/<run>/*`.
+//! for the forge: it fetches each repository of its thread, and pushes to its own refs, `refs/runs/<run>/*`, in a
+//! repository its thread alone uses.
 //!
-//! Each mirror is a bare repository fetched from the forge's `refs/heads/*` and `refs/tags/*` alone, so a fetch never
-//! touches the runs' refs. Every run's request is checked against its thread's repository set as it stands, so a
-//! repository added to the thread is reachable at once and one removed is refused. A run sees no other run's refs,
-//! and can fetch only what its own refs, the branches and the tags reach: git speaks its first protocol here, which
-//! checks every object a run asks for against what it was shown. Pushes go through a hook ([`hook`]) before git takes
+//! Each repository on the forge has a bare mirror, fetched from its `refs/heads/*` and `refs/tags/*` alone, which no
+//! run reaches. Each thread has a repository of its own per repository it works on, borrowing the mirror's objects and
+//! holding its runs' pushes, so a run reaches the forge's history, its own thread's runs' refs and nothing of any other
+//! thread's. Every request is checked against the run's thread's repository set as it stands, so a repository added
+//! to the thread is reachable at once and one removed is refused. Pushes go through a hook ([`hook`]) before git takes
 //! them.
+//!
+//! The mirror keeps every object it fetched, since the threads' repositories borrow them. Once a thread is finished,
+//! its repositories are removed, and a mirror no thread borrows from any more drops what the forge no longer has.
 //!
 //! Git runs with an environment of the server's making, nothing inherited, and a home of its own, so none of the
 //! user's settings or credentials reaches the forge or a run. Each request runs git in a process group of its own,
@@ -32,6 +35,8 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Router};
 use futures_util::StreamExt as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+use acyclic_operator::token::Claims;
 
 use crate::{Credential, Listener};
 
@@ -76,7 +81,7 @@ pub struct Code {
     path: String,
     /// When each mirror's last successful fetch began, by record id.
     fetched: Mutex<BTreeMap<String, Instant>>,
-    /// One lock per mirror, held while it is made or fetched.
+    /// One lock per repository, held while its mirror or a thread's repository of it is made, fetched or removed.
     fetching: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// The runs with a push under way, with the repository's record: `<run> <record>`.
     pushing: Arc<Mutex<BTreeSet<String>>>,
@@ -170,9 +175,24 @@ impl Code {
         }
     }
 
-    /// The mirror of `record`, made if missing, and fetched first if `refresh`, unless a fetch begun since this was
-    /// asked for finished meanwhile: fetches asked for together share one.
-    async fn mirror(&self, record: &Repository, refresh: bool) -> Result<PathBuf, Failure> {
+    /// The lock of `record`'s mirror and its threads' repositories, held while any of them is made, fetched or
+    /// removed.
+    async fn lock(&self, record: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, Failure> {
+        let lock = {
+            let mut fetching = self.fetching.lock().map_err(|_| internal())?;
+            Arc::clone(fetching.entry(record.to_owned()).or_default())
+        };
+        Ok(lock.lock_owned().await)
+    }
+
+    /// The repository `thread`'s runs use for `record`: made if missing, borrowing the mirror's objects, and brought
+    /// up to date with the mirror, which is fetched first if `refresh`.
+    async fn workspace(
+        &self,
+        record: &Repository,
+        thread: &str,
+        refresh: bool,
+    ) -> Result<PathBuf, Failure> {
         let unavailable = |message: String| (StatusCode::FORBIDDEN, message);
         let (Some(owner), Some(name)) = (record.owner.one(), record.name.one()) else {
             return Err(unavailable(format!("{} has no single owner and name", record.id)));
@@ -182,18 +202,86 @@ impl Code {
                 "{owner}/{name} is private, and private repositories can't be mirrored yet"
             )));
         }
-        if !(segment(owner) && segment(name)) {
+        if !(segment(owner) && segment(name) && segment(thread)) {
             return Err(unavailable(format!("{owner}/{name} isn't a repository's name")));
         }
         let mirror = acyclic_cli::mirror(&self.settings.env, &record.id)
             .filter(|mirror| mirror.parent() == Some(self.root.as_path()))
             .ok_or_else(|| unavailable(format!("{} can't name a mirror", record.id)))?;
+        let threads = self.root.join(format!("{}.threads", record.id));
+        let repository = threads.join(format!("{thread}.git"));
         let asked = Instant::now();
-        let lock = {
-            let mut fetching = self.fetching.lock().map_err(|_| internal())?;
-            Arc::clone(fetching.entry(record.id.clone()).or_default())
+        let _held = self.lock(&record.id).await?;
+        self.fetch(record, owner, name, &mirror, refresh, asked).await?;
+        let made = repository.is_dir();
+        if made && !refresh {
+            return Ok(repository);
+        }
+        let staged = threads.join(format!(".{thread}.{}.new", std::process::id()));
+        let target = if made { repository.clone() } else { staged.clone() };
+        if !made {
+            let _ = std::fs::remove_dir_all(&staged);
+            let mut init = self.git();
+            init.args(["init", "-q", "--bare", "--template="]).arg(&staged);
+            self.run(init, "making the thread's repository").await?;
+            let info = staged.join("objects/info");
+            let borrowed = format!("{}\n", mirror.join("objects").display());
+            std::fs::create_dir_all(&info)
+                .and_then(|()| std::fs::write(info.join("alternates"), borrowed))
+                .map_err(|err| {
+                    let _ = std::fs::remove_dir_all(&staged);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("making the thread's repository: {err}"),
+                    )
+                })?;
+        }
+        // The mirror's objects are the thread's own already, so this moves refs alone.
+        let mut fetch = self.git();
+        fetch
+            .arg("-C")
+            .arg(&target)
+            .args(["fetch", "-q", "--prune", "--no-write-fetch-head", "--"])
+            .arg(&mirror)
+            .args(["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"]);
+        let fetched = self.run(fetch, "updating the thread's repository").await;
+        let named = match (&fetched, record.default_branch.one().filter(|b| segment(b))) {
+            (Ok(()), Some(branch)) => {
+                let mut head = self.git();
+                head.arg("-C").arg(&target).args(["symbolic-ref", "HEAD"]);
+                head.arg(format!("refs/heads/{branch}"));
+                self.run(head, "naming the default branch").await
+            },
+            _ => fetched,
         };
-        let _held = lock.lock().await;
+        if let Err(failure) = named {
+            if !made {
+                let _ = std::fs::remove_dir_all(&staged);
+            }
+            return Err(failure);
+        }
+        if !made && std::fs::rename(&staged, &repository).is_err() {
+            let _ = std::fs::remove_dir_all(&staged);
+            if !repository.is_dir() {
+                return Err(internal());
+            }
+        }
+        Ok(repository)
+    }
+
+    /// Fetches the mirror at `mirror` from the forge if it is missing, or if `refresh` and no fetch begun since
+    /// `asked` finished meanwhile, so fetches asked for together share one. A new mirror is fetched where it is made
+    /// and moved into place only once it holds the forge's branches; it never prunes objects on its own, since the
+    /// threads' repositories borrow them. Called with the record's lock held.
+    async fn fetch(
+        &self,
+        record: &Repository,
+        owner: &str,
+        name: &str,
+        mirror: &Path,
+        refresh: bool,
+        asked: Instant,
+    ) -> Result<(), Failure> {
         let made = mirror.is_dir();
         let fresh = self
             .fetched
@@ -202,16 +290,18 @@ impl Code {
             .get(&record.id)
             .is_some_and(|began| *began >= asked);
         if made && (fresh || !refresh) {
-            return Ok(mirror);
+            return Ok(());
         }
-        // A new mirror is fetched where it is made, and moved into place only once it holds the forge's branches.
         let staged = self.root.join(format!(".{}.{}.new", record.id, std::process::id()));
-        let target = if made { mirror.clone() } else { staged.clone() };
+        let target = if made { mirror.to_path_buf() } else { staged.clone() };
         if !made {
             let _ = std::fs::remove_dir_all(&staged);
             let mut init = self.git();
             init.args(["init", "-q", "--bare", "--template="]).arg(&staged);
             self.run(init, "making the mirror").await?;
+            let mut keep = self.git();
+            keep.arg("-C").arg(&staged).args(["config", "gc.pruneExpire", "never"]);
+            self.run(keep, "making the mirror").await?;
         }
         let began = Instant::now();
         let mut fetch = self.git();
@@ -225,68 +315,90 @@ impl Code {
             if made {
                 // The forge being away shouldn't stop runs: they get the mirror as it was last fetched.
                 eprintln!("acyclic: {}; serving the mirror as last fetched", failure.1);
-                return Ok(mirror);
+                return Ok(());
             }
             let _ = std::fs::remove_dir_all(&staged);
             return Err(failure);
         }
-        if let Some(branch) = record.default_branch.one().filter(|branch| segment(branch)) {
-            let mut head = self.git();
-            head.arg("-C").arg(&target).args(["symbolic-ref", "HEAD"]);
-            head.arg(format!("refs/heads/{branch}"));
-            self.run(head, "naming the mirror's default branch").await?;
-        }
-        if !made && std::fs::rename(&staged, &mirror).is_err() {
+        if !made && std::fs::rename(&staged, mirror).is_err() {
             // Another server made it first.
             let _ = std::fs::remove_dir_all(&staged);
             if !mirror.is_dir() {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "the mirror couldn't be made".into(),
-                ));
+                return Err(internal());
             }
         }
         self.fetched.lock().map_err(|_| internal())?.insert(record.id.clone(), began);
-        Ok(mirror)
+        Ok(())
     }
 
-    /// Fetches every mirror that exists of a public repository, for readiness's checks of what is merged.
+    /// Fetches every mirror that exists of a public repository, for readiness's checks of what is merged, and removes
+    /// the repositories of threads that are finished.
     pub(crate) async fn refresh_all(&self, tracker: &Path) {
         let Ok(records) = acyclic_cli::repositories(tracker) else { return };
         for record in records {
-            let exists = acyclic_cli::mirror(&self.settings.env, &record.id)
-                .is_some_and(|mirror| mirror.is_dir());
-            if exists && record.public.one() == Some(&true) {
-                let _ = self.mirror(&record, true).await;
+            let Some(mirror) = acyclic_cli::mirror(&self.settings.env, &record.id)
+                .filter(|mirror| mirror.parent() == Some(self.root.as_path()) && mirror.is_dir())
+            else {
+                continue;
+            };
+            if let (Some(owner), Some(name), Some(true)) =
+                (record.owner.one(), record.name.one(), record.public.one())
+                && let Ok(_held) = self.lock(&record.id).await
+            {
+                let _ = self.fetch(&record, owner, name, &mirror, true, Instant::now()).await;
+            }
+            let threads = self.root.join(format!("{}.threads", record.id));
+            let present = borrowers(&threads);
+            let tracker = tracker.to_path_buf();
+            let finished = tokio::task::spawn_blocking(move || {
+                acyclic_cli::finished(&present, &tracker).unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+            if finished.is_empty() {
+                continue;
+            }
+            if let Ok(_held) = self.lock(&record.id).await {
+                let git = self.blocking_git();
+                let _ =
+                    tokio::task::spawn_blocking(move || collect(git, &mirror, &threads, &finished))
+                        .await;
             }
         }
     }
 
-    /// Git's `upload-pack` or `receive-pack` in `mirror` for `run`, its output streamed back. Every ref of another
-    /// run is hidden; a run's wants are checked against what it was shown, never taken by id alone.
+    /// [`Self::git`], for the blocking pool.
+    fn blocking_git(&self) -> std::process::Command {
+        let mut command = std::process::Command::new("git");
+        command
+            .env_clear()
+            .env("PATH", &self.path)
+            .env("HOME", self.root.join(".home"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    /// Git's `upload-pack` or `receive-pack` in a thread's repository for `run`, the pushes' hook in place.
     fn pack(
         &self,
         service: Service,
-        mirror: &Path,
+        repository: &Path,
         run: &str,
         advertise: bool,
         public: bool,
     ) -> tokio::process::Command {
         let mut command = self.git();
         for (key, value) in [
-            ("transfer.hideRefs", "refs/runs".to_owned()),
-            ("transfer.hideRefs", format!("!refs/runs/{run}")),
-            ("uploadpack.allowTipSHA1InWant", "false".to_owned()),
-            ("uploadpack.allowReachableSHA1InWant", "false".to_owned()),
-            ("uploadpack.allowAnySHA1InWant", "false".to_owned()),
-            ("uploadpack.allowFilter", "false".to_owned()),
             ("core.hooksPath", self.root.join(".hooks").display().to_string()),
             ("receive.advertisePushOptions", "false".to_owned()),
             ("receive.fsckObjects", "true".to_owned()),
             ("receive.maxInputSize", MOST_PUSHED.to_string()),
-            // Every push is kept as a pack in quarantine, its objects all there, even those the mirror has: the hook
-            // tells what the push brought by what the quarantine holds.
-            ("receive.unpackLimit", "1".to_owned()),
         ] {
             command.arg("-c").arg(format!("{key}={value}"));
         }
@@ -295,7 +407,7 @@ impl Code {
             command.arg("--advertise-refs");
         }
         command
-            .arg(mirror)
+            .arg(repository)
             .env(hook::RUN, run)
             .env(hook::PUBLIC, if public { "1" } else { "0" })
             .env(hook::DENY, &self.settings.deny)
@@ -349,6 +461,37 @@ fn run_id(run: &str) -> bool {
     !run.is_empty() && run.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
+/// The threads with a repository under `threads`.
+fn borrowers(threads: &Path) -> BTreeSet<String> {
+    let Ok(entries) = std::fs::read_dir(threads) else { return BTreeSet::new() };
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".git").map(str::to_owned))
+        .filter(|thread| segment(thread))
+        .collect()
+}
+
+/// Removes the repositories under `threads` of the `finished` threads, then, once none is left to borrow from the
+/// mirror at `mirror`, lets the mirror drop what the forge no longer has. Called with the record's lock held.
+fn collect(
+    mut git: std::process::Command,
+    mirror: &Path,
+    threads: &Path,
+    finished: &BTreeSet<String>,
+) {
+    let mut removed = false;
+    for thread in finished.iter().filter(|thread| segment(thread)) {
+        removed |= std::fs::remove_dir_all(threads.join(format!("{thread}.git"))).is_ok();
+    }
+    if removed && borrowers(threads).is_empty() {
+        let _ = git
+            .arg("-C")
+            .arg(mirror)
+            .args(["-c", "gc.pruneExpire=now", "gc", "-q", "--prune=now"])
+            .status();
+    }
+}
+
 fn internal() -> Failure {
     (StatusCode::INTERNAL_SERVER_ERROR, "the server failed".to_owned())
 }
@@ -397,14 +540,14 @@ pub(crate) fn routes() -> Router<Arc<Listener>> {
         .route("/git/{owner}/{name}/{service}", post(exchange))
 }
 
-/// The code endpoint, the run, and the record it named, once the run is checked: under way, and the repository in its
-/// thread's set.
+/// The code endpoint, the run's claims, and the record it named, once the run is checked: under way, and the repository
+/// in its thread's set.
 async fn authorize(
     listener: &Arc<Listener>,
     credential: Credential,
     owner: String,
     name: String,
-) -> Result<(Arc<Code>, String, Repository), Failure> {
+) -> Result<(Arc<Code>, Claims, Repository), Failure> {
     let Credential::Run(claims) = credential else {
         return Err((StatusCode::FORBIDDEN, "only runs reach code here".to_owned()));
     };
@@ -412,7 +555,7 @@ async fn authorize(
         return Err((StatusCode::NOT_FOUND, "this server serves no code".to_owned()));
     };
     let code = Arc::clone(code);
-    if !run_id(&claims.run) {
+    if !run_id(&claims.run) || !segment(&claims.thread) {
         return Err((StatusCode::FORBIDDEN, "the token names no run".to_owned()));
     }
     let name = name.strip_suffix(".git").unwrap_or(&name).to_owned();
@@ -429,7 +572,7 @@ async fn authorize(
     .await
     .map_err(|_| internal())?;
     match reached {
-        Ok(Reach::Found(record)) => Ok((code, claims.run, record)),
+        Ok(Reach::Found(record)) => Ok((code, claims, record)),
         Ok(Reach::Inactive) => {
             Err((StatusCode::FORBIDDEN, "the token's run isn't under way".to_owned()))
         },
@@ -457,16 +600,17 @@ async fn advertise(
             "this server speaks git's smart protocol alone".to_owned(),
         ));
     };
-    let (code, run, record) = match authorize(&listener, credential, owner, name).await {
+    let (code, claims, record) = match authorize(&listener, credential, owner, name).await {
         Ok(authorized) => authorized,
         Err(failure) => return text(failure),
     };
-    let mirror = match code.mirror(&record, service == Service::Upload).await {
-        Ok(mirror) => mirror,
+    let refresh = service == Service::Upload;
+    let repository = match code.workspace(&record, &claims.thread, refresh).await {
+        Ok(repository) => repository,
         Err(failure) => return text(failure),
     };
     let public = record.public.one() == Some(&true);
-    let command = code.pack(service, &mirror, &run, true, public);
+    let command = code.pack(service, &repository, &claims.run, true, public);
     let first = format!("# service={}\n", service.name());
     let preamble = format!("{:04x}{first}0000", first.len() + 4);
     match stream(command, Input::None, Some(Bytes::from(preamble)), None, None) {
@@ -497,17 +641,18 @@ async fn exchange(
     if headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok()) != Some(expected.as_str()) {
         return text((StatusCode::UNSUPPORTED_MEDIA_TYPE, "not git's request".to_owned()));
     }
-    let (code, run, record) = match authorize(&listener, credential, owner, name).await {
+    let (code, claims, record) = match authorize(&listener, credential, owner, name).await {
         Ok(authorized) => authorized,
         Err(failure) => return text(failure),
     };
-    let mirror = match code.mirror(&record, false).await {
-        Ok(mirror) => mirror,
+    let run = claims.run;
+    let repository = match code.workspace(&record, &claims.thread, false).await {
+        Ok(repository) => repository,
         Err(failure) => return text(failure),
     };
     let encoding = headers.get(CONTENT_ENCODING).and_then(|value| value.to_str().ok());
     let public = record.public.one() == Some(&true);
-    let command = code.pack(service, &mirror, &run, false, public);
+    let command = code.pack(service, &repository, &run, false, public);
     let streamed = match service {
         Service::Upload => {
             let Ok(permit) =
@@ -679,4 +824,57 @@ fn stream(
         }
     });
     Ok(Body::from_stream(chunks))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git(dir: &Path) -> std::process::Command {
+        let mut command = std::process::Command::new("git");
+        command
+            .arg("-C")
+            .arg(dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .stdin(Stdio::null());
+        command
+    }
+
+    #[test]
+    fn a_mirror_drops_what_the_forge_dropped_once_no_unfinished_thread_borrows_from_it() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mirror = temp.path().join("app.git");
+        assert!(
+            git(temp.path()).args(["init", "-q", "--bare", "app.git"]).status().unwrap().success()
+        );
+        assert!(
+            git(&mirror).args(["config", "gc.pruneExpire", "never"]).status().unwrap().success()
+        );
+        // An object no ref reaches, as a branch the forge deleted leaves behind.
+        let mut writing = git(&mirror)
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut writing.stdin.take().unwrap(), b"dropped\n").unwrap();
+        let output = writing.wait_with_output().unwrap();
+        let dropped = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        let kept = || git(&mirror).args(["cat-file", "-e", &dropped]).status().unwrap().success();
+        let threads = temp.path().join("app.threads");
+        for thread in ["t0", "t1"] {
+            std::fs::create_dir_all(threads.join(format!("{thread}.git"))).unwrap();
+        }
+        let collected = |finished: &[&str]| {
+            let finished = finished.iter().map(|thread| (*thread).to_owned()).collect();
+            collect(git(temp.path()), &mirror, &threads, &finished);
+        };
+        collected(&["t0"]);
+        assert_eq!(borrowers(&threads), ["t1".to_owned()].into());
+        assert!(kept(), "t1 may still borrow it");
+        collected(&["t1"]);
+        assert!(borrowers(&threads).is_empty());
+        assert!(!kept());
+    }
 }

@@ -1,13 +1,11 @@
-//! The mirrors' pre-receive hook: what checks a run's push before git takes it.
+//! The threads' repositories' pre-receive hook: what checks a run's push before git takes it.
 //!
 //! The endpoint runs `git receive-pack` with an environment of its own making, and git runs this hook with the pushed
 //! objects in quarantine, before it moves any ref. A push may only update the run's own refs, `refs/runs/<run>/*`, to
-//! commits. Every object it makes reachable must have come in the push itself: every run's objects share the mirror's
-//! store, so a ref naming another run's commit, or a commit built on one, would otherwise hand that run's work over.
-//! Then the new commits are scanned: for the deny-list's terms in a public repository, since private records name
-//! private terms by design, and with Gitleaks in every repository. Anything else refuses the whole push.
+//! commits. Then the new commits are scanned: for the deny-list's terms in a public repository, since private records
+//! name private terms by design, and with Gitleaks in every repository. Anything else refuses the whole push.
 
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
@@ -27,10 +25,12 @@ pub const DENY: &str = "ACYCLIC_DENY_FILE";
 #[must_use]
 pub fn main() -> ExitCode {
     let given = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    let (Some(run), Some(public), Some(deny), Some(quarantine)) =
+    let (Some(run), Some(public), Some(deny), Some(_)) =
         (given(RUN), given(PUBLIC), given(DENY), given("GIT_QUARANTINE_PATH"))
     else {
-        eprintln!("acyclic receive-hook runs only as the mirrors' hook, under git receive-pack");
+        eprintln!(
+            "acyclic receive-hook runs only as the threads' repositories' hook, under git receive-pack"
+        );
         return ExitCode::from(2);
     };
     let mut input = String::new();
@@ -38,7 +38,7 @@ pub fn main() -> ExitCode {
         eprintln!("the hook couldn't read the push's updates");
         return ExitCode::FAILURE;
     }
-    match check(Path::new("."), &input, &run, public == "1", Path::new(&deny), &quarantine) {
+    match check(Path::new("."), &input, &run, public == "1", Path::new(&deny)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -47,15 +47,8 @@ pub fn main() -> ExitCode {
     }
 }
 
-/// Checks a push to the mirror at `repo` whose updates git gave as `input`, from run `run`.
-fn check(
-    repo: &Path,
-    input: &str,
-    run: &str,
-    public: bool,
-    deny: &Path,
-    quarantine: &str,
-) -> Result<(), String> {
+/// Checks a push to the thread's repository at `repo` whose updates git gave as `input`, from run `run`.
+fn check(repo: &Path, input: &str, run: &str, public: bool, deny: &Path) -> Result<(), String> {
     let own = format!("refs/runs/{run}/");
     let zero = |id: &str| id.bytes().all(|byte| byte == b'0');
     let mut news = Vec::new();
@@ -84,19 +77,9 @@ fn check(
     if news.is_empty() {
         return Ok(());
     }
-    // What the run could see before the push: the branches, the tags and its own refs, none of another run's.
+    // The commits new to the thread's repository; the rest were scanned as they came.
     let mut range = news.clone();
-    range.extend(
-        ["--not", "--exclude=refs/runs/*", "--all", &format!("--glob={own}*")].map(str::to_owned),
-    );
-    let mut listing = vec!["rev-list", "--objects"];
-    listing.extend(range.iter().map(String::as_str));
-    let listed = git(repo, &listing)?;
-    let objects: Vec<&str> = listed.lines().filter_map(|line| line.split(' ').next()).collect();
-    let found = quarantined(repo, &objects, quarantine)?;
-    if found.lines().any(|line| line.ends_with(" missing")) {
-        return Err("the push references objects this run can't see".to_owned());
-    }
+    range.extend(["--not", "--all"].map(str::to_owned));
     let list = if public { list } else { DenyList::parse("") };
     if names.iter().any(|name| !list.matches(name).is_empty()) {
         return Err("a ref's name holds a term the deny-list forbids".to_owned());
@@ -117,32 +100,7 @@ fn allowed(own: &str, reference: &str) -> bool {
     reference.strip_prefix(own).is_some_and(|rest| !rest.is_empty())
 }
 
-/// What `git cat-file --batch-check` says of `objects` in the quarantine alone, the push's own objects.
-fn quarantined(repo: &Path, objects: &[&str], quarantine: &str) -> Result<String, String> {
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["cat-file", "--batch-check"])
-        .env("GIT_OBJECT_DIRECTORY", quarantine)
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
-        .env("LC_ALL", "C")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| format!("git can't run: {err}"))?;
-    let mut stdin = child.stdin.take().ok_or("git took no input")?;
-    let text = objects.iter().flat_map(|object| [*object, "\n"]).collect::<String>();
-    let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
-    let output = child.wait_with_output().map_err(|err| format!("git can't run: {err}"))?;
-    let _ = writer.join();
-    if !output.status.success() {
-        return Err("git cat-file failed".to_owned());
-    }
-    String::from_utf8(output.stdout).map_err(|_| "git printed something not UTF-8".to_owned())
-}
-
-/// Runs git in the mirror, as the hook's environment points it, quarantine included.
+/// Runs git in the thread's repository, as the hook's environment points it, quarantine included.
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")

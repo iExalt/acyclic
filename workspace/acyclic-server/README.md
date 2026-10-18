@@ -52,17 +52,25 @@ answered `duplicate`. It supersedes only what the tracker held when the run last
 
 The runners' listener also serves git's smart HTTP protocol at `/git/<owner>/<name>.git`, so a run never holds a
 credential for the forge. A run reaches only the repositories of its thread's set as it stands at each request; any
-other is refused as not in this thread. Each is served from a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by
-default under `~/.local/share`), made on first use and fetched from `https://github.com/<owner>/<name>.git`
-(`ACYCLIC_UPSTREAM` names another forge) whenever a run fetches, and every 5 minutes unless `--sync-every 0`. A fetch
-takes `refs/heads/*` and `refs/tags/*` alone, so it never touches the runs' refs. Git runs there with no settings or
-credentials of the user's, so only public repositories can be mirrored for now. Readiness checks whether a commit is
-merged against the mirror of a repository with no clone mapped in `~/.config/acyclic/clones.toml`.
+other is refused as not in this thread.
 
-A run sees and fetches only the branches, the tags and its own refs, `refs/runs/<run>/*`, and pushes only to its own
-refs, to commits. A push's hook refuses one that names objects the push didn't bring, which would hand over another
-run's work, then scans the new commits for the deny-list's terms, in a public repository, and with Gitleaks, in every
-one. A request may take 10 minutes, a push 512 MiB, and a run one push at a time.
+Each repository has a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by default under `~/.local/share`), made on
+first use and fetched from `https://github.com/<owner>/<name>.git` (`ACYCLIC_UPSTREAM` names another forge) whenever a
+run fetches, and every 5 minutes unless `--sync-every 0`; when the forge can't be reached, runs get the mirror as last
+fetched. Git runs there with no settings or credentials of the user's, so only public repositories can be mirrored for
+now. Readiness checks whether a commit is merged against the mirror of a repository with no clone mapped in
+`~/.config/acyclic/clones.toml`.
+
+No run reaches a mirror itself: each thread has a repository of its own beside it, which borrows the mirror's objects
+and holds its runs' pushes. A run sees the forge's branches and tags and its thread's runs' refs, so one replacing
+another picks up its work, and nothing of another thread's. It pushes only to its own refs, `refs/runs/<run>/*`, and
+only commits; a push's hook scans the new commits for the deny-list's terms, in a public repository, and with
+Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB, and a run one push at a time to each
+repository.
+
+Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, the
+repositories of finished threads, those with every item done and no run under way, are removed, and a mirror no
+thread borrows from any more drops what the forge no longer has.
 
 The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
 any of the forge's URLs, to the server with the run's token.

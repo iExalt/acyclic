@@ -1,6 +1,6 @@
 //! Runs reaching their thread's code through `acyclic up --runners`, end to end with git itself: each run clones by
-//! the forge's URL, which its environment sends to the server's mirror, sees and pushes only its own refs, and can't
-//! reach another run's work or a repository outside its thread.
+//! the forge's URL, which its environment sends to the server, pushes only to its own refs, sees its own thread's
+//! runs' work, and can't reach another thread's or a repository outside its thread.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 
 use acyclic_cli::Env;
+use acyclic_core::model::RunState;
 use acyclic_operator::runs::{self, Clone, Operator};
 use acyclic_operator::token::Signer;
 use serde_json::Value;
@@ -102,7 +103,7 @@ fn push_without_objects(runners: &str, token: &str, update: &str, pack: &[u8]) -
 }
 
 #[test]
-fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_refs() {
+fn runs_reach_their_threads_code_alone_and_push_only_their_own_refs() {
     let temp = tempfile::TempDir::new().unwrap();
     let dir = temp.path();
     let none = BTreeMap::new();
@@ -189,7 +190,7 @@ fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_ref
     // Not the branches, nor another run's refs.
     refused(&git(&a, &vars_a, &["push", "origin", "HEAD:refs/heads/main"]), "alone");
     let theirs = format!("HEAD:refs/runs/{run_b}/work");
-    refused(&git(&a, &vars_a, &["push", "origin", &theirs]), "hidden ref");
+    refused(&git(&a, &vars_a, &["push", "origin", &theirs]), "alone");
     // Nor a term the deny-list holds, in a public repository.
     commit(&a, &none, "notes", &format!("{TERM}\n"));
     refused(
@@ -202,23 +203,20 @@ fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_ref
         "not in this thread",
     );
 
-    // B, in another thread holding app, doesn't see A's ref, can't fetch its commit by id, even over the second
-    // protocol, and can't point a ref at it without sending it.
+    // B, in another thread holding app, has nothing of A's: no ref, no commit to fetch by id, and none to point a
+    // ref at without sending it.
     ok(&git(dir, &vars_b, &["clone", "-q", "git@github.com:o1/app.git", "b"]));
     let b = dir.join("b");
     let listed = ok(&git(&b, &vars_b, &["ls-remote", "origin"]));
     assert!(listed.contains("refs/heads/main") && !listed.contains("refs/runs/"), "{listed}");
     let by_id = git(&b, &vars_b, &["-c", "protocol.version=2", "fetch", "origin", &work]);
-    refused(&by_id, "unadvertised object");
+    assert!(!by_id.status.success());
     let empty = git(&b, &none, &["pack-objects", "--stdout"]).stdout;
     let zero = "0".repeat(40);
     let update = format!("{zero} {work} refs/runs/{run_b}/stolen");
     let response = push_without_objects(&runners, &token_b, &update, &empty);
-    assert!(response.contains("can't see") && !response.contains("ok refs/"), "{response}");
+    assert!(!response.contains("ok refs/"), "{response}");
     assert!(!ok(&git(&b, &vars_b, &["ls-remote", "origin"])).contains("stolen"));
-    // Work of its own that happens to match A's is B's to push.
-    commit(&b, &none, "work", "a's work\n");
-    ok(&git(&b, &vars_b, &["push", "-q", "origin", &format!("HEAD:refs/runs/{run_b}/same")]));
 
     // The forge moves on; a fetch brings it, and A's ref is still there.
     let moved = commit(&seed, &none, "later", "later\n");
@@ -226,6 +224,16 @@ fn runs_reach_their_threads_code_through_the_mirrors_and_push_only_their_own_ref
     ok(&git(&seed, &none, &["push", "-q", url.to_str().unwrap(), "main"]));
     ok(&git(&a, &vars_a, &["fetch", "-q", "origin"]));
     assert_eq!(ok(&git(&a, &none, &["rev-parse", "origin/main"])).trim(), moved);
-    let listed = ok(&git(&a, &vars_a, &["ls-remote", "origin"]));
-    assert!(listed.contains(&format!("{work}\trefs/runs/{run_a}/work")), "{listed}");
+
+    // A run replacing A on its thread picks up A's work.
+    operator.end(&run_a, RunState::Stopped).unwrap();
+    let (run_c, token_c) = operator.start("t0", now, HOUR).unwrap();
+    let vars_c = runs::environment(&server, &token_c, &owners);
+    ok(&git(dir, &vars_c, &["clone", "-q", "https://github.com/o1/app", "c"]));
+    let c = dir.join("c");
+    let fetched = format!("refs/runs/{run_a}/work:refs/heads/picked");
+    ok(&git(&c, &vars_c, &["fetch", "-q", "origin", &fetched]));
+    assert_eq!(ok(&git(&c, &none, &["rev-parse", "picked"])).trim(), work);
+    let mine = format!("picked:refs/runs/{run_c}/work");
+    ok(&git(&c, &vars_c, &["push", "-q", "origin", &mine]));
 }

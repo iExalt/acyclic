@@ -573,3 +573,23 @@ fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
     assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
     assert_eq!(names(&Level::ALL), ["everything", "scope-and-irreversible", "blockers"]);
 }
+
+#[test]
+fn a_thread_is_finished_once_gone_or_all_done_with_no_run_under_way() {
+    let mut r = replica("a");
+    let thread_key = Key::new(kind::THREAD, "t1").unwrap();
+    set(&mut r, &thread_key, thread::TITLE, Some(&"one"), by(1)).unwrap();
+    assert!(model(&r).thread_finished("gone"));
+    assert!(!model(&r).thread_finished("t1"), "no items yet");
+    items(&mut r, &["x", "y"]);
+    for id in ["x", "y"] {
+        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
+    }
+    set_state(&mut r, "x", ItemState::Done, by(3)).unwrap();
+    assert!(!model(&r).thread_finished("t1"), "y is open");
+    set_state(&mut r, "y", ItemState::Done, by(3)).unwrap();
+    start_run(&mut r, "r1", "t1", by(4)).unwrap();
+    assert!(!model(&r).thread_finished("t1"), "r1 is under way");
+    set_run_state(&mut r, "r1", RunState::Done, by(5)).unwrap();
+    assert!(model(&r).thread_finished("t1"));
+}

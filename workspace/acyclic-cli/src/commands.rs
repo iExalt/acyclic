@@ -303,6 +303,14 @@ pub fn reach(
     })
 }
 
+/// Which of `threads` are finished in the clone at `tracker`.
+pub fn finished(tracker: &Path, threads: &BTreeSet<String>) -> Result<BTreeSet<String>, CliError> {
+    let (opened, _) = Tracker::open(tracker)?;
+    let (_, state) = opened.load()?;
+    let model = Model::read(&state)?;
+    Ok(threads.iter().filter(|thread| model.thread_finished(thread)).cloned().collect())
+}
+
 /// The repository records in the clone at `tracker`.
 pub fn repositories(tracker: &Path) -> Result<Vec<model::Repository>, CliError> {
     let (opened, _) = Tracker::open(tracker)?;

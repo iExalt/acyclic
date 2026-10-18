@@ -385,6 +385,18 @@ pub fn reach(
     commands::reach(tracker, run, thread, owner, name).map_err(|err| (err.exit, err.envelope()))
 }
 
+/// Which of `threads` are finished in the clone at `tracker`: gone, or with every item done and no run under way.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn finished(
+    threads: &std::collections::BTreeSet<String>,
+    tracker: &Path,
+) -> Result<std::collections::BTreeSet<String>, (u8, Value)> {
+    commands::finished(tracker, threads).map_err(|err| (err.exit, err.envelope()))
+}
+
 /// The repository records in the clone at `tracker`.
 ///
 /// # Errors
