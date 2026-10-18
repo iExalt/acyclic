@@ -371,6 +371,8 @@ fn a_runs_edit_keeps_what_it_never_saw_beside_its_own() {
     // The user retitles the item after the run took its copy.
     set(&mut server, &item, field::TITLE, Some(&"the user's"), by(2)).unwrap();
     let run = By { actor: "run/r1", at: 3, seen: Some(&base) };
+    // Two edits from the same old view: the run's second replaces its first, never conflicting with itself.
+    set(&mut server, &item, field::TITLE, Some(&"the run's first"), run).unwrap();
     set(&mut server, &item, field::TITLE, Some(&"the run's"), run).unwrap();
     assert_eq!(
         model(&server).items["x"].title.all(),
