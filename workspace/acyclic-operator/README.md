@@ -10,6 +10,16 @@ against that token, so its writes are its own whatever it claims.
   forwards only the writes of a run's own work (claims, releases, done, item and link edits) within its thread, and the
   tracker applies each once, as the run, through the CLI's own checks. A command a run may not send is refused and its
   number spent.
+- `endpoint` is where runs push: git's smart HTTP protocol at `/tracker.git`, `git-receive-pack` alone, with the run's
+  token as `Authorization: Bearer <token>` on every request. Each run pushes to an inbox of its own under
+  `~/.config/acyclic/operator/inbox/`, which refuses deletions and rewrites and runs only the operator's hook.
+- `hook` is that hook, run as `acyclic operator-hook`. Before forwarding anything it checks the whole push: one update
+  to the run's own ref, a chain of commits that each add the next operation and nothing else, and nothing the
+  deny-list in `~/.config/acyclic/deny-list` or Gitleaks objects to. Gitleaks must be on the operator's `PATH`, as
+  itself rather than a shim that needs a project to resolve; without it every push is refused.
+
+Nothing serves the endpoint yet, and `acyclic up` checks no run tokens: runs reach the tracker through the operator
+alone.
 
 A run's clone queues its writes rather than making them: with `git config acyclic.operations <run>`, each write a run
 may send becomes `ops/<seq>.json`, holding `{"seq", "seen", "command"}`, added by one commit on the clone's `ops`
