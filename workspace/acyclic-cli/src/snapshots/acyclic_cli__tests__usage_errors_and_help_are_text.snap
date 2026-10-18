@@ -25,7 +25,6 @@ Command Groups:
 Other Commands:
   init         Sets up a tracker clone as a new replica, creating the repository if there is none
   sync         Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
-  ops          Pushes a run's queued operations, or drops the ones the tracker hasn't spent
   prime        Prints conventions for agents, matched to this version, as text
   import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
   graph        Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser

@@ -310,7 +310,6 @@ fn classify(command: &Command) -> Use {
         | Command::Import { .. }
         | Command::Doctor
         | Command::Graph { .. }
-        | Command::Ops(_)
         | Command::Serve(_)
         | Command::Up(_)
         | Command::Completions { .. } => Use::Refused,

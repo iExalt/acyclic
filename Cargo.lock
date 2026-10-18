@@ -9,12 +9,9 @@ dependencies = [
  "acyclic-cli",
  "acyclic-core",
  "acyclic-fixtures",
- "acyclic-operator",
  "acyclic-server",
- "axum",
  "serde_json",
  "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -67,14 +64,11 @@ version = "0.2.0"
 dependencies = [
  "acyclic-cli",
  "acyclic-core",
- "acyclic-guard",
- "axum",
  "ed25519-dalek",
  "getrandom",
  "serde",
  "serde_json",
  "tempfile",
- "tokio",
 ]
 
 [[package]]

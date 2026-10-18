@@ -119,9 +119,7 @@ standard output.
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With
    `git config acyclic.pushAfterWrite true` in the tracker clone, every write pushes too and reports `push`; a push that
-   fails leaves the write in place and shows in `acyclic needs` until a sync. In a run's clone, where
-   `acyclic.operations` names the run, writes queue as operations instead: `acyclic ops push` sends them, and `sync`
-   pushes nothing.
+   fails leaves the write in place and shows in `acyclic needs` until a sync.
 
 ## Details
 

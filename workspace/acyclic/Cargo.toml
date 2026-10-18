@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 acyclic-cli.workspace = true
-acyclic-operator.workspace = true
 acyclic-server.workspace = true
 
 [features]
@@ -17,10 +16,8 @@ probe = ["acyclic-cli/probe"]
 [dev-dependencies]
 acyclic-core.workspace = true
 acyclic-fixtures.workspace = true
-axum.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
 
 [[bench]]
 name = "store"

@@ -13,7 +13,6 @@
 
 mod cache;
 mod git;
-pub mod ops;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -60,8 +59,7 @@ fn unset(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsStr
 }
 
 /// `git -C <repo>`, finding the repository by that path alone and taking no settings from the environment, even
-/// when git's environment names another repository, as it does for a hook that writes the tracker while a push to
-/// some other repository waits on it. Every git acyclic runs starts here.
+/// when git's environment names another repository, as a git hook's does. Every git acyclic runs starts here.
 #[must_use]
 pub fn git_at(repo: &Path) -> std::process::Command {
     let mut command = std::process::Command::new("git");
@@ -238,8 +236,6 @@ pub struct Tracker {
     origin: bool,
     /// Whether every write ends with a push: `acyclic.pushAfterWrite` in the clone's git config.
     push_after_write: bool,
-    /// The run this clone sends operations for, if it does: [`ops::OPERATIONS_CONFIG`].
-    operations: Option<String>,
 }
 
 /// What a sync did.
@@ -468,7 +464,6 @@ impl Tracker {
         let push_after_write = setting(PUSH_AFTER_WRITE_CONFIG).is_some_and(|v| {
             matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1")
         });
-        let operations = setting(ops::OPERATIONS_CONFIG).map(str::to_owned);
         let id = setting(REPLICA_CONFIG).ok_or_else(|| {
             StoreError::Config(format!("no {REPLICA_CONFIG} in {}", path.display()))
         })?;
@@ -485,7 +480,6 @@ impl Tracker {
             upkeep,
             origin,
             push_after_write,
-            operations: operations.clone(),
         };
         if tip.is_some() {
             return Ok((tracker(git, id, false, tip), None));
@@ -1287,20 +1281,6 @@ impl Tracker {
     ///
     /// As [`Self::sync`].
     pub fn sync_with(&self, remote: &str, options: Fetch) -> Result<Synced, StoreError> {
-        self.exchange(remote, options, true)
-    }
-
-    /// Fetches and joins as [`Self::sync`] does, and pushes nothing: for a clone whose writes travel as a run's
-    /// operations, not as its own state.
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::sync`], less the push's.
-    pub fn pull(&self, remote: &str) -> Result<Synced, StoreError> {
-        self.exchange(remote, Fetch::default(), false)
-    }
-
-    fn exchange(&self, remote: &str, options: Fetch, push: bool) -> Result<Synced, StoreError> {
         let prefix = tracking_prefix(remote);
         let own = format!("{prefix}{}", self.replica);
         let joined_prefix = joined_prefix(&self.replica, remote);
@@ -1375,7 +1355,7 @@ impl Tracker {
             }
         }
         // Right after the fetch, its refs say what the remote holds, so the push needn't ask.
-        let pushed = if push { self.send(remote, &theirs, local)? } else { 0 };
+        let pushed = self.send(remote, &theirs, local)?;
         crate::probe::mark("sync: push");
         // Fetch and push skip git's own upkeep, so a clone that mostly syncs gets the store's here.
         self.maintain();

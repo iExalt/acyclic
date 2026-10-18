@@ -71,7 +71,6 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
         &[
             "init",
             "sync",
-            "ops",
             "prime",
             "import",
             "graph",
@@ -284,13 +283,6 @@ pub enum Command {
     /// Lists and shows proposals, and keeps or drops them (user only).
     #[command(subcommand)]
     Proposal(ProposalCommand),
-    /// Pushes a run's queued operations, or drops the ones the tracker hasn't spent.
-    ///
-    /// `git config acyclic.operations <run>` sets a clone to queue run <run>'s writes as operations instead of making
-    /// them, and to sync without pushing.
-    #[command(subcommand)]
-    #[serde(skip)]
-    Ops(OpsCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip)]
     Serve(Serve),
@@ -400,21 +392,6 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
     }
 }
 
-/// What a run does with its queue of operations.
-#[derive(Debug, Clone, Copy, Subcommand)]
-pub enum OpsCommand {
-    /// Pushes the queue for the operator to apply, and says how far the tracker got.
-    ///
-    /// A push the operator refused in part leaves the operations it applied spent. Push again after a failure that
-    /// may pass, such as a busy tracker: what was applied is found applied, and the rest is sent again.
-    Push,
-    /// Drops the queued operations after the last one the tracker spent, to abandon them.
-    ///
-    /// For operations the run won't send as they are, such as one the operator refused to forward; not for a failure
-    /// that may pass, which a push retries. Refused while a push's outcome is unknown: push again first.
-    Reset,
-}
-
 impl Command {
     /// Whether a run may send this command as an operation: the writes of its own work, and nothing that approves,
     /// configures, reaches outside the tracker or reshapes threads. With no catch-all arm, a new command fails to
@@ -447,7 +424,6 @@ impl Command {
             | Self::Thread(_)
             | Self::Repo(_)
             | Self::Proposal(_)
-            | Self::Ops(_)
             | Self::Serve(_)
             | Self::Up(_)
             | Self::Completions { .. } => false,
