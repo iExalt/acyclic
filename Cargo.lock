@@ -9,6 +9,7 @@ dependencies = [
  "acyclic-cli",
  "acyclic-core",
  "acyclic-fixtures",
+ "acyclic-operator",
  "acyclic-server",
  "serde_json",
  "tempfile",

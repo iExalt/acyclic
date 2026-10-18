@@ -16,6 +16,7 @@ probe = ["acyclic-cli/probe"]
 [dev-dependencies]
 acyclic-core.workspace = true
 acyclic-fixtures.workspace = true
+acyclic-operator.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 
