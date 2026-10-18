@@ -667,6 +667,43 @@ fn a_journal_records_exactly_what_changed(tc: TestCase) {
     assert_eq!(after, later);
 }
 
+/// A run's write supersedes exactly the values its view covers: with this replica's whole context it is a plain write,
+/// and with another replica's, older view, whatever that view never saw survives beside the new value.
+#[hegel::test]
+fn a_write_supersedes_exactly_what_its_view_saw(tc: TestCase) {
+    let replicas = play(&steps(&tc));
+    let (writer, viewer) = (below(&tc, 3), below(&tc, 3));
+    let item = key("item", &format!("e{}", below(&tc, 4)));
+    let field = format!("f{}", below(&tc, 3));
+    let value = json!(tc.draw(gs::integers::<i64>().min_value(0).max_value(4)));
+    let base = &replicas[writer];
+    let (mut plain, mut seen) = (base.clone(), base.clone());
+    plain.write(&item, &field, "run/r", 5, Some(value.clone())).unwrap();
+    let context = base.state.context.clone();
+    seen.write_seen(&item, &field, "run/r", 5, value.clone(), &context).unwrap();
+    assert_eq!(seen.state, plain.state, "a view of everything is a plain write");
+
+    let view = replicas[viewer].state.context.clone();
+    let mut stale = base.clone();
+    let dot = stale.write_seen(&item, &field, "run/r", 5, value, &view).unwrap();
+    let unseen: BTreeSet<Dot> = base
+        .state
+        .field(&item, &field)
+        .into_iter()
+        .flatten()
+        .map(|(d, _)| d.clone())
+        .filter(|d| !view.covers(d))
+        .collect();
+    let now: BTreeSet<Dot> =
+        stale.state.field(&item, &field).into_iter().flatten().map(|(d, _)| d.clone()).collect();
+    assert_eq!(
+        now,
+        unseen.into_iter().chain([dot]).collect(),
+        "only what the view saw is superseded"
+    );
+    assert!(stale.state.check().is_ok());
+}
+
 /// P6: concurrent claims from two replicas resolve to the same winner, for the same `now`, in either join order.
 #[hegel::test]
 fn claim_winners_agree(tc: TestCase) {

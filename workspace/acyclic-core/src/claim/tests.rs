@@ -14,7 +14,7 @@ fn replica(name: &str) -> Replica {
 }
 
 fn by(actor: &'static str, at: Millis) -> By<'static> {
-    By { actor, at }
+    By { actor, at, seen: None }
 }
 
 /// A thread record holding the given new items.

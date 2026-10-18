@@ -5,7 +5,7 @@ use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_stat
 use crate::schema::{item as field, kind, thread};
 use crate::state::{Key, Replica, ReplicaId, State};
 
-const USER: By<'static> = By { actor: "actor/user", at: 1 };
+const USER: By<'static> = By { actor: "actor/user", at: 1, seen: None };
 
 fn write(r: &mut Replica, key: &Key, name: &str, value: serde_json::Value) {
     r.write(key, name, USER.actor, USER.at, Some(value)).unwrap();

@@ -644,6 +644,37 @@ impl Replica {
         Ok(Some(dot))
     }
 
+    /// Writes a field as [`Replica::write`] does, but superseding only the values `seen` covers: values it didn't see
+    /// survive beside the new one as a conflict. With `seen` covering everything this replica has seen, it is exactly
+    /// [`Replica::write`] with a value.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a non-integer number or when the replica can't mint dots yet.
+    pub fn write_seen(
+        &mut self,
+        key: &Key,
+        field: &str,
+        actor: &str,
+        at: Millis,
+        value: Json,
+        seen: &Context,
+    ) -> Result<Dot, Error> {
+        check_value(&value)?;
+        let mut register: Register = self
+            .state
+            .field(key, field)
+            .into_iter()
+            .flatten()
+            .filter(|(dot, _)| !seen.covers(dot))
+            .map(|(dot, value)| (dot.clone(), value.clone()))
+            .collect();
+        let (dot, at) = self.mint(at)?;
+        register.insert(dot.clone(), Stamped { actor: actor.to_owned(), at, value });
+        self.set(key, field, register);
+        Ok(dot)
+    }
+
     /// Applies a run's operation. Sequence numbers must arrive in order from 1: a repeat is a duplicate and a gap is
     /// refused. The new value supersedes the values the run saw and the run's own earlier values; values it didn't
     /// see survive beside it as a conflict.

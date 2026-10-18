@@ -17,7 +17,7 @@ impl Ancestry for ByName {
 }
 
 fn user(at: Millis) -> By<'static> {
-    By { actor: "actor/user", at }
+    By { actor: "actor/user", at, seen: None }
 }
 
 /// A group `g` with done leaves `a` (merged) and `b` (no repository), both done on day 1.
@@ -104,7 +104,7 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
          ago"
     );
     let now = DAY + GATELESS_WAIT;
-    let agent = By { actor: "run/worker", at: now };
+    let agent = By { actor: "run/worker", at: now, seen: None };
     assert_eq!(
         archive(&mut r, &ByName, "g", agent),
         Err(ArchiveError::NotAllowed("run/worker".into()))
@@ -151,7 +151,7 @@ fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
     assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready);
     // Any actor may reopen: an agent may find a defect in finished work.
-    reopen(&mut r, "b", By { actor: "run/worker", at: 2 * DAY }).unwrap();
+    reopen(&mut r, "b", By { actor: "run/worker", at: 2 * DAY, seen: None }).unwrap();
     assert!(
         matches!(status(&r, "outside", 2 * DAY), Status::Blocked { waiting } if waiting["b"] == Wait::Open)
     );

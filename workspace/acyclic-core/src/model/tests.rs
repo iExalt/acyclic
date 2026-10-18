@@ -8,7 +8,7 @@ fn replica(name: &str) -> Replica {
 }
 
 fn by(at: Millis) -> By<'static> {
-    By { actor: "actor/user", at }
+    By { actor: "actor/user", at, seen: None }
 }
 
 fn items(replica: &mut Replica, ids: &[&str]) {
@@ -364,12 +364,38 @@ fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
 }
 
 #[test]
+fn a_runs_edit_keeps_what_it_never_saw_beside_its_own() {
+    let (mut server, _) = pair(&["x"]);
+    let item = item_key("x").unwrap();
+    let base = server.state.context.clone();
+    // The user retitles the item after the run took its copy.
+    set(&mut server, &item, field::TITLE, Some(&"the user's"), by(2)).unwrap();
+    let run = By { actor: "run/r1", at: 3, seen: Some(&base) };
+    set(&mut server, &item, field::TITLE, Some(&"the run's"), run).unwrap();
+    assert_eq!(
+        model(&server).items["x"].title.all(),
+        vec![&"the user's".to_owned(), &"the run's".to_owned()]
+    );
+    // Seeing the user's title, the run supersedes it.
+    let current = server.state.context.clone();
+    let run = By { seen: Some(&current), ..run };
+    set(&mut server, &item, field::TITLE, Some(&"settled"), run).unwrap();
+    assert_eq!(model(&server).items["x"].title.all(), vec![&"settled".to_owned()]);
+    // A view changes nothing about who may write what.
+    let approved = Key::new(kind::THREAD, "t").unwrap();
+    assert!(matches!(
+        set(&mut server, &approved, thread::APPROVED, Some(&true), run),
+        Err(WriteError::UserOnly { .. })
+    ));
+}
+
+#[test]
 fn only_the_user_or_an_operator_starts_or_moves_a_run() {
     let (mut a, _) = pair(&[]);
-    let operator = By { actor: "operator/mac", at: 1 };
+    let operator = By { actor: "operator/mac", at: 1, seen: None };
     start_run(&mut a, "r1", "t1", operator).unwrap();
     for actor in ["run/r1", "agent/x", "session/mac", "operatorx/mac"] {
-        let agent = By { actor, at: 2 };
+        let agent = By { actor, at: 2, seen: None };
         assert_eq!(start_run(&mut a, "r2", "t2", agent), Err(WriteError::RunWriter(actor.into())));
         assert_eq!(
             set_run_state(&mut a, "r1", RunState::Done, agent),
@@ -491,7 +517,7 @@ fn only_the_user_sets_a_threads_approval_flags_and_the_global_settings() {
     for actor in ["run/boss", "run/worker", "session/mac"] {
         for (key, name) in fields {
             assert_eq!(
-                set(&mut r, key, name, Some(&true), By { actor, at: 2 }),
+                set(&mut r, key, name, Some(&true), By { actor, at: 2, seen: None }),
                 Err(WriteError::UserOnly { field: name.to_owned(), actor: actor.to_owned() })
             );
         }

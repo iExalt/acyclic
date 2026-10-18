@@ -11,7 +11,7 @@ fn replica() -> Replica {
 }
 
 fn by(actor: &str, at: Millis) -> By<'_> {
-    By { actor, at }
+    By { actor, at, seen: None }
 }
 
 fn imported() -> Replica {

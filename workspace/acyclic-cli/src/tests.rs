@@ -317,7 +317,7 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
     use acyclic_core::schema::{kind, thread};
     use acyclic_core::scope::ScopeEdit;
     use acyclic_core::state::Replica;
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
+    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
     let thread_key = |id: &str| Key::new(kind::THREAD, id).unwrap();
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), acyclic_core::state::State::new());
     for id in ["x", "y", "z", "late", "raced"] {
@@ -358,7 +358,7 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
     use acyclic_core::model::{By, LinkKind, Model, add_item, link};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: USER, at: 1 };
+    let user = By { actor: USER, at: 1, seen: None };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     let join = |replica: &mut Replica, item: &str, thread: &str| {
         let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
@@ -499,7 +499,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     use acyclic_core::model::{By, Evidence, ItemState, Model, add_item, set, set_state};
     use acyclic_core::schema::{item, kind, repository};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
+    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     add_item(&mut mac, "a", "A", user).unwrap();
     let repo = Key::new(kind::REPOSITORY, "r").unwrap();

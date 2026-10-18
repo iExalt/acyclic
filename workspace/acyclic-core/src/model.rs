@@ -12,7 +12,7 @@ use serde_json::Value as Json;
 
 use crate::graph;
 use crate::schema::{item as field, kind, link, repository, run, set, thread};
-use crate::state::{Error, Key, Millis, Replica, State};
+use crate::state::{Context, Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
 pub const MAX_ID_LEN: usize = 64;
@@ -813,6 +813,11 @@ pub struct By<'a> {
     pub actor: &'a str,
     /// The write's timestamp.
     pub at: Millis,
+    /// For a run's write, what the run had seen: a field set through [`set`] supersedes only the values this covers,
+    /// so values written meanwhile that the run never saw survive beside its own as a conflict. `None` supersedes
+    /// every value this replica has seen, as every other writer does. Writes that read the field and decide, such
+    /// as a state's move or a claim, supersede what they read either way.
+    pub seen: Option<&'a Context>,
 }
 
 /// A checked id or element name: a valid key id of at most [`MAX_ID_LEN`] characters.
@@ -873,7 +878,8 @@ const USER_ONLY: [(&str, &str); 7] = [
 
 /// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
 /// archived flag and reopen flag, a link's fields, a run's thread and state) are refused: use their checked writes.
-/// A thread's approval, flags and choices and the global settings are the user's alone.
+/// A thread's approval, flags and choices and the global settings are the user's alone. A run's write supersedes only
+/// what it had seen ([`By::seen`]).
 ///
 /// # Errors
 ///
@@ -897,7 +903,14 @@ pub fn set<T: Serialize>(
     if user_only && by.actor != crate::scope::USER {
         return Err(WriteError::UserOnly { field: name.to_owned(), actor: by.actor.to_owned() });
     }
-    put(replica, key, name, value, by)
+    match by.seen {
+        Some(seen) => {
+            let value = value.map_or(Json::Null, to_json);
+            replica.write_seen(key, name, by.actor, by.at, value, seen)?;
+            Ok(())
+        },
+        None => put(replica, key, name, value, by),
+    }
 }
 
 /// Writes a single-valued field. A clear writes `null` rather than nothing, so a set it never saw conflicts with it

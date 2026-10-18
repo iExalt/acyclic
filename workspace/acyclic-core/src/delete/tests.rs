@@ -14,11 +14,11 @@ use super::*;
 const NOW: Millis = 10_000;
 
 fn user(at: Millis) -> By<'static> {
-    By { actor: USER, at }
+    By { actor: USER, at, seen: None }
 }
 
 fn agent(at: Millis) -> By<'static> {
-    By { actor: "session/mac", at }
+    By { actor: "session/mac", at, seen: None }
 }
 
 fn replica(name: &str) -> Replica {
@@ -69,7 +69,10 @@ fn only_an_item_nothing_refers_to_is_deleted() {
     assert_eq!(refusal(&mut r, "done", user(NOW)), ["finished"]);
     // Someone else's claim on its thread holds it; the deleter's own doesn't.
     assert_eq!(refusal(&mut r, "claimed", user(NOW)), ["claimed"]);
-    assert_eq!(delete_item(&mut r, "mine", By { actor: "session/pi", at: NOW }), Ok(true));
+    assert_eq!(
+        delete_item(&mut r, "mine", By { actor: "session/pi", at: NOW, seen: None }),
+        Ok(true)
+    );
     // The refusal says why in one line.
     let message = delete_item(&mut r, "parent", user(NOW)).unwrap_err().to_string();
     assert_eq!(message, "parent can't be deleted: it has children (kid)");

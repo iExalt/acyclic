@@ -380,7 +380,7 @@ impl<'a> Session<'a> {
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();
-            let data = apply(replica, By { actor: &self.actor, at })?;
+            let data = apply(replica, By { actor: &self.actor, at, seen: None })?;
             *result.borrow_mut() = (data, replica.changes() != before);
             Ok(())
         })?;
@@ -740,7 +740,7 @@ impl<'a> Session<'a> {
             let (_, state) = self.tracker.load()?;
             let mut replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let by = By { actor: &self.actor, at };
+            let by = By { actor: &self.actor, at, seen: None };
             let report = import::apply(&doc, &mut replica, by)?;
             let placed = place::place(&mut replica, &keys, by)?;
             return Ok(import_json(&report, &placed, true));
