@@ -392,6 +392,7 @@ fn spends(err: &CliError) -> bool {
                 | "not-continuous"
                 | "id-reused"
                 | "inactive"
+                | "seq-taken"
         ),
         _ => false,
     }

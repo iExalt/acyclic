@@ -510,10 +510,12 @@ fn a_runs_operations_apply_once_each_as_the_run() {
             .unwrap();
     assert!(ok(0)(&first), "{first:?}");
     assert_eq!(titles(&sh, "a1"), [("run/r1".to_owned(), json!("Run's"))]);
-    // Sent again, it applies nothing and says how it went.
+    // Sent again, it applies nothing and says how it went; another command under its number is told it was taken.
     let before = state(&sh);
-    let again = operation(&sh, 1, &base, edit("a1", "Changed"), &[]).unwrap();
+    let again = operation(&sh, 1, &base, edit("a1", "Run's"), &[]).unwrap();
     assert_eq!(again, Applied::Duplicate(Some(json!({"ok": true}))));
+    let (_, taken) = operation(&sh, 1, &base, edit("a1", "Changed"), &[]).unwrap_err();
+    assert_eq!(taken["error"]["code"], "seq-taken");
     assert_eq!(state(&sh), before);
 
     // A gap, or a clock that stepped back, says nothing of the command, so the number stays unspent.
@@ -537,7 +539,8 @@ fn a_runs_operations_apply_once_each_as_the_run() {
     assert!(ok(2)(&usage), "{usage:?}");
     // A command that writes nothing still spends its number.
     assert!(ok(0)(&operation(&sh, 4, &base, json!({"show": {"items": ["a1"]}}), &[]).unwrap()));
-    assert!(matches!(operation(&sh, 4, &base, json!("list"), &[]), Ok(Applied::Duplicate(_))));
+    let show = json!({"show": {"items": ["a1"]}});
+    assert!(matches!(operation(&sh, 4, &base, show, &[]), Ok(Applied::Duplicate(_))));
 
     // An edit the run never saw survives beside the run's own; the run's earlier edit doesn't.
     assert_eq!(sh.run("item edit a2 --title Mine --as-user", &[]), 0);

@@ -104,6 +104,7 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::IdReused { replica: id(), mine: 1, theirs: 2 }.into(),
         StateError::Gap { run: "r".into(), expected: 1, got: 2 }.into(),
         StateError::WrongReplica { run: "r".into(), applied_by: "mac".into() }.into(),
+        StateError::SeqTaken { run: "r".into(), seq: 1 }.into(),
         StateError::Claimed(key.clone()).into(),
         StateError::NoThread("t".into()).into(),
         StateError::LeaseRequired("session/s".into()).into(),

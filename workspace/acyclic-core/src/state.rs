@@ -225,6 +225,13 @@ pub enum Error {
         /// The sequence number received.
         got: u64,
     },
+    /// A run's operation came with the number of the run's latest applied one but another command: two sent it.
+    SeqTaken {
+        /// The run.
+        run: String,
+        /// The number.
+        seq: u64,
+    },
     /// A run operation reached a replica other than the one applying the run.
     WrongReplica {
         /// The run.
@@ -278,6 +285,10 @@ impl fmt::Display for Error {
             Self::WrongReplica { run, applied_by } => {
                 write!(f, "run {run} is applied by replica {applied_by}")
             },
+            Self::SeqTaken { run, seq } => write!(
+                f,
+                "run {run}'s operation {seq} is another command, applied already; send this one as the next"
+            ),
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
             Self::LeaseRequired(holder) => {
                 write!(f, "{holder} isn't a run, so its claim needs a time lease")
@@ -323,7 +334,7 @@ impl State {
         let key = Key::new("run", run)?;
         Ok(self
             .field(&key, RUN_APPLIED_SEQ)
-            .and_then(|r| r.values().filter_map(|v| v.value.as_u64()).max())
+            .and_then(|r| r.values().filter_map(|v| v.value["seq"].as_u64()).max())
             .unwrap_or(0))
     }
 
@@ -501,7 +512,7 @@ pub enum Sequence {
     },
 }
 
-/// The run entity's field holding the last applied sequence number.
+/// The run entity's field holding the last applied operation: `{"seq", "hash"}`, its number and its command's hash.
 pub const RUN_APPLIED_SEQ: &str = "applied-seq";
 /// The run entity's field naming the replica that applies the run.
 pub const RUN_APPLIED_BY: &str = "applied-by";
@@ -685,8 +696,9 @@ impl Replica {
     ///
     /// # Errors
     ///
-    /// Fails on a gap or a run applied by another replica.
-    pub fn sequence(&self, run: &str, seq: u64) -> Result<Sequence, Error> {
+    /// Fails on a gap, a run applied by another replica, or the number of the latest applied operation sent with
+    /// another command, as `hash` tells: two sent it, and only one was applied.
+    pub fn sequence(&self, run: &str, seq: u64, hash: &str) -> Result<Sequence, Error> {
         let key = Key::new("run", run)?;
         let one =
             |field| self.state.field(&key, field).and_then(|r| r.values().next()).map(|v| &v.value);
@@ -701,6 +713,12 @@ impl Replica {
         let last = self.state.applied_seq(run)?;
         if seq <= last {
             let latest = seq == last;
+            let taken = self.state.field(&key, RUN_APPLIED_SEQ).is_some_and(|r| {
+                r.values().any(|v| v.value["seq"] == seq && v.value["hash"].as_str() != Some(hash))
+            });
+            if latest && taken {
+                return Err(Error::SeqTaken { run: run.to_owned(), seq });
+            }
             let refusal = one(RUN_APPLIED_REFUSAL)
                 .filter(|recorded| latest && recorded["seq"] == seq)
                 .map(|recorded| recorded["refusal"].clone());
@@ -712,7 +730,8 @@ impl Replica {
         Ok(Sequence::Next)
     }
 
-    /// Records the run's operation `seq` as applied, or as refused with `refusal`, under this replica's own actor. Call
+    /// Records the run's operation `seq`, whose command `hash` names, as applied, or as refused with `refusal`, under
+    /// this replica's own actor. Call
     /// it in the same batch as the operation's writes, after [`Replica::sequence`] said it was next. Only a refusal is
     /// stored beside the number, so an applied operation costs one write; keep a refusal small, and its numbers
     /// integers.
@@ -724,12 +743,14 @@ impl Replica {
         &mut self,
         run: &str,
         seq: u64,
+        hash: &str,
         refusal: Option<&Json>,
         at: Millis,
     ) -> Result<(), Error> {
         let key = Key::new("run", run)?;
         let system = format!("replica/{}", self.id);
-        self.write(&key, RUN_APPLIED_SEQ, &system, at, Some(Json::from(seq)))?;
+        let applied = serde_json::json!({"seq": seq, "hash": hash});
+        self.write(&key, RUN_APPLIED_SEQ, &system, at, Some(applied))?;
         if let Some(refusal) = refusal {
             let recorded = serde_json::json!({"seq": seq, "refusal": refusal});
             self.write(&key, RUN_APPLIED_REFUSAL, &system, at, Some(recorded))?;

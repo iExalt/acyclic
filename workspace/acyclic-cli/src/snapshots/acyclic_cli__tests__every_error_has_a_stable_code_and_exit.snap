@@ -9,6 +9,7 @@ expression: table
 1 id-reused
 1 sequence-gap
 1 wrong-replica
+1 seq-taken
 1 claimed spends
 3 not-found spends
 1 lease-required spends

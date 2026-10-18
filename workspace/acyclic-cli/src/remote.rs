@@ -4,7 +4,9 @@
 //! A write the run may send carries its number in the run's sequence, which the server applies once. The number is
 //! the server's own latest applied, plus one, asked for just before sending, so the client keeps nothing: an answer
 //! lost on the way is found out by the next write, whose number then follows the lost one's if it was applied and
-//! takes its place if not. Writes from one machine take turns under a lock, so two can't take the same number. A
+//! takes its place if not. Writes from one machine take turns under a lock, so two can't take the same number; one
+//! that does anyway, from another machine or from an earlier write that landed after its sender gave up, is answered
+//! `seq-taken`, and the command is sent again as the next. A
 //! failure that may pass, such as the server being unreachable or busy, is tried again a few times with the same
 //! number, which the server answers `duplicate` if it had applied it after all.
 
@@ -80,9 +82,21 @@ pub fn run(cli: &Cli, env: &Env, url: &str) -> Answer {
         Ok(turn) => turn,
         Err(err) => return local(err),
     };
-    let applied = server.send("GET", "/api/run", "", None)?;
-    let seq = applied["applied"].as_u64().unwrap_or(0) + 1;
-    server.send("POST", "/api/command", &body, Some(seq))
+    // Another command took the number meanwhile, as one sent from another machine, or by an earlier process whose
+    // write landed after it gave up: ask again and send this one as the next.
+    let mut tries = 0;
+    loop {
+        let applied = server.send("GET", "/api/run", "", None)?;
+        let seq = applied["applied"].as_u64().unwrap_or(0) + 1;
+        match server.send("POST", "/api/command", &body, Some(seq)) {
+            Err((_, envelope))
+                if envelope["error"]["code"] == "seq-taken" && tries < BACKOFF.len() =>
+            {
+                tries += 1;
+            },
+            answer => return answer,
+        }
+    }
 }
 
 /// The server at `url`, with the run's token.

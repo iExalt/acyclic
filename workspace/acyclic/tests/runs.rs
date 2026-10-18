@@ -184,6 +184,10 @@ fn a_run_reads_and_writes_the_tracker_through_the_runners_listener_as_itself() {
     assert_eq!(applied(), lost + 1);
     let (status, again) = request(&runners, &post(lost, &runners), edit);
     assert_eq!((status, &again["data"]["duplicate"]), (200, &json!(true)), "{again}");
+    // Another command with that number was sent by someone else: it is told so, not that it applied.
+    let other = r#"{"item": {"edit": {"item": "a", "title": "Other"}}}"#;
+    let (status, taken) = request(&runners, &post(lost + 1, &runners), other);
+    assert_eq!((status, &taken["error"]["code"]), (409, &json!("seq-taken")), "{taken}");
     assert_eq!(titles(dir, "a"), [(format!("run/{run}"), json!("Next"))]);
 
     // The run supersedes only what it read: the user's edit since its last read stays beside the run's write.

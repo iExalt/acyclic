@@ -146,8 +146,8 @@ fn check_within(
 }
 
 /// Checks that `op` is the run's next operation, refusing a duplicate with [`DUPLICATE`] and its recorded outcome.
-fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
-    match replica.sequence(&op.run, op.seq)? {
+fn next(replica: &Replica, op: &Operation, hash: &str) -> Result<(), CliError> {
+    match replica.sequence(&op.run, op.seq, hash)? {
         Sequence::Next => Ok(()),
         Sequence::Duplicate { latest, refusal } => {
             let outcome = match (latest, refusal) {
@@ -170,6 +170,7 @@ fn next(replica: &Replica, op: &Operation) -> Result<(), CliError> {
 pub fn apply(cli: &Cli, env: &Env, operation: Operation) -> Result<Json, CliError> {
     let mut session = Session::open(cli, env)?;
     session.within = within(&cli.command, &operation.thread)?;
+    session.hash = hash(&cli.command);
     session.operation = Some(operation);
     let data = session.dispatch(&cli.command)?;
     if !session.recorded.get() {
@@ -191,6 +192,7 @@ pub fn refuse(
     refusal: &CliError,
 ) -> Result<(), CliError> {
     let mut session = Session::open(cli, env)?;
+    session.hash = hash(&cli.command);
     session.operation = Some(operation);
     session.record(Some(&json!({"code": refusal.code})))
 }
@@ -216,6 +218,7 @@ pub fn start_run(
         operation: None,
         recorded: Cell::new(false),
         within: Vec::new(),
+        hash: String::new(),
     };
     session.write(|replica, by| {
         model::start_run(replica, run, thread, by)?;
@@ -244,6 +247,7 @@ pub fn set_run_state(
         operation: None,
         recorded: Cell::new(false),
         within: Vec::new(),
+        hash: String::new(),
     };
     session.write(|replica, by| {
         model::set_run_state(replica, run, state, by)?;
@@ -324,6 +328,20 @@ struct Session<'a> {
     recorded: Cell<bool>,
     /// What the operation's command must find to stay within the run's thread.
     within: Vec<Within>,
+    /// The operation's command's hash, recorded with its number so that another command sent with the same number is
+    /// told apart from the same one sent again.
+    hash: String,
+}
+
+/// A short hash of a command, as JSON.
+fn hash(command: &Command) -> String {
+    use sha2::Digest as _;
+    use std::fmt::Write as _;
+    let json = serde_json::to_vec(command).unwrap_or_default();
+    sha2::Sha256::digest(json).iter().take(8).fold(String::new(), |mut hex, byte| {
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
 }
 
 /// A run's operation: one command, numbered in the run's sequence from 1, with the run's view of the tracker when it
@@ -360,6 +378,7 @@ impl<'a> Session<'a> {
             operation: None,
             recorded: Cell::new(false),
             within: Vec::new(),
+            hash: String::new(),
         })
     }
 
@@ -626,8 +645,8 @@ impl<'a> Session<'a> {
         let Some(op) = &self.operation else { return Ok(()) };
         let meta = Meta { actor: self.actor.clone(), run: Some((op.run.clone(), op.seq)) };
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
-            next(replica, op)?;
-            Ok::<_, CliError>(replica.record(&op.run, op.seq, refusal, at)?)
+            next(replica, op, &self.hash)?;
+            Ok::<_, CliError>(replica.record(&op.run, op.seq, &self.hash, refusal, at)?)
         })?;
         Ok(())
     }
@@ -646,7 +665,7 @@ impl<'a> Session<'a> {
         let operation = self.operation.as_ref();
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
             if let Some(op) = operation {
-                next(replica, op)?;
+                next(replica, op, &self.hash)?;
                 // Checked again here, on the state the write goes into: a run ended since its request arrived writes
                 // nothing more.
                 if !model::run_active(replica.state(), &op.run, &op.thread) {
@@ -664,7 +683,7 @@ impl<'a> Session<'a> {
             let data = apply(replica, By { actor: &self.actor, at, seen })?;
             *result.borrow_mut() = (data, replica.changes() != before);
             if let Some(op) = operation {
-                replica.record(&op.run, op.seq, None, at)?;
+                replica.record(&op.run, op.seq, &self.hash, None, at)?;
             }
             Ok(())
         })?;
