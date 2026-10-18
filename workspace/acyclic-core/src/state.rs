@@ -731,10 +731,9 @@ impl Replica {
     }
 
     /// Records the run's operation `seq`, whose command `hash` names, as applied, or as refused with `refusal`, under
-    /// this replica's own actor. Call
-    /// it in the same batch as the operation's writes, after [`Replica::sequence`] said it was next. Only a refusal is
-    /// stored beside the number, so an applied operation costs one write; keep a refusal small, and its numbers
-    /// integers.
+    /// this replica's own actor. Call it in the same batch as the operation's writes, after [`Replica::sequence`] said
+    /// it was next. Only a refusal is stored beside the number and the hash, so an applied operation costs one write;
+    /// keep a refusal small, and its numbers integers.
     ///
     /// # Errors
     ///
