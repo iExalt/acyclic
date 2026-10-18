@@ -85,6 +85,14 @@ fn the_key_is_made_once_and_kept_private() {
     assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     let (again, _) = Signer::open(home.path()).unwrap();
     assert_eq!(first.verifier(), again.verifier());
+    // The public half sits beside it for the server, which reads that alone.
+    assert_eq!(Verifier::open(home.path()).unwrap(), first.verifier());
+    let public = home.path().join(PUBLIC_PATH);
+    std::fs::set_permissions(&public, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        matches!(Verifier::open(home.path()), Err(Error::Key(_))),
+        "a key others could replace"
+    );
     std::fs::write(&path, "not a key\n").unwrap();
     assert!(matches!(Signer::open(home.path()), Err(Error::Key(_))));
 }

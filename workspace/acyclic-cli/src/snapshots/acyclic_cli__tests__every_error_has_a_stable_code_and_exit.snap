@@ -9,6 +9,7 @@ expression: table
 1 id-reused
 1 sequence-gap
 1 wrong-replica
+1 seq-taken
 1 claimed spends
 3 not-found spends
 1 lease-required spends
@@ -52,6 +53,9 @@ expression: table
 1 not-ready spends
 1 already-exists spends
 1 already-done spends
+1 not-in-thread spends
+1 not-the-runs spends
+1 inactive
 1 incomplete-repository spends
 1 unwritable spends
 1 unopenable spends

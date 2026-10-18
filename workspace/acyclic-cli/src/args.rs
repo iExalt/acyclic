@@ -140,7 +140,7 @@ fn lease_minutes(text: &str) -> Result<u32, String> {
 }
 
 /// The commands: the ones every session uses at the top, the rest grouped by what they act on.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum Command {
     /// Sets up a tracker clone as a new replica, creating the repository if there is none.
@@ -284,18 +284,18 @@ pub enum Command {
     #[command(subcommand)]
     Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Serve(Serve),
     /// Serves the JSON API and the app on this machine, to whoever holds its session.
     ///
     /// The session lives in ~/.config/acyclic/up/session, readable only by the user, and a request presents it as
     /// `Authorization: Bearer <session>`.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Up(Up),
     /// Prints a completion script for a shell, as text.
     ///
     /// For zsh, write it to a directory on `fpath`: `acyclic completions zsh > ~/.zfunc/_acyclic`.
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     Completions {
         /// The shell.
         #[arg(value_enum)]
@@ -351,7 +351,7 @@ pub struct Up {
     pub rotate: bool,
     /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
     /// Give the same --port as the server, if it has one.
-    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale", "runners"])]
     pub link: bool,
     /// Also serve through `tailscale serve`, pointed at a Unix socket that only the user can open, to requests carrying
     /// the user's Tailscale identity. Run `tailscale serve --bg unix:<socket>` as the output says.
@@ -369,6 +369,11 @@ pub struct Up {
     /// The socket; ~/.config/acyclic/up/tailscale.sock by default. Its directory should be open to the user alone.
     #[arg(long, requires = "tailscale")]
     pub socket: Option<PathBuf>,
+    /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
+    /// the writes of their own work, applied as the run. Needs the operator's public key, which the operator writes
+    /// to ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
+    #[arg(long, value_name = "PORT")]
+    pub runners: Option<u16>,
 }
 
 /// A usage error.
@@ -393,6 +398,43 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
 }
 
 impl Command {
+    /// Whether a run may send this command as an operation: the writes of its own work, and nothing that approves,
+    /// configures, reaches outside the tracker or reshapes threads. With no catch-all arm, a new command fails to
+    /// compile until it is placed.
+    #[must_use]
+    pub fn run_may_send(&self) -> bool {
+        match self {
+            Self::Claim { force: false, .. }
+            | Self::Release { .. }
+            | Self::Done { force: false, .. }
+            | Self::Item(
+                ItemCommand::Add { .. } | ItemCommand::Edit(_) | ItemCommand::Reopen { .. },
+            )
+            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => true,
+            // Forcing a claim past readiness, or a finish past its checks, is the user's to do.
+            Self::Claim { force: true, .. }
+            | Self::Done { force: true, .. }
+            | Self::Init { .. }
+            | Self::Sync { .. }
+            | Self::Prime
+            | Self::Ready { .. }
+            | Self::List
+            | Self::Show { .. }
+            | Self::Needs
+            | Self::Level { .. }
+            | Self::Import { .. }
+            | Self::Graph { .. }
+            | Self::Doctor
+            | Self::Item(ItemCommand::Archive { .. } | ItemCommand::Delete { .. })
+            | Self::Thread(_)
+            | Self::Repo(_)
+            | Self::Proposal(_)
+            | Self::Serve(_)
+            | Self::Up(_)
+            | Self::Completions { .. } => false,
+        }
+    }
+
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
     /// that require or exclude each other, and the flags that clear what another sets.
     ///
@@ -438,7 +480,7 @@ impl Command {
 }
 
 /// A graph document's format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GraphFormat {
     /// Graphviz DOT.
@@ -477,7 +519,7 @@ impl StateWord {
 }
 
 /// The item commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ItemCommand {
     /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused.
@@ -538,7 +580,7 @@ pub enum ItemCommand {
 }
 
 /// What `item edit` changes.
-#[derive(Debug, clap::Args, Deserialize)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 #[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemEdit {
@@ -659,7 +701,7 @@ const LINK_EXAMPLE: &str = concat!(
 );
 
 /// The link commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum LinkCommand {
     /// Links two items: `<FROM>` waits for or relates to `<TO>`.
@@ -687,7 +729,7 @@ pub enum LinkCommand {
 }
 
 /// The thread commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
     /// Lists every thread, by id, with its approval, its members and its heads: the open leaves nothing in it orders.
@@ -732,7 +774,7 @@ pub enum ThreadCommand {
 }
 
 /// What `thread edit` changes.
-#[derive(Debug, clap::Args, Deserialize)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThreadEdit {
     /// The thread.
@@ -773,7 +815,7 @@ impl ThreadEdit {
 }
 
 /// The repository commands.
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum RepoCommand {
     /// Lists every repository record, by id.
@@ -833,7 +875,7 @@ pub enum RepoCommand {
 }
 
 /// The proposal commands (user only).
-#[derive(Debug, Subcommand, Deserialize)]
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {
     /// Lists every proposal, open ones first and then decided ones, each by id, with who proposed it, its edit and its

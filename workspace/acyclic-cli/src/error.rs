@@ -84,6 +84,7 @@ impl From<StateError> for CliError {
             StateError::NotContinuous(_) => ("not-continuous", exit::REFUSED),
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
             StateError::Gap { .. } => ("sequence-gap", exit::REFUSED),
+            StateError::SeqTaken { .. } => ("seq-taken", exit::REFUSED),
             StateError::WrongReplica { .. } => ("wrong-replica", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),

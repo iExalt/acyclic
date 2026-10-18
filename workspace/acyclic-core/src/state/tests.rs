@@ -234,11 +234,11 @@ fn run_op(
     value: Json,
     seen: &Context,
 ) -> Option<Dot> {
-    if server.sequence(run, seq).unwrap() != Sequence::Next {
+    if server.sequence(run, seq, "h").unwrap() != Sequence::Next {
         return None;
     }
     let dot = server.write_seen(item, "title", &format!("run/{run}"), 3, value, seen).unwrap();
-    server.record(run, seq, None, 3).unwrap();
+    server.record(run, seq, "h", None, 3).unwrap();
     Some(dot)
 }
 
@@ -274,23 +274,38 @@ fn a_run_supersedes_itself_and_a_resent_op_applies_once() {
     let nothing = Context::default();
     run_op(&mut server, "r1", 1, &item, json!("one"), &nothing).unwrap();
     let after_first = server.state.clone();
-    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: true, refusal: None }));
+    assert_eq!(
+        server.sequence("r1", 1, "h"),
+        Ok(Sequence::Duplicate { latest: true, refusal: None })
+    );
     assert_eq!(run_op(&mut server, "r1", 1, &item, json!("again"), &nothing), None);
     assert_eq!(server.state, after_first);
     // The run's view never held its own first write, yet the second replaces it.
     run_op(&mut server, "r1", 2, &item, json!("two"), &nothing).unwrap();
     assert_eq!(values(&server.state, &item, "title"), vec![json!("two")]);
     // Only the latest refusal is kept, and an older number is merely spent.
-    assert_eq!(server.sequence("r1", 1), Ok(Sequence::Duplicate { latest: false, refusal: None }));
+    assert_eq!(
+        server.sequence("r1", 1, "h"),
+        Ok(Sequence::Duplicate { latest: false, refusal: None })
+    );
     let check = server.state.context.clone();
     assert!(run_op(&mut server, "r1", 3, &item, json!("three"), &check).is_some());
-    server.record("r1", 4, Some(&json!({"code": "user-only"})), 4).unwrap();
+    server.record("r1", 4, "h", Some(&json!({"code": "user-only"})), 4).unwrap();
     let refused = Some(json!({"code": "user-only"}));
     assert_eq!(
-        server.sequence("r1", 4),
+        server.sequence("r1", 4, "h"),
         Ok(Sequence::Duplicate { latest: true, refusal: refused })
     );
-    assert_eq!(server.sequence("r1", 3), Ok(Sequence::Duplicate { latest: false, refusal: None }));
+    assert_eq!(
+        server.sequence("r1", 3, "h"),
+        Ok(Sequence::Duplicate { latest: false, refusal: None })
+    );
+    // The latest number sent with another command was taken by the first: the second must go as the next.
+    assert_eq!(
+        server.sequence("r1", 4, "other"),
+        Err(Error::SeqTaken { run: "r1".to_owned(), seq: 4 })
+    );
+    assert_eq!(server.state.applied_seq("r1"), Ok(4));
 }
 
 #[test]
@@ -299,13 +314,13 @@ fn a_gap_or_another_replica_is_refused() {
     let mut server = replica("server");
     run_op(&mut server, "r1", 1, &item, json!(1), &Context::default()).unwrap();
     assert_eq!(
-        server.sequence("r1", 3),
+        server.sequence("r1", 3, "h"),
         Err(Error::Gap { run: "r1".to_owned(), expected: 2, got: 3 })
     );
     let mut other = replica("other");
     other.join(&server.state).unwrap();
     assert_eq!(
-        other.sequence("r1", 2),
+        other.sequence("r1", 2, "h"),
         Err(Error::WrongReplica { run: "r1".to_owned(), applied_by: "server".to_owned() })
     );
 }
@@ -552,7 +567,7 @@ impl Play {
                 let name = format!("run{run}");
                 let actor = format!("run/{name}");
                 let seq = sent[*run] + 1;
-                assert_eq!(applier.sequence(&name, seq), Ok(Sequence::Next));
+                assert_eq!(applier.sequence(&name, seq, "h"), Ok(Sequence::Next));
                 // What it didn't see, and didn't write itself, stays beside its value as a conflict.
                 let mut kept: BTreeSet<Dot> = applier
                     .state
@@ -564,7 +579,7 @@ impl Play {
                     .collect();
                 let value = value.map_or(Json::Null, Json::from);
                 kept.insert(applier.write_seen(&item, &field, &actor, at, value, &seen).unwrap());
-                applier.record(&name, seq, None, at).unwrap();
+                applier.record(&name, seq, "h", None, at).unwrap();
                 let now: BTreeSet<Dot> = applier
                     .state
                     .field(&item, &field)
@@ -581,7 +596,7 @@ impl Play {
                 };
                 let applier = &replicas[run % 3];
                 assert!(matches!(
-                    applier.sequence(&format!("run{run}"), seq),
+                    applier.sequence(&format!("run{run}"), seq, "h"),
                     Ok(Sequence::Duplicate { .. })
                 ));
             },

@@ -7,4 +7,4 @@ pub mod scan;
 
 pub use deny_list::DenyList;
 pub use push::RefUpdate;
-pub use scan::{Channel, Finding};
+pub use scan::{Channel, Finding, scan_text};

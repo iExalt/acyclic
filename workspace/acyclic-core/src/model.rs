@@ -1145,6 +1145,19 @@ fn run_writer(by: By<'_>) -> Result<(), WriteError> {
     }
 }
 
+/// Whether run `id` is under way on `thread` in `state`: an active state among its values and a thread value naming
+/// `thread`, as [`Run::is_active`] judges, reading the run alone.
+#[must_use]
+pub fn run_active(state: &State, id: &str, thread: &str) -> bool {
+    let Ok(key) = Key::new(kind::RUN, id) else { return false };
+    let values =
+        |name| state.field(&key, name).into_iter().flat_map(|r| r.values()).map(|v| &v.value);
+    values(run::STATE)
+        .filter_map(|value| serde_json::from_value::<RunState>(value.clone()).ok())
+        .any(RunState::is_active)
+        && values(run::THREAD).any(|value| value.as_str() == Some(thread))
+}
+
 /// Records a run starting on a thread.
 ///
 /// # Errors

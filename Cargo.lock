@@ -9,6 +9,7 @@ dependencies = [
  "acyclic-cli",
  "acyclic-core",
  "acyclic-fixtures",
+ "acyclic-operator",
  "acyclic-server",
  "serde_json",
  "tempfile",
@@ -85,6 +86,8 @@ version = "0.2.0"
 dependencies = [
  "acyclic-cli",
  "acyclic-core",
+ "acyclic-guard",
+ "acyclic-operator",
  "axum",
  "getrandom",
  "serde_json",

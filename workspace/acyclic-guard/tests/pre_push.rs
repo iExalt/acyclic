@@ -242,3 +242,17 @@ fn pushed_content_cannot_silence_gitleaks() {
     fixture.commit_file(".gitleaksignore", fingerprint.as_bytes(), "chore: scanner ignores");
     fixture.push_blocked(&["origin", "main"], "gitleaks found a secret");
 }
+
+#[test]
+fn text_a_run_sends_is_scanned_for_terms_and_secrets() {
+    let list = acyclic_guard::DenyList::parse("synthetic-term\n");
+    let clean = acyclic_guard::scan_text(r#"{"title":"fine"}"#, "request", &list).unwrap();
+    assert!(clean.is_clean());
+    let named =
+        acyclic_guard::scan_text(r#"{"title":"a Synthetic-Term"}"#, "request", &list).unwrap();
+    assert_eq!((named.findings.len(), named.leaks), (1, false));
+    let key = ["AKIA", "QYLPMN5HHHFPZAM2"].concat();
+    let leaked =
+        acyclic_guard::scan_text(&format!("aws_access_key_id = {key}"), "request", &list).unwrap();
+    assert!(leaked.leaks);
+}
