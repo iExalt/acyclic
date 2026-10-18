@@ -613,7 +613,8 @@ async fn run_command(
             return Err(Refusal::Inactive);
         }
         if let (Some(_), Access::Run { deny, .. }) = (seq, &lister.access) {
-            let text = String::from_utf8_lossy(&body);
+            let text =
+                serde_json::from_slice(&body).map(|value| stored(&value)).unwrap_or_default();
             match acyclic_guard::scan_text(&text, "the write", deny) {
                 Ok(report) if !report.findings.is_empty() => return Err(Refusal::DenyListed),
                 Ok(report) if report.leaks => return Err(Refusal::Leak),
@@ -658,6 +659,31 @@ async fn run_command(
         },
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+/// The text a write would store: every string in the request and every key, decoded and one to a line. Scanning the
+/// request as sent would miss a term written with JSON's escapes, which decoding turns back into the term.
+fn stored(value: &Value) -> String {
+    fn collect(value: &Value, text: &mut String) {
+        match value {
+            Value::String(string) => {
+                text.push_str(string);
+                text.push('\n');
+            },
+            Value::Array(values) => values.iter().for_each(|value| collect(value, text)),
+            Value::Object(map) => {
+                for (key, value) in map {
+                    text.push_str(key);
+                    text.push('\n');
+                    collect(value, text);
+                }
+            },
+            Value::Null | Value::Bool(_) | Value::Number(_) => {},
+        }
+    }
+    let mut text = String::new();
+    collect(value, &mut text);
+    text
 }
 
 /// Runs a run's read as the run, and records the tracker as it stood before the read as what the run has seen: never

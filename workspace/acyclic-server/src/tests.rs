@@ -195,6 +195,19 @@ fn a_runners_listener_lets_in_a_valid_run_token_by_any_name_and_no_browser() {
     assert_eq!(access.same_origin(&headers(&[json, from]), &run), Err(Refusal::WrongOrigin));
 }
 
+#[test]
+fn a_write_is_scanned_as_it_would_be_stored() {
+    let sent = r#"{"item": {"edit": {"item": "a", "title": "\u0074erm", "notes": "x\ny"}}}"#;
+    let text = stored(&serde_json::from_str(sent).unwrap());
+    assert!(text.lines().any(|line| line == "term"), "{text}");
+    assert_eq!(DenyList::parse("term\n").matches(&text), [1]);
+    assert_eq!(
+        DenyList::parse("term\n").matches(sent),
+        Vec::<usize>::new(),
+        "as sent, the term hides"
+    );
+}
+
 /// Sends one request through the router and returns its status and body.
 fn send(
     router: &Router,
