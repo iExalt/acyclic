@@ -109,15 +109,32 @@ pub fn scan_push(
             report.findings.extend(find(list, &text, Channel::Tag, &update.local_sha));
         }
         let range = outgoing_range(repo, remote, update)?;
-        let commits =
-            git_text(repo, ["rev-list"].into_iter().chain(range.iter().map(String::as_str)))?;
-        let commits: Vec<&str> = commits.lines().collect();
-        for commit in &commits {
-            scan_commit(repo, list, commit, &mut report.findings)?;
-        }
-        if !commits.is_empty() {
-            report.leaks |= gitleaks(repo, &range)?;
-        }
+        let scanned = commits(repo, &range, list, true)?;
+        report.findings.extend(scanned.findings);
+        report.leaks |= scanned.leaks;
+    }
+    Ok(report)
+}
+
+/// Scans the commits `rev-list` selects with `range` in the repository at `repo`, as a receiving side does before it
+/// takes a push. Gitleaks's own report is dropped: a receiver's output goes back to the pusher.
+///
+/// # Errors
+///
+/// Fails when Git or Gitleaks can't run or Gitleaks fails for a reason other than a leak.
+pub fn scan_range(repo: &Path, range: &[String], list: &DenyList) -> Result<Report, Error> {
+    commits(repo, range, list, false)
+}
+
+fn commits(repo: &Path, range: &[String], list: &DenyList, echo: bool) -> Result<Report, Error> {
+    let mut report = Report::default();
+    let commits = git_text(repo, ["rev-list"].into_iter().chain(range.iter().map(String::as_str)))?;
+    let commits: Vec<&str> = commits.lines().collect();
+    for commit in &commits {
+        scan_commit(repo, list, commit, &mut report.findings)?;
+    }
+    if !commits.is_empty() {
+        report.leaks = gitleaks(repo, range, echo)?;
     }
     Ok(report)
 }
@@ -251,7 +268,7 @@ const GITLEAKS_CONFIG: &str = "[extend]\nuseDefault = true\n";
 ///
 /// Nothing in the pushed content can weaken the scan: the configuration is ours, `gitleaks:allow` comments are
 /// ignored, and no ignore file in the work tree or the pushed content is read.
-fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
+fn gitleaks(repo: &Path, range: &[String], echo: bool) -> Result<bool, Error> {
     // Gitleaks reads `.gitleaksignore` from the directory it scans, so it scans the Git directory, not the work tree.
     let git_dir = git_text(repo, ["rev-parse", "--absolute-git-dir"])?;
     let dir = PrivateDir::new()?;
@@ -271,8 +288,8 @@ fn gitleaks(repo: &Path, range: &[String]) -> Result<bool, Error> {
         .env_remove("GITLEAKS_CONFIG")
         .env_remove("GITLEAKS_CONFIG_TOML")
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stdout(if echo { Stdio::inherit() } else { Stdio::null() })
+        .stderr(if echo { Stdio::inherit() } else { Stdio::null() })
         .output()
         .map_err(|err| Error(format!("gitleaks can't run: {err}")))?;
     match output.status.code() {

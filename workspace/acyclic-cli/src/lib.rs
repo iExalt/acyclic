@@ -23,8 +23,8 @@ use serde_json::{Value, json};
 use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Format, Serve, Up};
-pub use crate::commands::Operation;
-pub use crate::context::now;
+pub use crate::commands::{Operation, Reach};
+pub use crate::context::{mirror, mirrors, now};
 use crate::error::{CliError, exit};
 
 /// Starts the server for `acyclic serve` or `acyclic up` on a tracker clone, and returns when it stops.
@@ -368,6 +368,42 @@ pub fn set_run_state(
 /// When the tracker can't be opened or read, as an exit code and envelope.
 pub fn run_active(run: &str, thread: &str, tracker: &Path) -> Result<bool, (u8, Value)> {
     commands::run_active(tracker, run, thread).map_err(|err| (err.exit, err.envelope()))
+}
+
+/// What run `run` on `thread` may reach of repository `owner`/`name` in the clone at `tracker`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn reach(
+    run: &str,
+    thread: &str,
+    owner: &str,
+    name: &str,
+    tracker: &Path,
+) -> Result<Reach, (u8, Value)> {
+    commands::reach(tracker, run, thread, owner, name).map_err(|err| (err.exit, err.envelope()))
+}
+
+/// Which of `threads` are finished in the clone at `tracker`: gone, or with every item done and no run under way.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn finished(
+    threads: &std::collections::BTreeSet<String>,
+    tracker: &Path,
+) -> Result<std::collections::BTreeSet<String>, (u8, Value)> {
+    commands::finished(tracker, threads).map_err(|err| (err.exit, err.envelope()))
+}
+
+/// The repository records in the clone at `tracker`.
+///
+/// # Errors
+///
+/// When the tracker can't be opened or read, as an exit code and envelope.
+pub fn repositories(tracker: &Path) -> Result<Vec<acyclic_core::model::Repository>, (u8, Value)> {
+    commands::repositories(tracker).map_err(|err| (err.exit, err.envelope()))
 }
 
 /// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.

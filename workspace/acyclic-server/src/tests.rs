@@ -163,7 +163,8 @@ fn a_runners_listener_lets_in_a_valid_run_token_by_any_name_and_no_browser() {
     use acyclic_operator::token::Signer;
     const NOW: Millis = 1_792_022_400_000;
     let signer = Signer::from_seed([3; 32]);
-    let access = Access::Run { verifier: signer.verifier(), deny: DenyList::parse("term\n") };
+    let access =
+        Access::Run { verifier: signer.verifier(), deny: DenyList::parse("term\n"), code: None };
     let token = signer.mint("r1", "t1", NOW, 60_000).unwrap();
     let forged = Signer::from_seed([4; 32]).mint("r1", "t1", NOW, 60_000).unwrap();
     let bearer = format!("Bearer {token}");

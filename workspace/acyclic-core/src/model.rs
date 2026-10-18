@@ -594,6 +594,34 @@ impl Model {
         repositories
     }
 
+    /// Whether a thread is finished: gone, or with every item done and no run under way. A thread with no items yet
+    /// isn't.
+    #[must_use]
+    pub fn thread_finished(&self, thread: &str) -> bool {
+        if !self.threads.contains_key(thread) {
+            return true;
+        }
+        let members = self.members(thread);
+        let running = self
+            .runs
+            .values()
+            .any(|run| run.is_active() && run.thread.all().into_iter().any(|t| t == thread));
+        !members.is_empty() && members.iter().all(|id| self.items[*id].is_done()) && !running
+    }
+
+    /// The repository records naming `owner`/`name`, compared without regard to case as GitHub does: none, one, or
+    /// several that the caller must not choose between.
+    #[must_use]
+    pub fn repositories_named(&self, owner: &str, name: &str) -> Vec<&Repository> {
+        let same = |value: &Value<String>, wanted: &str| {
+            value.one().is_some_and(|value| value.eq_ignore_ascii_case(wanted))
+        };
+        self.repositories
+            .values()
+            .filter(|record| same(&record.owner, owner) && same(&record.name, name))
+            .collect()
+    }
+
     /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {
