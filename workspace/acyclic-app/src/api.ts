@@ -13,13 +13,13 @@ interface RawItem {
   title: Raw<string>;
   parent: Raw<string>;
   thread: Raw<string>;
-  state: string;
+  state: Raw<string>;
   archived: boolean;
   links: { waits_for: string[]; relates_to: string[] };
 }
 
 /** The fields whose conflicts the app settles for display. */
-export type Settled = "title" | "parent" | "thread";
+export type Settled = "title" | "parent" | "thread" | "state";
 
 /**
  * An item with every field ready to draw: a conflicted field reads as its first value in the tracker's order, and
@@ -29,6 +29,7 @@ export interface Item extends Omit<RawItem, Settled> {
   title: string;
   parent: string | null;
   thread: string | null;
+  state: string;
   conflicts: Partial<Record<Settled, (string | null)[]>>;
 }
 
@@ -46,7 +47,9 @@ export function settle(raw: RawItem): Item {
     return value.conflict.find((one) => one !== null) ?? null;
   };
   const title = pick("title") ?? raw.id;
-  return { ...raw, title, parent: pick("parent"), thread: pick("thread"), conflicts };
+  // An unset state reads as backlog, as the CLI reads it.
+  const state = pick("state") ?? "backlog";
+  return { ...raw, title, parent: pick("parent"), thread: pick("thread"), state, conflicts };
 }
 
 /** A refusal or failure, carrying the envelope's stable code. */

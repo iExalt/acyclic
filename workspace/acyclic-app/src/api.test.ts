@@ -64,12 +64,14 @@ describe("settle", () => {
       title: { conflict: [null, "Sow", "Plant"] },
       parent: { conflict: ["beds", null] },
       thread: { conflict: [null] },
+      state: { conflict: [null, null] },
     });
-    expect(item).toMatchObject({ title: "Sow", parent: "beds", thread: null });
+    expect(item).toMatchObject({ title: "Sow", parent: "beds", thread: null, state: "backlog" });
     expect(item.conflicts).toEqual({
       title: [null, "Sow", "Plant"],
       parent: ["beds", null],
       thread: [null],
+      state: [null, null],
     });
     expect(settle(raw("b")).conflicts).toEqual({});
   });
