@@ -170,3 +170,8 @@ export async function proposals(fetcher: Fetch = fetch): Promise<Proposal[]> {
 export async function globalLevel(fetcher: Fetch = fetch): Promise<string> {
   return (await command<{ global: string }>({ level: {} }, fetcher)).global;
 }
+
+/** What needs the user, as `acyclic needs` lists it. */
+export async function needs(fetcher: Fetch = fetch): Promise<({ kind: string } & Record<string, unknown>)[]> {
+  return (await command<{ needs: ({ kind: string } & Record<string, unknown>)[] }>("needs", fetcher)).needs;
+}

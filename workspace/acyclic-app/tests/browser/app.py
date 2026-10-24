@@ -7,7 +7,7 @@ the default view, a box expanded and collapsed again without moving on screen, a
 thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
 as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
 thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
-are set. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+are set; from the needs-you list, a proposal is kept and a waiting thread approved. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -605,6 +605,50 @@ def thread_journey(page, env, plan, thread, name, failures):
     )
 
 
+def needs_journey(page, env, plan, thread, name, failures):
+    """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows."""
+    count = page.get_by_test_id("needs-count")
+    page.get_by_test_id("needs-button").click()
+    needs = page.get_by_test_id("needs")
+    needs.wait_for(timeout=10_000)
+    outside = next(
+        id
+        for id, row in sorted(plan.items.items())
+        if row["thread"] not in (thread, None)
+    )
+    run(env, "item", "edit", outside, "--thread", thread)
+    before = int(count.inner_text())
+    page.get_by_role("button", name="Refresh").click()
+    page.wait_for_function(
+        "n => Number(document.querySelector('[data-testid=needs-count]').textContent) === n",
+        arg=before + 1,
+        timeout=10_000,
+    )
+    proposal = needs.locator("[data-need^='proposal:']").filter(
+        has_text=plan.items[outside]["title"]
+    )
+    proposal.locator("[data-action=keep]").click()
+    proposal.wait_for(state="detached", timeout=10_000)
+    waiting = needs.locator("[data-need^='awaiting-approval:']").first
+    approved = waiting.get_attribute("data-need").split(":", 1)[1]
+    waiting.locator("[data-action=approve]").click()
+    needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
+        state="detached", timeout=10_000
+    )
+    if int(count.inner_text()) >= before:
+        failures.append(
+            f"{name}: the needs count stayed at {count.inner_text()} after two were met"
+        )
+    if json.loads(run(env, "show", outside))["data"][0]["thread"] != thread:
+        failures.append(
+            f"{name}: keeping the proposal didn't put {outside} in {thread}"
+        )
+    if not json.loads(run(env, "thread", "show", approved))["data"][0]["approved"]:
+        failures.append(f"{name}: approving {approved} from the list didn't approve it")
+    page.screenshot(path=SHOTS / f"app-{name}-needs.png")
+    print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -674,6 +718,7 @@ def main():
                         page, view, env, remote, "journey-added", name, failures
                     )
                     thread_journey(page, env, plan, "t0", name, failures)
+                    needs_journey(page, env, plan, "t0", name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:

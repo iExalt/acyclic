@@ -120,6 +120,16 @@ export function globalLevelCommand(level: Level): Command {
   return { level: { level } };
 }
 
+/** Keeps an item in a thread it joined after the thread's approval, as the user's own edit. */
+export function keepMemberCommand(item: string, thread: string): Command {
+  return { item: { edit: { item, thread } } };
+}
+
+/** Takes an item back out of a thread it joined after the thread's approval. */
+export function dropMemberCommand(item: string): Command {
+  return { item: { edit: { item, "no-thread": true } } };
+}
+
 export function keepCommand(proposal: string): Command {
   return { proposal: { keep: { proposal } } };
 }

@@ -1,0 +1,163 @@
+// The needs-you list: what each entry says, what it names, and the actions the app can take on it. Entries the app
+// has no command for say so and give the CLI's hint. Pure, so every kind is tested without a browser.
+
+import type { Command } from "./api";
+import type { Entity } from "./forms";
+import {
+  approveCommand,
+  dropCommand,
+  dropMemberCommand,
+  keepCommand,
+  keepMemberCommand,
+  resolveCommand,
+  unsettledWhy,
+} from "./forms";
+
+/** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
+export type Need = { kind: string } & Record<string, unknown>;
+
+export interface Action {
+  label: string;
+  command: Command;
+  /** Names the action for tests: `keep`, `drop`, `approve` or `use`. */
+  action: string;
+}
+
+export interface NeedView {
+  /** A stable key for the entry: its kind and what it names. */
+  key: string;
+  text: string;
+  /** What it names, to select. */
+  items: string[];
+  threads: string[];
+  actions: Action[];
+  /** Why there is no action here, or how to settle it elsewhere. */
+  note: string | null;
+}
+
+interface Row {
+  id: string;
+  title?: unknown;
+}
+
+const row = (value: unknown): Row | null =>
+  typeof value === "object" && value !== null && typeof (value as Row).id === "string" ? (value as Row) : null;
+const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).filter((one) => one !== null) : []);
+const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
+const str = (value: unknown) => (typeof value === "string" ? value : "");
+
+/** One entry as the app shows it. */
+export function needView(need: Need): NeedView {
+  const item = row(need.item);
+  const thread = row(need.thread);
+  const base = {
+    items: item === null ? [] : [item.id],
+    threads: thread === null ? [] : [thread.id],
+    actions: [] as Action[],
+    note: null as string | null,
+  };
+  switch (need.kind) {
+    case "proposal": {
+      const proposal = need.proposal as { id?: string; actor?: string; edit?: Record<string, unknown> } | null;
+      const id = proposal?.id ?? "";
+      const edit = proposal?.edit ?? {};
+      return {
+        ...base,
+        key: `proposal:${id}`,
+        text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)} ${shown(edit.before)} → ${shown(edit.after)}${item === null ? "" : ` for ${titled(item)}`}`,
+        actions: [
+          { label: "Keep", command: keepCommand(id), action: "keep" },
+          { label: "Drop", command: dropCommand(id), action: "drop" },
+        ],
+      };
+    }
+    case "unapproved": {
+      const id = item?.id ?? "";
+      const to = thread?.id ?? "";
+      return {
+        ...base,
+        key: `unapproved:${id}:${to}`,
+        text: `${item === null ? id : titled(item)} joined ${thread === null ? to : titled(thread)} after its approval`,
+        actions: [
+          { label: "Keep", command: keepMemberCommand(id, to), action: "keep" },
+          { label: "Drop", command: dropMemberCommand(id), action: "drop" },
+        ],
+      };
+    }
+    case "awaiting-approval": {
+      const id = thread?.id ?? "";
+      const open = Number((need.counts as { open_members?: number } | undefined)?.open_members ?? 0);
+      const heads = Array.isArray((need.thread as { heads?: unknown })?.heads)
+        ? ((need.thread as { heads: string[] }).heads ?? [])
+        : [];
+      return {
+        ...base,
+        key: `awaiting-approval:${id}`,
+        items: heads,
+        text: `${thread === null ? id : titled(thread)} waits for your approval`,
+        actions: [
+          { label: `Approve ${open} ${open === 1 ? "item" : "items"}`, command: approveCommand(id), action: "approve" },
+        ],
+      };
+    }
+    case "conflict": {
+      const entity = str(need.entity);
+      const id = str(need.id);
+      const field = str(need.field);
+      const values = Array.isArray(need.values) ? need.values : [];
+      const known = entity === "item" || entity === "thread" || entity === "settings";
+      const actions: Action[] = [];
+      const why: string[] = [];
+      for (const value of values) {
+        const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
+        if (command !== null) actions.push({ label: `Use ${shown(value)}`, command, action: "use" });
+        else
+          why.push(`${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "the CLI settles it"}`);
+      }
+      return {
+        ...base,
+        key: `conflict:${entity}:${id}:${field}`,
+        text: `${entity} ${id}: ${field} was written differently on two machines`,
+        actions,
+        note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
+      };
+    }
+    default: {
+      const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
+      const hint = str(need.fix) || str(need.resolve);
+      return {
+        ...base,
+        items: [...base.items, ...named.map((one) => one.id)],
+        key: `${need.kind}:${[...base.items, ...base.threads, ...named.map((one) => one.id), str(need.resource), str(need.remote)].filter((one) => one !== "").join(":")}`,
+        text: describe(need.kind, item, thread, named),
+        note: hint === "" ? "The CLI settles this one: `acyclic needs` says how" : hint,
+      };
+    }
+  }
+}
+
+function shown(value: unknown): string {
+  if (value === null || value === undefined) return "none";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** A line for a kind the app only shows. */
+function describe(kind: string, item: Row | null, thread: Row | null, named: Row[]): string {
+  const subject = item !== null ? titled(item) : thread !== null ? titled(thread) : named.map(titled).join(", ");
+  const words: Record<string, string> = {
+    unpushed: "This clone holds writes the remote lacks",
+    "link-cycle": "Links form a cycle",
+    "parent-cycle": "Parents form a cycle",
+    contest: "Two holders claim one thread",
+    "resource-clash": "Two threads hold one resource",
+    "clock-ahead": "A claim's clock runs ahead",
+    "unknown-run": "A run nothing knows of claims a thread",
+    unthreaded: "In no thread",
+    "run-clash": "Two runs work one thread",
+    "new-blocker": "Gained a new blocker",
+    reopened: "Reopened, with work waiting on it",
+    "done-early": "Done while work in it is open",
+  };
+  const said = words[kind] ?? kind;
+  return subject === "" ? said : `${said}: ${subject}`;
+}

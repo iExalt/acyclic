@@ -287,6 +287,32 @@
       "command": {
         "level": {}
       }
+    },
+    {
+      "name": "needs",
+      "command": "needs"
+    },
+    {
+      "name": "keep a member the approval didn't see",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "a",
+            "thread": "t"
+          }
+        }
+      }
+    },
+    {
+      "name": "drop a member the approval didn't see",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "b",
+            "no-thread": true
+          }
+        }
+      }
     }
   ]
 }
