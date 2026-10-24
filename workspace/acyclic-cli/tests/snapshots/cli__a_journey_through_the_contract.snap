@@ -608,6 +608,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
           "title": "First"
         },
         "kind": "proposal",
+        "notify": true,
         "proposal": {
           "actor": "session/mac",
           "decision": null,
@@ -1366,6 +1367,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
           "open_members": 1
         },
         "kind": "awaiting-approval",
+        "notify": true,
         "thread": {
           "approved": false,
           "counts": {

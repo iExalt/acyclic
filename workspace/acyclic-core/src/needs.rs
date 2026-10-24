@@ -197,6 +197,37 @@ pub enum Entry {
     },
 }
 
+impl Entry {
+    /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
+    /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked) and items in no
+    /// thread, which agents leave routinely, stay on the list without a notification. With no catch-all arm, a new
+    /// kind fails to compile until it is placed here.
+    #[must_use]
+    pub const fn notifies(&self) -> bool {
+        match self {
+            Self::Conflict { .. }
+            | Self::AwaitingApproval { .. }
+            | Self::LinkCycle { .. }
+            | Self::ParentCycle { .. }
+            | Self::Contest { .. }
+            | Self::ResourceClash { .. }
+            | Self::UnknownRun { .. }
+            | Self::RunClash { .. }
+            | Self::Proposal { .. }
+            | Self::Unapproved { .. }
+            | Self::NewBlocker { .. }
+            | Self::Reopened { .. }
+            | Self::DoneEarly { .. }
+            | Self::Question { .. } => true,
+            Self::Unpushed { .. }
+            | Self::ClockAhead { .. }
+            | Self::Unthreaded { .. }
+            | Self::Dangling { .. }
+            | Self::Unverified { .. } => false,
+        }
+    }
+}
+
 /// The needs-you list at `now`, sorted.
 ///
 /// # Errors

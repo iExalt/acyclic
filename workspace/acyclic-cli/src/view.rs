@@ -177,8 +177,9 @@ impl View<'_> {
 }
 
 impl View<'_> {
-    /// The needs-you list: each entry is `{kind, …}`, with item and thread entries embedding their summaries, a
+    /// The needs-you list: each entry is `{kind, notify, …}`, with item and thread entries embedding their summaries, a
     /// proposal embedding what `proposal show` returns, and a conflict listing its `values` and how to `resolve` it.
+    /// `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
         let heads = self.model.heads_index();
@@ -199,7 +200,7 @@ impl View<'_> {
         };
         let mut found = Vec::with_capacity(entries.len());
         for entry in entries {
-            found.push(match entry {
+            let mut shown = match entry {
                 Entry::Conflict { kind, id, field } => self.conflict(kind, id, field, &thread)?,
                 Entry::AwaitingApproval { thread: id, members: open, waits_with, .. } => json!({
                     "kind": "awaiting-approval", "thread": thread(id),
@@ -207,7 +208,9 @@ impl View<'_> {
                     "counts": {"open_members": open},
                 }),
                 Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
-                Entry::LinkCycle { items: ids } => json!({"kind": "link-cycle", "items": items(ids)?}),
+                Entry::LinkCycle { items: ids } => {
+                    json!({"kind": "link-cycle", "items": items(ids)?})
+                },
                 Entry::ParentCycle { items: ids } => {
                     json!({"kind": "parent-cycle", "items": items(ids)?})
                 },
@@ -269,7 +272,9 @@ impl View<'_> {
                     "kind": "question", "id": id, "thread": asking.as_deref().map(thread),
                     "class": class, "text": text,
                 }),
-            });
+            };
+            shown["notify"] = entry.notifies().into();
+            found.push(shown);
         }
         Ok(found)
     }
