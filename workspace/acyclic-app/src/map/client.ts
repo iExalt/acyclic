@@ -21,8 +21,15 @@ export class Layouts {
   }
 }
 
-/** The app's layouts, with ELK in a classic worker of its own. */
+/**
+ * The app's layouts, with ELK in a classic worker of its own. `?engine=inline` runs ELK on the page's own thread
+ * instead, loaded only then, so a timing run can tell ELK's own time from what the worker's messages add.
+ */
 export function browserLayouts(): Layouts {
+  if (new URLSearchParams(location.search).get("engine") === "inline") {
+    const elk = import("elkjs/lib/elk.bundled.js").then(({ default: Elk }) => new Elk());
+    return new Layouts(elkLayBox({ layout: async (graph) => (await elk).layout(graph) }));
+  }
   const elk = new ElkApi({ workerFactory: () => new Worker(workerUrl) });
   return new Layouts(elkLayBox(elk));
 }

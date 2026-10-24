@@ -8,6 +8,7 @@
     "check": "tsc -p tsconfig.json && tsc -p tsconfig.sw.json && tsc -p tsconfig.node.json && biome ci --error-on-warnings . && vitest run"
   },
   "dependencies": {
+    "cytoscape": "3.34.4",
     "elkjs": "0.12.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"

@@ -1,6 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
+import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { describe, expect, it } from "vitest";
-import { elkLayBox } from "./elk";
+import { dependencyOrder, elkLayBox } from "./elk";
 import { item } from "./fixture";
 import { type LayBox, LayoutCache, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
@@ -123,6 +124,47 @@ describe("place", () => {
     }
     await placing;
     expect(asked).toEqual([["left", "right"], ["top"], [ROOT]]);
+  });
+});
+
+describe("elkLayBox", () => {
+  it("packs the top level in dependency order and keeps every box's size", async () => {
+    const order = dependencyOrder({
+      id: ROOT,
+      children: ["a", "b", "c"].map((id) => ({ id, width: 10, height: 10 })),
+      edges: [{ source: "b", target: "a" }],
+    });
+    expect(order).toEqual(["b", "a", "c"]);
+    const sizes = [
+      { id: "a", width: 900, height: 120 },
+      { id: "b", width: 200, height: 700 },
+      { id: "c", width: 444, height: 48 },
+      { id: "d", width: 300, height: 300 },
+    ];
+    const elk = new ELK();
+    let answer: ElkNode | undefined;
+    const watched = { layout: async (graph: ElkNode) => (answer = await elk.layout(graph)) };
+    const packed = await elkLayBox(watched)({ id: ROOT, children: sizes, edges: [] });
+    // Packing must not stretch a box to fill its row: what it holds was placed for its own size.
+    expect(
+      answer?.children
+        ?.map(({ id, width, height }) => ({ id, width, height }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(sizes);
+    for (const box of sizes) {
+      const at = packed.at[box.id];
+      expect((at?.x ?? Infinity) + box.width).toBeLessThanOrEqual(packed.width);
+      expect((at?.y ?? Infinity) + box.height).toBeLessThanOrEqual(packed.height);
+    }
+  });
+
+  it("breaks a dependency cycle at its least id", () => {
+    const children = ["a", "b"].map((id) => ({ id, width: 1, height: 1 }));
+    const edges = [
+      { source: "a", target: "b" },
+      { source: "b", target: "a" },
+    ];
+    expect(dependencyOrder({ id: ROOT, children, edges })).toEqual(["a", "b"]);
   });
 });
 

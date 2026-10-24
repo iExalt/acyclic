@@ -1,0 +1,99 @@
+/* The shell: a bar on top, the threads beside the Map on a wide screen and above it on a phone. */
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #101418;
+  color: #d8e4ee;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+.shell {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100%;
+}
+.bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2b3a4a;
+}
+.bar h1 {
+  font-size: 16px;
+  margin: 0 auto 0 0;
+}
+.threads {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid #2b3a4a;
+}
+.thread {
+  flex: none;
+  background: #1b2530;
+  color: inherit;
+  border: 1px solid #4a6378;
+  border-radius: 14px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.thread.picked {
+  border-color: #7cc4ff;
+  background: #24323f;
+}
+.stage {
+  position: relative;
+  min-height: 0;
+}
+.map {
+  position: absolute;
+  inset: 0;
+}
+.inspector {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: #1b2530ee;
+  border-top: 1px solid #4a6378;
+  padding: 8px 12px;
+}
+.inspector h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.status {
+  padding: 16px;
+}
+@media (min-width: 900px) {
+  .shell {
+    grid-template-rows: auto 1fr;
+    grid-template-columns: 240px 1fr;
+  }
+  .bar {
+    grid-column: 1 / -1;
+  }
+  .threads {
+    flex-direction: column;
+    overflow-y: auto;
+    border-bottom: none;
+    border-right: 1px solid #2b3a4a;
+  }
+  .thread {
+    text-align: left;
+  }
+  .inspector {
+    inset: 0 0 0 auto;
+    width: 320px;
+    border-top: none;
+    border-left: 1px solid #4a6378;
+  }
+}
