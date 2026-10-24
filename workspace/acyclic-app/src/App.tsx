@@ -62,7 +62,8 @@ export function App() {
   const [adding, setAdding] = useState<Adding | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showNeeds, setShowNeeds] = useState(false);
+  // A notification opens the app on `/?needs`, to the list it is about.
+  const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 

@@ -115,6 +115,8 @@ enum Trigger {
     Seen,
     /// Something else may have changed: push what is new.
     Look,
+    /// A device subscribed: a reason to try at once, even while backing off.
+    Device,
 }
 
 /// The server's pushing: its settings, its files, and the task that pushes, started on first use.
@@ -200,7 +202,7 @@ impl Push {
             devices.drain(..excess);
             self.inner.save("subscriptions.json", &devices)?;
         }
-        self.send(Trigger::Look);
+        self.send(Trigger::Device);
         Ok(())
     }
 
@@ -258,6 +260,10 @@ async fn work(
             trigger = triggers.recv() => match trigger { Some(trigger) => trigger, None => return },
             _ = ticks.tick() => Trigger::Look,
         };
+        if first == Trigger::Device {
+            resume = tokio::time::Instant::now();
+            backoff = inner.settings.backoff;
+        }
         if first == Trigger::Look && tokio::time::Instant::now() < resume {
             continue;
         }

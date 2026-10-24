@@ -7,7 +7,8 @@ the default view, a box expanded and collapsed again without moving on screen, a
 thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
 as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
 thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
-are set; from the needs-you list, a proposal is kept and a waiting thread approved. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+are set; from the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
+subscription it is given, shows a pushed notification, and opens the needs-you list it names. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -649,6 +650,95 @@ def needs_journey(page, env, plan, thread, name, failures):
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
 
+def push_journey(context, page, env, origin, name, failures):
+    """Subscribes a device as the browser would, delivers a push through the service worker, and opens what it names.
+
+    Headless Chromium reaches no real push service, so the subscription is one the page makes up, with a real P-256 key,
+    and the message comes in through DevTools rather than from the server.
+    """
+    context.grant_permissions(["notifications"], origin=origin)
+    # The switch reads the permission as the list opens.
+    page.get_by_test_id("needs-button").click()
+    notify = page.get_by_test_id("notify")
+    notify.wait_for(timeout=10_000)
+    if notify.is_checked() or not notify.is_enabled():
+        failures.append(
+            f"{name}: with permission and no subscription, the switch isn't off and ready"
+        )
+    endpoint = "https://push.example/journey"
+    answer = page.evaluate(
+        """async (endpoint) => {
+            const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+            const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+            const b64 = (bytes) => btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+            const keys = { p256dh: b64(raw), auth: b64(crypto.getRandomValues(new Uint8Array(16))) };
+            const response = await fetch("/api/push/subscribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ endpoint, keys }),
+            });
+            return response.json();
+        }""",
+        endpoint,
+    )
+    devices = Path(env["HOME"]) / ".config/acyclic/push/subscriptions.json"
+    if not answer.get("ok") or endpoint not in devices.read_text():
+        failures.append(f"{name}: the server didn't keep the subscription: {answer}")
+    cdp = context.new_cdp_session(page)
+    registrations = []
+    cdp.on(
+        "ServiceWorker.workerRegistrationUpdated",
+        lambda event: registrations.extend(event["registrations"]),
+    )
+    cdp.send("ServiceWorker.enable")
+    page.wait_for_function("navigator.serviceWorker.ready.then(() => true)")
+    deadline = time.monotonic() + 10
+    while not registrations and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    message = {
+        "title": "Needs you",
+        "body": "A proposal for the journey",
+        "url": "/?needs",
+    }
+    # Headless Chromium can lose a notification shown while its notifications are being read, so each read waits a
+    # little after a delivery, and a lost one is delivered again: a worker that shows nothing fails every time.
+    shown, deliveries = [], 0
+    while not shown and deliveries < 5:
+        deliveries += 1
+        cdp.send(
+            "ServiceWorker.deliverPushMessage",
+            {
+                "origin": origin,
+                "registrationId": registrations[0]["registrationId"],
+                "data": json.dumps(message),
+            },
+        )
+        page.wait_for_timeout(500)
+        shown = context.service_workers[0].evaluate(
+            """async () => (await self.registration.getNotifications({ tag: "needs" }))
+                .map((one) => ({ title: one.title, body: one.body, url: one.data?.url }))"""
+        )
+    if shown != [message]:
+        failures.append(f"{name}: the push showed {shown}, not {message}")
+    # Opening the notification goes to what it names: the needs-you list.
+    page.goto(origin + message["url"])
+    page.get_by_test_id("needs").wait_for(timeout=10_000)
+    page.evaluate(
+        """(endpoint) => fetch("/api/push/unsubscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint }),
+        })""",
+        endpoint,
+    )
+    if endpoint in devices.read_text():
+        failures.append(f"{name}: unsubscribing left the device")
+    page.screenshot(path=SHOTS / f"app-{name}-notify.png")
+    print(
+        f"{name}: subscribed, showed a pushed notification after {deliveries} deliveries, and opened the needs-you list"
+    )
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -726,6 +816,19 @@ def main():
                         f"{name}: the page threw or logged errors: {errors}"
                     )
                 context.close()
+            # Chromium's headless shell refuses notifications; its full build, headless, shows them.
+            notifying = playwright.chromium.launch(channel="chromium")
+            context, page, origin, errors = open_app(
+                notifying, VIEWS["phone"], link, failures, "notifying phone"
+            )
+            link = fresh()
+            push_journey(context, page, env, origin, "phone", failures)
+            if errors:
+                failures.append(
+                    f"notifying phone: the page threw or logged errors: {errors}"
+                )
+            context.close()
+            notifying.close()
             webkit = playwright.webkit.launch()
             context, page, _, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"

@@ -1,6 +1,7 @@
 // The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
 
 import type { Command } from "./api";
+import { Notify } from "./Notify";
 import { type Need, needView } from "./needs";
 
 export interface NeedsListProps {
@@ -23,6 +24,7 @@ export function NeedsList({ needs, titleOf, busy, onCommand, onSelect, onPickThr
           ×
         </button>
       </header>
+      <Notify />
       {views.length === 0 ? <p className="facts">Nothing needs you.</p> : null}
       <ul className="needs">
         {views.map((view) => (
