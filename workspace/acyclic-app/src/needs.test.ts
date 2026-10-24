@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
-import { needView } from "./needs";
+import { needView, threadLabel } from "./needs";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
 const item = (id: string) => ({ id, title: id.toUpperCase() });
@@ -59,8 +59,23 @@ describe("needView", () => {
       text: "Ship it now waits for your approval",
       line: lines.get("t3"),
     });
-    // A thread the list lacks has no badge, so it keeps its number.
-    expect(waiting("t9", "9. Gone")).toMatchObject({ text: "9. Gone waits for your approval", line: undefined });
+    // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
+    expect(waiting("t9", "9. Gone")).toMatchObject({
+      text: "9. Gone waits for your approval",
+      line: undefined,
+      threads: [{ id: "t9", title: "9. Gone" }],
+    });
+    expect(threadLabel({ id: "t9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
+    expect(threadLabel({ id: "t3", title: "3. Ship it" }, lines)).toEqual({
+      line: lines.get("t3"),
+      text: "Ship it now",
+    });
+    // Text that doesn't name its thread has no badge: the thread's row below already shows it.
+    const ask = needView(
+      { kind: "question", id: "q", thread: { id: "t7", title: "7. Build it" }, text: "Which?" },
+      lines,
+    );
+    expect(ask.line).toBeUndefined();
     const clash = needView(
       {
         kind: "resource-clash",
@@ -104,7 +119,7 @@ describe("needView", () => {
     const asks = ["Which flag?", "Ship today?"].map((text, n) =>
       needView({ kind: "question", id: `q${n}`, thread: thread("t"), class: "scope", text }, none),
     );
-    expect(asks.map((one) => [one.key, one.text, one.threads])).toEqual([
+    expect(asks.map((one) => [one.key, one.text, one.threads.map((t) => t.id)])).toEqual([
       ["question:q0", "Which flag?", ["t"]],
       ["question:q1", "Ship today?", ["t"]],
     ]);
@@ -124,7 +139,13 @@ describe("needView", () => {
       },
       none,
     );
-    expect(clash).toMatchObject({ threads: ["t", "u"], key: "resource-clash:gpu" });
+    expect(clash).toMatchObject({
+      threads: [
+        { id: "t", title: "T" },
+        { id: "u", title: "U" },
+      ],
+      key: "resource-clash:gpu",
+    });
     expect(clash.text).toMatch(/T, U$/);
   });
 });

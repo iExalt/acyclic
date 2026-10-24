@@ -4,7 +4,7 @@ import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
-import { type Need, needView } from "./needs";
+import { type Need, needView, threadLabel } from "./needs";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
 const PRIMARY = new Set(["keep", "approve"]);
@@ -57,19 +57,22 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
             )}
             {view.note === null ? null : <p className="why">{view.note}</p>}
             <ul className="rows">
-              {view.threads.map((id) => (
-                <li key={`t-${id}`}>
-                  <button
-                    type="button"
-                    className="row line"
-                    style={lineStyle(lines.get(id))}
-                    onClick={() => onPickThread(id)}
-                  >
-                    <Badge line={lines.get(id)} />
-                    {lines.get(id)?.name ?? id}
-                  </button>
-                </li>
-              ))}
+              {view.threads.map((thread) => {
+                const label = threadLabel(thread, lines);
+                return (
+                  <li key={`t-${thread.id}`}>
+                    <button
+                      type="button"
+                      className="row line"
+                      style={lineStyle(label.line)}
+                      onClick={() => onPickThread(thread.id)}
+                    >
+                      <Badge line={label.line} />
+                      {label.text}
+                    </button>
+                  </li>
+                );
+              })}
               {view.items.map((id) => (
                 <li key={`i-${id}`}>
                   <button type="button" className="row" data-select={id} onClick={() => onSelect(id)}>

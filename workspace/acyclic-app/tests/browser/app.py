@@ -131,12 +131,14 @@ def wait_drawn(page, nodes, timeout=20_000):
 
 
 def from_menu(page, act):
-    """Does `act` in the bar's menu, opening it first and closing it after, as a hand would."""
-    summary = page.get_by_test_id("menu")
-    if not page.locator("details.menu").evaluate("d => d.open"):
-        summary.click()
+    """Does `act` in the bar's menu, opening it first, as a hand would. Acting closes the menu, so the next tap reaches
+    what it lands on rather than only closing the menu."""
+    menu = page.locator("details.menu")
+    if not menu.evaluate("d => d.open"):
+        page.get_by_test_id("menu").click()
     act()
-    summary.click()
+    if menu.evaluate("d => d.open"):
+        raise AssertionError("acting in the menu left it open, to swallow the next tap")
 
 
 def refresh(page):
@@ -893,12 +895,22 @@ def main():
             )
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
-            # WebKit too closes the menu on a tap outside it, and the tap selects nothing on the Map.
+            # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
+            # collapsed box would start laying it out open at once, and change the nodes drawn.
+            target = next(id for id in plan.default() if plan.depth(id) == 1)
+            drawn = page.get_by_test_id("map")
+            before = drawn.get_attribute("data-nodes")
             page.get_by_test_id("menu").click()
-            box = page.get_by_test_id("map").bounding_box()
-            page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-            if page.locator("details.menu").evaluate("d => d.open") or page.get_by_test_id("inspector").count():
-                failures.append("webkit phone: a tap outside the menu didn't close it alone")
+            tap_middle(page, VIEWS["phone"], target)
+            if (
+                page.locator("details.menu").evaluate("d => d.open")
+                or page.get_by_test_id("inspector").count()
+                or drawn.get_attribute("data-state") != "drawn"
+                or drawn.get_attribute("data-nodes") != before
+            ):
+                failures.append(
+                    "webkit phone: a tap outside the menu didn't close it alone"
+                )
             if errors:
                 failures.append(
                     f"webkit phone: the page threw or logged errors: {errors}"
