@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, items } from "./api";
+import { CommandError, command, items, settle } from "./api";
+
+/** An item as `show` returns it, unconflicted. */
+function raw(id: string) {
+  return {
+    id,
+    title: id.toUpperCase(),
+    parent: null,
+    thread: null,
+    state: "backlog",
+    archived: false,
+    links: { waits_for: [], relates_to: [] },
+  };
+}
 
 /** A server that answers each command from a table, recording what it was sent. */
 function server(answers: Record<string, unknown>) {
@@ -33,13 +46,35 @@ describe("command", () => {
 
 describe("items", () => {
   it("shows every listed id in one request, and sends none for an empty tracker", async () => {
-    const shown = [{ id: "a" }, { id: "b" }];
+    const shown = [raw("a"), raw("b")];
     const full = server({ list: { ok: true, data: [{ id: "a" }, { id: "b" }] }, show: { ok: true, data: shown } });
-    await expect(items(full.fetcher)).resolves.toEqual(shown);
+    await expect(items(full.fetcher)).resolves.toEqual(shown.map(settle));
     expect(full.sent).toEqual([{ list: {} }, { show: { items: ["a", "b"] } }]);
 
     const empty = server({ list: { ok: true, data: [] } });
     await expect(items(empty.fetcher)).resolves.toEqual([]);
     expect(empty.sent).toHaveLength(1);
+  });
+});
+
+describe("settle", () => {
+  it("draws a conflicted field as its first value and keeps every value for resolving", () => {
+    const item = settle({
+      ...raw("a"),
+      title: { conflict: [null, "Sow", "Plant"] },
+      parent: { conflict: ["beds", null] },
+      thread: { conflict: [null] },
+    });
+    expect(item).toMatchObject({ title: "Sow", parent: "beds", thread: null });
+    expect(item.conflicts).toEqual({
+      title: [null, "Sow", "Plant"],
+      parent: ["beds", null],
+      thread: [null],
+    });
+    expect(settle(raw("b")).conflicts).toEqual({});
+  });
+
+  it("falls back to the id when every title in a conflict is a clear", () => {
+    expect(settle({ ...raw("a"), title: { conflict: [null, null] } }).title).toBe("a");
   });
 });

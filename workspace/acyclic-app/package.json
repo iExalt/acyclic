@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "check": "tsc -p tsconfig.json && biome ci . && vitest run"
+    "check": "tsc -p tsconfig.json && biome ci --error-on-warnings . && vitest run"
   },
   "dependencies": {
     "react": "19.3.1",
