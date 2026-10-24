@@ -98,3 +98,21 @@ when the clone says so, as for the CLI: set `git config acyclic.pushAfterWrite t
 syncs take turns, so their pushes never race; a write that waits 15 seconds for its turn is answered `503` with the
 code `busy`, and git gives up on a transfer that stalls for 30 seconds. A clone without `origin` never syncs; one that
 loses its `origin` stops syncing until the server restarts.
+
+## Notifications
+
+The server tells the user's devices, through Web Push, when something new needs them: each entry of `acyclic needs`
+whose `notify` is true, the first time it appears. `GET /api/push/key` gives the server's VAPID public key, `POST
+/api/push/subscribe` takes a browser's `PushSubscription` as JSON (an `https://` endpoint and its `p256dh` and `auth`
+keys), and `POST /api/push/unsubscribe` takes `{"endpoint": …}`. Only the user may call them, from the server's own
+origin; never a run. Up to 10 devices are kept, the oldest replaced first.
+
+After agents' writes, after syncs, and every minute besides, the server reads the list and, a few seconds later, sends
+each device one encrypted message (RFC 8291) naming what is new; a push service keeps it for a day. What the user's own
+writes through the app bring about is taken as seen. A device whose push service answers `404` or `410`, or refuses 5
+sends in a row as malformed or unauthorised, is dropped. Being offline, or the service failing or deferring a send,
+never drops a device: the news stays untold and is tried again with backoff, from 30 seconds up to 10 minutes.
+The VAPID key, the devices and the needs already told live in `~/.config/acyclic/push`, readable only by the user, so a
+restart tells nothing twice. Messages are signed (RFC 8292) with the server's origin behind Tailscale as the contact,
+or what `~/.config/acyclic/push/subject` holds (`mailto:…` or `https://…`). TLS uses the system's certificate
+authorities; without any, sends fail and the server says so once.

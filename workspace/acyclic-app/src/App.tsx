@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AddForm } from "./AddForm";
-import { type Command, CommandError, command, globalLevel, type Item, items, type Thread, threads } from "./api";
+import { type Command, CommandError, command, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
 import {
   addCommand,
   type LinkKind,
@@ -16,6 +16,8 @@ import { globalLevelCommand, LEVELS, type Level } from "./forms";
 import { Inspector } from "./Inspector";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
+import { NeedsList } from "./NeedsList";
+import type { Need } from "./needs";
 import { ThreadPanel } from "./ThreadPanel";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -27,7 +29,7 @@ const byTitle = (a: Thread, b: Thread) => a.title.localeCompare(b.title, undefin
 
 type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string }
+  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string; needs: Need[] }
   | { state: "failed"; message: string };
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
@@ -60,12 +62,14 @@ export function App() {
   const [adding, setAdding] = useState<Adding | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  // A notification opens the app on `/?needs`, to the list it is about.
+  const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
   const fetchAll = useCallback(async () => {
-    const [found, listed, level] = await Promise.all([items(), threads(), globalLevel()]);
-    return { state: "loaded" as const, items: found, threads: listed, level };
+    const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
+    return { state: "loaded" as const, items: found, threads: listed, level, needs: needed };
   }, []);
   const refresh = useCallback(() => {
     setVersion((was) => was + 1);
@@ -207,6 +211,17 @@ export function App() {
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          data-testid="needs-button"
+          aria-pressed={showNeeds}
+          onClick={() => {
+            setSelected(null);
+            setShowNeeds((was) => !was);
+          }}
+        >
+          Needs you <span data-testid="needs-count">{load.needs.length}</span>
+        </button>
         <button type="button" onClick={() => startAdd(null)} data-action="add-top">
           Add
         </button>
@@ -310,7 +325,21 @@ export function App() {
             busy={busy}
           />
         )}
-        {prompt === null && adding === null && chosen === undefined && thread !== null ? (
+        {prompt === null && adding === null && chosen === undefined && showNeeds ? (
+          <NeedsList
+            needs={load.needs}
+            titleOf={titleOf}
+            busy={busy}
+            onCommand={(edit) => send(edit, { select: null, pin: null })}
+            onSelect={(id) => select(id, null)}
+            onPickThread={(id) => {
+              setShowNeeds(false);
+              setThread(id);
+            }}
+            onClose={() => setShowNeeds(false)}
+          />
+        ) : null}
+        {prompt === null && adding === null && chosen === undefined && !showNeeds && thread !== null ? (
           <ThreadPanel
             key={thread}
             id={thread}

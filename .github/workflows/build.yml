@@ -68,6 +68,12 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: rustup target add "$TARGET"
+      # ring, under rustls, compiles C; a static build needs musl's compiler wrapper, for the runner's own architecture.
+      - name: Install musl's C compiler
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
       - run: mise run vendor:graph
       - run: mise run build:app
       - run: cargo build --release --locked -p acyclic --target "$TARGET"

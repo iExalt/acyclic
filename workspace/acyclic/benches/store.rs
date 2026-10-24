@@ -190,6 +190,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .collect();
     record(&mut row, "ready, no cache", &cold);
     record(&mut row, "show", &times(&|_| format!("show {item}"), false));
+    record(&mut row, "needs", &times(&|_| "needs".into(), false));
     record(&mut row, "edit", &times(&|n| format!("item edit {item} --notes edit-{n}"), false));
     let fresh: Vec<Sample> = (0..runs)
         .map(|n| {

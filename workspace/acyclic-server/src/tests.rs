@@ -13,7 +13,12 @@ const PORT: u16 = 7478;
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn config(static_dir: Option<PathBuf>) -> Config {
-    Config { tracker: PathBuf::from("/nonexistent/tracker"), env: Env::default(), static_dir }
+    Config {
+        tracker: PathBuf::from("/nonexistent/tracker"),
+        env: Env::default(),
+        static_dir,
+        push: crate::push::Settings::default(),
+    }
 }
 
 fn tailscale() -> Access {
@@ -265,6 +270,9 @@ fn every_route_is_behind_the_listeners_check() {
         (Method::OPTIONS, "/api/command"),
         (Method::GET, "/api/command"),
         (Method::POST, "/api/command"),
+        (Method::GET, "/api/push/key"),
+        (Method::POST, "/api/push/subscribe"),
+        (Method::POST, "/api/push/unsubscribe"),
     ] {
         let (status, body) = send(&router, method.clone(), path, &[host], "");
         assert_eq!(
@@ -653,3 +661,5 @@ fn every_command_the_app_sends_runs_through_the_api() {
         );
     }
 }
+
+mod push;

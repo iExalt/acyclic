@@ -35,6 +35,7 @@ use tower_http::compression::predicate::SizeAbove;
 
 pub mod app;
 pub mod code;
+pub mod push;
 pub mod session;
 
 use session::Token;
@@ -51,6 +52,8 @@ pub struct Config {
     pub env: Env,
     /// The directory of the app's files, if any, in place of the copy built into the binary.
     pub static_dir: Option<PathBuf>,
+    /// How the server pushes to the user's devices.
+    pub push: push::Settings,
 }
 
 /// Who a listener lets in, and how it tells.
@@ -430,11 +433,14 @@ struct Server {
     turns: Arc<tokio::sync::Mutex<()>>,
     /// How long a write waits for its turn.
     turn: Duration,
+    /// Pushes to the user's devices.
+    push: push::Push,
 }
 
 impl Server {
     fn new(config: Config) -> Self {
-        Self { config, turns: Arc::default(), turn: TURN }
+        let push = push::Push::new(config.tracker.clone(), config.env.clone(), config.push.clone());
+        Self { config, turns: Arc::default(), turn: TURN, push }
     }
 
     /// Waits up to [`Self::turn`] for a write's turn.
@@ -569,7 +575,8 @@ async fn command(
         },
     };
     let server = &listener.server;
-    let (code, envelope) = match classify(&command) {
+    let used = classify(&command);
+    let (code, envelope) = match used {
         Use::Refused => return Refusal::NotAllowed.into_response(),
         Use::Read => server.call(command, None).await,
         Use::Write => match server.turn().await {
@@ -577,6 +584,10 @@ async fn command(
             Err(err) => (err.exit, err.envelope()),
         },
     };
+    // What the user's own write brings about is theirs, and needs no push.
+    if code == exit::OK && used == Use::Write {
+        server.push.seen();
+    }
     (status(code), Json(envelope)).into_response()
 }
 
@@ -656,9 +667,13 @@ async fn run_command(
     })
     .await;
     match applied {
-        Ok(Ok(Applied::Ran(code, envelope)) | Err((code, envelope))) => {
+        Ok(Ok(Applied::Ran(code, envelope))) => {
+            if code == exit::OK {
+                server.push.look();
+            }
             (status(code), Json(envelope)).into_response()
         },
+        Ok(Err((code, envelope))) => (status(code), Json(envelope)).into_response(),
         Ok(Ok(Applied::Duplicate(outcome))) => {
             let data = json!({"duplicate": true, "seq": seq, "outcome": outcome});
             (StatusCode::OK, Json(json!({"ok": true, "data": data}))).into_response()
@@ -747,6 +762,77 @@ async fn run_status(
     }
 }
 
+/// The server's VAPID public key, which a device subscribes with.
+async fn push_key(
+    State(listener): State<Arc<Listener>>,
+    Extension(credential): Extension<Credential>,
+) -> Response {
+    if let Credential::Run(_) = credential {
+        return Refusal::NotForRuns.into_response();
+    }
+    pushed(listener.server.push.public_key().map(|key| json!({"key": key})))
+}
+
+/// Takes a device's subscription: the browser's `PushSubscription`, as JSON.
+async fn push_subscribe(
+    State(listener): State<Arc<Listener>>,
+    Extension(credential): Extension<Credential>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(refusal) = push_allowed(&listener, &credential, &headers) {
+        return refusal.into_response();
+    }
+    match serde_json::from_slice::<push::Subscription>(&body) {
+        Ok(subscription) => {
+            pushed(listener.server.push.subscribe(subscription).map(|()| Value::Null))
+        },
+        Err(err) => pushed(Err(push::Refused(format!("not a subscription: {err}")))),
+    }
+}
+
+/// Forgets a device: `{"endpoint": …}`.
+async fn push_unsubscribe(
+    State(listener): State<Arc<Listener>>,
+    Extension(credential): Extension<Credential>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(refusal) = push_allowed(&listener, &credential, &headers) {
+        return refusal.into_response();
+    }
+    let endpoint = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|value| value["endpoint"].as_str().map(str::to_owned));
+    match endpoint {
+        Some(endpoint) => pushed(listener.server.push.unsubscribe(&endpoint).map(|()| Value::Null)),
+        None => pushed(Err(push::Refused("give the endpoint to forget".into()))),
+    }
+}
+
+/// Lets the user's browser change the devices pushed to, from the server's own origin; never a run.
+fn push_allowed(
+    listener: &Listener,
+    credential: &Credential,
+    headers: &HeaderMap,
+) -> Result<(), Refusal> {
+    if let Credential::Run(_) = credential {
+        return Err(Refusal::NotForRuns);
+    }
+    listener.access.same_origin(headers, credential)
+}
+
+/// The envelope for a push request's outcome.
+fn pushed(outcome: Result<Value, push::Refused>) -> Response {
+    match outcome {
+        Ok(data) => Json(json!({"ok": true, "data": data})).into_response(),
+        Err(push::Refused(message)) => {
+            let err = CliError::new("push", exit::USAGE, message);
+            (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response()
+        },
+    }
+}
+
 /// Gives every response, refusals included, the app's content policy ([`app::POLICY`]), which among other things
 /// forbids every page to frame it: a page from another local server is the same site as the app's, so a paired
 /// browser would send its cookie into a frame, and the frame could be clicked into writes.
@@ -769,6 +855,9 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
     let mut router = Router::new()
         .route("/api/command", post(command))
         .route("/api/run", get(run_status))
+        .route("/api/push/key", get(push_key))
+        .route("/api/push/subscribe", post(push_subscribe))
+        .route("/api/push/unsubscribe", post(push_unsubscribe))
         .layer(CompressionLayer::new().compress_when(SizeAbove::new(1024)));
     // Runs have no use for the app, and get none.
     if !matches!(access, Access::Run { .. }) {
@@ -837,7 +926,11 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
     if let Some(dir) = &options.static_dir {
         app::check_dir(dir)?;
     }
-    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
+    let Access::Tailscale { origin, .. } = &access else {
+        unreachable!("access through Tailscale")
+    };
+    let push = push::Settings { subject: Some(origin.clone()), ..push::Settings::default() };
+    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone(), push };
     run(config, options.sync_every, options.listen, Vec::new(), |address, _| {
         Ok((access, json!({"listening": address.to_string()})))
     })
@@ -883,7 +976,12 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
             runners(home.as_ref(), env)?,
         ));
     }
-    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
+    let subject = match &tailscale {
+        Some((_, Access::Tailscale { origin, .. })) => Some(origin.clone()),
+        _ => None,
+    };
+    let push = push::Settings { subject, ..push::Settings::default() };
+    let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone(), push };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
     let link = |port| link(port, &token, env);
     let socket = tailscale.as_ref().map(|(socket, _)| socket.clone());
@@ -990,6 +1088,8 @@ fn run(
         if sync_every > 0 {
             tokio::spawn(sync(server.clone(), Duration::from_secs(sync_every)));
         }
+        // Starts the pushing, which looks for news every so often from then on.
+        server.push.look();
         let mut stdout = std::io::stdout();
         writeln!(stdout, "{}", json!({"ok": true, "data": started}))
             .and_then(|()| stdout.flush())
@@ -1063,6 +1163,7 @@ async fn sync(server: Arc<Server>, every: Duration) {
         let turn = server.turns.clone().lock_owned().await;
         let (code, envelope) = server.call(Command::Sync { with_usage: true }, Some(turn)).await;
         if code == exit::OK {
+            server.push.look();
             continue;
         }
         if envelope["error"]["code"] == "no-remote" {
