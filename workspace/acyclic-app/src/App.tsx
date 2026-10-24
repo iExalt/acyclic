@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AddForm } from "./AddForm";
-import { type Command, CommandError, command, type Item, items, type Thread, threads } from "./api";
+import { type Command, CommandError, command, globalLevel, type Item, items, type Thread, threads } from "./api";
 import {
   addCommand,
   type LinkKind,
@@ -12,9 +12,11 @@ import {
   told,
   unlinkCommand,
 } from "./edits";
+import { globalLevelCommand, LEVELS, type Level } from "./forms";
 import { Inspector } from "./Inspector";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
+import { ThreadPanel } from "./ThreadPanel";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
 const mapModule = import("./map/PlanMap");
@@ -25,12 +27,13 @@ const byTitle = (a: Thread, b: Thread) => a.title.localeCompare(b.title, undefin
 
 type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Thread[] }
+  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string }
   | { state: "failed"; message: string };
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
 interface After {
-  select: string;
+  /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
+  select: string | null;
   pin: string | null;
 }
 
@@ -57,12 +60,15 @@ export function App() {
   const [adding, setAdding] = useState<Adding | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
+  const [version, setVersion] = useState(0);
 
   const fetchAll = useCallback(async () => {
-    const [found, listed] = await Promise.all([items(), threads()]);
-    return { state: "loaded" as const, items: found, threads: listed };
+    const [found, listed, level] = await Promise.all([items(), threads(), globalLevel()]);
+    return { state: "loaded" as const, items: found, threads: listed, level };
   }, []);
   const refresh = useCallback(() => {
+    setVersion((was) => was + 1);
     fetchAll().then(setLoad, (err: unknown) =>
       setLoad({ state: "failed", message: err instanceof Error ? err.message : String(err) }),
     );
@@ -103,8 +109,11 @@ export function App() {
           const next = await fetchAll();
           setLoad(next);
           setAdding(null);
-          setSelected(after.select);
-          setFocus((was) => ({ id: after.select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
+          const select = after.select;
+          if (select !== null) {
+            setSelected(select);
+            setFocus((was) => ({ id: select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
+          }
           sent = { write: "saved", proposals, reload: "done" };
         } catch (err) {
           setAdding(null);
@@ -117,6 +126,7 @@ export function App() {
       const { text, offer, fixId } = told(sent);
       setNotice(text === null ? null : { text, offer, retry: offer === "retry" ? { body, after } : null });
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
+      setVersion((was) => was + 1);
       setBusy(false);
     },
     [fetchAll],
@@ -182,6 +192,21 @@ export function App() {
           />{" "}
           Archived
         </label>
+        <label>
+          Autonomy{" "}
+          <select
+            data-testid="global-level"
+            value={load.level}
+            disabled={busy}
+            onChange={(event) => send(globalLevelCommand(event.target.value as Level), { select: null, pin: null })}
+          >
+            {LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" onClick={() => startAdd(null)} data-action="add-top">
           Add
         </button>
@@ -197,7 +222,10 @@ export function App() {
             className={one.id === thread ? "thread picked" : "thread"}
             aria-pressed={one.id === thread}
             data-thread={one.id}
-            onClick={() => setThread(one.id === thread ? null : one.id)}
+            onClick={() => {
+              setSelected(null);
+              setThread(one.id === thread ? null : one.id);
+            }}
           >
             {one.title}
           </button>
@@ -282,6 +310,19 @@ export function App() {
             busy={busy}
           />
         )}
+        {prompt === null && adding === null && chosen === undefined && thread !== null ? (
+          <ThreadPanel
+            key={thread}
+            id={thread}
+            globalLevel={load.level}
+            titleOf={titleOf}
+            version={version}
+            busy={busy}
+            onCommand={(edit) => send(edit, { select: null, pin: null })}
+            onSelect={(id) => select(id, null)}
+            onClose={() => setThread(null)}
+          />
+        ) : null}
       </main>
     </div>
   );

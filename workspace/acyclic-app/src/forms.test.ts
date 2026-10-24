@@ -12,6 +12,7 @@ import {
   resolveCommand,
   revokeCommand,
   threadLevelCommand,
+  unsettledWhy,
 } from "./forms";
 import { item } from "./map/fixture";
 
@@ -74,5 +75,9 @@ describe("resolveCommand", () => {
     expect(resolveCommand("thread", "t", "autonomy", "sometimes")).toBeNull();
     expect(resolveCommand("thread", "t", "approved", false)).toEqual(revokeCommand("t"));
     expect(resolveCommand("thread", "t", "evidence", "x")).toBeNull();
+    // The global level itself can be written apart.
+    expect(resolveCommand("settings", "global", "autonomy", "blockers")).toEqual(example("the global level"));
+    expect(resolveCommand("settings", "global", "autonomy", null)).toBeNull();
+    expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic done/);
   });
 });

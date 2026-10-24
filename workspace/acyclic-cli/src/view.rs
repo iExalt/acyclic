@@ -881,6 +881,19 @@ mod tests {
     }
 
     #[test]
+    fn a_threads_level_and_project_management_flag_are_settled_by_thread_edit() {
+        let state = tracker();
+        assert_eq!(
+            resolve(state.state(), "thread", "t", "pm-flag").as_deref(),
+            Some("acyclic thread edit t --pm|--no-pm --as-user")
+        );
+        assert_eq!(
+            resolve(state.state(), "thread", "t", "autonomy").as_deref(),
+            Some("acyclic thread edit t --level <LEVEL> (or --no-level)")
+        );
+    }
+
+    #[test]
     fn a_conflicted_link_that_an_older_version_stored_resolves_as_relates_to() {
         let mut mac = tracker();
         let link_key = key("link", "after-1-a-b");

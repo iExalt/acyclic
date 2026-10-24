@@ -119,3 +119,54 @@ export async function threads(fetcher: Fetch = fetch): Promise<Thread[]> {
   );
   return rows.map((row) => ({ id: row.id, title: typeof row.title === "string" ? row.title : row.id }));
 }
+
+/** A thread as its panel shows it. */
+export interface ThreadDetail {
+  id: string;
+  title: string;
+  brief: string | null;
+  approved: boolean;
+  /** Its own autonomy level, or null when the global one applies. */
+  level: string | null;
+  pm: boolean;
+  heads: string[];
+  members: { id: string; title: string }[];
+}
+
+const text = (raw: Raw<string>, fallback: string) => (typeof raw === "string" ? raw : fallback);
+
+export async function thread(id: string, fetcher: Fetch = fetch): Promise<ThreadDetail> {
+  type Row = Omit<ThreadDetail, "title" | "brief" | "level" | "members"> & {
+    title: Raw<string>;
+    brief: Raw<string>;
+    level: Raw<string>;
+    members: { id: string; title: Raw<string> }[];
+  };
+  const [row] = await command<Row[]>({ thread: { show: { threads: [id] } } }, fetcher);
+  if (row === undefined) throw new CommandError("not-found", `no thread ${id}`);
+  return {
+    ...row,
+    title: text(row.title, row.id),
+    brief: typeof row.brief === "string" ? row.brief : null,
+    level: typeof row.level === "string" ? row.level : null,
+    members: row.members.map((member) => ({ id: member.id, title: text(member.title, member.id) })),
+  };
+}
+
+/** A proposal an agent made to approved scope, waiting for the user's decision or decided. */
+export interface Proposal {
+  id: string;
+  actor: string;
+  decision: unknown;
+  edit: { kind: string; field: string; item?: string; before: unknown; after: unknown };
+  threads: string[];
+}
+
+export async function proposals(fetcher: Fetch = fetch): Promise<Proposal[]> {
+  return (await command<{ proposals: Proposal[] }>({ proposal: "list" }, fetcher)).proposals;
+}
+
+/** The global autonomy level. */
+export async function globalLevel(fetcher: Fetch = fetch): Promise<string> {
+  return (await command<{ global: string }>({ level: {} }, fetcher)).global;
+}

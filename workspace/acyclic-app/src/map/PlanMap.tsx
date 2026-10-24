@@ -10,6 +10,7 @@ import { chain, expandTo } from "../edits";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type View, visible } from "./model";
+import { reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
 
 /** How tall a box's title strip is, where a tap collapses or expands it. */
@@ -99,6 +100,8 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
   const [laid, setLaid] = useState<{ view: View; placed: Placed } | null>(null);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
+  /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
+  const shown = useRef<string | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
   const view = useMemo(() => visible(model, { collapsed, showArchived }), [model, collapsed, showArchived]);
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
@@ -114,6 +117,7 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
       const corner = core.getElementById(drawn).renderedBoundingBox({ includeLabels: false });
       anchor.current = { id: drawn, x: corner.x1, y: corner.y1 };
     }
+    shown.current = focus.id;
     if (host.current !== null) host.current.dataset.state = "laying-out";
     setToggles((was) => expandTo(model, focus.id, was));
   }, [focus]);
@@ -197,6 +201,25 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
         core.panBy({ x: anchor.current.x - now.x1, y: anchor.current.y - now.y1 });
       }
       anchor.current = null;
+    }
+    if (shown.current !== null) {
+      // The pin holds still unless that leaves the item hidden.
+      const node = core.getElementById(shown.current);
+      if (node.nonempty()) {
+        const map = element.getBoundingClientRect();
+        const sheet = element.parentElement?.querySelector<HTMLElement>(".inspector, .sheet")?.getBoundingClientRect();
+        const cover =
+          sheet === undefined
+            ? null
+            : {
+                x1: sheet.left - map.left,
+                y1: sheet.top - map.top,
+                x2: sheet.right - map.left,
+                y2: sheet.bottom - map.top,
+              };
+        core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), uncovered(map.width, map.height, cover)));
+      }
+      shown.current = null;
     }
     // What the renderer holds, for the journeys to compare with the plan.
     element.dataset.nodes = String(core.nodes().length);

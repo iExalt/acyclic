@@ -141,6 +141,8 @@ describe("told", () => {
       offer: null,
       fixId: true,
     });
+    // A proposal decided elsewhere: the app's view is stale, so it offers a refresh.
+    expect(told({ write: "failed", code: "decided", message: "decided" }).offer).toBe("refresh");
     expect(told({ write: "saved", proposals: 0, reload: { failed: "offline" } })).toEqual({
       text: "Saved, but the refresh failed: offline",
       offer: "refresh",

@@ -50,7 +50,7 @@ export function itemEdit(item: Item, draft: ItemDraft): Command | null {
 }
 
 /** An entity whose field can be in conflict, as `needs` reports it. */
-export type Entity = "item" | "thread";
+export type Entity = "item" | "thread" | "settings";
 
 /**
  * The command that settles a conflict by keeping one of its values (`null` for a clear), as the CLI's own hint for it
@@ -58,6 +58,7 @@ export type Entity = "item" | "thread";
  */
 export function resolveCommand(entity: Entity, id: string, field: string, value: unknown): Command | null {
   const text = typeof value === "string" ? value : null;
+  if (entity === "settings") return field === "autonomy" && isLevel(text) ? globalLevelCommand(text) : null;
   if (entity === "item") {
     const edit = (fields: Record<string, unknown>) => ({ item: { edit: { item: id, ...fields } } });
     if (field === "title") return text === null ? null : edit({ title: text });
@@ -79,6 +80,13 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
   if (field === "pm-flag") return edit(value === true ? { pm: true } : { "no-pm": true });
   if (field === "approved") return value === true ? approveCommand(id) : revokeCommand(id);
   return null;
+}
+
+/** Why a value of a conflict can't be kept from the app, for a value `resolveCommand` gives no command for. */
+export function unsettledWhy(entity: Entity, field: string, value: unknown): string {
+  if (entity === "item" && field === "state" && value === "done") return "Keep done with `acyclic done`, with evidence";
+  if (value === null) return "This field can't be cleared";
+  return "Settle this one with the CLI: `acyclic needs` says how";
 }
 
 function isLevel(value: string | null): value is Level {

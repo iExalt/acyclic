@@ -21,7 +21,8 @@ body,
 }
 .bar {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid #2b3a4a;
@@ -137,6 +138,29 @@ button {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.setting {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.proposals ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.proposals li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  margin: 4px 0;
+}
+.why {
+  color: #9fb3c4;
+  font-size: 12px;
 }
 .conflicts li {
   display: flex;

@@ -150,7 +150,9 @@ export interface Told {
 export function told(sent: Sent): Told {
   if (sent.write === "failed") {
     const { retry, fixId } = recovery(sent.code);
-    return { text: sent.message, offer: retry ? "retry" : null, fixId };
+    // Decided or gone elsewhere: what the app shows is out of date.
+    const stale = sent.code === "decided" || sent.code === "not-found";
+    return { text: sent.message, offer: retry ? "retry" : stale ? "refresh" : null, fixId };
   }
   // Saved is saved: a failed refresh is offered again, never the write.
   if (sent.reload !== "done")

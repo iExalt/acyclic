@@ -4,7 +4,7 @@
 import { useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import type { LinkKind } from "./edits";
-import { reopenCommand, resolveCommand } from "./forms";
+import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 
 export interface InspectorProps {
@@ -152,14 +152,13 @@ function Conflicts({
               return (
                 <li key={JSON.stringify(value)}>
                   <span className="value">{shown(field, value)}</span>
-                  <button
-                    type="button"
-                    data-keep={value ?? ""}
-                    disabled={busy || settle === null}
-                    onClick={() => settle !== null && onCommand(settle)}
-                  >
-                    Use this
-                  </button>
+                  {settle === null ? (
+                    <span className="why">{unsettledWhy("item", field, value)}</span>
+                  ) : (
+                    <button type="button" data-keep={value ?? ""} disabled={busy} onClick={() => onCommand(settle)}>
+                      Use this
+                    </button>
+                  )}
                 </li>
               );
             })}

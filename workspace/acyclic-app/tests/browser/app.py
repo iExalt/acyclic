@@ -5,7 +5,9 @@ that leaves the server is aborted. In Chromium, at both sizes, the page must lis
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
 the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
 thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
-as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
+thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
+are set. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -426,6 +428,22 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def in_open_view(page, id):
+    """Whether a node is drawn wholly inside the Map and clear of the sheet or pane over it, once the Map settles."""
+    settled_corner(page, id)
+    return page.get_by_test_id("map").evaluate(
+        """(m, id) => {
+            const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+            const r = m.getBoundingClientRect();
+            const s = m.parentElement.querySelector('.inspector, .sheet')?.getBoundingClientRect();
+            const box = { x1: r.left + b.x1, y1: r.top + b.y1, x2: r.left + b.x2, y2: r.top + b.y2 };
+            const clear = !s || box.x2 <= s.left || box.y2 <= s.top || box.x1 >= s.right || box.y1 >= s.bottom;
+            return clear && box.x1 >= r.left && box.y1 >= r.top && box.x2 <= r.right && box.y2 <= r.bottom;
+        }""",
+        id,
+    )
+
+
 def form_journey(page, view, env, remote, id, name, failures):
     """Edits the selected item's fields, settles a conflict two clones wrote, and reopens it, as the phone would."""
     inspector = page.get_by_test_id("inspector")
@@ -437,6 +455,8 @@ def form_journey(page, view, env, remote, id, name, failures):
     form.locator("textarea[name=notes]").fill("Plain notes")
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
+    if not in_open_view(page, id):
+        failures.append(f"{name}: after saving, {id} is off the Map or under the sheet")
     check_tracker(
         env,
         id,
@@ -503,6 +523,85 @@ def form_journey(page, view, env, remote, id, name, failures):
     page.screenshot(path=SHOTS / f"app-{name}-forms.png")
     print(
         f"{name}: edited {id}'s fields, settled a conflict two clones wrote, and reopened it"
+    )
+
+
+def settled_control(page, selector, prop, value):
+    """Waits until a control shows `value` and is enabled again, once the edit it sent is saved and read back."""
+    page.wait_for_function(
+        "([selector, prop, value]) => { const c = document.querySelector(selector);"
+        " return c && !c.disabled && c[prop] === value; }",
+        arg=[selector, prop, value],
+        timeout=10_000,
+    )
+
+
+def thread_journey(page, env, plan, thread, name, failures):
+    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level, its
+    project-management flag and the global level, checking the panel and then the tracker."""
+    panel = page.get_by_test_id("thread-panel")
+    # Picking a thread already picked unpicks it.
+    pick = page.locator(f"[data-thread='{thread}']")
+    pick.click()
+    if pick.get_attribute("aria-pressed") != "true":
+        pick.click()
+
+    def shown():
+        return json.loads(run(env, "thread", "show", thread))["data"][0]
+
+    # Approve, naming what it approves; revoke first if the fixture approved it already.
+    if (
+        panel.locator("[data-action=revoke]")
+        .or_(panel.locator("[data-action=approve]"))
+        .first.get_attribute("data-action")
+        == "revoke"
+    ):
+        panel.locator("[data-action=revoke]").click()
+    approve = panel.locator("[data-action=approve]")
+    members = len(shown()["members"])
+    if approve.inner_text() != f"Approve {members} items":
+        failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
+    approve.click()
+    panel.locator("[data-action=revoke]").wait_for(timeout=10_000)
+    # An agent proposes two items join the approved thread: one is kept, one dropped.
+    outside = sorted(id for id, row in plan.items.items() if row["thread"] != thread)[
+        :2
+    ]
+    for id in outside:
+        run(env, "item", "edit", id, "--thread", thread)
+    page.get_by_role("button", name="Refresh").click()
+    rows = panel.locator("[data-proposal]")
+    rows.nth(1).wait_for(timeout=10_000)
+    first = rows.filter(has_text=plan.items[outside[0]]["title"])
+    first.locator("[data-action=keep]").click()
+    first.wait_for(state="detached", timeout=10_000)
+    rows.locator("[data-action=drop]").first.click()
+    panel.get_by_test_id("proposals").wait_for(state="detached", timeout=10_000)
+    # Its own level, its project-management flag, and the global level.
+    panel.locator("select[name=level]").select_option("everything")
+    settled_control(
+        page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
+    )
+    # The box shows the tracker's flag, so it ticks once the edit is saved and read back, not on the tap.
+    panel.locator("input[name=pm]").click()
+    settled_control(page, "[data-testid=thread-panel] input[name=pm]", "checked", True)
+    page.get_by_test_id("global-level").select_option("everything")
+    settled_control(page, "[data-testid=global-level]", "value", "everything")
+    after = shown()
+    if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
+        failures.append(
+            f"{name}: the tracker shows {thread} as {after['approved'], after['level'], after['pm']}"
+        )
+    threads_of = {
+        id: json.loads(run(env, "show", id))["data"][0]["thread"] for id in outside
+    }
+    if threads_of != {outside[0]: thread, outside[1]: plan.items[outside[1]]["thread"]}:
+        failures.append(f"{name}: keep and drop left {threads_of}")
+    if json.loads(run(env, "level"))["data"]["global"] != "everything":
+        failures.append(f"{name}: the global level didn't change")
+    page.screenshot(path=SHOTS / f"app-{name}-thread-panel.png")
+    print(
+        f"{name}: approved {thread}, kept and dropped proposals, and set its level, its flag and the global level"
     )
 
 
@@ -574,6 +673,7 @@ def main():
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures
                     )
+                    thread_journey(page, env, plan, "t0", name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
