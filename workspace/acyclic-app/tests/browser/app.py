@@ -3,7 +3,7 @@
 `acyclic up` runs on a fixture with a home of its own; the browser pairs through the link it prints, and every request
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
-the default view, a box collapsed and expanded again without moving on screen, archived subtrees shown, and a
+the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
 thread's members lit. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
@@ -136,6 +136,26 @@ def tap_title(page, view, id):
         page.mouse.click(x, y)
 
 
+def settled_corner(page, id):
+    """Where a box's top-left corner is drawn once it has stopped moving: the same for half a second of frames.
+
+    Read from the renderer itself, so it doesn't trust the app's own account of when it has finished drawing."""
+    return page.get_by_test_id("map").evaluate(
+        """(m, id) => new Promise((done) => {
+            let last = null, since = performance.now();
+            const read = () => {
+                const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+                const now = `${Math.round(b.x1)},${Math.round(b.y1)}`;
+                if (now !== last) { last = now; since = performance.now(); }
+                if (performance.now() - since >= 500) done({ x: b.x1, y: b.y1 });
+                else requestAnimationFrame(read);
+            };
+            read();
+        })""",
+        id,
+    )
+
+
 def open_app(browser, view, link, failures, name):
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
@@ -180,18 +200,40 @@ def installable(context, page, origin, name, failures):
 def map_journey(page, view, plan, name, failures):
     expected = len(plan.default())
     wait_drawn(page, expected)
-    # Collapse the root box holding the most, then expand it: the count follows, and the box holds still.
-    box = max(
-        (id for id in plan.default() if plan.depth(id) == 0 and plan.children(id)),
-        key=lambda id: (len(plan.children(id)), id),
-    )
-    tap_title(page, view, box)
-    data = wait_drawn(page, expected - len(plan.children(box)))
-    moved = (abs(int(data.get("anchorDx", 99))), abs(int(data.get("anchorDy", 99))))
-    if max(moved) > 2:
-        failures.append(f"{name}: collapsing {box} moved it by {moved} px on screen")
-    tap_title(page, view, box)
-    wait_drawn(page, expected)
+    # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
+    # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
+    corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
+    moved, box = 0, None
+    for box in sorted(
+        (id for id in plan.default() if plan.depth(id) == 1 and plan.children(id)),
+        key=lambda id: (-len(plan.children(id)), id),
+    ):
+        # Bring it to full size in the middle of the screen first, as a person would: on a phone, the fitted plan
+        # draws it too small to tap.
+        page.get_by_test_id("map").evaluate(
+            "(m, id) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); }", box
+        )
+        placed = page.get_by_test_id("map").evaluate(corner, box)
+        for action, nodes in [
+            ("expanding", expected + len(plan.children(box))),
+            ("collapsing", expected),
+        ]:
+            before = settled_corner(page, box)
+            tap_title(page, view, box)
+            wait_drawn(page, nodes)
+            after = settled_corner(page, box)
+            if action == "expanding":
+                relaid = page.get_by_test_id("map").evaluate(corner, box) != placed
+            shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
+            moved = max(moved, shift)
+            if shift > 2:
+                failures.append(
+                    f"{name}: {action} {box} moved it by {shift:.0f} px on screen"
+                )
+        if relaid:
+            break
+    else:
+        failures.append(f"{name}: no box moved in the layout when expanded")
     # Archived subtrees show when asked, and hide again.
     page.get_by_test_id("show-archived").click()
     wait_drawn(page, len(plan.default(archived=True)))
@@ -208,7 +250,7 @@ def map_journey(page, view, plan, name, failures):
     )
     page.screenshot(path=SHOTS / f"app-{name}-thread.png")
     print(
-        f"{name}: drew {expected} nodes, collapsed and expanded {box} held within {max(moved)} px"
+        f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
     )
 
 

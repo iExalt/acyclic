@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
-import { buildModel, defaultView, visible } from "./model";
+import { buildModel, collapsedWith, type View, visible } from "./model";
 import { type Selection, scene } from "./scene";
 
 /** How tall a box's title strip is, where a tap collapses or expands it. */
@@ -77,12 +77,24 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
   const model = useMemo(() => buildModel(items), [items]);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => defaultView(model).collapsed);
-  const [placed, setPlaced] = useState<Placed | null>(null);
+  /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
+  const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  /** The last layout, with the view it was computed for. */
+  const [laid, setLaid] = useState<{ view: View; placed: Placed } | null>(null);
   const [item, setItem] = useState<string | null>(null);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
+  const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
   const view = useMemo(() => visible(model, { collapsed, showArchived }), [model, collapsed, showArchived]);
+  // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
+  const placed = laid !== null && laid.view === view ? laid.placed : null;
+
+  useEffect(() => {
+    if (item !== null && !model.items.has(item)) {
+      setItem(null);
+      onSelect(null);
+    }
+  }, [model, item, onSelect]);
 
   useEffect(() => {
     let live = true;
@@ -94,7 +106,7 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
         host.current.dataset.layoutMs = String(Math.round(performance.now() - start));
         host.current.dataset.layoutCalls = String(result.laidOut.length);
       }
-      setPlaced(result);
+      setLaid({ view, placed: result });
     });
     return () => {
       live = false;
@@ -129,8 +141,6 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
-    // A layout from before the last toggle may still be drawn; draw only the one for the current view.
-    if (drawn.nodes.length !== view.nodes.length) return;
     const elements: ElementDefinition[] = [
       ...drawn.nodes.map((node) => ({
         group: "nodes" as const,
@@ -163,9 +173,6 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
       if (box.nonempty()) {
         const now = box.renderedBoundingBox({ includeLabels: false });
         core.panBy({ x: anchor.current.x - now.x1, y: anchor.current.y - now.y1 });
-        const held = box.renderedBoundingBox({ includeLabels: false });
-        element.dataset.anchorDx = String(Math.round(held.x1 - anchor.current.x));
-        element.dataset.anchorDy = String(Math.round(held.y1 - anchor.current.y));
       }
       anchor.current = null;
     }
@@ -181,7 +188,7 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed, view]);
+  }, [drawn, placed]);
 
   useEffect(() => {
     const core = cy.current;
@@ -201,12 +208,7 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
         const corner = target.renderedBoundingBox({ includeLabels: false });
         anchor.current = { id, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
-        setCollapsed((was) => {
-          const next = new Set(was);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
-          return next;
-        });
+        setToggles((was) => new Map(was).set(id, kind === "box"));
         return;
       }
       setItem(id);

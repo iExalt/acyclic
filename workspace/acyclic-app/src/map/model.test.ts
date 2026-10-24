@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, defaultView, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, visible } from "./model";
 
 // garden
 //   beds: dig, edge
@@ -76,5 +76,18 @@ describe("visible", () => {
   it("treats an item whose parent is missing as a root", () => {
     const orphan = buildModel([item("a", "gone")]);
     expect(orphan.roots).toEqual(["a"]);
+  });
+});
+
+describe("collapsedWith", () => {
+  it("keeps the user's toggles across a refresh, and collapses a box new since the last one by default", () => {
+    const toggles = new Map([
+      ["beds", false],
+      ["garden", true],
+    ]);
+    expect([...collapsedWith(model, toggles)].sort()).toEqual(["garden", "plant"]);
+    // weeds is new, holding pull: collapsed, while beds stays open as the user left it.
+    const refreshed = buildModel([...plan, item("weeds", "garden"), item("pull", "weeds")]);
+    expect([...collapsedWith(refreshed, toggles)].sort()).toEqual(["garden", "plant", "weeds"]);
   });
 });

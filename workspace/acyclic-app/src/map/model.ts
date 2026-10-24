@@ -95,6 +95,19 @@ export function defaultView(model: Model): ViewState {
   return { collapsed, showArchived: false };
 }
 
+/**
+ * The boxes collapsed once the user's own toggles are applied to the default view. A toggle outlives a refresh, while
+ * a box the user hasn't touched, such as one new since the last refresh, keeps the default.
+ */
+export function collapsedWith(model: Model, toggles: ReadonlyMap<string, boolean>): ReadonlySet<string> {
+  const collapsed = new Set(defaultView(model).collapsed);
+  for (const [id, closed] of toggles) {
+    if (closed) collapsed.add(id);
+    else collapsed.delete(id);
+  }
+  return collapsed;
+}
+
 export type Kind = "box" | "collapsed" | "leaf";
 
 export interface VisibleNode {
