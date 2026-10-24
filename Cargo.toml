@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["workspace/*"]
-exclude = ["workspace/template"]
+# The app is TypeScript, built by pnpm (mise run build:app).
+exclude = ["workspace/template", "workspace/acyclic-app"]
 
 [workspace.package]
 version = "0.2.0"

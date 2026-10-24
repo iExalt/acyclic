@@ -4,7 +4,7 @@
 set -eu
 allowed='text|sh|console|shell|json|toml|yaml|markdown|md|dot|mermaid|html|diff|csv'
 status=0
-for file in $(grep -rlE '```|~~~' workspace --include='*.rs' --include='README.md' --exclude-dir=template || true); do
+for file in $(grep -rlE '```|~~~' workspace --include='*.rs' --include='README.md' --exclude-dir=template --exclude-dir=node_modules || true); do
   awk -v file="$file" -v allowed="^($allowed)$" '
     /^[[:space:]]*(\/\/[\/!][[:space:]]*)?(```|~~~)/ {
       info = $0

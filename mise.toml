@@ -23,6 +23,9 @@ podman = { version = "6.1.4", os = ["macos"] }
 "github:crc-org/vfkit" = { version = "0.6.4", asset_pattern = "vfkit", bin = "vfkit", os = ["macos"] }
 # Decrypts the Mac's secrets file for acyclic-secrets; CI's tests use a stand-in.
 sops = { version = "3.13.0", os = ["macos"] }
+# The app's toolchain (workspace/acyclic-app); its own dependencies are pinned in its pnpm-lock.yaml.
+node = "26.12.1"
+pnpm = "12.15.0"
 
 [tasks.check]
 description = "Routine check: format, Clippy and every crate's unit tests (budget: 60 seconds on a warm cache)"
@@ -39,6 +42,20 @@ run = [
   "rumdl check .",
   "actionlint",
 ]
+
+[tasks."app:install"]
+description = "Install the app's dependencies from its lockfile, from pnpm's store when it can"
+dir = "workspace/acyclic-app"
+run = [
+  # Offline first, so a warm run never waits on the registry; say so when it has to go online.
+  'pnpm install --frozen-lockfile --offline --silent 2>/dev/null || { echo "app:install: the store lacks a package, fetching online" >&2; pnpm install --frozen-lockfile --silent; }',
+]
+
+[tasks."check:app"]
+description = "The app's check: typecheck, Biome's lint and format, and its unit tests (budget: 20 seconds on a warm cache)"
+depends = ["app:install"]
+dir = "workspace/acyclic-app"
+run = "pnpm run check"
 
 [tasks."check:integration"]
 description = "Integration tests (budget: 3 minutes)"
