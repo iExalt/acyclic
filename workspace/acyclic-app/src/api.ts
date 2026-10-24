@@ -65,8 +65,11 @@ export class CommandError extends Error {
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
+/** A CLI command as the API takes it: a bare name for one without arguments, such as `"list"`, else `{name: args}`. */
+export type Command = string | Record<string, unknown>;
+
 /** Runs one command as the paired browser's user; the session cookie rides along, since the page is same-origin. */
-export async function command<T>(body: object, fetcher: Fetch = fetch): Promise<T> {
+export async function command<T>(body: Command, fetcher: Fetch = fetch): Promise<T> {
   const response = await fetcher("/api/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,7 +83,7 @@ export async function command<T>(body: object, fetcher: Fetch = fetch): Promise<
 
 /** Every item with its links: `list` for the ids, then one `show` for all of them. */
 export async function items(fetcher: Fetch = fetch): Promise<Item[]> {
-  const rows = await command<{ id: string }[]>({ list: {} }, fetcher);
+  const { items: rows } = await command<{ items: { id: string }[] }>("list", fetcher);
   if (rows.length === 0) return [];
   const shown = await command<RawItem[]>({ show: { items: rows.map((row) => row.id) } }, fetcher);
   return shown.map(settle);

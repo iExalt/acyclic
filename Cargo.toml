@@ -10,6 +10,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+acyclic-app-assets = { path = "workspace/acyclic-app-assets" }
 acyclic-cli = { path = "workspace/acyclic-cli" }
 acyclic-core = { path = "workspace/acyclic-core" }
 acyclic-fixtures = { path = "workspace/acyclic-fixtures" }

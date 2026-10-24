@@ -1,6 +1,42 @@
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import license from "rollup-plugin-license";
+import { defineConfig, type Plugin } from "vite";
+
+/** The text files worth compressing; images such as PNGs are compressed already. */
+const COMPRESSIBLE = /\.(html|js|css|json|webmanifest|svg|txt|map)$/;
+
+/** Writes a Brotli and a gzip copy beside each compressible file, for the server to pick by `Accept-Encoding`. */
+function precompress(): Plugin {
+  return {
+    name: "acyclic-precompress",
+    apply: "build",
+    closeBundle() {
+      const walk = (dir: string): string[] =>
+        readdirSync(dir).flatMap((name) => {
+          const path = join(dir, name);
+          return statSync(path).isDirectory() ? walk(path) : [path];
+        });
+      for (const path of walk("dist").filter((path) => COMPRESSIBLE.test(path))) {
+        const body = readFileSync(path);
+        const br = brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } });
+        const gz = gzipSync(body, { level: 9 });
+        // A copy that saves nothing would only cost the binary its size.
+        if (br.length < body.length) writeFileSync(`${path}.br`, br);
+        if (gz.length < body.length) writeFileSync(`${path}.gz`, gz);
+      }
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // The licences of exactly what the bundle holds, for the release's notices.
+    license({ thirdParty: { includePrivate: false, output: { file: "dist/licenses.txt" } } }),
+    precompress(),
+  ],
+  build: { sourcemap: false },
 });

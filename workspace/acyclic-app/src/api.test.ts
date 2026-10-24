@@ -16,11 +16,11 @@ function raw(id: string) {
 
 /** A server that answers each command from a table, recording what it was sent. */
 function server(answers: Record<string, unknown>) {
-  const sent: object[] = [];
+  const sent: unknown[] = [];
   const fetcher = async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const body = JSON.parse(String(init.body)) as unknown;
     sent.push(body);
-    const name = Object.keys(body)[0] ?? "";
+    const name = typeof body === "string" ? body : (Object.keys(body as object)[0] ?? "");
     return new Response(JSON.stringify(answers[name]), { status: 200 });
   };
   return { fetcher, sent };
@@ -32,7 +32,7 @@ describe("command", () => {
       list: { ok: true, data: [] },
       show: { ok: false, error: { code: "not-found", message: "no item a", details: null } },
     });
-    await expect(command({ list: {} }, fetcher)).resolves.toEqual([]);
+    await expect(command("list", fetcher)).resolves.toEqual([]);
     await expect(command({ show: { items: ["a"] } }, fetcher)).rejects.toEqual(
       new CommandError("not-found", "no item a"),
     );
@@ -40,18 +40,22 @@ describe("command", () => {
 
   it("names the status when the answer isn't an envelope", async () => {
     const fetcher = async () => new Response("unpaired", { status: 401 });
-    await expect(command({ list: {} }, fetcher)).rejects.toMatchObject({ code: "http" });
+    await expect(command("list", fetcher)).rejects.toMatchObject({ code: "http" });
   });
 });
 
 describe("items", () => {
   it("shows every listed id in one request, and sends none for an empty tracker", async () => {
     const shown = [raw("a"), raw("b")];
-    const full = server({ list: { ok: true, data: [{ id: "a" }, { id: "b" }] }, show: { ok: true, data: shown } });
+    const full = server({
+      list: { ok: true, data: { items: [{ id: "a" }, { id: "b" }] } },
+      show: { ok: true, data: shown },
+    });
     await expect(items(full.fetcher)).resolves.toEqual(shown.map(settle));
-    expect(full.sent).toEqual([{ list: {} }, { show: { items: ["a", "b"] } }]);
+    // A command without arguments goes as its bare name, as the server parses it.
+    expect(full.sent).toEqual(["list", { show: { items: ["a", "b"] } }]);
 
-    const empty = server({ list: { ok: true, data: [] } });
+    const empty = server({ list: { ok: true, data: { items: [] } } });
     await expect(items(empty.fetcher)).resolves.toEqual([]);
     expect(empty.sent).toHaveLength(1);
   });

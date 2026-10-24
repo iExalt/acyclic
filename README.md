@@ -36,7 +36,8 @@ mise use -g github:iExalt/acyclic
 mise holds a release back for its first day; name the version, such as `github:iExalt/acyclic@0.2.0`, to take it
 sooner.
 
-From a clone, `mise run install` fetches the graph page's renderers and installs `acyclic` into `~/.cargo/bin`.
+From a clone, `mise run install` fetches the graph page's renderers, builds the app and installs `acyclic` into
+`~/.cargo/bin`.
 
 The server's image is `ghcr.io/iexalt/acyclic-server`, tagged with each release's tag, such as `v0.2.0`, and `latest`.
 

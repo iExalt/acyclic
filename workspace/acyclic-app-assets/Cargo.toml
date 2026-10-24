@@ -1,0 +1,6 @@
+[package]
+name = "acyclic-app-assets"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+license.workspace = true

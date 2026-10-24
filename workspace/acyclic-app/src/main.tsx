@@ -9,3 +9,8 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
+
+// Registered from the root, so its scope is the whole app.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch((err: unknown) => console.error("the service worker failed", err));
+}

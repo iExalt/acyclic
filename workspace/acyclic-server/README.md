@@ -1,7 +1,7 @@
 # `acyclic-server`
 
-The server behind `acyclic serve` and `acyclic up`: the tracker's JSON API and the app's static files, for the user
-alone. Each listener has its own check, and what passes one counts for nothing on another.
+The server behind `acyclic serve` and `acyclic up`: the tracker's JSON API and the app, for the user alone. Each
+listener has its own check, and what passes one counts for nothing on another.
 
 ## `acyclic serve`, behind Tailscale
 
@@ -76,6 +76,14 @@ thread borrows from any more drops what the forge no longer has.
 
 The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
 any of the forge's URLs, to the server with the run's token.
+
+## The app
+
+Both serve the app built into the binary (`acyclic-app-assets`), or the one in `--static <dir>`, which must hold an
+`index.html`; runs' listeners serve neither. `/` is `/index.html`, and a path with no file is 404, since the app has
+no routes of its own. Files are sent Brotli- or gzip-compressed when the browser takes it and the build wrote the
+copy. The bundle's hashed files under `/assets/` may be kept for good; everything else is revalidated. Every response
+carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing.
 
 ## The API
 

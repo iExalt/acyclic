@@ -53,6 +53,12 @@ depends = ["app:install"]
 dir = "workspace/acyclic-app"
 run = "pnpm run check"
 
+[tasks."build:app"]
+description = "Build the app into workspace/acyclic-app/dist, which acyclic-app-assets embeds in the binary"
+depends = ["app:install"]
+dir = "workspace/acyclic-app"
+run = "pnpm exec vite build --logLevel warn"
+
 [tasks."check:integration"]
 description = "Integration tests (budget: 3 minutes)"
 depends = ["vendor:graph"]
@@ -81,14 +87,15 @@ description = "Hands the secrets file named by ACYCLIC_SECRETS_FILE to a contain
 run = '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p acyclic-secrets --test live --run-ignored only --locked'
 
 [tasks."check:browser"]
-description = "Draws graph pages in headless Chromium and WebKit with the network blocked; downloads Playwright's browsers"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
+description = "Draws graph pages in headless Chromium and WebKit with the network blocked, and drives the app; downloads Playwright's browsers (budget: 3 minutes)"
+depends = ["vendor:graph", "build:app"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1" }
 run = [
   "cargo build --quiet --locked -p acyclic -p acyclic-fixtures",
   # CI sets PLAYWRIGHT_DEPS=--with-deps for the browsers' system libraries.
   "uv run --no-project --with playwright==1.64.0 python -m playwright install ${PLAYWRIGHT_DEPS:-} chromium webkit",
   "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/debug/acyclic target/debug/acyclic-fixtures",
+  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/debug/acyclic target/debug/acyclic-fixtures",
 ]
 
 [tasks."vendor:graph"]
@@ -100,9 +107,9 @@ description = "Write the release's third-party notices to the path given: THIRD_
 run = "sh scripts/notices.sh"
 
 [tasks.install]
-description = "Install the acyclic CLI from this checkout into ~/.cargo/bin"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
+description = "Install the acyclic CLI, with the app built in, from this checkout into ~/.cargo/bin"
+depends = ["vendor:graph", "build:app"]
+env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1" }
 run = "cargo install --locked --path workspace/acyclic"
 
 [tasks."hooks:install"]
