@@ -208,16 +208,17 @@ export default function PlanMap({
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null);
   }, [view, placed, selected, thread, model]);
 
+  // Only the lit thread's colour, so a reload that leaves it alone doesn't redraw.
+  const colour = drawn === null || drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
   useEffect(() => {
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
-    const line = drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
     const layers = new Map(drawn.nodes.map((node) => [node.id, node.layer]));
     const elements: ElementDefinition[] = [
       ...drawn.nodes.map((node) => ({
         group: "nodes" as const,
-        data: { ...node, textWidth: Math.max(40, node.width - 16), line: line ?? TOKENS.ink },
+        data: { ...node, textWidth: Math.max(40, node.width - 16), line: colour ?? TOKENS.ink },
         position: { x: node.x, y: node.y },
         classes: [node.kind, node.lit ? "lit" : "", node.dim ? "dim" : "", node.selected ? "selected" : ""].join(" "),
       })),
@@ -274,7 +275,7 @@ export default function PlanMap({
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed, lines]);
+  }, [drawn, placed, colour]);
 
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick });

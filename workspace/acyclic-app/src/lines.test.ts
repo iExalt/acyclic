@@ -11,6 +11,13 @@ describe("lineOf", () => {
     expect(lineOf({ id: "d", title: "2.8 Draw the Map" })).toMatchObject({ number: null, name: "2.8 Draw the Map" });
   });
 
+  it("badges a number once: never beside a title that is only that number, and without its leading zeros", () => {
+    expect(lineOf({ id: "a", title: "Thread 7:" })).toMatchObject({ number: null, name: "Thread 7:" });
+    expect(lineOf({ id: "b", title: "7. " })).toMatchObject({ number: null, name: "7. " });
+    expect(lineOf({ id: "c", title: "007. Build it" })).toEqual(lineOf({ id: "d", title: "7. Build it" }));
+    expect(lineOf({ id: "e", title: "0. Start" })).toMatchObject({ number: "0", name: "Start" });
+  });
+
   it("gives a thread without a number no number, and a colour from its id that holds as threads come and go", () => {
     const loose = { id: "thread-errands", title: "Errands" };
     const alone = linesOf([loose]).get(loose.id);
