@@ -33,43 +33,56 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
       <Notify />
       {views.length === 0 ? <p className="facts">Nothing needs you.</p> : null}
       <ul className="needs">
-        {views.map((view) => (
-          <li key={view.key} data-need={view.key}>
-            <p className="facts">{view.text}</p>
-            <div className="actions">
-              {view.items.map((id) => (
-                <button type="button" className="chip" key={`i-${id}`} data-select={id} onClick={() => onSelect(id)}>
-                  {titleOf(id)}
-                </button>
-              ))}
-              {view.threads.map((id) => (
-                <button
-                  type="button"
-                  className="chip"
-                  key={`t-${id}`}
-                  style={lineStyle(lines.get(id))}
-                  onClick={() => onPickThread(id)}
-                >
-                  <Badge line={lines.get(id)} />
-                  {lines.get(id)?.name ?? id}
-                </button>
-              ))}
-              {view.actions.map((action) => (
-                <button
-                  type="button"
-                  key={action.label}
-                  className={PRIMARY.has(action.action) ? "primary" : undefined}
-                  data-action={action.action}
-                  disabled={busy}
-                  onClick={() => onCommand(action.command)}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-            {view.note === null ? null : <p className="why">{view.note}</p>}
-          </li>
-        ))}
+        {views.map((view) => {
+          const first = view.threads.length === 1 ? lines.get(view.threads[0] ?? "") : undefined;
+          return (
+            <li key={view.key} data-need={view.key}>
+              <p className="facts line" style={lineStyle(first)}>
+                <Badge line={first} />
+                <span>{view.text}</span>
+              </p>
+              {view.actions.length === 0 ? null : (
+                <div className="actions">
+                  {view.actions.map((action) => (
+                    <button
+                      type="button"
+                      key={action.label}
+                      className={PRIMARY.has(action.action) ? "primary" : undefined}
+                      data-action={action.action}
+                      disabled={busy}
+                      onClick={() => onCommand(action.command)}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {view.note === null ? null : <p className="why">{view.note}</p>}
+              <ul className="rows">
+                {view.threads.map((id) => (
+                  <li key={`t-${id}`}>
+                    <button
+                      type="button"
+                      className="row line"
+                      style={lineStyle(lines.get(id))}
+                      onClick={() => onPickThread(id)}
+                    >
+                      <Badge line={lines.get(id)} />
+                      {lines.get(id)?.name ?? id}
+                    </button>
+                  </li>
+                ))}
+                {view.items.map((id) => (
+                  <li key={`i-${id}`}>
+                    <button type="button" className="row" data-select={id} onClick={() => onSelect(id)}>
+                      {titleOf(id)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
       </ul>
     </aside>
   );

@@ -597,12 +597,33 @@ dl.facts .chip {
 }
 .needs > li {
   padding: 12px 0 8px;
-  border-top: 1px solid var(--rule);
+  border-top: 2px solid var(--rule);
 }
 .notify {
   margin: 0 0 4px;
 }
 
+/* Items listed to pick from: rows a finger's height, ruled apart, since titles are too long to sit side by side. */
+.rows {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.rows li + li {
+  border-top: 1px solid var(--rule);
+}
+button.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 0;
+  font-weight: 500;
+  text-align: left;
+}
 @media (min-width: 900px) {
   .shell {
     grid-template-rows: auto 1fr;

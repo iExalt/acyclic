@@ -10,6 +10,7 @@ import {
   keepCommand,
   LEVELS,
   type Level,
+  levelLabel,
   pmCommand,
   revokeCommand,
   threadLevelCommand,
@@ -79,24 +80,9 @@ export function ThreadPanel({
           ×
         </button>
       </header>
-      {detail.brief === null ? null : <p className="notes">{detail.brief}</p>}
       <p className="facts">
         {members} {members === 1 ? "item" : "items"}, {detail.approved ? "approved" : "not approved yet"}
       </p>
-      {detail.heads.length === 0 ? null : (
-        <div className="links">
-          <h3>Ready to start</h3>
-          <ul>
-            {detail.heads.map((head) => (
-              <li key={head}>
-                <button type="button" className="chip" data-select={head} onClick={() => onSelect(head)}>
-                  {titleOf(head)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       <div className="actions">
         {detail.approved ? (
           <button type="button" data-action="revoke" disabled={busy} onClick={() => onCommand(revokeCommand(id))}>
@@ -124,10 +110,10 @@ export function ThreadPanel({
             onCommand(threadLevelCommand(id, event.target.value === "" ? null : (event.target.value as Level)))
           }
         >
-          <option value="">Global ({globalLevel})</option>
+          <option value="">Global ({levelLabel(globalLevel)})</option>
           {LEVELS.map((level) => (
             <option key={level} value={level}>
-              {level}
+              {levelLabel(level)}
             </option>
           ))}
         </select>
@@ -165,6 +151,21 @@ export function ThreadPanel({
                   onClick={() => onCommand(dropCommand(proposal.id))}
                 >
                   Drop
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {detail.brief === null ? null : <p className="notes">{detail.brief}</p>}
+      {detail.heads.length === 0 ? null : (
+        <div className="heads">
+          <h3>Ready to start</h3>
+          <ul className="rows">
+            {detail.heads.map((head) => (
+              <li key={head}>
+                <button type="button" className="row" data-select={head} onClick={() => onSelect(head)}>
+                  {titleOf(head)}
                 </button>
               </li>
             ))}

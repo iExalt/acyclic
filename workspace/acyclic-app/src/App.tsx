@@ -13,7 +13,7 @@ import {
   told,
   unlinkCommand,
 } from "./edits";
-import { globalLevelCommand, LEVELS, type Level } from "./forms";
+import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
@@ -196,7 +196,7 @@ export function App() {
             </span>{" "}
             items
           </h1>
-          <p title={`Autonomy: ${load.level}`}>Autonomy: {load.level}</p>
+          <p title={`Autonomy: ${levelLabel(load.level)}`}>Autonomy: {levelLabel(load.level)}</p>
         </div>
         <button
           type="button"
@@ -243,7 +243,7 @@ export function App() {
             >
               {LEVELS.map((level) => (
                 <option key={level} value={level}>
-                  {level}
+                  {levelLabel(level)}
                 </option>
               ))}
             </select>

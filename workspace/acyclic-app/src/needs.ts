@@ -12,6 +12,7 @@ import {
   resolveCommand,
   unsettledWhy,
 } from "./forms";
+import { lineOf } from "./lines";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
@@ -44,6 +45,8 @@ const row = (value: unknown): Row | null =>
   typeof value === "object" && value !== null && typeof (value as Row).id === "string" ? (value as Row) : null;
 const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).filter((one) => one !== null) : []);
 const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
+/** A thread by its line's name: its badge, beside the text, carries the number its title starts with. */
+const lineName = (one: Row) => lineOf({ id: one.id, title: titled(one) }).name;
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
 /** One entry as the app shows it. */
@@ -77,7 +80,7 @@ export function needView(need: Need): NeedView {
       return {
         ...base,
         key: `unapproved:${id}:${to}`,
-        text: `${item === null ? id : titled(item)} joined ${thread === null ? to : titled(thread)} after its approval`,
+        text: `${item === null ? id : titled(item)} joined ${thread === null ? to : lineName(thread)} after its approval`,
         actions: [
           { label: "Keep", command: keepMemberCommand(id, to), action: "keep" },
           { label: "Drop", command: dropMemberCommand(id), action: "drop" },
@@ -95,7 +98,7 @@ export function needView(need: Need): NeedView {
         ...base,
         key: `awaiting-approval:${id}`,
         items: heads,
-        text: `${thread === null ? id : titled(thread)} waits for your approval`,
+        text: `${thread === null ? id : lineName(thread)} waits for your approval`,
         actions: [
           {
             label: `Approve ${members} ${members === 1 ? "item" : "items"}`,
@@ -152,7 +155,7 @@ export function needView(need: Need): NeedView {
         ...base,
         threads: threads.map((one) => one.id),
         key: `resource-clash:${str(need.resource)}`,
-        text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(titled).join(", ")}`,
+        text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(lineName).join(", ")}`,
         note: "The CLI settles this one: `acyclic needs` says how",
       };
     }
@@ -192,7 +195,7 @@ function shown(value: unknown): string {
 
 /** A line for a kind the app only shows. */
 function describe(kind: string, item: Row | null, thread: Row | null, named: Row[]): string {
-  const subject = item !== null ? titled(item) : thread !== null ? titled(thread) : named.map(titled).join(", ");
+  const subject = item !== null ? titled(item) : thread !== null ? lineName(thread) : named.map(titled).join(", ");
   const words: Record<string, string> = {
     unpushed: "This clone holds writes the remote lacks",
     "link-cycle": "Links form a cycle",
