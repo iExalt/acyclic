@@ -539,3 +539,57 @@ fn a_socket_replaces_only_one_no_server_listens_on() {
     assert!(bind_socket(&socket).unwrap_err().message.contains("another server"));
     drop(live);
 }
+
+#[test]
+fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = dir.path().join("tracker");
+    let run = |command: Value| {
+        let command: Command = serde_json::from_value(command).unwrap();
+        assert_eq!(acyclic_cli::call(command, tracker.clone(), true, &Env::default()).0, 0);
+    };
+    run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    run(json!({"item": {"add": {"item": "a", "title": "a long title ".repeat(200)}}}));
+    let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
+    let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
+    // The encodings a response was sent in, one per `Content-Encoding` value.
+    let encodings = |method: Method, path: &str, extra: &[(&str, &str)], body: &str| {
+        let mut request = Request::builder().method(method).uri(path);
+        for (name, value) in pass.iter().chain(extra) {
+            request = request.header(*name, *value);
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let request = request.body(Body::from(body.to_owned())).unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
+            let sent: Vec<String> = response
+                .headers()
+                .get_all("content-encoding")
+                .iter()
+                .map(|value| value.to_str().unwrap().to_owned())
+                .collect();
+            (response.status(), sent, response.headers().get("etag").cloned())
+        })
+    };
+    let show = r#"{"show": {"items": ["a"]}}"#;
+    let api = |accept: &str, body: &str| {
+        encodings(Method::POST, "/api/command", &[("accept-encoding", accept)], body).1
+    };
+    // A big answer is compressed in an encoding the client takes; a small one, or one to a client that takes none,
+    // isn't.
+    assert_eq!(api("gzip", show), ["gzip"]);
+    assert_eq!(api("br", show), ["br"]);
+    assert_eq!(api("identity", show), Vec::<String>::new());
+    assert_eq!(api("gzip", r#""level""#), Vec::<String>::new());
+    // The app's files keep the one encoding they were built with, if any, for GET, HEAD and a 304 alike.
+    let built = acyclic_app_assets::get("/index.html").unwrap().gz.is_some();
+    let expected: Vec<String> = if built { vec!["gzip".into()] } else { Vec::new() };
+    let gzip = [("accept-encoding", "gzip")];
+    let (status, sent, tag) = encodings(Method::GET, "/index.html", &gzip, "");
+    assert_eq!((status, &sent), (StatusCode::OK, &expected));
+    assert_eq!(encodings(Method::HEAD, "/index.html", &gzip, "").1, expected);
+    let tag = tag.unwrap();
+    let again = [("accept-encoding", "gzip"), ("if-none-match", tag.to_str().unwrap())];
+    let (status, sent, _) = encodings(Method::GET, "/index.html", &again, "");
+    assert_eq!((status, sent), (StatusCode::NOT_MODIFIED, Vec::<String>::new()));
+}
