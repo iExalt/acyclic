@@ -1104,3 +1104,25 @@ async fn stopped() {
 
 #[cfg(test)]
 mod tests;
+
+/// Probe only: an HTTPS client on rustls with ring and the system's roots, to see the release targets build it.
+#[doc(hidden)]
+#[must_use]
+pub fn https_probe() -> impl Sized {
+    use hyper_rustls::ConfigBuilderExt as _;
+    let tls = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .expect("TLS versions")
+    .with_native_roots()
+    .expect("native roots")
+    .with_no_client_auth();
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_only()
+        .enable_http1()
+        .build();
+    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build::<_, http_body_util::Full<axum::body::Bytes>>(https)
+}
