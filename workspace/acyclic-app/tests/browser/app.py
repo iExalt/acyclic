@@ -4,8 +4,8 @@
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
 the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
-thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, and an agent's note is
-shown as text. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
+as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -97,7 +97,8 @@ class Plan:
         return len(drawn)
 
 
-def tracker(directory, env, items):
+def tracker(directory, env, items, remote=None):
+    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
     plan.write_text(
         subprocess.run(
@@ -107,8 +108,11 @@ def tracker(directory, env, items):
             check=True,
         ).stdout
     )
-    run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac")
+    remote_args = [] if remote is None else ["--remote", str(remote)]
+    run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     run(env, "--as-user", "import", str(plan))
+    if remote is not None:
+        run(env, "sync")
     return Plan(env)
 
 
@@ -422,6 +426,86 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def form_journey(page, view, env, remote, id, name, failures):
+    """Edits the selected item's fields, settles a conflict two clones wrote, and reopens it, as the phone would."""
+    inspector = page.get_by_test_id("inspector")
+    # Fields: only what changed is sent.
+    page.locator("[data-action=edit]").click()
+    form = page.get_by_test_id("item-form")
+    form.locator("input[name=title]").fill("Edited in the app")
+    form.locator("select[name=size]").select_option("m")
+    form.locator("textarea[name=notes]").fill("Plain notes")
+    form.locator("button[type=submit]").click()
+    inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
+    check_tracker(
+        env,
+        id,
+        lambda row: (
+            (row["title"], row["size"], row["notes"])
+            == ("Edited in the app", "m", "Plain notes")
+        ),
+        f"{id}'s new fields",
+        failures,
+        name,
+    )
+
+    # A conflict: a second clone and the server's own write the title apart, and both sync. `up` never syncs, so its
+    # clone is synced here first, for the second clone to start from what the app wrote.
+    run(env, "sync")
+    other = {
+        **env,
+        "ACYCLIC_TRACKER": str(Path(env["ACYCLIC_TRACKER"]).parent / "other"),
+    }
+    run(
+        other,
+        "init",
+        other["ACYCLIC_TRACKER"],
+        "--replica",
+        "other",
+        "--remote",
+        str(remote),
+    )
+    run(other, "sync")
+    run(other, "--as-user", "item", "edit", id, "--title", "Title from the other clone")
+    run(env, "--as-user", "item", "edit", id, "--title", "Title from this clone")
+    run(other, "sync")
+    run(env, "sync")
+    page.get_by_role("button", name="Refresh").click()
+    conflict = page.locator("[data-testid=conflicts] [data-conflict=title]")
+    conflict.wait_for(timeout=10_000)
+    conflict.locator("[data-keep='Title from the other clone']").click()
+    page.get_by_test_id("conflicts").wait_for(state="detached", timeout=10_000)
+    inspector.get_by_role("heading", name="Title from the other clone").wait_for(
+        timeout=10_000
+    )
+    check_tracker(
+        env,
+        id,
+        lambda row: row["title"] == "Title from the other clone",
+        f"{id}'s conflict settled",
+        failures,
+        name,
+    )
+    needs = json.loads(run(env, "needs"))["data"]
+    if id in json.dumps(needs):
+        failures.append(
+            f"{name}: acyclic needs still lists {id} after the conflict was settled"
+        )
+
+    # Reopen: finished elsewhere, reopened here.
+    run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
+    page.get_by_role("button", name="Refresh").click()
+    page.locator("[data-action=reopen]").click()
+    page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
+    check_tracker(
+        env, id, lambda row: row["state"] != "done", f"{id} reopened", failures, name
+    )
+    page.screenshot(path=SHOTS / f"app-{name}-forms.png")
+    print(
+        f"{name}: edited {id}'s fields, settled a conflict two clones wrote, and reopened it"
+    )
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -438,7 +522,12 @@ def main():
                 "ACYCLIC_TRACKER": str(directory / f"tracker-{items}"),
                 "ACYCLIC_ACTOR": "session/browser",
             }
-            plan = tracker(directory, env, items)
+            # The small tracker syncs with an origin, so the journeys can write a conflict from a second clone.
+            remote = None
+            if items < 1000:
+                remote = directory / f"origin-{items}.git"
+                subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            plan = tracker(directory, env, items, remote)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
@@ -455,10 +544,10 @@ def main():
                     "link"
                 ]
 
-            return plan, link, fresh, env
+            return plan, link, fresh, env, remote
 
         try:
-            plan, link, fresh, env = serve(350)
+            plan, link, fresh, env, remote = serve(350)
             chromium = playwright.chromium.launch()
             hint = None
             for name, view in VIEWS.items():
@@ -482,6 +571,9 @@ def main():
                     run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
                     page.get_by_role("button", name="Refresh").click()
                     edit_journey(page, view, env, plan, hint, name, failures)
+                    form_journey(
+                        page, view, env, remote, "journey-added", name, failures
+                    )
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
@@ -502,7 +594,7 @@ def main():
             context.close()
             webkit.close()
 
-            large, link, _, _ = serve(3500)
+            large, link, _, _, _ = serve(3500)
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )

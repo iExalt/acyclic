@@ -268,6 +268,7 @@ export function App() {
           />
         ) : chosen === undefined ? null : (
           <Inspector
+            key={chosen.id}
             item={chosen}
             titleOf={titleOf}
             onSelect={(id) => select(id, selected)}
@@ -276,6 +277,9 @@ export function App() {
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
+            onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
+            threads={[...load.threads].sort(byTitle)}
+            busy={busy}
           />
         )}
       </main>

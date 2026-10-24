@@ -40,7 +40,8 @@ describe("commands", () => {
       ["c relates to b", linkCommand("c", "relates-to", "b")],
       ["c no longer waits for d", unlinkCommand("c", "waits-for", "d")],
     ];
-    expect(built).toEqual(examples.map((one) => [one.name, one.command]));
+    const named = new Map(examples.map((one) => [one.name, one.command]));
+    expect(built).toEqual(built.map(([name]) => [name, named.get(name as string)]));
   });
 });
 

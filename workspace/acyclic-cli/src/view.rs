@@ -341,6 +341,7 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
             edit(field, true)
         },
         ("thread", "autonomy") => edit("level", true),
+        ("thread", "pm-flag") => Some(format!("acyclic thread edit {id} --pm|--no-pm --as-user")),
         ("repository", "default-branch") => edit("default-branch", false),
         ("repository", "public") => Some(format!("acyclic repo edit {id} --public|--private")),
         ("item", "evidence") => Some(format!(
