@@ -700,8 +700,10 @@ def push_journey(context, page, env, origin, name, failures):
         "body": "A proposal for the journey",
         "url": "/?needs",
     }
-    # Headless Chromium can lose a notification shown while its notifications are being read, so each read waits a
-    # little after a delivery, and a lost one is delivered again: a worker that shows nothing fails every time.
+    # Headless Chromium can lose a notification shown while its notifications are being read: probed, about half the
+    # runs that read at once after delivering saw none, 4 of 4 that read once beforehand saw none, and 9 of 9 that
+    # waited 0.5 s saw it. So each read waits 0.5 s after a delivery, and a lost one is delivered again; a worker that
+    # shows nothing fails all five.
     shown, deliveries = [], 0
     while not shown and deliveries < 5:
         deliveries += 1

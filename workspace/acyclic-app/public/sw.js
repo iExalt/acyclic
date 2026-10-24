@@ -6,9 +6,21 @@ const worker = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (
 worker.addEventListener("install", () => worker.skipWaiting());
 worker.addEventListener("activate", (event) => event.waitUntil(worker.clients.claim()));
 
-/** Only a path on the app's own origin: a message can't send the user elsewhere. */
-const inApp = (/** @type {unknown} */ url) =>
-  typeof url === "string" && url.startsWith("/") && !url.startsWith("//") ? url : "/?needs";
+/**
+ * The path and query of `url` when it resolves to the app's own origin, else the needs-you list: a message can't send
+ * the user elsewhere, however its URL is spelled (a backslash or a tab can turn `/…` into another host).
+ */
+const inApp = (/** @type {unknown} */ url) => {
+  if (typeof url === "string") {
+    try {
+      const resolved = new URL(url, worker.location.origin);
+      if (resolved.origin === worker.location.origin) return resolved.pathname + resolved.search;
+    } catch {
+      // Not a URL at all.
+    }
+  }
+  return "/?needs";
+};
 
 worker.addEventListener("push", (event) => {
   /** @type {{title?: string, body?: string, url?: string}} */

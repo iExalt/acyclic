@@ -18,7 +18,7 @@ export interface Device {
   permission: () => NotificationPermission;
   requestPermission: () => Promise<NotificationPermission>;
   /** The service worker's push manager, once the worker is ready; null without Web Push. */
-  pushManager: () => Promise<Pick<PushManager, "getSubscription" | "subscribe"> | null>;
+  pushManager: () => Promise<Manager | null>;
 }
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -46,7 +46,13 @@ async function call<T>(path: string, body: unknown, fetcher: Fetch): Promise<T> 
   return envelope.data;
 }
 
-/** Whether the server pushes to this device. A subscription the device holds is sent again, in case the server lost it. */
+type Manager = Pick<PushManager, "getSubscription" | "subscribe">;
+
+/**
+ * Whether the server pushes to this device. A subscription the device holds is sent again, in case the server lost it,
+ * unless it was made with a key the server no longer has, whose pushes the push service would refuse: that one is
+ * replaced.
+ */
 export async function pushState(device: Device | null, fetcher: Fetch = fetch): Promise<PushState> {
   if (device === null) return "unsupported";
   if (device.permission() === "denied") return "blocked";
@@ -54,8 +60,15 @@ export async function pushState(device: Device | null, fetcher: Fetch = fetch): 
   if (manager === null) return "unsupported";
   const held = await manager.getSubscription();
   if (held === null || device.permission() !== "granted") return "off";
-  await call("/api/push/subscribe", held.toJSON(), fetcher);
-  return "on";
+  const key = await serverKey(fetcher);
+  const made = held.options.applicationServerKey;
+  if (made !== null && same(new Uint8Array(made), key)) {
+    await call("/api/push/subscribe", held.toJSON(), fetcher);
+    return "on";
+  }
+  await call("/api/push/unsubscribe", { endpoint: held.endpoint }, fetcher);
+  await held.unsubscribe();
+  return subscribe(manager, key, fetcher);
 }
 
 /** Asks for permission, subscribes with the server's key, and gives the subscription to the server. */
@@ -65,10 +78,21 @@ export async function turnOn(device: Device, fetcher: Fetch = fetch): Promise<Pu
   if (permission !== "granted") return "off";
   const manager = await device.pushManager();
   if (manager === null) return "unsupported";
-  const { key } = await call<{ key: string }>("/api/push/key", undefined, fetcher);
-  const subscription = await manager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(key) });
+  return subscribe(manager, await serverKey(fetcher), fetcher);
+}
+
+async function serverKey(fetcher: Fetch): Promise<Uint8Array<ArrayBuffer>> {
+  return fromBase64Url((await call<{ key: string }>("/api/push/key", undefined, fetcher)).key);
+}
+
+async function subscribe(manager: Manager, key: Uint8Array<ArrayBuffer>, fetcher: Fetch): Promise<PushState> {
+  const subscription = await manager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
   await call("/api/push/subscribe", subscription.toJSON(), fetcher);
   return "on";
+}
+
+function same(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, at) => byte === b[at]);
 }
 
 /** Tells the server to forget this device, then drops the subscription. */
