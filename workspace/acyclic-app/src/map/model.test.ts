@@ -67,6 +67,10 @@ describe("visible", () => {
     expect(tangled.roots).toEqual(["a"]);
     expect(ids(visible(tangled, { collapsed: new Set(), showArchived: false }))).toEqual(["a:box", "b:leaf", "c:leaf"]);
     expect([...tangled.depth.values()]).toEqual([0, 1, 1]);
+    // An item hanging off a cycle stays under its parent, though it sorts before the cycle's items.
+    const hanging = buildModel([item("x", "y"), item("y", "x"), item("a", "x")]);
+    expect(hanging.roots).toEqual(["x"]);
+    expect(hanging.children.get("x")).toEqual(["a", "y"]);
   });
 
   it("treats an item whose parent is missing as a root", () => {

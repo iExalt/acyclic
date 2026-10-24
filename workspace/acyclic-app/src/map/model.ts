@@ -53,8 +53,9 @@ export function buildModel(items: Item[]): Model {
   for (const siblings of listed.values()) siblings.sort();
   roots.sort();
   // The tree as walked from the roots, each item once. Two replicas can each move one item under the other, and
-  // their merge leaves parents in a cycle that no root reaches; the first such item, in id order, is drawn as a root
-  // too, so nothing vanishes, and the walk drops the link that closes the cycle.
+  // their merge leaves parents in a cycle that no root reaches; the cycle's first item in id order is drawn as a root
+  // too, so nothing vanishes and what hangs off the cycle stays under its parent, and the walk drops the link that
+  // closes the cycle.
   const children = new Map<string, string[]>();
   const depth = new Map<string, number>();
   const walk = (id: string, d: number) => {
@@ -66,8 +67,17 @@ export function buildModel(items: Item[]): Model {
   for (const root of roots) walk(root, 0);
   for (const id of [...byId.keys()].sort()) {
     if (depth.has(id)) continue;
-    roots.push(id);
-    walk(id, 0);
+    // Climb from an unreached item until an item repeats: everything from there on is the cycle above it.
+    const climbed: string[] = [];
+    let at: string | null = id;
+    while (at !== null && !climbed.includes(at)) {
+      climbed.push(at);
+      at = byId.get(at)?.parent ?? null;
+    }
+    const cycle = at === null ? [id] : climbed.slice(climbed.indexOf(at));
+    const root = [...cycle].sort()[0] ?? id;
+    roots.push(root);
+    walk(root, 0);
   }
   return { items: byId, children, roots, depth };
 }
