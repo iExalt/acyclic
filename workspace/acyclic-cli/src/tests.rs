@@ -785,6 +785,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
         "acyclic thread edit t --level blockers --no-level",
+        "acyclic thread edit t --pm --no-pm",
         "acyclic thread edit t --repository r --no-repository r",
         "acyclic repo edit r --public --private",
         "acyclic repo add r --owner o --name n --default-branch main",

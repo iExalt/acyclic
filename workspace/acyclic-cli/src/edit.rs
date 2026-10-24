@@ -74,6 +74,8 @@ pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
     pub level: Change<Level>,
+    /// Whether its agent is a project-management agent; clearing it leaves an ordinary one.
+    pub pm: Change<bool>,
     pub repositories: Delta,
 }
 
@@ -423,6 +425,7 @@ fn write_thread(
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
     write_change(replica, &key, thread_field::AUTONOMY, &fields.level, by)?;
+    write_change(replica, &key, thread_field::PM_FLAG, &fields.pm, by)?;
     let mut written = Written::default();
     for change in thread_scope(id, fields) {
         scope_step(replica, &change, by, &mut written.proposals)?;

@@ -588,6 +588,7 @@ impl<'a> Session<'a> {
                     title: Some(title.clone()),
                     brief: Change::of(brief.clone(), false),
                     level: Change::of(*level, false),
+                    pm: Change::Keep,
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
@@ -599,6 +600,7 @@ impl<'a> Session<'a> {
                     title: edit.title.clone(),
                     brief: Change::of(edit.brief.clone(), edit.no_brief),
                     level: Change::of(edit.level, edit.no_level),
+                    pm: Change::of(edit.pm.then_some(true), edit.no_pm),
                     repositories: Delta {
                         add: edit.repository.clone(),
                         remove: edit.no_repository.clone(),

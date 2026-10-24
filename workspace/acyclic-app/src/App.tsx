@@ -1,7 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AddForm } from "./AddForm";
 import { type Command, CommandError, command, type Item, items, type Thread, threads } from "./api";
-import { addCommand, type LinkKind, type Mode, type NewItem, type Pick, pick, recovery, unlinkCommand } from "./edits";
+import {
+  addCommand,
+  type LinkKind,
+  type Mode,
+  type NewItem,
+  type Pick,
+  pick,
+  type Sent,
+  told,
+  unlinkCommand,
+} from "./edits";
 import { Inspector } from "./Inspector";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
@@ -24,9 +34,10 @@ interface After {
   pin: string | null;
 }
 
-/** A refusal or failure to show, with the command to send again when the server was only busy. */
+/** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
 interface Notice {
   text: string;
+  offer: "retry" | "refresh" | null;
   retry: { body: Command; after: After } | null;
 }
 
@@ -79,29 +90,34 @@ export function App() {
     if (id !== null) setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
   }, []);
 
-  /** Sends an edit; on success, reloads the plan and brings `after.select` into view with `after.pin` held still. */
+  /** Sends an edit; once saved, reloads the plan and brings `after.select` into view with `after.pin` held still. */
   const send = useCallback(
     async (body: Command, after: After) => {
       setBusy(true);
       setNotice(null);
+      let sent: Sent;
       try {
-        const answer = await command<{ proposals?: unknown[] }>(body);
-        const next = await fetchAll();
-        setLoad(next);
-        setAdding(null);
-        setSelected(after.select);
-        setFocus((was) => ({ id: after.select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
-        if ((answer?.proposals?.length ?? 0) > 0)
-          setNotice({ text: "Sent as a proposal for you to keep", retry: null });
+        const answer = await command<{ proposals?: unknown[] } | null>(body);
+        const proposals = answer?.proposals?.length ?? 0;
+        try {
+          const next = await fetchAll();
+          setLoad(next);
+          setAdding(null);
+          setSelected(after.select);
+          setFocus((was) => ({ id: after.select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
+          sent = { write: "saved", proposals, reload: "done" };
+        } catch (err) {
+          setAdding(null);
+          sent = { write: "saved", proposals, reload: { failed: err instanceof Error ? err.message : String(err) } };
+        }
       } catch (err) {
         const code = err instanceof CommandError ? err.code : "network";
-        const text = err instanceof Error ? err.message : String(err);
-        const { retry, fixId } = recovery(code);
-        setNotice({ text, retry: retry ? { body, after } : null });
-        if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
-      } finally {
-        setBusy(false);
+        sent = { write: "failed", code, message: err instanceof Error ? err.message : String(err) };
       }
+      const { text, offer, fixId } = told(sent);
+      setNotice(text === null ? null : { text, offer, retry: offer === "retry" ? { body, after } : null });
+      if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
+      setBusy(false);
     },
     [fetchAll],
   );
@@ -111,10 +127,10 @@ export function App() {
       if (model === null) return;
       const step = pick(model, mode, target);
       setMode(step.mode);
-      setNotice(step.refusal === null ? null : { text: step.refusal, retry: null });
+      setNotice(step.refusal === null ? null : { text: step.refusal, offer: null, retry: null });
       if (step.command === null || mode.kind === "idle") return;
-      // A move pins the new parent; a link, the item linked from.
-      const pin = mode.kind === "move" ? (target.kind === "item" ? target.id : null) : mode.item;
+      // A move pins the new parent, or the item itself when it goes to the top level; a link, the item linked from.
+      const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
       send(step.command, { select: mode.item, pin });
     },
     [model, mode, send],
@@ -209,6 +225,17 @@ export function App() {
                 Try again
               </button>
             )}
+            {notice.offer === "refresh" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setNotice(null);
+                  refresh();
+                }}
+              >
+                Refresh
+              </button>
+            ) : null}
             <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
               ×
             </button>

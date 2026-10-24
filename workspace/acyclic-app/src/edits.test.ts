@@ -10,6 +10,7 @@ import {
   newId,
   pick,
   recovery,
+  told,
   unlinkCommand,
 } from "./edits";
 import { item } from "./map/fixture";
@@ -124,5 +125,27 @@ describe("recovery", () => {
     expect(recovery("busy")).toEqual({ retry: true, fixId: false });
     for (const code of ["already-exists", "deleted", "invalid-name"]) expect(recovery(code).fixId).toBe(true);
     expect(recovery("parent-cycle")).toEqual({ retry: false, fixId: false });
+  });
+});
+
+describe("told", () => {
+  it("offers the write again only when it failed busy, and a refresh when it saved but the reload failed", () => {
+    expect(told({ write: "failed", code: "busy", message: "busy" })).toEqual({
+      text: "busy",
+      offer: "retry",
+      fixId: false,
+    });
+    expect(told({ write: "failed", code: "already-exists", message: "taken" })).toEqual({
+      text: "taken",
+      offer: null,
+      fixId: true,
+    });
+    expect(told({ write: "saved", proposals: 0, reload: { failed: "offline" } })).toEqual({
+      text: "Saved, but the refresh failed: offline",
+      offer: "refresh",
+      fixId: false,
+    });
+    expect(told({ write: "saved", proposals: 1, reload: "done" }).text).toMatch(/proposal/);
+    expect(told({ write: "saved", proposals: 0, reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
   });
 });
