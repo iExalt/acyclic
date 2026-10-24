@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.0](https://github.com/iExalt/acyclic/compare/v0.2.0...v0.3.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* claims move from items to threads: `claim` and `release` take a thread and return `{thread, …}`, the server's claim body names `thread`, `done` no longer releases, and claims older versions made on items are ignored. `ready` returns threads with their items; readiness drops `rank`, adds `unthreaded`, and a busy resource names its `thread`; needs gains an `unthreaded` entry, its contest, clock-ahead and unknown-run entries carry `thread`, and resource-clash holders are (thread, holder) pairs. Follows links can no longer be added, and links drop `follows` and `followed_by`. `proposals` in write results holds `{id, field}` objects, and `graph --output <FILE>` is now `graph --file <FILE>`. Older binaries ignore a claim on a thread but can't see one either, so don't mix this build with older ones that still claim items.
+
+### Features
+
+* **app:** add, move and link items on the Map, with an inspector ([a04bc50](https://github.com/iExalt/acyclic/commit/a04bc5054e490f70ef045d3d7ac816ee2be63185))
+* **app:** draw the Map, laid out box by box, with Cytoscape.js ([2639fe9](https://github.com/iExalt/acyclic/commit/2639fe9b9102d46bce20329ac9a92b874ed2ecbe))
+* **app:** draw threads as numbered, coloured lines, in a quieter shell ([8246fbd](https://github.com/iExalt/acyclic/commit/8246fbd33fdb5038fb703e8921757594c58ee552))
+* **app:** edit fields, settle conflicts, approve threads and set autonomy from the app ([e7bf062](https://github.com/iExalt/acyclic/commit/e7bf0623ab056afae9b98be761564ff24cc5cca0))
+* **app:** list what needs the user and notify their devices ([3c0a1be](https://github.com/iExalt/acyclic/commit/3c0a1be998f943511d30bfb8bcde26547578d174))
+* **app:** start the app, served by the server built in and installable ([#17](https://github.com/iExalt/acyclic/issues/17)) ([e5407d5](https://github.com/iExalt/acyclic/commit/e5407d59b6c5291866fa865fa1dc501148c0a0e3))
+* **cli:** print for people at a terminal and JSON when piped ([#10](https://github.com/iExalt/acyclic/issues/10)) ([08d01db](https://github.com/iExalt/acyclic/commit/08d01dbbc77b657d9c75e2dbe50d34282445b72e))
+* make threads the unit of work and give the CLI a human side ([#6](https://github.com/iExalt/acyclic/issues/6)) ([cdbc6de](https://github.com/iExalt/acyclic/commit/cdbc6dee9b1b71189cb21bfd2a355ddc3769512f))
+* **operator:** start runs with signed tokens and apply their writes once, as the run ([#13](https://github.com/iExalt/acyclic/issues/13)) ([f80a7a3](https://github.com/iExalt/acyclic/commit/f80a7a39fdb445d77f670173fb948f4b81bd8c2f))
+* **secrets:** run Podman machines from mise and hand containers credentials as Podman secrets ([#11](https://github.com/iExalt/acyclic/issues/11)) ([85fe13c](https://github.com/iExalt/acyclic/commit/85fe13c2be66926f06dd07ca0d9dab2550b48c3c))
+* **server:** let runs fetch and push their thread's code through the server, from mirrors of the forge ([#15](https://github.com/iExalt/acyclic/issues/15)) ([47c16f9](https://github.com/iExalt/acyclic/commit/47c16f9472d1701eca2b0162537dca75ff7328d9))
+* **server:** serve runs' commands on a runners' listener, bound to their thread, scanned and applied once ([#14](https://github.com/iExalt/acyclic/issues/14)) ([e579069](https://github.com/iExalt/acyclic/commit/e579069ac076fb2ff9441a1736ba724d4ed3fcec))
+* **server:** serve the tracker on the Mac with acyclic up, a session and an opt-in Tailscale socket ([#12](https://github.com/iExalt/acyclic/issues/12)) ([9b9690e](https://github.com/iExalt/acyclic/commit/9b9690e46fc870c0f6a311819be204dad235b914))
+
+
+### Bug Fixes
+
+* **app:** close the menu alone, and badge thread numbers once ([#25](https://github.com/iExalt/acyclic/issues/25)) ([71f8938](https://github.com/iExalt/acyclic/commit/71f8938491cd4cf2426c45b6e3f2d9f5875501da))
+* **app:** let the next tap through after a menu action, and badge only named threads ([#26](https://github.com/iExalt/acyclic/issues/26)) ([3259e82](https://github.com/iExalt/acyclic/commit/3259e822ece5f127b13496e43855b8ca20bdc81f))
+* **cli:** print readiness in pretty output as a phrase ([#9](https://github.com/iExalt/acyclic/issues/9)) ([22d514c](https://github.com/iExalt/acyclic/commit/22d514cde3bb485a58c2e139a2bf80265562a156))
+* **server:** share recent mirror fetches, bound a push's refs, and look repositories up within the run's thread ([#16](https://github.com/iExalt/acyclic/issues/16)) ([28e0d2a](https://github.com/iExalt/acyclic/commit/28e0d2a64106cfdd115d98c7196e7a942ed67064))
+
+
+### Performance Improvements
+
+* **cli:** build each thread's row once in the needs-you list ([f6de37d](https://github.com/iExalt/acyclic/commit/f6de37d361a7f3cff78bf7c5a2643207393508ae))
+
 ## [0.2.0](https://github.com/iExalt/acyclic/compare/v0.1.0...v0.2.0) (2026-10-16)
 
 
