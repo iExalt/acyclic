@@ -183,8 +183,17 @@ impl View<'_> {
         let members = thread_members(self.model);
         let heads = self.model.heads_index();
         let proposals = scope::proposals(self.state)?;
-        let thread =
-            |id: &str| thread_row(&heads, id, members.get(id).map_or(&[][..], Vec::as_slice));
+        // A thread's row walks its heads, and threads waiting on each other in a cycle name each other, so each row is
+        // built once: per mention, a plan of thousands of items took seconds.
+        let rows: std::cell::RefCell<BTreeMap<String, Json>> = std::cell::RefCell::default();
+        let thread = |id: &str| {
+            rows.borrow_mut()
+                .entry(id.to_owned())
+                .or_insert_with(|| {
+                    thread_row(&heads, id, members.get(id).map_or(&[][..], Vec::as_slice))
+                })
+                .clone()
+        };
         let items = |ids: &[String]| -> Result<Json, CliError> {
             Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
         };
