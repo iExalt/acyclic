@@ -38,26 +38,37 @@ export function buildModel(items: Item[]): Model {
       },
     ]),
   );
-  const children = new Map<string, string[]>();
+  const listed = new Map<string, string[]>();
   const roots: string[] = [];
   for (const item of byId.values()) {
     // A parent the plan doesn't hold, such as one deleted elsewhere, makes its child a root.
     if (item.parent !== null && byId.has(item.parent)) {
-      const siblings = children.get(item.parent) ?? [];
+      const siblings = listed.get(item.parent) ?? [];
       siblings.push(item.id);
-      children.set(item.parent, siblings);
+      listed.set(item.parent, siblings);
     } else {
       roots.push(item.id);
     }
   }
-  for (const siblings of children.values()) siblings.sort();
+  for (const siblings of listed.values()) siblings.sort();
   roots.sort();
+  // The tree as walked from the roots, each item once. Two replicas can each move one item under the other, and
+  // their merge leaves parents in a cycle that no root reaches; the first such item, in id order, is drawn as a root
+  // too, so nothing vanishes, and the walk drops the link that closes the cycle.
+  const children = new Map<string, string[]>();
   const depth = new Map<string, number>();
   const walk = (id: string, d: number) => {
     depth.set(id, d);
-    for (const child of children.get(id) ?? []) walk(child, d + 1);
+    const kids = (listed.get(id) ?? []).filter((child) => !depth.has(child));
+    if (kids.length > 0) children.set(id, kids);
+    for (const child of kids) if (!depth.has(child)) walk(child, d + 1);
   };
   for (const root of roots) walk(root, 0);
+  for (const id of [...byId.keys()].sort()) {
+    if (depth.has(id)) continue;
+    roots.push(id);
+    walk(id, 0);
+  }
   return { items: byId, children, roots, depth };
 }
 

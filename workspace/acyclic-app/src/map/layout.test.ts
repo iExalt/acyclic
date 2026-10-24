@@ -130,7 +130,8 @@ describe("withinOneBox", () => {
   it("draws an edge always only when both drawn ends are in the same box", () => {
     const linked = [...plan, item("r2", "right", ["r1"]), item("far2", null, ["l1"])];
     const view = visible(buildModel(linked), { collapsed: new Set(["left"]), showArchived: false });
-    const edges = view.edges.map((edge) => [`${edge.source}->${edge.target}`, withinOneBox(view, edge)]);
+    const within = withinOneBox(view);
+    const edges = view.edges.map((edge) => [`${edge.source}->${edge.target}`, within(edge)]);
     // r1 to r2 is inside right; left (standing in for l1) to far2 crosses from top to the top level.
     expect(edges).toEqual([
       ["left->far2", false],

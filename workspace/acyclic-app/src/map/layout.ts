@@ -86,13 +86,13 @@ function lift(from: string[], to: string[]) {
 }
 
 /**
- * Whether an edge is drawn whatever is selected: when both its drawn ends are children of the same box, it stays
- * inside that box. Every other edge crosses boxes and is drawn only for the selected item, since without routing
- * around boxes it would cross whatever lies between.
+ * Tells whether an edge is drawn whatever is selected: when both its drawn ends are children of the same box, it
+ * stays inside that box. Every other edge crosses boxes and is drawn only for the selected item, since without routing
+ * around boxes it would cross whatever lies between. Built once per view, so classifying every edge is linear.
  */
-export function withinOneBox(view: View, edge: { source: string; target: string }): boolean {
+export function withinOneBox(view: View): (edge: { source: string; target: string }) => boolean {
   const parent = new Map(view.nodes.map((node) => [node.id, node.parent]));
-  return parent.get(edge.source) === parent.get(edge.target);
+  return (edge) => parent.get(edge.source) === parent.get(edge.target);
 }
 
 /** A bounded cache of box layouts by signature, evicting the least recently used. */

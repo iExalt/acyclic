@@ -62,6 +62,13 @@ describe("visible", () => {
     expect(open.threads.get("spring")).toEqual(["paint", "sow", "water"]);
   });
 
+  it("draws items whose parents form a cycle, from the first of them in id order", () => {
+    const tangled = buildModel([item("a", "b"), item("b", "a"), item("c", "a")]);
+    expect(tangled.roots).toEqual(["a"]);
+    expect(ids(visible(tangled, { collapsed: new Set(), showArchived: false }))).toEqual(["a:box", "b:leaf", "c:leaf"]);
+    expect([...tangled.depth.values()]).toEqual([0, 1, 1]);
+  });
+
   it("treats an item whose parent is missing as a root", () => {
     const orphan = buildModel([item("a", "gone")]);
     expect(orphan.roots).toEqual(["a"]);
