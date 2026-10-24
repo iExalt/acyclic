@@ -74,6 +74,7 @@ describe("resolveCommand", () => {
     });
     expect(resolveCommand("thread", "t", "autonomy", "sometimes")).toBeNull();
     expect(resolveCommand("thread", "t", "approved", false)).toEqual(revokeCommand("t"));
+    expect(resolveCommand("thread", "t", "approved-members", ["a"])).toEqual(approveCommand("t"));
     expect(resolveCommand("thread", "t", "evidence", "x")).toBeNull();
     // The global level itself can be written apart.
     expect(resolveCommand("settings", "global", "autonomy", "blockers")).toEqual(example("the global level"));

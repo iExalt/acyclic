@@ -79,6 +79,8 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
     return value === null ? edit({ "no-level": true }) : isLevel(text) ? edit({ level: text }) : null;
   if (field === "pm-flag") return edit(value === true ? { pm: true } : { "no-pm": true });
   if (field === "approved") return value === true ? approveCommand(id) : revokeCommand(id);
+  // Approving again records the members as they are now.
+  if (field === "approved-members") return approveCommand(id);
   return null;
 }
 
