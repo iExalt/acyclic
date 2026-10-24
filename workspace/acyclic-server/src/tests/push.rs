@@ -10,10 +10,10 @@ use super::*;
 use crate::push::crypto::tests::{claims, decrypt};
 use crate::push::{Settings, Transport};
 
-/// What the stand-in push service was sent: each message's `Authorization` and body.
+/// What the stand-in push service was sent: each message's `Authorization` and body, and what it answered.
 #[derive(Default)]
 struct Service {
-    sent: StdMutex<Vec<(String, Vec<u8>)>>,
+    sent: StdMutex<Vec<(String, Vec<u8>, StatusCode)>>,
     /// What it answers.
     answer: StdMutex<StatusCode>,
 }
@@ -22,8 +22,20 @@ async fn take(State(service): State<Arc<Service>>, headers: HeaderMap, body: Byt
     let authorization = headers[AUTHORIZATION].to_str().unwrap().to_owned();
     assert_eq!(headers["content-encoding"], "aes128gcm");
     assert_eq!(headers["ttl"], "86400");
-    service.sent.lock().unwrap().push((authorization, body.to_vec()));
-    *service.answer.lock().unwrap()
+    let answer = *service.answer.lock().unwrap();
+    service.sent.lock().unwrap().push((authorization, body.to_vec(), answer));
+    answer
+}
+
+/// Waits up to 10 seconds for `done` to give something, and gives it.
+async fn eventually<T>(what: &str, mut done: impl FnMut() -> Option<T>) -> T {
+    for _ in 0..1000 {
+        if let Some(found) = done() {
+            return found;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{what} didn't happen within 10 s");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -74,6 +86,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         transport: Transport::LoopbackHttp,
         subject: Some("mailto:user@example.com".into()),
         window: Duration::from_millis(20),
+        backoff: Duration::from_millis(5),
         ..Settings::default()
     };
     let config =
@@ -94,18 +107,15 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     let device = SecretKey::from_slice(&[7; 32]).unwrap();
     let auth = [9_u8; 16];
     let received = async |n: usize| {
-        for _ in 0..500 {
+        let sent = eventually(&format!("message {n}"), || {
             let sent = service.sent.lock().unwrap().clone();
-            if sent.len() >= n {
-                assert_eq!(sent.len(), n, "one push per look with news");
-                let (authorization, body) = sent.last().unwrap().clone();
-                let message: Value =
-                    serde_json::from_slice(&decrypt(&body, &device, &auth)).unwrap();
-                return (authorization, message);
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("the service wasn't sent {n} messages");
+            (sent.len() >= n).then_some(sent)
+        })
+        .await;
+        assert_eq!(sent.len(), n, "one push per look with news");
+        let (authorization, body, _) = sent.last().unwrap().clone();
+        let message: Value = serde_json::from_slice(&decrypt(&body, &device, &auth)).unwrap();
+        (authorization, message)
     };
 
     let server = Arc::new(Server::new(config.clone()));
@@ -152,15 +162,32 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         StatusCode::OK
     );
     let sent = home.join(".config/acyclic/push/sent.json");
-    for _ in 0..500 {
-        if std::fs::read_to_string(&sent).unwrap().contains("awaiting-approval:u") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let read = |file: &std::path::Path| std::fs::read_to_string(file).unwrap();
+    eventually("taking U as seen", || read(&sent).contains("awaiting-approval:u").then_some(()))
+        .await;
     propose(3);
     server.push.look();
     assert_eq!(received(3).await.1["body"], "A proposal for P3");
+
+    // However long the service is down, the device stays, and the news arrives once it is back.
+    let devices = home.join(".config/acyclic/push/subscriptions.json");
+    *service.answer.lock().unwrap() = StatusCode::SERVICE_UNAVAILABLE;
+    propose(4);
+    server.push.look();
+    eventually("six refused sends", || (service.sent.lock().unwrap().len() >= 3 + 6).then_some(()))
+        .await;
+    assert!(read(&devices).contains(&audience));
+    *service.answer.lock().unwrap() = StatusCode::CREATED;
+    let delivered = eventually("a send once the service is back", || {
+        match service.sent.lock().unwrap().last().cloned() {
+            Some((_, body, StatusCode::CREATED)) => Some(body),
+            _ => None,
+        }
+    })
+    .await;
+    let message: Value = serde_json::from_slice(&decrypt(&delivered, &device, &auth)).unwrap();
+    assert_eq!(message["body"], "A proposal for P4");
+    let told = service.sent.lock().unwrap().len();
 
     // A restart on the same files tells nothing again, and a device the service says is gone is dropped.
     drop(router);
@@ -168,17 +195,10 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     let server = Arc::new(Server::new(config.clone()));
     *service.answer.lock().unwrap() = StatusCode::GONE;
     server.push.look();
-    propose(4);
+    propose(5);
     server.push.look();
-    assert_eq!(received(4).await.1["body"], "A proposal for P4");
-    let devices = home.join(".config/acyclic/push/subscriptions.json");
-    for _ in 0..500 {
-        if std::fs::read_to_string(&devices).unwrap() == "[]" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(std::fs::read_to_string(&devices).unwrap(), "[]");
+    assert_eq!(received(told + 1).await.1["body"], "A proposal for P5");
+    eventually("dropping the gone device", || (read(&devices) == "[]").then_some(())).await;
     for file in ["vapid.key", "subscriptions.json", "sent.json"] {
         let mode = std::fs::metadata(home.join(".config/acyclic/push").join(file))
             .unwrap()

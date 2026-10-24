@@ -109,8 +109,9 @@ origin; never a run. Up to 10 devices are kept, the oldest replaced first.
 
 After agents' writes, after syncs, and every minute besides, the server reads the list and, a few seconds later, sends
 each device one encrypted message (RFC 8291) naming what is new; a push service keeps it for a day. What the user's own
-writes through the app bring about is taken as seen. A device whose push service answers `404` or `410`, or that fails
-5 sends in a row, is dropped; when no device can be reached, the news stays untold and is tried again with backoff.
+writes through the app bring about is taken as seen. A device whose push service answers `404` or `410`, or refuses 5
+sends in a row as malformed or unauthorised, is dropped. Being offline, or the service failing or deferring a send,
+never drops a device: the news stays untold and is tried again with backoff, from 30 seconds up to 10 minutes.
 The VAPID key, the devices and the needs already told live in `~/.config/acyclic/push`, readable only by the user, so a
 restart tells nothing twice. Messages are signed (RFC 8292) with the server's origin behind Tailscale as the contact,
 or what `~/.config/acyclic/push/subject` holds (`mailto:…` or `https://…`). TLS uses the system's certificate

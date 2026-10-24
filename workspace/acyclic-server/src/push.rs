@@ -51,11 +51,19 @@ pub struct Settings {
     pub window: Duration,
     /// How often to look for news the server wasn't told of, such as the CLI's writes.
     pub every: Duration,
+    /// The first wait before trying again when no device could be reached; it doubles up to [`BACKOFF_MAX`].
+    pub backoff: Duration,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { transport: Transport::Https, subject: None, window: WINDOW, every: EVERY }
+        Self {
+            transport: Transport::Https,
+            subject: None,
+            window: WINDOW,
+            every: EVERY,
+            backoff: BACKOFF,
+        }
     }
 }
 
@@ -63,12 +71,12 @@ impl Default for Settings {
 const WINDOW: Duration = Duration::from_secs(3);
 /// How often the server looks for news without being told of any.
 const EVERY: Duration = Duration::from_secs(60);
-/// The first wait before trying again when no device could be reached; it doubles up to [`BACKOFF_MAX`].
 const BACKOFF: Duration = Duration::from_secs(30);
 const BACKOFF_MAX: Duration = Duration::from_secs(600);
 /// How many devices may subscribe; a new one past this replaces the oldest.
 const DEVICES: usize = 10;
-/// How many sends in a row may fail before a device is dropped.
+/// How many sends in a row a push service may refuse before its device is dropped. Sends that fail on the way, or that
+/// the service fails or defers, don't count: being offline for a while must not cost the user their devices.
 const FAILURES: u32 = 5;
 /// How long a push service keeps a message for a device that is away: a day.
 const TTL: u32 = 86_400;
@@ -82,7 +90,7 @@ pub struct Subscription {
     pub endpoint: String,
     /// The keys its messages are encrypted to.
     pub keys: Keys,
-    /// Sends in a row that failed.
+    /// Sends in a row its push service refused.
     #[serde(default)]
     pub failures: u32,
 }
@@ -242,12 +250,17 @@ async fn work(
     let mut ticks = tokio::time::interval(inner.settings.every);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticks.tick().await;
-    let mut backoff = BACKOFF;
+    let mut backoff = inner.settings.backoff;
+    // While backing off, looks wait for the retry, so an unreachable push service isn't sent to more often.
+    let mut resume = tokio::time::Instant::now();
     loop {
         let first = tokio::select! {
             trigger = triggers.recv() => match trigger { Some(trigger) => trigger, None => return },
             _ = ticks.tick() => Trigger::Look,
         };
+        if first == Trigger::Look && tokio::time::Instant::now() < resume {
+            continue;
+        }
         let mut seen = first == Trigger::Seen;
         if !seen {
             tokio::time::sleep(inner.settings.window).await;
@@ -264,11 +277,12 @@ async fn work(
         let done = Arc::clone(&inner);
         let _ = tokio::task::spawn_blocking(move || done.settle(&plan, &reached)).await;
         if told {
-            backoff = BACKOFF;
+            backoff = inner.settings.backoff;
         } else {
             // No device took it: the news stays untold, and the next look tries again.
             let again = again.clone();
             let wait = backoff;
+            resume = tokio::time::Instant::now() + wait;
             tokio::spawn(async move {
                 tokio::time::sleep(wait).await;
                 if let Some(again) = again.upgrade() {
@@ -292,8 +306,12 @@ struct Plan {
 impl Inner {
     /// Reads the list and decides; with `seen`, takes what is new as seen and plans nothing.
     fn plan(&self, seen: bool) -> Option<Plan> {
-        let _files = self.files.lock().ok()?;
-        let devices = self.devices();
+        // The files are held only to read and write them, not while the list is read, so a device can subscribe
+        // meanwhile.
+        let devices = {
+            let _files = self.files.lock().ok()?;
+            self.devices()
+        };
         if devices.is_empty() {
             // With no device, nothing is read, and what is on the list stays untold: the first device to subscribe
             // hears of it.
@@ -310,6 +328,7 @@ impl Inner {
             .map(|all| all.iter().filter(|entry| entry["notify"] == true).collect())
             .unwrap_or_default();
         let now: BTreeSet<String> = entries.iter().map(|entry| key(entry)).collect();
+        let _files = self.files.lock().ok()?;
         let told: BTreeSet<String> = self.load::<BTreeSet<String>>("sent.json").unwrap_or_default();
         if seen {
             let _ = self.save("sent.json", &now);
@@ -350,7 +369,8 @@ impl Inner {
         reached
     }
 
-    /// Records what the sends came to: the news told, and the devices that are gone or keep failing dropped.
+    /// Records what the sends came to: the news told, and the devices that are gone, or whose service keeps refusing
+    /// them, dropped.
     fn settle(&self, plan: &Plan, reached: &BTreeMap<String, StatusCode>) {
         let Ok(_files) = self.files.lock() else { return };
         let mut devices = self.devices();
@@ -358,9 +378,13 @@ impl Inner {
             match reached.get(&device.endpoint) {
                 Some(status) if status.is_success() => device.failures = 0,
                 Some(&StatusCode::NOT_FOUND | &StatusCode::GONE) => device.failures = FAILURES,
-                _ if plan.devices.iter().any(|sent| sent.endpoint == device.endpoint) => {
+                // Refused as malformed, unauthorised or too large: likely to stay so.
+                Some(status)
+                    if status.is_client_error() && *status != StatusCode::TOO_MANY_REQUESTS =>
+                {
                     device.failures += 1;
                 },
+                // Not sent, failed or deferred by the service: tried again later, and never counted.
                 _ => {},
             }
         }
