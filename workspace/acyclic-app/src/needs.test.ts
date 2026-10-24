@@ -29,8 +29,13 @@ describe("needView", () => {
   });
 
   it("approves a waiting thread naming how many items, with its heads to select", () => {
-    const waiting = needView({ kind: "awaiting-approval", thread: thread("u", ["z"]), counts: { open_members: 3 } });
-    expect(waiting.actions).toEqual([{ label: "Approve 3 items", command: approveCommand("u"), action: "approve" }]);
+    // Its members all told, as the thread's panel counts them, not only the open ones.
+    const waiting = needView({
+      kind: "awaiting-approval",
+      thread: { ...thread("u", ["z"]), counts: { members: 12 } },
+      counts: { open_members: 3 },
+    });
+    expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
     expect(waiting.items).toEqual(["z"]);
   });
 
@@ -54,5 +59,30 @@ describe("needView", () => {
     const loose = needView({ kind: "unthreaded", item: item("o"), fix: "acyclic item edit o --thread <THREAD>" });
     expect(loose.note).toBe("acyclic item edit o --thread <THREAD>");
     expect(needView({ kind: "something-new" }).text).toBe("something-new");
+  });
+
+  it("shows each question's own text, keyed by its id, so two in one thread stay apart", () => {
+    const asks = ["Which flag?", "Ship today?"].map((text, n) =>
+      needView({ kind: "question", id: `q${n}`, thread: thread("t"), class: "scope", text }),
+    );
+    expect(asks.map((one) => [one.key, one.text, one.threads])).toEqual([
+      ["question:q0", "Which flag?", ["t"]],
+      ["question:q1", "Ship today?", ["t"]],
+    ]);
+  });
+
+  it("names a new blocker and the threads a resource clash holds, to select", () => {
+    const blocked = needView({ kind: "new-blocker", item: item("a"), thread: thread("t"), blocker: item("b") });
+    expect(blocked).toMatchObject({ items: ["a", "b"], text: "A gained a new blocker since its approval: B" });
+    const clash = needView({
+      kind: "resource-clash",
+      resource: "gpu",
+      holders: [
+        { thread: thread("t"), holder: "x" },
+        { thread: thread("u"), holder: "y" },
+      ],
+    });
+    expect(clash).toMatchObject({ threads: ["t", "u"], key: "resource-clash:gpu" });
+    expect(clash.text).toMatch(/T, U$/);
   });
 });

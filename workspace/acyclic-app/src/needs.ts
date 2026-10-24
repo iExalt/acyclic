@@ -86,7 +86,8 @@ export function needView(need: Need): NeedView {
     }
     case "awaiting-approval": {
       const id = thread?.id ?? "";
-      const open = Number((need.counts as { open_members?: number } | undefined)?.open_members ?? 0);
+      // All its members, as the thread's panel counts them: approval covers the thread's whole scope.
+      const members = Number((need.thread as { counts?: { members?: number } } | undefined)?.counts?.members ?? 0);
       const heads = Array.isArray((need.thread as { heads?: unknown })?.heads)
         ? ((need.thread as { heads: string[] }).heads ?? [])
         : [];
@@ -96,7 +97,11 @@ export function needView(need: Need): NeedView {
         items: heads,
         text: `${thread === null ? id : titled(thread)} waits for your approval`,
         actions: [
-          { label: `Approve ${open} ${open === 1 ? "item" : "items"}`, command: approveCommand(id), action: "approve" },
+          {
+            label: `Approve ${members} ${members === 1 ? "item" : "items"}`,
+            command: approveCommand(id),
+            action: "approve",
+          },
         ],
       };
     }
@@ -122,13 +127,57 @@ export function needView(need: Need): NeedView {
         note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
       };
     }
+    case "question": {
+      const id = str(need.id);
+      return {
+        ...base,
+        key: `question:${id}`,
+        text: str(need.text) || "An agent asks a question",
+        note: "The app can't answer questions yet",
+      };
+    }
+    case "new-blocker": {
+      const blocker = row(need.blocker);
+      return {
+        ...base,
+        items: [...base.items, ...(blocker === null ? [] : [blocker.id])],
+        key: `new-blocker:${item?.id ?? ""}:${blocker?.id ?? ""}`,
+        text: `${item === null ? "An item" : titled(item)} gained a new blocker since its approval: ${blocker === null ? "?" : titled(blocker)}`,
+      };
+    }
+    case "resource-clash": {
+      const holders = Array.isArray(need.holders) ? need.holders : [];
+      const threads = holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null);
+      return {
+        ...base,
+        threads: threads.map((one) => one.id),
+        key: `resource-clash:${str(need.resource)}`,
+        text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(titled).join(", ")}`,
+        note: "The CLI settles this one: `acyclic needs` says how",
+      };
+    }
+    case "dangling":
+      return {
+        ...base,
+        key: `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`,
+        text: `${str(need.entity)} ${str(need.id)}: ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
+        note: "The CLI settles this one: `acyclic needs` says how",
+      };
+    case "unverified":
+      return {
+        ...base,
+        key: `unverified:${item?.id ?? ""}:${str(need.repository)}`,
+        text: `Can't check ${item === null ? "an item" : titled(item)}'s merge in ${str(need.repository)}: ${str(need.reason)}`,
+        note: "The CLI settles this one: `acyclic needs` says how",
+      };
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix) || str(need.resolve);
+      const ids = [str(need.id), ...base.items, ...base.threads, ...named.map((one) => one.id), str(need.remote)];
       return {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],
-        key: `${need.kind}:${[...base.items, ...base.threads, ...named.map((one) => one.id), str(need.resource), str(need.remote)].filter((one) => one !== "").join(":")}`,
+        key: `${need.kind}:${ids.filter((one) => one !== "").join(":")}`,
         text: describe(need.kind, item, thread, named),
         note: hint === "" ? "The CLI settles this one: `acyclic needs` says how" : hint,
       };
