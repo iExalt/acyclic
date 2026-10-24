@@ -59,19 +59,111 @@ body,
   position: absolute;
   inset: 0;
 }
-.inspector {
+/* The inspector, the add form and a mode's prompt: a sheet along the bottom on a phone, a pane on the right when wide. */
+.inspector,
+.sheet {
   position: absolute;
   inset: auto 0 0 0;
+  max-height: 45%;
+  overflow-y: auto;
   background: #1b2530ee;
   border-top: 1px solid #4a6378;
   padding: 8px 12px;
 }
-.inspector h2 {
+.inspector header {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+.inspector h2,
+.sheet h2 {
   font-size: 15px;
   margin: 0 0 4px;
+  flex: 1;
+}
+.inspector h3 {
+  font-size: 12px;
+  margin: 8px 0 2px;
+  color: #9fb3c4;
+}
+.facts {
+  margin: 2px 0;
+  font-size: 13px;
+}
+.links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  background: #24323f;
+  color: inherit;
+  border: 1px solid #4a6378;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+.notes {
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: #b8c8d6;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+button {
+  min-height: 32px;
+}
+/* While a mode waits for a tap on the Map, its prompt takes one line, so the Map stays free to tap. */
+.sheet.prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.sheet.add label {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.sheet.add input,
+.sheet.add select {
+  font: inherit;
+  font-size: 16px;
+  padding: 6px;
+  background: #101418;
+  color: inherit;
+  border: 1px solid #4a6378;
+}
+.sheet.add input[aria-invalid="true"] {
+  border-color: #ff8080;
+}
+.notice {
+  position: absolute;
+  inset: 8px 8px auto 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #3a2a1a;
+  border: 1px solid #ffd166;
+  padding: 6px 10px;
+  font-size: 13px;
+  z-index: 2;
 }
 .status {
   padding: 16px;
+}
+/* What fills a row of buttons, such as a prompt's text. */
+.grow {
+  flex: 1;
 }
 @media (min-width: 900px) {
   .shell {
@@ -90,9 +182,11 @@ body,
   .thread {
     text-align: left;
   }
-  .inspector {
+  .inspector,
+  .sheet.add {
     inset: 0 0 0 auto;
     width: 320px;
+    max-height: none;
     border-top: none;
     border-left: 1px solid #4a6378;
   }

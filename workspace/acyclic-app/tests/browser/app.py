@@ -4,7 +4,8 @@
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
 the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
-thread's members lit. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, and an agent's note is
+shown as text. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -136,6 +137,28 @@ def tap_title(page, view, id):
         page.mouse.click(x, y)
 
 
+def centre(page, id):
+    """Brings a node to full size in the middle of the screen, as a person would before tapping it: on a phone, the
+    fitted plan draws it too small to tap."""
+    page.get_by_test_id("map").evaluate(
+        "(m, id) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); }", id
+    )
+
+
+def tap_middle(page, view, id):
+    """Taps the middle of a node where it is drawn, after bringing it to full size."""
+    centre(page, id)
+    middle = page.get_by_test_id("map").evaluate(
+        "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+        id,
+    )
+    if view.get("has_touch"):
+        page.touchscreen.tap(middle["x"], middle["y"])
+    else:
+        page.mouse.click(middle["x"], middle["y"])
+
+
 def settled_corner(page, id):
     """Where a box's top-left corner is drawn once it has stopped moving: the same for 300 ms of frames.
 
@@ -209,11 +232,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
         (id for id in plan.default() if plan.depth(id) == 1 and plan.children(id)),
         key=lambda id: (id != hint, -len(plan.children(id)), id),
     ):
-        # Bring it to full size in the middle of the screen first, as a person would: on a phone, the fitted plan
-        # draws it too small to tap.
-        page.get_by_test_id("map").evaluate(
-            "(m, id) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); }", box
-        )
+        centre(page, box)
         placed = page.get_by_test_id("map").evaluate(corner, box)
         # Where it settles after expanding is where it starts collapsing.
         before = settled_corner(page, box)
@@ -259,6 +278,150 @@ def map_journey(page, view, plan, name, failures, hint=None):
     return box
 
 
+# A note as an agent might write one, which must show as text and never run.
+HOSTILE = '<img src=x onerror="window.pwned = true">'
+
+
+def item(env, id):
+    """The item as the tracker shows it, or None while there is no such item."""
+    out = subprocess.run(
+        [ACYCLIC, "show", id], env=env, capture_output=True, text=True, check=False
+    )
+    return json.loads(out.stdout)["data"][0] if out.returncode == 0 else None
+
+
+def check_tracker(env, id, check, what, failures, name):
+    """Checks that the tracker shows an edit the app has already shown: polling the CLI before then would contend with
+    the server for the clone's lock."""
+    if (row := item(env, id)) is None or not check(row):
+        failures.append(f"{name}: the tracker doesn't show {what}")
+
+
+def wait_inspector(page, selector, state="visible"):
+    page.locator(f"[data-testid=inspector] {selector}").first.wait_for(
+        state=state, timeout=10_000
+    )
+
+
+def held(page, id, before, what, name, failures):
+    after = settled_corner(page, id)
+    shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
+    if shift > 2:
+        failures.append(f"{name}: {what} moved {id} by {shift:.0f} px on screen")
+
+
+def edit_journey(page, view, env, plan, box, name, failures):
+    """Adds, moves, links and unlinks on the Map, as the phone would, checking the Map and then the tracker after each.
+
+    Works in `box`, a box map_journey has seen laid out: it is opened, and two of its leaves are used. Expects the
+    first leaf's notes to be HOSTILE."""
+    leaves = sorted(id for id in plan.children(box) if not plan.children(id))[:2]
+    if len(leaves) < 2:
+        failures.append(f"{name}: {box} has fewer than two leaves to edit around")
+        return
+    first, second = leaves
+    centre(page, box)
+    tap_title(page, view, box)
+    base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
+    # Selecting shows the item's notes, as text.
+    tap_middle(page, view, first)
+    notes = page.locator("[data-testid=inspector] [data-testid=notes]")
+    notes.get_by_text(HOSTILE, exact=True).wait_for(timeout=10_000)
+    if notes.locator("img").count() or page.evaluate("window.pwned === true"):
+        failures.append(f"{name}: the inspector ran a note as markup")
+
+    # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
+    added = "journey-added"
+    before = settled_corner(page, first)
+    page.locator("[data-action=add-child]").click()
+    form = page.get_by_test_id("add-form")
+    form.locator("input[name=title]").fill("Journey: added!")
+    if form.locator("input[name=id]").input_value() != added:
+        failures.append(
+            f"{name}: the add form didn't make the id {added} from the title"
+        )
+    form.locator("button[type=submit]").click()
+    wait_inspector(page, f".facts [data-select='{first}']")
+    wait_drawn(page, base + 1)
+    held(page, first, before, "adding inside it", name, failures)
+    check_tracker(
+        env,
+        added,
+        lambda row: row["parent"] == first,
+        f"{added} under {first}",
+        failures,
+        name,
+    )
+
+    # Move it into the second leaf, picked on the Map: the prompt leaves the Map free, and the new parent holds still.
+    page.locator("[data-action=move]").click()
+    prompt = page.get_by_test_id("prompt").bounding_box()
+    if prompt is None or prompt["height"] > 60:
+        failures.append(f"{name}: the move prompt covers the Map: {prompt}")
+    centre(page, second)
+    before = settled_corner(page, second)
+    tap_middle(page, view, second)
+    wait_inspector(page, f".facts [data-select='{second}']")
+    wait_drawn(page, base + 1)
+    held(page, second, before, "moving an item into it", name, failures)
+    inside = page.get_by_test_id("map").evaluate(
+        "(m, [child, parent]) => { const c = m.cy.getElementById(child).boundingBox();"
+        " const p = m.cy.getElementById(parent).boundingBox();"
+        " return c.x1 >= p.x1 && c.x2 <= p.x2 && c.y1 >= p.y1 && c.y2 <= p.y2; }",
+        [added, second],
+    )
+    if not inside:
+        failures.append(f"{name}: {added} isn't drawn inside {second} after the move")
+    check_tracker(
+        env,
+        added,
+        lambda row: row["parent"] == second,
+        f"{added} under {second}",
+        failures,
+        name,
+    )
+
+    # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
+    edge = f"{first}->{added}"
+    page.locator("[data-action=waits-for]").click()
+    tap_middle(page, view, first)
+    wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
+    page.wait_for_function(
+        "([edge, source]) => { const e = document.querySelector('[data-testid=map]').cy.getElementById(edge);"
+        " return e.nonempty() && e.source().id() === source; }",
+        arg=[edge, first],
+        timeout=10_000,
+    )
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [first],
+        f"{added} waiting for {first}",
+        failures,
+        name,
+    )
+    # Unlinked from the inspector: gone from the Map and the tracker.
+    page.locator("[data-testid=waits-for] .unlink").click()
+    wait_inspector(page, "[data-testid=waits-for]", state="detached")
+    page.wait_for_function(
+        "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
+        arg=edge,
+        timeout=10_000,
+    )
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [],
+        f"{added} no longer waiting",
+        failures,
+        name,
+    )
+    page.screenshot(path=SHOTS / f"app-{name}-edited.png")
+    print(
+        f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
+    )
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -292,10 +455,10 @@ def main():
                     "link"
                 ]
 
-            return plan, link, fresh
+            return plan, link, fresh, env
 
         try:
-            plan, link, fresh = serve(350)
+            plan, link, fresh, env = serve(350)
             chromium = playwright.chromium.launch()
             hint = None
             for name, view in VIEWS.items():
@@ -311,6 +474,15 @@ def main():
                 installable(context, page, origin, name, failures)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
+                if name == "phone" and hint is not None:
+                    # Edits run once, on the phone the app is used on; the plan is read again after them.
+                    leaf = min(
+                        id for id in plan.children(hint) if not plan.children(id)
+                    )
+                    run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
+                    page.get_by_role("button", name="Refresh").click()
+                    edit_journey(page, view, env, plan, hint, name, failures)
+                    plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
                     failures.append(
@@ -330,7 +502,7 @@ def main():
             context.close()
             webkit.close()
 
-            large, link, _ = serve(3500)
+            large, link, _, _ = serve(3500)
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )

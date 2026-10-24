@@ -593,3 +593,45 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
     let (status, sent, _) = encodings(Method::GET, "/index.html", &again, "");
     assert_eq!((status, sent), (StatusCode::NOT_MODIFIED, Vec::<String>::new()));
 }
+
+#[test]
+fn every_command_the_app_sends_runs_through_the_api() {
+    // The app's own list of what it sends, read when the test runs: the crate never builds it in, so packaging the
+    // crate doesn't reach outside it.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../acyclic-app/src/commands.examples.json");
+    let examples: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = dir.path().join("tracker");
+    let run = |command: Value| {
+        let command: Command = serde_json::from_value(command).unwrap();
+        assert_eq!(acyclic_cli::call(command, tracker.clone(), true, &Env::default()).0, 0);
+    };
+    run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    run(json!({"item": {"add": {"item": "a", "title": "A"}}}));
+    run(json!({"item": {"add": {"item": "b", "title": "B", "parent": "a"}}}));
+    run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
+    let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    for example in examples["examples"].as_array().unwrap() {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/command")
+            .header("host", HOST_NAME)
+            .header(IDENTITY, LOGIN)
+            .header("content-type", "application/json")
+            .body(Body::from(example["command"].to_string()))
+            .unwrap();
+        let (status, body) = runtime.block_on(async {
+            let response = router.clone().oneshot(request).await.unwrap();
+            (response.status(), to_bytes(response.into_body(), usize::MAX).await.unwrap())
+        });
+        let envelope: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            (status, &envelope["ok"]),
+            (StatusCode::OK, &json!(true)),
+            "{}: {envelope}",
+            example["name"]
+        );
+    }
+}

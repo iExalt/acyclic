@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, items, settle } from "./api";
+import { CommandError, command, items, settle, threads } from "./api";
+import { examples } from "./commands.examples.json";
+
+/** The command the server's tests run under this name. */
+const example = (name: string) => examples.find((one) => one.name === name)?.command;
 
 /** An item as `show` returns it, unconflicted. */
 function raw(id: string) {
@@ -9,8 +13,9 @@ function raw(id: string) {
     parent: null,
     thread: null,
     state: "backlog",
+    notes: null,
     archived: false,
-    links: { waits_for: [], relates_to: [] },
+    links: { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] },
   };
 }
 
@@ -53,11 +58,32 @@ describe("items", () => {
     });
     await expect(items(full.fetcher)).resolves.toEqual(shown.map(settle));
     // A command without arguments goes as its bare name, as the server parses it.
-    expect(full.sent).toEqual(["list", { show: { items: ["a", "b"] } }]);
+    expect(full.sent).toEqual([example("list"), example("show")]);
 
     const empty = server({ list: { ok: true, data: { items: [] } } });
     await expect(items(empty.fetcher)).resolves.toEqual([]);
     expect(empty.sent).toHaveLength(1);
+  });
+});
+
+describe("threads", () => {
+  it("lists threads, titling one with a conflicted title by its id", async () => {
+    const { fetcher, sent } = server({
+      thread: {
+        ok: true,
+        data: {
+          threads: [
+            { id: "t", title: "T" },
+            { id: "u", title: { conflict: ["U", "V"] } },
+          ],
+        },
+      },
+    });
+    await expect(threads(fetcher)).resolves.toEqual([
+      { id: "t", title: "T" },
+      { id: "u", title: "u" },
+    ]);
+    expect(sent).toEqual([example("threads")]);
   });
 });
 
