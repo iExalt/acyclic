@@ -29,8 +29,9 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
-use tower_http::services::ServeDir;
+use tower::ServiceExt as _;
 
+pub mod app;
 pub mod code;
 pub mod session;
 
@@ -46,7 +47,7 @@ pub struct Config {
     pub tracker: PathBuf,
     /// The environment every command runs in.
     pub env: Env,
-    /// The directory of static files, if any.
+    /// The directory of the app's files, if any, in place of the copy built into the binary.
     pub static_dir: Option<PathBuf>,
 }
 
@@ -744,11 +745,12 @@ async fn run_status(
     }
 }
 
-/// Forbids every page to frame any response, refusals included: a page from another local server is the same site as
-/// the app's, so a paired browser would send its cookie into a frame, and the frame could be clicked into writes.
+/// Gives every response, refusals included, the app's content policy ([`app::POLICY`]), which among other things
+/// forbids every page to frame it: a page from another local server is the same site as the app's, so a paired
+/// browser would send its cookie into a frame, and the frame could be clicked into writes.
 async fn unframed(mut response: Response) -> Response {
     let headers = response.headers_mut();
-    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
+    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(app::POLICY));
     headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     response
 }
@@ -761,10 +763,9 @@ pub fn router(config: Config, access: Access) -> Router {
 fn routes(server: Arc<Server>, access: Access) -> Router {
     let mut router =
         Router::new().route("/api/command", post(command)).route("/api/run", get(run_status));
-    if let Some(dir) = &server.config.static_dir
-        && !matches!(access, Access::Run { .. })
-    {
-        router = router.fallback_service(ServeDir::new(dir));
+    // Runs have no use for the app, and get none.
+    if !matches!(access, Access::Run { .. }) {
+        router = router.fallback(files);
     }
     if let Access::Run { code: Some(_), .. } = &access {
         router = router.merge(code::routes());
@@ -779,6 +780,20 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
         .layer(middleware::from_fn_with_state(listener.clone(), guard))
         .layer(middleware::map_response(unframed))
         .with_state(listener)
+}
+
+/// The app's files: from `--static`'s directory if the server has one, else the copy built into the binary.
+async fn files(State(listener): State<Arc<Listener>>, request: Request) -> Response {
+    let path = request.uri().path().to_owned();
+    let mut response = match &listener.server.config.static_dir {
+        Some(dir) => match app::dir(dir).oneshot(request).await {
+            Ok(response) => response.into_response(),
+            Err(never) => match never {},
+        },
+        None => app::embedded(&request),
+    };
+    app::cache(&path, &mut response);
+    response
 }
 
 fn failed(what: &str, err: impl std::fmt::Display) -> CliError {
@@ -812,6 +827,9 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
             options.listen
         );
     }
+    if let Some(dir) = &options.static_dir {
+        app::check_dir(dir)?;
+    }
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone() };
     run(config, options.sync_every, options.listen, Vec::new(), |address, _| {
         Ok((access, json!({"listening": address.to_string()})))
@@ -834,6 +852,9 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
         let link = link(options.port, &token, env)?;
         println!("{}", json!({"ok": true, "data": {"link": link}}));
         return Ok(());
+    }
+    if let Some(dir) = &options.static_dir {
+        app::check_dir(dir)?;
     }
     let (token, path) = session::open(home.as_ref(), options.rotate)?;
     let tailscale = match (options.tailscale, &options.login, &options.host) {

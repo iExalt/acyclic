@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "acyclic-app-assets"
+version = "0.2.0"
+
+[[package]]
 name = "acyclic-cli"
 version = "0.2.0"
 dependencies = [
@@ -84,6 +88,7 @@ dependencies = [
 name = "acyclic-server"
 version = "0.2.0"
 dependencies = [
+ "acyclic-app-assets",
  "acyclic-cli",
  "acyclic-core",
  "acyclic-guard",

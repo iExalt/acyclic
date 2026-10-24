@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>acyclic</title>
+  <rect width="512" height="512" fill="#101418"/>
+  <g transform="translate(256 256) scale(0.7) translate(-256 -256)">
+    <g fill="none" stroke="#7cc4ff" stroke-width="28" stroke-linecap="round">
+      <path d="M150 170 L256 340 L362 170"/>
+    </g>
+    <g fill="#7cc4ff">
+      <circle cx="150" cy="170" r="46"/>
+      <circle cx="362" cy="170" r="46"/>
+      <circle cx="256" cy="340" r="46"/>
+    </g>
+  </g>
+</svg>

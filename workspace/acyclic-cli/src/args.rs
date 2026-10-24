@@ -321,8 +321,8 @@ pub struct Serve {
     /// The origin a browser's request must come from; `https://<host>` by default.
     #[arg(long)]
     pub origin: Option<String>,
-    /// A directory of static files to serve, such as the built app. Symbolic links in it are followed, so it should
-    /// hold only what the server's own build put there.
+    /// A directory holding the built app, to serve in place of the copy built into the binary; it must have an
+    /// `index.html`. Symbolic links in it are followed, so it should hold only what the server's own build put there.
     #[arg(long = "static")]
     pub static_dir: Option<PathBuf>,
     /// Seconds between syncs with the clone's `origin`; 0 never syncs. Writes also push when the clone's
@@ -337,8 +337,8 @@ pub struct Up {
     /// The port to listen on, on 127.0.0.1 only; 0 picks a free one.
     #[arg(long, default_value_t = 7478)]
     pub port: u16,
-    /// A directory of static files to serve, such as the built app. Symbolic links in it are followed, so it should
-    /// hold only what acyclic's own build put there.
+    /// A directory holding the built app, to serve in place of the copy built into the binary; it must have an
+    /// `index.html`. Symbolic links in it are followed, so it should hold only what acyclic's own build put there.
     #[arg(long = "static")]
     pub static_dir: Option<PathBuf>,
     /// Seconds between syncs with the clone's `origin`; 0, the default, never syncs, so the clone syncs only when

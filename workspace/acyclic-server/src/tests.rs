@@ -1,6 +1,5 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Method;
-use tower::ServiceExt as _;
 
 use serde_json::json;
 
@@ -194,6 +193,18 @@ fn a_runners_listener_lets_in_a_valid_run_token_by_any_name_and_no_browser() {
     assert_eq!(access.same_origin(&headers(&[json]), &run), Ok(()));
     let from = ("origin", "http://127.0.0.1:7479");
     assert_eq!(access.same_origin(&headers(&[json, from]), &run), Err(Refusal::WrongOrigin));
+    // A run gets no app, neither the copy built in nor a directory's.
+    let now = acyclic_cli::now(&Env::default());
+    let live = format!("Bearer {}", signer.mint("r1", "t1", now, 600_000).unwrap());
+    let www = tempfile::tempdir().unwrap();
+    std::fs::write(www.path().join("index.html"), "the app").unwrap();
+    for dir in [None, Some(www.path().to_owned())] {
+        let router = router(config(dir.clone()), access.clone());
+        for path in ["/", "/index.html"] {
+            let (status, _) = send(&router, Method::GET, path, &[("authorization", &live)], "");
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path} with {dir:?}");
+        }
+    }
 }
 
 #[test]
@@ -300,7 +311,7 @@ fn every_route_is_behind_the_listeners_check() {
     // No page may frame the app, or a refusal.
     for pairs in [vec![host, ("authorization", bearer.as_str())], vec![host]] {
         let (_, headers) = exchange(&router, "/index.html", &pairs);
-        assert_eq!(headers[CONTENT_SECURITY_POLICY], "frame-ancestors 'none'");
+        assert_eq!(headers[CONTENT_SECURITY_POLICY], app::POLICY);
         assert_eq!(headers[X_FRAME_OPTIONS], "DENY");
     }
 }

@@ -25,11 +25,18 @@ build embeds them in the binary. Each page carries a notice naming the renderer'
   `071914164d0f6d53e5c26a10a220230d4ae8d37ed0f2263fbf072266f0af3a0a`.
 - File: `package/dist/mermaid.min.js`, SHA-256 `a8a6a6f805b074a8261a2825c86f99c8054acb3b35f50bb7e24a4f9f2c3c3b9f`.
 
+## The app
+
+The binary embeds the app, built by `mise run build:app` from `workspace/acyclic-app`, whose packages are pinned in its
+`pnpm-lock.yaml`. Its bundle holds React and React DOM (MIT License) among others; the build lists every package it
+bundled, with its licence, in the app's `licenses.txt`, which the server also serves.
+
 ## Release binaries
 
 The Linux binaries are linked statically against musl, under the MIT License (<https://musl.libc.org>). Each release
 archive carries `THIRD_PARTY_NOTICES.md`: this file followed by the licences of the Rust crates the binary links,
-collected by `mise run notices` ([cargo-about](https://github.com/EmbarkStudios/cargo-about)).
+collected by `mise run notices` ([cargo-about](https://github.com/EmbarkStudios/cargo-about)), and those of the app's
+bundled packages.
 
 ## The server's image
 

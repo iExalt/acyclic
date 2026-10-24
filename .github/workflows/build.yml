@@ -42,7 +42,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The build needs only Rust and cargo-about.
+  # The build needs only Rust and cargo-about, and Node and pnpm for the app.
   MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
 
 jobs:
@@ -58,6 +58,7 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       ACYCLIC_REQUIRE_ASSETS: "1"
+      ACYCLIC_REQUIRE_APP: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,6 +69,7 @@ jobs:
           key: ${{ matrix.target }}
       - run: rustup target add "$TARGET"
       - run: mise run vendor:graph
+      - run: mise run build:app
       - run: cargo build --release --locked -p acyclic --target "$TARGET"
       - name: Check the binary runs, and is static on Linux
         run: |

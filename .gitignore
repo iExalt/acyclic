@@ -31,3 +31,5 @@ target
 
 # Release builds staged for the server's image
 /dist/
+/workspace/acyclic-app/node_modules/
+/workspace/acyclic-app/dist/

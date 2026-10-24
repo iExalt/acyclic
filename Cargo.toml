@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["workspace/*"]
-exclude = ["workspace/template"]
+# The app is TypeScript, built by pnpm (mise run build:app).
+exclude = ["workspace/template", "workspace/acyclic-app"]
 
 [workspace.package]
 version = "0.2.0"
@@ -9,6 +10,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+acyclic-app-assets = { path = "workspace/acyclic-app-assets" }
 acyclic-cli = { path = "workspace/acyclic-cli" }
 acyclic-core = { path = "workspace/acyclic-core" }
 acyclic-fixtures = { path = "workspace/acyclic-fixtures" }

@@ -1,6 +1,6 @@
 name: CI
 
-# Every pull request, where its three checks must pass before a merge, and every push to main.
+# Every pull request, where its four checks must pass before a merge, and every push to main.
 on:
   push:
     branches: [main]
@@ -17,7 +17,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # The checks need only Rust, nextest and Gitleaks; skip the rest of mise.toml's tools.
-  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
+  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about,node,pnpm
 
 jobs:
   check:
@@ -46,11 +46,28 @@ jobs:
           key: graph-renderers-${{ hashFiles('scripts/vendor-graph.pins') }}
       - run: mise run check:integration
 
+  app:
+    name: mise run check:app
+    runs-on: ubuntu-latest
+    env:
+      # The app's check needs only Node and pnpm.
+      MISE_DISABLE_TOOLS: rust,python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,podman,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - id: pnpm
+        run: echo "store=$(pnpm --dir workspace/acyclic-app store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('workspace/acyclic-app/pnpm-lock.yaml') }}
+      - run: mise run check:app
+
   browser:
     name: mise run check:browser
     runs-on: ubuntu-latest
     env:
-      # Python and uv run Playwright here.
+      # Python and uv run Playwright here, and Node and pnpm build the app.
       MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
       PLAYWRIGHT_DEPS: --with-deps
     steps:
@@ -61,6 +78,12 @@ jobs:
         with:
           path: workspace/acyclic-cli/assets/graph
           key: graph-renderers-${{ hashFiles('scripts/vendor-graph.pins') }}
+      - id: pnpm
+        run: echo "store=$(pnpm --dir workspace/acyclic-app store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('workspace/acyclic-app/pnpm-lock.yaml') }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
