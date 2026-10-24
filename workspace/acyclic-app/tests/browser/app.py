@@ -4,8 +4,10 @@
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
 the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
-thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, and an agent's note is
-shown as text. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
+as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
+thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
+are set. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -97,7 +99,8 @@ class Plan:
         return len(drawn)
 
 
-def tracker(directory, env, items):
+def tracker(directory, env, items, remote=None):
+    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
     plan.write_text(
         subprocess.run(
@@ -107,8 +110,11 @@ def tracker(directory, env, items):
             check=True,
         ).stdout
     )
-    run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac")
+    remote_args = [] if remote is None else ["--remote", str(remote)]
+    run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     run(env, "--as-user", "import", str(plan))
+    if remote is not None:
+        run(env, "sync")
     return Plan(env)
 
 
@@ -422,6 +428,183 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def in_open_view(page, id):
+    """Whether a node is drawn wholly inside the Map and clear of the sheet or pane over it, once the Map settles."""
+    settled_corner(page, id)
+    return page.get_by_test_id("map").evaluate(
+        """(m, id) => {
+            const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+            const r = m.getBoundingClientRect();
+            const s = m.parentElement.querySelector('.inspector, .sheet')?.getBoundingClientRect();
+            const box = { x1: r.left + b.x1, y1: r.top + b.y1, x2: r.left + b.x2, y2: r.top + b.y2 };
+            const clear = !s || box.x2 <= s.left || box.y2 <= s.top || box.x1 >= s.right || box.y1 >= s.bottom;
+            return clear && box.x1 >= r.left && box.y1 >= r.top && box.x2 <= r.right && box.y2 <= r.bottom;
+        }""",
+        id,
+    )
+
+
+def form_journey(page, view, env, remote, id, name, failures):
+    """Edits the selected item's fields, settles a conflict two clones wrote, and reopens it, as the phone would."""
+    inspector = page.get_by_test_id("inspector")
+    # Fields: only what changed is sent.
+    page.locator("[data-action=edit]").click()
+    form = page.get_by_test_id("item-form")
+    form.locator("input[name=title]").fill("Edited in the app")
+    form.locator("select[name=size]").select_option("m")
+    form.locator("textarea[name=notes]").fill("Plain notes")
+    form.locator("button[type=submit]").click()
+    inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
+    if not in_open_view(page, id):
+        failures.append(f"{name}: after saving, {id} is off the Map or under the sheet")
+    check_tracker(
+        env,
+        id,
+        lambda row: (
+            (row["title"], row["size"], row["notes"])
+            == ("Edited in the app", "m", "Plain notes")
+        ),
+        f"{id}'s new fields",
+        failures,
+        name,
+    )
+
+    # A conflict: a second clone and the server's own write the title apart, and both sync. `up` never syncs, so its
+    # clone is synced here first, for the second clone to start from what the app wrote.
+    run(env, "sync")
+    other = {
+        **env,
+        "ACYCLIC_TRACKER": str(Path(env["ACYCLIC_TRACKER"]).parent / "other"),
+    }
+    run(
+        other,
+        "init",
+        other["ACYCLIC_TRACKER"],
+        "--replica",
+        "other",
+        "--remote",
+        str(remote),
+    )
+    run(other, "sync")
+    run(other, "--as-user", "item", "edit", id, "--title", "Title from the other clone")
+    run(env, "--as-user", "item", "edit", id, "--title", "Title from this clone")
+    run(other, "sync")
+    run(env, "sync")
+    page.get_by_role("button", name="Refresh").click()
+    conflict = page.locator("[data-testid=conflicts] [data-conflict=title]")
+    conflict.wait_for(timeout=10_000)
+    conflict.locator("[data-keep='Title from the other clone']").click()
+    page.get_by_test_id("conflicts").wait_for(state="detached", timeout=10_000)
+    inspector.get_by_role("heading", name="Title from the other clone").wait_for(
+        timeout=10_000
+    )
+    check_tracker(
+        env,
+        id,
+        lambda row: row["title"] == "Title from the other clone",
+        f"{id}'s conflict settled",
+        failures,
+        name,
+    )
+    needs = json.loads(run(env, "needs"))["data"]
+    if id in json.dumps(needs):
+        failures.append(
+            f"{name}: acyclic needs still lists {id} after the conflict was settled"
+        )
+
+    # Reopen: finished elsewhere, reopened here.
+    run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
+    page.get_by_role("button", name="Refresh").click()
+    page.locator("[data-action=reopen]").click()
+    page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
+    check_tracker(
+        env, id, lambda row: row["state"] != "done", f"{id} reopened", failures, name
+    )
+    page.screenshot(path=SHOTS / f"app-{name}-forms.png")
+    print(
+        f"{name}: edited {id}'s fields, settled a conflict two clones wrote, and reopened it"
+    )
+
+
+def settled_control(page, selector, prop, value):
+    """Waits until a control shows `value` and is enabled again, once the edit it sent is saved and read back."""
+    page.wait_for_function(
+        "([selector, prop, value]) => { const c = document.querySelector(selector);"
+        " return c && !c.disabled && c[prop] === value; }",
+        arg=[selector, prop, value],
+        timeout=10_000,
+    )
+
+
+def thread_journey(page, env, plan, thread, name, failures):
+    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level, its
+    project-management flag and the global level, checking the panel and then the tracker."""
+    panel = page.get_by_test_id("thread-panel")
+    # Picking a thread already picked unpicks it.
+    pick = page.locator(f"[data-thread='{thread}']")
+    pick.click()
+    if pick.get_attribute("aria-pressed") != "true":
+        pick.click()
+
+    def shown():
+        return json.loads(run(env, "thread", "show", thread))["data"][0]
+
+    # Approve, naming what it approves; revoke first if the fixture approved it already.
+    if (
+        panel.locator("[data-action=revoke]")
+        .or_(panel.locator("[data-action=approve]"))
+        .first.get_attribute("data-action")
+        == "revoke"
+    ):
+        panel.locator("[data-action=revoke]").click()
+    approve = panel.locator("[data-action=approve]")
+    members = len(shown()["members"])
+    if approve.inner_text() != f"Approve {members} items":
+        failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
+    approve.click()
+    panel.locator("[data-action=revoke]").wait_for(timeout=10_000)
+    # An agent proposes two items join the approved thread: one is kept, one dropped.
+    outside = sorted(id for id, row in plan.items.items() if row["thread"] != thread)[
+        :2
+    ]
+    for id in outside:
+        run(env, "item", "edit", id, "--thread", thread)
+    page.get_by_role("button", name="Refresh").click()
+    rows = panel.locator("[data-proposal]")
+    rows.nth(1).wait_for(timeout=10_000)
+    first = rows.filter(has_text=plan.items[outside[0]]["title"])
+    first.locator("[data-action=keep]").click()
+    first.wait_for(state="detached", timeout=10_000)
+    rows.locator("[data-action=drop]").first.click()
+    panel.get_by_test_id("proposals").wait_for(state="detached", timeout=10_000)
+    # Its own level, its project-management flag, and the global level.
+    panel.locator("select[name=level]").select_option("everything")
+    settled_control(
+        page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
+    )
+    # The box shows the tracker's flag, so it ticks once the edit is saved and read back, not on the tap.
+    panel.locator("input[name=pm]").click()
+    settled_control(page, "[data-testid=thread-panel] input[name=pm]", "checked", True)
+    page.get_by_test_id("global-level").select_option("everything")
+    settled_control(page, "[data-testid=global-level]", "value", "everything")
+    after = shown()
+    if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
+        failures.append(
+            f"{name}: the tracker shows {thread} as {after['approved'], after['level'], after['pm']}"
+        )
+    threads_of = {
+        id: json.loads(run(env, "show", id))["data"][0]["thread"] for id in outside
+    }
+    if threads_of != {outside[0]: thread, outside[1]: plan.items[outside[1]]["thread"]}:
+        failures.append(f"{name}: keep and drop left {threads_of}")
+    if json.loads(run(env, "level"))["data"]["global"] != "everything":
+        failures.append(f"{name}: the global level didn't change")
+    page.screenshot(path=SHOTS / f"app-{name}-thread-panel.png")
+    print(
+        f"{name}: approved {thread}, kept and dropped proposals, and set its level, its flag and the global level"
+    )
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -438,7 +621,12 @@ def main():
                 "ACYCLIC_TRACKER": str(directory / f"tracker-{items}"),
                 "ACYCLIC_ACTOR": "session/browser",
             }
-            plan = tracker(directory, env, items)
+            # The small tracker syncs with an origin, so the journeys can write a conflict from a second clone.
+            remote = None
+            if items < 1000:
+                remote = directory / f"origin-{items}.git"
+                subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            plan = tracker(directory, env, items, remote)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
@@ -455,10 +643,10 @@ def main():
                     "link"
                 ]
 
-            return plan, link, fresh, env
+            return plan, link, fresh, env, remote
 
         try:
-            plan, link, fresh, env = serve(350)
+            plan, link, fresh, env, remote = serve(350)
             chromium = playwright.chromium.launch()
             hint = None
             for name, view in VIEWS.items():
@@ -482,6 +670,10 @@ def main():
                     run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
                     page.get_by_role("button", name="Refresh").click()
                     edit_journey(page, view, env, plan, hint, name, failures)
+                    form_journey(
+                        page, view, env, remote, "journey-added", name, failures
+                    )
+                    thread_journey(page, env, plan, "t0", name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
@@ -502,7 +694,7 @@ def main():
             context.close()
             webkit.close()
 
-            large, link, _, _ = serve(3500)
+            large, link, _, _, _ = serve(3500)
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )

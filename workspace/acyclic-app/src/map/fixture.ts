@@ -14,6 +14,8 @@ export function item(id: string, parent: string | null = null, waitsFor: string[
     thread: null,
     state: "backlog",
     notes: null,
+    gate: null,
+    size: null,
     archived: false,
     links: { waits_for: waitsFor, waited_on_by: [], relates_to: [], related_from: [] },
     conflicts: {},

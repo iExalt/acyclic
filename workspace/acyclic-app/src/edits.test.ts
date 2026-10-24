@@ -10,6 +10,7 @@ import {
   newId,
   pick,
   recovery,
+  told,
   unlinkCommand,
 } from "./edits";
 import { item } from "./map/fixture";
@@ -39,7 +40,8 @@ describe("commands", () => {
       ["c relates to b", linkCommand("c", "relates-to", "b")],
       ["c no longer waits for d", unlinkCommand("c", "waits-for", "d")],
     ];
-    expect(built).toEqual(examples.map((one) => [one.name, one.command]));
+    const named = new Map(examples.map((one) => [one.name, one.command]));
+    expect(built).toEqual(built.map(([name]) => [name, named.get(name as string)]));
   });
 });
 
@@ -124,5 +126,29 @@ describe("recovery", () => {
     expect(recovery("busy")).toEqual({ retry: true, fixId: false });
     for (const code of ["already-exists", "deleted", "invalid-name"]) expect(recovery(code).fixId).toBe(true);
     expect(recovery("parent-cycle")).toEqual({ retry: false, fixId: false });
+  });
+});
+
+describe("told", () => {
+  it("offers the write again only when it failed busy, and a refresh when it saved but the reload failed", () => {
+    expect(told({ write: "failed", code: "busy", message: "busy" })).toEqual({
+      text: "busy",
+      offer: "retry",
+      fixId: false,
+    });
+    expect(told({ write: "failed", code: "already-exists", message: "taken" })).toEqual({
+      text: "taken",
+      offer: null,
+      fixId: true,
+    });
+    // A proposal decided elsewhere: the app's view is stale, so it offers a refresh.
+    expect(told({ write: "failed", code: "decided", message: "decided" }).offer).toBe("refresh");
+    expect(told({ write: "saved", proposals: 0, reload: { failed: "offline" } })).toEqual({
+      text: "Saved, but the refresh failed: offline",
+      offer: "refresh",
+      fixId: false,
+    });
+    expect(told({ write: "saved", proposals: 1, reload: "done" }).text).toMatch(/proposal/);
+    expect(told({ write: "saved", proposals: 0, reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
   });
 });

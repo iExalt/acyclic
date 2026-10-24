@@ -341,6 +341,7 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
             edit(field, true)
         },
         ("thread", "autonomy") => edit("level", true),
+        ("thread", "pm-flag") => Some(format!("acyclic thread edit {id} --pm|--no-pm --as-user")),
         ("repository", "default-branch") => edit("default-branch", false),
         ("repository", "public") => Some(format!("acyclic repo edit {id} --public|--private")),
         ("item", "evidence") => Some(format!(
@@ -877,6 +878,19 @@ mod tests {
                 follows_the_conventions(entry, "needs");
             }
         });
+    }
+
+    #[test]
+    fn a_threads_level_and_project_management_flag_are_settled_by_thread_edit() {
+        let state = tracker();
+        assert_eq!(
+            resolve(state.state(), "thread", "t", "pm-flag").as_deref(),
+            Some("acyclic thread edit t --pm|--no-pm --as-user")
+        );
+        assert_eq!(
+            resolve(state.state(), "thread", "t", "autonomy").as_deref(),
+            Some("acyclic thread edit t --level <LEVEL> (or --no-level)")
+        );
     }
 
     #[test]

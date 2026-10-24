@@ -1,21 +1,292 @@
 {
-  "about": "Every command the app sends, as it sends them, in an order that succeeds on a tracker holding item a, item b under a, and thread t. The app's unit tests check its builders make exactly these; the server's tests run them through the API.",
+  "about": "Every command the app sends, as it sends them, in an order that succeeds on a tracker holding item a, item b under a, item e done, thread t approved, and two proposals by an agent, $proposal-1 and $proposal-2. The app's unit tests check its builders make exactly these; the server's tests run them through the API.",
   "examples": [
-    { "name": "list", "command": "list" },
-    { "name": "show", "command": { "show": { "items": ["a", "b"] } } },
-    { "name": "threads", "command": { "thread": "list" } },
+    {
+      "name": "list",
+      "command": "list"
+    },
+    {
+      "name": "show",
+      "command": {
+        "show": {
+          "items": ["a", "b"]
+        }
+      }
+    },
+    {
+      "name": "threads",
+      "command": {
+        "thread": "list"
+      }
+    },
     {
       "name": "add under a parent, in a thread",
-      "command": { "item": { "add": { "item": "c", "title": "C", "parent": "a", "thread": "t" } } }
+      "command": {
+        "item": {
+          "add": {
+            "item": "c",
+            "title": "C",
+            "parent": "a",
+            "thread": "t"
+          }
+        }
+      }
     },
-    { "name": "add at the top level", "command": { "item": { "add": { "item": "d", "title": "D" } } } },
-    { "name": "move to the top level", "command": { "item": { "edit": { "item": "c", "no-parent": true } } } },
-    { "name": "move under a parent", "command": { "item": { "edit": { "item": "d", "parent": "a" } } } },
-    { "name": "c waits for d", "command": { "link": { "add": { "from": "c", "kind": "waits-for", "to": "d" } } } },
-    { "name": "c relates to b", "command": { "link": { "add": { "from": "c", "kind": "relates-to", "to": "b" } } } },
+    {
+      "name": "add at the top level",
+      "command": {
+        "item": {
+          "add": {
+            "item": "d",
+            "title": "D"
+          }
+        }
+      }
+    },
+    {
+      "name": "move to the top level",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "c",
+            "no-parent": true
+          }
+        }
+      }
+    },
+    {
+      "name": "move under a parent",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "d",
+            "parent": "a"
+          }
+        }
+      }
+    },
+    {
+      "name": "c waits for d",
+      "command": {
+        "link": {
+          "add": {
+            "from": "c",
+            "kind": "waits-for",
+            "to": "d"
+          }
+        }
+      }
+    },
+    {
+      "name": "c relates to b",
+      "command": {
+        "link": {
+          "add": {
+            "from": "c",
+            "kind": "relates-to",
+            "to": "b"
+          }
+        }
+      }
+    },
     {
       "name": "c no longer waits for d",
-      "command": { "link": { "remove": { "from": "c", "kind": "waits-for", "to": "d" } } }
+      "command": {
+        "link": {
+          "remove": {
+            "from": "c",
+            "kind": "waits-for",
+            "to": "d"
+          }
+        }
+      }
+    },
+    {
+      "name": "edit an item's fields",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "c",
+            "title": "C2",
+            "state": "in-progress",
+            "thread": "t",
+            "notes": "n",
+            "gate": "g",
+            "size": "m"
+          }
+        }
+      }
+    },
+    {
+      "name": "clear an item's fields",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "c",
+            "no-thread": true,
+            "no-notes": true,
+            "no-gate": true,
+            "no-size": true
+          }
+        }
+      }
+    },
+    {
+      "name": "settle an item's parent as a clear",
+      "command": {
+        "item": {
+          "edit": {
+            "item": "d",
+            "no-parent": true
+          }
+        }
+      }
+    },
+    {
+      "name": "settle a thread's title",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "title": "T"
+          }
+        }
+      }
+    },
+    {
+      "name": "settle a thread's brief as a clear",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "no-brief": true
+          }
+        }
+      }
+    },
+    {
+      "name": "reopen",
+      "command": {
+        "item": {
+          "reopen": {
+            "item": "e"
+          }
+        }
+      }
+    },
+    {
+      "name": "revoke",
+      "command": {
+        "thread": {
+          "revoke": {
+            "thread": "t"
+          }
+        }
+      }
+    },
+    {
+      "name": "approve",
+      "command": {
+        "thread": {
+          "approve": {
+            "thread": "t"
+          }
+        }
+      }
+    },
+    {
+      "name": "keep",
+      "command": {
+        "proposal": {
+          "keep": {
+            "proposal": "$proposal-1"
+          }
+        }
+      }
+    },
+    {
+      "name": "drop",
+      "command": {
+        "proposal": {
+          "drop": {
+            "proposal": "$proposal-2"
+          }
+        }
+      }
+    },
+    {
+      "name": "a thread's own level",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "level": "everything"
+          }
+        }
+      }
+    },
+    {
+      "name": "the global level for a thread",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "no-level": true
+          }
+        }
+      }
+    },
+    {
+      "name": "flag project management",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "pm": true
+          }
+        }
+      }
+    },
+    {
+      "name": "unflag project management",
+      "command": {
+        "thread": {
+          "edit": {
+            "thread": "t",
+            "no-pm": true
+          }
+        }
+      }
+    },
+    {
+      "name": "the global level",
+      "command": {
+        "level": {
+          "level": "blockers"
+        }
+      }
+    },
+    {
+      "name": "proposals",
+      "command": {
+        "proposal": "list"
+      }
+    },
+    {
+      "name": "a thread",
+      "command": {
+        "thread": {
+          "show": {
+            "threads": ["t"]
+          }
+        }
+      }
+    },
+    {
+      "name": "levels",
+      "command": {
+        "level": {}
+      }
     }
   ]
 }

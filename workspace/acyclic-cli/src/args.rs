@@ -776,6 +776,7 @@ pub enum ThreadCommand {
 
 /// What `thread edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
+#[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThreadEdit {
     /// The thread.
@@ -805,12 +806,21 @@ pub struct ThreadEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_level: bool,
+    /// Make its agent a project-management agent, whose edits to approved scope apply at once (user only).
+    #[arg(long)]
+    #[serde(default)]
+    pub pm: bool,
+    /// Make its agent an ordinary one again, whose edits to approved scope wait as proposals (user only).
+    #[arg(long)]
+    #[serde(default)]
+    pub no_pm: bool,
 }
 
 impl ThreadEdit {
     fn validate(&self) -> Result<(), CliError> {
         clears("brief", self.brief.is_some(), self.no_brief)?;
         clears("level", self.level.is_some(), self.no_level)?;
+        clears("pm", self.pm, self.no_pm)?;
         overlaps("repository", &self.repository, &self.no_repository)
     }
 }

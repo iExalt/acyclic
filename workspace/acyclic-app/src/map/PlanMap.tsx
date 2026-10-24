@@ -9,7 +9,8 @@ import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
-import { buildModel, collapsedWith, type View, visible } from "./model";
+import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
+import { reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
 
 /** How tall a box's title strip is, where a tap collapses or expands it. */
@@ -99,6 +100,10 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
   const [laid, setLaid] = useState<{ view: View; placed: Placed } | null>(null);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
+  /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
+  const shown = useRef<string | null>(null);
+  /** The model last drawn, to tell whether a focus will be drawn afresh. */
+  const drawnModel = useRef<Model | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
   const view = useMemo(() => visible(model, { collapsed, showArchived }), [model, collapsed, showArchived]);
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
@@ -114,8 +119,16 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
       const corner = core.getElementById(drawn).renderedBoundingBox({ includeLabels: false });
       anchor.current = { id: drawn, x: corner.x1, y: corner.y1 };
     }
+    const next = expandTo(model, focus.id, toggles);
+    if (next === toggles && model === drawnModel.current) {
+      // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
+      anchor.current = null;
+      if (host.current !== null) revealIn(core, host.current, focus.id);
+      return;
+    }
+    shown.current = focus.id;
     if (host.current !== null) host.current.dataset.state = "laying-out";
-    setToggles((was) => expandTo(model, focus.id, was));
+    setToggles(next);
   }, [focus]);
 
   useEffect(() => {
@@ -198,6 +211,12 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
       }
       anchor.current = null;
     }
+    if (shown.current !== null) {
+      // The pin holds still unless that leaves the item hidden.
+      revealIn(core, element, shown.current);
+      shown.current = null;
+    }
+    drawnModel.current = model;
     // What the renderer holds, for the journeys to compare with the plan.
     element.dataset.nodes = String(core.nodes().length);
     element.dataset.edges = String(core.edges().length);
@@ -250,4 +269,17 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
   }, []);
 
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+}
+
+/** Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it. */
+function revealIn(core: Core, element: HTMLElement, id: string) {
+  const node = core.getElementById(id);
+  if (node.empty()) return;
+  const map = element.getBoundingClientRect();
+  const sheet = element.parentElement?.querySelector<HTMLElement>(".inspector, .sheet")?.getBoundingClientRect();
+  const cover =
+    sheet === undefined
+      ? null
+      : { x1: sheet.left - map.left, y1: sheet.top - map.top, x2: sheet.right - map.left, y2: sheet.bottom - map.top };
+  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), uncovered(map.width, map.height, cover)));
 }

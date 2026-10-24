@@ -134,6 +134,33 @@ export function pick(model: Model, mode: Mode, target: Pick): Step {
   return { mode: idle, command: linkCommand(mode.item, mode.link, target.id), refusal: null };
 }
 
+/** How an edit went: the write, then, if it was saved, reading the plan again. */
+export type Sent =
+  | { write: "failed"; code: string; message: string }
+  | { write: "saved"; proposals: number; reload: "done" | { failed: string } };
+
+/** What the app tells the user after an edit, and what it offers: the same write again, or a refresh. */
+export interface Told {
+  text: string | null;
+  offer: "retry" | "refresh" | null;
+  /** The new item's id was refused: the user should change it. */
+  fixId: boolean;
+}
+
+export function told(sent: Sent): Told {
+  if (sent.write === "failed") {
+    const { retry, fixId } = recovery(sent.code);
+    // Decided or gone elsewhere: what the app shows is out of date.
+    const stale = sent.code === "decided" || sent.code === "not-found";
+    return { text: sent.message, offer: retry ? "retry" : stale ? "refresh" : null, fixId };
+  }
+  // Saved is saved: a failed refresh is offered again, never the write.
+  if (sent.reload !== "done")
+    return { text: `Saved, but the refresh failed: ${sent.reload.failed}`, offer: "refresh", fixId: false };
+  if (sent.proposals > 0) return { text: "Sent as a proposal for you to keep", offer: null, fixId: false };
+  return { text: null, offer: null, fixId: false };
+}
+
 /** What the app offers after a refusal or failure, by the envelope's code. */
 export interface Recovery {
   /** The server was busy: the same command may simply be sent again. */

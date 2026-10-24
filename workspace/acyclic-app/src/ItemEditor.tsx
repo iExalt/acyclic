@@ -1,0 +1,89 @@
+// The selected item's fields as a form. Save sends only what changed; sets of areas, resources and repositories stay
+// with the CLI.
+
+import { type FormEvent, useState } from "react";
+import type { Command, Item, Thread } from "./api";
+import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
+
+export interface ItemEditorProps {
+  item: Item;
+  threads: Thread[];
+  busy: boolean;
+  onSave: (edit: Command) => void;
+  onCancel: () => void;
+}
+
+export function ItemEditor({ item, threads, busy, onSave, onCancel }: ItemEditorProps) {
+  const [draft, setDraft] = useState<ItemDraft>(() => draftOf(item));
+  const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
+    setDraft((was) => ({ ...was, [field]: event.target.value }));
+  const edit = itemEdit(item, draft);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (edit === null) onCancel();
+    else onSave(edit);
+  };
+  return (
+    <form className="fields" data-testid="item-form" onSubmit={submit}>
+      <label>
+        Title
+        <input name="title" value={draft.title} onChange={set("title")} />
+      </label>
+      {item.state === "done" ? (
+        <label>
+          State
+          <input name="state" value="done" disabled />
+        </label>
+      ) : (
+        <label>
+          State
+          <select name="state" value={draft.state} onChange={set("state")}>
+            {STATES.map((state) => (
+              <option key={state} value={state}>
+                {state}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label>
+        Thread
+        <select name="thread" value={draft.thread} onChange={set("thread")}>
+          <option value="">None</option>
+          {threads.map((one) => (
+            <option key={one.id} value={one.id}>
+              {one.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Gate
+        <input name="gate" value={draft.gate} onChange={set("gate")} />
+      </label>
+      <label>
+        Size
+        <select name="size" value={draft.size} onChange={set("size")}>
+          <option value="">None</option>
+          {SIZES.map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Notes
+        <textarea name="notes" rows={4} value={draft.notes} onChange={set("notes")} />
+      </label>
+      <div className="actions">
+        <button type="submit" disabled={busy || edit === null}>
+          Save
+        </button>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}

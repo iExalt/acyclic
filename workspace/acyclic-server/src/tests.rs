@@ -600,7 +600,7 @@ fn every_command_the_app_sends_runs_through_the_api() {
     // crate doesn't reach outside it.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../acyclic-app/src/commands.examples.json");
-    let examples: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut examples = std::fs::read_to_string(path).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let tracker = dir.path().join("tracker");
     let run = |command: Value| {
@@ -611,6 +611,24 @@ fn every_command_the_app_sends_runs_through_the_api() {
     run(json!({"item": {"add": {"item": "a", "title": "A"}}}));
     run(json!({"item": {"add": {"item": "b", "title": "B", "parent": "a"}}}));
     run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
+    run(json!({"item": {"add": {"item": "e", "title": "E"}}}));
+    run(json!({"done": {"item": "e", "note": "n", "force": true}}));
+    run(json!({"thread": {"approve": {"thread": "t"}}}));
+    // An agent's edits to the approved thread's scope wait as proposals, which the examples keep and drop.
+    for n in 1..=2 {
+        run(json!({"item": {"add": {"item": format!("p{n}"), "title": "P"}}}));
+        let edit = json!({"item": {"edit": {"item": format!("p{n}"), "thread": "t"}}});
+        let (code, answer) = acyclic_cli::call_as(
+            serde_json::from_value(edit).unwrap(),
+            tracker.clone(),
+            "session/agent",
+            &Env::default(),
+        );
+        assert_eq!(code, 0, "{answer}");
+        let id = answer["data"]["proposals"][0]["id"].as_str().unwrap().to_owned();
+        examples = examples.replace(&format!("$proposal-{n}"), &id);
+    }
+    let examples: Value = serde_json::from_str(&examples).unwrap();
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     for example in examples["examples"].as_array().unwrap() {
