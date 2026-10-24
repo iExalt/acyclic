@@ -7,6 +7,12 @@ settings:
 importers:
   .:
     dependencies:
+      cytoscape:
+        specifier: 3.34.4
+        version: 3.34.4
+      elkjs:
+        specifier: 0.12.0
+        version: 0.12.0
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -648,10 +654,19 @@ packages:
     resolution:
       { integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ== }
 
+  cytoscape@3.34.4:
+    resolution:
+      { integrity: sha512-msY99tMY8iWTg+sIPGfSqDcPNOt4xcj+v/K/7qUFaCUxxlqnMkUYLBjRUzn9W5CU/R2hrmtJa5+UtovrEM2ctg== }
+    engines: { node: ">=0.10" }
+
   detect-libc@2.1.2:
     resolution:
       { integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ== }
     engines: { node: ">=8" }
+
+  elkjs@0.12.0:
+    resolution:
+      { integrity: sha512-YZcKynxVxYoKIOEpywEPwCFdg+BTbxQRNf3pbwdDCvc8O3kQD8bmIwSxKU1eOTVc4Xo+VG9Te+575mlfvOrhEQ== }
 
   es-module-lexer@2.3.2:
     resolution:
@@ -1289,7 +1304,11 @@ snapshots:
 
   csstype@3.2.3: {}
 
+  cytoscape@3.34.4: {}
+
   detect-libc@2.1.2: {}
+
+  elkjs@0.12.0: {}
 
   es-module-lexer@2.3.2: {}
 

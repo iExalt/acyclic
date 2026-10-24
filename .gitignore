@@ -33,3 +33,6 @@ target
 /dist/
 /workspace/acyclic-app/node_modules/
 /workspace/acyclic-app/dist/
+
+# Python bytecode from the browser journeys
+__pycache__/

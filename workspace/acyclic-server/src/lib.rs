@@ -30,6 +30,8 @@ use axum::{Extension, Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower::ServiceExt as _;
+use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::SizeAbove;
 
 pub mod app;
 pub mod code;
@@ -761,8 +763,13 @@ pub fn router(config: Config, access: Access) -> Router {
 }
 
 fn routes(server: Arc<Server>, access: Access) -> Router {
-    let mut router =
-        Router::new().route("/api/command", post(command)).route("/api/run", get(run_status));
+    // The API's answers are compressed when they're worth it: a whole tracker's `show` is megabytes of JSON, and a
+    // phone may reach the server through a relay. None of them holds a secret an attacker could guess at through
+    // their compressed size: the session travels only in the request. The app's files are compressed already.
+    let mut router = Router::new()
+        .route("/api/command", post(command))
+        .route("/api/run", get(run_status))
+        .layer(CompressionLayer::new().compress_when(SizeAbove::new(1024)));
     // Runs have no use for the app, and get none.
     if !matches!(access, Access::Run { .. }) {
         router = router.fallback(files);

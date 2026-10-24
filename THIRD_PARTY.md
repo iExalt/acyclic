@@ -28,8 +28,9 @@ build embeds them in the binary. Each page carries a notice naming the renderer'
 ## The app
 
 The binary embeds the app, built by `mise run build:app` from `workspace/acyclic-app`, whose packages are pinned in its
-`pnpm-lock.yaml`. Its bundle holds React and React DOM (MIT License) among others; the build lists every package it
-bundled, with its licence, in the app's `licenses.txt`, which the server also serves.
+`pnpm-lock.yaml`. Its bundle holds React and React DOM (MIT License), Cytoscape.js (MIT License) and elkjs (Eclipse
+Public License 2.0) among others; the build lists every package it bundled, with its licence, in the app's
+`licenses.txt`, which the server also serves.
 
 ## Release binaries
 

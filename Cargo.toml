@@ -41,5 +41,5 @@ terminal_size = "0.4.4"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time", "process", "io-util", "sync"] }
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
-tower-http = { version = "0.7.1", default-features = false, features = ["fs"] }
+tower-http = { version = "0.7.1", default-features = false, features = ["fs", "compression-br", "compression-gzip"] }
 zeroize = "1.9.1"

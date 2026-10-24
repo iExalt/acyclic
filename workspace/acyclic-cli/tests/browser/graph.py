@@ -1,8 +1,9 @@
 """Renders acyclic's graph pages in headless Chromium and WebKit with the network blocked.
 
 For each renderer and browser, a small tracker with a hostile title must draw every item and ghost, show the title as
-text and run none of it; screenshots go to target/browser/. Then the 3,500-item fixture is drawn and timed, with a
-60-second limit per page: Graphviz must finish in time, and Mermaid's time, or its timeout, is reported.
+text and run none of it; screenshots go to target/browser/. Then the 3,500-item fixture is drawn and timed with
+Graphviz, which must finish within 60 seconds. Mermaid isn't tried at that size: it never finished within the limit,
+so the case only spent the limit to report it.
 
 Usage: graph.py <acyclic binary> <acyclic-fixtures binary>
 """
@@ -51,7 +52,9 @@ def page_file(tracker, directory, renderer, *scope):
         str(path),
         *scope,
     )
-    return path, summary["data"]["counts"]["items"] + summary["data"]["counts"]["ghosts"]
+    return path, summary["data"]["counts"]["items"] + summary["data"]["counts"][
+        "ghosts"
+    ]
 
 
 def small_tracker(directory):
@@ -162,27 +165,21 @@ def main():
                     f"{label}: {result['nodes']} nodes in {result['ms']} ms, {result['renderMs']} ms drawing"
                 )
         large = large_tracker(directory)
-        for renderer in RENDERERS:
-            path, expected = page_file(large, directory, renderer)
-            browser = browsers["chromium"]
-            result = render(browser, path)
-            label = f"chromium {renderer} 3,500 items"
-            if result["state"] == "done":
-                result["page"].screenshot(path=SHOTS / f"chromium-{renderer}-large.png")
-                result["context"].close()
-                print(
-                    f"{label}: {result['nodes']} of {expected} nodes in {result['ms']} ms, {result['renderMs']} ms drawing"
+        path, expected = page_file(large, directory, "graphviz")
+        result = render(browsers["chromium"], path)
+        label = "chromium graphviz 3,500 items"
+        if result["state"] == "done":
+            result["page"].screenshot(path=SHOTS / "chromium-graphviz-large.png")
+            result["context"].close()
+            print(
+                f"{label}: {result['nodes']} of {expected} nodes in {result['ms']} ms, {result['renderMs']} ms drawing"
+            )
+            if result["nodes"] != expected:
+                failures.append(
+                    f"{label}: drew {result['nodes']} nodes, expected {expected}"
                 )
-                if result["nodes"] != expected:
-                    failures.append(
-                        f"{label}: drew {result['nodes']} nodes, expected {expected}"
-                    )
-            elif renderer == "graphviz":
-                failures.append(f"{label}: {result['state']} {result.get('error', '')}")
-            else:
-                print(
-                    f"{label}: {result['state']} {result.get('error', '')[:200]} (reported, not a failure)"
-                )
+        else:
+            failures.append(f"{label}: {result['state']} {result.get('error', '')}")
         for browser in browsers.values():
             browser.close()
     if failures:

@@ -88,3 +88,18 @@ export async function items(fetcher: Fetch = fetch): Promise<Item[]> {
   const shown = await command<RawItem[]>({ show: { items: rows.map((row) => row.id) } }, fetcher);
   return shown.map(settle);
 }
+
+/** A thread, with what the app reads of it. */
+export interface Thread {
+  id: string;
+  title: string;
+}
+
+/** Every thread. */
+export async function threads(fetcher: Fetch = fetch): Promise<Thread[]> {
+  const { threads: rows } = await command<{ threads: { id: string; title: Raw<string> }[] }>(
+    { thread: "list" },
+    fetcher,
+  );
+  return rows.map((row) => ({ id: row.id, title: typeof row.title === "string" ? row.title : row.id }));
+}
