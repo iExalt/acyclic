@@ -9,7 +9,9 @@ fn main() {
     let required = std::env::var("ACYCLIC_REQUIRE_APP").is_ok_and(|value| value == "1");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"));
     let dist = manifest.join("../acyclic-app/dist");
-    // Watching the directory reruns this script when anything under it changes, or when it appears.
+    // Watching the directory reruns this script when anything under it changes. Cargo counts a missing path as
+    // changed on every build, which would rebuild the server each time, so the directory always exists, if empty.
+    std::fs::create_dir_all(&dist).expect("the app's dist can be made");
     println!("cargo::rerun-if-changed={}", dist.display());
     let mut files = Vec::new();
     if dist.join("index.html").is_file() {
@@ -31,7 +33,9 @@ fn main() {
     );
     code.push_str("/// Every file, sorted by path.\npub static FILES: &[Asset] = &[\n");
     if files.is_empty() {
-        code.push_str("    Asset { path: \"/index.html\", body: STUB, br: None, gz: None },\n");
+        code.push_str(
+            "    Asset { path: \"/index.html\", body: STUB, br: None, gz: None, tag: \"stub\" },\n",
+        );
     }
     for (path, file) in &files {
         let variant = |suffix: &str| {
@@ -47,10 +51,11 @@ fn main() {
         };
         writeln!(
             code,
-            "    Asset {{ path: {path:?}, body: include_bytes!({:?}), br: {}, gz: {} }},",
+            "    Asset {{ path: {path:?}, body: include_bytes!({:?}), br: {}, gz: {}, tag: {:?} }},",
             file.display().to_string(),
             variant("br"),
-            variant("gz")
+            variant("gz"),
+            format!("{:016x}", fnv(&std::fs::read(file).expect("dist is readable")))
         )
         .expect("a String takes writes");
     }
@@ -72,4 +77,11 @@ fn walk(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
             files.push((format!("/{}", parts.join("/")), path));
         }
     }
+}
+
+/// FNV-1a over a file's bytes: an entity tag that changes with its content.
+fn fnv(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    })
 }

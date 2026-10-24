@@ -6,6 +6,7 @@ FROM docker.io/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b
 ARG TARGETARCH
 
 RUN apk add --no-cache git ca-certificates \
+    && mkdir -p /usr/share/acyclic \
     && apk info -v | sort > /usr/share/acyclic/packages.txt \
     && adduser -D -u 10001 acyclic
 

@@ -4,3 +4,5 @@ version.workspace = true
 edition.workspace = true
 readme = "README.md"
 license.workspace = true
+# Its build script makes the app's `dist` directory, outside its own output.
+publish = false

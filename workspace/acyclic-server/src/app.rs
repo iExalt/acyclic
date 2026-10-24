@@ -6,7 +6,9 @@ use std::path::Path;
 use acyclic_cli::error::{CliError, exit};
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::header::{ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, VARY};
+use axum::http::header::{
+    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, ETAG, IF_NONE_MATCH, VARY,
+};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 
@@ -59,23 +61,39 @@ pub fn embedded(request: &Request) -> Response {
         (_, Some(gz)) if accepted.gzip => (gz, Some("gzip")),
         _ => (asset.body, None),
     };
-    let mut response = Response::new(if request.method() == Method::HEAD {
-        Body::empty()
-    } else {
-        Body::from(body)
+    // Each encoding is its own representation, with its own tag.
+    let tag = format!("\"{}-{}\"", asset.tag, encoding.unwrap_or("identity"));
+    let unchanged = request.headers().get_all(IF_NONE_MATCH).iter().any(|sent| {
+        sent.to_str().unwrap_or_default().split(',').any(|one| {
+            let one = one.trim();
+            one == "*" || one.strip_prefix("W/").unwrap_or(one) == tag
+        })
     });
+    let mut response = if unchanged {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else if request.method() == Method::HEAD {
+        Response::new(Body::empty())
+    } else {
+        Response::new(Body::from(body))
+    };
     let headers = response.headers_mut();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type(path)));
-    if let Some(encoding) = encoding {
-        headers.insert(CONTENT_ENCODING, HeaderValue::from_static(encoding));
+    // A tag is hex and an encoding's name, always a valid value.
+    if let Ok(tag) = HeaderValue::from_str(&tag) {
+        headers.insert(ETAG, tag);
+    }
+    if !unchanged {
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type(path)));
+        if let Some(encoding) = encoding {
+            headers.insert(CONTENT_ENCODING, HeaderValue::from_static(encoding));
+        }
     }
     response
 }
 
 /// Sets the headers every file of the app carries, wherever it came from: how long it may be kept, and that its
-/// encoding depends on `Accept-Encoding`. Refusals and errors are left alone.
+/// encoding depends on `Accept-Encoding`, on what it answers and on a 304 alike. Refusals and errors are left alone.
 pub fn cache(path: &str, response: &mut Response) {
-    if !response.status().is_success() {
+    if !response.status().is_success() && response.status() != StatusCode::NOT_MODIFIED {
         return;
     }
     let headers = response.headers_mut();
@@ -169,6 +187,7 @@ mod tests {
         for path in ["/", "/index.html", "/sw.js", "/manifest.webmanifest"] {
             assert_eq!(kept(path, StatusCode::OK), (Some(fresh.clone()), vary.clone()), "{path}");
         }
+        assert_eq!(kept("/sw.js", StatusCode::NOT_MODIFIED), (Some(fresh), vary));
         assert_eq!(kept("/assets/missing.js", StatusCode::NOT_FOUND), (None, None));
     }
 
@@ -182,12 +201,21 @@ mod tests {
     }
 
     fn get(method: Method, path: &str, encodings: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
-        let request = Request::builder()
-            .method(method)
-            .uri(path)
-            .header(ACCEPT_ENCODING, encodings)
-            .body(Body::empty())
-            .unwrap();
+        get_if(method, path, encodings, None)
+    }
+
+    fn get_if(
+        method: Method,
+        path: &str,
+        encodings: &str,
+        tag: Option<&HeaderValue>,
+    ) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let mut request =
+            Request::builder().method(method).uri(path).header(ACCEPT_ENCODING, encodings);
+        if let Some(tag) = tag {
+            request = request.header(IF_NONE_MATCH, tag);
+        }
+        let request = request.body(Body::empty()).unwrap();
         let response = embedded(&request);
         let (parts, body) = response.into_parts();
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
@@ -224,6 +252,22 @@ mod tests {
             assert_eq!(sent("gzip"), gz.unwrap_or_else(|| plain.clone()));
             assert_eq!(sent("identity"), plain);
         }
+    }
+
+    #[test]
+    fn a_file_the_browser_has_is_not_modified_in_the_same_encoding() {
+        let (_, headers, _) = get(Method::GET, "/index.html", "gzip, br");
+        let tag = headers[ETAG].clone();
+        let (status, headers, body) = get_if(Method::GET, "/index.html", "gzip, br", Some(&tag));
+        assert_eq!((status, &headers[ETAG], body.len()), (StatusCode::NOT_MODIFIED, &tag, 0));
+        assert_eq!(
+            get_if(Method::GET, "/", "br, gzip", Some(&HeaderValue::from_static("*"))).0,
+            StatusCode::NOT_MODIFIED
+        );
+        // Another encoding is another representation; without a build there is only one.
+        let other = get_if(Method::GET, "/index.html", "identity", Some(&tag)).0;
+        let compressed = acyclic_app_assets::get("/index.html").unwrap().gz.is_some();
+        assert_eq!(other == StatusCode::OK, compressed);
     }
 
     #[test]

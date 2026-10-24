@@ -12,6 +12,8 @@ pub struct Asset {
     pub br: Option<&'static [u8]>,
     /// Its bytes compressed with gzip, if the build wrote them.
     pub gz: Option<&'static [u8]>,
+    /// A hash of its bytes, for its entity tags.
+    pub tag: &'static str,
 }
 
 /// The page served in place of an app that wasn't built.
