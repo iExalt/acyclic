@@ -294,6 +294,10 @@ def map_journey(page, view, plan, name, failures, hint=None):
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
         arg=plan.lit(thread),
     )
+    panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
+    panel.wait_for()
+    if panel.locator("[role=alert]").count():
+        failures.append(f"{name}: the thread's panel failed: {panel.inner_text()}")
     page.screenshot(path=SHOTS / f"app-{name}-thread.png")
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
@@ -396,6 +400,22 @@ def edit_journey(page, view, env, plan, box, name, failures):
     prompt = page.get_by_test_id("prompt").bounding_box()
     if prompt is None or prompt["height"] > 60:
         failures.append(f"{name}: the move prompt covers the Map: {prompt}")
+    # The menu over a mode closes alone: on an Escape pressed as it opens, and on a tap on the Map, which picks nothing.
+    menu = page.locator("details.menu")
+    for close in (
+        lambda: page.keyboard.press("Escape"),
+        lambda: tap_middle(page, view, second, rise=0.2),
+    ):
+        page.get_by_test_id("menu").click()
+        close()
+        if (
+            menu.evaluate("d => d.open")
+            or not page.get_by_test_id("prompt").is_visible()
+            or page.get_by_test_id("notice").count()
+        ):
+            # The rest of the journey needs the move still waiting, so stop here, naming why.
+            failures.append(f"{name}: closing the menu didn't leave the move waiting")
+            return
     # Above the inspector that opens after the move, likewise.
     centre(page, second, rise=0.2)
     before = settled_corner(page, second)
@@ -873,6 +893,12 @@ def main():
             )
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
+            # WebKit too closes the menu on a tap outside it, and the tap selects nothing on the Map.
+            page.get_by_test_id("menu").click()
+            box = page.get_by_test_id("map").bounding_box()
+            page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            if page.locator("details.menu").evaluate("d => d.open") or page.get_by_test_id("inspector").count():
+                failures.append("webkit phone: a tap outside the menu didn't close it alone")
             if errors:
                 failures.append(
                     f"webkit phone: the page threw or logged errors: {errors}"

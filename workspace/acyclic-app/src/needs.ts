@@ -12,7 +12,7 @@ import {
   resolveCommand,
   unsettledWhy,
 } from "./forms";
-import { lineOf } from "./lines";
+import type { Line } from "./lines";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
@@ -28,6 +28,8 @@ export interface NeedView {
   /** A stable key for the entry: its kind and what it names. */
   key: string;
   text: string;
+  /** The line of the one thread it names, for its badge, which then carries the number the text leaves out. */
+  line: Line | undefined;
   /** What it names, to select. */
   items: string[];
   threads: string[];
@@ -45,17 +47,26 @@ const row = (value: unknown): Row | null =>
   typeof value === "object" && value !== null && typeof (value as Row).id === "string" ? (value as Row) : null;
 const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).filter((one) => one !== null) : []);
 const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
-/** A thread by its line's name: its badge, beside the text, carries the number its title starts with. */
-const lineName = (one: Row) => lineOf({ id: one.id, title: titled(one) }).name;
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** One entry as the app shows it. */
-export function needView(need: Need): NeedView {
+/** One entry as the app shows it, with each thread's line from `lines`. */
+export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView {
   const item = row(need.item);
   const thread = row(need.thread);
+  const holders = Array.isArray(need.holders) ? need.holders : [];
+  const threads =
+    need.kind === "resource-clash"
+      ? holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null)
+      : thread === null
+        ? []
+        : [thread];
+  // A badge only for an entry naming one thread, and a thread named by its line's name only beside that badge.
+  const line = threads.length === 1 ? lines.get(threads[0]?.id ?? "") : undefined;
+  const lineName = (one: Row) => (line !== undefined && one.id === threads[0]?.id ? line.name : titled(one));
   const base = {
+    line,
     items: item === null ? [] : [item.id],
-    threads: thread === null ? [] : [thread.id],
+    threads: threads.map((one) => one.id),
     actions: [] as Action[],
     note: null as string | null,
   };
@@ -149,11 +160,8 @@ export function needView(need: Need): NeedView {
       };
     }
     case "resource-clash": {
-      const holders = Array.isArray(need.holders) ? need.holders : [];
-      const threads = holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null);
       return {
         ...base,
-        threads: threads.map((one) => one.id),
         key: `resource-clash:${str(need.resource)}`,
         text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(lineName).join(", ")}`,
         note: "The CLI settles this one: `acyclic needs` says how",
@@ -181,7 +189,7 @@ export function needView(need: Need): NeedView {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],
         key: `${need.kind}:${ids.filter((one) => one !== "").join(":")}`,
-        text: describe(need.kind, item, thread, named),
+        text: describe(need.kind, item, thread, named, lineName),
         note: hint === "" ? "The CLI settles this one: `acyclic needs` says how" : hint,
       };
     }
@@ -194,8 +202,14 @@ function shown(value: unknown): string {
 }
 
 /** A line for a kind the app only shows. */
-function describe(kind: string, item: Row | null, thread: Row | null, named: Row[]): string {
-  const subject = item !== null ? titled(item) : thread !== null ? lineName(thread) : named.map(titled).join(", ");
+function describe(
+  kind: string,
+  item: Row | null,
+  thread: Row | null,
+  named: Row[],
+  name: (thread: Row) => string,
+): string {
+  const subject = item !== null ? titled(item) : thread !== null ? name(thread) : named.map(titled).join(", ");
   const words: Record<string, string> = {
     unpushed: "This clone holds writes the remote lacks",
     "link-cycle": "Links form a cycle",

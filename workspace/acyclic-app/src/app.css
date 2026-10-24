@@ -274,11 +274,19 @@ button.icon {
 .menu[open] summary {
   background: var(--tile);
 }
+/* A tap outside the open menu lands on its summary, which closes it, and reaches nothing under it. */
+.menu[open] summary::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  cursor: default;
+}
 .menu-body {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 3;
+  z-index: 5;
   display: grid;
   gap: 10px;
   width: min(300px, calc(100vw - 16px));
