@@ -59,20 +59,17 @@ export interface Line {
 const NUMBERED = /^\s*(?:thread\s+)?(\d+)\s*[.:](?!\d)\s*/i;
 
 /**
- * The line for a thread: coloured by its number, so colours hold still as threads come and go, else by its id. A title
- * that is only a number, such as "Thread 7:", has no name to put beside a badge, so it keeps its title and no badge.
+ * The line for a thread: coloured by its number, so colours hold still as threads come and go, else by its id. Its
+ * number is shown as written, so "07" and "7" stay two badges. A title that is only a number, such as "Thread 7:",
+ * keeps its colour but has no name to put beside the number, so it is named by its title, with a dot for a badge.
  */
 export function lineOf(thread: Thread): Line {
   const numbered = NUMBERED.exec(thread.title);
-  const name = numbered === null ? "" : thread.title.slice(numbered[0].length);
-  if (numbered === null || name === "") {
-    const colour = LINE_COLOURS[hash(thread.id) % LINE_COLOURS.length] ?? LINE_COLOURS[0];
-    return { number: null, name: thread.title, colour, ink: inkOn(colour) };
-  }
-  const number = numbered[1]?.replace(/^0+(?=\d)/, "") ?? "";
-  const at = Number(number);
+  const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
+  const number = rest === "" ? null : (numbered?.[1] ?? null);
+  const at = numbered?.[1] === undefined ? hash(thread.id) : Number(numbered[1]);
   const colour = LINE_COLOURS[at % LINE_COLOURS.length] ?? LINE_COLOURS[0];
-  return { number, name, colour, ink: inkOn(colour) };
+  return { number, name: number === null ? thread.title : rest, colour, ink: inkOn(colour) };
 }
 
 /** Each thread's line, by id. */

@@ -28,11 +28,11 @@ export interface NeedView {
   /** A stable key for the entry: its kind and what it names. */
   key: string;
   text: string;
-  /** The line of the one thread it names, for its badge, which then carries the number the text leaves out. */
+  /** The line of the one thread its text names, for its badge, which carries the number the text leaves out. */
   line: Line | undefined;
-  /** What it names, to select. */
+  /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
-  threads: string[];
+  threads: { id: string; title: string }[];
   actions: Action[];
   /** Why there is no action here, or how to settle it elsewhere. */
   note: string | null;
@@ -49,8 +49,24 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).f
 const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
+/** A thread's row under an entry: its line, or, for a thread the list lacks, the title the entry gives. */
+export function threadLabel(thread: { id: string; title: string }, lines: ReadonlyMap<string, Line>) {
+  const line = lines.get(thread.id);
+  return { line, text: line?.name ?? thread.title };
+}
+
 /** One entry as the app shows it, with each thread's line from `lines`. */
 export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView {
+  // A badge only where the text names its thread: elsewhere it would only repeat the thread's row.
+  let named = false;
+  const view = viewOf(need, lines, () => {
+    named = true;
+  });
+  return named ? view : { ...view, line: undefined };
+}
+
+/** The entry, calling `named` when its text names the badge's thread by its line. */
+function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void): NeedView {
   const item = row(need.item);
   const thread = row(need.thread);
   const holders = Array.isArray(need.holders) ? need.holders : [];
@@ -62,11 +78,15 @@ export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView
         : [thread];
   // A badge only for an entry naming one thread, and a thread named by its line's name only beside that badge.
   const line = threads.length === 1 ? lines.get(threads[0]?.id ?? "") : undefined;
-  const lineName = (one: Row) => (line !== undefined && one.id === threads[0]?.id ? line.name : titled(one));
+  const lineName = (one: Row) => {
+    if (line === undefined || one.id !== threads[0]?.id) return titled(one);
+    named();
+    return line.name;
+  };
   const base = {
     line,
     items: item === null ? [] : [item.id],
-    threads: threads.map((one) => one.id),
+    threads: threads.map((one) => ({ id: one.id, title: titled(one) })),
     actions: [] as Action[],
     note: null as string | null,
   };
@@ -215,7 +235,6 @@ function describe(
     "link-cycle": "Links form a cycle",
     "parent-cycle": "Parents form a cycle",
     contest: "Two holders claim one thread",
-    "resource-clash": "Two threads hold one resource",
     "clock-ahead": "A claim's clock runs ahead",
     "unknown-run": "A run nothing knows of claims a thread",
     unthreaded: "In no thread",
