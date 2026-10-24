@@ -77,10 +77,10 @@ export function AddForm({
         </select>
       </label>
       <div className="actions">
-        <button type="submit" disabled={busy || title.trim() === ""}>
+        <button type="submit" className="primary" disabled={busy || title.trim() === ""}>
           Add
         </button>
-        <button type="button" onClick={onCancel}>
+        <button type="button" className="quiet" onClick={onCancel}>
           Cancel
         </button>
       </div>

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AddForm } from "./AddForm";
 import { type Command, CommandError, command, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
+import { Badge, lineStyle } from "./Badge";
 import {
   addCommand,
   type LinkKind,
@@ -14,6 +15,8 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level } from "./forms";
 import { Inspector } from "./Inspector";
+import { linesOf } from "./lines";
+import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
@@ -88,6 +91,8 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
+  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byTitle)), [loaded]);
+  const lines = useMemo(() => linesOf(sorted), [sorted]);
   const model = useMemo(() => (loaded === null ? null : buildModel(loaded.items)), [loaded]);
   const chosen = selected === null ? undefined : loaded?.items.find((one) => one.id === selected);
   // An item that went away, deleted or moved out of reach elsewhere, is no longer selected.
@@ -184,65 +189,87 @@ export function App() {
   return (
     <div className="shell">
       <header className="bar">
-        <h1>
-          <span data-testid="item-count">{load.items.length}</span> items
-        </h1>
-        <label>
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(event) => setShowArchived(event.target.checked)}
-            data-testid="show-archived"
-          />{" "}
-          Archived
-        </label>
-        <label>
-          Autonomy{" "}
-          <select
-            data-testid="global-level"
-            value={load.level}
-            disabled={busy}
-            onChange={(event) => send(globalLevelCommand(event.target.value as Level), { select: null, pin: null })}
-          >
-            {LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="brand">
+          <h1>
+            <span className="count" data-testid="item-count">
+              {load.items.length}
+            </span>{" "}
+            items
+          </h1>
+          <p title={`Autonomy: ${load.level}`}>Autonomy: {load.level}</p>
+        </div>
         <button
           type="button"
+          className="needs-button"
           data-testid="needs-button"
+          data-none={load.needs.length === 0}
           aria-pressed={showNeeds}
           onClick={() => {
             setSelected(null);
             setShowNeeds((was) => !was);
           }}
         >
-          Needs you <span data-testid="needs-count">{load.needs.length}</span>
+          <span className="badge" data-testid="needs-count">
+            {load.needs.length}
+          </span>
+          Needs you
         </button>
-        <button type="button" onClick={() => startAdd(null)} data-action="add-top">
-          Add
+        <button
+          type="button"
+          className="icon"
+          aria-label="Add at the top level"
+          onClick={() => startAdd(null)}
+          data-action="add-top"
+        >
+          +
         </button>
-        <button type="button" onClick={refresh}>
-          Refresh
-        </button>
+        <Menu>
+          <label>
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(event) => setShowArchived(event.target.checked)}
+              data-testid="show-archived"
+            />
+            Show archived items
+          </label>
+          <label>
+            Autonomy for every thread without its own
+            <select
+              data-testid="global-level"
+              value={load.level}
+              disabled={busy}
+              onChange={(event) => send(globalLevelCommand(event.target.value as Level), { select: null, pin: null })}
+            >
+              {LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={refresh}>
+            Refresh
+          </button>
+        </Menu>
       </header>
       <nav className="threads" aria-label="Threads">
-        {[...load.threads].sort(byTitle).map((one) => (
+        {sorted.map((one) => (
           <button
             type="button"
             key={one.id}
-            className={one.id === thread ? "thread picked" : "thread"}
+            className="thread"
+            style={lineStyle(lines.get(one.id))}
             aria-pressed={one.id === thread}
             data-thread={one.id}
+            title={one.title}
             onClick={() => {
               setSelected(null);
               setThread(one.id === thread ? null : one.id);
             }}
           >
-            {one.title}
+            <Badge line={lines.get(one.id)} />
+            <span className="name">{lines.get(one.id)?.name ?? one.title}</span>
           </button>
         ))}
       </nav>
@@ -252,6 +279,7 @@ export function App() {
             items={load.items}
             showArchived={showArchived}
             thread={thread}
+            lines={lines}
             selected={selected}
             onSelect={setSelected}
             focus={focus}
@@ -292,7 +320,7 @@ export function App() {
                 Top level
               </button>
             ) : null}
-            <button type="button" onClick={() => choose({ kind: "cancel" })}>
+            <button type="button" className="quiet" onClick={() => choose({ kind: "cancel" })}>
               Cancel
             </button>
           </div>
@@ -302,7 +330,7 @@ export function App() {
             parent={adding.parent}
             parentTitle={adding.parent === null ? null : titleOf(adding.parent)}
             thread={thread ?? (adding.parent === null ? null : (model?.items.get(adding.parent)?.thread ?? null))}
-            threads={[...load.threads].sort(byTitle)}
+            threads={sorted}
             taken={new Set(model?.items.keys())}
             idRefused={adding.idRefused}
             busy={busy}
@@ -321,7 +349,8 @@ export function App() {
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
-            threads={[...load.threads].sort(byTitle)}
+            threads={sorted}
+            lines={lines}
             busy={busy}
           />
         )}
@@ -329,6 +358,7 @@ export function App() {
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
+            lines={lines}
             busy={busy}
             onCommand={(edit) => send(edit, { select: null, pin: null })}
             onSelect={(id) => select(id, null)}
@@ -344,6 +374,7 @@ export function App() {
             key={thread}
             id={thread}
             globalLevel={load.level}
+            line={lines.get(thread)}
             titleOf={titleOf}
             version={version}
             busy={busy}
