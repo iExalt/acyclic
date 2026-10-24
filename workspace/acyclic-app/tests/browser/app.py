@@ -137,7 +137,7 @@ def tap_title(page, view, id):
 
 
 def settled_corner(page, id):
-    """Where a box's top-left corner is drawn once it has stopped moving: the same for half a second of frames.
+    """Where a box's top-left corner is drawn once it has stopped moving: the same for 300 ms of frames.
 
     Read from the renderer itself, so it doesn't trust the app's own account of when it has finished drawing."""
     return page.get_by_test_id("map").evaluate(
@@ -147,7 +147,7 @@ def settled_corner(page, id):
                 const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
                 const now = `${Math.round(b.x1)},${Math.round(b.y1)}`;
                 if (now !== last) { last = now; since = performance.now(); }
-                if (performance.now() - since >= 500) done({ x: b.x1, y: b.y1 });
+                if (performance.now() - since >= 300) done({ x: b.x1, y: b.y1 });
                 else requestAnimationFrame(read);
             };
             read();
@@ -197,7 +197,8 @@ def installable(context, page, origin, name, failures):
             failures.append(f"{name}: icon {icon['src']} answered {status}")
 
 
-def map_journey(page, view, plan, name, failures):
+def map_journey(page, view, plan, name, failures, hint=None):
+    """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
     wait_drawn(page, expected)
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
@@ -206,7 +207,7 @@ def map_journey(page, view, plan, name, failures):
     moved, box = 0, None
     for box in sorted(
         (id for id in plan.default() if plan.depth(id) == 1 and plan.children(id)),
-        key=lambda id: (-len(plan.children(id)), id),
+        key=lambda id: (id != hint, -len(plan.children(id)), id),
     ):
         # Bring it to full size in the middle of the screen first, as a person would: on a phone, the fitted plan
         # draws it too small to tap.
@@ -214,11 +215,12 @@ def map_journey(page, view, plan, name, failures):
             "(m, id) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); }", box
         )
         placed = page.get_by_test_id("map").evaluate(corner, box)
+        # Where it settles after expanding is where it starts collapsing.
+        before = settled_corner(page, box)
         for action, nodes in [
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
         ]:
-            before = settled_corner(page, box)
             tap_title(page, view, box)
             wait_drawn(page, nodes)
             after = settled_corner(page, box)
@@ -230,10 +232,12 @@ def map_journey(page, view, plan, name, failures):
                 failures.append(
                     f"{name}: {action} {box} moved it by {shift:.0f} px on screen"
                 )
+            before = after
         if relaid:
             break
     else:
         failures.append(f"{name}: no box moved in the layout when expanded")
+        box = None
     # Archived subtrees show when asked, and hide again.
     page.get_by_test_id("show-archived").click()
     wait_drawn(page, len(plan.default(archived=True)))
@@ -252,6 +256,7 @@ def map_journey(page, view, plan, name, failures):
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
     )
+    return box
 
 
 def main():
@@ -292,6 +297,7 @@ def main():
         try:
             plan, link, fresh = serve(350)
             chromium = playwright.chromium.launch()
+            hint = None
             for name, view in VIEWS.items():
                 context, page, origin, errors = open_app(
                     chromium, view, link, failures, name
@@ -303,7 +309,8 @@ def main():
                         f"{name}: the page lists {count} items, expected {len(plan.items)}"
                     )
                 installable(context, page, origin, name, failures)
-                map_journey(page, view, plan, name, failures)
+                # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
+                hint = map_journey(page, view, plan, name, failures, hint)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
                     failures.append(
