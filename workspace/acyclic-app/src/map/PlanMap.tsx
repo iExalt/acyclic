@@ -1,10 +1,12 @@
 // The Map: the plan drawn as nested boxes on a canvas, with Cytoscape.js placing nodes exactly where the scoped
 // layout put them. Tapping a box's title collapses or expands it, and the box stays where it was on screen; tapping
-// an item selects it, lighting up its thread and drawing its links across boxes. Dragging pans; nothing moves items.
+// an item selects it, lighting up its thread and drawing its links across boxes. While an edit waits for a target, a
+// tap picks one instead. Dragging pans; nothing moves items.
 
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
+import { chain, expandTo } from "../edits";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type View, visible } from "./model";
@@ -69,10 +71,24 @@ export interface PlanMapProps {
   showArchived: boolean;
   /** The thread picked in the sidebar, if any. */
   thread: string | null;
+  selected: string | null;
   onSelect: (item: string | null) => void;
+  /**
+   * An item to bring into view, expanding the boxes above it, while `pin` (or its nearest drawn ancestor) holds still
+   * on screen. A new `n` asks again.
+   */
+  focus: Focus | null;
+  /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
+  onPick: ((item: string | null) => void) | null;
 }
 
-export default function PlanMap({ items, showArchived, thread, onSelect }: PlanMapProps) {
+export interface Focus {
+  id: string;
+  pin: string | null;
+  n: number;
+}
+
+export default function PlanMap({ items, showArchived, thread, selected, onSelect, focus, onPick }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
@@ -81,7 +97,6 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   /** The last layout, with the view it was computed for. */
   const [laid, setLaid] = useState<{ view: View; placed: Placed } | null>(null);
-  const [item, setItem] = useState<string | null>(null);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
@@ -89,12 +104,19 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
   const placed = laid !== null && laid.view === view ? laid.placed : null;
 
+  // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
-    if (item !== null && !model.items.has(item)) {
-      setItem(null);
-      onSelect(null);
+    const core = cy.current;
+    if (focus === null || core === null) return;
+    const drawn =
+      focus.pin === null ? undefined : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
+    if (drawn !== undefined) {
+      const corner = core.getElementById(drawn).renderedBoundingBox({ includeLabels: false });
+      anchor.current = { id: drawn, x: corner.x1, y: corner.y1 };
     }
-  }, [model, item, onSelect]);
+    if (host.current !== null) host.current.dataset.state = "laying-out";
+    setToggles((was) => expandTo(model, focus.id, was));
+  }, [focus]);
 
   useEffect(() => {
     let live = true;
@@ -133,9 +155,9 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
 
   const drawn = useMemo(() => {
     if (placed === null) return null;
-    const selection: Selection = { item, thread };
+    const selection: Selection = { item: selected, thread };
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null);
-  }, [view, placed, item, thread, model]);
+  }, [view, placed, selected, thread, model]);
 
   useEffect(() => {
     const core = cy.current;
@@ -190,35 +212,42 @@ export default function PlanMap({ items, showArchived, thread, onSelect }: PlanM
     );
   }, [drawn, placed]);
 
+  // The latest handlers, so the tap listener is added once.
+  const handlers = useRef({ onSelect, onPick });
+  handlers.current = { onSelect, onPick };
   useEffect(() => {
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
+      const { onSelect, onPick } = handlers.current;
       const target = event.target as cytoscape.NodeSingular | Core;
-      if (target === core || !("isNode" in target) || !target.isNode()) {
-        setItem(null);
+      const node = target !== core && "isNode" in target && target.isNode() ? target : null;
+      if (onPick !== null) {
+        onPick(node === null ? null : node.id());
+        return;
+      }
+      if (node === null) {
         onSelect(null);
         return;
       }
-      const id = target.id();
-      const kind = target.data("kind") as string;
-      const box = target.boundingBox({ includeLabels: false });
+      const id = node.id();
+      const kind = node.data("kind") as string;
+      const box = node.boundingBox({ includeLabels: false });
       const inTitle = event.position.y - box.y1 <= TITLE;
       if (kind === "collapsed" || (kind === "box" && inTitle)) {
-        const corner = target.renderedBoundingBox({ includeLabels: false });
+        const corner = node.renderedBoundingBox({ includeLabels: false });
         anchor.current = { id, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
         setToggles((was) => new Map(was).set(id, kind === "box"));
         return;
       }
-      setItem(id);
       onSelect(id);
     };
     core.on("tap", tap);
     return () => {
       core.off("tap", tap);
     };
-  }, [onSelect]);
+  }, []);
 
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
 }

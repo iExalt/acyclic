@@ -1,0 +1,21 @@
+{
+  "about": "Every command the app sends, as it sends them, in an order that succeeds on a tracker holding item a, item b under a, and thread t. The app's unit tests check its builders make exactly these; the server's tests run them through the API.",
+  "examples": [
+    { "name": "list", "command": "list" },
+    { "name": "show", "command": { "show": { "items": ["a", "b"] } } },
+    { "name": "threads", "command": { "thread": "list" } },
+    {
+      "name": "add under a parent, in a thread",
+      "command": { "item": { "add": { "item": "c", "title": "C", "parent": "a", "thread": "t" } } }
+    },
+    { "name": "add at the top level", "command": { "item": { "add": { "item": "d", "title": "D" } } } },
+    { "name": "move to the top level", "command": { "item": { "edit": { "item": "c", "no-parent": true } } } },
+    { "name": "move under a parent", "command": { "item": { "edit": { "item": "d", "parent": "a" } } } },
+    { "name": "c waits for d", "command": { "link": { "add": { "from": "c", "kind": "waits-for", "to": "d" } } } },
+    { "name": "c relates to b", "command": { "link": { "add": { "from": "c", "kind": "relates-to", "to": "b" } } } },
+    {
+      "name": "c no longer waits for d",
+      "command": { "link": { "remove": { "from": "c", "kind": "waits-for", "to": "d" } } }
+    }
+  ]
+}

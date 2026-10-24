@@ -1,0 +1,128 @@
+import { describe, expect, it } from "vitest";
+import { examples } from "./commands.examples.json";
+import {
+  addCommand,
+  expandTo,
+  linkCommand,
+  linkRefusal,
+  type Mode,
+  moveCommand,
+  newId,
+  pick,
+  recovery,
+  unlinkCommand,
+} from "./edits";
+import { item } from "./map/fixture";
+import { buildModel } from "./map/model";
+
+// garden: beds (dig), plant (sow); tools at the top level.
+const model = buildModel([
+  item("garden"),
+  item("beds", "garden"),
+  item("dig", "beds"),
+  item("plant", "garden"),
+  item("sow", "plant"),
+  item("tools"),
+]);
+
+describe("commands", () => {
+  it("builds exactly the commands the server's tests run", () => {
+    const built = [
+      ["list", "list"],
+      ["show", { show: { items: ["a", "b"] } }],
+      ["threads", { thread: "list" }],
+      ["add under a parent, in a thread", addCommand({ item: "c", title: "C", parent: "a", thread: "t" })],
+      ["add at the top level", addCommand({ item: "d", title: "D", parent: null, thread: null })],
+      ["move to the top level", moveCommand("c", null)],
+      ["move under a parent", moveCommand("d", "a")],
+      ["c waits for d", linkCommand("c", "waits-for", "d")],
+      ["c relates to b", linkCommand("c", "relates-to", "b")],
+      ["c no longer waits for d", unlinkCommand("c", "waits-for", "d")],
+    ];
+    expect(built).toEqual(examples.map((one) => [one.name, one.command]));
+  });
+});
+
+describe("newId", () => {
+  it("slugs the title, numbers it past taken ids, and keeps the number within the tracker's 64 characters", () => {
+    expect(newId("Sow the Beans!", new Set())).toBe("sow-the-beans");
+    expect(newId("Crème brûlée", new Set())).toBe("creme-brulee");
+    expect(newId("Sow", new Set(["sow", "sow-2"]))).toBe("sow-3");
+    expect(newId("日本", new Set())).toBe("item");
+    const long = "a".repeat(70);
+    expect(newId(long, new Set())).toBe("a".repeat(64));
+    expect(newId(long, new Set(["a".repeat(64)]))).toBe(`${"a".repeat(62)}-2`);
+    // A cut that ends between words leaves no trailing dash before the number.
+    expect(newId(`${"a".repeat(61)} b`, new Set([`${"a".repeat(61)}-b`]))).toBe(`${"a".repeat(61)}-2`);
+  });
+});
+
+describe("pick", () => {
+  const move: Mode = { kind: "move", item: "plant" };
+
+  it("moves under a box or to the top level, and refuses the item, its descendants, its own parent and the background", () => {
+    expect(pick(model, move, { kind: "item", id: "beds" })).toEqual({
+      mode: { kind: "idle" },
+      command: moveCommand("plant", "beds"),
+      refusal: null,
+    });
+    expect(pick(model, move, { kind: "top" }).command).toEqual(moveCommand("plant", null));
+    for (const target of [
+      { kind: "item", id: "plant" },
+      { kind: "item", id: "sow" },
+      { kind: "item", id: "garden" },
+      { kind: "background" },
+    ] as const) {
+      const step = pick(model, move, target);
+      expect(step.command).toBeNull();
+      expect(step.mode).toBe(move);
+      expect(step.refusal).not.toBeNull();
+    }
+    expect(pick(model, { kind: "move", item: "tools" }, { kind: "top" }).refusal).toMatch(/already at the top/);
+  });
+
+  it("links the selected item to the one tapped, which comes first, and refuses links the Map couldn't draw", () => {
+    const link: Mode = { kind: "link", item: "sow", link: "waits-for" };
+    expect(pick(model, link, { kind: "item", id: "dig" }).command).toEqual({
+      link: { add: { from: "sow", kind: "waits-for", to: "dig" } },
+    });
+    for (const id of ["sow", "plant", "garden"]) expect(pick(model, link, { kind: "item", id }).command).toBeNull();
+    expect(linkRefusal(model, "garden", "dig")).toMatch(/holds/);
+    expect(pick(model, link, { kind: "background" }).mode).toBe(link);
+  });
+
+  it("returns to idle on cancel from every mode", () => {
+    const modes: Mode[] = [{ kind: "idle" }, move, { kind: "link", item: "sow", link: "relates-to" }];
+    for (const mode of modes)
+      expect(pick(model, mode, { kind: "cancel" })).toEqual({
+        mode: { kind: "idle" },
+        command: null,
+        refusal: null,
+      });
+  });
+});
+
+describe("expandTo", () => {
+  it("expands every box above an item and leaves the rest as the user left it", () => {
+    const toggles = new Map([
+      ["tools", true],
+      ["beds", true],
+    ]);
+    expect([...expandTo(model, "sow", toggles)].sort()).toEqual([
+      ["beds", true],
+      ["garden", false],
+      ["plant", false],
+      ["tools", true],
+    ]);
+    const open = new Map([["garden", false]]);
+    expect(expandTo(model, "beds", open)).toBe(open);
+  });
+});
+
+describe("recovery", () => {
+  it("offers a retry when the server is busy, and a fix to the id when the id is refused", () => {
+    expect(recovery("busy")).toEqual({ retry: true, fixId: false });
+    for (const code of ["already-exists", "deleted", "invalid-name"]) expect(recovery(code).fixId).toBe(true);
+    expect(recovery("parent-cycle")).toEqual({ retry: false, fixId: false });
+  });
+});
