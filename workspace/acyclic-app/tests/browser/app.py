@@ -346,8 +346,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     centre(page, box)
     tap_title(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
-    # Selecting shows the item's notes, as text.
-    tap_middle(page, view, first)
+    # Selecting shows the item's notes, as text. The leaf sits above the inspector, as a person would hold it, so the
+    # Map need not pan to show what is added inside it.
+    tap_middle(page, view, first, rise=0.2)
     notes = page.locator("[data-testid=inspector] [data-testid=notes]")
     notes.get_by_text(HOSTILE, exact=True).wait_for(timeout=10_000)
     if notes.locator("img").count() or page.evaluate("window.pwned === true"):
@@ -395,7 +396,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     prompt = page.get_by_test_id("prompt").bounding_box()
     if prompt is None or prompt["height"] > 60:
         failures.append(f"{name}: the move prompt covers the Map: {prompt}")
-    # Above the inspector that opens after the move, as a person would hold it, so the Map need not pan to show it.
+    # Above the inspector that opens after the move, likewise.
     centre(page, second, rise=0.2)
     before = settled_corner(page, second)
     tap_middle(page, view, second, rise=0.2)
