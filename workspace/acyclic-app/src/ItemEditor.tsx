@@ -77,10 +77,10 @@ export function ItemEditor({ item, threads, busy, onSave, onCancel }: ItemEditor
         <textarea name="notes" rows={4} value={draft.notes} onChange={set("notes")} />
       </label>
       <div className="actions">
-        <button type="submit" disabled={busy || edit === null}>
+        <button type="submit" className="primary" disabled={busy || edit === null}>
           Save
         </button>
-        <button type="button" onClick={onCancel}>
+        <button type="button" className="quiet" onClick={onCancel}>
           Cancel
         </button>
       </div>

@@ -37,6 +37,9 @@ describe("needView", () => {
     });
     expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
     expect(waiting.items).toEqual(["z"]);
+    // Named as its line, since its badge shows the number beside the text.
+    const numbered = needView({ kind: "awaiting-approval", thread: { id: "t7", title: "7. Ship it", heads: [] } });
+    expect(numbered.text).toBe("Ship it waits for your approval");
   });
 
   it("settles a conflict with each value it can keep, and says why for one it can't", () => {

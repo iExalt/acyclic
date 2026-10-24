@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import react from "@vitejs/plugin-react";
@@ -31,11 +31,29 @@ function precompress(): Plugin {
   };
 }
 
+/** Adds the font's licence to the list: app.css loads its files by URL, which the licence plugin doesn't follow. */
+function fontNotice(): Plugin {
+  return {
+    name: "acyclic-font-notice",
+    apply: "build",
+    writeBundle() {
+      const font = "node_modules/@fontsource-variable/overpass";
+      const { version } = JSON.parse(readFileSync(`${font}/package.json`, "utf8")) as { version: string };
+      const text = readFileSync(`${font}/LICENSE`, "utf8");
+      appendFileSync(
+        "dist/licenses.txt",
+        `\n\n---\n\nName: @fontsource-variable/overpass\nVersion: ${version}\nLicense: OFL-1.1\nLicense Text:\n===\n\n${text}`,
+      );
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
     // The licences of exactly what the bundle holds, for the release's notices.
     license({ thirdParty: { includePrivate: false, output: { file: "dist/licenses.txt" } } }),
+    fontNotice(),
     precompress(),
   ],
   build: { sourcemap: false },

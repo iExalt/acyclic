@@ -3,9 +3,11 @@
 
 import { useState } from "react";
 import type { Command, Item, Thread } from "./api";
+import { Badge, lineStyle } from "./Badge";
 import type { LinkKind } from "./edits";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
+import type { Line } from "./lines";
 
 export interface InspectorProps {
   item: Item;
@@ -19,6 +21,8 @@ export interface InspectorProps {
   /** Sends an edit of this item, such as its fields or a conflict settled. */
   onCommand: (command: Command) => void;
   threads: Thread[];
+  /** Each thread's line, to show the item's. */
+  lines: ReadonlyMap<string, Line>;
   busy: boolean;
 }
 
@@ -33,6 +37,7 @@ export function Inspector({
   onClose,
   onCommand,
   threads,
+  lines,
   busy,
 }: InspectorProps) {
   const [editing, setEditing] = useState(false);
@@ -64,18 +69,30 @@ export function Inspector({
       </div>
     );
   return (
-    <aside className="inspector" data-testid="inspector" aria-label="Selected item">
+    <aside className={editing ? "inspector tall" : "inspector"} data-testid="inspector" aria-label="Selected item">
       <header>
         <h2>{item.title}</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
       </header>
-      <p className="facts">
-        <code>{item.id}</code> · {item.state}
-        {item.thread === null ? null : <> · {item.thread}</>}
-      </p>
-      <p className="facts">In {item.parent === null ? "the top level" : chip(item.parent)}</p>
+      <dl className="facts">
+        <dt>Id</dt>
+        <dd>{item.id}</dd>
+        <dt>State</dt>
+        <dd>{item.state}</dd>
+        {item.thread === null ? null : (
+          <>
+            <dt>Thread</dt>
+            <dd className="line" style={lineStyle(lines.get(item.thread))}>
+              <Badge line={lines.get(item.thread)} />
+              {lines.get(item.thread)?.name ?? item.thread}
+            </dd>
+          </>
+        )}
+        <dt>In</dt>
+        <dd>{item.parent === null ? "the top level" : chip(item.parent)}</dd>
+      </dl>
       <Conflicts item={item} titleOf={titleOf} busy={busy} onCommand={onCommand} />
       {editing ? (
         <ItemEditor

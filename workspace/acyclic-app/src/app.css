@@ -1,9 +1,52 @@
-/* The shell: a bar on top, the threads beside the Map on a wide screen and above it on a phone. */
+/* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
+   The colours are lines.ts's TOKENS, which a unit test holds these to. */
+@font-face {
+  font-family: "Overpass";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/overpass/files/overpass-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Overpass";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/overpass/files/overpass-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 :root {
+  --ground: #141a1f;
+  --chrome: #1b2228;
+  --box: #1b2329;
+  --tile: #26313a;
+  --sheet: #222b33;
+  --rule: #34404a;
+  --ink: #e6ebef;
+  --muted: #95a3ae;
+  --signal: #f2b33d;
+  /* A control's edge: stronger than a rule, so an outlined button reads as one. */
+  --edge: #4e5d69;
+  --danger: #ff8a80;
+  /* At least 44 px to a fingertip; a mouse makes do with less. */
+  --hit: 44px;
   color-scheme: dark;
-  font-family: system-ui, sans-serif;
-  background: #101418;
-  color: #d8e4ee;
+  font-family: Overpass, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  background: var(--ground);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+@media (pointer: fine) {
+  :root {
+    --hit: 34px;
+  }
 }
 * {
   box-sizing: border-box;
@@ -14,6 +57,142 @@ body,
   height: 100%;
   margin: 0;
 }
+h2,
+h3,
+p {
+  margin: 0;
+}
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Controls in three tiers: primary says what the panel is for, the outlined rest are options, quiet ones step away. */
+button,
+summary,
+select,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  min-height: var(--hit);
+  padding: 0 14px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--tile);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--ground);
+}
+button.primary:hover:not(:disabled) {
+  background: #ffffff;
+}
+button.quiet,
+button.close {
+  border-color: transparent;
+  color: var(--muted);
+}
+button.close,
+button.icon {
+  width: var(--hit);
+  padding: 0;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1;
+}
+select,
+input:not([type="checkbox"]),
+textarea {
+  min-height: var(--hit);
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--ground);
+  /* Under 16 px, a phone zooms in on the field. */
+  font-size: 16px;
+}
+textarea {
+  resize: vertical;
+}
+select,
+input:not([type="checkbox"]),
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+/* Drawn alike in every engine: WebKit's own select ignores the height the other fields have. */
+select {
+  appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 19px) 55%,
+    calc(100% - 14px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+label:has(> input[type="checkbox"]) {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--hit);
+  cursor: pointer;
+}
+
+/* A line's badge: one round shape, its size set by where it sits. A thread without a number gets a dot. */
+.badge {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 1.75em;
+  height: 1.75em;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--line-ink);
+  font-size: 0.8em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  /* Overpass sits high in its line box; this centres the figures. */
+  padding-top: 0.12em;
+}
+.badge.dot {
+  min-width: 0;
+  width: 0.9em;
+  height: 0.9em;
+  padding: 0;
+  margin: 0 0.42em;
+}
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The shell: a bar on top, the lines beside the Map on a wide screen and above it on a phone. */
 .shell {
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -21,221 +200,465 @@ body,
 }
 .bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 6px;
   align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid #2b3a4a;
+  padding: 6px 6px 6px 12px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  background: var(--chrome);
+  border-bottom: 1px solid var(--rule);
 }
-.bar h1 {
-  font-size: 16px;
-  margin: 0 auto 0 0;
+.brand {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
 }
+.bar > :not(.brand) {
+  flex: none;
+}
+.brand h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.brand p {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.icon {
+  font-size: 26px;
+}
+.needs-button {
+  display: inline-flex;
+  padding: 0 10px 0 6px;
+  gap: 6px;
+  align-items: center;
+}
+.needs-button .badge {
+  --line: var(--signal);
+  --line-ink: var(--ground);
+}
+.needs-button[data-none="true"] .badge {
+  --line: var(--tile);
+  --line-ink: var(--muted);
+}
+.needs-button[aria-pressed="true"],
+.thread[aria-pressed="true"] {
+  background: var(--tile);
+  border-color: var(--ink);
+}
+
+/* The menu of what's changed rarely: archived items, autonomy, a refresh. */
+.menu {
+  position: relative;
+  width: var(--hit);
+  height: var(--hit);
+}
+.menu summary {
+  display: grid;
+  place-items: center;
+  width: var(--hit);
+  height: var(--hit);
+  border-radius: 8px;
+  list-style: none;
+  font-size: 22px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+.menu[open] summary {
+  background: var(--tile);
+}
+.menu-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 3;
+  display: grid;
+  gap: 10px;
+  width: min(300px, calc(100vw - 16px));
+  padding: 12px 14px;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.menu-body label:not(:has(> input[type="checkbox"])) {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.menu-body select {
+  color: var(--ink);
+}
+
+/* The lines: a strip to scroll along on a phone, a list down the side when wide. */
 .threads {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   overflow-x: auto;
-  padding: 6px 12px;
-  border-bottom: 1px solid #2b3a4a;
+  padding: 6px 8px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--rule);
+  scrollbar-width: none;
 }
 .thread {
+  display: flex;
   flex: none;
-  background: #1b2530;
-  color: inherit;
-  border: 1px solid #4a6378;
-  border-radius: 14px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 13px;
+  gap: 8px;
+  align-items: center;
+  max-width: 17em;
+  padding: 0 12px 0 6px;
+  border-color: transparent;
+  font-weight: 500;
+  text-align: left;
 }
-.thread.picked {
-  border-color: #7cc4ff;
-  background: #24323f;
+.thread .name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
+.thread[aria-pressed="true"] {
+  border-color: var(--line);
+}
+
 .stage {
   position: relative;
   min-height: 0;
+  background: var(--ground);
 }
 .map {
   position: absolute;
   inset: 0;
 }
-/* The inspector, the add form and a mode's prompt: a sheet along the bottom on a phone, a pane on the right when wide. */
+
+/* The inspector, the needs list, a thread, the add form and a mode's prompt: a sheet along the bottom on a phone, a
+   pane on the right when wide. A sheet is opaque: the Map behind it would only be noise. */
 .inspector,
 .sheet {
   position: absolute;
   inset: auto 0 0 0;
+  z-index: 2;
   max-height: 45%;
   overflow-y: auto;
-  background: #1b2530ee;
-  border-top: 1px solid #4a6378;
-  padding: 8px 12px;
+  overscroll-behavior: contain;
+  padding: 18px 16px max(16px, env(safe-area-inset-bottom));
+  background: var(--sheet);
+  border-top: 1px solid var(--rule);
+  border-radius: 14px 14px 0 0;
+  animation: rise 150ms ease-out;
 }
-.inspector header {
+/* The handle says the sheet is a layer over the Map. */
+.inspector::before,
+.sheet::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: calc(50% - 18px);
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--edge);
+}
+/* A form takes the whole height: at 45 %, less a phone's keyboard, it would be a few lines tall. */
+.inspector.tall,
+.sheet.add {
+  max-height: none;
+  top: 0;
+  border-radius: 0;
+}
+.inspector.tall::before,
+.sheet.add::before {
+  display: none;
+}
+@keyframes rise {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inspector,
+  .sheet {
+    animation: none;
+  }
+}
+.inspector header,
+.sheet header {
   display: flex;
   align-items: start;
   gap: 8px;
+  margin: -6px -8px 6px 0;
 }
 .inspector h2,
 .sheet h2 {
-  font-size: 15px;
-  margin: 0 0 4px;
   flex: 1;
+  padding-top: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 .inspector h3 {
-  font-size: 12px;
-  margin: 8px 0 2px;
-  color: #9fb3c4;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .facts {
   margin: 2px 0;
+}
+dl.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  align-items: baseline;
+  margin: 6px 0 0;
+}
+dl.facts dt {
+  color: var(--muted);
   font-size: 13px;
 }
-.links ul {
-  list-style: none;
+dl.facts dd {
+  min-width: 0;
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  overflow-wrap: anywhere;
 }
-.chip {
-  background: #24323f;
-  color: inherit;
-  border: 1px solid #4a6378;
-  border-radius: 12px;
-  padding: 2px 8px;
-  font: inherit;
+/* A thread named beside its badge. */
+.line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.why {
+  color: var(--muted);
   font-size: 13px;
 }
 .notes {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
   white-space: pre-wrap;
-  font-size: 13px;
-  color: #b8c8d6;
+  color: var(--ink);
+  max-width: 68ch;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.grow {
+  flex: 1;
+}
+
+/* An item named in a panel: a small station sign, drawn compact, with a fingertip's reach around it. */
+.chip {
+  position: relative;
+  display: inline-flex;
   gap: 6px;
-  margin: 6px 0;
-}
-button {
-  min-height: 32px;
-}
-/* While a mode waits for a tap on the Map, its prompt takes one line, so the Map stays free to tap. */
-.sheet.prompt {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 2px 10px;
+  margin: 7px 0;
+  background: var(--tile);
+  border-color: var(--rule);
+  border-radius: 6px;
+  font-weight: 500;
+  text-align: left;
 }
-.conflicts {
-  border: 1px solid #ffd166;
-  padding: 4px 8px;
-  margin: 6px 0;
+.chip::after {
+  content: "";
+  position: absolute;
+  inset: -8px -2px;
 }
-.conflicts ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.setting {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 6px 0;
-  font-size: 13px;
-}
+.links ul,
+.conflicts ul,
 .proposals ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.proposals li {
+.links ul {
   display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 13px;
-  margin: 4px 0;
+  flex-wrap: wrap;
+  column-gap: 4px;
 }
-.why {
-  color: #9fb3c4;
-  font-size: 12px;
+.links li {
+  display: flex;
+  align-items: center;
+}
+dl.facts .chip {
+  margin: 0;
+}
+.links .unlink {
+  min-width: 36px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.conflicts {
+  margin: 12px 0;
+  padding: 2px 12px 10px;
+  border-left: 3px dashed var(--signal);
+}
+.conflicts h3 {
+  color: var(--signal);
+}
+.conflict + .conflict {
+  margin-top: 8px;
+}
+.conflict .field {
+  font-weight: 600;
 }
 .conflicts li {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 13px;
+  margin: 4px 0;
 }
+.conflicts .value {
+  flex: 1;
+}
+
+.setting {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0;
+}
+.proposals li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--rule);
+}
+
 .fields label,
 .sheet.add label {
   display: grid;
-  gap: 2px;
-  margin: 6px 0;
+  gap: 4px;
+  margin: 10px 0;
   font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
 }
-.fields input,
-.fields select,
-.fields textarea,
-.sheet.add input,
-.sheet.add select {
-  font: inherit;
-  font-size: 16px;
-  padding: 6px;
-  background: #101418;
-  color: inherit;
-  border: 1px solid #4a6378;
+.fields :is(input, select, textarea),
+.sheet.add :is(input, select) {
+  color: var(--ink);
+  font-weight: 400;
 }
-.sheet.add input[aria-invalid="true"] {
-  border-color: #ff8080;
+
+/* While a mode waits for a tap on the Map, its prompt takes one line, so the Map stays free to tap. */
+.sheet.prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px max(6px, env(safe-area-inset-bottom)) 16px;
 }
+.sheet.prompt::before {
+  display: none;
+}
+
 .notice {
   position: absolute;
   inset: 8px 8px auto 8px;
+  z-index: 3;
   display: flex;
   gap: 8px;
   align-items: center;
-  background: #3a2a1a;
-  border: 1px solid #ffd166;
-  padding: 6px 10px;
-  font-size: 13px;
-  z-index: 2;
+  padding: 4px 4px 4px 14px;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-left: 3px dashed var(--signal);
+  border-radius: 8px;
 }
 .status {
   padding: 16px;
+  color: var(--muted);
 }
-/* What fills a row of buttons, such as a prompt's text. */
-.grow {
-  flex: 1;
+
+/* The needs-you list: one entry after another, ruled apart. */
+.needs {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.needs > li {
+  padding: 12px 0 8px;
+  border-top: 2px solid var(--rule);
+}
+.notify {
+  margin: 0 0 4px;
+}
+
+/* Items listed to pick from: rows a finger's height, ruled apart, since titles are too long to sit side by side. */
+.rows {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.rows li + li {
+  border-top: 1px solid var(--rule);
+}
+button.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 0;
+  font-weight: 500;
+  text-align: left;
 }
 @media (min-width: 900px) {
   .shell {
     grid-template-rows: auto 1fr;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 260px 1fr;
   }
   .bar {
     grid-column: 1 / -1;
   }
   .threads {
     flex-direction: column;
+    gap: 2px;
     overflow-y: auto;
     border-bottom: none;
-    border-right: 1px solid #2b3a4a;
+    border-right: 1px solid var(--rule);
   }
   .thread {
-    text-align: left;
+    max-width: none;
+    padding: 6px 10px 6px 6px;
+    align-items: start;
+  }
+  .thread .name {
+    white-space: normal;
+    padding-top: 0.15em;
   }
   .inspector,
   .sheet.add {
     inset: 0 0 0 auto;
-    width: 320px;
+    width: 360px;
     max-height: none;
     border-top: none;
-    border-left: 1px solid #4a6378;
+    border-left: 1px solid var(--rule);
+    border-radius: 0;
+    animation: none;
   }
-}
-.notify {
-  margin: 4px 0 8px;
-  font-size: 14px;
+  .inspector::before {
+    display: none;
+  }
 }

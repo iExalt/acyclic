@@ -7,6 +7,7 @@ import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
+import { type Line, TOKENS } from "../lines";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
@@ -16,6 +17,16 @@ import { type Selection, scene } from "./scene";
 /** How tall a box's title strip is, where a tap collapses or expands it. */
 const TITLE = 36;
 
+/** The face labels are drawn in; the canvas draws with whatever is loaded, so the first draw waits for it. */
+const FONT = "Overpass, system-ui, sans-serif";
+const fontLoaded: Promise<unknown> =
+  typeof document === "undefined" || !("fonts" in document)
+    ? Promise.resolve()
+    : Promise.all([document.fonts.load("500 13px Overpass"), document.fonts.load("700 13px Overpass")]).catch(
+        () => undefined,
+      );
+
+/** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 const STYLE: cytoscape.StylesheetJson = [
   {
     selector: "node",
@@ -24,46 +35,60 @@ const STYLE: cytoscape.StylesheetJson = [
       width: "data(width)",
       height: "data(height)",
       label: "data(label)",
-      color: "#d8e4ee",
+      color: TOKENS.ink,
+      "font-family": FONT,
       "font-size": 13,
+      "font-weight": 500,
       "text-wrap": "ellipsis",
       "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth")}px`,
       "text-valign": "center",
       "text-halign": "center",
-      "background-color": "#24323f",
+      "background-color": TOKENS.tile,
       "border-width": 1,
-      "border-color": "#4a6378",
-      "z-index": (node: cytoscape.NodeSingular) => node.data("layer") as number,
+      "border-color": TOKENS.rule,
+      // Drawn by z-index alone: by default Cytoscape draws every edge under every node, so a box hid the links in it.
+      // Nodes take the even levels, and a link the odd one between the box it is in and the items it joins.
+      "z-index-compare": "manual",
+      "z-index": (node: cytoscape.NodeSingular) => 2 * (node.data("layer") as number),
     },
   },
   {
     selector: "node.box",
     style: {
-      "background-color": "#1b2530",
+      "background-color": TOKENS.box,
+      "border-color": TOKENS.rule,
+      color: TOKENS.muted,
+      "font-weight": 700,
       "text-valign": "top",
       // The label's centre sits on the box's top edge; this brings it into the title strip.
       "text-margin-y": TITLE / 2 + 6,
     },
   },
-  { selector: "node.collapsed", style: { "background-color": "#2b3a4a", "border-style": "dashed" } },
-  { selector: "node.lit", style: { "border-color": "#7cc4ff", "border-width": 3 } },
-  { selector: "node.dim", style: { opacity: 0.3 } },
-  { selector: "node.selected", style: { "border-color": "#ffd166", "border-width": 3 } },
+  {
+    selector: "node.collapsed",
+    style: { "border-color": TOKENS.muted, "border-style": "dashed", "font-weight": 700 },
+  },
+  { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 3 } },
+  { selector: "node.dim", style: { opacity: 0.35 } },
+  { selector: "node.selected", style: { "border-color": "#ffffff", "border-width": 3 } },
   {
     selector: "edge",
     style: {
       width: 1.5,
       "curve-style": "straight",
-      "line-color": "#7cc4ff",
-      "line-opacity": 0.6,
+      "line-color": TOKENS.muted,
       "target-arrow-shape": "triangle",
-      "target-arrow-color": "#7cc4ff",
-      "z-index": 1000,
+      "target-arrow-color": TOKENS.muted,
+      "arrow-scale": 0.9,
+      // Drawn over the nodes, so a tap must pass through to the node beneath.
+      events: "no",
+      "z-index-compare": "manual",
+      "z-index": (edge: cytoscape.EdgeSingular) => edge.data("z") as number,
     },
   },
   {
     selector: "edge.crossing",
-    style: { "line-style": "dashed", "line-color": "#ffd166", "target-arrow-color": "#ffd166" },
+    style: { "line-style": "dashed", "line-color": TOKENS.signal, "target-arrow-color": TOKENS.signal },
   },
 ];
 
@@ -72,6 +97,8 @@ export interface PlanMapProps {
   showArchived: boolean;
   /** The thread picked in the sidebar, if any. */
   thread: string | null;
+  /** Each thread's line, whose colour lights its items. */
+  lines: ReadonlyMap<string, Line>;
   selected: string | null;
   onSelect: (item: string | null) => void;
   /**
@@ -89,7 +116,16 @@ export interface Focus {
   n: number;
 }
 
-export default function PlanMap({ items, showArchived, thread, selected, onSelect, focus, onPick }: PlanMapProps) {
+export default function PlanMap({
+  items,
+  showArchived,
+  thread,
+  lines,
+  selected,
+  onSelect,
+  focus,
+  onPick,
+}: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
@@ -134,7 +170,7 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
   useEffect(() => {
     let live = true;
     const start = performance.now();
-    layouts.layout(view).then((result) => {
+    Promise.all([layouts.layout(view), fontLoaded]).then(([result]) => {
       if (!live || result === null) return;
       // How long the layout took and how many boxes it laid out afresh, for timing runs.
       if (host.current !== null) {
@@ -176,16 +212,24 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
+    const line = drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
+    const layers = new Map(drawn.nodes.map((node) => [node.id, node.layer]));
     const elements: ElementDefinition[] = [
       ...drawn.nodes.map((node) => ({
         group: "nodes" as const,
-        data: { ...node, textWidth: Math.max(40, node.width - 16) },
+        data: { ...node, textWidth: Math.max(40, node.width - 16), line: line ?? TOKENS.ink },
         position: { x: node.x, y: node.y },
         classes: [node.kind, node.lit ? "lit" : "", node.dim ? "dim" : "", node.selected ? "selected" : ""].join(" "),
       })),
       ...drawn.edges.map((edge) => ({
         group: "edges" as const,
-        data: { id: edge.id, source: edge.source, target: edge.target },
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          // A link across boxes is drawn over everything: it is drawn only for the selected item, to be seen.
+          z: edge.crossing ? 1000 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
+        },
         classes: edge.crossing ? "crossing" : "",
       })),
     ];
@@ -221,6 +265,7 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
     element.dataset.nodes = String(core.nodes().length);
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
+    element.dataset.font = String(document.fonts?.check("500 13px Overpass") ?? false);
     // Drawn once the browser has painted the frame after this one's changes.
     const drawing = performance.now();
     requestAnimationFrame(() =>
@@ -229,7 +274,7 @@ export default function PlanMap({ items, showArchived, thread, selected, onSelec
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed]);
+  }, [drawn, placed, lines]);
 
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick });

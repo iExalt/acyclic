@@ -130,6 +130,19 @@ def wait_drawn(page, nodes, timeout=20_000):
     return page.get_by_test_id("map").evaluate("m => ({ ...m.dataset })")
 
 
+def from_menu(page, act):
+    """Does `act` in the bar's menu, opening it first and closing it after, as a hand would."""
+    summary = page.get_by_test_id("menu")
+    if not page.locator("details.menu").evaluate("d => d.open"):
+        summary.click()
+    act()
+    summary.click()
+
+
+def refresh(page):
+    from_menu(page, lambda: page.get_by_role("button", name="Refresh").click())
+
+
 def tap_title(page, view, id):
     """Taps a box's title strip where it is drawn on the canvas."""
     corner = page.get_by_test_id("map").evaluate(
@@ -144,17 +157,18 @@ def tap_title(page, view, id):
         page.mouse.click(x, y)
 
 
-def centre(page, id):
+def centre(page, id, rise=0):
     """Brings a node to full size in the middle of the screen, as a person would before tapping it: on a phone, the
-    fitted plan draws it too small to tap."""
+    fitted plan draws it too small to tap. `rise` lifts it by that share of the Map's height."""
     page.get_by_test_id("map").evaluate(
-        "(m, id) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); }", id
+        "(m, [id, rise]) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); m.cy.panBy({ x: 0, y: -rise * m.clientHeight }); }",
+        [id, rise],
     )
 
 
-def tap_middle(page, view, id):
-    """Taps the middle of a node where it is drawn, after bringing it to full size."""
-    centre(page, id)
+def tap_middle(page, view, id, rise=0):
+    """Taps the middle of a node where it is drawn, after bringing it to full size, `rise` above the middle."""
+    centre(page, id, rise)
     middle = page.get_by_test_id("map").evaluate(
         "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
         " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
@@ -230,7 +244,9 @@ def installable(context, page, origin, name, failures):
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
-    wait_drawn(page, expected)
+    # The canvas draws labels in whatever face is loaded, so the first draw waits for the app's own.
+    if wait_drawn(page, expected).get("font") != "true":
+        failures.append(f"{name}: the Map drew before its font loaded")
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
@@ -265,9 +281,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
         failures.append(f"{name}: no box moved in the layout when expanded")
         box = None
     # Archived subtrees show when asked, and hide again.
-    page.get_by_test_id("show-archived").click()
+    from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, len(plan.default(archived=True)))
-    page.get_by_test_id("show-archived").click()
+    from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, expected)
     # A thread lights up its members as drawn.
     thread, _ = Counter(
@@ -330,12 +346,27 @@ def edit_journey(page, view, env, plan, box, name, failures):
     centre(page, box)
     tap_title(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
-    # Selecting shows the item's notes, as text.
-    tap_middle(page, view, first)
+    # Selecting shows the item's notes, as text. The leaf sits above the inspector, as a person would hold it, so the
+    # Map need not pan to show what is added inside it.
+    tap_middle(page, view, first, rise=0.2)
     notes = page.locator("[data-testid=inspector] [data-testid=notes]")
     notes.get_by_text(HOSTILE, exact=True).wait_for(timeout=10_000)
     if notes.locator("img").count() or page.evaluate("window.pwned === true"):
         failures.append(f"{name}: the inspector ran a note as markup")
+    # A fingertip reaches a close button and a chip from 44 px apart, though the chip is drawn smaller.
+    reach = page.evaluate(
+        """() => {
+            const at = (el, dy) => { const r = el.getBoundingClientRect();
+                return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2 + dy)?.closest('button') === el; };
+            const close = document.querySelector('[data-testid=inspector] .close');
+            const chip = document.querySelector('[data-testid=inspector] .chip');
+            return [close.getBoundingClientRect().height, at(chip, -21) && at(chip, 21)];
+        }"""
+    )
+    if view.get("has_touch") and (reach[0] < 44 or not reach[1]):
+        failures.append(
+            f"{name}: too small to tap: close {reach[0]} px, chip reached {reach[1]}"
+        )
 
     # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
     added = "journey-added"
@@ -365,9 +396,10 @@ def edit_journey(page, view, env, plan, box, name, failures):
     prompt = page.get_by_test_id("prompt").bounding_box()
     if prompt is None or prompt["height"] > 60:
         failures.append(f"{name}: the move prompt covers the Map: {prompt}")
-    centre(page, second)
+    # Above the inspector that opens after the move, likewise.
+    centre(page, second, rise=0.2)
     before = settled_corner(page, second)
-    tap_middle(page, view, second)
+    tap_middle(page, view, second, rise=0.2)
     wait_inspector(page, f".facts [data-select='{second}']")
     wait_drawn(page, base + 1)
     held(page, second, before, "moving an item into it", name, failures)
@@ -491,7 +523,7 @@ def form_journey(page, view, env, remote, id, name, failures):
     run(env, "--as-user", "item", "edit", id, "--title", "Title from this clone")
     run(other, "sync")
     run(env, "sync")
-    page.get_by_role("button", name="Refresh").click()
+    refresh(page)
     conflict = page.locator("[data-testid=conflicts] [data-conflict=title]")
     conflict.wait_for(timeout=10_000)
     conflict.locator("[data-keep='Title from the other clone']").click()
@@ -515,7 +547,7 @@ def form_journey(page, view, env, remote, id, name, failures):
 
     # Reopen: finished elsewhere, reopened here.
     run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
-    page.get_by_role("button", name="Refresh").click()
+    refresh(page)
     page.locator("[data-action=reopen]").click()
     page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
     check_tracker(
@@ -570,7 +602,7 @@ def thread_journey(page, env, plan, thread, name, failures):
     ]
     for id in outside:
         run(env, "item", "edit", id, "--thread", thread)
-    page.get_by_role("button", name="Refresh").click()
+    refresh(page)
     rows = panel.locator("[data-proposal]")
     rows.nth(1).wait_for(timeout=10_000)
     first = rows.filter(has_text=plan.items[outside[0]]["title"])
@@ -586,8 +618,12 @@ def thread_journey(page, env, plan, thread, name, failures):
     # The box shows the tracker's flag, so it ticks once the edit is saved and read back, not on the tap.
     panel.locator("input[name=pm]").click()
     settled_control(page, "[data-testid=thread-panel] input[name=pm]", "checked", True)
-    page.get_by_test_id("global-level").select_option("everything")
-    settled_control(page, "[data-testid=global-level]", "value", "everything")
+
+    def level():
+        page.get_by_test_id("global-level").select_option("everything")
+        settled_control(page, "[data-testid=global-level]", "value", "everything")
+
+    from_menu(page, level)
     after = shown()
     if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
         failures.append(
@@ -619,7 +655,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     )
     run(env, "item", "edit", outside, "--thread", thread)
     before = int(count.inner_text())
-    page.get_by_role("button", name="Refresh").click()
+    refresh(page)
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=needs-count]').textContent) === n",
         arg=before + 1,
@@ -804,7 +840,7 @@ def main():
                         id for id in plan.children(hint) if not plan.children(id)
                     )
                     run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
-                    page.get_by_role("button", name="Refresh").click()
+                    refresh(page)
                     edit_journey(page, view, env, plan, hint, name, failures)
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures

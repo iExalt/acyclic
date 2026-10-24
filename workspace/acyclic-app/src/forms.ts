@@ -10,6 +10,12 @@ export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
 export const LEVELS = ["everything", "scope-and-irreversible", "blockers"] as const;
 export type Level = (typeof LEVELS)[number];
 
+/** A level as the app says it: "scope-and-irreversible" reads "Scope and irreversible". */
+export function levelLabel(level: string): string {
+  const words = level.replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** The item's fields the editor changes; an empty string is a clear. */
 export interface ItemDraft {
   title: string;

@@ -3,20 +3,25 @@
 
 import { useEffect, useState } from "react";
 import { type Command, type Proposal, proposals, type ThreadDetail, thread } from "./api";
+import { Badge, lineStyle } from "./Badge";
 import {
   approveCommand,
   dropCommand,
   keepCommand,
   LEVELS,
   type Level,
+  levelLabel,
   pmCommand,
   revokeCommand,
   threadLevelCommand,
 } from "./forms";
+import type { Line } from "./lines";
 
 export interface ThreadPanelProps {
   id: string;
   globalLevel: string;
+  /** The thread's line, for its badge. */
+  line: Line | undefined;
   titleOf: (id: string) => string;
   /** Changes after every edit sent, so the panel reads the thread again. */
   version: number;
@@ -31,6 +36,7 @@ type Loaded = { detail: ThreadDetail; open: Proposal[] } | { failed: string } | 
 export function ThreadPanel({
   id,
   globalLevel,
+  line,
   titleOf,
   version,
   busy,
@@ -66,36 +72,30 @@ export function ThreadPanel({
   return (
     <aside className="inspector" data-testid="thread-panel" aria-label="Picked thread">
       <header>
-        <h2>{detail.title}</h2>
+        <h2 className="line" style={lineStyle(line)}>
+          <Badge line={line} />
+          {line?.name ?? detail.title}
+        </h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
       </header>
-      {detail.brief === null ? null : <p className="notes">{detail.brief}</p>}
       <p className="facts">
-        {detail.approved ? "Approved" : "Not approved"} · {members} {members === 1 ? "item" : "items"}
+        {members} {members === 1 ? "item" : "items"}, {detail.approved ? "approved" : "not approved yet"}
       </p>
-      {detail.heads.length === 0 ? null : (
-        <div className="links">
-          <h3>Ready to start</h3>
-          <ul>
-            {detail.heads.map((head) => (
-              <li key={head}>
-                <button type="button" className="chip" data-select={head} onClick={() => onSelect(head)}>
-                  {titleOf(head)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       <div className="actions">
         {detail.approved ? (
           <button type="button" data-action="revoke" disabled={busy} onClick={() => onCommand(revokeCommand(id))}>
             Revoke approval
           </button>
         ) : (
-          <button type="button" data-action="approve" disabled={busy} onClick={() => onCommand(approveCommand(id))}>
+          <button
+            type="button"
+            className="primary"
+            data-action="approve"
+            disabled={busy}
+            onClick={() => onCommand(approveCommand(id))}
+          >
             Approve {members} {members === 1 ? "item" : "items"}
           </button>
         )}
@@ -110,10 +110,10 @@ export function ThreadPanel({
             onCommand(threadLevelCommand(id, event.target.value === "" ? null : (event.target.value as Level)))
           }
         >
-          <option value="">Global ({globalLevel})</option>
+          <option value="">Global ({levelLabel(globalLevel)})</option>
           {LEVELS.map((level) => (
             <option key={level} value={level}>
-              {level}
+              {levelLabel(level)}
             </option>
           ))}
         </select>
@@ -137,6 +137,7 @@ export function ThreadPanel({
                 <span className="grow">{describe(proposal, titleOf)}</span>
                 <button
                   type="button"
+                  className="primary"
                   data-action="keep"
                   disabled={busy}
                   onClick={() => onCommand(keepCommand(proposal.id))}
@@ -150,6 +151,21 @@ export function ThreadPanel({
                   onClick={() => onCommand(dropCommand(proposal.id))}
                 >
                   Drop
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {detail.brief === null ? null : <p className="notes">{detail.brief}</p>}
+      {detail.heads.length === 0 ? null : (
+        <div className="heads">
+          <h3>Ready to start</h3>
+          <ul className="rows">
+            {detail.heads.map((head) => (
+              <li key={head}>
+                <button type="button" className="row" data-select={head} onClick={() => onSelect(head)}>
+                  {titleOf(head)}
                 </button>
               </li>
             ))}
