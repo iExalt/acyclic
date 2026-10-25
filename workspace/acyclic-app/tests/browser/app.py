@@ -152,14 +152,17 @@ def refresh(page):
 # values only, since the renderer's own objects take seconds to serialise.
 
 
-def tap_title(page, view, id):
-    """Taps a box's title strip where it is drawn on the canvas."""
+def tap_box(page, view, id, chevron=True):
+    """Taps a box where it is drawn on the canvas: its chevron, which opens or closes it, or else its title, which
+    selects it."""
     corner = page.get_by_test_id("map").evaluate(
         "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
-        " const r = m.getBoundingClientRect(); return { x: r.x + b.x1, y: r.y + b.y1, w: b.w }; }",
+        " const r = m.getBoundingClientRect(); return { x: r.x + b.x1, y: r.y + b.y1, w: b.w, z: m.cy.zoom() }; }",
         id,
     )
-    x, y = corner["x"] + min(corner["w"] / 2, 60), corner["y"] + 10
+    # The chevron is in the middle of the 36 px square at the title strip's left; the title starts after it.
+    along = 18 * corner["z"] if chevron else min(corner["w"] / 2, 120 * corner["z"])
+    x, y = corner["x"] + along, corner["y"] + 18 * corner["z"]
     if view.get("has_touch"):
         page.touchscreen.tap(x, y)
     else:
@@ -374,7 +377,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
         ]:
-            tap_title(page, view, box)
+            tap_box(page, view, box)
             wait_drawn(page, nodes)
             after = settled_corner(page, box)
             if action == "expanding":
@@ -394,6 +397,14 @@ def map_journey(page, view, plan, name, failures, hint=None):
     # Archived subtrees show when asked, and hide again.
     from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, len(plan.default(archived=True)))
+    archived = next(
+        (id for id in plan.default(archived=True) if plan.items[id]["archived"]), None
+    )
+    if archived is not None:
+        # For the eye: crossed out. The renderer loads its images after drawing, and draws them a moment later.
+        centre(page, archived)
+        page.wait_for_timeout(200)
+        page.screenshot(path=SHOTS / f"app-{name}-archived.png")
     from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, expected)
     # A thread lights up its members as drawn.
@@ -553,8 +564,16 @@ def edit_journey(page, view, env, plan, box, name, failures):
         return
     first, second = leaves
     centre(page, box)
-    tap_title(page, view, box)
+    tap_box(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
+    # A tap on the box's title past its chevron selects the box, and leaves it open.
+    tap_box(page, view, box, chevron=False)
+    title = plan.items[box]["title"]
+    page.get_by_test_id("inspector").get_by_role(
+        "heading", name=title, exact=True
+    ).wait_for(timeout=10_000)
+    if page.get_by_test_id("map").get_attribute("data-nodes") != str(base):
+        failures.append(f"{name}: a tap on {box}'s title opened or closed it")
     # Selecting shows the item's notes, as text. The leaf sits above the inspector, as a person would hold it, so the
     # Map need not pan to show what is added inside it.
     tap_middle(page, view, first, rise=0.2)
@@ -1489,7 +1508,7 @@ def main():
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
             # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
-            # collapsed box would start laying it out open at once, and change the nodes drawn.
+            # collapsed box would select it, and open the inspector.
             target = next(id for id in plan.default() if plan.depth(id) == 1)
             drawn = page.get_by_test_id("map")
             before = drawn.get_attribute("data-nodes")

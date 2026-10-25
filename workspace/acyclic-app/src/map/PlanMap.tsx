@@ -1,102 +1,32 @@
 // The Map: the plan drawn as nested boxes on a canvas, with Cytoscape.js placing nodes exactly where the scoped
-// layout put them. Tapping a box's title collapses or expands it, and the box stays where it was on screen; tapping
-// an item selects it, lighting up its thread and drawing its links across boxes. While an edit waits for a target, a
-// tap picks one instead. Dragging pans; nothing moves items.
+// layout put them. Tapping a box's chevron collapses or expands it, and the box stays where it was on screen; tapping
+// anything else selects it, lighting up its thread and drawing its links across boxes. While an edit waits for a
+// target, a tap picks one instead. Dragging pans; nothing moves items.
 
 import cytoscape, { type Core } from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
-import { type Line, TOKENS } from "../lines";
+import type { Line } from "../lines";
+import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
+import { STYLE } from "./style";
 
-/** How tall a box's title strip is, where a tap collapses or expands it. */
-const TITLE = 36;
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
 
-/** The face labels are drawn in; the canvas draws with whatever is loaded, so the first draw waits for it. */
-const FONT = "Overpass, system-ui, sans-serif";
+/** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
 const fontLoaded: Promise<unknown> =
   typeof document === "undefined" || !("fonts" in document)
     ? Promise.resolve()
     : Promise.all([document.fonts.load("500 13px Overpass"), document.fonts.load("700 13px Overpass")]).catch(
         () => undefined,
       );
-
-/** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
-const STYLE: cytoscape.StylesheetJson = [
-  {
-    selector: "node",
-    style: {
-      shape: "round-rectangle",
-      width: "data(width)",
-      height: "data(height)",
-      label: "data(label)",
-      color: TOKENS.ink,
-      "font-family": FONT,
-      "font-size": 13,
-      "font-weight": 500,
-      "text-wrap": "ellipsis",
-      "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth")}px`,
-      "text-valign": "center",
-      "text-halign": "center",
-      "background-color": TOKENS.tile,
-      "border-width": 1,
-      "border-color": TOKENS.rule,
-      // Drawn by z-index alone: by default Cytoscape draws every edge under every node, so a box hid the links in it.
-      // Nodes take the even levels, and a link the odd one between the box it is in and the items it joins.
-      "z-index-compare": "manual",
-      "z-index": (node: cytoscape.NodeSingular) => 2 * (node.data("layer") as number),
-    },
-  },
-  {
-    selector: "node.box",
-    style: {
-      "background-color": TOKENS.box,
-      "border-color": TOKENS.rule,
-      color: TOKENS.muted,
-      "font-weight": 700,
-      "text-valign": "top",
-      // The label's centre sits on the box's top edge; this brings it into the title strip.
-      "text-margin-y": TITLE / 2 + 6,
-    },
-  },
-  {
-    selector: "node.collapsed",
-    style: { "border-color": TOKENS.muted, "border-style": "dashed", "font-weight": 700 },
-  },
-  { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 3 } },
-  { selector: "node.dim", style: { opacity: 0.35 } },
-  { selector: "node.selected", style: { "border-color": "#ffffff", "border-width": 3 } },
-  {
-    selector: "edge",
-    style: {
-      width: 1.5,
-      "curve-style": "straight",
-      "line-color": TOKENS.muted,
-      "target-arrow-shape": "triangle",
-      "target-arrow-color": TOKENS.muted,
-      "arrow-scale": 0.9,
-      // Drawn over the nodes, so a tap must pass through to the node beneath.
-      events: "no",
-      "z-index-compare": "manual",
-      "z-index": (edge: cytoscape.EdgeSingular) => edge.data("z") as number,
-    },
-  },
-  {
-    selector: "edge.crossing",
-    style: { "line-style": "dashed", "line-color": TOKENS.signal, "target-arrow-color": TOKENS.signal },
-  },
-  // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
-  { selector: "edge.lit", style: { width: 3, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
-  { selector: "edge.dim", style: { opacity: 0.35 } },
-];
 
 export interface PlanMapProps {
   items: Item[];
@@ -319,9 +249,7 @@ export default function PlanMap({
       }
       const id = node.id();
       const kind = node.data("kind") as string;
-      const box = node.boundingBox({ includeLabels: false });
-      const inTitle = event.position.y - box.y1 <= TITLE;
-      if (kind === "collapsed" || (kind === "box" && inTitle)) {
+      if (onChevron(kind, node.boundingBox({ includeLabels: false }), event.position, core.zoom())) {
         const corner = node.renderedBoundingBox({ includeLabels: false });
         anchor.current = { id, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
