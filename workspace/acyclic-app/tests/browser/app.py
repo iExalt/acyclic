@@ -774,7 +774,10 @@ def failed_add_journey(page, errors, name, failures):
         form.locator("button[type=submit]").click()
         return form
 
-    # Escape never throws away what was typed: it says how to leave instead.
+    # Escape never throws away what was typed: it says how to leave instead. From nothing selected, so the form's
+    # opener is the bar's Add, which is still there when the form closes.
+    if page.get_by_test_id("inspector").count():
+        page.get_by_test_id("inspector").get_by_role("button", name="Close").click()
     page.locator("[data-action=add-top]").click()
     form = page.get_by_test_id("add-form")
     form.locator("input[name=title]").fill("Typed, then Escape")
@@ -786,6 +789,17 @@ def failed_add_journey(page, errors, name, failures):
         failures.append(f"{name}: Escape threw away an add form's typed title")
     if form.count():
         form.get_by_role("button", name="Cancel").click()
+    # Gone with the form: what was said of it, and focus, back to what opened it.
+    try:
+        page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
+    except PlaywrightTimeout:
+        pass
+    if page.get_by_test_id("notice").count() or not page.locator(
+        "[data-action=add-top]"
+    ).evaluate("b => b === document.activeElement"):
+        failures.append(
+            f"{name}: after cancelling an add form, its notice stayed, or focus didn't go back to Add"
+        )
     form = add(
         "Refused add",
         lambda route: route.fulfill(

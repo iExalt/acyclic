@@ -54,6 +54,8 @@ interface Notice {
   text: string;
   offer: "retry" | "refresh" | null;
   retry: { body: Command; after: After } | null;
+  /** Said of a form Escape left open, so it goes when the form does. */
+  unsaved?: true;
 }
 
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
@@ -251,13 +253,17 @@ export function App() {
     needs: showNeeds,
     thread: thread !== null,
   });
+  /** Drops what was said of an unsaved form, once the form has gone. */
+  const formClosed = useCallback(() => setNotice((was) => (was?.unsaved ? null : was)), []);
+  // What's on top changing takes the add form, or the item's editor, with it.
+  useEffect(formClosed, [top]);
   // Escape closes what's on top, but never a form holding what the user typed: that says how to leave it instead.
   useEffect(() => {
     if (top === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (document.querySelector("form[data-dirty='true']") !== null) {
-        setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null });
+        setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
         return;
       }
       if (top === "mode") setMode({ kind: "idle" });
@@ -462,6 +468,7 @@ export function App() {
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
+            onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
             onSave={(edit, edited) =>
               send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, edited })

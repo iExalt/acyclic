@@ -19,6 +19,8 @@ export interface InspectorProps {
   onLink: (kind: LinkKind) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** Its editor closed, saved or not. */
+  onEditorClosed: () => void;
   /** Sends an edit of this item, such as a conflict settled. */
   onCommand: (command: Command) => void;
   /** Saves its fields, with the draft to draw at once. */
@@ -42,6 +44,7 @@ export function Inspector({
   onLink,
   onAdd,
   onClose,
+  onEditorClosed,
   onCommand,
   onSave,
   reopened,
@@ -122,9 +125,13 @@ export function Inspector({
           busy={busy}
           onSave={(edit, edited) => {
             setEditing(false);
+            onEditorClosed();
             onSave(edit, edited);
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={() => {
+            setEditing(false);
+            onEditorClosed();
+          }}
         />
       ) : null}
       <div className="actions">
