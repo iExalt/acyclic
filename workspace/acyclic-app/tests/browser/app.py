@@ -397,7 +397,10 @@ def map_journey(page, view, plan, name, failures, hint=None):
         row["thread"] for row in plan.items.values() if row["thread"]
     ).most_common(1)[0]
     # Picked with none of its items in view, the nearest comes into view, clear of the panel the pick opens.
-    page.get_by_test_id("map").evaluate("m => m.cy.pan({ x: 100000, y: 100000 })")
+    # In braces, so the renderer itself isn't sent back: serialising it takes seconds.
+    page.get_by_test_id("map").evaluate(
+        "m => { m.cy.pan({ x: 2 * m.clientWidth, y: 2 * m.clientHeight }); }"
+    )
     page.locator(f"[data-thread='{thread}']").click()
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
