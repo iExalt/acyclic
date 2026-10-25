@@ -1,10 +1,11 @@
 // The selected item: its fields, its conflicts with a way to settle each, and its links both ways, each a button that
 // selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
 
-import { useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited, LinkKind } from "./edits";
+import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import type { Line } from "./lines";
@@ -18,6 +19,8 @@ export interface InspectorProps {
   onLink: (kind: LinkKind) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** Its editor closed, saved or not. */
+  onEditorClosed: () => void;
   /** Sends an edit of this item, such as a conflict settled. */
   onCommand: (command: Command) => void;
   /** Saves its fields, with the draft to draw at once. */
@@ -25,6 +28,8 @@ export interface InspectorProps {
   /** The editor's draft, open again after a save failed, or null. */
   reopened: Edited | null;
   threads: Thread[];
+  /** A refusal or failure to show, under its title rather than over it. */
+  notice: ReactNode;
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
   busy: boolean;
@@ -39,14 +44,18 @@ export function Inspector({
   onLink,
   onAdd,
   onClose,
+  onEditorClosed,
   onCommand,
   onSave,
   reopened,
   threads,
+  notice,
   lines,
   busy,
 }: InspectorProps) {
   const [editing, setEditing] = useState(reopened !== null);
+  const panel = useRef<HTMLElement>(null);
+  useFocusIn(panel);
   const chip = (id: string) => (
     <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
       {titleOf(id)}
@@ -76,13 +85,20 @@ export function Inspector({
       </div>
     );
   return (
-    <aside className={editing ? "inspector tall" : "inspector"} data-testid="inspector" aria-label="Selected item">
+    <aside
+      ref={panel}
+      tabIndex={-1}
+      className={editing ? "inspector tall" : "inspector"}
+      data-testid="inspector"
+      aria-label="Selected item"
+    >
       <header>
         <h2>{item.title}</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
       </header>
+      {notice}
       <dl className="facts">
         <dt>Id</dt>
         <dd>{item.id}</dd>
@@ -109,9 +125,13 @@ export function Inspector({
           busy={busy}
           onSave={(edit, edited) => {
             setEditing(false);
+            onEditorClosed();
             onSave(edit, edited);
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={() => {
+            setEditing(false);
+            onEditorClosed();
+          }}
         />
       ) : null}
       <div className="actions">

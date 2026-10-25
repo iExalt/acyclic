@@ -148,6 +148,10 @@ def refresh(page):
     from_menu(page, lambda: page.get_by_role("button", name="Refresh").click())
 
 
+# The Map's helpers reach the renderer through `evaluate`, which sends back whatever its function returns: return plain
+# values only, since the renderer's own objects take seconds to serialise.
+
+
 def tap_title(page, view, id):
     """Taps a box's title strip where it is drawn on the canvas."""
     corner = page.get_by_test_id("map").evaluate(
@@ -440,6 +444,15 @@ def map_journey(page, view, plan, name, failures, hint=None):
     if panel.locator("[role=alert]").count():
         failures.append(f"{name}: the thread's panel failed: {panel.inner_text()}")
     page.screenshot(path=SHOTS / f"app-{name}-thread.png")
+    # Escape closes the panel the pick opened, and focus goes back to the thread picked; picked again, it reopens.
+    button = page.locator(f"[data-thread='{thread}']")
+    page.keyboard.press("Escape")
+    if panel.count() or not button.evaluate("b => b === document.activeElement"):
+        failures.append(
+            f"{name}: Escape left the thread's panel open, or focus away from {thread}"
+        )
+    button.click()
+    panel.wait_for()
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
     )
@@ -761,6 +774,32 @@ def failed_add_journey(page, errors, name, failures):
         form.locator("button[type=submit]").click()
         return form
 
+    # Escape never throws away what was typed: it says how to leave instead. From nothing selected, so the form's
+    # opener is the bar's Add, which is still there when the form closes.
+    if page.get_by_test_id("inspector").count():
+        page.get_by_test_id("inspector").get_by_role("button", name="Close").click()
+    page.locator("[data-action=add-top]").click()
+    form = page.get_by_test_id("add-form")
+    form.locator("input[name=title]").fill("Typed, then Escape")
+    page.keyboard.press("Escape")
+    if (
+        not form.count()
+        or not form.get_by_test_id("notice").get_by_text("Unsaved changes").count()
+    ):
+        failures.append(f"{name}: Escape threw away an add form's typed title")
+    if form.count():
+        form.get_by_role("button", name="Cancel").click()
+    # Gone with the form: what was said of it, and focus, back to what opened it.
+    try:
+        page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
+    except PlaywrightTimeout:
+        pass
+    if page.get_by_test_id("notice").count() or not page.locator(
+        "[data-action=add-top]"
+    ).evaluate("b => b === document.activeElement"):
+        failures.append(
+            f"{name}: after cancelling an add form, its notice stayed, or focus didn't go back to Add"
+        )
     form = add(
         "Refused add",
         lambda route: route.fulfill(
@@ -925,9 +964,15 @@ def in_open_view(page, id):
 def form_journey(page, view, env, remote, id, name, failures):
     """Edits the selected item's fields, settles a conflict two clones wrote, and reopens it, as the phone would."""
     inspector = page.get_by_test_id("inspector")
-    # Fields: only what changed is sent.
+    # Escape in an editor with nothing changed closes the editor alone.
     page.locator("[data-action=edit]").click()
     form = page.get_by_test_id("item-form")
+    form.locator("input[name=title]").focus()
+    page.keyboard.press("Escape")
+    if form.count() or not inspector.count():
+        failures.append(f"{name}: Escape in an unchanged editor didn't close it alone")
+    # Fields: only what changed is sent.
+    page.locator("[data-action=edit]").click()
     form.locator("input[name=title]").fill("Edited in the app")
     form.locator("select[name=size]").select_option("m")
     form.locator("textarea[name=notes]").fill("Plain notes")
