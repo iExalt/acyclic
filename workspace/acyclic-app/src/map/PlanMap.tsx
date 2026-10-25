@@ -345,9 +345,6 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
     element.clientHeight / Math.max(1, placed.height),
   );
   core.minZoom(Math.min(1, fit * 0.9));
-  // What the renderer allows, and for what, for the journeys to compare with the Map's size.
-  element.dataset.minZoom = String(core.minZoom());
-  element.dataset.plan = `${placed.width}x${placed.height}`;
 }
 
 /** Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it. */

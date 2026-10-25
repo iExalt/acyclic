@@ -32,15 +32,18 @@ export function Menu({ children }: { children: ReactNode }) {
       <summary aria-label="More" data-testid="menu">
         <span aria-hidden="true">⋯</span>
       </summary>
-      {/* Its buttons close it on a click, and its fields on a change; the keys reach each control as usual. */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: listens for clicks its buttons and fields already handle. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: as above. */}
+      {/* Its buttons close it on a click, its fields on a change, and its lists on Enter; keys reach each control. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: listens for what its buttons, fields and lists already handle. */}
       <div
         className="menu-body"
         onClick={(event) => {
           if ((event.target as Element).closest("button") !== null) close(details.current);
         }}
         onChange={() => close(details.current)}
+        // Enter on a list writes its draft, which acts as a pick does.
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && event.target instanceof HTMLSelectElement) close(details.current);
+        }}
       >
         {children}
       </div>

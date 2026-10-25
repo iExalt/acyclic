@@ -536,6 +536,54 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def level_keys_journey(page, name, failures):
+    """Arrow keys on the autonomy list move a draft, written once on Enter and dropped on Escape; where a browser's
+    arrow keys open the list instead, as on macOS, there is no draft to check."""
+    writes = []
+    page.on(
+        "request",
+        lambda request: (
+            writes.append(json.loads(request.post_data)["level"]["level"])
+            if request.url.endswith("/api/command")
+            and (request.post_data or "").startswith('{"level":{"level"')
+            else None
+        ),
+    )
+    levels = page.get_by_test_id("global-level")
+    page.get_by_test_id("menu").click()
+    was = levels.input_value()
+    order = levels.evaluate("s => [...s.options].map(o => o.value)")
+    levels.focus()
+    page.keyboard.press("ArrowDown")
+    if levels.input_value() == was:
+        page.keyboard.press("Escape")
+        print(
+            f"{name}: arrow keys open the autonomy list here, so there is no draft to check"
+        )
+        return
+    page.keyboard.press("ArrowDown")
+    if writes:
+        failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
+    page.keyboard.press("Enter")
+    target = order[min(order.index(was) + 2, len(order) - 1)]
+    settled_control(page, "[data-testid=global-level]", "value", target)
+    if writes != [target]:
+        failures.append(
+            f"{name}: Enter after two arrow keys wrote {writes}, not once {target}"
+        )
+    page.get_by_test_id("menu").click()
+    levels.focus()
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("Escape")
+    page.get_by_test_id("menu").click()
+    if writes != [target] or levels.input_value() != target:
+        failures.append(
+            f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
+        )
+    page.get_by_test_id("menu").click()
+    print(f"{name}: arrow keys on the autonomy list wrote once, on Enter")
+
+
 def failed_add_journey(page, errors, name, failures):
     """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
     is lost after the server saved it stays drawn, with the form closed."""
@@ -1115,6 +1163,8 @@ def main():
                 installable(context, page, origin, name, failures)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
+                if name == "desktop":
+                    level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.
                     leaf = min(

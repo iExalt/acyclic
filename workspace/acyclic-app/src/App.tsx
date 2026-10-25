@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AddForm } from "./AddForm";
 import { type Command, CommandError, command, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
 import { Badge, lineStyle } from "./Badge";
+import { Choice } from "./Choice";
 import {
   addCommand,
   type LinkKind,
@@ -311,21 +312,19 @@ export function App() {
             />
             Show archived items
           </label>
-          <label>
-            Autonomy for every thread without its own
-            <select
-              data-testid="global-level"
-              value={load.level}
-              disabled={busy}
-              onChange={(event) => send(globalLevelCommand(event.target.value as Level), { select: null, pin: null })}
-            >
-              {LEVELS.map((level) => (
-                <option key={level} value={level}>
-                  {levelLabel(level)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Choice
+            label="Autonomy for every thread without its own"
+            testid="global-level"
+            value={load.level}
+            disabled={busy}
+            onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null })}
+          >
+            {LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {levelLabel(level)}
+              </option>
+            ))}
+          </Choice>
           <button type="button" onClick={refresh}>
             Refresh
           </button>

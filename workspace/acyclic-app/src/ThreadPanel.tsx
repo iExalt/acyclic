@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { type Command, type Proposal, proposals, type ThreadDetail, thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
+import { Choice } from "./Choice";
 import {
   approveCommand,
   dropCommand,
@@ -100,24 +101,21 @@ export function ThreadPanel({
           </button>
         )}
       </div>
-      <label className="setting">
-        Autonomy
-        <select
-          name="level"
-          value={detail.level ?? ""}
-          disabled={busy}
-          onChange={(event) =>
-            onCommand(threadLevelCommand(id, event.target.value === "" ? null : (event.target.value as Level)))
-          }
-        >
-          <option value="">Global ({levelLabel(globalLevel)})</option>
-          {LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {levelLabel(level)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Choice
+        label="Autonomy"
+        className="setting"
+        name="level"
+        value={detail.level ?? ""}
+        disabled={busy}
+        onWrite={(level) => onCommand(threadLevelCommand(id, level === "" ? null : (level as Level)))}
+      >
+        <option value="">Global ({levelLabel(globalLevel)})</option>
+        {LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {levelLabel(level)}
+          </option>
+        ))}
+      </Choice>
       <label className="setting">
         <input
           type="checkbox"
