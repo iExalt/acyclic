@@ -42,7 +42,10 @@ export function Menu({ children }: { children: ReactNode }) {
         onChange={() => close(details.current)}
         // Enter on a list writes its draft, which acts as a pick does; a list with no draft keeps the key to itself.
         onKeyDown={(event) => {
-          if (event.key === "Enter" && event.target instanceof HTMLSelectElement) close(details.current);
+          if (event.key !== "Enter" || !(event.target instanceof HTMLSelectElement)) return;
+          // Its default would reach the summary that closing focuses, and open the menu again.
+          event.preventDefault();
+          close(details.current);
         }}
       >
         {children}

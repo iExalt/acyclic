@@ -580,6 +580,11 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
             )
+        if page.locator("details.menu").evaluate("d => d.open"):
+            failures.append(
+                f"{name}: Enter on the autonomy list wrote, but left the menu open"
+            )
+            page.get_by_test_id("menu").click()
         page.get_by_test_id("menu").click()
         levels.focus()
         page.keyboard.press("ArrowUp")
