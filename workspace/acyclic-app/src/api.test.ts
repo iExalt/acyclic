@@ -142,9 +142,17 @@ describe("settle", () => {
 });
 
 describe("failure", () => {
-  it("tells a refusal by its code, and a request that never reached the server in the app's words", () => {
+  it("tells a request that never reached the server in the app's words, and keeps any other failure's own", async () => {
+    const lost = async () => {
+      throw new TypeError("Load failed");
+    };
+    const told = await command("list", lost).catch(failure);
+    expect(told).toEqual({ code: "network", message: "Can't reach the server" });
+    // A bug in reading an answer isn't a lost connection.
+    const malformed = async () => Response.json({ ok: true, data: null });
+    const bug = await items(malformed).then(() => null, failure);
+    expect(bug?.code).toBe("network");
+    expect(bug?.message).not.toBe("Can't reach the server");
     expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "try again" });
-    expect(failure(new TypeError("Load failed"))).toEqual({ code: "network", message: "Can't reach the server" });
-    expect(failure(new SyntaxError("bad JSON"))).toEqual({ code: "network", message: "bad JSON" });
   });
 });

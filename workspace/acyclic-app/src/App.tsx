@@ -360,7 +360,8 @@ export function App() {
           </button>
         ))}
       </nav>
-      <main className="stage" data-busy={busy}>
+      {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
+      <main className="stage" data-busy={busy} data-reads={reads.current.shown}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
           <PlanMap
             items={shown}

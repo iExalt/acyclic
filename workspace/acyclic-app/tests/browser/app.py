@@ -865,9 +865,12 @@ def form_journey(page, view, env, remote, id, name, failures):
             )
     # Meanwhile, an agent sets the gate, and coming back to the app reads it: saving sends only what the user changed.
     run(env, "--as-user", "item", "edit", id, "--gate", "Set elsewhere")
-    with page.expect_response(lambda r: '"show"' in (r.request.post_data or "")):
-        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    reads = int(page.locator("main.stage").get_attribute("data-reads"))
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_function(
+        "n => Number(document.querySelector('main.stage').dataset.reads) > n",
+        arg=reads,
+    )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
     if not in_open_view(page, id):
