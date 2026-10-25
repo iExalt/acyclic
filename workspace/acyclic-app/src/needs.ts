@@ -15,7 +15,7 @@ import {
 import type { Line } from "./lines";
 
 /** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
-const IN_A_TERMINAL = "Settle this one in a terminal: acyclic needs says how";
+const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see how";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
