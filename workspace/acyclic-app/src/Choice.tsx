@@ -3,6 +3,10 @@
 import { type ReactNode, useRef, useState } from "react";
 import { type ChoiceEvent, choose, UNCHOSEN } from "./choosing";
 
+/** The keys that open a closed list rather than step through it. */
+const opens = (event: { key: string; altKey: boolean }) =>
+  event.key === " " || event.key === "F4" || (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowUp"));
+
 export interface ChoiceProps {
   /** What the list sets, said before it. */
   label: ReactNode;
@@ -36,6 +40,8 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
         onKeyDown={(event) => {
           if (event.key === "Enter") step({ kind: "enter" });
           else if (event.key === "Escape") step({ kind: "cancel" });
+          // A key that only opens the list changes nothing itself: the pick comes later, from the list.
+          if (opens(event)) return;
           keying.current = true;
           setTimeout(() => {
             keying.current = false;
