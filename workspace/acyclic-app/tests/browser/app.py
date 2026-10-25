@@ -216,11 +216,14 @@ def open_app(browser, view, link, failures, name):
     )
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
-    # A blocked load, such as one the content policy refuses, shows only as a console error.
+    # A blocked load, such as one the content policy refuses, shows only as a console error. WebKit on Linux says it
+    # ignores the viewport's keyboard setting, which only Chromium and Firefox read.
     page.on(
         "console",
         lambda message: (
-            errors.append(message.text) if message.type == "error" else None
+            errors.append(message.text)
+            if message.type == "error" and '"interactive-widget"' not in message.text
+            else None
         ),
     )
     page.goto(link)
