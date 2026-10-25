@@ -453,6 +453,42 @@ def map_journey(page, view, plan, name, failures, hint=None):
         )
     button.click()
     panel.wait_for()
+    if view.get("has_touch"):
+        # A phone's Back closes what's open one layer at a time, and stays in the app: the needs-you list over the
+        # thread's panel, then the panel.
+        needs = page.get_by_test_id("needs")
+        page.get_by_test_id("needs-button").click()
+        needs.wait_for()
+        url = page.url
+        page.go_back()
+        needs.wait_for(state="detached")
+        try:
+            panel.wait_for(timeout=5_000)
+            stayed = True
+        except PlaywrightTimeout:
+            stayed = False
+        page.go_back()
+        try:
+            panel.wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            stayed = False
+        if not stayed or page.url != url:
+            failures.append(
+                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app"
+            )
+        if not panel.count():
+            button.click()
+        panel.wait_for()
+        # Closed in the app, a layer gives its entry back, so the next Back closes what's open then.
+        page.get_by_test_id("needs-button").click()
+        needs.get_by_role("button", name="Close").click()
+        needs.wait_for(state="detached")
+        try:
+            page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(
+                f"{name}: closing the needs-you list left the history at {page.evaluate('JSON.stringify(history.state)')}"
+            )
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
     )
@@ -787,6 +823,10 @@ def failed_add_journey(page, errors, name, failures):
         or not form.get_by_test_id("notice").get_by_text("Unsaved changes").count()
     ):
         failures.append(f"{name}: Escape threw away an add form's typed title")
+    # Nor does Back.
+    page.go_back()
+    if not form.count():
+        failures.append(f"{name}: Back threw away an add form's typed title")
     if form.count():
         form.get_by_role("button", name="Cancel").click()
     # Gone with the form: what was said of it, and focus, back to what opened it.

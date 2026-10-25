@@ -20,7 +20,7 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
-import { topLayer } from "./layers";
+import { arrived, depth, type Entries, follow, type HistoryAction, type Open, topLayer } from "./layers";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
@@ -246,35 +246,66 @@ export function App() {
     },
     [model, mode, send],
   );
-  const top = topLayer({
+  const open: Open = {
     mode: mode.kind !== "idle",
     adding: adding !== null,
     item: chosen !== undefined,
     needs: showNeeds,
     thread: thread !== null,
-  });
+  };
+  const top = topLayer(open);
+  const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => setNotice((was) => (was?.unsaved ? null : was)), []);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [top]);
-  // Escape closes what's on top, but never a form holding what the user typed: that says how to leave it instead.
+  /**
+   * Closes what's on top, as Escape and Back do, but never a form holding what the user typed: that says how to leave
+   * it instead. Whether it closed anything.
+   */
+  const closeTop = useRef<() => boolean>(() => false);
+  closeTop.current = () => {
+    if (document.querySelector("form[data-dirty='true']") !== null) {
+      setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+      return false;
+    }
+    if (top === "mode") setMode({ kind: "idle" });
+    else if (top === "add") setAdding(null);
+    else if (top === "item") setSelected(null);
+    else if (top === "needs") setShowNeeds(false);
+    else if (top === "thread") setThread(null);
+    return top !== null;
+  };
   useEffect(() => {
-    if (top === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (document.querySelector("form[data-dirty='true']") !== null) {
-        setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
-        return;
-      }
-      if (top === "mode") setMode({ kind: "idle" });
-      else if (top === "add") setAdding(null);
-      else if (top === "item") setSelected(null);
-      else if (top === "needs") setShowNeeds(false);
-      else setThread(null);
+      if (event.key === "Escape" && !event.defaultPrevented) closeTop.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [top]);
+  }, []);
+  // One history entry per layer open, so a phone's Back closes them one by one before it leaves the app.
+  const entries = useRef<Entries>({ pushed: 0, waiting: false });
+  const layersNow = useRef(layers);
+  layersNow.current = layers;
+  const act = useCallback((step: { entries: Entries; action: HistoryAction }) => {
+    entries.current = step.entries;
+    const { action } = step;
+    if (action === null) return;
+    if (action.kind === "push")
+      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "");
+    else if (action.kind === "back") window.history.go(-action.by);
+    // A form left open by Back takes its entry again.
+    else if (!closeTop.current()) act(follow(entries.current, layersNow.current));
+  }, []);
+  useEffect(() => act(follow(entries.current, layers)), [act, layers]);
+  useEffect(() => {
+    const onMove = (event: PopStateEvent) => {
+      const at = typeof event.state?.layers === "number" ? event.state.layers : 0;
+      act(arrived(entries.current, at, layersNow.current));
+    };
+    window.addEventListener("popstate", onMove);
+    return () => window.removeEventListener("popstate", onMove);
+  }, [act]);
 
   if (load.state === "loading") return <p className="status">Loading…</p>;
   if (load.state === "failed")

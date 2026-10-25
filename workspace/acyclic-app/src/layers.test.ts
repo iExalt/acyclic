@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { topLayer } from "./layers";
+import { arrived, depth, follow, topLayer } from "./layers";
 
 const none = { mode: false, adding: false, item: false, needs: false, thread: false };
 
@@ -12,5 +12,34 @@ describe("topLayer", () => {
     expect(topLayer({ ...none, needs: true, thread: true })).toBe("needs");
     expect(topLayer({ ...none, thread: true })).toBe("thread");
     expect(topLayer(none)).toBeNull();
+  });
+});
+
+describe("the history of layers", () => {
+  const at = (pushed: number, waiting = false) => ({ pushed, waiting });
+
+  it("keeps one entry per layer open: pushing as they open, going back over the extra as the app closes them", () => {
+    expect(depth({ ...none, thread: true, item: true })).toBe(2);
+    expect(follow(at(0), 2)).toEqual({ entries: at(2), action: { kind: "push", from: 0, to: 2 } });
+    expect(follow(at(2), 1)).toEqual({ entries: at(1, true), action: { kind: "back", by: 1 } });
+    expect(follow(at(1), 1).action).toBeNull();
+  });
+
+  it("holds a push until its own move back has landed, then brings the entries to what's open then", () => {
+    // Closed in the app, then another opened before the move back lands.
+    const waiting = follow(at(2), 1).entries;
+    expect(follow(waiting, 2)).toEqual({ entries: waiting, action: null });
+    expect(arrived(waiting, 1, 2)).toEqual({ entries: at(2), action: { kind: "push", from: 1, to: 2 } });
+    expect(arrived(waiting, 1, 1)).toEqual({ entries: at(1), action: null });
+  });
+
+  it("closes the layer on top on Back, and ignores a move that lands on no fewer layers, such as forward", () => {
+    expect(arrived(at(2), 1, 2)).toEqual({ entries: at(1), action: { kind: "close" } });
+    expect(arrived(at(2), 2, 2).action).toBeNull();
+    // A form left open by Back stays: it takes its entry again.
+    expect(follow(arrived(at(2), 1, 2).entries, 2)).toEqual({
+      entries: at(2),
+      action: { kind: "push", from: 1, to: 2 },
+    });
   });
 });
