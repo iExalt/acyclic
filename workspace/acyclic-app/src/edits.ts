@@ -2,7 +2,7 @@
 // and what a tap does in each mode. Pure, so every rule is tested without a browser.
 
 import type { Command, Item } from "./api";
-import { type ItemDraft, itemEdit, STATES } from "./forms";
+import { changes, draftOf, type ItemDraft } from "./forms";
 import type { Model } from "./map/model";
 
 export type LinkKind = "waits-for" | "relates-to";
@@ -178,7 +178,13 @@ export function recovery(code: string): Recovery {
  * A write drawn before the server has it, so the Map answers a tap at once: an item added, or an item's fields
  * edited. The app holds at most one, since it sends one write at a time.
  */
-export type Pending = { kind: "add"; item: NewItem } | { kind: "edit"; id: string; draft: ItemDraft };
+export type Pending = { kind: "add"; item: NewItem } | { kind: "edit"; id: string; edited: Edited };
+
+/** An item's fields as its editor opened on them, `base`, and as the user left them, `draft`. */
+export interface Edited {
+  base: ItemDraft;
+  draft: ItemDraft;
+}
 
 /** The items with `pending` drawn over them. */
 export function withPending(items: Item[], pending: Pending | null): Item[] {
@@ -202,29 +208,35 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
     };
     return [...items, added];
   }
-  const { id, draft } = pending;
-  const or = (value: string) => (value === "" ? null : value);
+  const { id, edited } = pending;
+  const changed = changes(edited.base, edited.draft);
+  const or = (value: string | undefined, was: string | null) =>
+    value === undefined ? was : value === "" ? null : value;
   return items.map((one) =>
     one.id !== id
       ? one
       : {
           ...one,
-          title: draft.title.trim() === "" ? one.title : draft.title.trim(),
-          state: (STATES as readonly string[]).includes(draft.state) ? draft.state : one.state,
-          thread: or(draft.thread),
-          notes: or(draft.notes),
-          gate: or(draft.gate),
-          size: or(draft.size),
+          title: changed.title ?? one.title,
+          // A done item's state isn't the editor's to change.
+          state: one.state === "done" ? one.state : (changed.state ?? one.state),
+          thread: or(changed.thread, one.thread),
+          notes: or(changed.notes, one.notes),
+          gate: or(changed.gate, one.gate),
+          size: or(changed.size, one.size),
         },
   );
 }
 
-/** Whether `items`, read from the server, already hold the write `pending` drew. */
+/** Whether `items`, read from the server, hold `pending`: the item added, or every field the user changed. */
 export function landed(pending: Pending, items: Item[]): boolean {
   if (pending.kind === "add") return items.some((one) => one.id === pending.item.item);
   const item = items.find((one) => one.id === pending.id);
-  // Titles are saved trimmed, as the editor sends them; the server keeps every field as sent.
-  return item !== undefined && itemEdit(item, { ...pending.draft, title: pending.draft.title.trim() }) === null;
+  if (item === undefined) return false;
+  const now = draftOf(item);
+  return Object.entries(changes(pending.edited.base, pending.edited.draft)).every(
+    ([field, value]) => now[field as keyof ItemDraft] === value,
+  );
 }
 
 /** A failure that leaves unknown whether the server applied the write: no answer, or one that wasn't the server's. */

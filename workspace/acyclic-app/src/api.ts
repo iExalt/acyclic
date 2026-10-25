@@ -79,6 +79,12 @@ export class CommandError extends Error {
   }
 }
 
+/** A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. */
+export function failure(err: unknown): { code: string; message: string } {
+  if (err instanceof CommandError) return { code: err.code, message: err.message };
+  return { code: "network", message: err instanceof Error ? err.message : String(err) };
+}
+
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
 /** A CLI command as the API takes it: a bare name for one without arguments, such as `"list"`, else `{name: args}`. */
@@ -86,10 +92,14 @@ export type Command = string | Record<string, unknown>;
 
 /** Runs one command as the paired browser's user; the session cookie rides along, since the page is same-origin. */
 export async function command<T>(body: Command, fetcher: Fetch = fetch): Promise<T> {
+  // A request that never reached the server says so in each browser's own words ("Failed to fetch", "Load
+  // failed"…), so it's told in the app's.
   const response = await fetcher("/api/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  }).catch(() => {
+    throw new CommandError("network", "Can't reach the server");
   });
   const envelope = (await response.json().catch(() => null)) as Envelope<T> | null;
   if (envelope === null) throw new CommandError("http", `the server answered ${response.status} without an envelope`);

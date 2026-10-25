@@ -2,7 +2,7 @@
 // proposals agents made to it, each kept or dropped with one tap.
 
 import { useEffect, useState } from "react";
-import { type Command, type Proposal, proposals, type ThreadDetail, thread } from "./api";
+import { type Command, failure, type Proposal, proposals, type ThreadDetail, thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { Choice } from "./Choice";
 import {
@@ -54,7 +54,7 @@ export function ThreadPanel({
         if (live) setLoaded({ detail, open: all.filter((one) => one.decision === null && one.threads.includes(id)) });
       },
       (err: unknown) => {
-        if (live) setLoaded({ failed: err instanceof Error ? err.message : String(err) });
+        if (live) setLoaded({ failed: failure(err).message });
       },
     );
     return () => {

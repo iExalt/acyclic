@@ -770,6 +770,28 @@ def failed_add_journey(page, errors, name, failures):
         )
     if form.count():
         form.get_by_role("button", name="Cancel").click()
+    # A refresh that fails keeps the plan shown, and offers another.
+    nodes = page.get_by_test_id("map").get_attribute("data-nodes")
+    page.route(
+        "**/api/command",
+        lambda route: (
+            route.fulfill(status=500, body="")
+            if route.request.post_data == '"list"'
+            else route.fallback()
+        ),
+    )
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    notice = page.get_by_test_id("notice")
+    notice.get_by_text("Couldn't refresh").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        page.get_by_test_id("map").get_attribute("data-nodes") != nodes
+        or notice.get_by_role("button", name="Refresh").count() != 1
+    ):
+        failures.append(
+            f"{name}: a failed refresh lost the plan, or offered no Refresh"
+        )
+    notice.get_by_role("button", name="Refresh").click()
     # The browser logs the answer it lost, and the read refused, as it should.
     errors[logged:] = [
         one
@@ -841,6 +863,14 @@ def form_journey(page, view, env, remote, id, name, failures):
             failures.append(
                 f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach"
             )
+    # Meanwhile, an agent sets the gate, and coming back to the app reads it: saving sends only what the user changed.
+    run(env, "--as-user", "item", "edit", id, "--gate", "Set elsewhere")
+    reads = int(page.locator("main.stage").get_attribute("data-reads"))
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_function(
+        "n => Number(document.querySelector('main.stage').dataset.reads) > n",
+        arg=reads,
+    )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
     if not in_open_view(page, id):
@@ -849,10 +879,10 @@ def form_journey(page, view, env, remote, id, name, failures):
         env,
         id,
         lambda row: (
-            (row["title"], row["size"], row["notes"])
-            == ("Edited in the app", "m", "Plain notes")
+            (row["title"], row["size"], row["notes"], row["gate"])
+            == ("Edited in the app", "m", "Plain notes", "Set elsewhere")
         ),
-        f"{id}'s new fields",
+        f"{id}'s new fields, and the gate set while the editor was open",
         failures,
         name,
     )
