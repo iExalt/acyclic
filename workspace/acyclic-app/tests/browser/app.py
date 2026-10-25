@@ -185,6 +185,43 @@ def tap_middle(page, view, id, rise=0):
         page.mouse.click(middle["x"], middle["y"])
 
 
+def drag_pans(page, view, id):
+    """Drags from the middle of a node, by finger on a phone and by mouse on a laptop: whether the Map panned with it,
+    and selected nothing."""
+    centre(page, id)
+    drawn = page.get_by_test_id("map")
+    middle = drawn.evaluate(
+        "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+        id,
+    )
+    before = drawn.evaluate("m => m.cy.pan()")
+    x, y = middle["x"], middle["y"]
+    steps = [(x + 15 * n, y + 10 * n) for n in range(1, 7)]
+    if view.get("has_touch"):
+        cdp = page.context.new_cdp_session(page)
+        touch = lambda kind, points: cdp.send(
+            "Input.dispatchTouchEvent",
+            {"type": kind, "touchPoints": [{"x": a, "y": b} for a, b in points]},
+        )
+        touch("touchStart", [(x, y)])
+        for step in steps:
+            touch("touchMove", [step])
+        touch("touchEnd", [])
+        cdp.detach()
+    else:
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for a, b in steps:
+            page.mouse.move(a, b)
+        page.mouse.up()
+    after = drawn.evaluate("m => m.cy.pan()")
+    moved = (after["x"] - before["x"], after["y"] - before["y"])
+    return abs(moved[0] - 90) < 2 and abs(
+        moved[1] - 60
+    ) < 2 and not page.get_by_test_id("inspector").count(), moved
+
+
 def settled_corner(page, id):
     """Where a box's top-left corner is drawn once it has stopped moving: the same for 300 ms of frames.
 
@@ -250,12 +287,11 @@ def installable(context, page, origin, name, failures):
 
 
 def first_view_readable(page, name, failures):
-    """The Map opens at a zoom its titles can be read at, with a node's top-left corner, where its title starts, in
-    view."""
+    """The Map opens at a zoom its titles can be read at, with an item, not a box, wholly in view, title and all."""
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
-        " shown: m.cy.nodes().some(n => { const b = n.renderedBoundingBox({ includeLabels: false });"
-        " return b.x1 >= 0 && b.y1 >= 0 && b.x1 < w && b.y1 < h; }) }; }"
+        " shown: m.cy.nodes().not('.box').some(n => { const b = n.renderedBoundingBox();"
+        " return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= w && b.y2 <= h; }) }; }"
     )
     if view["zoom"] < READABLE or not view["shown"]:
         failures.append(
@@ -270,6 +306,54 @@ def map_journey(page, view, plan, name, failures, hint=None):
     if wait_drawn(page, expected).get("font") != "true":
         failures.append(f"{name}: the Map drew before its font loaded")
     first_view_readable(page, name, failures)
+    # Dragging pans from anywhere, an item or a box as well as the background.
+    for id in [
+        next(id for id in plan.default() if plan.depth(id) == 1),
+        next(id for id in plan.default() if plan.depth(id) == 0 and plan.children(id)),
+    ]:
+        panned, moved = drag_pans(page, view, id)
+        if not panned:
+            failures.append(
+                f"{name}: a drag from {id} moved the Map {moved}, not with it, or selected it"
+            )
+    if view.get("has_touch"):
+        # Two fingers from an item pinch, zooming the Map, rather than panning it with the first.
+        drawn = page.get_by_test_id("map")
+        centre(page, id)
+        box = drawn.evaluate(
+            "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+            " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+            id,
+        )
+        zoom = drawn.evaluate("m => m.cy.zoom()")
+        cdp = page.context.new_cdp_session(page)
+        x, y = box["x"], box["y"]
+        for kind, spread in [("touchStart", 10)] + [
+            ("touchMove", 10 + 12 * n) for n in range(1, 7)
+        ]:
+            cdp.send(
+                "Input.dispatchTouchEvent",
+                {
+                    "type": kind,
+                    "touchPoints": [
+                        {"x": x - spread, "y": y},
+                        {"x": x + spread, "y": y},
+                    ],
+                },
+            )
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        cdp.detach()
+        after = drawn.evaluate(
+            "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+            " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+            id,
+        )
+        # Spread about the item's middle, it zooms about it, so the middle stays put.
+        drift = max(abs(after["x"] - x), abs(after["y"] - y))
+        if drawn.evaluate("m => m.cy.zoom()") <= zoom or drift > 8:
+            failures.append(
+                f"{name}: a pinch from {id} didn't zoom the Map about it (drifted {drift:.0f} px)"
+            )
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
@@ -312,11 +396,30 @@ def map_journey(page, view, plan, name, failures, hint=None):
     thread, _ = Counter(
         row["thread"] for row in plan.items.values() if row["thread"]
     ).most_common(1)[0]
+    # Picked with none of its items in view, the nearest comes into view, clear of the panel the pick opens.
+    # In braces, so the renderer itself isn't sent back: serialising it takes seconds.
+    page.get_by_test_id("map").evaluate(
+        "m => { m.cy.pan({ x: 2 * m.clientWidth, y: 2 * m.clientHeight }); }"
+    )
     page.locator(f"[data-thread='{thread}']").click()
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
         arg=plan.lit(thread),
     )
+    page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for()
+    if not page.get_by_test_id("map").evaluate(
+        """m => {
+            const r = m.getBoundingClientRect();
+            const sheet = m.parentElement.querySelector('.inspector')?.getBoundingClientRect();
+            const across = sheet && sheet.width >= r.width * 0.9;
+            const open = { x2: sheet && !across ? sheet.left - r.left : r.width, y2: sheet && across ? sheet.top - r.top : r.height };
+            return m.cy.nodes('.lit').some(n => {
+                const b = n.renderedBoundingBox({ includeLabels: false });
+                return b.x2 > 0 && b.y2 > 0 && b.x1 < open.x2 && b.y1 < open.y2;
+            });
+        }"""
+    ):
+        failures.append(f"{name}: picking {thread} left all of its items out of view")
     # Its links are its route, drawn in its line's colour.
     route = page.get_by_test_id("map").evaluate(
         "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector(`[data-thread='${"

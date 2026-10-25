@@ -87,7 +87,7 @@ export function Inspector({
         <dt>Id</dt>
         <dd>{item.id}</dd>
         <dt>State</dt>
-        <dd>{item.state}</dd>
+        <dd data-testid="state">{item.archived ? `${item.state}, archived` : item.state}</dd>
         {item.thread === null ? null : (
           <>
             <dt>Thread</dt>
