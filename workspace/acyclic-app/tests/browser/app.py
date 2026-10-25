@@ -557,6 +557,11 @@ def level_keys_journey(page, name, failures):
         order = levels.evaluate("s => [...s.options].map(o => o.value)")
         levels.focus()
         page.keyboard.press("ArrowDown")
+        # A write is wrong on any platform; no change shows a platform whose arrow keys open the list.
+        page.wait_for_timeout(300)
+        if writes:
+            failures.append(f"{name}: an arrow key on the autonomy list wrote {writes}")
+            return
         if levels.input_value() == was:
             page.keyboard.press("Escape")
             print(
