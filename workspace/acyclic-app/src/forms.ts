@@ -100,9 +100,10 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
 
 /** Why a value of a conflict can't be kept from the app, for a value `resolveCommand` gives no command for. */
 export function unsettledWhy(entity: Entity, field: string, value: unknown): string {
-  if (entity === "item" && field === "state" && value === "done") return "Keep done with `acyclic done`, with evidence";
+  if (entity === "item" && field === "state" && value === "done")
+    return "Keep done in a terminal: run acyclic done with its evidence";
   if (value === null) return "This field can't be cleared";
-  return "Settle this one with the CLI: `acyclic needs` says how";
+  return "Settle this one in a terminal: run acyclic needs to see how";
 }
 
 function isLevel(value: string | null): value is Level {

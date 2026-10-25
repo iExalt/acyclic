@@ -14,6 +14,9 @@ import {
 } from "./forms";
 import type { Line } from "./lines";
 
+/** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
+const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see how";
+
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
 
@@ -155,7 +158,9 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
         if (command !== null) actions.push({ label: `Use ${shown(value)}`, command, action: "use" });
         else
-          why.push(`${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "the CLI settles it"}`);
+          why.push(
+            `${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`,
+          );
       }
       return {
         ...base,
@@ -188,7 +193,7 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         ...base,
         key: `resource-clash:${str(need.resource)}`,
         text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(lineName).join(", ")}`,
-        note: "The CLI settles this one: `acyclic needs` says how",
+        note: IN_A_TERMINAL,
       };
     }
     case "dangling":
@@ -196,14 +201,14 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         ...base,
         key: `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`,
         text: `${str(need.entity)} ${str(need.id)}: ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
-        note: "The CLI settles this one: `acyclic needs` says how",
+        note: IN_A_TERMINAL,
       };
     case "unverified":
       return {
         ...base,
         key: `unverified:${item?.id ?? ""}:${str(need.repository)}`,
         text: `Can't check ${item === null ? "an item" : titled(item)}'s merge in ${str(need.repository)}: ${str(need.reason)}`,
-        note: "The CLI settles this one: `acyclic needs` says how",
+        note: IN_A_TERMINAL,
       };
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
@@ -220,7 +225,7 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         items: [...base.items, ...named.map((one) => one.id)],
         key: `${need.kind}:${ids.filter((one) => one !== "").join(":")}`,
         text: describe(need.kind, item, thread, named, lineName),
-        note: hint === "" ? "The CLI settles this one: `acyclic needs` says how" : hint,
+        note: hint === "" ? IN_A_TERMINAL : hint,
       };
     }
   }

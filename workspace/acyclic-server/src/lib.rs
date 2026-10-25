@@ -888,9 +888,15 @@ async fn files(State(listener): State<Arc<Listener>>, request: Request) -> Respo
         },
         None => app::embedded(&request),
     };
+    // A person who followed a stale or mistyped link is told where the app is, not shown a blank page.
+    if response.status() == StatusCode::NOT_FOUND {
+        return page(StatusCode::NOT_FOUND, NOWHERE);
+    }
     app::cache(&path, &mut response);
     response
 }
+
+const NOWHERE: &str = "There's nothing at this address. The app is at /.";
 
 fn failed(what: &str, err: impl std::fmt::Display) -> CliError {
     CliError::new("serve", exit::CONFIG, format!("{what}: {err}"))

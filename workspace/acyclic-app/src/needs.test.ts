@@ -108,7 +108,7 @@ describe("needView", () => {
       none,
     );
     expect(conflict.actions.map((one) => one.label)).toEqual(["Use parked"]);
-    expect(conflict.note).toMatch(/done: Keep done with `acyclic done`/);
+    expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic done/);
     expect(conflict.key).toBe("conflict:item:a:state");
   });
 

@@ -285,7 +285,10 @@ fn every_route_is_behind_the_listeners_check() {
         send(&router, Method::GET, "/index.html", &[host, user], ""),
         (StatusCode::OK, "the app".into())
     );
-    assert_eq!(send(&router, Method::GET, "/missing", &[host, user], "").0, StatusCode::NOT_FOUND);
+    // A page that isn't there says where the app is.
+    let (status, body) = send(&router, Method::GET, "/missing", &[host, user], "");
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("The app is at /"), "{body}");
     // Static files can't reach outside their directory.
     for path in ["/../secret", "/%2e%2e/secret", "/..%2fsecret"] {
         let (status, body) = send(&router, Method::GET, path, &[host, user], "");
