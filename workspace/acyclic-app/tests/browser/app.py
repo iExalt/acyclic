@@ -254,7 +254,9 @@ def first_view_readable(page, name, failures):
         " return b.x1 >= 0 && b.y1 >= 0 && b.x1 < w && b.y1 < h; }) }; }"
     )
     if view["zoom"] < READABLE or not view["shown"]:
-        failures.append(f"{name}: the Map opened unreadably small or showing nothing whole: {view}")
+        failures.append(
+            f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
+        )
 
 
 def map_journey(page, view, plan, name, failures, hint=None):
@@ -323,7 +325,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
         (route["line"] or "").replace(" ", "")
     ]
     if route["n"] == 0 or route["n"] != route["said"] or not same:
-        failures.append(f"{name}: {thread}'s links aren't drawn in its line's colour: {route}")
+        failures.append(
+            f"{name}: {thread}'s links aren't drawn in its line's colour: {route}"
+        )
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     panel.wait_for()
     if panel.locator("[role=alert]").count():
@@ -549,7 +553,9 @@ def form_journey(page, view, env, remote, id, name, failures):
         )
         page.set_viewport_size(size)
         if not reachable:
-            failures.append(f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach")
+            failures.append(
+                f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach"
+            )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
     if not in_open_view(page, id):
