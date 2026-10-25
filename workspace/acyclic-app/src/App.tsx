@@ -87,14 +87,18 @@ export function App() {
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
-  /** Counts reads of the plan started, and the latest shown, so one overtaken by a later read is never shown. */
-  const reads = useRef({ started: 0, shown: 0 });
+  /**
+   * Counts reads of the plan started, and the latest shown, so one overtaken by a later read is never shown; `items`
+   * are the latest shown read's.
+   */
+  const reads = useRef<{ started: number; shown: number; items: Item[] }>({ started: 0, shown: 0, items: [] });
   /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
     const n = ++reads.current.started;
     const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
     if (n < reads.current.shown) return null;
     reads.current.shown = n;
+    reads.current.items = found;
     return { state: "loaded" as const, items: found, threads: listed, level, needs: needed };
   }, []);
   const refresh = useCallback(() => {
@@ -175,7 +179,11 @@ export function App() {
           bringIn();
           sent = { write: "saved", proposals, reload: "done" };
         } catch (err) {
-          // Saved, so what it drew stays until a refresh reads the plan.
+          // Saved, so what it drew joins the plan shown until a refresh reads it, where the next write can't undo it.
+          if (drawn !== null) {
+            setLoad((was) => (was.state === "loaded" ? { ...was, items: withPending(was.items, drawn) } : was));
+            setPending(null);
+          }
           setAdding(null);
           sent = { write: "saved", proposals, reload: { failed: err instanceof Error ? err.message : String(err) } };
         }
@@ -187,10 +195,11 @@ export function App() {
           // stays until then, so the item stays selected if it was saved.
           let held = false;
           if (unanswered(code)) {
-            const next = await fetchAll().catch(() => null);
-            if (next !== null) {
-              setLoad(next);
-              held = landed(drawn, next.items);
+            const next = await fetchAll().catch(() => undefined);
+            if (next !== undefined) {
+              // A read overtaken by one already shown: that one says.
+              if (next !== null) setLoad(next);
+              held = landed(drawn, next?.items ?? reads.current.items);
             }
           }
           setPending(null);
@@ -361,7 +370,11 @@ export function App() {
           <div className="notice" role="alert" data-testid="notice">
             <span className="grow">{notice.text}</span>
             {notice.retry === null ? null : (
-              <button type="button" onClick={() => notice.retry && send(notice.retry.body, notice.retry.after)}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => notice.retry && send(notice.retry.body, notice.retry.after)}
+              >
                 Try again
               </button>
             )}

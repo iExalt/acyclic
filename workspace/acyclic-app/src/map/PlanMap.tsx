@@ -207,6 +207,22 @@ export default function PlanMap({
     };
   }, []);
 
+  // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows.
+  const placedNow = useRef<Placed | null>(null);
+  placedNow.current = placed;
+  useEffect(() => {
+    const element = host.current;
+    if (element === null) return;
+    const observer = new ResizeObserver(() => {
+      const core = cy.current;
+      if (core === null || placedNow.current === null) return;
+      core.resize();
+      zoomOutTo(core, element, placedNow.current);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const drawn = useMemo(() => {
     if (placed === null) return null;
     const selection: Selection = { item: selected, thread };
@@ -246,12 +262,7 @@ export default function PlanMap({
       core.elements().remove();
       core.add(elements);
     });
-    // The whole plan must fit the screen at the furthest zoom out, and no further.
-    const fit = Math.min(
-      element.clientWidth / Math.max(1, placed.width),
-      element.clientHeight / Math.max(1, placed.height),
-    );
-    core.minZoom(Math.min(1, fit * 0.9));
+    zoomOutTo(core, element, placed);
     if (first) {
       // At a zoom its titles can be read at, which on a phone shows only the start of a large plan.
       const view = firstView(placed, { width: element.clientWidth, height: element.clientHeight }, 16, MAX_ZOOM);
@@ -325,6 +336,18 @@ export default function PlanMap({
   }, []);
 
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+}
+
+/** Lets the Map zoom out until the whole plan fits it, and no further; a zoom already further out stays until moved. */
+function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
+  const fit = Math.min(
+    element.clientWidth / Math.max(1, placed.width),
+    element.clientHeight / Math.max(1, placed.height),
+  );
+  core.minZoom(Math.min(1, fit * 0.9));
+  // What the renderer allows, and for what, for the journeys to compare with the Map's size.
+  element.dataset.minZoom = String(core.minZoom());
+  element.dataset.plan = `${placed.width}x${placed.height}`;
 }
 
 /** Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it. */

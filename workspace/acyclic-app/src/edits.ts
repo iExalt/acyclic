@@ -223,7 +223,7 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
 export function landed(pending: Pending, items: Item[]): boolean {
   if (pending.kind === "add") return items.some((one) => one.id === pending.item.item);
   const item = items.find((one) => one.id === pending.id);
-  // Titles are saved trimmed.
+  // Titles are saved trimmed, as the editor sends them; the server keeps every field as sent.
   return item !== undefined && itemEdit(item, { ...pending.draft, title: pending.draft.title.trim() }) === null;
 }
 

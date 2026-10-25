@@ -25,6 +25,7 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -639,8 +640,50 @@ def failed_add_journey(page, errors, name, failures):
         )
     if editor.count():
         editor.get_by_role("button", name="Cancel").click()
-    # The browser logs the answer it lost, as it should.
-    errors[logged:] = [one for one in errors[logged:] if "net::ERR_FAILED" not in one]
+    # A saved add whose read back failed stays drawn through a later add the server refuses.
+    page.route(
+        "**/api/command",
+        lambda route: (
+            route.fulfill(status=500, body="")
+            if route.request.post_data == '"list"'
+            else route.fallback()
+        ),
+    )
+    page.locator("[data-action=add-top]").click()
+    form = page.get_by_test_id("add-form")
+    form.locator("input[name=title]").fill("Saved unread")
+    form.locator("button[type=submit]").click()
+    page.get_by_test_id("notice").get_by_text("Saved, but the refresh failed").wait_for(
+        timeout=10_000
+    )
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    form = add(
+        "Refused after",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=refusal
+        ),
+    )
+    form.locator("input[name=title]").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not page.get_by_test_id("map").evaluate(
+            "m => m.cy.getElementById('saved-unread').nonempty()"
+        )
+        or form.locator("input[name=title]").input_value() != "Refused after"
+    ):
+        failures.append(
+            f"{name}: a saved add went missing when the next add was refused"
+        )
+    if form.count():
+        form.get_by_role("button", name="Cancel").click()
+    # The browser logs the answer it lost, and the read refused, as it should.
+    errors[logged:] = [
+        one
+        for one in errors[logged:]
+        if "net::ERR_FAILED" not in one and "status of 500" not in one
+    ]
     print(
         f"{name}: a refused add or edit gave back what was typed; an add saved without an answer stayed drawn"
     )
@@ -675,7 +718,20 @@ def form_journey(page, view, env, remote, id, name, failures):
         # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
         # must stay in it.
         size = page.viewport_size
+        drawn = page.get_by_test_id("map")
+        widest = drawn.evaluate("m => m.cy.minZoom()")
         page.set_viewport_size({"width": size["width"], "height": 360})
+        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now.
+        try:
+            page.wait_for_function(
+                "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
+                arg=widest,
+                timeout=5_000,
+            )
+        except PlaywrightTimeout:
+            failures.append(
+                f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
+            )
         reachable = form.evaluate(
             "f => { f.querySelector('input[name=title]').focus();"
             " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"

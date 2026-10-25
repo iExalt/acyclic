@@ -57,6 +57,13 @@ describe("scene", () => {
     expect(scene(view, placed, { item: null, thread: null }, threadOf).edges.every((edge) => !edge.dim)).toBe(true);
   });
 
+  it("routes a thread through the collapsed box that hides a member", () => {
+    const closed = visible(model, { collapsed: new Set(["top"]), showArchived: false });
+    const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);
+    // Both now sit at the top level, so the link no longer crosses boxes.
+    expect(drawn.edges).toMatchObject([{ id: "top->c", crossing: false, lit: true, dim: false }]);
+  });
+
   it("lights up the selected item's thread and dims other items, but not the boxes around them", () => {
     const lit = scene(view, placed, { item: "a", thread: null }, threadOf);
     const marks = lit.nodes.map((node) => `${node.id}:${node.lit ? "lit" : node.dim ? "dim" : "-"}`);
