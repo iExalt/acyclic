@@ -605,10 +605,41 @@ def failed_add_journey(page, errors, name, failures):
         )
         if form.count():
             form.get_by_role("button", name="Cancel").click()
+    # A refused edit opens the editor again with what was typed, over the item as it was.
+    inspector = page.get_by_test_id("inspector")
+    inspector.get_by_role("heading", name="Lost answer").wait_for(timeout=10_000)
+    page.route(
+        "**/api/command",
+        lambda route: (
+            route.fulfill(status=200, content_type="application/json", body=refusal)
+            if '"edit"' in (route.request.post_data or "")
+            else route.fallback()
+        ),
+    )
+    page.locator("[data-action=edit]").click()
+    editor = page.get_by_test_id("item-form")
+    editor.locator("input[name=title]").fill("Refused edit")
+    editor.locator("textarea[name=notes]").fill("Notes typed on the phone")
+    editor.locator("button[type=submit]").click()
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not editor.count()
+        or editor.locator("input[name=title]").input_value() != "Refused edit"
+        or editor.locator("textarea[name=notes]").input_value()
+        != "Notes typed on the phone"
+        or inspector.get_by_role("heading", name="Lost answer").count() != 1
+    ):
+        failures.append(
+            f"{name}: a refused edit didn't give back what was typed over the item as it was"
+        )
+    if editor.count():
+        editor.get_by_role("button", name="Cancel").click()
     # The browser logs the answer it lost, as it should.
     errors[logged:] = [one for one in errors[logged:] if "net::ERR_FAILED" not in one]
     print(
-        f"{name}: a refused add gave back its form; one saved without an answer stayed drawn"
+        f"{name}: a refused add or edit gave back what was typed; an add saved without an answer stayed drawn"
     )
 
 

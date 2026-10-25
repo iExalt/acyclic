@@ -87,14 +87,21 @@ export function App() {
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
+  /** Counts reads of the plan started, and the latest shown, so one overtaken by a later read is never shown. */
+  const reads = useRef({ started: 0, shown: 0 });
+  /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
+    const n = ++reads.current.started;
     const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
+    if (n < reads.current.shown) return null;
+    reads.current.shown = n;
     return { state: "loaded" as const, items: found, threads: listed, level, needs: needed };
   }, []);
   const refresh = useCallback(() => {
     setVersion((was) => was + 1);
     fetchAll().then(
       (next) => {
+        if (next === null) return;
         setLoad(next);
         // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
         if (!sending.current) setPending(null);
@@ -162,7 +169,7 @@ export function App() {
         const proposals = answer?.proposals?.length ?? 0;
         try {
           const next = await fetchAll();
-          setLoad(next);
+          if (next !== null) setLoad(next);
           setPending(null);
           setAdding(null);
           bringIn();
@@ -176,8 +183,8 @@ export function App() {
         const code = err instanceof CommandError ? err.code : "network";
         sent = { write: "failed", code, message: err instanceof Error ? err.message : String(err) };
         if (drawn !== null) {
-          setPending(null);
-          // No answer may still mean saved: the plan says, and the form opens again only if it isn't.
+          // No answer may still mean saved: the plan says, and the form opens again only if it isn't. What was drawn
+          // stays until then, so the item stays selected if it was saved.
           let held = false;
           if (unanswered(code)) {
             const next = await fetchAll().catch(() => null);
@@ -186,6 +193,7 @@ export function App() {
               held = landed(drawn, next.items);
             }
           }
+          setPending(null);
           if (!held && drawn.kind === "add")
             setAdding({ parent: drawn.item.parent, idRefused: told(sent).fixId, draft: drawn.item });
           if (!held && drawn.kind === "edit")
