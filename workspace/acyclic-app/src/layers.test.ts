@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrived, depth, follow, topLayer } from "./layers";
+import { arrived, depth, follow, openLayers, topLayer } from "./layers";
 
 const none = { mode: false, adding: false, item: false, needs: false, thread: false };
 
@@ -12,6 +12,7 @@ describe("topLayer", () => {
     expect(topLayer({ ...none, needs: true, thread: true })).toBe("needs");
     expect(topLayer({ ...none, thread: true })).toBe("thread");
     expect(topLayer(none)).toBeNull();
+    expect(openLayers({ ...none, thread: true, item: true })).toEqual(["item", "thread"]);
   });
 });
 
@@ -34,7 +35,9 @@ describe("the history of layers", () => {
   });
 
   it("closes the layer on top on Back, and ignores a move that lands on no fewer layers, such as forward", () => {
-    expect(arrived(at(2), 1, 2)).toEqual({ entries: at(1), action: { kind: "close" } });
+    expect(arrived(at(2), 1, 2)).toEqual({ entries: at(1), action: { kind: "close", by: 1 } });
+    // A jump over several entries, as a long press on Back makes, or Chrome skipping one pushed without a tap.
+    expect(arrived(at(3), 1, 3)).toEqual({ entries: at(1), action: { kind: "close", by: 2 } });
     expect(arrived(at(2), 2, 2).action).toBeNull();
     // A form left open by Back stays: it takes its entry again.
     expect(follow(arrived(at(2), 1, 2).entries, 2)).toEqual({

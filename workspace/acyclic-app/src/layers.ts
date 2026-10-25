@@ -14,11 +14,14 @@ export interface Open {
   thread: boolean;
 }
 
-/** The layer shown, of those open, or null when the Map has none over it. */
-export function topLayer(open: Open): Layer | null {
+/** The layers open, the one shown first. */
+export function openLayers(open: Open): Layer[] {
   const order: Layer[] = ["mode", "add", "item", "needs", "thread"];
-  return order.find((layer) => open[layer === "add" ? "adding" : layer]) ?? null;
+  return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
+
+/** The layer shown, of those open, or null when the Map has none over it. */
+export const topLayer = (open: Open): Layer | null => openLayers(open)[0] ?? null;
 
 /** How many layers are open, each with its own history entry. */
 export const depth = (open: Open): number => Object.values(open).filter(Boolean).length;
@@ -36,8 +39,8 @@ export interface Entries {
 export type HistoryAction =
   | { kind: "push"; from: number; to: number }
   | { kind: "back"; by: number }
-  /** Back closed the layer on top. */
-  | { kind: "close" }
+  /** Back, over `by` entries, closes as many layers from the top. */
+  | { kind: "close"; by: number }
   | null;
 
 /** Brings the entries to `open` layers: pushing more as they open, going back over the extra as the app closes them. */
@@ -55,5 +58,5 @@ export function follow(entries: Entries, open: number): { entries: Entries; acti
 export function arrived(entries: Entries, at: number, open: number): { entries: Entries; action: HistoryAction } {
   if (entries.waiting) return follow({ ...entries, waiting: false }, open);
   if (at >= entries.pushed) return { entries, action: null };
-  return { entries: { pushed: at, waiting: false }, action: { kind: "close" } };
+  return { entries: { pushed: at, waiting: false }, action: { kind: "close", by: entries.pushed - at } };
 }

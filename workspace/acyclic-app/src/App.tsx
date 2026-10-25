@@ -20,7 +20,7 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
-import { arrived, depth, type Entries, follow, type HistoryAction, type Open, topLayer } from "./layers";
+import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
@@ -260,25 +260,28 @@ export function App() {
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [top]);
   /**
-   * Closes what's on top, as Escape and Back do, but never a form holding what the user typed: that says how to leave
-   * it instead. Whether it closed anything.
+   * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
+   * form holding what the user typed: that says how to leave it instead. How many it closed.
    */
-  const closeTop = useRef<() => boolean>(() => false);
-  closeTop.current = () => {
+  const closeTop = useRef<(count: number) => number>(() => 0);
+  closeTop.current = (count) => {
     if (document.querySelector("form[data-dirty='true']") !== null) {
       setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
-      return false;
+      return 0;
     }
-    if (top === "mode") setMode({ kind: "idle" });
-    else if (top === "add") setAdding(null);
-    else if (top === "item") setSelected(null);
-    else if (top === "needs") setShowNeeds(false);
-    else if (top === "thread") setThread(null);
-    return top !== null;
+    const closing = openLayers(open).slice(0, count);
+    for (const layer of closing) {
+      if (layer === "mode") setMode({ kind: "idle" });
+      else if (layer === "add") setAdding(null);
+      else if (layer === "item") setSelected(null);
+      else if (layer === "needs") setShowNeeds(false);
+      else setThread(null);
+    }
+    return closing.length;
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) closeTop.current();
+      if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -294,8 +297,8 @@ export function App() {
     if (action.kind === "push")
       for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "");
     else if (action.kind === "back") window.history.go(-action.by);
-    // A form left open by Back takes its entry again.
-    else if (!closeTop.current()) act(follow(entries.current, layersNow.current));
+    // A form left open by Back takes its entries again.
+    else if (closeTop.current(action.by) === 0) act(follow(entries.current, layersNow.current));
   }, []);
   useEffect(() => act(follow(entries.current, layers)), [act, layers]);
   useEffect(() => {

@@ -489,6 +489,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
             failures.append(
                 f"{name}: closing the needs-you list left the history at {page.evaluate('JSON.stringify(history.state)')}"
             )
+        # A jump back over both entries, as a long press on Back makes, closes both.
+        page.get_by_test_id("needs-button").click()
+        needs.wait_for()
+        page.evaluate("history.go(-2)")
+        try:
+            needs.wait_for(state="detached", timeout=5_000)
+            panel.wait_for(state="detached", timeout=5_000)
+            page.wait_for_function("() => history.state === null", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(
+                f"{name}: going back two entries didn't close both the needs-you list and the thread's panel"
+            )
+        if not panel.count():
+            button.click()
+        panel.wait_for()
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
     )
