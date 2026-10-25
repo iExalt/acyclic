@@ -4,9 +4,12 @@
 // comes: an arrow key's within the key's own task, a pick's later, since the page never sees the keys in the open
 // list. Pure, so every rule is tested without a browser.
 
-/** The draft shown in place of the value written, if any. */
+/**
+ * The draft shown in place of the value written, if any, with the value it was drafted over: a draft over a value
+ * since replaced, by a refresh or another write, is gone.
+ */
 export interface ChoiceState {
-  draft: string | null;
+  draft: { value: string; over: string } | null;
 }
 
 export type ChoiceEvent =
@@ -18,6 +21,13 @@ export type ChoiceEvent =
 
 export const UNCHOSEN: ChoiceState = { draft: null };
 
+/**
+ * The draft to show over `applied`, if it still stands. A value replaced and then put back brings its draft back,
+ * which is still the user's own.
+ */
+export const draftOf = (state: ChoiceState, applied: string) =>
+  state.draft !== null && state.draft.over === applied ? state.draft.value : null;
+
 /** The state after `event`, with what to write, if anything, given the value written now, `applied`. */
 export function choose(
   state: ChoiceState,
@@ -26,10 +36,14 @@ export function choose(
 ): { state: ChoiceState; write: string | null } {
   switch (event.kind) {
     case "change":
-      if (event.keyed) return { state: { draft: event.value === applied ? null : event.value }, write: null };
+      if (event.keyed)
+        return {
+          state: { draft: event.value === applied ? null : { value: event.value, over: applied } },
+          write: null,
+        };
       return { state: UNCHOSEN, write: event.value === applied ? null : event.value };
     case "enter":
-      return { state: UNCHOSEN, write: state.draft };
+      return { state: UNCHOSEN, write: draftOf(state, applied) };
     case "cancel":
       return { state: UNCHOSEN, write: null };
   }

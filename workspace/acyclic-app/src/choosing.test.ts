@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ChoiceEvent, type ChoiceState, choose, UNCHOSEN } from "./choosing";
+import { type ChoiceEvent, type ChoiceState, choose, draftOf, UNCHOSEN } from "./choosing";
 
 /** Runs events from no draft, returning the final state and every write. */
 function run(applied: string, events: ChoiceEvent[]) {
@@ -23,7 +23,7 @@ describe("choose", () => {
   });
 
   it("moves a draft on arrow keys, written once on Enter", () => {
-    expect(run("a", [keyed("b"), keyed("c")])).toEqual({ state: { draft: "c" }, writes: [] });
+    expect(run("a", [keyed("b"), keyed("c")])).toEqual({ state: { draft: { value: "c", over: "a" } }, writes: [] });
     expect(run("a", [keyed("b"), keyed("c"), { kind: "enter" }])).toEqual({ state: UNCHOSEN, writes: ["c"] });
   });
 
@@ -31,6 +31,17 @@ describe("choose", () => {
     expect(run("a", [keyed("b"), { kind: "cancel" }])).toEqual({ state: UNCHOSEN, writes: [] });
     expect(run("a", [{ kind: "enter" }]).writes).toEqual([]);
     expect(run("a", [keyed("b"), keyed("a"), { kind: "enter" }]).writes).toEqual([]);
+  });
+
+  it("drops a draft once the value it was drafted over is replaced", () => {
+    const { state } = run("a", [keyed("b")]);
+    expect(draftOf(state, "a")).toBe("b");
+    expect(draftOf(state, "c")).toBeNull();
+    expect(choose(state, "c", { kind: "enter" }).write).toBeNull();
+    // Even when the value now is the draft: nothing is left to write.
+    expect(choose(state, "b", { kind: "enter" }).write).toBeNull();
+    // Put back, the value has its draft again.
+    expect(choose(state, "a", { kind: "enter" }).write).toBe("b");
   });
 
   it("writes a pick at once over a draft", () => {

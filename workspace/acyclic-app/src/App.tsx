@@ -16,7 +16,6 @@ import {
   told,
   unanswered,
   unlinkCommand,
-  withPending,
 } from "./edits";
 import { globalLevelCommand, type ItemDraft, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
@@ -26,6 +25,7 @@ import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
+import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -37,7 +37,7 @@ const byTitle = (a: Thread, b: Thread) => a.title.localeCompare(b.title, undefin
 
 type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string; needs: Need[] }
+  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string; needs: Need[]; unread: Unread[] }
   | { state: "failed"; message: string };
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
@@ -88,19 +88,17 @@ export function App() {
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
-  /**
-   * Counts reads of the plan started, and the latest shown, so one overtaken by a later read is never shown; `items`
-   * are the latest shown read's.
-   */
-  const reads = useRef<{ started: number; shown: number; items: Item[] }>({ started: 0, shown: 0, items: [] });
+  /** The plan's reads, so one overtaken by a later read is never shown, and the writes saved that none holds yet. */
+  const reads = useRef<Reads>(NO_READS);
   /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
-    const n = ++reads.current.started;
+    reads.current = start(reads.current);
+    const n = reads.current.started;
     const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
-    if (n < reads.current.shown) return null;
-    reads.current.shown = n;
-    reads.current.items = found;
-    return { state: "loaded" as const, items: found, threads: listed, level, needs: needed };
+    const next = show(reads.current, n, found);
+    if (next === null) return null;
+    reads.current = next;
+    return { state: "loaded" as const, items: found, threads: listed, level, needs: needed, unread: next.unread };
   }, []);
   const refresh = useCallback(() => {
     setVersion((was) => was + 1);
@@ -125,7 +123,10 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
-  const shown = useMemo(() => (loaded === null ? [] : withPending(loaded.items, pending)), [loaded, pending]);
+  const shown = useMemo(
+    () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
+    [loaded, pending],
+  );
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byTitle)), [loaded]);
   const lines = useMemo(() => linesOf(sorted), [sorted]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
@@ -172,6 +173,8 @@ export function App() {
       try {
         const answer = await command<{ proposals?: unknown[] } | null>(body);
         const proposals = answer?.proposals?.length ?? 0;
+        // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
+        if (drawn !== null) reads.current = answered(reads.current, drawn);
         try {
           const next = await fetchAll();
           if (next !== null) setLoad(next);
@@ -180,9 +183,10 @@ export function App() {
           bringIn();
           sent = { write: "saved", proposals, reload: "done" };
         } catch (err) {
-          // Saved, so what it drew joins the plan shown until a refresh reads it, where the next write can't undo it.
+          // Saved, so what it drew stays, as unread, where the next write can't undo it.
           if (drawn !== null) {
-            setLoad((was) => (was.state === "loaded" ? { ...was, items: withPending(was.items, drawn) } : was));
+            const { unread } = reads.current;
+            setLoad((was) => (was.state === "loaded" ? { ...was, unread } : was));
             setPending(null);
           }
           setAdding(null);

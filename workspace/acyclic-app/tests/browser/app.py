@@ -569,8 +569,10 @@ def level_keys_journey(page, name, failures):
             )
             return
         page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(300)
         if writes:
             failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
+            return
         page.keyboard.press("Enter")
         step = order[min(order.index(was) + 2, len(order) - 1)]
         settled_control(page, "[data-testid=global-level]", "value", step)
@@ -578,6 +580,11 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
             )
+        if page.locator("details.menu").evaluate("d => d.open"):
+            failures.append(
+                f"{name}: Enter on the autonomy list wrote, but left the menu open"
+            )
+            page.get_by_test_id("menu").click()
         page.get_by_test_id("menu").click()
         levels.focus()
         page.keyboard.press("ArrowUp")
@@ -587,6 +594,14 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
             )
+        # Only an act closes the menu: Enter on the list with nothing chosen isn't one.
+        levels.focus()
+        page.keyboard.press("Enter")
+        if not page.locator("details.menu").evaluate("d => d.open"):
+            failures.append(
+                f"{name}: Enter on the autonomy list, unchanged, closed the menu"
+            )
+            page.get_by_test_id("menu").click()
         # Space opens the list; the keys in it reach only the list, and Enter there picks.
         levels.focus()
         for key in ["Space", "ArrowUp", "Enter"]:
@@ -597,7 +612,9 @@ def level_keys_journey(page, name, failures):
         try:
             settled_control(page, "[data-testid=global-level]", "value", picked)
         except PlaywrightTimeout:
-            pass
+            failures.append(
+                f"{name}: a pick from the list opened by Space left {levels.input_value()} showing, not {picked}"
+            )
         if writes != [step, picked]:
             failures.append(
                 f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
@@ -796,17 +813,23 @@ def form_journey(page, view, env, remote, id, name, failures):
         drawn = page.get_by_test_id("map")
         widest = drawn.evaluate("m => m.cy.minZoom()")
         page.set_viewport_size({"width": size["width"], "height": 360})
-        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now.
-        try:
-            page.wait_for_function(
-                "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
-                arg=widest,
-                timeout=5_000,
-            )
-        except PlaywrightTimeout:
+        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now; a plan that fits at full
+        # zoom can't show it, since zooming out stops there.
+        if widest >= 1:
             failures.append(
-                f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
+                f"{name}: the plan fits the Map at full zoom, so a resize can't show its furthest zoom out following"
             )
+        else:
+            try:
+                page.wait_for_function(
+                    "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
+                    arg=widest,
+                    timeout=5_000,
+                )
+            except PlaywrightTimeout:
+                failures.append(
+                    f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
+                )
         reachable = form.evaluate(
             "f => { f.querySelector('input[name=title]').focus();"
             " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
