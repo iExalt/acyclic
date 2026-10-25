@@ -8,20 +8,22 @@ import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
 export interface ItemEditorProps {
   item: Item;
   threads: Thread[];
+  /** What the user wrote before, when a failed save opens the editor again. */
+  initial: ItemDraft | null;
   busy: boolean;
-  onSave: (edit: Command) => void;
+  onSave: (edit: Command, draft: ItemDraft) => void;
   onCancel: () => void;
 }
 
-export function ItemEditor({ item, threads, busy, onSave, onCancel }: ItemEditorProps) {
-  const [draft, setDraft] = useState<ItemDraft>(() => draftOf(item));
+export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: ItemEditorProps) {
+  const [draft, setDraft] = useState<ItemDraft>(() => initial ?? draftOf(item));
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
   const edit = itemEdit(item, draft);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (edit === null) onCancel();
-    else onSave(edit);
+    else onSave(edit, draft);
   };
   return (
     <form className="fields" data-testid="item-form" onSubmit={submit}>

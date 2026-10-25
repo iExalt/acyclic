@@ -416,8 +416,25 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(
             f"{name}: the add form didn't make the id {added} from the title"
         )
+    # It is drawn and selected at once, before the server answers, which is held back until then.
+    waiting = []
+    page.route(
+        "**/api/command",
+        lambda route: (
+            waiting.append(route)
+            if '"add"' in (route.request.post_data or "")
+            else route.fallback()
+        ),
+    )
     form.locator("button[type=submit]").click()
     wait_inspector(page, f".facts [data-select='{first}']")
+    wait_drawn(page, base + 1)
+    if len(waiting) != 1 or form.count():
+        failures.append(f"{name}: an add wasn't drawn until the server answered")
+    page.unroute("**/api/command")
+    for route in waiting:
+        route.continue_()
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, base + 1)
     held(page, first, before, "adding inside it", name, failures)
     check_tracker(
@@ -512,6 +529,86 @@ def edit_journey(page, view, env, plan, box, name, failures):
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
+    )
+
+
+def failed_add_journey(page, errors, name, failures):
+    """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
+    is lost after the server saved it stays drawn, with the form closed."""
+    nodes = int(page.get_by_test_id("map").get_attribute("data-nodes"))
+    refusal = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "code": "invalid",
+                "message": "Refused for the journey",
+                "details": None,
+            },
+        }
+    )
+
+    def add(title, answer):
+        page.route(
+            "**/api/command",
+            lambda route: (
+                answer(route)
+                if '"add"' in (route.request.post_data or "")
+                else route.fallback()
+            ),
+        )
+        page.locator("[data-action=add-top]").click()
+        form = page.get_by_test_id("add-form")
+        form.locator("input[name=title]").fill(title)
+        form.locator("button[type=submit]").click()
+        return form
+
+    form = add(
+        "Refused add",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=refusal
+        ),
+    )
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not form.count()
+        or form.locator("input[name=title]").input_value() != "Refused add"
+        or page.get_by_test_id("map").evaluate(
+            "m => m.cy.getElementById('refused-add').nonempty()"
+        )
+        or page.get_by_test_id("inspector").count()
+    ):
+        failures.append(
+            f"{name}: a refused add didn't give back its form, or stayed drawn"
+        )
+    form.get_by_role("button", name="Cancel").click()
+
+    def lost(route):
+        route.fetch()
+        route.abort()
+
+    logged = len(errors)
+    form = add("Lost answer", lost)
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    page.wait_for_function(
+        "n => Number(document.querySelector('[data-testid=map]').dataset.nodes) === n",
+        arg=nodes + 1,
+    )
+    if form.count() or not page.get_by_test_id("map").evaluate(
+        "m => m.cy.getElementById('lost-answer').nonempty()"
+    ):
+        failures.append(
+            f"{name}: an add saved without an answer opened its form again, or wasn't drawn"
+        )
+        if form.count():
+            form.get_by_role("button", name="Cancel").click()
+    # The browser logs the answer it lost, as it should.
+    errors[logged:] = [one for one in errors[logged:] if "net::ERR_FAILED" not in one]
+    print(
+        f"{name}: a refused add gave back its form; one saved without an answer stayed drawn"
     )
 
 
@@ -740,7 +837,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     approved = waiting.get_attribute("data-need").split(":", 1)[1]
     # The text names the thread beside its badge and picks it, so no row repeats the thread below.
     if (
-        waiting.locator(f":scope > button[data-thread='{approved}']").count() != 1
+        waiting.locator(f":scope > button[data-pick-thread='{approved}']").count() != 1
         or waiting.locator(".rows .line").count() != 0
     ):
         failures.append(
@@ -761,13 +858,20 @@ def needs_journey(page, env, plan, thread, name, failures):
     if not json.loads(run(env, "thread", "show", approved))["data"][0]["approved"]:
         failures.append(f"{name}: approving {approved} from the list didn't approve it")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
-    picker = needs.locator("[data-need] > button[data-thread]").first
-    if picker.count() == 1:
-        picked = picker.get_attribute("data-thread")
+    picker = needs.locator("[data-need] > button[data-pick-thread]").first
+    if picker.count() == 0:
+        failures.append(f"{name}: no entry's text picks its thread")
+    else:
+        picked = picker.get_attribute("data-pick-thread")
         picker.click()
         panel = page.get_by_test_id("thread-panel")
         panel.wait_for(timeout=10_000)
-        if page.locator(f"[data-thread='{picked}'][aria-pressed=true]").count() != 1:
+        if (
+            page.locator(
+                f".threads [data-thread='{picked}'][aria-pressed=true]"
+            ).count()
+            != 1
+        ):
             failures.append(f"{name}: an entry's text didn't pick {picked}")
         panel.get_by_role("button", name="Close").click()
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
@@ -932,6 +1036,7 @@ def main():
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures
                     )
+                    failed_add_journey(page, errors, name, failures)
                     thread_journey(page, env, plan, "t0", name, failures)
                     needs_journey(page, env, plan, "t0", name, failures)
                     plan = Plan(env)

@@ -3,6 +3,7 @@ import { examples } from "./commands.examples.json";
 import {
   addCommand,
   expandTo,
+  landed,
   linkCommand,
   linkRefusal,
   type Mode,
@@ -11,8 +12,11 @@ import {
   pick,
   recovery,
   told,
+  unanswered,
   unlinkCommand,
+  withPending,
 } from "./edits";
+import { draftOf } from "./forms";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
@@ -150,5 +154,42 @@ describe("told", () => {
     });
     expect(told({ write: "saved", proposals: 1, reload: "done" }).text).toMatch(/proposal/);
     expect(told({ write: "saved", proposals: 0, reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
+  });
+});
+
+describe("a write drawn before the server answers", () => {
+  const items = [item("garden"), item("beds", "garden", [], { notes: "old", size: "s" })];
+
+  it("draws an added item where it goes, once, and says when the plan holds it", () => {
+    const add = { kind: "add" as const, item: { item: "pond", title: "Pond", parent: "garden", thread: "t" } };
+    const drawn = withPending(items, add);
+    expect(drawn.at(-1)).toMatchObject({ id: "pond", title: "Pond", parent: "garden", thread: "t", state: "backlog" });
+    expect(landed(add, items)).toBe(false);
+    // Read back from the server, it is drawn once, as the server has it.
+    const read = [...items, item("pond", "garden")];
+    expect(withPending(read, add)).toBe(read);
+    expect(landed(add, read)).toBe(true);
+    expect(withPending(items, null)).toBe(items);
+  });
+
+  it("draws an edit's fields, clearing what the draft empties, and says when the plan holds them", () => {
+    const beds = items[1] ?? item("beds");
+    const draft = { ...draftOf(beds), title: " Raised beds ", notes: "", state: "parked" };
+    const edit = { kind: "edit" as const, id: "beds", draft };
+    const drawn = withPending(items, edit);
+    expect(drawn[1]).toMatchObject({ title: "Raised beds", notes: null, size: "s", state: "parked" });
+    expect(drawn[0]).toBe(items[0]);
+    expect(landed(edit, items)).toBe(false);
+    expect(landed(edit, drawn)).toBe(true);
+    // A done item's state isn't the editor's to change.
+    const done = [item("x", null, [], { state: "done" })];
+    expect(
+      withPending(done, { kind: "edit", id: "x", draft: { ...draftOf(done[0] ?? item("x")), title: "Y" } })[0]?.state,
+    ).toBe("done");
+  });
+
+  it("knows only a missing or foreign answer leaves the write's outcome unknown", () => {
+    expect(["network", "http"].map(unanswered)).toEqual([true, true]);
+    expect(["busy", "already-exists", "invalid"].map(unanswered)).toEqual([false, false, false]);
   });
 });

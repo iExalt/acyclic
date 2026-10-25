@@ -34,6 +34,15 @@ describe("scene", () => {
   });
 
   it("draws the lit thread's links as its route, across boxes too, and dims the rest", () => {
+    // Inside one box: a solid route.
+    const both = buildModel([
+      item("top"),
+      item("a", "top", [], { thread: "t" }),
+      item("b", "top", ["a"], { thread: "t" }),
+    ]);
+    const open = visible(both, { collapsed: new Set(), showArchived: false });
+    const inside = scene(open, placed, { item: null, thread: "t" }, (id) => both.items.get(id)?.thread ?? null);
+    expect(inside.edges).toMatchObject([{ id: "a->b", crossing: false, lit: true, dim: false }]);
     const picked = scene(view, placed, { item: null, thread: "t" }, threadOf);
     expect(picked.edges.map((edge) => [edge.id, edge.crossing, edge.lit, edge.dim])).toEqual([
       ["a->b", false, false, true],

@@ -45,7 +45,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
                 type="button"
                 className="row line"
                 style={lineStyle(view.line)}
-                data-thread={view.thread}
+                data-pick-thread={view.thread}
                 onClick={() => view.thread !== null && onPickThread(view.thread)}
               >
                 <Badge line={view.line} />

@@ -14,6 +14,8 @@ export interface AddFormProps {
   taken: ReadonlySet<string>;
   /** Set when the server refused the id, to have the user change it. */
   idRefused: boolean;
+  /** What the user wrote before, when a failed add opens the form again. */
+  draft: NewItem | null;
   busy: boolean;
   onSubmit: (item: NewItem) => void;
   onCancel: () => void;
@@ -26,13 +28,14 @@ export function AddForm({
   threads,
   taken,
   idRefused,
+  draft,
   busy,
   onSubmit,
   onCancel,
 }: AddFormProps) {
-  const [title, setTitle] = useState("");
-  const [id, setId] = useState<string | null>(null);
-  const [thread, setThread] = useState(initialThread);
+  const [title, setTitle] = useState(draft?.title ?? "");
+  const [id, setId] = useState<string | null>(draft?.item ?? null);
+  const [thread, setThread] = useState(draft === null ? initialThread : draft.thread);
   const idField = useRef<HTMLInputElement>(null);
   const shownId = id ?? newId(title, taken);
   useEffect(() => {
