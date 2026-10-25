@@ -55,14 +55,18 @@ describe("needView", () => {
     const waiting = (id: string, title: string) =>
       needView({ kind: "awaiting-approval", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.
+    // The badge-led text picks its thread, so the entry has no row repeating it.
     expect(waiting("t3", "3. Ship it")).toMatchObject({
       text: "Ship it now waits for your approval",
       line: lines.get("t3"),
+      thread: "t3",
+      threads: [],
     });
     // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
     expect(waiting("t9", "9. Gone")).toMatchObject({
       text: "9. Gone waits for your approval",
       line: undefined,
+      thread: null,
       threads: [{ id: "t9", title: "9. Gone" }],
     });
     expect(threadLabel({ id: "t9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
@@ -75,7 +79,7 @@ describe("needView", () => {
       { kind: "question", id: "q", thread: { id: "t7", title: "7. Build it" }, text: "Which?" },
       lines,
     );
-    expect(ask.line).toBeUndefined();
+    expect(ask).toMatchObject({ line: undefined, thread: null, threads: [{ id: "t7", title: "7. Build it" }] });
     const clash = needView(
       {
         kind: "resource-clash",
@@ -86,6 +90,7 @@ describe("needView", () => {
     );
     expect(clash).toMatchObject({
       line: undefined,
+      thread: null,
       text: "Threads held by different holders need gpu: 3. Ship it now, 7. Build it",
     });
   });
@@ -113,6 +118,7 @@ describe("needView", () => {
     const loose = needView({ kind: "unthreaded", item: item("o"), fix: "acyclic item edit o --thread <THREAD>" }, none);
     expect(loose.note).toBe("acyclic item edit o --thread <THREAD>");
     expect(needView({ kind: "something-new" }, none).text).toBe("something-new");
+    expect(needView({ kind: "contest", thread: thread("t") }, none).key).toBe("contest:t");
   });
 
   it("shows each question's own text, keyed by its id, so two in one thread stay apart", () => {

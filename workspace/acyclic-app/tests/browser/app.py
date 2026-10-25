@@ -39,6 +39,8 @@ VIEWS = {
     },
     "desktop": {"viewport": {"width": 1440, "height": 900}},
 }
+# The furthest the Map's first view zooms out, as reveal.ts has it.
+READABLE = 0.85
 # How long the 3,500-item Map may take to draw: a loose bound against hanging, not a timing.
 LARGE_LIMIT_MS = 60_000
 
@@ -243,12 +245,25 @@ def installable(context, page, origin, name, failures):
             failures.append(f"{name}: icon {icon['src']} answered {status}")
 
 
+def first_view_readable(page, name, failures):
+    """The Map opens at a zoom its titles can be read at, with a node's top-left corner, where its title starts, in
+    view."""
+    view = page.get_by_test_id("map").evaluate(
+        "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
+        " shown: m.cy.nodes().some(n => { const b = n.renderedBoundingBox({ includeLabels: false });"
+        " return b.x1 >= 0 && b.y1 >= 0 && b.x1 < w && b.y1 < h; }) }; }"
+    )
+    if view["zoom"] < READABLE or not view["shown"]:
+        failures.append(f"{name}: the Map opened unreadably small or showing nothing whole: {view}")
+
+
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
     # The canvas draws labels in whatever face is loaded, so the first draw waits for the app's own.
     if wait_drawn(page, expected).get("font") != "true":
         failures.append(f"{name}: the Map drew before its font loaded")
+    first_view_readable(page, name, failures)
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
@@ -296,6 +311,19 @@ def map_journey(page, view, plan, name, failures, hint=None):
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
         arg=plan.lit(thread),
     )
+    # Its links are its route, drawn in its line's colour.
+    route = page.get_by_test_id("map").evaluate(
+        "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector(`[data-thread='${"
+        + repr(thread)
+        + "}'] .badge`);"
+        " return { n: lit.length, said: Number(m.dataset.litEdges),"
+        " colours: [...new Set(lit.map(e => e.style('line-color')))], line: badge && getComputedStyle(badge).backgroundColor }; }"
+    )
+    same = [colour.replace(" ", "") for colour in route["colours"]] == [
+        (route["line"] or "").replace(" ", "")
+    ]
+    if route["n"] == 0 or route["n"] != route["said"] or not same:
+        failures.append(f"{name}: {thread}'s links aren't drawn in its line's colour: {route}")
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     panel.wait_for()
     if panel.locator("[role=alert]").count():
@@ -508,6 +536,20 @@ def form_journey(page, view, env, remote, id, name, failures):
     form.locator("input[name=title]").fill("Edited in the app")
     form.locator("select[name=size]").select_option("m")
     form.locator("textarea[name=notes]").fill("Plain notes")
+    if view == VIEWS["phone"]:
+        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
+        # must stay in it.
+        size = page.viewport_size
+        page.set_viewport_size({"width": size["width"], "height": 360})
+        reachable = form.evaluate(
+            "f => { f.querySelector('input[name=title]').focus();"
+            " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
+            " const r = b.getBoundingClientRect();"
+            " return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === b; }); }"
+        )
+        page.set_viewport_size(size)
+        if not reachable:
+            failures.append(f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach")
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
     if not in_open_view(page, id):
@@ -690,6 +732,14 @@ def needs_journey(page, env, plan, thread, name, failures):
     proposal.wait_for(state="detached", timeout=10_000)
     waiting = needs.locator("[data-need^='awaiting-approval:']").first
     approved = waiting.get_attribute("data-need").split(":", 1)[1]
+    # The text names the thread beside its badge and picks it, so no row repeats the thread below.
+    if (
+        waiting.locator(f":scope > button[data-thread='{approved}']").count() != 1
+        or waiting.locator(".rows .line").count() != 0
+    ):
+        failures.append(
+            f"{name}: the entry for {approved} should pick it from its text, with no row repeating it"
+        )
     waiting.locator("[data-action=approve]").click()
     needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
         state="detached", timeout=10_000
@@ -705,6 +755,15 @@ def needs_journey(page, env, plan, thread, name, failures):
     if not json.loads(run(env, "thread", "show", approved))["data"][0]["approved"]:
         failures.append(f"{name}: approving {approved} from the list didn't approve it")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
+    picker = needs.locator("[data-need] > button[data-thread]").first
+    if picker.count() == 1:
+        picked = picker.get_attribute("data-thread")
+        picker.click()
+        panel = page.get_by_test_id("thread-panel")
+        panel.wait_for(timeout=10_000)
+        if page.locator(f"[data-thread='{picked}'][aria-pressed=true]").count() != 1:
+            failures.append(f"{name}: an entry's text didn't pick {picked}")
+        panel.get_by_role("button", name="Close").click()
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
 
@@ -927,6 +986,7 @@ def main():
             print(
                 f"3,500 items: drew the default view in {(time.monotonic() - start) * 1000:.0f} ms after the list"
             )
+            first_view_readable(page, "3,500 items", failures)
             page.screenshot(path=SHOTS / "app-large.png")
             if errors:
                 failures.append(

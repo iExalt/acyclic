@@ -11,11 +11,13 @@ import { type Line, TOKENS } from "../lines";
 import { browserLayouts } from "./client";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { reveal, uncovered } from "./reveal";
+import { firstView, reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
 
 /** How tall a box's title strip is, where a tap collapses or expands it. */
 const TITLE = 36;
+/** The furthest the Map zooms in. */
+const MAX_ZOOM = 2;
 
 /** The face labels are drawn in; the canvas draws with whatever is loaded, so the first draw waits for it. */
 const FONT = "Overpass, system-ui, sans-serif";
@@ -90,6 +92,9 @@ const STYLE: cytoscape.StylesheetJson = [
     selector: "edge.crossing",
     style: { "line-style": "dashed", "line-color": TOKENS.signal, "target-arrow-color": TOKENS.signal },
   },
+  // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
+  { selector: "edge.lit", style: { width: 3, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
+  { selector: "edge.dim", style: { opacity: 0.35 } },
 ];
 
 export interface PlanMapProps {
@@ -191,7 +196,7 @@ export default function PlanMap({
       style: STYLE,
       autoungrabify: true,
       boxSelectionEnabled: false,
-      maxZoom: 2,
+      maxZoom: MAX_ZOOM,
     });
     cy.current = core;
     // Browser journeys reach the renderer through its element, to find where a node is drawn on the canvas.
@@ -228,10 +233,12 @@ export default function PlanMap({
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          // A link across boxes is drawn over everything: it is drawn only for the selected item, to be seen.
+          line: colour ?? TOKENS.ink,
+          // A link across boxes is drawn over everything: it is drawn only for the selected item or the lit thread,
+          // to be seen.
           z: edge.crossing ? 1000 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
         },
-        classes: edge.crossing ? "crossing" : "",
+        classes: [edge.crossing ? "crossing" : "", edge.lit ? "lit" : "", edge.dim ? "dim" : ""].join(" "),
       })),
     ];
     const first = core.elements().length === 0;
@@ -246,7 +253,9 @@ export default function PlanMap({
     );
     core.minZoom(Math.min(1, fit * 0.9));
     if (first) {
-      core.fit(undefined, 16);
+      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan.
+      const view = firstView(placed, { width: element.clientWidth, height: element.clientHeight }, 16, MAX_ZOOM);
+      core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
       // Pan so the toggled box's corner is where it was before the layout changed.
       const box = core.getElementById(anchor.current.id);
@@ -266,6 +275,7 @@ export default function PlanMap({
     element.dataset.nodes = String(core.nodes().length);
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
+    element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
     element.dataset.font = String(document.fonts?.check("500 13px Overpass") ?? false);
     // Drawn once the browser has painted the frame after this one's changes.
     const drawing = performance.now();

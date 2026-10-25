@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reveal, uncovered } from "./reveal";
+import { firstView, READABLE, reveal, uncovered } from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -20,5 +20,21 @@ describe("uncovered", () => {
     expect(uncovered(384, 700, { x1: 0, y1: 400, x2: 384, y2: 700 })).toEqual({ x1: 0, y1: 0, x2: 384, y2: 400 });
     expect(uncovered(1200, 800, { x1: 880, y1: 0, x2: 1200, y2: 800 })).toEqual({ x1: 0, y1: 0, x2: 880, y2: 800 });
     expect(uncovered(384, 700, null)).toEqual({ x1: 0, y1: 0, x2: 384, y2: 700 });
+  });
+});
+
+describe("firstView", () => {
+  const phone = { width: 384, height: 600 };
+
+  it("shows a plan that fits at a readable zoom whole and centred, zooming in no further than the most", () => {
+    expect(firstView({ width: 352, height: 284 }, phone, 16, 2)).toEqual({ zoom: 1, pan: { x: 16, y: 158 } });
+    expect(firstView({ width: 100, height: 100 }, phone, 16, 2)).toEqual({ zoom: 2, pan: { x: 92, y: 200 } });
+  });
+
+  it("opens a plan too big to read whole at its top-left corner, at the furthest readable zoom", () => {
+    expect(firstView({ width: 4000, height: 3000 }, phone, 16, 2)).toEqual({ zoom: READABLE, pan: { x: 16, y: 16 } });
+    // Just readable whole: still whole.
+    const edge = (phone.width - 32) / READABLE;
+    expect(firstView({ width: edge, height: 10 }, phone, 16, 2).zoom).toBeCloseTo(READABLE);
   });
 });
