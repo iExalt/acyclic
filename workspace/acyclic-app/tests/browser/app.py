@@ -537,51 +537,71 @@ def edit_journey(page, view, env, plan, box, name, failures):
 
 
 def level_keys_journey(page, name, failures):
-    """Arrow keys on the autonomy list move a draft, written once on Enter and dropped on Escape; where a browser's
-    arrow keys open the list instead, as on macOS, there is no draft to check."""
+    """Arrow keys on the closed autonomy list move a draft, written once on Enter and dropped on Escape, while a pick
+    from the open list, opened from the keyboard too, writes at once. Where a browser's arrow keys open the list, as on
+    macOS, and its headless list takes no keys, there is nothing to check."""
     writes = []
-    page.on(
-        "request",
-        lambda request: (
-            writes.append(json.loads(request.post_data)["level"]["level"])
-            if request.url.endswith("/api/command")
-            and (request.post_data or "").startswith('{"level":{"level"')
-            else None
-        ),
-    )
-    levels = page.get_by_test_id("global-level")
-    page.get_by_test_id("menu").click()
-    was = levels.input_value()
-    order = levels.evaluate("s => [...s.options].map(o => o.value)")
-    levels.focus()
-    page.keyboard.press("ArrowDown")
-    if levels.input_value() == was:
+
+    def sent(request):
+        body = request.post_data or ""
+        if request.url.endswith("/api/command") and body.startswith(
+            '{"level":{"level"'
+        ):
+            writes.append(json.loads(body)["level"]["level"])
+
+    page.on("request", sent)
+    try:
+        levels = page.get_by_test_id("global-level")
+        page.get_by_test_id("menu").click()
+        was = levels.input_value()
+        order = levels.evaluate("s => [...s.options].map(o => o.value)")
+        levels.focus()
+        page.keyboard.press("ArrowDown")
+        if levels.input_value() == was:
+            page.keyboard.press("Escape")
+            print(
+                f"{name}: arrow keys open the autonomy list here, so there is no draft to check"
+            )
+            return
+        page.keyboard.press("ArrowDown")
+        if writes:
+            failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
+        page.keyboard.press("Enter")
+        step = order[min(order.index(was) + 2, len(order) - 1)]
+        settled_control(page, "[data-testid=global-level]", "value", step)
+        if writes != [step]:
+            failures.append(
+                f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
+            )
+        page.get_by_test_id("menu").click()
+        levels.focus()
+        page.keyboard.press("ArrowUp")
         page.keyboard.press("Escape")
+        page.get_by_test_id("menu").click()
+        if writes != [step] or levels.input_value() != step:
+            failures.append(
+                f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
+            )
+        # Space opens the list; the keys in it reach only the list, and Enter there picks.
+        levels.focus()
+        for key in ["Space", "ArrowUp", "Enter"]:
+            page.keyboard.press(key)
+        picked = order[order.index(step) - 1]
+        try:
+            settled_control(page, "[data-testid=global-level]", "value", picked)
+        except PlaywrightTimeout:
+            pass
+        if writes != [step, picked]:
+            failures.append(
+                f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
+            )
+        if page.locator("details.menu").evaluate("d => d.open"):
+            page.get_by_test_id("menu").click()
         print(
-            f"{name}: arrow keys open the autonomy list here, so there is no draft to check"
+            f"{name}: arrow keys on the autonomy list wrote once, on Enter, and a pick at once"
         )
-        return
-    page.keyboard.press("ArrowDown")
-    if writes:
-        failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
-    page.keyboard.press("Enter")
-    target = order[min(order.index(was) + 2, len(order) - 1)]
-    settled_control(page, "[data-testid=global-level]", "value", target)
-    if writes != [target]:
-        failures.append(
-            f"{name}: Enter after two arrow keys wrote {writes}, not once {target}"
-        )
-    page.get_by_test_id("menu").click()
-    levels.focus()
-    page.keyboard.press("ArrowUp")
-    page.keyboard.press("Escape")
-    page.get_by_test_id("menu").click()
-    if writes != [target] or levels.input_value() != target:
-        failures.append(
-            f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
-        )
-    page.get_by_test_id("menu").click()
-    print(f"{name}: arrow keys on the autonomy list wrote once, on Enter")
+    finally:
+        page.remove_listener("request", sent)
 
 
 def failed_add_journey(page, errors, name, failures):

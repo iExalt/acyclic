@@ -1,6 +1,6 @@
 // A setting picked from a list, written as choosing.ts decides: a pick at once, arrow keys as a draft until Enter.
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { type ChoiceEvent, choose, UNCHOSEN } from "./choosing";
 
 export interface ChoiceProps {
@@ -17,6 +17,8 @@ export interface ChoiceProps {
 
 export function Choice({ label, className, value, disabled, onWrite, name, testid, children }: ChoiceProps) {
   const [state, setState] = useState(UNCHOSEN);
+  /** Set while a key's own task runs: a change then is an arrow key's on the closed list, not a pick. */
+  const keying = useRef(false);
   const step = (event: ChoiceEvent) => {
     const next = choose(state, value, event);
     setState(next.state);
@@ -31,15 +33,18 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
         data-testid={testid}
         value={state.draft ?? value}
         disabled={disabled}
-        onPointerDown={() => step({ kind: "pointer" })}
         onKeyDown={(event) => {
           if (event.key === "Enter") step({ kind: "enter" });
           else if (event.key === "Escape") step({ kind: "cancel" });
-          else step({ kind: "key" });
+          keying.current = true;
+          setTimeout(() => {
+            keying.current = false;
+          }, 0);
         }}
         onChange={(event) => {
           // A draft isn't an act: it keeps a menu around it open.
-          if (step({ kind: "change", value: event.target.value }).write === null) event.stopPropagation();
+          if (step({ kind: "change", value: event.target.value, keyed: keying.current }).write === null)
+            event.stopPropagation();
         }}
         onBlur={() => step({ kind: "cancel" })}
       >
