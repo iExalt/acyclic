@@ -39,6 +39,8 @@ VIEWS = {
     },
     "desktop": {"viewport": {"width": 1440, "height": 900}},
 }
+# The furthest the Map's first view zooms out, as reveal.ts has it.
+READABLE = 0.85
 # How long the 3,500-item Map may take to draw: a loose bound against hanging, not a timing.
 LARGE_LIMIT_MS = 60_000
 
@@ -214,11 +216,14 @@ def open_app(browser, view, link, failures, name):
     )
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
-    # A blocked load, such as one the content policy refuses, shows only as a console error.
+    # A blocked load, such as one the content policy refuses, shows only as a console error. WebKit on Linux says it
+    # ignores the viewport's keyboard setting, which only Chromium and Firefox read.
     page.on(
         "console",
         lambda message: (
-            errors.append(message.text) if message.type == "error" else None
+            errors.append(message.text)
+            if message.type == "error" and '"interactive-widget"' not in message.text
+            else None
         ),
     )
     page.goto(link)
@@ -243,12 +248,27 @@ def installable(context, page, origin, name, failures):
             failures.append(f"{name}: icon {icon['src']} answered {status}")
 
 
+def first_view_readable(page, name, failures):
+    """The Map opens at a zoom its titles can be read at, with a node's top-left corner, where its title starts, in
+    view."""
+    view = page.get_by_test_id("map").evaluate(
+        "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
+        " shown: m.cy.nodes().some(n => { const b = n.renderedBoundingBox({ includeLabels: false });"
+        " return b.x1 >= 0 && b.y1 >= 0 && b.x1 < w && b.y1 < h; }) }; }"
+    )
+    if view["zoom"] < READABLE or not view["shown"]:
+        failures.append(
+            f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
+        )
+
+
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
     # The canvas draws labels in whatever face is loaded, so the first draw waits for the app's own.
     if wait_drawn(page, expected).get("font") != "true":
         failures.append(f"{name}: the Map drew before its font loaded")
+    first_view_readable(page, name, failures)
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
@@ -296,6 +316,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
         arg=plan.lit(thread),
     )
+    # Its links are its route, drawn in its line's colour.
+    route = page.get_by_test_id("map").evaluate(
+        "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector(`[data-thread='${"
+        + repr(thread)
+        + "}'] .badge`);"
+        " return { n: lit.length, said: Number(m.dataset.litEdges),"
+        " colours: [...new Set(lit.map(e => e.style('line-color')))], line: badge && getComputedStyle(badge).backgroundColor }; }"
+    )
+    same = [colour.replace(" ", "") for colour in route["colours"]] == [
+        (route["line"] or "").replace(" ", "")
+    ]
+    if route["n"] == 0 or route["n"] != route["said"] or not same:
+        failures.append(
+            f"{name}: {thread}'s links aren't drawn in its line's colour: {route}"
+        )
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     panel.wait_for()
     if panel.locator("[role=alert]").count():
@@ -384,8 +419,25 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(
             f"{name}: the add form didn't make the id {added} from the title"
         )
+    # It is drawn and selected at once, before the server answers, which is held back until then.
+    waiting = []
+    page.route(
+        "**/api/command",
+        lambda route: (
+            waiting.append(route)
+            if '"add"' in (route.request.post_data or "")
+            else route.fallback()
+        ),
+    )
     form.locator("button[type=submit]").click()
     wait_inspector(page, f".facts [data-select='{first}']")
+    wait_drawn(page, base + 1)
+    if len(waiting) != 1 or form.count():
+        failures.append(f"{name}: an add wasn't drawn until the server answered")
+    page.unroute("**/api/command")
+    for route in waiting:
+        route.continue_()
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, base + 1)
     held(page, first, before, "adding inside it", name, failures)
     check_tracker(
@@ -483,6 +535,117 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def failed_add_journey(page, errors, name, failures):
+    """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
+    is lost after the server saved it stays drawn, with the form closed."""
+    nodes = int(page.get_by_test_id("map").get_attribute("data-nodes"))
+    refusal = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "code": "invalid",
+                "message": "Refused for the journey",
+                "details": None,
+            },
+        }
+    )
+
+    def add(title, answer):
+        page.route(
+            "**/api/command",
+            lambda route: (
+                answer(route)
+                if '"add"' in (route.request.post_data or "")
+                else route.fallback()
+            ),
+        )
+        page.locator("[data-action=add-top]").click()
+        form = page.get_by_test_id("add-form")
+        form.locator("input[name=title]").fill(title)
+        form.locator("button[type=submit]").click()
+        return form
+
+    form = add(
+        "Refused add",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=refusal
+        ),
+    )
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not form.count()
+        or form.locator("input[name=title]").input_value() != "Refused add"
+        or page.get_by_test_id("map").evaluate(
+            "m => m.cy.getElementById('refused-add').nonempty()"
+        )
+        or page.get_by_test_id("inspector").count()
+    ):
+        failures.append(
+            f"{name}: a refused add didn't give back its form, or stayed drawn"
+        )
+    form.get_by_role("button", name="Cancel").click()
+
+    def lost(route):
+        route.fetch()
+        route.abort()
+
+    logged = len(errors)
+    form = add("Lost answer", lost)
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    page.wait_for_function(
+        "n => Number(document.querySelector('[data-testid=map]').dataset.nodes) === n",
+        arg=nodes + 1,
+    )
+    if form.count() or not page.get_by_test_id("map").evaluate(
+        "m => m.cy.getElementById('lost-answer').nonempty()"
+    ):
+        failures.append(
+            f"{name}: an add saved without an answer opened its form again, or wasn't drawn"
+        )
+        if form.count():
+            form.get_by_role("button", name="Cancel").click()
+    # A refused edit opens the editor again with what was typed, over the item as it was.
+    inspector = page.get_by_test_id("inspector")
+    inspector.get_by_role("heading", name="Lost answer").wait_for(timeout=10_000)
+    page.route(
+        "**/api/command",
+        lambda route: (
+            route.fulfill(status=200, content_type="application/json", body=refusal)
+            if '"edit"' in (route.request.post_data or "")
+            else route.fallback()
+        ),
+    )
+    page.locator("[data-action=edit]").click()
+    editor = page.get_by_test_id("item-form")
+    editor.locator("input[name=title]").fill("Refused edit")
+    editor.locator("textarea[name=notes]").fill("Notes typed on the phone")
+    editor.locator("button[type=submit]").click()
+    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not editor.count()
+        or editor.locator("input[name=title]").input_value() != "Refused edit"
+        or editor.locator("textarea[name=notes]").input_value()
+        != "Notes typed on the phone"
+        or inspector.get_by_role("heading", name="Lost answer").count() != 1
+    ):
+        failures.append(
+            f"{name}: a refused edit didn't give back what was typed over the item as it was"
+        )
+    if editor.count():
+        editor.get_by_role("button", name="Cancel").click()
+    # The browser logs the answer it lost, as it should.
+    errors[logged:] = [one for one in errors[logged:] if "net::ERR_FAILED" not in one]
+    print(
+        f"{name}: a refused add or edit gave back what was typed; an add saved without an answer stayed drawn"
+    )
+
+
 def in_open_view(page, id):
     """Whether a node is drawn wholly inside the Map and clear of the sheet or pane over it, once the Map settles."""
     settled_corner(page, id)
@@ -508,6 +671,22 @@ def form_journey(page, view, env, remote, id, name, failures):
     form.locator("input[name=title]").fill("Edited in the app")
     form.locator("select[name=size]").select_option("m")
     form.locator("textarea[name=notes]").fill("Plain notes")
+    if view == VIEWS["phone"]:
+        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
+        # must stay in it.
+        size = page.viewport_size
+        page.set_viewport_size({"width": size["width"], "height": 360})
+        reachable = form.evaluate(
+            "f => { f.querySelector('input[name=title]').focus();"
+            " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
+            " const r = b.getBoundingClientRect();"
+            " return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === b; }); }"
+        )
+        page.set_viewport_size(size)
+        if not reachable:
+            failures.append(
+                f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach"
+            )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
     if not in_open_view(page, id):
@@ -690,6 +869,14 @@ def needs_journey(page, env, plan, thread, name, failures):
     proposal.wait_for(state="detached", timeout=10_000)
     waiting = needs.locator("[data-need^='awaiting-approval:']").first
     approved = waiting.get_attribute("data-need").split(":", 1)[1]
+    # The text names the thread beside its badge and picks it, so no row repeats the thread below.
+    if (
+        waiting.locator(f":scope > button[data-pick-thread='{approved}']").count() != 1
+        or waiting.locator(".rows .line").count() != 0
+    ):
+        failures.append(
+            f"{name}: the entry for {approved} should pick it from its text, with no row repeating it"
+        )
     waiting.locator("[data-action=approve]").click()
     needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
         state="detached", timeout=10_000
@@ -705,6 +892,22 @@ def needs_journey(page, env, plan, thread, name, failures):
     if not json.loads(run(env, "thread", "show", approved))["data"][0]["approved"]:
         failures.append(f"{name}: approving {approved} from the list didn't approve it")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
+    picker = needs.locator("[data-need] > button[data-pick-thread]").first
+    if picker.count() == 0:
+        failures.append(f"{name}: no entry's text picks its thread")
+    else:
+        picked = picker.get_attribute("data-pick-thread")
+        picker.click()
+        panel = page.get_by_test_id("thread-panel")
+        panel.wait_for(timeout=10_000)
+        if (
+            page.locator(
+                f".threads [data-thread='{picked}'][aria-pressed=true]"
+            ).count()
+            != 1
+        ):
+            failures.append(f"{name}: an entry's text didn't pick {picked}")
+        panel.get_by_role("button", name="Close").click()
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
 
@@ -867,6 +1070,7 @@ def main():
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures
                     )
+                    failed_add_journey(page, errors, name, failures)
                     thread_journey(page, env, plan, "t0", name, failures)
                     needs_journey(page, env, plan, "t0", name, failures)
                     plan = Plan(env)
@@ -927,6 +1131,7 @@ def main():
             print(
                 f"3,500 items: drew the default view in {(time.monotonic() - start) * 1000:.0f} ms after the list"
             )
+            first_view_readable(page, "3,500 items", failures)
             page.screenshot(path=SHOTS / "app-large.png")
             if errors:
                 failures.append(

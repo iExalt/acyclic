@@ -567,6 +567,15 @@ dl.facts .chip {
   color: var(--ink);
   font-weight: 400;
 }
+/* A form's Save and Cancel stay in reach however long the form, above a phone's keyboard as well. */
+.fields > .actions,
+.sheet.add > .actions {
+  position: sticky;
+  bottom: 0;
+  margin-bottom: 0;
+  padding: 8px 0;
+  background: var(--sheet);
+}
 
 /* While a mode waits for a tap on the Map, its prompt takes one line, so the Map stays free to tap. */
 .sheet.prompt {

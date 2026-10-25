@@ -35,10 +35,23 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
       <ul className="needs">
         {views.map((view) => (
           <li key={view.key} data-need={view.key}>
-            <p className="facts line" style={lineStyle(view.line)}>
-              <Badge line={view.line} />
-              <span>{view.text}</span>
-            </p>
+            {view.thread === null ? (
+              <p className="facts line" style={lineStyle(view.line)}>
+                <Badge line={view.line} />
+                <span>{view.text}</span>
+              </p>
+            ) : (
+              <button
+                type="button"
+                className="row line"
+                style={lineStyle(view.line)}
+                data-pick-thread={view.thread}
+                onClick={() => view.thread !== null && onPickThread(view.thread)}
+              >
+                <Badge line={view.line} />
+                <span>{view.text}</span>
+              </button>
+            )}
             {view.actions.length === 0 ? null : (
               <div className="actions">
                 {view.actions.map((action) => (

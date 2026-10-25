@@ -1,5 +1,5 @@
 // What the Map draws for a laid-out view and the user's selection: every node at its place, the edges worth
-// drawing, and which nodes the selected thread lights up. Pure, so the rules are tested without a canvas.
+// drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
 import { type Placed, withinOneBox } from "./layout";
 import type { Kind, View } from "./model";
@@ -30,8 +30,12 @@ export interface SceneEdge {
   id: string;
   source: string;
   target: string;
-  /** An edge that crosses boxes, drawn only because its end is selected. */
+  /** An edge that crosses boxes, drawn only because its end is selected or it joins the lit thread. */
   crossing: boolean;
+  /** Joins two of the lit thread's nodes, so the thread reads as a route in its line's colour. */
+  lit: boolean;
+  /** Outside the lit thread while one is lit. */
+  dim: boolean;
 }
 
 export interface Scene {
@@ -80,8 +84,16 @@ export function scene(
   for (const edge of view.edges) {
     const crossing = !within(edge);
     const touches = selection.item !== null && (edge.source === selection.item || edge.target === selection.item);
-    if (crossing && !touches) continue;
-    edges.push({ id: `${edge.source}->${edge.target}`, source: edge.source, target: edge.target, crossing });
+    const joins = lit.has(edge.source) && lit.has(edge.target);
+    if (crossing && !touches && !joins) continue;
+    edges.push({
+      id: `${edge.source}->${edge.target}`,
+      source: edge.source,
+      target: edge.target,
+      crossing,
+      lit: joins,
+      dim: thread !== null && !joins && !touches,
+    });
   }
   return { nodes, edges, thread };
 }

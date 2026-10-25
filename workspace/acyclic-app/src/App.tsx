@@ -1,19 +1,23 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
 import { type Command, CommandError, command, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import {
   addCommand,
   type LinkKind,
+  landed,
   type Mode,
   type NewItem,
+  type Pending,
   type Pick,
   pick,
   type Sent,
   told,
+  unanswered,
   unlinkCommand,
+  withPending,
 } from "./edits";
-import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
+import { globalLevelCommand, type ItemDraft, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
@@ -49,10 +53,18 @@ interface Notice {
   retry: { body: Command; after: After } | null;
 }
 
-/** The add form, open under a parent or at the top level. */
+/** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
 interface Adding {
   parent: string | null;
   idRefused: boolean;
+  draft: NewItem | null;
+}
+
+/** An item's editor reopened, with what the user wrote, after their edit failed; `n` remounts the inspector. */
+interface Reopened {
+  id: string;
+  draft: ItemDraft;
+  n: number;
 }
 
 export function App() {
@@ -65,19 +77,36 @@ export function App() {
   const [adding, setAdding] = useState<Adding | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */
+  const sending = useRef(false);
+  /** A write drawn before the server answers, until the plan read after it holds it. */
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [reopened, setReopened] = useState<Reopened | null>(null);
   // A notification opens the app on `/?needs`, to the list it is about.
   const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
+  /** Counts reads of the plan started, and the latest shown, so one overtaken by a later read is never shown. */
+  const reads = useRef({ started: 0, shown: 0 });
+  /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
+    const n = ++reads.current.started;
     const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
+    if (n < reads.current.shown) return null;
+    reads.current.shown = n;
     return { state: "loaded" as const, items: found, threads: listed, level, needs: needed };
   }, []);
   const refresh = useCallback(() => {
     setVersion((was) => was + 1);
-    fetchAll().then(setLoad, (err: unknown) =>
-      setLoad({ state: "failed", message: err instanceof Error ? err.message : String(err) }),
+    fetchAll().then(
+      (next) => {
+        if (next === null) return;
+        setLoad(next);
+        // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
+        if (!sending.current) setPending(null);
+      },
+      (err: unknown) => setLoad({ state: "failed", message: err instanceof Error ? err.message : String(err) }),
     );
   }, [fetchAll]);
   useEffect(() => {
@@ -91,51 +120,91 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
+  const shown = useMemo(() => (loaded === null ? [] : withPending(loaded.items, pending)), [loaded, pending]);
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byTitle)), [loaded]);
   const lines = useMemo(() => linesOf(sorted), [sorted]);
-  const model = useMemo(() => (loaded === null ? null : buildModel(loaded.items)), [loaded]);
-  const chosen = selected === null ? undefined : loaded?.items.find((one) => one.id === selected);
+  const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
+  const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
   // An item that went away, deleted or moved out of reach elsewhere, is no longer selected.
   useEffect(() => {
     if (model !== null && selected !== null && !model.items.has(selected)) setSelected(null);
   }, [model, selected]);
+
+  // An editor opened again for one item stays closed on any other.
+  useEffect(() => {
+    setReopened((was) => (was === null || was.id === selected ? was : null));
+  }, [selected]);
 
   const select = useCallback((id: string | null, pin: string | null = null) => {
     setSelected(id);
     if (id !== null) setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
   }, []);
 
-  /** Sends an edit; once saved, reloads the plan and brings `after.select` into view with `after.pin` held still. */
+  /**
+   * Sends an edit; once saved, reloads the plan and brings `after.select` into view with `after.pin` held still. An
+   * edit `drawn` is drawn at once, its form closed, and if the write fails, the form opens again with what the user
+   * wrote, unless the server turns out to hold it after all.
+   */
   const send = useCallback(
-    async (body: Command, after: After) => {
+    async (body: Command, after: After, drawn: Pending | null = null) => {
+      if (sending.current) return;
+      sending.current = true;
       setBusy(true);
       setNotice(null);
+      const bringIn = () => {
+        const select = after.select;
+        if (select === null) return;
+        setSelected(select);
+        setFocus((was) => ({ id: select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
+      };
+      if (drawn !== null) {
+        setPending(drawn);
+        setAdding(null);
+        setReopened(null);
+        bringIn();
+      }
       let sent: Sent;
       try {
         const answer = await command<{ proposals?: unknown[] } | null>(body);
         const proposals = answer?.proposals?.length ?? 0;
         try {
           const next = await fetchAll();
-          setLoad(next);
+          if (next !== null) setLoad(next);
+          setPending(null);
           setAdding(null);
-          const select = after.select;
-          if (select !== null) {
-            setSelected(select);
-            setFocus((was) => ({ id: select, pin: after.pin, n: (was?.n ?? 0) + 1 }));
-          }
+          bringIn();
           sent = { write: "saved", proposals, reload: "done" };
         } catch (err) {
+          // Saved, so what it drew stays until a refresh reads the plan.
           setAdding(null);
           sent = { write: "saved", proposals, reload: { failed: err instanceof Error ? err.message : String(err) } };
         }
       } catch (err) {
         const code = err instanceof CommandError ? err.code : "network";
         sent = { write: "failed", code, message: err instanceof Error ? err.message : String(err) };
+        if (drawn !== null) {
+          // No answer may still mean saved: the plan says, and the form opens again only if it isn't. What was drawn
+          // stays until then, so the item stays selected if it was saved.
+          let held = false;
+          if (unanswered(code)) {
+            const next = await fetchAll().catch(() => null);
+            if (next !== null) {
+              setLoad(next);
+              held = landed(drawn, next.items);
+            }
+          }
+          setPending(null);
+          if (!held && drawn.kind === "add")
+            setAdding({ parent: drawn.item.parent, idRefused: told(sent).fixId, draft: drawn.item });
+          if (!held && drawn.kind === "edit")
+            setReopened((was) => ({ id: drawn.id, draft: drawn.draft, n: (was?.n ?? 0) + 1 }));
+        }
       }
       const { text, offer, fixId } = told(sent);
       setNotice(text === null ? null : { text, offer, retry: offer === "retry" ? { body, after } : null });
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
+      sending.current = false;
       setBusy(false);
     },
     [fetchAll],
@@ -175,9 +244,9 @@ export function App() {
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;
   const startAdd = (parent: string | null) => {
     setMode({ kind: "idle" });
-    setAdding({ parent, idRefused: false });
+    setAdding({ parent, idRefused: false, draft: null });
   };
-  const add = (item: NewItem) => send(addCommand(item), { select: item.item, pin: item.parent });
+  const add = (item: NewItem) => send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
   const unlink = (from: string, kind: LinkKind, to: string) =>
     send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
   const prompt =
@@ -192,7 +261,7 @@ export function App() {
         <div className="brand">
           <h1>
             <span className="count" data-testid="item-count">
-              {load.items.length}
+              {shown.length}
             </span>{" "}
             items
           </h1>
@@ -276,7 +345,7 @@ export function App() {
       <main className="stage" data-busy={busy}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
           <PlanMap
-            items={load.items}
+            items={shown}
             showArchived={showArchived}
             thread={thread}
             lines={lines}
@@ -333,14 +402,16 @@ export function App() {
             threads={sorted}
             taken={new Set(model?.items.keys())}
             idRefused={adding.idRefused}
+            draft={adding.draft}
             busy={busy}
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
         ) : chosen === undefined ? null : (
           <Inspector
-            key={chosen.id}
+            key={`${chosen.id}:${reopened?.id === chosen.id ? reopened.n : 0}`}
             item={chosen}
+            reopened={reopened?.id === chosen.id ? reopened.draft : null}
             titleOf={titleOf}
             onSelect={(id) => select(id, selected)}
             onUnlink={unlink}
@@ -349,6 +420,9 @@ export function App() {
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
+            onSave={(edit, draft) =>
+              send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, draft })
+            }
             threads={sorted}
             lines={lines}
             busy={busy}

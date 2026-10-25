@@ -1,7 +1,8 @@
 // Edits made on the Map: the commands they send, the ids new items get, which targets a move or a link may take,
 // and what a tap does in each mode. Pure, so every rule is tested without a browser.
 
-import type { Command } from "./api";
+import type { Command, Item } from "./api";
+import { type ItemDraft, itemEdit, STATES } from "./forms";
 import type { Model } from "./map/model";
 
 export type LinkKind = "waits-for" | "relates-to";
@@ -171,4 +172,62 @@ export interface Recovery {
 
 export function recovery(code: string): Recovery {
   return { retry: code === "busy", fixId: ["already-exists", "deleted", "invalid-name"].includes(code) };
+}
+
+/**
+ * A write drawn before the server has it, so the Map answers a tap at once: an item added, or an item's fields
+ * edited. The app holds at most one, since it sends one write at a time.
+ */
+export type Pending = { kind: "add"; item: NewItem } | { kind: "edit"; id: string; draft: ItemDraft };
+
+/** The items with `pending` drawn over them. */
+export function withPending(items: Item[], pending: Pending | null): Item[] {
+  if (pending === null) return items;
+  if (pending.kind === "add") {
+    const { item: id, title, parent, thread } = pending.item;
+    if (items.some((one) => one.id === id)) return items;
+    const links = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
+    const added: Item = {
+      id,
+      title,
+      parent,
+      thread,
+      state: "backlog",
+      notes: null,
+      gate: null,
+      size: null,
+      archived: false,
+      links,
+      conflicts: {},
+    };
+    return [...items, added];
+  }
+  const { id, draft } = pending;
+  const or = (value: string) => (value === "" ? null : value);
+  return items.map((one) =>
+    one.id !== id
+      ? one
+      : {
+          ...one,
+          title: draft.title.trim() === "" ? one.title : draft.title.trim(),
+          state: (STATES as readonly string[]).includes(draft.state) ? draft.state : one.state,
+          thread: or(draft.thread),
+          notes: or(draft.notes),
+          gate: or(draft.gate),
+          size: or(draft.size),
+        },
+  );
+}
+
+/** Whether `items`, read from the server, already hold the write `pending` drew. */
+export function landed(pending: Pending, items: Item[]): boolean {
+  if (pending.kind === "add") return items.some((one) => one.id === pending.item.item);
+  const item = items.find((one) => one.id === pending.id);
+  // Titles are saved trimmed.
+  return item !== undefined && itemEdit(item, { ...pending.draft, title: pending.draft.title.trim() }) === null;
+}
+
+/** A failure that leaves unknown whether the server applied the write: no answer, or one that wasn't the server's. */
+export function unanswered(code: string): boolean {
+  return code === "network" || code === "http";
 }

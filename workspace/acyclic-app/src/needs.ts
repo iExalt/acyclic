@@ -33,6 +33,8 @@ export interface NeedView {
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
   threads: { id: string; title: string }[];
+  /** The thread the badge-led text names, which the text picks: its row would only repeat it. */
+  thread: string | null;
   actions: Action[];
   /** Why there is no action here, or how to settle it elsewhere. */
   note: string | null;
@@ -57,16 +59,18 @@ export function threadLabel(thread: { id: string; title: string }, lines: Readon
 
 /** One entry as the app shows it, with each thread's line from `lines`. */
 export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView {
-  // A badge only where the text names its thread: elsewhere it would only repeat the thread's row.
+  // A badge only where the text names its thread, and then the text picks the thread in place of its row.
   let named = false;
   const view = viewOf(need, lines, () => {
     named = true;
   });
-  return named ? view : { ...view, line: undefined };
+  if (!named) return { ...view, line: undefined, thread: null };
+  const thread = view.threads[0]?.id ?? null;
+  return { ...view, thread, threads: view.threads.filter((one) => one.id !== thread) };
 }
 
 /** The entry, calling `named` when its text names the badge's thread by its line. */
-function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void): NeedView {
+function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void): Omit<NeedView, "thread"> {
   const item = row(need.item);
   const thread = row(need.thread);
   const holders = Array.isArray(need.holders) ? need.holders : [];
@@ -204,7 +208,13 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix) || str(need.resolve);
-      const ids = [str(need.id), ...base.items, ...base.threads, ...named.map((one) => one.id), str(need.remote)];
+      const ids = [
+        str(need.id),
+        ...base.items,
+        ...base.threads.map((one) => one.id),
+        ...named.map((one) => one.id),
+        str(need.remote),
+      ];
       return {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],

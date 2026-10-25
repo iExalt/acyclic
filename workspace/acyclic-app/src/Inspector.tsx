@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { LinkKind } from "./edits";
-import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
+import { type ItemDraft, reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import type { Line } from "./lines";
 
@@ -18,8 +18,12 @@ export interface InspectorProps {
   onLink: (kind: LinkKind) => void;
   onAdd: () => void;
   onClose: () => void;
-  /** Sends an edit of this item, such as its fields or a conflict settled. */
+  /** Sends an edit of this item, such as a conflict settled. */
   onCommand: (command: Command) => void;
+  /** Saves its fields, with the draft to draw at once. */
+  onSave: (command: Command, draft: ItemDraft) => void;
+  /** The editor's draft, open again after a save failed, or null. */
+  reopened: ItemDraft | null;
   threads: Thread[];
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
@@ -36,11 +40,13 @@ export function Inspector({
   onAdd,
   onClose,
   onCommand,
+  onSave,
+  reopened,
   threads,
   lines,
   busy,
 }: InspectorProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(reopened !== null);
   const chip = (id: string) => (
     <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
       {titleOf(id)}
@@ -59,6 +65,7 @@ export function Inspector({
                 type="button"
                 className="unlink"
                 aria-label={`Remove the link to ${id}`}
+                disabled={busy}
                 onClick={() => unlink(id)}
               >
                 ×
@@ -98,16 +105,17 @@ export function Inspector({
         <ItemEditor
           item={item}
           threads={threads}
+          initial={reopened}
           busy={busy}
-          onSave={(edit) => {
+          onSave={(edit, draft) => {
             setEditing(false);
-            onCommand(edit);
+            onSave(edit, draft);
           }}
           onCancel={() => setEditing(false)}
         />
       ) : null}
       <div className="actions">
-        <button type="button" onClick={() => setEditing(true)} data-action="edit" disabled={editing}>
+        <button type="button" onClick={() => setEditing(true)} data-action="edit" disabled={editing || busy}>
           Edit
         </button>
         {item.state === "done" ? (
@@ -115,16 +123,16 @@ export function Inspector({
             Reopen
           </button>
         ) : null}
-        <button type="button" onClick={onAdd} data-action="add-child">
+        <button type="button" onClick={onAdd} data-action="add-child" disabled={busy}>
           Add inside
         </button>
-        <button type="button" onClick={onMove} data-action="move">
+        <button type="button" onClick={onMove} data-action="move" disabled={busy}>
           Move
         </button>
-        <button type="button" onClick={() => onLink("waits-for")} data-action="waits-for">
+        <button type="button" onClick={() => onLink("waits-for")} data-action="waits-for" disabled={busy}>
           Waits for…
         </button>
-        <button type="button" onClick={() => onLink("relates-to")} data-action="relates-to">
+        <button type="button" onClick={() => onLink("relates-to")} data-action="relates-to" disabled={busy}>
           Relates to…
         </button>
       </div>

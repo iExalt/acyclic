@@ -33,6 +33,30 @@ describe("scene", () => {
     ]);
   });
 
+  it("draws the lit thread's links as its route, across boxes too, and dims the rest", () => {
+    // Inside one box: a solid route.
+    const both = buildModel([
+      item("top"),
+      item("a", "top", [], { thread: "t" }),
+      item("b", "top", ["a"], { thread: "t" }),
+    ]);
+    const open = visible(both, { collapsed: new Set(), showArchived: false });
+    const inside = scene(open, placed, { item: null, thread: "t" }, (id) => both.items.get(id)?.thread ?? null);
+    expect(inside.edges).toMatchObject([{ id: "a->b", crossing: false, lit: true, dim: false }]);
+    const picked = scene(view, placed, { item: null, thread: "t" }, threadOf);
+    expect(picked.edges.map((edge) => [edge.id, edge.crossing, edge.lit, edge.dim])).toEqual([
+      ["a->b", false, false, true],
+      ["a->c", true, true, false],
+    ]);
+    // A link of the selected item's stays undimmed, though outside its thread.
+    const selected = scene(view, placed, { item: "b", thread: "t" }, threadOf);
+    expect(selected.edges.find((edge) => edge.id === "a->b")).toMatchObject({ lit: false, dim: false });
+    // So does a crossing drawn for the selected item.
+    const crossing = scene(view, placed, { item: "c", thread: "u" }, threadOf);
+    expect(crossing.edges.find((edge) => edge.id === "a->c")).toMatchObject({ crossing: true, lit: false, dim: false });
+    expect(scene(view, placed, { item: null, thread: null }, threadOf).edges.every((edge) => !edge.dim)).toBe(true);
+  });
+
   it("lights up the selected item's thread and dims other items, but not the boxes around them", () => {
     const lit = scene(view, placed, { item: "a", thread: null }, threadOf);
     const marks = lit.nodes.map((node) => `${node.id}:${node.lit ? "lit" : node.dim ? "dim" : "-"}`);
