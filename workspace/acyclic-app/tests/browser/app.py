@@ -287,12 +287,11 @@ def installable(context, page, origin, name, failures):
 
 
 def first_view_readable(page, name, failures):
-    """The Map opens at a zoom its titles can be read at, with a node's top-left corner, where its title starts, in
-    view."""
+    """The Map opens at a zoom its titles can be read at, with an item, not a box, wholly in view, title and all."""
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
-        " shown: m.cy.nodes().some(n => { const b = n.renderedBoundingBox({ includeLabels: false });"
-        " return b.x1 >= 0 && b.y1 >= 0 && b.x1 < w && b.y1 < h; }) }; }"
+        " shown: m.cy.nodes().not('.box').some(n => { const b = n.renderedBoundingBox();"
+        " return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= w && b.y2 <= h; }) }; }"
     )
     if view["zoom"] < READABLE or not view["shown"]:
         failures.append(
@@ -309,13 +308,51 @@ def map_journey(page, view, plan, name, failures, hint=None):
     first_view_readable(page, name, failures)
     # Dragging pans from anywhere, an item or a box as well as the background.
     for id in [
-        next(id for id in plan.default() if not plan.children(id)),
+        next(id for id in plan.default() if plan.depth(id) == 1),
         next(id for id in plan.default() if plan.depth(id) == 0 and plan.children(id)),
     ]:
         panned, moved = drag_pans(page, view, id)
         if not panned:
             failures.append(
                 f"{name}: a drag from {id} moved the Map {moved}, not with it, or selected it"
+            )
+    if view.get("has_touch"):
+        # Two fingers from an item pinch, zooming the Map, rather than panning it with the first.
+        drawn = page.get_by_test_id("map")
+        centre(page, id)
+        box = drawn.evaluate(
+            "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+            " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+            id,
+        )
+        zoom = drawn.evaluate("m => m.cy.zoom()")
+        cdp = page.context.new_cdp_session(page)
+        x, y = box["x"], box["y"]
+        for kind, spread in [("touchStart", 10)] + [
+            ("touchMove", 10 + 12 * n) for n in range(1, 7)
+        ]:
+            cdp.send(
+                "Input.dispatchTouchEvent",
+                {
+                    "type": kind,
+                    "touchPoints": [
+                        {"x": x - spread, "y": y},
+                        {"x": x + spread, "y": y},
+                    ],
+                },
+            )
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        cdp.detach()
+        after = drawn.evaluate(
+            "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+            " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
+            id,
+        )
+        # Spread about the item's middle, it zooms about it, so the middle stays put.
+        drift = max(abs(after["x"] - x), abs(after["y"] - y))
+        if drawn.evaluate("m => m.cy.zoom()") <= zoom or drift > 8:
+            failures.append(
+                f"{name}: a pinch from {id} didn't zoom the Map about it (drifted {drift:.0f} px)"
             )
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.

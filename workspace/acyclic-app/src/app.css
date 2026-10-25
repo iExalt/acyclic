@@ -375,6 +375,12 @@ button.icon {
   background: var(--edge);
 }
 /* A form takes the whole height: at 45 %, less a phone's keyboard, it would be a few lines tall. */
+/* A panel still loading takes the most room it will, so what the Map brings into view above it stays there. */
+@media (max-width: 899px) {
+  .inspector[aria-busy="true"] {
+    height: 45%;
+  }
+}
 .inspector.tall,
 .sheet.add {
   max-height: none;
