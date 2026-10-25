@@ -12,8 +12,10 @@ describe("onChevron", () => {
     expect(onChevron("leaf", box, at(10, 10), 1)).toBe(false);
   });
 
-  it("takes a collapsed box's left edge from top to bottom", () => {
-    expect(onChevron("collapsed", { ...box, y2: 164 }, at(10, 60), 1)).toBe(true);
+  it("takes a collapsed box's left edge from top to bottom, and leaves the rest of it to select it", () => {
+    const card = { ...box, y2: 164 };
+    expect(onChevron("collapsed", card, at(10, 60), 1)).toBe(true);
+    expect(onChevron("collapsed", card, at(150, 30), 1)).toBe(false);
   });
 
   it("widens to a fingertip when the Map is zoomed out, but never past half the node", () => {

@@ -401,7 +401,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
         (id for id in plan.default(archived=True) if plan.items[id]["archived"]), None
     )
     if archived is not None:
-        # For the eye: crossed out. The renderer loads its images after drawing, and draws them a moment later.
+        # For the eye only, so a fixed wait will do: the renderer loads its images after drawing, and draws them later.
         centre(page, archived)
         page.wait_for_timeout(200)
         page.screenshot(path=SHOTS / f"app-{name}-archived.png")
