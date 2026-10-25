@@ -1,7 +1,7 @@
 // A setting picked from a list, written as choosing.ts decides: a pick at once, arrow keys as a draft until Enter.
 
 import { type ReactNode, useRef, useState } from "react";
-import { type ChoiceEvent, choose, UNCHOSEN } from "./choosing";
+import { type ChoiceEvent, choose, draftOf, UNCHOSEN } from "./choosing";
 
 /** The keys that open a closed list rather than step through it. */
 const opens = (event: { key: string; altKey: boolean }) =>
@@ -35,11 +35,19 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
       <select
         name={name}
         data-testid={testid}
-        value={state.draft ?? value}
+        value={draftOf(state, value) ?? value}
         disabled={disabled}
         onKeyDown={(event) => {
-          if (event.key === "Enter") step({ kind: "enter" });
-          else if (event.key === "Escape") step({ kind: "cancel" });
+          // Enter with nothing to write isn't an act either: it keeps a menu around it open.
+          if (event.key === "Enter") {
+            if (step({ kind: "enter" }).write === null) event.stopPropagation();
+            // A change in Enter's own task is a pick, in a list drawn in the page, as Firefox's is.
+            return;
+          }
+          if (event.key === "Escape") {
+            step({ kind: "cancel" });
+            return;
+          }
           // A key that only opens the list changes nothing itself: the pick comes later, from the list.
           if (opens(event)) return;
           keying.current = true;

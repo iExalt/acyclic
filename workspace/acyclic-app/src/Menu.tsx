@@ -40,7 +40,7 @@ export function Menu({ children }: { children: ReactNode }) {
           if ((event.target as Element).closest("button") !== null) close(details.current);
         }}
         onChange={() => close(details.current)}
-        // Enter on a list writes its draft, which acts as a pick does.
+        // Enter on a list writes its draft, which acts as a pick does; a list with no draft keeps the key to itself.
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.target instanceof HTMLSelectElement) close(details.current);
         }}
