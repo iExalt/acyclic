@@ -47,6 +47,11 @@ describe("visible", () => {
       { source: "sow", target: "paint" },
       { source: "sow", target: "water" },
     ]);
+    // Only the subtree's root is marked archived; what it holds is archived with it, closed or open.
+    const archived = (one: ReturnType<typeof visible>) =>
+      one.nodes.filter((node) => node.archived).map((node) => node.id);
+    expect(archived(view)).toEqual(["shed", "paint"]);
+    expect(archived(visible(model, { collapsed: new Set(["shed"]), showArchived: true }))).toEqual(["shed"]);
   });
 
   it("drops an edge between a box and an item inside it", () => {

@@ -25,11 +25,11 @@ THROTTLE = float(os.environ.get("THROTTLE", "4"))
 
 def tap_node(page, id):
     """Brings a box to full size in the middle of the screen, as a person would before tapping it, then taps its
-    title. At 3,500 items the whole plan fits only at a zoom where a box is a few pixels tall."""
+    chevron. At 3,500 items the whole plan fits only at a zoom where a box is a few pixels tall."""
     corner = page.get_by_test_id("map").evaluate(
         "(m, id) => { const n = m.cy.getElementById(id); m.cy.zoom(1); m.cy.center(n);"
         " const b = n.renderedBoundingBox({ includeLabels: false });"
-        " const r = m.getBoundingClientRect(); return { x: r.x + b.x1 + b.w / 2, y: r.y + b.y1 + 10 }; }",
+        " const r = m.getBoundingClientRect(); return { x: r.x + b.x1 + 18, y: r.y + b.y1 + 18 }; }",
         id,
     )
     page.touchscreen.tap(corner["x"], corner["y"])

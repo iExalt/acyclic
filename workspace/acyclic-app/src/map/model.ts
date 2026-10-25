@@ -119,6 +119,8 @@ export interface VisibleNode {
   kind: Kind;
   /** How many items a collapsed box hides. */
   hidden: number;
+  /** In an archived subtree: archived itself, or under an item that is. */
+  archived: boolean;
 }
 
 /** An edge from the item that must come first to the one that waits for it, between visible nodes. */
@@ -149,16 +151,17 @@ export function visible(model: Model, state: ViewState): View {
   const shown = (id: string) => state.showArchived || !model.items.get(id)?.archived;
   const count = (id: string): number =>
     (model.children.get(id) ?? []).reduce((sum, child) => (shown(child) ? sum + 1 + count(child) : sum), 0);
-  const walk = (id: string, parent: string | null, standIn: string | null) => {
+  const walk = (id: string, parent: string | null, standIn: string | null, under: boolean) => {
     if (!shown(id)) return;
     if (standIn !== null) {
       stand.set(id, standIn);
-      for (const child of model.children.get(id) ?? []) walk(child, parent, standIn);
+      for (const child of model.children.get(id) ?? []) walk(child, parent, standIn, under);
       return;
     }
     const item = model.items.get(id);
     if (item === undefined) return;
     stand.set(id, id);
+    const archived = under || item.archived;
     const kids = (model.children.get(id) ?? []).filter(shown);
     const collapsed = kids.length > 0 && state.collapsed.has(id);
     nodes.push({
@@ -168,10 +171,11 @@ export function visible(model: Model, state: ViewState): View {
       parent,
       kind: kids.length === 0 ? "leaf" : collapsed ? "collapsed" : "box",
       hidden: collapsed ? count(id) : 0,
+      archived,
     });
-    for (const child of kids) walk(child, id, collapsed ? id : null);
+    for (const child of kids) walk(child, id, collapsed ? id : null, archived);
   };
-  for (const root of model.roots) walk(root, null, null);
+  for (const root of model.roots) walk(root, null, null, false);
 
   const parentOf = new Map(nodes.map((node) => [node.id, node.parent]));
   const contains = (outer: string, inner: string) => {

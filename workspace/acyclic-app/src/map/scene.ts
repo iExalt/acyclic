@@ -24,6 +24,8 @@ export interface SceneNode {
   lit: boolean;
   dim: boolean;
   selected: boolean;
+  /** In an archived subtree, which only shows when asked for. */
+  archived: boolean;
 }
 
 export interface SceneEdge {
@@ -77,6 +79,7 @@ export function scene(
       // Dimming says "not in this thread"; a box isn't a member just because it holds members, so it isn't dimmed.
       dim: thread !== null && !lit.has(node.id) && node.kind !== "box",
       selected: node.id === selection.item,
+      archived: node.archived,
     });
   }
   const within = withinOneBox(view);

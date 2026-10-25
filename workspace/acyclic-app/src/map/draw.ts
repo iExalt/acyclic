@@ -6,6 +6,7 @@
 
 import type { Core, ElementDefinition } from "cytoscape";
 import { TOKENS } from "../lines";
+import { TITLE } from "./chevron";
 import type { Scene } from "./scene";
 
 /** An element as the renderer is given it; `data.id` is its id. */
@@ -18,9 +19,16 @@ export function elementsOf(scene: Scene, colour: string | undefined): Drawn[] {
   return [
     ...scene.nodes.map((node) => ({
       group: "nodes" as const,
-      data: { ...node, textWidth: Math.max(40, node.width - 16), line },
+      // A box's title starts after its chevron.
+      data: { ...node, textWidth: Math.max(40, node.width - (node.kind === "leaf" ? 16 : TITLE + 10)), line },
       position: { x: node.x, y: node.y },
-      classes: [node.kind, node.lit ? "lit" : "", node.dim ? "dim" : "", node.selected ? "selected" : ""].join(" "),
+      classes: [
+        node.kind,
+        node.lit ? "lit" : "",
+        node.dim ? "dim" : "",
+        node.selected ? "selected" : "",
+        node.archived ? "archived" : "",
+      ].join(" "),
     })),
     ...scene.edges.map((edge) => ({
       group: "edges" as const,
