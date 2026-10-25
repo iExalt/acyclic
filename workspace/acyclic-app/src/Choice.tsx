@@ -45,6 +45,8 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
             return;
           }
           if (event.key === "Escape") {
+            // Dropping a draft is all the key does; with none, it closes what the list is in.
+            if (draftOf(state, value) !== null) event.stopPropagation();
             step({ kind: "cancel" });
             return;
           }

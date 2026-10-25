@@ -1,9 +1,10 @@
 // Adding an item: a title, the id it gets (made from the title until the user changes it), and its thread. It goes
 // under the parent given, or at the top level.
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Thread } from "./api";
 import { type NewItem, newId } from "./edits";
+import { useFocusIn } from "./focus";
 
 export interface AddFormProps {
   parent: string | null;
@@ -17,6 +18,8 @@ export interface AddFormProps {
   /** What the user wrote before, when a failed add opens the form again. */
   draft: NewItem | null;
   busy: boolean;
+  /** A refusal or failure to show, under its heading rather than over it. */
+  notice: ReactNode;
   onSubmit: (item: NewItem) => void;
   onCancel: () => void;
 }
@@ -30,6 +33,7 @@ export function AddForm({
   idRefused,
   draft,
   busy,
+  notice,
   onSubmit,
   onCancel,
 }: AddFormProps) {
@@ -37,6 +41,8 @@ export function AddForm({
   const [id, setId] = useState<string | null>(draft?.item ?? null);
   const [thread, setThread] = useState(draft === null ? initialThread : draft.thread);
   const idField = useRef<HTMLInputElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  useFocusIn(form);
   const shownId = id ?? newId(title, taken);
   useEffect(() => {
     if (idRefused) idField.current?.focus();
@@ -47,8 +53,16 @@ export function AddForm({
     onSubmit({ item: shownId, title: title.trim(), parent, thread });
   };
   return (
-    <form className="sheet add" data-testid="add-form" onSubmit={submit}>
+    <form
+      ref={form}
+      className="sheet add"
+      data-testid="add-form"
+      // What the user typed, which no key throws away.
+      data-dirty={title !== "" || id !== null}
+      onSubmit={submit}
+    >
       <h2>Add {parent === null ? "at the top level" : <>inside {parentTitle}</>}</h2>
+      {notice}
       <label>
         Title
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}

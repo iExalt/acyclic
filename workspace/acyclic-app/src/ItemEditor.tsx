@@ -29,7 +29,18 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
     else onSave(edit, { base, draft });
   };
   return (
-    <form className="fields" data-testid="item-form" onSubmit={submit}>
+    <form
+      className="fields"
+      data-testid="item-form"
+      // What the user changed, which no key throws away; unchanged, Escape closes the editor alone.
+      data-dirty={edit !== null}
+      onSubmit={submit}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || edit !== null) return;
+        event.stopPropagation();
+        onCancel();
+      }}
+    >
       <label>
         Title
         <input name="title" value={draft.title} onChange={set("title")} />

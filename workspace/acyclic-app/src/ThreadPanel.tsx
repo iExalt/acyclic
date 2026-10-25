@@ -1,10 +1,11 @@
 // The picked thread: what approving it lets agents work on, its autonomy level and project-management flag, and the
 // proposals agents made to it, each kept or dropped with one tap.
 
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type Command, failure, type Proposal, proposals, type ThreadDetail, thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { Choice } from "./Choice";
+import { useFocusIn } from "./focus";
 import {
   approveCommand,
   dropCommand,
@@ -61,17 +62,27 @@ export function ThreadPanel({
       live = false;
     };
   }, [id, version]);
-  if (loaded === null) return <aside className="inspector" data-testid="thread-panel" aria-busy="true" />;
-  if ("failed" in loaded)
-    return (
-      <aside className="inspector" data-testid="thread-panel">
-        <p role="alert">{loaded.failed}</p>
-      </aside>
-    );
+  // One panel throughout, so focus put in it as it opens stays as it loads.
+  const panel = useRef<HTMLElement>(null);
+  useFocusIn(panel);
+  const shell = (body: ReactNode) => (
+    <aside
+      ref={panel}
+      tabIndex={-1}
+      className="inspector"
+      data-testid="thread-panel"
+      aria-label="Picked thread"
+      aria-busy={loaded === null ? true : undefined}
+    >
+      {body}
+    </aside>
+  );
+  if (loaded === null) return shell(null);
+  if ("failed" in loaded) return shell(<p role="alert">{loaded.failed}</p>);
   const { detail, open } = loaded;
   const members = detail.members.length;
-  return (
-    <aside className="inspector" data-testid="thread-panel" aria-label="Picked thread">
+  return shell(
+    <>
       <header>
         <h2 className="line" style={lineStyle(line)}>
           <Badge line={line} />
@@ -170,7 +181,7 @@ export function ThreadPanel({
           </ul>
         </div>
       )}
-    </aside>
+    </>,
   );
 }
 

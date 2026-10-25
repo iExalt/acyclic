@@ -20,6 +20,7 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
+import { topLayer } from "./layers";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
@@ -243,16 +244,31 @@ export function App() {
     },
     [model, mode, send],
   );
+  const top = topLayer({
+    mode: mode.kind !== "idle",
+    adding: adding !== null,
+    item: chosen !== undefined,
+    needs: showNeeds,
+    thread: thread !== null,
+  });
+  // Escape closes what's on top, but never a form holding what the user typed: that says how to leave it instead.
   useEffect(() => {
-    if (mode.kind === "idle" && adding === null) return;
+    if (top === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setMode({ kind: "idle" });
-      setAdding(null);
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("form[data-dirty='true']") !== null) {
+        setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null });
+        return;
+      }
+      if (top === "mode") setMode({ kind: "idle" });
+      else if (top === "add") setAdding(null);
+      else if (top === "item") setSelected(null);
+      else if (top === "needs") setShowNeeds(false);
+      else setThread(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [mode, adding]);
+  }, [top]);
 
   if (load.state === "loading") return <p className="status">Loading…</p>;
   if (load.state === "failed")
@@ -269,6 +285,36 @@ export function App() {
   const add = (item: NewItem) => send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
   const unlink = (from: string, kind: LinkKind, to: string) =>
     send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
+  /** A refusal or failure, shown in the form or item it is about, else over the Map. */
+  const noticeView =
+    notice === null ? null : (
+      <div className="notice" role="alert" data-testid="notice">
+        <span className="grow">{notice.text}</span>
+        {notice.retry === null ? null : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => notice.retry && send(notice.retry.body, notice.retry.after)}
+          >
+            Try again
+          </button>
+        )}
+        {notice.offer === "refresh" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              refresh();
+            }}
+          >
+            Refresh
+          </button>
+        ) : null}
+        <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+          ×
+        </button>
+      </div>
+    );
   const prompt =
     mode.kind === "move"
       ? `Tap the box to put ${titleOf(mode.item)} in`
@@ -376,35 +422,8 @@ export function App() {
             }
           />
         </Suspense>
-        {notice === null ? null : (
-          <div className="notice" role="alert" data-testid="notice">
-            <span className="grow">{notice.text}</span>
-            {notice.retry === null ? null : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => notice.retry && send(notice.retry.body, notice.retry.after)}
-              >
-                Try again
-              </button>
-            )}
-            {notice.offer === "refresh" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setNotice(null);
-                  refresh();
-                }}
-              >
-                Refresh
-              </button>
-            ) : null}
-            <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
-              ×
-            </button>
-          </div>
-        )}
-        {prompt !== null ? (
+        {top === "add" || top === "item" ? null : noticeView}
+        {top === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">
             <span className="grow">{prompt}</span>
             {mode.kind === "move" ? (
@@ -416,7 +435,7 @@ export function App() {
               Cancel
             </button>
           </div>
-        ) : adding !== null ? (
+        ) : top === "add" && adding !== null ? (
           <AddForm
             key={adding.parent ?? ""}
             parent={adding.parent}
@@ -427,10 +446,11 @@ export function App() {
             idRefused={adding.idRefused}
             draft={adding.draft}
             busy={busy}
+            notice={noticeView}
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
-        ) : chosen === undefined ? null : (
+        ) : top !== "item" || chosen === undefined ? null : (
           <Inspector
             key={`${chosen.id}:${reopened?.id === chosen.id ? reopened.n : 0}`}
             item={chosen}
@@ -447,11 +467,12 @@ export function App() {
               send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
+            notice={noticeView}
             lines={lines}
             busy={busy}
           />
         )}
-        {prompt === null && adding === null && chosen === undefined && showNeeds ? (
+        {top === "needs" ? (
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
@@ -466,7 +487,7 @@ export function App() {
             onClose={() => setShowNeeds(false)}
           />
         ) : null}
-        {prompt === null && adding === null && chosen === undefined && !showNeeds && thread !== null ? (
+        {top === "thread" && thread !== null ? (
           <ThreadPanel
             key={thread}
             id={thread}

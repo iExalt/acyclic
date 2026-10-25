@@ -1,7 +1,9 @@
 // The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
 
+import { useRef } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
+import { useFocusIn } from "./focus";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
 import { type Need, needView, threadLabel } from "./needs";
@@ -22,8 +24,10 @@ export interface NeedsListProps {
 
 export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, onPickThread, onClose }: NeedsListProps) {
   const views = needs.map((need) => needView(need, lines));
+  const panel = useRef<HTMLElement>(null);
+  useFocusIn(panel);
   return (
-    <aside className="inspector" data-testid="needs" aria-label="Needs you">
+    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Needs you">
       <header>
         <h2>Needs you</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
