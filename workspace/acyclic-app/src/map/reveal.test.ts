@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstView, READABLE, reveal, uncovered } from "./reveal";
+import { firstOf, firstView, nearest, READABLE, reveal, uncovered } from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -36,5 +36,33 @@ describe("firstView", () => {
     // Just readable whole: still whole.
     const edge = (phone.width - 32) / READABLE;
     expect(firstView({ width: edge, height: 10 }, phone, 16, 2).zoom).toBeCloseTo(READABLE);
+  });
+
+  it("opens a plan too big to read whole on its first item, not on the empty corner of a box", () => {
+    const start = firstOf([
+      { x: 300, y: 900 },
+      { x: 500, y: 400 },
+      { x: 200, y: 400 },
+    ]);
+    expect(start).toEqual({ x: 200, y: 400 });
+    expect(firstView({ width: 4000, height: 3000 }, phone, 16, 2, start)).toEqual({
+      zoom: READABLE,
+      pan: { x: 16 - 200 * READABLE, y: 16 - 400 * READABLE },
+    });
+    expect(firstOf([])).toBeUndefined();
+  });
+});
+
+describe("nearest", () => {
+  const open = { x1: 0, y1: 0, x2: 400, y2: 400 };
+  const at = (x: number, y: number) => ({ x1: x, y1: y, x2: x + 50, y2: y + 20 });
+
+  it("brings in nothing when one of the nodes shows, partly or whole, nor when there are none", () => {
+    expect(nearest([at(380, 10), at(900, 900)], open)).toBeNull();
+    expect(nearest([], open)).toBeNull();
+  });
+
+  it("else brings in the one nearest the middle of what shows, which moves the Map least", () => {
+    expect(nearest([at(-900, 180), at(500, 180), at(180, 2000)], open)).toEqual(at(500, 180));
   });
 });

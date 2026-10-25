@@ -35,19 +35,41 @@ export const READABLE = 0.85;
 
 /**
  * The first view of a plan `plan` big on a screen `screen` big: the whole plan, centred, when it fits at a readable
- * zoom, else its top-left corner at that zoom, where its first box starts. A pinch still zooms out to the whole.
+ * zoom, else at that zoom with `start` at the top-left, the plan's first item, so the screen opens on titles rather
+ * than on the empty corner of a box. A pinch still zooms out to the whole.
  */
 export function firstView(
   plan: { width: number; height: number },
   screen: { width: number; height: number },
   padding: number,
   maxZoom: number,
+  start: { x: number; y: number } = { x: 0, y: 0 },
 ): { zoom: number; pan: { x: number; y: number } } {
   const fit = Math.min(
     (screen.width - 2 * padding) / Math.max(1, plan.width),
     (screen.height - 2 * padding) / Math.max(1, plan.height),
   );
-  if (fit < READABLE) return { zoom: READABLE, pan: { x: padding, y: padding } };
+  if (fit < READABLE)
+    return { zoom: READABLE, pan: { x: padding - start.x * READABLE, y: padding - start.y * READABLE } };
   const zoom = Math.min(maxZoom, fit);
   return { zoom, pan: { x: (screen.width - plan.width * zoom) / 2, y: (screen.height - plan.height * zoom) / 2 } };
+}
+
+/** The top-left of the first of `nodes` in reading order: the highest, and of those, the leftmost. */
+export function firstOf(nodes: Iterable<{ x: number; y: number }>): { x: number; y: number } | undefined {
+  let first: { x: number; y: number } | undefined;
+  for (const node of nodes)
+    if (first === undefined || node.y < first.y || (node.y === first.y && node.x < first.x))
+      first = { x: node.x, y: node.y };
+  return first;
+}
+
+/** Of `nodes` on screen, the one to bring into `open`: none if any shows there already, else the nearest its centre. */
+export function nearest(nodes: Box[], open: Box): Box | null {
+  const shows = (b: Box) => b.x2 > open.x1 && b.x1 < open.x2 && b.y2 > open.y1 && b.y1 < open.y2;
+  if (nodes.length === 0 || nodes.some(shows)) return null;
+  const cx = (open.x1 + open.x2) / 2;
+  const cy = (open.y1 + open.y2) / 2;
+  const away = (b: Box) => Math.hypot((b.x1 + b.x2) / 2 - cx, (b.y1 + b.y2) / 2 - cy);
+  return nodes.reduce((best, b) => (away(b) < away(best) ? b : best));
 }

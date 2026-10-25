@@ -12,7 +12,7 @@ import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstView, reveal, uncovered } from "./reveal";
+import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
 
 /** How tall a box's title strip is, where a tap collapses or expands it. */
@@ -244,8 +244,12 @@ export default function PlanMap({
     held.current = apply(core, held.current, elementsOf(drawn, colour));
     zoomOutTo(core, element, placed);
     if (first) {
-      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan.
-      const view = firstView(placed, { width: element.clientWidth, height: element.clientHeight }, 16, MAX_ZOOM);
+      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: its first item.
+      const start = firstOf(
+        drawn.nodes.flatMap((node) => (node.kind === "box" ? [] : (placed.nodes.get(node.id) ?? []))),
+      );
+      const screen = { width: element.clientWidth, height: element.clientHeight };
+      const view = firstView(placed, screen, 16, MAX_ZOOM, start);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
       // Pan so the toggled box's corner is where it was before the layout changed.
@@ -278,6 +282,23 @@ export default function PlanMap({
     );
   }, [drawn, placed, colour]);
 
+  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens.
+  const sought = useRef<string | null>(null);
+  useEffect(() => {
+    const core = cy.current;
+    const element = host.current;
+    if (thread === null) sought.current = null;
+    if (thread === null || sought.current === thread || core === null || element === null || drawn === null) return;
+    sought.current = thread;
+    const lit = drawn.nodes.flatMap((node) => {
+      const drawnNode = core.getElementById(node.id);
+      return node.lit && drawnNode.nonempty() ? [drawnNode.renderedBoundingBox({ includeLabels: false })] : [];
+    });
+    const open = openPart(element);
+    const target = nearest(lit, open);
+    if (target !== null) core.panBy(reveal(target, open));
+  }, [thread, drawn]);
+
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick });
   handlers.current = { onSelect, onPick };
@@ -309,9 +330,32 @@ export default function PlanMap({
       }
       onSelect(id);
     };
+    // The renderer pans only from the background; a drag from an item or a box pans too, since nothing moves items. A
+    // second finger makes it a pinch, which the renderer zooms.
+    let from: { x: number; y: number } | null = null;
+    const press = (event: cytoscape.EventObject) => {
+      from = { x: event.renderedPosition.x, y: event.renderedPosition.y };
+    };
+    const drag = (event: cytoscape.EventObject) => {
+      const touches = (event.originalEvent as Partial<TouchEvent> | undefined)?.touches;
+      if (touches !== undefined && touches.length > 1) from = null;
+      if (from === null) return;
+      const at = event.renderedPosition;
+      core.panBy({ x: at.x - from.x, y: at.y - from.y });
+      from = { x: at.x, y: at.y };
+    };
+    const release = () => {
+      from = null;
+    };
     core.on("tap", tap);
+    core.on("tapstart", "node", press);
+    core.on("tapdrag", drag);
+    core.on("tapend", release);
     return () => {
       core.off("tap", tap);
+      core.off("tapstart", "node", press);
+      core.off("tapdrag", drag);
+      core.off("tapend", release);
     };
   }, []);
 
@@ -331,11 +375,16 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
 function revealIn(core: Core, element: HTMLElement, id: string) {
   const node = core.getElementById(id);
   if (node.empty()) return;
+  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element)));
+}
+
+/** The part of the Map no sheet or pane covers, in its own pixels. */
+function openPart(element: HTMLElement) {
   const map = element.getBoundingClientRect();
   const sheet = element.parentElement?.querySelector<HTMLElement>(".inspector, .sheet")?.getBoundingClientRect();
   const cover =
     sheet === undefined
       ? null
       : { x1: sheet.left - map.left, y1: sheet.top - map.top, x2: sheet.right - map.left, y2: sheet.bottom - map.top };
-  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), uncovered(map.width, map.height, cover)));
+  return uncovered(map.width, map.height, cover);
 }
