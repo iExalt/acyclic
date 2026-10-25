@@ -148,6 +148,10 @@ def refresh(page):
     from_menu(page, lambda: page.get_by_role("button", name="Refresh").click())
 
 
+# The Map's helpers reach the renderer through `evaluate`, which sends back whatever its function returns: return plain
+# values only, since the renderer's own objects take seconds to serialise.
+
+
 def tap_title(page, view, id):
     """Taps a box's title strip where it is drawn on the canvas."""
     corner = page.get_by_test_id("map").evaluate(
