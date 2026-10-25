@@ -586,6 +586,8 @@ def level_keys_journey(page, name, failures):
         levels.focus()
         for key in ["Space", "ArrowUp", "Enter"]:
             page.keyboard.press(key)
+            # The list opens in its own time, as it does under a person's fingers.
+            page.wait_for_timeout(100)
         picked = order[order.index(step) - 1]
         try:
             settled_control(page, "[data-testid=global-level]", "value", picked)
