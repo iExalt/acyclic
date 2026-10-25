@@ -37,11 +37,12 @@ describe("the plan's reads", () => {
 
   it("keeps a saved edit's fields over an older read, under the write still out", () => {
     const beds = item("beds", null, [], { notes: "old" });
-    const draft = { title: "Beds", state: "backlog", thread: "", notes: "new", gate: "", size: "" };
-    const saved = answered(start(NO_READS), { kind: "edit", id: "beds", draft });
+    const base = { title: "Beds", state: "backlog", thread: "", notes: "old", gate: "", size: "" };
+    const draft = { ...base, notes: "new" };
+    const saved = answered(start(NO_READS), { kind: "edit", id: "beds", edited: { base, draft } });
     const older = shown(saved, 1, [beds]);
     expect(drawn(older.items, older.unread, null)[0]?.notes).toBe("new");
-    const out = { kind: "edit" as const, id: "beds", draft: { ...draft, notes: "newer" } };
+    const out = { kind: "edit" as const, id: "beds", edited: { base: draft, draft: { ...draft, notes: "newer" } } };
     expect(drawn(older.items, older.unread, out)[0]?.notes).toBe("newer");
   });
 });

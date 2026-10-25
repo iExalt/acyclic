@@ -79,6 +79,16 @@ export class CommandError extends Error {
   }
 }
 
+/**
+ * A failure as the app tells it: a refusal by its code, and anything else as `network`. A request that never reached
+ * the server says so in each browser's own words ("Failed to fetch", "Load failed"…), so it's told in the app's.
+ */
+export function failure(err: unknown): { code: string; message: string } {
+  if (err instanceof CommandError) return { code: err.code, message: err.message };
+  if (err instanceof TypeError) return { code: "network", message: "Can't reach the server" };
+  return { code: "network", message: err instanceof Error ? err.message : String(err) };
+}
+
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
 /** A CLI command as the API takes it: a bare name for one without arguments, such as `"list"`, else `{name: args}`. */

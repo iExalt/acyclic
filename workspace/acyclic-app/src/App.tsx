@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
-import { type Command, CommandError, command, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
+import { type Command, command, failure, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { Choice } from "./Choice";
 import {
   addCommand,
+  type Edited,
   type LinkKind,
   landed,
   type Mode,
@@ -17,7 +18,7 @@ import {
   unanswered,
   unlinkCommand,
 } from "./edits";
-import { globalLevelCommand, type ItemDraft, LEVELS, type Level, levelLabel } from "./forms";
+import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { linesOf } from "./lines";
 import { Menu } from "./Menu";
@@ -64,7 +65,7 @@ interface Adding {
 /** An item's editor reopened, with what the user wrote, after their edit failed; `n` remounts the inspector. */
 interface Reopened {
   id: string;
-  draft: ItemDraft;
+  edited: Edited;
   n: number;
 }
 
@@ -109,7 +110,12 @@ export function App() {
         // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
         if (!sending.current) setPending(null);
       },
-      (err: unknown) => setLoad({ state: "failed", message: err instanceof Error ? err.message : String(err) }),
+      (err: unknown) => {
+        const { message } = failure(err);
+        // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another.
+        if (reads.current.shown === 0) setLoad({ state: "failed", message });
+        else setNotice({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null });
+      },
     );
   }, [fetchAll]);
   useEffect(() => {
@@ -190,11 +196,11 @@ export function App() {
             setPending(null);
           }
           setAdding(null);
-          sent = { write: "saved", proposals, reload: { failed: err instanceof Error ? err.message : String(err) } };
+          sent = { write: "saved", proposals, reload: { failed: failure(err).message } };
         }
       } catch (err) {
-        const code = err instanceof CommandError ? err.code : "network";
-        sent = { write: "failed", code, message: err instanceof Error ? err.message : String(err) };
+        const { code, message } = failure(err);
+        sent = { write: "failed", code, message };
         if (drawn !== null) {
           // No answer may still mean saved: the plan says, and the form opens again only if it isn't. What was drawn
           // stays until then, so the item stays selected if it was saved.
@@ -211,7 +217,7 @@ export function App() {
           if (!held && drawn.kind === "add")
             setAdding({ parent: drawn.item.parent, idRefused: told(sent).fixId, draft: drawn.item });
           if (!held && drawn.kind === "edit")
-            setReopened((was) => ({ id: drawn.id, draft: drawn.draft, n: (was?.n ?? 0) + 1 }));
+            setReopened((was) => ({ id: drawn.id, edited: drawn.edited, n: (was?.n ?? 0) + 1 }));
         }
       }
       const { text, offer, fixId } = told(sent);
@@ -427,7 +433,7 @@ export function App() {
           <Inspector
             key={`${chosen.id}:${reopened?.id === chosen.id ? reopened.n : 0}`}
             item={chosen}
-            reopened={reopened?.id === chosen.id ? reopened.draft : null}
+            reopened={reopened?.id === chosen.id ? reopened.edited : null}
             titleOf={titleOf}
             onSelect={(id) => select(id, selected)}
             onUnlink={unlink}
@@ -436,8 +442,8 @@ export function App() {
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
-            onSave={(edit, draft) =>
-              send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, draft })
+            onSave={(edit, edited) =>
+              send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
             lines={lines}

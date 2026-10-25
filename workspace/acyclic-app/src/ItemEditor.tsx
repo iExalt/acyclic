@@ -3,27 +3,30 @@
 
 import { type FormEvent, useState } from "react";
 import type { Command, Item, Thread } from "./api";
+import type { Edited } from "./edits";
 import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
 
 export interface ItemEditorProps {
   item: Item;
   threads: Thread[];
-  /** What the user wrote before, when a failed save opens the editor again. */
-  initial: ItemDraft | null;
+  /** What the user wrote before, and over what, when a failed save opens the editor again. */
+  initial: Edited | null;
   busy: boolean;
-  onSave: (edit: Command, draft: ItemDraft) => void;
+  onSave: (edit: Command, edited: Edited) => void;
   onCancel: () => void;
 }
 
 export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: ItemEditorProps) {
-  const [draft, setDraft] = useState<ItemDraft>(() => initial ?? draftOf(item));
+  // The fields as it opened on them, so a save sends only what the user changed, not what changed elsewhere meanwhile.
+  const [base] = useState<ItemDraft>(() => initial?.base ?? draftOf(item));
+  const [draft, setDraft] = useState<ItemDraft>(() => initial?.draft ?? base);
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
-  const edit = itemEdit(item, draft);
+  const edit = itemEdit(item.id, base, draft);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (edit === null) onCancel();
-    else onSave(edit, draft);
+    else onSave(edit, { base, draft });
   };
   return (
     <form className="fields" data-testid="item-form" onSubmit={submit}>

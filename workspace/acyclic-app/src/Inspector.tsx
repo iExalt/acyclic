@@ -4,8 +4,8 @@
 import { useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import type { LinkKind } from "./edits";
-import { type ItemDraft, reopenCommand, resolveCommand, unsettledWhy } from "./forms";
+import type { Edited, LinkKind } from "./edits";
+import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import type { Line } from "./lines";
 
@@ -21,9 +21,9 @@ export interface InspectorProps {
   /** Sends an edit of this item, such as a conflict settled. */
   onCommand: (command: Command) => void;
   /** Saves its fields, with the draft to draw at once. */
-  onSave: (command: Command, draft: ItemDraft) => void;
+  onSave: (command: Command, edited: Edited) => void;
   /** The editor's draft, open again after a save failed, or null. */
-  reopened: ItemDraft | null;
+  reopened: Edited | null;
   threads: Thread[];
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
@@ -107,9 +107,9 @@ export function Inspector({
           threads={threads}
           initial={reopened}
           busy={busy}
-          onSave={(edit, draft) => {
+          onSave={(edit, edited) => {
             setEditing(false);
-            onSave(edit, draft);
+            onSave(edit, edited);
           }}
           onCancel={() => setEditing(false)}
         />

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import {
   approveCommand,
+  changes,
   draftOf,
   dropCommand,
   globalLevelCommand,
@@ -25,11 +26,11 @@ const example = (name: string) => {
 describe("form commands", () => {
   it("build exactly the commands the server's tests run", () => {
     const c = { ...item("c"), title: "C" };
-    expect(itemEdit(c, { title: "C2", state: "in-progress", thread: "t", notes: "n", gate: "g", size: "m" })).toEqual(
-      example("edit an item's fields"),
-    );
+    expect(
+      itemEdit("c", draftOf(c), { title: "C2", state: "in-progress", thread: "t", notes: "n", gate: "g", size: "m" }),
+    ).toEqual(example("edit an item's fields"));
     const filled = { ...c, thread: "t", notes: "n", gate: "g", size: "m" };
-    expect(itemEdit(filled, { ...draftOf(filled), thread: "", notes: "", gate: "", size: "" })).toEqual(
+    expect(itemEdit("c", draftOf(filled), { ...draftOf(filled), thread: "", notes: "", gate: "", size: "" })).toEqual(
       example("clear an item's fields"),
     );
     expect(resolveCommand("item", "d", "parent", null)).toEqual(example("settle an item's parent as a clear"));
@@ -51,10 +52,19 @@ describe("form commands", () => {
 describe("itemEdit", () => {
   it("sends nothing when nothing changed, and leaves a conflicted field the user didn't touch", () => {
     const a = { ...item("a"), conflicts: { title: ["A", "B"] } };
-    expect(itemEdit(a, draftOf(a))).toBeNull();
-    expect(itemEdit(a, { ...draftOf(a), gate: "g" })).toEqual({ item: { edit: { item: "a", gate: "g" } } });
+    expect(itemEdit("a", draftOf(a), draftOf(a))).toBeNull();
+    expect(itemEdit("a", draftOf(a), { ...draftOf(a), gate: "g" })).toEqual({
+      item: { edit: { item: "a", gate: "g" } },
+    });
     // A blank title or a state only `done` sets is never sent.
-    expect(itemEdit(a, { ...draftOf(a), title: " ", state: "done" })).toBeNull();
+    expect(itemEdit("a", draftOf(a), { ...draftOf(a), title: " ", state: "done" })).toBeNull();
+  });
+
+  it("sends only what the user changed since the editor opened, not what changed elsewhere meanwhile", () => {
+    const opened = draftOf({ ...item("a"), notes: "old", size: "s" });
+    // Notes and size change elsewhere; the user changes only the title, and the editor still holds the old notes.
+    expect(itemEdit("a", opened, { ...opened, title: "New" })).toEqual({ item: { edit: { item: "a", title: "New" } } });
+    expect(changes(opened, { ...opened, title: " New ", notes: "" })).toEqual({ title: "New", notes: "" });
   });
 });
 

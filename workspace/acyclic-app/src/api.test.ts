@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, globalLevel, items, proposals, settle, thread, threads } from "./api";
+import { CommandError, command, failure, globalLevel, items, proposals, settle, thread, threads } from "./api";
 import { examples } from "./commands.examples.json";
 
 /** The command the server's tests run under this name. */
@@ -138,5 +138,13 @@ describe("settle", () => {
 
   it("falls back to the id when every title in a conflict is a clear", () => {
     expect(settle({ ...raw("a"), title: { conflict: [null, null] } }).title).toBe("a");
+  });
+});
+
+describe("failure", () => {
+  it("tells a refusal by its code, and a request that never reached the server in the app's words", () => {
+    expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "try again" });
+    expect(failure(new TypeError("Load failed"))).toEqual({ code: "network", message: "Can't reach the server" });
+    expect(failure(new SyntaxError("bad JSON"))).toEqual({ code: "network", message: "bad JSON" });
   });
 });

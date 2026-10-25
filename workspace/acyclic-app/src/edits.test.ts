@@ -174,18 +174,31 @@ describe("a write drawn before the server answers", () => {
 
   it("draws an edit's fields, clearing what the draft empties, and says when the plan holds them", () => {
     const beds = items[1] ?? item("beds");
-    const draft = { ...draftOf(beds), title: " Raised beds ", notes: "", state: "parked" };
-    const edit = { kind: "edit" as const, id: "beds", draft };
+    const base = draftOf(beds);
+    const edit = {
+      kind: "edit" as const,
+      id: "beds",
+      edited: { base, draft: { ...base, title: " Raised beds ", notes: "", state: "parked" } },
+    };
     const drawn = withPending(items, edit);
     expect(drawn[1]).toMatchObject({ title: "Raised beds", notes: null, size: "s", state: "parked" });
     expect(drawn[0]).toBe(items[0]);
     expect(landed(edit, items)).toBe(false);
     expect(landed(edit, drawn)).toBe(true);
     // A done item's state isn't the editor's to change.
-    const done = [item("x", null, [], { state: "done" })];
-    expect(
-      withPending(done, { kind: "edit", id: "x", draft: { ...draftOf(done[0] ?? item("x")), title: "Y" } })[0]?.state,
-    ).toBe("done");
+    const done = item("x", null, [], { state: "done" });
+    const finished = { base: draftOf(done), draft: { ...draftOf(done), title: "Y", state: "parked" } };
+    expect(withPending([done], { kind: "edit", id: "x", edited: finished })[0]?.state).toBe("done");
+  });
+
+  it("draws and checks only the fields the user changed, not ones changed elsewhere while the editor was open", () => {
+    const beds = items[1] ?? item("beds");
+    const base = draftOf(beds);
+    const edit = { kind: "edit" as const, id: "beds", edited: { base, draft: { ...base, title: "Beds 2" } } };
+    // Elsewhere, the notes changed meanwhile; the server holds the title too.
+    const read = [{ ...beds, title: "Beds 2", notes: "from an agent" }];
+    expect(withPending(read, edit)[0]?.notes).toBe("from an agent");
+    expect(landed(edit, read)).toBe(true);
   });
 
   it("knows only a missing or foreign answer leaves the write's outcome unknown", () => {

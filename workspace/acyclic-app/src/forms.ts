@@ -38,21 +38,29 @@ export function draftOf(item: Item): ItemDraft {
 }
 
 /**
- * The edit that takes `item` to `draft`, naming only what changed, or null when nothing did. A conflicted field left
- * as shown isn't written, so saving never settles a conflict the user didn't touch.
+ * What the user changed from `base`, the fields as the editor opened on them, to `draft`: a title only when it isn't
+ * blank, trimmed, and a state only one a command may set. Fields left alone aren't here, so a save never writes back
+ * what changed elsewhere while the editor was open, and never settles a conflict the user didn't touch.
  */
-export function itemEdit(item: Item, draft: ItemDraft): Command | null {
-  const was = draftOf(item);
+export function changes(base: ItemDraft, draft: ItemDraft): Partial<ItemDraft> {
+  const out: Partial<ItemDraft> = {};
+  const title = draft.title.trim();
+  if (title !== "" && title !== base.title) out.title = title;
+  if (draft.state !== base.state && (STATES as readonly string[]).includes(draft.state)) out.state = draft.state;
+  for (const field of ["thread", "notes", "gate", "size"] as const)
+    if (draft[field] !== base[field]) out[field] = draft[field];
+  return out;
+}
+
+/** The edit of item `id` that makes the user's changes from `base` to `draft`, or null when they made none. */
+export function itemEdit(id: string, base: ItemDraft, draft: ItemDraft): Command | null {
+  const changed = changes(base, draft);
   const edit: Record<string, unknown> = {};
-  const changed = (field: keyof ItemDraft) => draft[field] !== was[field];
-  if (draft.title.trim() !== "" && changed("title")) edit.title = draft.title.trim();
-  if (changed("state") && (STATES as readonly string[]).includes(draft.state)) edit.state = draft.state;
-  for (const field of ["thread", "notes", "gate", "size"] as const) {
-    if (!changed(field)) continue;
-    if (draft[field] === "") edit[`no-${field}`] = true;
-    else edit[field] = draft[field];
+  for (const [field, value] of Object.entries(changed)) {
+    if (value === "") edit[`no-${field}`] = true;
+    else edit[field] = value;
   }
-  return Object.keys(edit).length === 0 ? null : { item: { edit: { item: item.id, ...edit } } };
+  return Object.keys(edit).length === 0 ? null : { item: { edit: { item: id, ...edit } } };
 }
 
 /** An entity whose field can be in conflict, as `needs` reports it. */
