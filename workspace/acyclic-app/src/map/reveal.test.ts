@@ -45,6 +45,13 @@ describe("firstView", () => {
       { x: 200, y: 400 },
     ]);
     expect(start).toEqual({ x: 200, y: 400 });
+    // A node a few pixels higher, to the right, is in the same row.
+    expect(
+      firstOf([
+        { x: 500, y: 396 },
+        { x: 200, y: 400 },
+      ]),
+    ).toEqual({ x: 200, y: 400 });
     expect(firstView({ width: 4000, height: 3000 }, phone, 16, 2, start)).toEqual({
       zoom: READABLE,
       pan: { x: 16 - 200 * READABLE, y: 16 - 400 * READABLE },

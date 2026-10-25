@@ -55,16 +55,19 @@ export function firstView(
   return { zoom, pan: { x: (screen.width - plan.width * zoom) / 2, y: (screen.height - plan.height * zoom) / 2 } };
 }
 
-/** The top-left of the first of `nodes` in reading order: the highest, and of those, the leftmost. */
+/** How far apart two tops can be and still read as one row. */
+const ROW = 8;
+
+/** The top-left of the first of `nodes` in reading order: in the highest row, the leftmost. */
 export function firstOf(nodes: Iterable<{ x: number; y: number }>): { x: number; y: number } | undefined {
   let first: { x: number; y: number } | undefined;
   for (const node of nodes)
-    if (first === undefined || node.y < first.y || (node.y === first.y && node.x < first.x))
+    if (first === undefined || node.y < first.y - ROW || (Math.abs(node.y - first.y) <= ROW && node.x < first.x))
       first = { x: node.x, y: node.y };
   return first;
 }
 
-/** Of `nodes` on screen, the one to bring into `open`: none if any shows there already, else the nearest its centre. */
+/** Of `nodes`, as drawn, the one to bring into `open`: none if any shows there already, else the nearest its centre. */
 export function nearest(nodes: Box[], open: Box): Box | null {
   const shows = (b: Box) => b.x2 > open.x1 && b.x1 < open.x2 && b.y2 > open.y1 && b.y1 < open.y2;
   if (nodes.length === 0 || nodes.some(shows)) return null;
