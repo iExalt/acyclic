@@ -25,6 +25,7 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -535,6 +536,81 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+def level_keys_journey(page, name, failures):
+    """Arrow keys on the closed autonomy list move a draft, written once on Enter and dropped on Escape, while a pick
+    from the open list, opened from the keyboard too, writes at once. Where a browser's arrow keys open the list, as on
+    macOS, and its headless list takes no keys, there is nothing to check."""
+    writes = []
+
+    def sent(request):
+        body = request.post_data or ""
+        if request.url.endswith("/api/command") and body.startswith(
+            '{"level":{"level"'
+        ):
+            writes.append(json.loads(body)["level"]["level"])
+
+    page.on("request", sent)
+    try:
+        levels = page.get_by_test_id("global-level")
+        page.get_by_test_id("menu").click()
+        was = levels.input_value()
+        order = levels.evaluate("s => [...s.options].map(o => o.value)")
+        levels.focus()
+        page.keyboard.press("ArrowDown")
+        # A write is wrong on any platform; no change shows a platform whose arrow keys open the list.
+        page.wait_for_timeout(300)
+        if writes:
+            failures.append(f"{name}: an arrow key on the autonomy list wrote {writes}")
+            return
+        if levels.input_value() == was:
+            page.keyboard.press("Escape")
+            print(
+                f"{name}: arrow keys open the autonomy list here, so there is no draft to check"
+            )
+            return
+        page.keyboard.press("ArrowDown")
+        if writes:
+            failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
+        page.keyboard.press("Enter")
+        step = order[min(order.index(was) + 2, len(order) - 1)]
+        settled_control(page, "[data-testid=global-level]", "value", step)
+        if writes != [step]:
+            failures.append(
+                f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
+            )
+        page.get_by_test_id("menu").click()
+        levels.focus()
+        page.keyboard.press("ArrowUp")
+        page.keyboard.press("Escape")
+        page.get_by_test_id("menu").click()
+        if writes != [step] or levels.input_value() != step:
+            failures.append(
+                f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
+            )
+        # Space opens the list; the keys in it reach only the list, and Enter there picks.
+        levels.focus()
+        for key in ["Space", "ArrowUp", "Enter"]:
+            page.keyboard.press(key)
+            # The list opens in its own time, as it does under a person's fingers.
+            page.wait_for_timeout(100)
+        picked = order[order.index(step) - 1]
+        try:
+            settled_control(page, "[data-testid=global-level]", "value", picked)
+        except PlaywrightTimeout:
+            pass
+        if writes != [step, picked]:
+            failures.append(
+                f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
+            )
+        if page.locator("details.menu").evaluate("d => d.open"):
+            page.get_by_test_id("menu").click()
+        print(
+            f"{name}: arrow keys on the autonomy list wrote once, on Enter, and a pick at once"
+        )
+    finally:
+        page.remove_listener("request", sent)
+
+
 def failed_add_journey(page, errors, name, failures):
     """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
     is lost after the server saved it stays drawn, with the form closed."""
@@ -639,8 +715,50 @@ def failed_add_journey(page, errors, name, failures):
         )
     if editor.count():
         editor.get_by_role("button", name="Cancel").click()
-    # The browser logs the answer it lost, as it should.
-    errors[logged:] = [one for one in errors[logged:] if "net::ERR_FAILED" not in one]
+    # A saved add whose read back failed stays drawn through a later add the server refuses.
+    page.route(
+        "**/api/command",
+        lambda route: (
+            route.fulfill(status=500, body="")
+            if route.request.post_data == '"list"'
+            else route.fallback()
+        ),
+    )
+    page.locator("[data-action=add-top]").click()
+    form = page.get_by_test_id("add-form")
+    form.locator("input[name=title]").fill("Saved unread")
+    form.locator("button[type=submit]").click()
+    page.get_by_test_id("notice").get_by_text("Saved, but the refresh failed").wait_for(
+        timeout=10_000
+    )
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    form = add(
+        "Refused after",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=refusal
+        ),
+    )
+    form.locator("input[name=title]").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    page.unroute("**/api/command")
+    if (
+        not page.get_by_test_id("map").evaluate(
+            "m => m.cy.getElementById('saved-unread').nonempty()"
+        )
+        or form.locator("input[name=title]").input_value() != "Refused after"
+    ):
+        failures.append(
+            f"{name}: a saved add went missing when the next add was refused"
+        )
+    if form.count():
+        form.get_by_role("button", name="Cancel").click()
+    # The browser logs the answer it lost, and the read refused, as it should.
+    errors[logged:] = [
+        one
+        for one in errors[logged:]
+        if "net::ERR_FAILED" not in one and "status of 500" not in one
+    ]
     print(
         f"{name}: a refused add or edit gave back what was typed; an add saved without an answer stayed drawn"
     )
@@ -675,7 +793,20 @@ def form_journey(page, view, env, remote, id, name, failures):
         # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
         # must stay in it.
         size = page.viewport_size
+        drawn = page.get_by_test_id("map")
+        widest = drawn.evaluate("m => m.cy.minZoom()")
         page.set_viewport_size({"width": size["width"], "height": 360})
+        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now.
+        try:
+            page.wait_for_function(
+                "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
+                arg=widest,
+                timeout=5_000,
+            )
+        except PlaywrightTimeout:
+            failures.append(
+                f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
+            )
         reachable = form.evaluate(
             "f => { f.querySelector('input[name=title]').focus();"
             " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
@@ -1059,6 +1190,8 @@ def main():
                 installable(context, page, origin, name, failures)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
+                if name == "desktop":
+                    level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.
                     leaf = min(

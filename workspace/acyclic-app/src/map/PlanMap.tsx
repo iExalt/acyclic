@@ -3,12 +3,13 @@
 // an item selects it, lighting up its thread and drawing its links across boxes. While an edit waits for a target, a
 // tap picks one instead. Dragging pans; nothing moves items.
 
-import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
+import cytoscape, { type Core } from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import { type Line, TOKENS } from "../lines";
 import { browserLayouts } from "./client";
+import { apply, type Drawn, elementsOf } from "./draw";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstView, reveal, uncovered } from "./reveal";
@@ -143,6 +144,8 @@ export default function PlanMap({
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
   const shown = useRef<string | null>(null);
+  /** The elements the renderer holds, by id. */
+  const held = useRef<ReadonlyMap<string, Drawn>>(new Map());
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
   const drawnModel = useRef<Model | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
@@ -204,7 +207,24 @@ export default function PlanMap({
     return () => {
       core.destroy();
       cy.current = null;
+      held.current = new Map();
     };
+  }, []);
+
+  // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows.
+  const placedNow = useRef<Placed | null>(null);
+  placedNow.current = placed;
+  useEffect(() => {
+    const element = host.current;
+    if (element === null) return;
+    const observer = new ResizeObserver(() => {
+      const core = cy.current;
+      if (core === null || placedNow.current === null) return;
+      core.resize();
+      zoomOutTo(core, element, placedNow.current);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   const drawn = useMemo(() => {
@@ -219,39 +239,10 @@ export default function PlanMap({
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
-    const layers = new Map(drawn.nodes.map((node) => [node.id, node.layer]));
-    const elements: ElementDefinition[] = [
-      ...drawn.nodes.map((node) => ({
-        group: "nodes" as const,
-        data: { ...node, textWidth: Math.max(40, node.width - 16), line: colour ?? TOKENS.ink },
-        position: { x: node.x, y: node.y },
-        classes: [node.kind, node.lit ? "lit" : "", node.dim ? "dim" : "", node.selected ? "selected" : ""].join(" "),
-      })),
-      ...drawn.edges.map((edge) => ({
-        group: "edges" as const,
-        data: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          line: colour ?? TOKENS.ink,
-          // A link across boxes is drawn over everything: it is drawn only for the selected item or the lit thread,
-          // to be seen.
-          z: edge.crossing ? 1000 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
-        },
-        classes: [edge.crossing ? "crossing" : "", edge.lit ? "lit" : "", edge.dim ? "dim" : ""].join(" "),
-      })),
-    ];
     const first = core.elements().length === 0;
-    core.batch(() => {
-      core.elements().remove();
-      core.add(elements);
-    });
-    // The whole plan must fit the screen at the furthest zoom out, and no further.
-    const fit = Math.min(
-      element.clientWidth / Math.max(1, placed.width),
-      element.clientHeight / Math.max(1, placed.height),
-    );
-    core.minZoom(Math.min(1, fit * 0.9));
+    // Only what changed: on a large plan, a write changes a few elements of thousands.
+    held.current = apply(core, held.current, elementsOf(drawn, colour));
+    zoomOutTo(core, element, placed);
     if (first) {
       // At a zoom its titles can be read at, which on a phone shows only the start of a large plan.
       const view = firstView(placed, { width: element.clientWidth, height: element.clientHeight }, 16, MAX_ZOOM);
@@ -325,6 +316,15 @@ export default function PlanMap({
   }, []);
 
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+}
+
+/** Lets the Map zoom out until the whole plan fits it, and no further; a zoom already further out stays until moved. */
+function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
+  const fit = Math.min(
+    element.clientWidth / Math.max(1, placed.width),
+    element.clientHeight / Math.max(1, placed.height),
+  );
+  core.minZoom(Math.min(1, fit * 0.9));
 }
 
 /** Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it. */
