@@ -89,7 +89,8 @@ run = '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p ac
 [tasks."check:browser"]
 description = "Draws graph pages in headless Chromium and WebKit with the network blocked, and drives the app; downloads Playwright's browsers (budget: 3 minutes)"
 depends = ["vendor:graph", "build:app"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1" }
+# Unbuffered, so each journey's line reaches CI's log as it finishes, and the log's timestamps time it.
+env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
 run = [
   "cargo build --quiet --locked -p acyclic -p acyclic-fixtures",
   # CI sets PLAYWRIGHT_DEPS=--with-deps for the browsers' system libraries.
