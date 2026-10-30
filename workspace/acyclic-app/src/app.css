@@ -436,6 +436,144 @@ button.phase-title {
   text-overflow: ellipsis;
 }
 
+/* The switch between the Map and the Threads view: in the strip on a phone, in the bar when wide, where it covers
+   nothing of the Map. */
+.view-switch {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.view-switch button {
+  border-radius: 0;
+}
+.view-switch button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.view-switch button:last-child {
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+.view-switch button[aria-pressed="true"] {
+  background: var(--tile);
+  border-color: var(--ink);
+}
+
+/* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
+   on a phone and stand in columns when wide, with arrows between the cards drawn under them. */
+.waves {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px 12px 24px;
+  background: var(--ground);
+}
+.waves .columns {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.wave h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.wave h2 small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.wave ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 12px 10px;
+  border-color: var(--rule);
+  border-left: 4px solid var(--line, var(--rule));
+  background: var(--tile);
+  font-weight: 500;
+  text-align: left;
+}
+.card[aria-pressed="true"] {
+  border-color: var(--ink);
+  border-left-color: var(--line, var(--ink));
+}
+.card .head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.card .phases,
+.card .counts,
+.card .after,
+.card .looped {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.card .phases {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card .after,
+.card .looped {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.card .looped {
+  color: var(--signal);
+}
+.arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--edge);
+}
+.arrows.over {
+  z-index: 2;
+}
+.arrows path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.arrows path.head {
+  fill: currentColor;
+  stroke: none;
+}
+/* Threads that wait on each other: a cycle to break, in Signal, dashed like a link across boxes. */
+.arrows .looped {
+  color: var(--signal);
+}
+.arrows .looped path:not(.head) {
+  stroke-dasharray: 5 4;
+}
+.arrows .lit path:not(.head) {
+  stroke-width: 2.5;
+}
+.arrows .dim {
+  opacity: 0.25;
+}
+
 .stage {
   position: relative;
   min-height: 0;
@@ -811,5 +949,19 @@ button.row {
   }
   .inspector::before {
     display: none;
+  }
+  .waves .columns {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 64px;
+    width: max-content;
+  }
+  .wave {
+    flex: none;
+    width: 220px;
+  }
+  .wave.anytime {
+    padding-left: 32px;
+    border-left: 1px dashed var(--edge);
   }
 }

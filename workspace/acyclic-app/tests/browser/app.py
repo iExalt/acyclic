@@ -630,6 +630,62 @@ def outline_journey(page, view, plan, name, failures):
     print(f"{name}: selecting {picked} marked its phase and its thread's row")
 
 
+def threads_journey(page, view, env, name, failures):
+    """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
+    and none on a phone; picking a card opens its thread's panel, and the Map comes back as it was."""
+    listed = json.loads(run(env, "thread", "list"))["data"]
+    want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
+    want |= {id: "anytime" for id in listed["anytime"]}
+    page.locator("[data-view=threads]").click()
+    page.get_by_test_id("threads-view").wait_for()
+    got = page.locator(".wave [data-card]").evaluate_all(
+        "cards => cards.map(card => [card.dataset.card, card.closest('.wave').dataset.wave])"
+    )
+    if dict(got) != want or len(got) != len(want):
+        failures.append(f"{name}: the Threads view's waves {got} aren't the tracker's {want}")
+    waits = sum(len(row["waits_for"]) for row in listed["threads"] if row["id"] in want)
+    arrows = 0 if view.get("has_touch") else waits
+    try:
+        page.wait_for_function(
+            f"() => document.querySelectorAll('.arrows g').length === {arrows}", timeout=5_000
+        )
+    except PlaywrightTimeout:
+        drawn = page.locator(".arrows g").count()
+        failures.append(f"{name}: the Threads view drew {drawn} arrows, expected {arrows}")
+    # A thread with work to start, whose panel offers it; picked already, a click would unpick it, so it is unpicked.
+    ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
+    picked = ready[0] if ready else next(iter(want))
+    card = page.locator(f"[data-card='{picked}']")
+    if card.get_attribute("aria-pressed") == "true":
+        card.click()
+    card.click()
+    try:
+        page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: picking {picked}'s card opened no panel")
+    if card.get_attribute("aria-pressed") != "true":
+        failures.append(f"{name}: picking {picked}'s card didn't mark it")
+    # A task chosen from a thread's panel is shown on the Map: the view goes back to it, the task selected.
+    row = page.locator("[data-testid=thread-panel] [data-select]").first
+    if row.count() == 0:
+        failures.append(f"{name}: {picked}'s panel offers no task to start, so going back to the Map went unchecked")
+        page.keyboard.press("Escape")
+        page.locator("[data-view=map]").click()
+    else:
+        task = row.get_attribute("data-select")
+        row.click()
+        try:
+            page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+            page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: choosing {task} from {picked}'s panel left the Threads view over the Map")
+        if page.locator("[data-view=map]").get_attribute("aria-pressed") != "true":
+            failures.append(f"{name}: choosing {task} didn't switch to the Map")
+        page.keyboard.press("Escape")
+    page.get_by_test_id("threads-view").wait_for(state="detached")
+    print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
+
+
 def item(env, id):
     """The item as the tracker shows it, or None while there is no such item."""
     out = subprocess.run(
@@ -1612,6 +1668,9 @@ def main():
                     thread_journey(page, env, plan, "thread-0", name, failures)
                     needs_journey(page, env, plan, "thread-0", name, failures)
                     plan = Plan(env)
+                # Last, since a task chosen from a thread opens the boxes it sits in, which the journeys before it
+                # count on being closed.
+                threads_journey(page, view, env, name, failures)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
                     failures.append(
