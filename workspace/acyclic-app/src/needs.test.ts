@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
-import { needView, threadLabel } from "./needs";
+import { countText, groupOf, needView, threadLabel } from "./needs";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
 const item = (id: string) => ({ id, title: id.toUpperCase() });
@@ -174,5 +174,21 @@ describe("needView", () => {
       threads: [{ id: "thread-mac-32" }, { id: "thread-pi-32" }],
       note: "acyclic thread renumber thread-pi-32 --as-user",
     });
+  });
+});
+
+describe("the Review list's groups and count", () => {
+  it("puts every kind in one group, a kind the app doesn't know among what to unblock", () => {
+    expect(["proposal", "unapproved", "awaiting-approval", "new-blocker"].map(groupOf)).toEqual(
+      Array(4).fill("approve"),
+    );
+    expect(groupOf("question")).toBe("answer");
+    expect(
+      ["conflict", "resource-clash", "number-clash", "dangling", "unverified", "link-cycle", "never-seen"].map(groupOf),
+    ).toEqual(Array(7).fill("unblock"));
+  });
+
+  it("counts exactly to 99, then says 99+", () => {
+    expect([0, 46, 99, 100, 120].map(countText)).toEqual(["0", "46", "99", "99+", "99+"]);
   });
 });

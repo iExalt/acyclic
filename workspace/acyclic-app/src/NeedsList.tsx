@@ -1,12 +1,12 @@
 // The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
-import { type Need, needView, threadLabel } from "./needs";
+import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
 import { Prose } from "./Prose";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
@@ -24,19 +24,44 @@ export interface NeedsListProps {
 }
 
 export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, onPickThread, onClose }: NeedsListProps) {
-  const views = needs.map((need) => needView(need, lines));
+  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines) }));
+  // Filters for the groups present, only when there are two or more to choose between.
+  const groups = GROUPS.map((one) => ({
+    ...one,
+    count: all.filter((entry) => entry.group === one.group).length,
+  })).filter((one) => one.count > 0);
+  const [filter, setFilter] = useState<NeedGroup | null>(null);
+  // A filter whose entries have all been settled shows everything again.
+  const shown = groups.some((one) => one.group === filter) ? filter : null;
+  const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
   return (
-    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Needs you">
+    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Review">
       <header>
-        <h2>Needs you</h2>
+        <h2>Review</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
       </header>
       <Notify />
-      {views.length === 0 ? <p className="facts">Nothing needs you.</p> : null}
+      {groups.length < 2 ? null : (
+        <fieldset className="filters" aria-label="Show">
+          {[{ group: null, label: "All", count: all.length }, ...groups].map((one) => (
+            <button
+              type="button"
+              key={one.label}
+              className="chip"
+              aria-pressed={shown === one.group}
+              data-filter={one.group ?? "all"}
+              onClick={() => setFilter(one.group)}
+            >
+              {one.label} <span className="count">{one.count}</span>
+            </button>
+          ))}
+        </fieldset>
+      )}
+      {views.length === 0 ? <p className="facts">Nothing to review.</p> : null}
       <ul className="needs">
         {views.map((view) => (
           <li key={view.key} data-need={view.key}>

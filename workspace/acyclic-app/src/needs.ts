@@ -54,6 +54,29 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).f
 const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
+/** What the user does about an entry, by which the Review list filters: say yes or no, answer, or unblock work. */
+export type NeedGroup = "approve" | "answer" | "unblock";
+
+export const GROUPS: { group: NeedGroup; label: string }[] = [
+  { group: "approve", label: "Approve" },
+  { group: "answer", label: "Answer" },
+  { group: "unblock", label: "Unblock" },
+];
+
+/**
+ * An entry's group: scope waiting for a yes or no, a blocker approving the thread again acknowledges, and an agent's
+ * question; every other kind, including one the app doesn't know yet, is something in the way to settle.
+ */
+export function groupOf(kind: string): NeedGroup {
+  if (["proposal", "unapproved", "awaiting-approval", "new-blocker"].includes(kind)) return "approve";
+  return kind === "question" ? "answer" : "unblock";
+}
+
+/** A count as the Review button shows it: exact to 99, then 99+. */
+export function countText(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 /** A thread's row under an entry: its line, or, for a thread the list lacks, the title the entry gives. */
 export function threadLabel(thread: { id: string; title: string }, lines: ReadonlyMap<string, Line>) {
   const line = lines.get(thread.id);
