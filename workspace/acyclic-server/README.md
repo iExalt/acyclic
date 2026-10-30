@@ -21,8 +21,9 @@ lives in `~/.config/acyclic/up/session`, readable by the user alone, and lasts a
 
 A browser pairs instead: `up` prints a link when it starts, and `acyclic up --link` (with the server's `--port`, if
 it has one) prints a fresh one. A link is good once, for five minutes, and gives the browser a cookie with a
-credential derived from the session, so rotating the session unpairs it too. The cookie reaches every port on
-localhost, so a write it authenticates must come from the listener's own origin, and no page may frame the app.
+credential derived from the session, so rotating the session unpairs it too. Each server names its cookie for its
+port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a write it
+authenticates must come from the listener's own origin, and no page may frame the app.
 
 `up --tailscale --login <login> --host <name>.ts.net` also listens on a Unix socket only the user can open
 (`--socket`, `~/.config/acyclic/up/tailscale.sock` by default), checked as `serve` checks requests. Point Tailscale
