@@ -19,6 +19,25 @@ interface RawItem {
   size: Raw<string>;
   archived: boolean;
   links: { waits_for: string[]; waited_on_by: string[]; relates_to: string[]; related_from: string[] };
+  /** A parent's state as the work under it makes it, and how many of its leaves are done; a leaf has none. */
+  progress?: Progress;
+}
+
+export interface Progress {
+  state: string;
+  counts: { done: number; leaves: number };
+}
+
+/** How an item's state reads: a parent's from the work under it, with how much of it is done. */
+export function stateText(item: Pick<Item, "state" | "archived" | "progress">): string {
+  const progress = item.progress;
+  const state =
+    progress === undefined
+      ? item.state
+      : progress.counts.leaves === 0
+        ? `${progress.state} (all archived)`
+        : `${progress.state} (${progress.counts.done}/${progress.counts.leaves})`;
+  return item.archived ? `${state}, archived` : state;
 }
 
 /** The fields whose conflicts the app settles for display. */
