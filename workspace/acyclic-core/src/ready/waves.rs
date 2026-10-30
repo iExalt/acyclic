@@ -34,17 +34,24 @@ impl Readiness<'_> {
         let model = self.model;
         let mut left: BTreeSet<&str> = BTreeSet::new();
         let mut edges: BTreeSet<(&str, &str)> = BTreeSet::new();
+        // Many leaves wait on one dependency, such as all those under a parent with a link: each is walked once.
+        let mut under: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
         for (id, item) in &model.items {
             let Some(thread) = self.recorded_thread(id) else { continue };
             if !self.has_work_left(id)? {
                 continue;
             }
             left.insert(thread);
-            if item.is_done() {
+            // Done work waits on nothing, and parked work waits for the user, not for other threads.
+            if item.is_done() || self.stage(id)? == Some(Stage::Parked) {
                 continue;
             }
-            for dependency in self.waiting(id).keys() {
-                for blocker in self.unfinished_under(dependency)? {
+            for dependency in self.waiting(id).into_keys() {
+                if !under.contains_key(&dependency) {
+                    let found = self.unfinished_under(&dependency)?;
+                    under.insert(dependency.clone(), found);
+                }
+                for &blocker in &under[&dependency] {
                     if blocker != thread {
                         edges.insert((blocker, thread));
                     }

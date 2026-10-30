@@ -744,6 +744,21 @@ fn work_in_review_holds_its_waiters_back_and_a_cycle_shares_a_wave() {
 }
 
 #[test]
+fn parked_work_holds_its_waiters_back_but_waits_on_nothing() {
+    let mut r = replica("a");
+    waits(&mut r, ("b", "t2"), ("a", "t1"));
+    set_state(&mut r, "b", ItemState::Parked, by(3)).unwrap();
+    let found = waves(&r, &Fake::default());
+    assert_eq!(found.anytime, ["t1", "t2"], "a parked leaf orders nothing");
+    waits(&mut r, ("c", "t3"), ("b", "t2"));
+    assert_eq!(
+        waves(&r, &Fake::default()).waits_for["t3"],
+        ["t2"],
+        "but holds back what waits on it"
+    );
+}
+
+#[test]
 fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back() {
     let mut r = replica("a");
     items(&mut r, &["box", "in1", "in2"]);
