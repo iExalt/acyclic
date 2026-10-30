@@ -562,7 +562,7 @@ impl<'a> Readiness<'a> {
     /// other by what is under it in turn. The first wait wins, one still open before one in review. A leaf waiting on
     /// its own ancestor is among what it waits on, so only closing the ancestor by hand meets it.
     fn leaves_wait(&self, dependent: &str, parent: &str) -> Option<Wait> {
-        // A parent cycle, which only a join makes, has no bottom to reach.
+        // A parent in a cycle meets nothing until the cycle is fixed: a cycle of parents has no bottom to reach.
         if self.cyclic.contains(parent) {
             return Some(Wait::Open);
         }
