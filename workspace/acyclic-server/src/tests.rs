@@ -473,7 +473,7 @@ fn a_link_pairs_a_browser_once_while_it_is_fresh() {
     let cookie = headers[SET_COOKIE].to_str().unwrap();
     assert!(cookie.contains("; HttpOnly; SameSite=Strict; Path=/;"), "{cookie}");
     // The cookie holds a credential of its own, never the session.
-    assert!(cookie.starts_with(&format!("acyclic-up={}", token.browser())), "{cookie}");
+    assert!(cookie.starts_with(&format!("acyclic-up-7478={}", token.browser())), "{cookie}");
     assert!(!cookie.contains(TOKEN));
     // A link is spent once used.
     assert_eq!(exchange(&router, &path, &[host]).0, StatusCode::FORBIDDEN);
@@ -490,7 +490,8 @@ fn a_link_pairs_a_browser_once_while_it_is_fresh() {
 #[test]
 fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     let router = up_router(0);
-    let browser = format!("acyclic-up={}", Token::parse(TOKEN).unwrap().browser());
+    let credential = Token::parse(TOKEN).unwrap().browser();
+    let browser = format!("acyclic-up-7478={credential}");
     let host = ("host", "localhost:7478");
     let json = ("content-type", "application/json");
     let paired = ("cookie", browser.as_str());
@@ -501,8 +502,13 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     // The tracker clone is missing, so a request let in fails as the CLI would.
     let ran = |(status, _): (StatusCode, String)| status.is_server_error();
     assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478")])));
-    let injected = format!("acyclic-up=forged; {browser}");
-    assert!(ran(post(&[host, json, ("cookie", &injected), ("origin", "http://localhost:7478")])));
+    // Each server on the host has a cookie of its own, and a browser paired before the cookies carried their port
+    // keeps the shared one.
+    let others = format!("acyclic-up=forged; acyclic-up-7479=forged; {browser}");
+    let shared = format!("acyclic-up={credential}");
+    for cookie in [&others, &shared] {
+        assert!(ran(post(&[host, json, ("cookie", cookie), ("origin", "http://localhost:7478")])));
+    }
     let same = ("sec-fetch-site", "same-origin");
     assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478"), same])));
     // The cookie reaches every port on the machine, so a page on another one, or one that hides its origin, is refused.
@@ -522,8 +528,13 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     }
     // A wrong cookie, or a wrong session beside a right cookie, lets nothing in.
     let forged = ("cookie", "acyclic-up=forged");
+    let elsewhere = format!("acyclic-up-7479={credential}");
     let wrong = ("authorization", "Bearer forged");
-    for refused in [vec![host, json, forged], vec![host, json, paired, wrong]] {
+    for refused in [
+        vec![host, json, forged],
+        vec![host, json, ("cookie", &elsewhere)],
+        vec![host, json, paired, wrong],
+    ] {
         assert_eq!(post(&refused), (StatusCode::UNAUTHORIZED, "no-session".into()), "{refused:?}");
     }
     // The session itself needs no origin: no browser sends it.

@@ -151,7 +151,7 @@ impl Access {
                 self.host(headers)?;
                 Ok(Credential::Identity)
             },
-            Self::Session { token, .. } => {
+            Self::Session { port, token } => {
                 self.host(headers)?;
                 if headers.contains_key(AUTHORIZATION) {
                     return match bearer(headers) {
@@ -160,7 +160,7 @@ impl Access {
                     };
                 }
                 let browser = token.browser();
-                if cookies(headers).any(|value| session::equal(value, browser.as_bytes())) {
+                if cookies(headers, *port).any(|value| session::equal(value, browser.as_bytes())) {
                     return Ok(Credential::Cookie);
                 }
                 Err(Refusal::NoSession)
@@ -230,18 +230,26 @@ pub enum Credential {
     Run(Claims),
 }
 
-/// The cookie a paired browser holds.
-const COOKIE: &str = "acyclic-up";
+/// The cookie a paired browser holds, named for the listener's port: browsers scope cookies by host and not by port, so
+/// servers on other ports of the same host would otherwise replace each other's.
+fn cookie(port: u16) -> String {
+    format!("acyclic-up-{port}")
+}
 
-/// The values of every cookie named [`COOKIE`] in the request. Another local server can set one of the same name, which
-/// can only fail to match, so each is tried.
-fn cookies(headers: &HeaderMap) -> impl Iterator<Item = &[u8]> {
-    headers.get_all(COOKIE_HEADER).into_iter().flat_map(|value| {
-        value.as_bytes().split(|byte| *byte == b';').filter_map(|pair| {
+/// The name every server's cookie had before it carried the port. It is still read, so a browser paired before then
+/// stays paired; another server's cookie of this name can only fail to match, so it does no harm.
+const SHARED_COOKIE: &str = "acyclic-up";
+
+/// The values of every cookie in the request named for `port` or [`SHARED_COOKIE`]; each is tried.
+fn cookies(headers: &HeaderMap, port: u16) -> impl Iterator<Item = &[u8]> {
+    let own = cookie(port);
+    headers.get_all(COOKIE_HEADER).into_iter().flat_map(move |value| {
+        let own = own.clone();
+        value.as_bytes().split(|byte| *byte == b';').filter_map(move |pair| {
             let (name, value) = pair
                 .trim_ascii()
                 .split_at(pair.trim_ascii().iter().position(|byte| *byte == b'=')?);
-            (name == COOKIE.as_bytes()).then_some(&value[1..])
+            (name == own.as_bytes() || name == SHARED_COOKIE.as_bytes()).then_some(&value[1..])
         })
     })
 }
@@ -498,11 +506,11 @@ async fn guard(
     next: Next,
 ) -> Response {
     let access = &listener.access;
-    if let Access::Session { token, .. } = access
+    if let Access::Session { port, token } = access
         && request.uri().path() == LOGIN
     {
         return match access.host(request.headers()) {
-            Ok(()) => pair(&listener, token, request.uri().query()),
+            Ok(()) => pair(&listener, *port, token, request.uri().query()),
             Err(refusal) => refusal.into_response(),
         };
     }
@@ -532,14 +540,15 @@ fn page(status: StatusCode, text: &'static str) -> Response {
 }
 
 /// Pairs a browser that opened a link with a valid, unspent code, by giving it the cookie, and sends it home.
-fn pair(listener: &Listener, token: &Token, query: Option<&str>) -> Response {
+fn pair(listener: &Listener, port: u16, token: &Token, query: Option<&str>) -> Response {
     let now = acyclic_cli::now(&listener.server.config.env);
     let code = query.and_then(|query| query.strip_prefix("code="));
     let made = code.and_then(|code| Some((code, token.verify(code, now)?)));
     match made {
         Some((code, made)) if listener.spent.spend(code, made, now) => {
             let cookie = format!(
-                "{COOKIE}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_AGE}",
+                "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_AGE}",
+                cookie(port),
                 token.browser()
             );
             (StatusCode::SEE_OTHER, [(SET_COOKIE, cookie), (LOCATION, "/".to_owned())])
