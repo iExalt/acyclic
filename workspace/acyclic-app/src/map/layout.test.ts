@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { STRIP } from "./chevron";
 import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
 import { item } from "./fixture";
-import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
+import { impliedOf, type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
 
 /**
@@ -118,6 +118,30 @@ describe("place", () => {
     expect(one.width).toBeGreaterThan(0);
   });
 
+  it("routes the links inside a box, with real ELK, from the source's border to the target's where they are drawn", async () => {
+    // In left, inside top: l1 to l2 to l3, and l1 to l3, which the way through l2 implies.
+    const chained = [...plan.filter((one) => !["l2", "l3"].includes(one.id)), item("l2", "left", ["l1"])];
+    const view = visible(buildModel([...chained, item("l3", "left", ["l1", "l2"])]), open);
+    const placed = await place(view, new LayoutCache(), elkLayBox(new ELK()), PORTRAIT);
+    expect([...placed.redundant]).toEqual(["l1->l3"]);
+    expect([...placed.routes.keys()].sort()).toEqual(["l1->l2", "l2->l3"]);
+    for (const [key, from, to] of [
+      ["l1->l2", "l1", "l2"],
+      ["l2->l3", "l2", "l3"],
+    ] as const) {
+      const way = placed.routes.get(key) ?? [];
+      const source = placed.nodes.get(from);
+      const target = placed.nodes.get(to);
+      // Down from the source's foot to the target's head, within each one's width: so offset by top and left both.
+      expect(way[0]?.y).toBeCloseTo((source?.y ?? 0) + (source?.height ?? 0));
+      expect(way.at(-1)?.y).toBeCloseTo(target?.y ?? 0);
+      expect(way[0]?.x).toBeGreaterThanOrEqual(source?.x ?? Infinity);
+      expect(way[0]?.x).toBeLessThanOrEqual((source?.x ?? 0) + (source?.width ?? 0));
+      expect(way.at(-1)?.x).toBeGreaterThanOrEqual(target?.x ?? Infinity);
+      expect(way.at(-1)?.x).toBeLessThanOrEqual((target?.x ?? 0) + (target?.width ?? 0));
+    }
+  });
+
   it("asks for a box only once every box inside it has answered, and for a level's boxes at once", async () => {
     const pending: { id: string; done: () => void }[] = [];
     const asked: string[][] = [];
@@ -201,8 +225,11 @@ describe("beside", () => {
   it("stands the unlinked beside the graph, in columns as tall as it, after a wider gap", () => {
     // A graph of three layers holds three tasks a column; five more take two columns.
     const graph = { width: 224, height: STRIP + 3 * 48 + 2 * 40 + 12, at: { a: { x: 12, y: STRIP } } };
-    const out = beside(graph, tasks(5));
+    const routes = { "a->b": [] };
+    const out = beside({ ...graph, routes }, tasks(5));
     expect(out.at.a).toEqual({ x: 12, y: STRIP });
+    // The graph's links keep their routes, since its children keep their places.
+    expect(out.routes).toBe(routes);
     expect(out.at.t0).toEqual({ x: 224 - 12 + 40, y: STRIP });
     expect(out.at.t3).toEqual({ x: 224 - 12 + 40 + 200 + 24, y: STRIP });
     expect(out.width).toBe(224 - 12 + 40 + 2 * 200 + 24 + 12);
@@ -236,6 +263,24 @@ describe("beside", () => {
     ]);
     expect(out.at.a).toEqual({ x: 12 + 500 + 24, y: STRIP });
     expect(out.width).toBe(12 + 500 + 24 + 200 + 12);
+  });
+});
+
+describe("impliedOf", () => {
+  const edges = (...pairs: string[]) => pairs.map((pair) => ({ source: pair[0] ?? "", target: pair[1] ?? "" }));
+  const leaf = (id: string) => id !== id.toUpperCase();
+
+  it("finds a link a longer way through tasks implies, and none a way through a box does", () => {
+    expect([...impliedOf(edges("ab", "bc", "ac", "cd", "ad"), leaf)].sort()).toEqual(["a->c", "a->d"]);
+    // a to B and B to c may join different items inside B, so a to c stands.
+    expect([...impliedOf(edges("aB", "Bc", "ac"), leaf)]).toEqual([]);
+    // Nor does a way imply a link to or from a box.
+    expect([...impliedOf(edges("ab", "bC", "aC"), leaf)]).toEqual([]);
+  });
+
+  it("ends on a cycle, and finds a link implied around it", () => {
+    expect([...impliedOf(edges("ab", "ba"), leaf)]).toEqual([]);
+    expect([...impliedOf(edges("ab", "bc", "ca", "ac"), leaf)]).toEqual(["a->c"]);
   });
 });
 

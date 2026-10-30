@@ -7,6 +7,7 @@ import { cut, type Measure, wrap } from "./fit";
 import { type Placed, withinOneBox } from "./layout";
 import { MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, View, VisibleNode } from "./model";
+import { type Segments, segmentsOf } from "./route";
 
 /** What the user has picked: an item, a thread, or neither. An item's thread lights up unless a thread is picked. */
 export interface Selection {
@@ -57,6 +58,13 @@ export interface SceneEdge {
   target: string;
   /** An edge that crosses boxes, drawn only because its end is selected or it joins the lit thread. */
   crossing: boolean;
+  /**
+   * A link inside one box that a longer way through its tasks already implies, drawn, straight, only for the same
+   * reasons as one that crosses boxes.
+   */
+  implied: boolean;
+  /** Its way around the box's other nodes, as the layout routed it; null to draw it straight. */
+  route: Segments | null;
   /** Joins two of the lit thread's nodes, so the thread reads as a route in its line's colour. */
   lit: boolean;
   /** Outside the lit thread while one is lit. */
@@ -112,16 +120,24 @@ export function scene(
   }
   const within = withinOneBox(view);
   const edges: SceneEdge[] = [];
+  const centre = new Map(nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   for (const edge of view.edges) {
+    const id = `${edge.source}->${edge.target}`;
     const crossing = !within(edge);
+    const implied = !crossing && placed.redundant.has(id);
     const touches = selection.item !== null && (edge.source === selection.item || edge.target === selection.item);
     const joins = lit.has(edge.source) && lit.has(edge.target);
-    if (crossing && !touches && !joins) continue;
+    if ((crossing || implied) && !touches && !joins) continue;
+    const way = crossing || implied ? undefined : placed.routes.get(id);
+    const source = centre.get(edge.source);
+    const target = centre.get(edge.target);
     edges.push({
-      id: `${edge.source}->${edge.target}`,
+      id,
       source: edge.source,
       target: edge.target,
       crossing,
+      implied,
+      route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
       dim: thread !== null && !joins && !touches,
     });

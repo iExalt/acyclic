@@ -36,6 +36,8 @@ function elements({ items, collapsed = [], archived = false, selection, colour }
     width: 500,
     height: 500,
     laidOut: [],
+    routes: new Map(),
+    redundant: new Set(),
     nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: i * 7, width: 20 + i, height: 10 }])),
   };
   const picked = selection ?? { item: null, thread: null };
