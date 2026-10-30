@@ -538,25 +538,29 @@ impl<'a> Readiness<'a> {
         if let Some(known) = self.stages.borrow().get(id) {
             return Ok(*known);
         }
-        let started = self
-            .model
-            .items
-            .get(id)
-            .is_some_and(|item| item.state == Value::One(ItemState::InProgress));
-        let stage = self.of(id)?.and_then(|status| match status {
-            Status::Archived | Status::Parent => None,
-            Status::Done => Some(Stage::Done),
-            Status::InReview | Status::Unverified { .. } => Some(Stage::InReview),
-            Status::Parked => Some(Stage::Parked),
-            _ if started => Some(Stage::InProgress),
-            Status::Claimed { .. } | Status::Contested { .. } => Some(Stage::InProgress),
-            Status::Ready => Some(Stage::Ready),
-            Status::Unthreaded => Some(Stage::Unthreaded),
-            Status::Blocked { .. }
-            | Status::ResourceBusy { .. }
-            | Status::InCycle
-            | Status::Conflicted { .. } => Some(Stage::Blocked),
-        });
+        let Some(item) = self.model.items.get(id) else { return Ok(None) };
+        // Done work is done whatever else holds it, such as threads two clones wrote apart: the model counts it so.
+        let finished =
+            item.is_done() && self.model.children(id).is_empty() && !self.is_archived(id);
+        let stage = if finished {
+            Some(if self.own_wait(item).is_none() { Stage::Done } else { Stage::InReview })
+        } else {
+            let started = item.state == Value::One(ItemState::InProgress);
+            self.of(id)?.and_then(|status| match status {
+                Status::Archived | Status::Parent => None,
+                Status::Done => Some(Stage::Done),
+                Status::InReview | Status::Unverified { .. } => Some(Stage::InReview),
+                Status::Parked => Some(Stage::Parked),
+                _ if started => Some(Stage::InProgress),
+                Status::Claimed { .. } | Status::Contested { .. } => Some(Stage::InProgress),
+                Status::Ready => Some(Stage::Ready),
+                Status::Unthreaded => Some(Stage::Unthreaded),
+                Status::Blocked { .. }
+                | Status::ResourceBusy { .. }
+                | Status::InCycle
+                | Status::Conflicted { .. } => Some(Stage::Blocked),
+            })
+        };
         self.stages.borrow_mut().insert(id.to_owned(), stage);
         Ok(stage)
     }

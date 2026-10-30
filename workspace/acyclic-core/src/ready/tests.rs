@@ -583,6 +583,26 @@ fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() 
 }
 
 #[test]
+fn done_work_counts_done_though_two_clones_put_it_in_different_threads() {
+    let mut a = replica("a");
+    items(&mut a, &["goal", "d"]);
+    set_parent(&mut a, "d", Some("goal"), by(2)).unwrap();
+    done_with(&mut a, "d", None);
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    thread(&mut a, "d", "t1");
+    thread(&mut b, "d", "t2");
+    a.join(&b.state).unwrap();
+    assert_eq!(
+        status(&a, &Fake::default(), "d"),
+        Status::Conflicted { fields: vec!["thread".into()] }
+    );
+    assert_eq!(stage(&a, "d"), Some(Stage::Done));
+    let rolled = rollup(&a, "goal");
+    assert_eq!(rolled.stages, Stages { done: 1, ..Stages::default() });
+}
+
+#[test]
 fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves() {
     let mut r = replica("a");
     items(&mut r, &["first", "box", "x", "y"]);
