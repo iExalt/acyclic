@@ -1511,8 +1511,8 @@ def main():
                         page, view, env, remote, "journey-added", name, failures
                     )
                     failed_add_journey(page, errors, name, failures)
-                    thread_journey(page, env, plan, "t0", name, failures)
-                    needs_journey(page, env, plan, "t0", name, failures)
+                    thread_journey(page, env, plan, "thread-0", name, failures)
+                    needs_journey(page, env, plan, "thread-0", name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
