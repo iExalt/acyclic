@@ -117,7 +117,8 @@ standard output.
    with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
    `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
    open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
-   link them.
+   link them. `thread list` also puts the threads with work left in `waves`, first to last, each after the threads
+   its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
    its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
