@@ -436,7 +436,8 @@ button.phase-title {
   text-overflow: ellipsis;
 }
 
-/* The switch between the Map and the Threads view: in the strip on a phone, over the stage's corner when wide. */
+/* The switch between the Map and the Threads view: in the strip on a phone, in the bar when wide, where it covers
+   nothing of the Map. */
 .view-switch {
   display: flex;
   flex: none;
@@ -945,17 +946,6 @@ button.row {
   }
   .inspector::before {
     display: none;
-  }
-  .stage > .view-switch {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    z-index: 2;
-    background: var(--chrome);
-    border-radius: 8px;
-  }
-  .waves {
-    padding-top: 68px;
   }
   .waves .columns {
     flex-direction: row;

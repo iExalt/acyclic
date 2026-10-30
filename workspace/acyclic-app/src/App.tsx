@@ -417,6 +417,7 @@ export function App() {
           </h1>
           <p title={`Autonomy: ${levelLabel(load.level)}`}>Autonomy: {levelLabel(load.level)}</p>
         </div>
+        {wide ? viewSwitch : null}
         <button
           type="button"
           className="needs-button"
@@ -521,7 +522,6 @@ export function App() {
             }
           />
         </Suspense>
-        {wide ? viewSwitch : null}
         {view === "threads" && waves !== null ? (
           <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
         ) : null}
