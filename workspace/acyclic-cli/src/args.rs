@@ -176,7 +176,8 @@ pub enum Command {
     },
     /// Lists every item, by id.
     List,
-    /// Shows items with their role, readiness and claims, as an array in the order given.
+    /// Shows items with their role, readiness and claims, and a parent's progress from its leaves, as an array in the
+    /// order given.
     Show {
         /// The items.
         #[arg(required = true, value_name = "ITEM")]

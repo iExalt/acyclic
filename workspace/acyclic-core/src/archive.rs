@@ -83,8 +83,12 @@ pub fn eligibility(
     let mut last_done = Millis::MIN;
     for id in &subtree {
         let item = &model.items[*id];
-        if !item.is_done() {
+        if !model.reads_done(id) {
             reasons.insert(Reason::Open { item: (*id).to_owned() });
+            continue;
+        }
+        // A parent done by its leaves has no commit of its own: they are checked, and their times count.
+        if !model.children(id).is_empty() && !item.is_done() {
             continue;
         }
         last_done = last_done.max(item.done_at.unwrap_or(Millis::MIN));
@@ -93,7 +97,8 @@ pub fn eligibility(
         }
     }
     for link in model.links.iter().filter(|l| l.kind != LinkKind::Relates) {
-        let open = model.items.get(&link.from).is_some_and(|i| !i.is_done())
+        let open = model.items.contains_key(&link.from)
+            && !model.reads_done(&link.from)
             && !model.is_archived(&link.from);
         if open && subtree.contains(link.to.as_str()) && !subtree.contains(link.from.as_str()) {
             reasons.insert(Reason::LiveDependent { from: link.from.clone(), to: link.to.clone() });

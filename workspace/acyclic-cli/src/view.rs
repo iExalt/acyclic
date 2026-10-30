@@ -74,7 +74,8 @@ pub(crate) struct View<'a> {
 }
 
 impl View<'_> {
-    /// The item summary: `{id, title, state, parent, thread, readiness}`. An id the model lacks has only its id.
+    /// The item summary: `{id, title, state, parent, thread, readiness}`, and a parent's `progress`, `{state, counts:
+    /// {done, leaves}}`, from the leaves under it. An id the model lacks has only its id.
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
         let Some(item) = self.model.items.get(id) else {
             return Ok(json!({
@@ -82,14 +83,21 @@ impl View<'_> {
                 "readiness": null,
             }));
         };
-        Ok(json!({
+        let mut row = json!({
             "id": id,
             "title": item.title,
             "state": state(item),
             "parent": item.parent,
             "thread": item.thread,
             "readiness": self.readiness.of(id)?,
-        }))
+        });
+        if let Some(progress) = self.model.progress(id) {
+            row["progress"] = json!({
+                "state": progress.state,
+                "counts": {"done": progress.done, "leaves": progress.total},
+            });
+        }
+        Ok(row)
     }
 
     /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
@@ -414,7 +422,7 @@ fn links(all: &[Link], id: &str) -> Json {
 pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
     let model = heads.model();
     let thread = model.threads.get(id);
-    let done = members.iter().filter(|m| model.items[m.item].is_done()).count();
+    let done = members.iter().filter(|m| model.reads_done(m.item)).count();
     let conflicted = members.iter().filter(|m| m.conflict).count();
     json!({
         "id": id,
@@ -654,7 +662,13 @@ mod tests {
                 json!({"id": "c", "title": "C", "state": "backlog", "parent": null, "thread": null,
                        "readiness": {"status": "blocked", "waiting": {"a": {"why": "open"}}}})
             );
+            // A parent's summary adds its progress from its leaves; a leaf's has none.
+            assert_eq!(
+                view.item_row("goal").unwrap()["progress"],
+                json!({"state": "backlog", "counts": {"done": 0, "leaves": 2}})
+            );
             let shown = view.item("a", &view.model.items["a"]).unwrap();
+            assert_eq!(shown.get("progress"), None);
             // The summary is at the top level, with no nested item, and show adds the rest.
             let summary = view.item_row("a").unwrap();
             for (name, value) in summary.as_object().unwrap() {
@@ -695,7 +709,8 @@ mod tests {
             fn go(value: &Json, keys: &mut BTreeSet<String>) {
                 match value {
                     Json::Object(map) => {
-                        for (name, inner) in map {
+                        // What sits under `counts` is counted, not a time.
+                        for (name, inner) in map.iter().filter(|(name, _)| *name != "counts") {
                             if inner.is_i64() && name != "members" {
                                 keys.insert(name.clone());
                             }
@@ -709,7 +724,7 @@ mod tests {
             go(value, keys);
         };
         viewing(&r, |view| {
-            for id in ["a", "d"] {
+            for id in ["a", "d", "goal"] {
                 walk(&view.item(id, &view.model.items[id]).unwrap(), &mut keys);
             }
         });

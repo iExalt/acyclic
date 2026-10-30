@@ -9,7 +9,7 @@ Usage: acyclic [OPTIONS] <COMMAND>
 Common Commands:
   ready        Lists threads with ready work, the actor's own first, each with its ready items
   list         Lists every item, by id
-  show         Shows items with their role, readiness and claims, as an array in the order given
+  show         Shows items with their role, readiness and claims, and a parent's progress from its leaves, as an array in the order given
   claim        Claims a thread with ready work, or renews the actor's claim on it
   release      Releases the actor's claim on a thread, leaving anyone else's
   done         Marks an item done, with evidence

@@ -279,6 +279,18 @@ impl Item {
     }
 }
 
+/// A parent's progress, from the leaves under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    /// The state it reads as: its own when parked or done by hand, else done when every leaf under it is finished, in
+    /// progress once any leaf is started or done, and backlog until then.
+    pub state: ItemState,
+    /// Its leaves that are done, archived ones aside.
+    pub done: usize,
+    /// Its leaves, archived ones aside: none when every one is archived, and it then reads as done.
+    pub total: usize,
+}
+
 /// A link as read.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
@@ -558,6 +570,43 @@ impl Model {
         }
     }
 
+    /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked or done, set by
+    /// hand; any other is what reopening a child left, and its leaves decide.
+    #[must_use]
+    pub fn progress(&self, id: &str) -> Option<Progress> {
+        let item = self.items.get(id)?;
+        if self.children(id).is_empty() {
+            return None;
+        }
+        let leaves: Vec<&Item> = self
+            .subtree(id)
+            .into_iter()
+            .filter(|leaf| self.children(leaf).is_empty() && !self.is_archived(leaf))
+            .filter_map(|leaf| self.items.get(leaf))
+            .collect();
+        let done = leaves.iter().filter(|leaf| leaf.is_done()).count();
+        let started = leaves.iter().any(|leaf| leaf.state == Value::One(ItemState::InProgress));
+        let state = if item.state == Value::One(ItemState::Parked) {
+            ItemState::Parked
+        } else if item.is_done() || done == leaves.len() {
+            ItemState::Done
+        } else if started || done > 0 {
+            ItemState::InProgress
+        } else {
+            ItemState::Backlog
+        };
+        Some(Progress { state, done, total: leaves.len() })
+    }
+
+    /// Whether an item reads as done: a leaf by its own state, a parent by its progress.
+    #[must_use]
+    pub fn reads_done(&self, id: &str) -> bool {
+        match self.progress(id) {
+            Some(progress) => progress.state == ItemState::Done,
+            None => self.items.get(id).is_some_and(Item::is_done),
+        }
+    }
+
     /// Whether an item or any ancestor is an archived subtree's root.
     #[must_use]
     pub fn is_archived(&self, id: &str) -> bool {
@@ -606,7 +655,7 @@ impl Model {
             .runs
             .values()
             .any(|run| run.is_active() && run.thread.all().into_iter().any(|t| t == thread));
-        !members.is_empty() && members.iter().all(|id| self.items[*id].is_done()) && !running
+        !members.is_empty() && members.iter().all(|id| self.reads_done(id)) && !running
     }
 
     /// The repository records naming `owner`/`name`, compared without regard to case as GitHub does: none, one, or
@@ -676,7 +725,7 @@ impl Model {
         let mut open: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for item in self.items.values() {
             if let Some(thread) = item.thread.one()
-                && !item.is_done()
+                && !self.reads_done(&item.id)
                 && !self.is_archived(&item.id)
             {
                 open.entry(thread.as_str()).or_default().push(item.id.as_str());

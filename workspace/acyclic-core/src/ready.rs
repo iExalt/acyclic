@@ -3,8 +3,9 @@
 //! its repository's default branch, and is "in review" until then. Work with no repository is met when done, and an
 //! archived dependency always is.
 //!
-//! Only leaves are claimed or ready. A dependency on a parent is met by the parent's own state, and a parent's
-//! dependencies hold back every item under it.
+//! Only leaves are claimed or ready. A dependency on a parent is met when the parent was marked done by hand, and
+//! otherwise once every leaf under it meets it, each judged as a dependency of its own: a parked parent meets none.
+//! A parent's dependencies hold back every item under it.
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -541,13 +542,35 @@ impl<'a> Readiness<'a> {
             return None;
         }
         if !item.is_done() {
-            return Some(Wait::Open);
+            if item.state == Value::One(ItemState::Parked)
+                || self.model.children(dependency).is_empty()
+            {
+                return Some(Wait::Open);
+            }
+            return self.leaves_wait(dependent, dependency);
         }
         let same_thread = self
             .model
             .thread_of(dependent)
             .is_some_and(|thread| self.model.thread_of(dependency) == Some(thread));
         if same_thread { None } else { self.own_wait(item) }
+    }
+
+    /// Why the leaves under a parent don't yet satisfy `dependent`, or `None` when every one does: the first wait,
+    /// a leaf still open before one in review.
+    fn leaves_wait(&self, dependent: &str, parent: &str) -> Option<Wait> {
+        let mut found = None;
+        for leaf in self.model.subtree(parent) {
+            if leaf == parent || !self.model.children(leaf).is_empty() {
+                continue;
+            }
+            match self.dependency_wait(dependent, leaf) {
+                Some(Wait::Open) => return Some(Wait::Open),
+                Some(wait) => found = found.or(Some(wait)),
+                None => {},
+            }
+        }
+        found
     }
 
     /// Whether a done item's own commits are merged: `None` when every one is, or it has none.
