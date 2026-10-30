@@ -3,8 +3,10 @@
 
 import type { Box } from "./reveal";
 
-/** How tall a box's title strip is; the chevron sits at its left, in a square as wide as it is tall. */
+/** How wide the square at the left of a box's title strip is, where the chevron sits. */
 export const TITLE = 36;
+/** How tall a box's title strip is: its title, and a parent's leaves by stage under it. */
+export const STRIP = 52;
 /** The least a fingertip can reliably hit, in screen pixels. */
 const FINGER = 44;
 

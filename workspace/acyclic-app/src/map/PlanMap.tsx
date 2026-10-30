@@ -15,8 +15,8 @@ import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
-import { type Selection, scene } from "./scene";
-import { STYLE } from "./style";
+import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
+import { FONT, STYLE } from "./style";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -29,6 +29,28 @@ const fontLoaded: Promise<unknown> =
     : Promise.all([document.fonts.load("500 13px Overpass"), document.fonts.load("700 13px Overpass")]).catch(
         () => undefined,
       );
+
+/**
+ * Measures labels as the renderer draws them, once the face is loaded, which the layout waits for before anything is
+ * drawn. Each text is measured once.
+ */
+function measuring(): Fonts {
+  const context = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+  if (context === null) return UNMEASURED;
+  const face = (weight: number) => {
+    const known = new Map<string, number>();
+    return (text: string) => {
+      let width = known.get(text);
+      if (width === undefined) {
+        context.font = `${weight} 13px ${FONT}`;
+        width = context.measureText(text).width;
+        known.set(text, width);
+      }
+      return width;
+    };
+  };
+  return { regular: face(500), bold: face(700) };
+}
 
 export interface PlanMapProps {
   items: Item[];
@@ -181,11 +203,12 @@ export default function PlanMap({
     return () => observer.disconnect();
   }, []);
 
+  const fonts = useMemo(measuring, []);
   const drawn = useMemo(() => {
     if (placed === null) return null;
     const selection: Selection = { item: selected, thread };
-    return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null);
-  }, [view, placed, selected, thread, model]);
+    return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts);
+  }, [view, placed, selected, thread, model, fonts]);
 
   // Only the lit thread's colour, so a reload that leaves it alone doesn't redraw.
   const colour = drawn === null || drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
@@ -195,7 +218,7 @@ export default function PlanMap({
     if (core === null || element === null || drawn === null || placed === null) return;
     const first = core.elements().length === 0;
     // Only what changed: on a large plan, a write changes a few elements of thousands.
-    held.current = apply(core, held.current, elementsOf(drawn, colour));
+    held.current = apply(core, held.current, elementsOf(drawn, colour, lines));
     zoomOutTo(core, element, placed);
     if (first) {
       // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: its first item.
@@ -234,7 +257,7 @@ export default function PlanMap({
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed, colour]);
+  }, [drawn, placed, colour, lines]);
 
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens.
   const sought = useRef<string | null>(null);

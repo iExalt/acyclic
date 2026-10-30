@@ -90,22 +90,32 @@ describe("scene", () => {
 });
 
 describe("labelOf", () => {
-  it("puts a parent's progress first, where a cut title can't hide it, and a collapsed box's count last", () => {
-    const node = { title: "Phase 2", kind: "box" as const, hidden: 0, progress: { done: 9, leaves: 15 } };
-    expect(labelOf(node)).toBe("9/15 – Phase 2");
-    expect(labelOf({ ...node, kind: "collapsed", hidden: 20 })).toBe("9/15 – Phase 2 (+20)");
-    expect(labelOf({ ...node, kind: "leaf", progress: null })).toBe("Phase 2");
+  // Every character 1 wide.
+  const fonts = { regular: (text: string) => text.length, bold: (text: string) => text.length };
+  const counts = { done: 9, leaves: 15, in_review: 0, in_progress: 2, ready: 3, blocked: 1, parked: 0, unthreaded: 0 };
+
+  it("titles a box on one line, its leaves by stage on the next, and ends a collapsed one with what it hides", () => {
+    const node = { title: "Phase two of the plan", kind: "box" as const, hidden: 0, progress: counts };
+    expect(labelOf(node, 60, fonts)).toBe("Phase two of the plan\n9 done, 2 in progress, 3 ready, 1 blocked");
+    expect(labelOf({ ...node, kind: "collapsed", hidden: 20 }, 16, fonts)).toBe("Phase two… (+20)\n9 done, 2 in pr…");
+    expect(labelOf({ ...node, progress: null }, 60, fonts)).toBe("Phase two of the plan");
+  });
+
+  it("wraps a task's title over two lines and cuts the second short", () => {
+    const leaf = { title: "Route the links inside a box", kind: "leaf" as const, hidden: 0, progress: null };
+    expect(labelOf(leaf, 12, fonts)).toBe("Route the\nlinks insid…");
   });
 });
 
 describe("buildModel", () => {
   it("takes a parent's progress from its item, and none when every leaf under it is archived", () => {
-    const progress = (done: number, leaves: number) => ({ state: "done", counts: { done, leaves } });
+    const none = { in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+    const progress = (done: number, leaves: number) => ({ state: "done", counts: { ...none, done, leaves } });
     const model = buildModel([
       item("p", null, [], { progress: progress(2, 2) }),
       item("q", null, [], { progress: progress(0, 0) }),
     ]);
-    expect(model.items.get("p")?.progress).toEqual({ done: 2, leaves: 2 });
+    expect(model.items.get("p")?.progress).toEqual({ ...none, done: 2, leaves: 2 });
     expect(model.items.get("q")?.progress).toBeNull();
   });
 });

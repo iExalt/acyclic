@@ -2,11 +2,18 @@ import cytoscape from "cytoscape";
 import { describe, expect, it } from "vitest";
 import { CLOSED, HATCH, OPEN, STYLE } from "./style";
 
+/** A task's marks, as an image its data carries. */
+const MARK = "data:image/svg+xml;utf8,%3Csvg%2F%3E";
+
 describe("style", () => {
-  it("draws each kind of box with its chevron, crosses out what is archived, and dashes an open archived box", () => {
+  it("draws each kind of box with its chevron, a task with its marks, crosses out what is archived, and dashes an open archived box", () => {
     const core = cytoscape({ headless: true, styleEnabled: true, style: STYLE });
     const node = (id: string, classes: string) =>
-      core.add({ group: "nodes", data: { id, label: id, width: 200, height: 64, textWidth: 150, layer: 0 }, classes });
+      core.add({
+        group: "nodes",
+        data: { id, label: id, width: 200, height: 64, textWidth: 150, layer: 0, mark: MARK },
+        classes,
+      });
     const drawn = (classes: string) => {
       // The parsed style, which Cytoscape's types leave out.
       const one = node(classes.replaceAll(" ", "-"), classes) as unknown as {
@@ -18,8 +25,8 @@ describe("style", () => {
         align: one.pstyle("text-halign").value,
       };
     };
-    expect(drawn("leaf")).toEqual({ images: ["none"], border: "solid", align: "center" });
-    expect(drawn("leaf archived")).toEqual({ images: [HATCH], border: "solid", align: "center" });
+    expect(drawn("leaf")).toEqual({ images: [MARK], border: "solid", align: "left-inside" });
+    expect(drawn("leaf archived")).toEqual({ images: [HATCH, MARK], border: "solid", align: "left-inside" });
     expect(drawn("box")).toEqual({ images: [OPEN], border: "solid", align: "left-inside" });
     expect(drawn("box archived")).toEqual({ images: [OPEN], border: "dashed", align: "left-inside" });
     expect(drawn("collapsed")).toEqual({ images: [CLOSED], border: "solid", align: "left-inside" });

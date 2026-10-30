@@ -311,6 +311,25 @@ def first_view_readable(page, name, failures):
         failures.append(f"{name}: the first load asked for {asked} layouts, not one")
 
 
+def stages_drawn(page, plan, name, failures):
+    """Each task drawn carries the stage the tracker gives it, as a class its tint and marks follow."""
+    drawn_stages = page.get_by_test_id("map").evaluate(
+        "m => Object.fromEntries(m.cy.nodes('.leaf').map(n => [n.id(),"
+        " (n.classes().find(c => c.startsWith('stage-')) ?? '').slice(6) || null]))"
+    )
+    # A parent drawn as a task, everything under it archived, has no stage of its own: its state says what it can.
+    told = {
+        id: plan.items[id].get("stage")
+        or (state if (state := plan.items[id]["state"]) in ("done", "parked", "in-progress") else None)
+        for id in drawn_stages
+    }
+    if not any(told.values()):
+        failures.append(f"{name}: no task with a stage drawn to check")
+    elif drawn_stages != told:
+        wrong = sorted(id for id in told if drawn_stages[id] != told[id])[:5]
+        failures.append(f"{name}: tasks drawn with the wrong stage: {wrong}")
+
+
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
@@ -386,7 +405,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
-    moved, box = 0, None
+    moved, box, checked = 0, None, False
     for box in sorted(
         (id for id in plan.default() if plan.depth(id) == 1 and plan.children(id)),
         key=lambda id: (id != hint, -len(plan.children(id)), id),
@@ -404,6 +423,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
             after = settled_corner(page, box)
             if action == "expanding":
                 relaid = page.get_by_test_id("map").evaluate(corner, box) != placed
+                if not checked:
+                    stages_drawn(page, plan, name, failures)
+                    checked = True
             shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
             moved = max(moved, shift)
             if shift > 2:
