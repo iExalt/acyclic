@@ -220,6 +220,14 @@ describe("beside", () => {
     expect(flat.height).toBe(STRIP + 2 * 48 + 24 + 12);
   });
 
+  it("shares the unlinked evenly among the columns they take, leaving none nearly empty", () => {
+    // Four fit beside this graph, so nine take three columns: three each, not four, four and one.
+    const graph = { width: 224, height: STRIP + 4 * 48 + 3 * 24 + 12, at: {} };
+    const out = beside(graph, tasks(9));
+    const xs = Object.values(out.at).map((at) => at.x);
+    expect([...new Set(xs)].map((x) => xs.filter((one) => one === x).length)).toEqual([3, 3, 3]);
+  });
+
   it("makes each column as wide as its widest child", () => {
     const out = beside(null, [
       { id: "box", width: 500, height: 300 },

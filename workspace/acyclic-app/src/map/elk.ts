@@ -74,25 +74,34 @@ export function dependencyOrder(input: BoxInput): string[] {
 export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string } & Size)[]): BoxLayout {
   const empty = { width: 2 * PAD, height: STRIP + PAD, at: {} };
   if (unlinked.length === 0) return graph ?? empty;
-  const at = { ...graph?.at };
   const inner = graph === null ? 0 : graph.height - STRIP - PAD;
   const cap = Math.max(inner, Math.ceil(Math.sqrt(unlinked.length)) * (LEAF.height + GAP) - GAP);
-  let x = graph === null ? PAD : graph.width - PAD + ASIDE;
-  let y = STRIP;
-  let column = 0;
-  let bottom = STRIP;
-  for (const child of unlinked) {
-    if (y > STRIP && y + child.height > STRIP + cap) {
-      x += column + GAP;
-      y = STRIP;
-      column = 0;
+  // Filled to the cap, the last column could hold one; so the columns that takes share the children evenly.
+  const share = Math.ceil(unlinked.length / stack(unlinked, cap, Infinity, 0, 0).columns);
+  const placed = stack(unlinked, cap, share, graph === null ? PAD : graph.width - PAD + ASIDE, STRIP);
+  return {
+    width: placed.right + PAD,
+    height: Math.max(graph?.height ?? 0, placed.bottom + PAD),
+    at: { ...graph?.at, ...placed.at },
+  };
+}
+
+/** Children in columns from (`left`, `top`), each column no taller than `cap` unless one child is, and at most `share`. */
+function stack(children: readonly ({ id: string } & Size)[], cap: number, share: number, left: number, top: number) {
+  const at: Record<string, { x: number; y: number }> = {};
+  let [x, y, column, count, columns, bottom] = [left, top, 0, 0, 1, top];
+  for (const child of children) {
+    if (count > 0 && (count === share || y + child.height > top + cap)) {
+      [x, y, column, count] = [x + column + GAP, top, 0, 0];
+      columns += 1;
     }
     at[child.id] = { x, y };
     column = Math.max(column, child.width);
     bottom = Math.max(bottom, y + child.height);
     y += child.height + GAP;
+    count += 1;
   }
-  return { width: x + column + PAD, height: Math.max(graph?.height ?? 0, bottom + PAD), at };
+  return { at, columns, right: x + column, bottom };
 }
 
 export function elkLayBox(engine: Engine): LayBox {
