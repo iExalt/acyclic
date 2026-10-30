@@ -459,8 +459,8 @@ impl Model {
 
     fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
         match key.kind.as_str() {
-            // A deleted item is gone from every reader; see `crate::delete`.
-            kind::ITEM if is_deleted(state, key) => {},
+            // A deleted item or thread is gone from every reader; see `crate::delete` and `crate::renumber`.
+            kind::ITEM | kind::THREAD if is_deleted(state, key) => {},
             kind::ITEM => {
                 let item = read_item(state, key)?;
                 for parent in item.parent.all() {

@@ -186,6 +186,16 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("repo list", AGENT), 0);
     let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
+    // The tracker assigns a thread's id when the add leaves it out; only the user renumbers a fresh thread.
+    let (code, added) = sh.output("thread add --title Spare", AGENT);
+    let spare = added["data"]["thread"].as_str().unwrap().to_owned();
+    assert_eq!(code, 0, "{added}");
+    assert_eq!(sh.run(&format!("thread renumber {spare}"), AGENT), 1, "only the user renumbers");
+    let (code, out) = sh.output(&format!("thread renumber {spare} --as-user"), AGENT);
+    assert_eq!(
+        (code, &out["data"]["from"], &out["data"]["title"]),
+        (0, &json!(spare), &json!("Spare"))
+    );
     assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
     let (code, out) = sh.output("graph --format mermaid --file graph.mmd", AGENT);
     assert_eq!((code, out["data"]["counts"]["items"].as_u64()), (0, Some(2)));

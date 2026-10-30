@@ -1150,6 +1150,42 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --title Spare
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "proposals": [],
+    "thread": "thread-mac-1",
+    "title": "Spare"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
+# exit 1
+{
+  "error": {
+    "code": "user-only",
+    "details": null,
+    "message": "only the user renumbers a thread, not session/mac"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1 --as-user
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "from": "thread-mac-1",
+    "moved": [],
+    "thread": "thread-mac-2",
+    "title": "Spare"
+  },
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic graph --thread t1
 # exit 0
 digraph acyclic {

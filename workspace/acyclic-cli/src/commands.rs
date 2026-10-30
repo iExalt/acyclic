@@ -14,6 +14,7 @@ use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetFie
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
+use acyclic_core::renumber;
 use acyclic_core::schema::{GLOBAL, item as field, kind, link as link_field, settings};
 use acyclic_core::scope;
 use acyclic_core::state::{Context, Key, Millis, Replica, ReplicaId, Sequence, State};
@@ -675,6 +676,12 @@ impl<'a> Session<'a> {
                 self.decide(proposal, scope::drop, "drop")
             },
             Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
+            Command::Thread(ThreadCommand::Renumber { thread: id }) => self.write(|replica, by| {
+                let done = renumber::renumber(replica, id, by)?;
+                let model = Model::read(replica.state())?;
+                let title = model.threads.get(&done.thread).and_then(|thread| thread.title.one());
+                Ok(json!({"thread": done.thread, "title": title, "from": done.from, "moved": done.moved}))
+            }),
             Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
             Command::Level { level: None } => self.levels(),
             Command::Level { level: Some(level) } => self.write(|replica, by| {
@@ -1062,12 +1069,16 @@ impl<'a> Session<'a> {
     fn sync(&self, with_usage: bool) -> Result<Json, CliError> {
         let remote = self.remote()?;
         let synced = self.tracker.sync_with(remote, store::Fetch { usage: with_usage })?;
+        // Threads two clones numbered alike, which only a sync brings together; `needs` lists those one can renumber.
+        let (state, model) = self.read()?;
+        let clashes = renumber::clashes(&state, &model, self.now)?;
         Ok(json!({
             "remote": remote,
             "fetched": synced.fetched,
             "joined": synced.joined,
             "pushed": synced.pushed,
             "changed": synced.joined,
+            "number_clashes": clashes,
         }))
     }
 

@@ -8,7 +8,7 @@ Every command's inputs follow these rules, so you can guess a command from its n
 
 1. **Verbs.** The daily workflow verbs are top level: `ready`, `list`, `show`, `claim`, `release`, `done`, `needs`.
    Everything else is `acyclic <noun> <verb>`. Actions that aren't a field's value are verbs: `item reopen`, `item
-   archive`, `item delete`, `thread approve`, `thread revoke`, `proposal keep`, `proposal drop`.
+   archive`, `item delete`, `thread approve`, `thread revoke`, `thread renumber`, `proposal keep`, `proposal drop`.
 2. **Positionals** are only the subject's ids, named for the entity: `<ITEM>`, `<THREAD>`, `<REPOSITORY>`,
    `<PROPOSAL>`. Read commands take one or more and answer as an array in the order given; write commands take one.
    The exceptions are the path of `init <PATH>`, the file of `import <FILE>`, `level <LEVEL>`, which sets the global

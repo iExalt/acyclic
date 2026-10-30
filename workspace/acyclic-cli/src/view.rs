@@ -273,6 +273,11 @@ impl View<'_> {
                 Entry::Dangling { kind, id, field, target } => json!({
                     "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
                 }),
+                Entry::NumberClash { number, threads, fresh, fix } => json!({
+                    "kind": "number-clash", "number": number,
+                    "threads": threads.iter().map(|id| thread(id)).collect::<Vec<_>>(),
+                    "fresh": fresh, "fix": fix,
+                }),
                 Entry::Unverified { item, repository, reason } => json!({
                     "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
                     "reason": reason,

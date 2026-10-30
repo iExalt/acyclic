@@ -408,7 +408,8 @@ fn classify(command: &Command) -> Use {
             ThreadCommand::Add { .. }
             | ThreadCommand::Edit(_)
             | ThreadCommand::Approve { .. }
-            | ThreadCommand::Revoke { .. },
+            | ThreadCommand::Revoke { .. }
+            | ThreadCommand::Renumber { .. },
         )
         | Command::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. })
         | Command::Proposal(ProposalCommand::Keep { .. } | ProposalCommand::Drop { .. }) => {
