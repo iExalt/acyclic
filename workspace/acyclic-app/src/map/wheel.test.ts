@@ -3,19 +3,26 @@ import { wheelZoom } from "./wheel";
 
 describe("wheelZoom", () => {
   const scroll = (deltaY: number, deltaMode = 0) => ({ deltaY, deltaMode, ctrlKey: false });
+  const run = (deltas: number[], ctrlKey = false) =>
+    deltas.reduce((zoom, deltaY) => wheelZoom(zoom, { deltaY, deltaMode: 0, ctrlKey }, 0.01, 100, 800), 1);
 
-  it("zooms 12% per notch of a mouse wheel, in and out alike", () => {
-    expect(wheelZoom(1, scroll(-100), 0.1, 2, 800)).toBeCloseTo(1.12);
-    expect(wheelZoom(1, scroll(100), 0.1, 2, 800)).toBeCloseTo(1 / 1.12);
+  it("zooms 12% per notch of a Mac's mouse wheel, in and out alike, and a little more for larger notches", () => {
+    expect(wheelZoom(1, scroll(-80), 0.1, 2, 800)).toBeCloseTo(1.12);
+    expect(wheelZoom(1, scroll(80), 0.1, 2, 800)).toBeCloseTo(1 / 1.12);
+    expect(wheelZoom(1, scroll(-100), 0.1, 2, 800)).toBeCloseTo(1.12 ** 1.25);
   });
 
-  it("counts lines and pages as pixels, so every wheel zooms by the distance scrolled", () => {
-    expect(wheelZoom(1, scroll(-100 / 16, 1), 0.1, 2, 800)).toBeCloseTo(1.12);
-    expect(wheelZoom(1, scroll(-1, 2), 0.1, 2, 100)).toBeCloseTo(1.12);
+  it("takes a wheel that counts lines or pages for a notched one", () => {
+    expect(wheelZoom(1, scroll(-5, 1), 0.1, 2, 800)).toBeCloseTo(1.12);
+    expect(wheelZoom(1, scroll(-1, 2), 0.1, 2, 80)).toBeCloseTo(1.12);
   });
 
-  it("gives a pinch a gain of its own", () => {
-    expect(wheelZoom(1, { deltaY: -10, deltaMode: 0, ctrlKey: true }, 0.1, 2, 800)).toBeCloseTo(Math.exp(0.1));
+  it("zooms a trackpad's scroll and pinch as Cytoscape did, a tenfold zoom per 250 pixels", () => {
+    // A short two-finger swipe and a pinch out, as Chrome on a Mac sent them.
+    expect(run([1, 2, 1, 4, 6, 6, 6, 8, 8, 13, 5, 12, 14, 10, 11])).toBeCloseTo(10 ** (-107 / 250));
+    expect(run([-1.04, -0.89, -1.78, -1.78, -2.44], true)).toBeCloseTo(10 ** (7.93 / 250));
+    // A pinch is never a notch, however far it moves at once.
+    expect(run([-80], true)).toBeCloseTo(10 ** (80 / 250));
   });
 
   it("stays within the Map's zoom limits", () => {

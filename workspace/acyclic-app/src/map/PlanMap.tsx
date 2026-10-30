@@ -136,8 +136,10 @@ export default function PlanMap({
     // Browser journeys reach the renderer through its element, to find where a node is drawn on the canvas.
     Object.assign(host.current, { cy: core });
     // The wheel zooms by the app's own steps. Cytoscape listens on the Map itself while capturing, so only a listener
-    // on the window, capturing, runs first and can keep the event from it; a touch pinch is still the renderer's.
+    // above it, capturing, runs first and can keep the event from it; a touch pinch is still the renderer's. It sits
+    // on the Map's parent rather than the window, so scrolling a pane elsewhere never waits for it.
     const element = host.current;
+    const above = element.parentElement ?? window;
     const wheel = (event: WheelEvent) => {
       if (!(event.target instanceof Node) || !element.contains(event.target)) return;
       event.preventDefault();
@@ -148,9 +150,9 @@ export default function PlanMap({
         renderedPosition: { x: event.clientX - at.left, y: event.clientY - at.top },
       });
     };
-    window.addEventListener("wheel", wheel, { capture: true, passive: false });
+    above.addEventListener("wheel", wheel as EventListener, { capture: true, passive: false });
     return () => {
-      window.removeEventListener("wheel", wheel, { capture: true });
+      above.removeEventListener("wheel", wheel as EventListener, { capture: true });
       core.destroy();
       cy.current = null;
       held.current = new Map();

@@ -1,6 +1,6 @@
 // The Map's own wheel zoom. Cytoscape's zooms about 3% per notch of a mouse wheel, which crawls on a laptop; this one
-// zooms by the distance scrolled, so a notched wheel and an accelerating one feel alike, and a trackpad's pinch,
-// which browsers send as a wheel with ctrlKey held, has a gain of its own.
+// zooms 12% per notch. A trackpad's two-finger scroll and its pinch, which browsers send as a wheel with ctrlKey held,
+// zoom as Cytoscape's always did.
 
 /** What zooming needs of a wheel event. */
 export interface Wheel {
@@ -13,14 +13,20 @@ export interface Wheel {
 
 /** A line of scrolling, in pixels, for wheels that count lines. */
 const LINE = 16;
-/** Zoom per pixel scrolled: 12% per 100 pixels, one notch of a mouse wheel in Chrome. */
-const SCROLL_GAIN = Math.log(1.12) / 100;
-/** Zoom per pixel of a pinch, whose deltas are a few pixels each. */
-const PINCH_GAIN = 0.01;
+/**
+ * The least a mouse wheel's notch scrolls, in whole pixels: Chrome sends 80 a notch on a Mac and 100 or 120 elsewhere,
+ * while a trackpad sends a stream of a few pixels at a time.
+ */
+const NOTCH = 40;
+/** Zoom per pixel of a notched wheel: 12% for a Mac's notch of 80 pixels, a little more for the larger notches. */
+const NOTCH_GAIN = Math.log(1.12) / 80;
+/** Zoom per pixel of a trackpad's scroll or pinch: Cytoscape's, a tenfold zoom per 250 pixels. */
+const SMOOTH_GAIN = Math.log(10) / 250;
 
 /** The zoom after `wheel`: scrolling down or pinching in zooms out, within `min` and `max`. */
 export function wheelZoom(zoom: number, wheel: Wheel, min: number, max: number, page: number): number {
   const pixels = wheel.deltaY * (wheel.deltaMode === 1 ? LINE : wheel.deltaMode === 2 ? page : 1);
-  const next = zoom * Math.exp(-pixels * (wheel.ctrlKey ? PINCH_GAIN : SCROLL_GAIN));
+  const notched = !wheel.ctrlKey && (wheel.deltaMode !== 0 || (Number.isInteger(pixels) && Math.abs(pixels) >= NOTCH));
+  const next = zoom * Math.exp(-pixels * (notched ? NOTCH_GAIN : SMOOTH_GAIN));
   return Math.min(max, Math.max(min, next));
 }
