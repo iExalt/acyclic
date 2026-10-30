@@ -1,5 +1,7 @@
 /* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
    The colours are lines.ts's TOKENS, which a unit test holds these to. */
+/* Overpass leaves out the backtick, U+0060: its font classes it as a mark, so browsers stacked it on the letter beside
+   it as an accent. It falls back to the system face, on the Map's canvas too. */
 @font-face {
   font-family: "Overpass";
   font-style: normal;
@@ -7,8 +9,8 @@
   font-weight: 100 900;
   src: url("@fontsource-variable/overpass/files/overpass-latin-wght-normal.woff2") format("woff2-variations");
   unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
-    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    U+0000-005F, U+0061-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "Overpass";
@@ -452,6 +454,14 @@ dl.facts dd {
 .why {
   color: var(--muted);
   font-size: 13px;
+}
+/* What was backticked: an id or a command, set apart in the system's monospace face. */
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0 0.25em;
+  border-radius: 4px;
+  background: var(--ground);
 }
 .notes {
   margin-top: 14px;

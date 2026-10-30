@@ -18,6 +18,7 @@ import {
   threadLevelCommand,
 } from "./forms";
 import type { Line } from "./lines";
+import { Prose } from "./Prose";
 
 export interface ThreadPanelProps {
   id: string;
@@ -86,7 +87,7 @@ export function ThreadPanel({
       <header>
         <h2 className="line" style={lineStyle(line)}>
           <Badge line={line} />
-          {line?.name ?? detail.title}
+          <Prose text={line?.name ?? detail.title} />
         </h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
@@ -127,16 +128,18 @@ export function ThreadPanel({
           </option>
         ))}
       </Choice>
-      <label className="setting">
-        <input
-          type="checkbox"
-          name="pm"
-          checked={detail.pm}
-          disabled={busy}
-          onChange={(event) => onCommand(pmCommand(id, event.target.checked))}
-        />{" "}
-        Project management: its agent's edits to approved scope apply at once
-      </label>
+      {/* The project-management flag, said as what it does to an agent's edits. */}
+      <Choice
+        label="Agent edits to approved scope"
+        className="setting"
+        name="pm"
+        value={detail.pm ? "apply" : "wait"}
+        disabled={busy}
+        onWrite={(choice) => onCommand(pmCommand(id, choice === "apply"))}
+      >
+        <option value="wait">Wait for your OK</option>
+        <option value="apply">Apply at once</option>
+      </Choice>
       {open.length === 0 ? null : (
         <div className="proposals" data-testid="proposals">
           <h3>Proposals</h3>
@@ -166,7 +169,11 @@ export function ThreadPanel({
           </ul>
         </div>
       )}
-      {detail.brief === null ? null : <p className="notes">{detail.brief}</p>}
+      {detail.brief === null ? null : (
+        <p className="notes">
+          <Prose text={detail.brief} />
+        </p>
+      )}
       {detail.heads.length === 0 ? null : (
         <div className="heads">
           <h3>Ready to start</h3>
@@ -174,7 +181,7 @@ export function ThreadPanel({
             {detail.heads.map((head) => (
               <li key={head}>
                 <button type="button" className="row" data-select={head} onClick={() => onSelect(head)}>
-                  {titleOf(head)}
+                  <Prose text={titleOf(head)} />
                 </button>
               </li>
             ))}

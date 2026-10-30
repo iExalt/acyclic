@@ -1244,9 +1244,9 @@ def thread_journey(page, env, plan, thread, name, failures):
     settled_control(
         page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
     )
-    # The box shows the tracker's flag, so it ticks once the edit is saved and read back, not on the tap.
-    panel.locator("input[name=pm]").click()
-    settled_control(page, "[data-testid=thread-panel] input[name=pm]", "checked", True)
+    # The switch shows the tracker's flag, so it reads "apply" once the edit is saved and read back, not on the pick.
+    panel.locator("select[name=pm]").select_option("apply")
+    settled_control(page, "[data-testid=thread-panel] select[name=pm]", "value", "apply")
 
     def level():
         page.get_by_test_id("global-level").select_option("everything")

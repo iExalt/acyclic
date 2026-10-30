@@ -7,6 +7,7 @@ import { useFocusIn } from "./focus";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
 import { type Need, needView, threadLabel } from "./needs";
+import { Prose } from "./Prose";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
 const PRIMARY = new Set(["keep", "approve"]);
@@ -85,7 +86,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
                       onClick={() => onPickThread(thread.id)}
                     >
                       <Badge line={label.line} />
-                      {label.text}
+                      <Prose text={label.text} />
                     </button>
                   </li>
                 );
@@ -93,7 +94,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
               {view.items.map((id) => (
                 <li key={`i-${id}`}>
                   <button type="button" className="row" data-select={id} onClick={() => onSelect(id)}>
-                    {titleOf(id)}
+                    <Prose text={titleOf(id)} />
                   </button>
                 </li>
               ))}

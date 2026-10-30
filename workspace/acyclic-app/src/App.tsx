@@ -27,6 +27,7 @@ import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
+import { Prose } from "./Prose";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
 
@@ -449,7 +450,9 @@ export function App() {
             }}
           >
             <Badge line={lines.get(one.id)} />
-            <span className="name">{lines.get(one.id)?.name ?? one.title}</span>
+            <span className="name">
+              <Prose text={lines.get(one.id)?.name ?? one.title} />
+            </span>
           </button>
         ))}
       </nav>
