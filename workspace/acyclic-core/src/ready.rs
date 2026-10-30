@@ -463,22 +463,40 @@ impl<'a> Readiness<'a> {
     /// Fails when a claim can't be read.
     pub fn progress(&self, id: &str) -> Result<Option<Progress>, Error> {
         let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
-        if progress.state == ItemState::Backlog {
-            for leaf in self.model.subtree(id) {
-                let Some(item) = self.model.items.get(leaf) else { continue };
-                if !self.model.children(leaf).is_empty() || item.is_done() || self.is_archived(leaf)
-                {
-                    continue;
-                }
-                if let Some(thread) = item.thread.one()
-                    && self.winner(thread)?.is_some()
-                {
-                    progress.state = ItemState::InProgress;
-                    break;
-                }
-            }
+        if progress.state == ItemState::Backlog
+            && self.claimed_under(id, &mut BTreeSet::from([id]))?
+        {
+            progress.state = ItemState::InProgress;
         }
         Ok(Some(progress))
+    }
+
+    /// Whether a live claim holds the thread of an open leaf under `id`. What is parked, or under a parked part, isn't
+    /// being worked, so it counts for nothing.
+    fn claimed_under<'b>(&self, id: &'b str, seen: &mut BTreeSet<&'b str>) -> Result<bool, Error>
+    where
+        'a: 'b,
+    {
+        for child in self.model.children(id) {
+            let Some(item) = self.model.items.get(child) else { continue };
+            if !seen.insert(child)
+                || item.is_done()
+                || item.state == Value::One(ItemState::Parked)
+                || self.is_archived(child)
+            {
+                continue;
+            }
+            if !self.model.children(child).is_empty() {
+                if self.claimed_under(child, seen)? {
+                    return Ok(true);
+                }
+            } else if let Some(thread) = item.thread.one()
+                && self.winner(thread)?.is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The unmet hard dependencies of an item and its ancestors.

@@ -488,6 +488,9 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
     claim::claim(&mut r, "main", "session/one", 900, Some(500), 1_000).unwrap();
     assert_eq!(state(&r, NOW), ItemState::InProgress);
     assert_eq!(state(&r, 2_000), ItemState::Backlog);
+    // Parked work isn't being worked, though its thread is claimed.
+    set_state(&mut r, "x", ItemState::Parked, by(3)).unwrap();
+    assert_eq!(state(&r, NOW), ItemState::Backlog);
     // A state set by hand holds.
     set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
     assert_eq!(state(&r, NOW), ItemState::Parked);
