@@ -1293,6 +1293,16 @@ def needs_journey(page, env, plan, thread, name, failures):
         arg=before + 1,
         timeout=10_000,
     )
+    # The Approve filter shows only what waits for a yes or no, and All shows everything again.
+    entries = needs.locator("[data-need]")
+    every = entries.count()
+    needs.locator("[data-filter=approve]").click()
+    kinds = {key.split(":")[0] for key in entries.evaluate_all("l => l.map(e => e.dataset.need)")}
+    if not kinds or not kinds <= {"proposal", "unapproved", "awaiting-approval", "new-blocker"}:
+        failures.append(f"{name}: the Approve filter shows {sorted(kinds)}")
+    needs.locator("[data-filter=all]").click()
+    if entries.count() != every:
+        failures.append(f"{name}: All shows {entries.count()} of {every} entries")
     proposal = needs.locator("[data-need^='proposal:']").filter(
         has_text=plan.items[outside]["title"]
     )

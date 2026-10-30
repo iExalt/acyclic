@@ -26,7 +26,7 @@ import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
-import type { Need } from "./needs";
+import { countText, type Need } from "./needs";
 import { Prose } from "./Prose";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
@@ -377,7 +377,7 @@ export function App() {
           data-testid="needs-button"
           data-none={load.needs.length === 0}
           aria-pressed={showNeeds}
-          aria-label={`Needs you: ${load.needs.length}`}
+          aria-label={`Review: ${load.needs.length} waiting`}
           onClick={() => {
             setSelected(null);
             setShowNeeds((was) => !was);
@@ -390,10 +390,10 @@ export function App() {
               !
             </span>
           )}
-          Needs you
+          Review
           {load.needs.length > 0 && (
             <span className="count" data-testid="needs-count">
-              {load.needs.length}
+              {countText(load.needs.length)}
             </span>
           )}
         </button>
