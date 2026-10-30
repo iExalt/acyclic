@@ -2,7 +2,7 @@
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app. Pure, so the rules are tested without a browser.
 
-export type Layer = "mode" | "add" | "item" | "needs" | "phases" | "thread";
+export type Layer = "mode" | "add" | "phases" | "item" | "needs" | "thread";
 
 export interface Open {
   /** A move or a link waiting for its target. */
@@ -18,7 +18,8 @@ export interface Open {
 
 /** The layers open, the one shown first. */
 export function openLayers(open: Open): Layer[] {
-  const order: Layer[] = ["mode", "add", "item", "needs", "phases", "thread"];
+  // The phases' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
+  const order: Layer[] = ["mode", "add", "phases", "item", "needs", "thread"];
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 

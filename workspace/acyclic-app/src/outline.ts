@@ -2,6 +2,7 @@
 // at work in it, and the threads in none. Pure, so the rules are tested without a browser.
 
 import type { Model } from "./map/model";
+import { natural } from "./natural";
 
 export interface PhaseRow {
   id: string;
@@ -18,13 +19,13 @@ export interface Outline {
 
 /**
  * The outline of `model` as the Map shows it, archived subtrees only when `showArchived`, for `threads` in their
- * order. A phase is a top-level item with something under it shown; a thread is in a phase when any item shown in it,
+ * order, and its phases in their ids' natural order, as the Map lays them out. A phase is a top-level item with something under it shown; a thread is in a phase when any item shown in it,
  * the phase itself included, is in the thread.
  */
 export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
   const shown = (id: string) => showArchived || !model.items.get(id)?.archived;
   const phases: { id: string; title: string; threads: Set<string> }[] = [];
-  for (const root of model.roots) {
+  for (const root of [...model.roots].sort(natural)) {
     const kids = (model.children.get(root) ?? []).filter(shown);
     if (!shown(root) || kids.length === 0) continue;
     const touched = new Set<string>();

@@ -35,6 +35,11 @@ describe("outlineOf", () => {
     });
   });
 
+  it("lists phases in their ids' natural order, as the Map lays them out", () => {
+    const numbered = buildModel([item("phase-10"), item("a", "phase-10"), item("phase-2"), item("b", "phase-2")]);
+    expect(outlineOf(numbered, [], false).phases.map((phase) => phase.id)).toEqual(["phase-2", "phase-10"]);
+  });
+
   it("counts what is archived only while it shows", () => {
     expect(outlineOf(model, threads, true).phases[0]?.threads.map((one) => one.id)).toEqual(["t", "x"]);
   });

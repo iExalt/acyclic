@@ -584,12 +584,36 @@ HOSTILE = '<img src=x onerror="window.pwned = true">'
 
 
 def outline_journey(page, view, plan, name, failures):
-    """Side by side, selecting an item marks its phase and its thread's row there, opening the phase; on a phone, the
-    phases' sheet opens from the strip and Back closes it."""
-    if view.get("has_touch"):
-        sheet = page.get_by_test_id("phases")
+    """Selecting an item marks its phase and its thread's row there, opening the phase. On a phone the phases come as a
+    sheet over the item's, and Back closes the sheet first, staying in the app."""
+    picked = next(
+        id for id in sorted(plan.default()) if plan.depth(id) == 1 and plan.items[id]["thread"]
+    )
+    phase, thread = plan.chain(picked)[-1], plan.items[picked]["thread"]
+    centre(page, picked)
+    tap_box(page, view, picked, chevron=False)
+    inspector = page.get_by_test_id("inspector")
+    inspector.wait_for()
+    phone = view.get("has_touch")
+    sheet = page.get_by_test_id("phases")
+    if phone:
         page.get_by_test_id("phases-button").click()
-        sheet.wait_for()
+        try:
+            sheet.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: the phases' sheet didn't show over {picked}'s")
+            return
+    marked = page.locator(f".phase[aria-current=true] [data-select-phase='{phase}']")
+    row = page.locator(f"[data-thread='{thread}'][data-phase='{phase}'][aria-current=true]")
+    try:
+        # The phase opens itself once the outline has drawn.
+        row.wait_for(timeout=5_000)
+        missed = not marked.count()
+    except PlaywrightTimeout:
+        missed = True
+    if missed:
+        failures.append(f"{name}: selecting {picked} didn't mark phase {phase} and {thread}'s row there")
+    if phone:
         url = page.url
         page.go_back()
         try:
@@ -598,18 +622,10 @@ def outline_journey(page, view, plan, name, failures):
             failures.append(f"{name}: Back left the phases' sheet open")
         if page.url != url:
             failures.append(f"{name}: Back from the phases' sheet left the app")
-        return
-    picked = next(
-        id for id in sorted(plan.default()) if plan.depth(id) == 1 and plan.items[id]["thread"]
-    )
-    phase, thread = plan.chain(picked)[-1], plan.items[picked]["thread"]
-    centre(page, picked)
-    tap_box(page, view, picked, chevron=False)
-    page.get_by_test_id("inspector").wait_for()
-    marked = page.locator(f".phase[aria-current=true] [data-select-phase='{phase}']")
-    row = page.locator(f"[data-thread='{thread}'][data-phase='{phase}'][aria-current=true]")
-    if not marked.count() or not row.is_visible():
-        failures.append(f"{name}: selecting {picked} didn't mark phase {phase} and {thread}'s row there")
+        try:
+            inspector.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the phases' sheet closed {picked}'s too")
     page.keyboard.press("Escape")
     print(f"{name}: selecting {picked} marked its phase and its thread's row")
 
