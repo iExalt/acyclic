@@ -18,6 +18,8 @@ const placed: Placed = {
   width: 100,
   height: 100,
   laidOut: [],
+  routes: new Map(),
+  redundant: new Set(),
   nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }])),
 };
 const threadOf = (id: string) => model.items.get(id)?.thread ?? null;
@@ -31,6 +33,44 @@ describe("scene", () => {
       ["a->b", false],
       ["a->c", true],
     ]);
+  });
+
+  it("draws a link another way implies only for its ends or its thread, and a routed link along its route", () => {
+    const chain = buildModel([
+      item("top"),
+      item("a", "top", [], { thread: "t" }),
+      item("b", "top", ["a"]),
+      item("d", "top", ["a", "b"], { thread: "t" }),
+    ]);
+    const open = visible(chain, { collapsed: new Set(), showArchived: false });
+    const at = new Map(open.nodes.map((node, i) => [node.id, { x: 0, y: i * 100, width: 10, height: 10 }]));
+    const routed: Placed = {
+      ...placed,
+      nodes: at,
+      redundant: new Set(["a->d"]),
+      routes: new Map([
+        [
+          "a->b",
+          [
+            { x: 5, y: 110 },
+            { x: 5, y: 200 },
+          ],
+        ],
+      ]),
+    };
+    const thread = (id: string) => chain.items.get(id)?.thread ?? null;
+    const none = scene(open, routed, { item: null, thread: null }, thread);
+    expect(none.edges.map((edge) => [edge.id, edge.route?.weights ?? null])).toEqual([
+      ["a->b", "0.5"],
+      ["b->d", null],
+    ]);
+    const picked = scene(open, routed, { item: "d", thread: "u" }, thread);
+    expect(picked.edges.find((edge) => edge.id === "a->d")).toMatchObject({
+      implied: true,
+      crossing: false,
+      route: null,
+    });
+    expect(scene(open, routed, { item: null, thread: "t" }, thread).edges.map((edge) => edge.id)).toContain("a->d");
   });
 
   it("draws the lit thread's links as its route, across boxes too, and dims the rest", () => {

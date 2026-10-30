@@ -9,6 +9,7 @@ import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
 import { type BoxInput, type BoxLayout, type LayBox, LEAF, ROOT, type Size } from "./layout";
+import type { Point } from "./route";
 
 /** A box's padding, the space between its children, and the wider gap between its graph and the tasks aside. */
 const PAD = 12;
@@ -20,6 +21,8 @@ const LAYERED = {
   "elk.direction": "DOWN",
   "elk.layered.spacing.nodeNodeBetweenLayers": "40",
   "elk.spacing.nodeNode": String(GAP),
+  // Each link gets its own way out of its node, so links leaving one node can be told apart.
+  "elk.layered.mergeEdges": "false",
   // Room at the top for the box's title strip.
   "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
@@ -80,6 +83,7 @@ export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string
   const share = Math.ceil(unlinked.length / stack(unlinked, cap, Infinity, 0, 0).columns);
   const placed = stack(unlinked, cap, share, graph === null ? PAD : graph.width - PAD + ASIDE, STRIP);
   return {
+    ...graph,
     width: placed.right + PAD,
     height: Math.max(graph?.height ?? 0, placed.bottom + PAD),
     at: { ...graph?.at, ...placed.at },
@@ -127,6 +131,7 @@ export function elkLayBox(engine: Engine): LayBox {
               children: [...size.values()].filter((child) => linked.has(child.id)),
               edges: input.edges.map((edge, i) => ({ id: `e${i}`, sources: [edge.source], targets: [edge.target] })),
             }),
+            input.edges,
           );
     return beside(
       graph,
@@ -135,8 +140,15 @@ export function elkLayBox(engine: Engine): LayBox {
   };
 }
 
-function laid(out: ElkNode): BoxLayout {
+function laid(out: ElkNode, edges: readonly { source: string; target: string }[] = []): BoxLayout {
   const at: Record<string, { x: number; y: number }> = {};
   for (const child of out.children ?? []) at[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
-  return { width: out.width ?? 0, height: out.height ?? 0, at };
+  const routes: Record<string, Point[]> = {};
+  for (const edge of out.edges ?? []) {
+    const section = edge.sections?.[0];
+    const link = edges[Number(edge.id.slice(1))];
+    if (section === undefined || link === undefined || edge.sections?.length !== 1) continue;
+    routes[`${link.source}->${link.target}`] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
+  }
+  return { width: out.width ?? 0, height: out.height ?? 0, at, ...(edges.length === 0 ? {} : { routes }) };
 }

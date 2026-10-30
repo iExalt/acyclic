@@ -47,8 +47,14 @@ export function elementsOf(scene: Scene, colour: string | undefined, lines: Read
         // A link across boxes is drawn over everything: it is drawn only for the selected item or the lit thread, to
         // be seen.
         z: edge.crossing ? 1000 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
+        ...edge.route,
       },
-      classes: [edge.crossing ? "crossing" : "", edge.lit ? "lit" : "", edge.dim ? "dim" : ""].join(" "),
+      classes: [
+        edge.crossing ? "crossing" : "",
+        edge.route === null ? "" : "routed",
+        edge.lit ? "lit" : "",
+        edge.dim ? "dim" : "",
+      ].join(" "),
     })),
   ];
 }

@@ -144,6 +144,20 @@ export const STYLE: cytoscape.StylesheetJson = [
       "z-index": (edge: cytoscape.EdgeSingular) => edge.data("z") as number,
     },
   },
+  // A link inside a box follows the way the layout routed around the box's other nodes, in right angles.
+  {
+    selector: "edge.routed",
+    style: {
+      "curve-style": "segments",
+      // Bends are placed from the ends the layout gave; Cytoscape's types don't list this value, which it has had since
+      // 3.25.
+      "edge-distances": "endpoints" as "node-position",
+      "source-endpoint": (edge: cytoscape.EdgeSingular) => edge.data("sourceEndpoint") as string,
+      "target-endpoint": (edge: cytoscape.EdgeSingular) => edge.data("targetEndpoint") as string,
+      "segment-weights": (edge: cytoscape.EdgeSingular) => edge.data("weights") as string,
+      "segment-distances": (edge: cytoscape.EdgeSingular) => edge.data("distances") as string,
+    },
+  },
   {
     selector: "edge.crossing",
     style: { "line-style": "dashed", "line-color": TOKENS.signal, "target-arrow-color": TOKENS.signal },

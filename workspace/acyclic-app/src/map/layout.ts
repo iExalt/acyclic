@@ -6,6 +6,7 @@
 
 import { natural } from "../natural";
 import type { Kind, View } from "./model";
+import type { Point } from "./route";
 
 /** The scope above the top-level items. */
 export const ROOT = "";
@@ -26,18 +27,22 @@ export interface BoxInput {
   aspect?: number;
 }
 
-/** A box's layout: its size, and where each child sits within it. */
+/** A box's layout: its size, where each child sits within it, and the route of each link between its children. */
 export interface BoxLayout extends Size {
   at: Record<string, { x: number; y: number }>;
+  /** By `source->target`, from the source's border to the target's; none for a link the engine didn't route. */
+  routes?: Record<string, Point[]>;
 }
 
 export type LayBox = (input: BoxInput) => Promise<BoxLayout>;
 
-/** Each box's children and the edges among them, lifted to that box. */
+/** Each box's children and the edges among them, lifted to that box, less those `redundant`. */
 export interface Scopes {
   kids: Map<string, string[]>;
   edges: Map<string, { source: string; target: string }[]>;
   kind: Map<string, Kind>;
+  /** Links between two tasks that a longer way through tasks in the same box already implies, by `source->target`. */
+  redundant: Set<string>;
 }
 
 export function scopes(view: View): Scopes {
@@ -66,17 +71,49 @@ export function scopes(view: View): Scopes {
     sets.set(box, set);
   }
   const edges = new Map<string, { source: string; target: string }[]>();
+  const redundant = new Set<string>();
   for (const [box, set] of sets) {
+    const all = [...set].sort().map((key) => {
+      const [source = "", target = ""] = key.split("\u0000");
+      return { source, target };
+    });
+    const implied = impliedOf(all, (id) => kind.get(id) === "leaf");
+    for (const key of implied) redundant.add(key);
     edges.set(
       box,
-      [...set].sort().map((key) => {
-        const [source = "", target = ""] = key.split("\u0000");
-        return { source, target };
-      }),
+      all.filter((edge) => !implied.has(`${edge.source}->${edge.target}`)),
     );
   }
   for (const list of kids.values()) list.sort(natural);
-  return { kids, edges, kind };
+  return { kids, edges, kind, redundant };
+}
+
+/**
+ * The links among one box's children that another way implies: a link between two tasks is implied when the target
+ * can be reached from the source by a longer way through tasks alone. A way through a box or a collapsed box implies
+ * nothing, since a link to it and one from it may join different items inside. By `source->target`.
+ */
+export function impliedOf(edges: readonly { source: string; target: string }[], leaf: (id: string) => boolean) {
+  const next = new Map<string, string[]>();
+  for (const edge of edges)
+    if (leaf(edge.source) && leaf(edge.target)) next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
+  const implied = new Set<string>();
+  for (const [source, targets] of next)
+    for (const target of targets) {
+      const seen = new Set<string>([source]);
+      const stack = targets.filter((one) => one !== target);
+      let found = false;
+      while (!found && stack.length > 0) {
+        const at = stack.pop() ?? "";
+        if (at === target) found = true;
+        else if (!seen.has(at)) {
+          seen.add(at);
+          stack.push(...(next.get(at) ?? []));
+        }
+      }
+      if (found) implied.add(`${source}->${target}`);
+    }
+  return implied;
 }
 
 /** The lowest box holding both ends of an edge, and the children of that box that hold each end. */
@@ -132,6 +169,10 @@ export class LayoutCache {
 /** Where every visible node sits, in the view's own coordinates, and the whole drawing's size. */
 export interface Placed extends Size {
   nodes: Map<string, { x: number; y: number } & Size>;
+  /** Each routed link's way, by `source->target`, in the same coordinates. */
+  routes: Map<string, Point[]>;
+  /** The links between tasks in one box that a longer way through them implies, drawn only when asked for. */
+  redundant: ReadonlySet<string>;
   /** The boxes laid out afresh for this view, rather than found in the cache. */
   laidOut: string[];
 }
@@ -189,9 +230,15 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
   }
   const root = boxes.get(ROOT) ?? { width: 0, height: 0, at: {} };
   const nodes = new Map<string, { x: number; y: number } & Size>();
+  const routes = new Map<string, Point[]>();
   const absolute = (id: string, ox: number, oy: number) => {
     const box = boxes.get(id);
     if (box === undefined) return;
+    for (const [key, way] of Object.entries(box.routes ?? {}))
+      routes.set(
+        key,
+        way.map((point) => ({ x: ox + point.x, y: oy + point.y })),
+      );
     for (const child of scope.kids.get(id) ?? []) {
       const at = box.at[child] ?? { x: 0, y: 0 };
       const x = ox + at.x;
@@ -201,5 +248,5 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
     }
   };
   absolute(ROOT, 0, 0);
-  return { width: root.width, height: root.height, nodes, laidOut };
+  return { width: root.width, height: root.height, nodes, routes, redundant: scope.redundant, laidOut };
 }
