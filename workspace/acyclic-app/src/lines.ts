@@ -60,9 +60,12 @@ export function lineColour(at: number): string {
 const INKS = [TOKENS.ground, "#ffffff"] as const;
 
 export interface Line {
-  /** The thread's own number, from its title, or null when it has none: a position in a list isn't a name. */
+  /**
+   * The thread's number, from its id, or null when its id has none. Two clones can give threads the same number, so
+   * while they clash each badge also carries its clone's initial, such as "32m".
+   */
   number: string | null;
-  /** The title without the number it starts with. */
+  /** The title, without a number it starts with that is the thread's own. */
   name: string;
   colour: string;
   /** The badge's text colour, whichever of the two reads better on `colour`. */
@@ -70,28 +73,60 @@ export interface Line {
 }
 
 /**
- * "Thread 7: Build it" and "7. Build it" both start with the line's number; "2.8 Draw the Map" starts with a step's,
- * which isn't one, and "Thread 7 Build it", without a separator, has none either.
+ * The tracker's thread ids: `thread-<n>`, or `thread-<clone>-<n>` for one a clone assigned, where the clone's id may
+ * hold dashes itself.
+ */
+const ID = /^thread-(?:([a-z0-9-]+)-)?(\d+)$/;
+
+/**
+ * A number a title starts with, from before threads took theirs from their ids: "7. Build it" or "Thread 7: Build
+ * it". "2.8 Draw the Map" starts with a step's, which isn't one.
  */
 const NUMBERED = /^\s*(?:thread\s+)?(\d+)\s*[.:](?!\d)\s*/i;
 
-/**
- * The line for a thread: coloured by its number, so colours hold still as threads come and go, else by its id. Its
- * number is shown as written, so "07" and "7" stay two badges. A title that is only a number, such as "Thread 7:",
- * keeps its colour but has no name to put beside the number, so it is named by its title, with a dot for a badge.
- */
-export function lineOf(thread: Thread): Line {
-  const numbered = NUMBERED.exec(thread.title);
-  const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
-  const number = rest === "" ? null : (numbered?.[1] ?? null);
-  const at = numbered?.[1] === undefined ? hash(thread.id) : Number(numbered[1]);
-  const colour = lineColour(at);
-  return { number, name: number === null ? thread.title : rest, colour, ink: inkOn(colour) };
+/** A thread's number and clone, from its id. */
+function parts(id: string): { number: number; clone: string | null } | null {
+  const found = ID.exec(id);
+  return found === null ? null : { number: Number(found[2]), clone: found[1] ?? null };
 }
 
-/** Each thread's line, by id. */
+/**
+ * The line for a thread: numbered and coloured by the number its id ends in, so colours hold still as threads come
+ * and go, else coloured by its id and badged with a dot. A title that starts with that same number has it taken off
+ * its name, so the number shows once.
+ */
+export function lineOf(thread: Thread, clone = ""): Line {
+  const own = parts(thread.id);
+  const numbered = NUMBERED.exec(thread.title);
+  const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
+  const name = own !== null && rest !== "" && Number(numbered?.[1]) === own.number ? rest : thread.title;
+  const colour = lineColour(own === null ? hash(thread.id) : own.number);
+  return { number: own === null ? null : `${own.number}${clone}`, name, colour, ink: inkOn(colour) };
+}
+
+/**
+ * Each thread's line, by id. Threads whose numbers clash are told apart by their clones' initials, or by their whole
+ * clone ids when two initials match; an older id, with no clone, keeps its bare number.
+ */
 export function linesOf(threads: Thread[]): Map<string, Line> {
-  return new Map(threads.map((thread) => [thread.id, lineOf(thread)]));
+  const owned = threads.map((thread) => ({ thread, own: parts(thread.id) }));
+  const sharing = (number: number) => owned.filter(({ own }) => own?.number === number);
+  return new Map(
+    owned.map(({ thread, own }) => {
+      const others = own === null ? [] : sharing(own.number);
+      if (own?.clone == null || others.length < 2) return [thread.id, lineOf(thread)];
+      const initial = own.clone.slice(0, 1);
+      const alike = others.filter((one) => one.own?.clone?.slice(0, 1) === initial).length;
+      return [thread.id, lineOf(thread, alike > 1 ? own.clone : initial)];
+    }),
+  );
+}
+
+/** Threads in the order they are listed: by number, then by title, with those without a number last. */
+export function byNumber(a: Thread, b: Thread): number {
+  const [x, y] = [parts(a.id)?.number ?? null, parts(b.id)?.number ?? null];
+  if (x !== y) return x === null ? 1 : y === null ? -1 : x - y;
+  return a.title.localeCompare(b.title, undefined, { numeric: true });
 }
 
 /** The ink with the higher contrast on `colour`. */

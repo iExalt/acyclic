@@ -21,7 +21,7 @@ import {
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
-import { linesOf } from "./lines";
+import { byNumber, linesOf } from "./lines";
 import { Menu } from "./Menu";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
@@ -33,9 +33,6 @@ import { ThreadPanel } from "./ThreadPanel";
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
 const mapModule = import("./map/PlanMap");
 const PlanMap = lazy(() => mapModule);
-
-/** Titles in reading order, so "Thread 2" comes before "Thread 10". */
-const byTitle = (a: Thread, b: Thread) => a.title.localeCompare(b.title, undefined, { numeric: true });
 
 type Load =
   | { state: "loading" }
@@ -136,7 +133,7 @@ export function App() {
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
   );
-  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byTitle)), [loaded]);
+  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byNumber)), [loaded]);
   const lines = useMemo(() => linesOf(sorted), [sorted]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);

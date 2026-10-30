@@ -49,42 +49,45 @@ describe("needView", () => {
 
   it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {
     const lines = linesOf([
-      { id: "t3", title: "3. Ship it now" },
-      { id: "t7", title: "7. Build it" },
+      { id: "thread-3", title: "3. Ship it now" },
+      { id: "thread-7", title: "7. Build it" },
     ]);
     const waiting = (id: string, title: string) =>
       needView({ kind: "awaiting-approval", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
-    expect(waiting("t3", "3. Ship it")).toMatchObject({
+    expect(waiting("thread-3", "3. Ship it")).toMatchObject({
       text: "Ship it now waits for your approval",
-      line: lines.get("t3"),
-      thread: "t3",
+      line: lines.get("thread-3"),
+      thread: "thread-3",
       threads: [],
     });
     // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
-    expect(waiting("t9", "9. Gone")).toMatchObject({
+    expect(waiting("thread-9", "9. Gone")).toMatchObject({
       text: "9. Gone waits for your approval",
       line: undefined,
       thread: null,
-      threads: [{ id: "t9", title: "9. Gone" }],
+      threads: [{ id: "thread-9", title: "9. Gone" }],
     });
-    expect(threadLabel({ id: "t9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
-    expect(threadLabel({ id: "t3", title: "3. Ship it" }, lines)).toEqual({
-      line: lines.get("t3"),
+    expect(threadLabel({ id: "thread-9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
+    expect(threadLabel({ id: "thread-3", title: "3. Ship it" }, lines)).toEqual({
+      line: lines.get("thread-3"),
       text: "Ship it now",
     });
     // Text that doesn't name its thread has no badge: the thread's row below already shows it.
     const ask = needView(
-      { kind: "question", id: "q", thread: { id: "t7", title: "7. Build it" }, text: "Which?" },
+      { kind: "question", id: "q", thread: { id: "thread-7", title: "7. Build it" }, text: "Which?" },
       lines,
     );
-    expect(ask).toMatchObject({ line: undefined, thread: null, threads: [{ id: "t7", title: "7. Build it" }] });
+    expect(ask).toMatchObject({ line: undefined, thread: null, threads: [{ id: "thread-7", title: "7. Build it" }] });
     const clash = needView(
       {
         kind: "resource-clash",
         resource: "gpu",
-        holders: [{ thread: { id: "t3", title: "3. Ship it now" } }, { thread: { id: "t7", title: "7. Build it" } }],
+        holders: [
+          { thread: { id: "thread-3", title: "3. Ship it now" } },
+          { thread: { id: "thread-7", title: "7. Build it" } },
+        ],
       },
       lines,
     );

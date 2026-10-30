@@ -337,9 +337,9 @@ impl Generator {
         for (thread, run) in members.iter_mut().enumerate() {
             run.sort_unstable();
             let repositories = if thread < extras { vec!["site".to_owned()] } else { Vec::new() };
-            let title = format!("Thread {thread}: {}", self.title());
+            let title = self.title();
             self.import.threads.push(Thread {
-                key: format!("t{thread}"),
+                key: format!("thread-{thread}"),
                 title,
                 brief: Some("A synthetic thread.".to_owned()),
                 items: run.iter().map(|&i| format!("i{i}")).collect(),
@@ -520,7 +520,7 @@ mod tests {
     fn a_seed_gives_the_same_plan_everywhere() {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_569, 18_360_276_869_490_170_492));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_474, 1_642_810_862_526_216_147));
     }
 
     #[test]

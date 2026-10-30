@@ -1,38 +1,60 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { contrast, inkOn, lineColour, lineOf, linesOf, TOKENS } from "./lines";
+import { byNumber, contrast, inkOn, lineColour, lineOf, linesOf, TOKENS } from "./lines";
 
 /** Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has. */
 const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at));
 
 describe("lineOf", () => {
-  it("takes the number a title starts with, in either style, and leaves the rest as the name", () => {
-    expect(lineOf({ id: "a", title: "Thread 7: Build it" })).toMatchObject({ number: "7", name: "Build it" });
-    expect(lineOf({ id: "b", title: "28. Phone checks" })).toMatchObject({ number: "28", name: "Phone checks" });
-    expect(lineOf({ id: "c", title: "7" })).toMatchObject({ number: null, name: "7" });
-    expect(lineOf({ id: "d", title: "2.8 Draw the Map" })).toMatchObject({ number: null, name: "2.8 Draw the Map" });
+  it("numbers a thread by its id, and takes the same number off the front of its title", () => {
+    expect(lineOf({ id: "thread-27", title: "Tracker-assigned ids" })).toMatchObject({
+      number: "27",
+      name: "Tracker-assigned ids",
+    });
+    expect(lineOf({ id: "thread-28", title: "28. Phone checks" })).toMatchObject({
+      number: "28",
+      name: "Phone checks",
+    });
+    expect(lineOf({ id: "thread-mac-3fa9c1-32", title: "Beds" })).toMatchObject({ number: "32", name: "Beds" });
+    expect(lineOf({ id: "thread-007", title: "Deploy" })).toMatchObject({ number: "7" });
+    // A number in the title that isn't the thread's own stays in its name.
+    expect(lineOf({ id: "thread-5", title: "2.8 Draw the Map" })).toMatchObject({ name: "2.8 Draw the Map" });
+    expect(lineOf({ id: "thread-5", title: "7. Build it" })).toMatchObject({ number: "5", name: "7. Build it" });
   });
 
-  it("shows a number once, as written, and colours by it even when it is the whole title", () => {
-    const seven = lineOf({ id: "d", title: "7. Build it" }).colour;
-    expect(lineOf({ id: "a", title: "Thread 7:" })).toMatchObject({ number: null, name: "Thread 7:", colour: seven });
-    expect(lineOf({ id: "b", title: "7. " })).toMatchObject({ number: null, name: "7. ", colour: seven });
-    expect(lineOf({ id: "c", title: "07. Deploy" })).toMatchObject({ number: "07", name: "Deploy", colour: seven });
-    expect(lineOf({ id: "e", title: "0. Start" })).toMatchObject({ number: "0", name: "Start" });
-  });
-
-  it("gives a thread without a number no number, and a colour from its id that holds as threads come and go", () => {
-    const loose = { id: "thread-errands", title: "Errands" };
+  it("gives a thread whose id has no number a dot, and a colour from its id that holds as threads come and go", () => {
+    const loose = { id: "errands", title: "3. Errands" };
     const alone = linesOf([loose]).get(loose.id);
-    const among = linesOf([{ id: "x", title: "1. First" }, loose, { id: "y", title: "Other" }]).get(loose.id);
-    expect(alone).toMatchObject({ number: null, name: "Errands" });
+    const among = linesOf([{ id: "thread-1", title: "First" }, loose, { id: "y", title: "Other" }]).get(loose.id);
+    expect(alone).toMatchObject({ number: null, name: "3. Errands" });
     expect(among).toEqual(alone);
   });
 
-  it("colours by number, so the same number is the same line whatever the id", () => {
-    expect(lineOf({ id: "a", title: "3. One" }).colour).toBe(lineOf({ id: "b", title: "Thread 3: Two" }).colour);
-    expect(lineOf({ id: "a", title: "3. One" }).colour).not.toBe(lineOf({ id: "a", title: "4. One" }).colour);
+  it("colours by number, so the same number is the same colour whichever clone gave it", () => {
+    expect(lineOf({ id: "thread-3", title: "One" }).colour).toBe(lineOf({ id: "thread-pi-3", title: "Two" }).colour);
+    expect(lineOf({ id: "thread-3", title: "One" }).colour).not.toBe(lineOf({ id: "thread-4", title: "One" }).colour);
+  });
+
+  it("tells clashing numbers apart by clone, by initial unless two clones share one", () => {
+    const numbers = (ids: string[]) =>
+      [...linesOf(ids.map((id) => ({ id, title: id }))).values()].map((line) => line.number);
+    expect(numbers(["thread-mac-32", "thread-pi-32", "thread-mac-33"])).toEqual(["32m", "32p", "33"]);
+    expect(numbers(["thread-27", "thread-x-27"])).toEqual(["27", "27x"]);
+    expect(numbers(["thread-mac-9", "thread-mac-3fa9c1-9"])).toEqual(["9mac", "9mac-3fa9c1"]);
+  });
+});
+
+describe("byNumber", () => {
+  it("lists threads by number, then by title, with those without a number last", () => {
+    const threads = ["thread-mac-32", "loose", "thread-10", "thread-9", "another"].map((id) => ({ id, title: id }));
+    expect(threads.sort(byNumber).map((one) => one.id)).toEqual([
+      "thread-9",
+      "thread-10",
+      "thread-mac-32",
+      "another",
+      "loose",
+    ]);
   });
 });
 
