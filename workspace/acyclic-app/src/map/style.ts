@@ -72,6 +72,8 @@ export const STYLE: cytoscape.StylesheetJson = [
       "background-position-y": CHEVRON_DOWN,
     },
   },
+  // A box's title alone, with no counts under it, sits half a line lower: in the middle of the strip.
+  { selector: "node.box.one-line", style: { "text-margin-y": STRIP / 2 + 8 } },
   // A task's marks, its thread's stripe and badge and its stage's icon, with its title between them.
   {
     selector: "node.leaf",

@@ -34,6 +34,7 @@ export function elementsOf(scene: Scene, colour: string | undefined, lines: Read
         node.selected ? "selected" : "",
         node.archived ? "archived" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
+        node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",
       ].join(" "),
     })),
     ...scene.edges.map((edge) => ({

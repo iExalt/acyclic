@@ -1,9 +1,10 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { describe, expect, it } from "vitest";
-import { dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
+import { STRIP } from "./chevron";
+import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
 import { item } from "./fixture";
-import { type LayBox, LayoutCache, place, ROOT, scopes, withinOneBox } from "./layout";
+import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
 
 /**
@@ -184,6 +185,57 @@ describe("elkLayBox", () => {
       { source: "b", target: "a" },
     ];
     expect(dependencyOrder({ id: ROOT, children, edges })).toEqual(["a", "b"]);
+  });
+});
+
+describe("beside", () => {
+  const tasks = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${i}`, ...LEAF }));
+  const columns = (layout: { at: Record<string, { x: number; y: number }> }) =>
+    new Set(Object.values(layout.at).map((at) => at.x)).size;
+
+  it("leaves a box with every child linked as its graph lays it out", () => {
+    const graph = { width: 224, height: 200, at: { a: { x: 12, y: STRIP } } };
+    expect(beside(graph, [])).toBe(graph);
+  });
+
+  it("stands the unlinked beside the graph, in columns as tall as it, after a wider gap", () => {
+    // A graph of three layers holds three tasks a column; five more take two columns.
+    const graph = { width: 224, height: STRIP + 3 * 48 + 2 * 40 + 12, at: { a: { x: 12, y: STRIP } } };
+    const out = beside(graph, tasks(5));
+    expect(out.at.a).toEqual({ x: 12, y: STRIP });
+    expect(out.at.t0).toEqual({ x: 224 - 12 + 40, y: STRIP });
+    expect(out.at.t3).toEqual({ x: 224 - 12 + 40 + 200 + 24, y: STRIP });
+    expect(out.width).toBe(224 - 12 + 40 + 2 * 200 + 24 + 12);
+    expect(out.height).toBe(graph.height);
+  });
+
+  it("grids a box with nothing linked about as many tasks tall as wide, and grows past a short graph", () => {
+    const alone = beside(null, tasks(9));
+    expect(columns(alone)).toBe(3);
+    expect(alone.height).toBe(STRIP + 3 * 48 + 2 * 24 + 12);
+    expect(columns(beside(null, tasks(10)))).toBe(3);
+    // A graph of one layer is shorter than four tasks' grid, so the column takes the grid's height and the box grows.
+    const flat = beside({ width: 224, height: STRIP + 48 + 12, at: {} }, tasks(4));
+    expect(columns(flat)).toBe(2);
+    expect(flat.height).toBe(STRIP + 2 * 48 + 24 + 12);
+  });
+
+  it("shares the unlinked evenly among the columns they take, leaving none nearly empty", () => {
+    // Four fit beside this graph, so nine take three columns: three each, not four, four and one.
+    const graph = { width: 224, height: STRIP + 4 * 48 + 3 * 24 + 12, at: {} };
+    const out = beside(graph, tasks(9));
+    const xs = Object.values(out.at).map((at) => at.x);
+    expect([...new Set(xs)].map((x) => xs.filter((one) => one === x).length)).toEqual([3, 3, 3]);
+  });
+
+  it("makes each column as wide as its widest child", () => {
+    const out = beside(null, [
+      { id: "box", width: 500, height: 300 },
+      { id: "a", ...LEAF },
+      { id: "b", ...LEAF },
+    ]);
+    expect(out.at.a).toEqual({ x: 12 + 500 + 24, y: STRIP });
+    expect(out.width).toBe(12 + 500 + 24 + 200 + 12);
   });
 });
 

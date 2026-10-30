@@ -1,4 +1,6 @@
-// ELK as the Map's layout engine, one box at a time. Inside a box, children are layered top to bottom by their links.
+// ELK as the Map's layout engine, one box at a time. Inside a box, children are layered top to bottom by their links,
+// and those with no link in the box stand aside in columns, since they can start any time and would only widen the
+// graph's first layer.
 // The top level is packed into rows instead: there the children are the plan's largest boxes, layering them stacks
 // them in a tall diagonal strip, and its links all run between items inside them, which the Map draws only for the
 // selection anyway. Packing keeps only the order it is given, so the top level's boxes are given in dependency order.
@@ -6,15 +8,20 @@
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
-import { type BoxInput, type LayBox, ROOT } from "./layout";
+import { type BoxInput, type BoxLayout, type LayBox, LEAF, ROOT, type Size } from "./layout";
+
+/** A box's padding, the space between its children, and the wider gap between its graph and the tasks aside. */
+const PAD = 12;
+const GAP = 24;
+const ASIDE = 40;
 
 const LAYERED = {
   "elk.algorithm": "layered",
   "elk.direction": "DOWN",
   "elk.layered.spacing.nodeNodeBetweenLayers": "40",
-  "elk.spacing.nodeNode": "24",
+  "elk.spacing.nodeNode": String(GAP),
   // Room at the top for the box's title strip.
-  "elk.padding": `[top=${STRIP},left=12,bottom=12,right=12]`,
+  "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
 
 const PACKED = {
@@ -59,26 +66,77 @@ export function dependencyOrder(input: BoxInput): string[] {
   return order;
 }
 
+/**
+ * A box's layout with its unlinked children aside: the graph as ELK laid it out, or none when nothing in the box is
+ * linked, then the unlinked in order in columns to its right. A column holds as many as fit the graph's height, or a
+ * near-square grid's when that is taller, so a box of only unlinked tasks is about as tall as it is wide in tasks.
+ */
+export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string } & Size)[]): BoxLayout {
+  const empty = { width: 2 * PAD, height: STRIP + PAD, at: {} };
+  if (unlinked.length === 0) return graph ?? empty;
+  const inner = graph === null ? 0 : graph.height - STRIP - PAD;
+  const cap = Math.max(inner, Math.ceil(Math.sqrt(unlinked.length)) * (LEAF.height + GAP) - GAP);
+  // Filled to the cap, the last column could hold one; so the columns that takes share the children evenly.
+  const share = Math.ceil(unlinked.length / stack(unlinked, cap, Infinity, 0, 0).columns);
+  const placed = stack(unlinked, cap, share, graph === null ? PAD : graph.width - PAD + ASIDE, STRIP);
+  return {
+    width: placed.right + PAD,
+    height: Math.max(graph?.height ?? 0, placed.bottom + PAD),
+    at: { ...graph?.at, ...placed.at },
+  };
+}
+
+/** Children in columns from (`left`, `top`), each column no taller than `cap` unless one child is, and at most `share`. */
+function stack(children: readonly ({ id: string } & Size)[], cap: number, share: number, left: number, top: number) {
+  const at: Record<string, { x: number; y: number }> = {};
+  let [x, y, column, count, columns, bottom] = [left, top, 0, 0, 1, top];
+  for (const child of children) {
+    if (count > 0 && (count === share || y + child.height > top + cap)) {
+      [x, y, column, count] = [x + column + GAP, top, 0, 0];
+      columns += 1;
+    }
+    at[child.id] = { x, y };
+    column = Math.max(column, child.width);
+    bottom = Math.max(bottom, y + child.height);
+    y += child.height + GAP;
+    count += 1;
+  }
+  return { at, columns, right: x + column, bottom };
+}
+
 export function elkLayBox(engine: Engine): LayBox {
   return async (input) => {
-    const root = input.id === ROOT;
-    const size = new Map(input.children.map((child) => [child.id, child]));
-    const children = (root ? dependencyOrder(input) : input.children.map((child) => child.id)).map((id) => ({
-      id,
-      width: size.get(id)?.width ?? 0,
-      height: size.get(id)?.height ?? 0,
-    }));
-    const graph: ElkNode = {
-      id: root ? "root" : input.id,
-      layoutOptions: root ? { ...PACKED, "elk.aspectRatio": String(input.aspect ?? PORTRAIT) } : LAYERED,
-      children,
-      edges: root
-        ? []
-        : input.edges.map((edge, i) => ({ id: `e${i}`, sources: [edge.source], targets: [edge.target] })),
-    };
-    const out = await engine.layout(graph);
-    const at: Record<string, { x: number; y: number }> = {};
-    for (const child of out.children ?? []) at[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
-    return { width: out.width ?? 0, height: out.height ?? 0, at };
+    const size = new Map(input.children.map(({ id, width, height }) => [id, { id, width, height }]));
+    if (input.id === ROOT)
+      return laid(
+        await engine.layout({
+          id: "root",
+          layoutOptions: { ...PACKED, "elk.aspectRatio": String(input.aspect ?? PORTRAIT) },
+          children: dependencyOrder(input).flatMap((id) => size.get(id) ?? []),
+          edges: [],
+        }),
+      );
+    const linked = new Set(input.edges.flatMap((edge) => [edge.source, edge.target]));
+    const graph =
+      linked.size === 0
+        ? null
+        : laid(
+            await engine.layout({
+              id: input.id,
+              layoutOptions: LAYERED,
+              children: [...size.values()].filter((child) => linked.has(child.id)),
+              edges: input.edges.map((edge, i) => ({ id: `e${i}`, sources: [edge.source], targets: [edge.target] })),
+            }),
+          );
+    return beside(
+      graph,
+      input.children.filter((child) => !linked.has(child.id)),
+    );
   };
+}
+
+function laid(out: ElkNode): BoxLayout {
+  const at: Record<string, { x: number; y: number }> = {};
+  for (const child of out.children ?? []) at[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+  return { width: out.width ?? 0, height: out.height ?? 0, at };
 }
