@@ -133,6 +133,20 @@ def wait_drawn(page, nodes, timeout=20_000):
     return page.get_by_test_id("map").evaluate("m => ({ ...m.dataset })")
 
 
+def pick_thread(page, plan, thread):
+    """Picks a thread from the outline as a hand would: on a phone from the phases' sheet, opening phases one by one
+    until a row of it shows, unless it is among the threads in no phase. Returns the row picked."""
+    if page.get_by_test_id("phases-button").count():
+        page.get_by_test_id("phases-button").click()
+        page.get_by_test_id("phases").wait_for()
+    rows = page.locator(f"[data-thread='{thread}']")
+    closed = page.locator("[data-toggle-phase][aria-expanded=false]")
+    while rows.count() == 0 and closed.count():
+        closed.first.click()
+    rows.first.click()
+    return rows.first
+
+
 def from_menu(page, act):
     """Does `act` in the bar's menu, opening it first, as a hand would. Acting closes the menu, so the next tap reaches
     what it lands on rather than only closing the menu."""
@@ -460,7 +474,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
     page.get_by_test_id("map").evaluate(
         "m => { m.cy.pan({ x: 2 * m.clientWidth, y: 2 * m.clientHeight }); }"
     )
-    page.locator(f"[data-thread='{thread}']").click()
+    pick_thread(page, plan, thread)
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=map]').dataset.lit) === n",
         arg=plan.lit(thread),
@@ -481,9 +495,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
         failures.append(f"{name}: picking {thread} left all of its items out of view")
     # Its links are its route, drawn in its line's colour.
     route = page.get_by_test_id("map").evaluate(
-        "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector(`[data-thread='${"
-        + repr(thread)
-        + "}'] .badge`);"
+        "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector('[data-testid=thread-panel] .badge');"
         " return { n: lit.length, said: Number(m.dataset.litEdges),"
         " colours: [...new Set(lit.map(e => e.style('line-color')))], line: badge && getComputedStyle(badge).backgroundColor }; }"
     )
@@ -499,14 +511,16 @@ def map_journey(page, view, plan, name, failures, hint=None):
     if panel.locator("[role=alert]").count():
         failures.append(f"{name}: the thread's panel failed: {panel.inner_text()}")
     page.screenshot(path=SHOTS / f"app-{name}-thread.png")
-    # Escape closes the panel the pick opened, and focus goes back to the thread picked; picked again, it reopens.
-    button = page.locator(f"[data-thread='{thread}']")
+    # Escape closes the panel the pick opened, and focus goes back to the thread picked, where its row is still in
+    # view; picked again, it reopens.
+    button = page.locator(f".threads [data-thread='{thread}']").first
     page.keyboard.press("Escape")
-    if panel.count() or not button.evaluate("b => b === document.activeElement"):
+    back = button.count() == 0 or button.evaluate("b => b === document.activeElement")
+    if panel.count() or not back:
         failures.append(
             f"{name}: Escape left the thread's panel open, or focus away from {thread}"
         )
-    button.click()
+    pick_thread(page, plan, thread)
     panel.wait_for()
     if view.get("has_touch"):
         # A phone's Back closes what's open one layer at a time, and stays in the app: the needs-you list over the
@@ -532,7 +546,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
                 f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app"
             )
         if not panel.count():
-            button.click()
+            pick_thread(page, plan, thread)
         panel.wait_for()
         # Closed in the app, a layer gives its entry back, so the next Back closes what's open then.
         page.get_by_test_id("needs-button").click()
@@ -557,7 +571,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
                 f"{name}: going back two entries didn't close both the needs-you list and the thread's panel"
             )
         if not panel.count():
-            button.click()
+            pick_thread(page, plan, thread)
         panel.wait_for()
     print(
         f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
@@ -567,6 +581,53 @@ def map_journey(page, view, plan, name, failures, hint=None):
 
 # A note as an agent might write one, which must show as text and never run.
 HOSTILE = '<img src=x onerror="window.pwned = true">'
+
+
+def outline_journey(page, view, plan, name, failures):
+    """Selecting an item marks its phase and its thread's row there, opening the phase. On a phone the phases come as a
+    sheet over the item's, and Back closes the sheet first, staying in the app."""
+    picked = next(
+        id for id in sorted(plan.default()) if plan.depth(id) == 1 and plan.items[id]["thread"]
+    )
+    phase, thread = plan.chain(picked)[-1], plan.items[picked]["thread"]
+    centre(page, picked)
+    tap_box(page, view, picked, chevron=False)
+    inspector = page.get_by_test_id("inspector")
+    inspector.wait_for()
+    phone = view.get("has_touch")
+    sheet = page.get_by_test_id("phases")
+    if phone:
+        page.get_by_test_id("phases-button").click()
+        try:
+            sheet.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: the phases' sheet didn't show over {picked}'s")
+            return
+    marked = page.locator(f".phase[aria-current=true] [data-select-phase='{phase}']")
+    row = page.locator(f"[data-thread='{thread}'][data-phase='{phase}'][aria-current=true]")
+    try:
+        # The phase opens itself once the outline has drawn.
+        row.wait_for(timeout=5_000)
+        missed = not marked.count()
+    except PlaywrightTimeout:
+        missed = True
+    if missed:
+        failures.append(f"{name}: selecting {picked} didn't mark phase {phase} and {thread}'s row there")
+    if phone:
+        url = page.url
+        page.go_back()
+        try:
+            sheet.wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back left the phases' sheet open")
+        if page.url != url:
+            failures.append(f"{name}: Back from the phases' sheet left the app")
+        try:
+            inspector.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the phases' sheet closed {picked}'s too")
+    page.keyboard.press("Escape")
+    print(f"{name}: selecting {picked} marked its phase and its thread's row")
 
 
 def item(env, id):
@@ -1225,10 +1286,11 @@ def thread_journey(page, env, plan, thread, name, failures):
     project-management flag and the global level, checking the panel and then the tracker."""
     panel = page.get_by_test_id("thread-panel")
     # Picking a thread already picked unpicks it.
-    pick = page.locator(f"[data-thread='{thread}']")
-    pick.click()
-    if pick.get_attribute("aria-pressed") != "true":
-        pick.click()
+    pick_thread(page, plan, thread)
+    try:
+        panel.wait_for(timeout=3_000)
+    except PlaywrightTimeout:
+        pick_thread(page, plan, thread)
 
     def shown():
         return json.loads(run(env, "thread", "show", thread))["data"][0]
@@ -1363,13 +1425,16 @@ def needs_journey(page, env, plan, thread, name, failures):
         picker.click()
         panel = page.get_by_test_id("thread-panel")
         panel.wait_for(timeout=10_000)
-        if (
-            page.locator(
-                f".threads [data-thread='{picked}'][aria-pressed=true]"
-            ).count()
-            != 1
-        ):
-            failures.append(f"{name}: an entry's text didn't pick {picked}")
+        # The pick shows in the outline, a phase it works in opened to show it: on a phone, in the phases' sheet.
+        sheet = page.get_by_test_id("phases-button")
+        if sheet.count():
+            sheet.click()
+        try:
+            page.locator(f"[data-thread='{picked}'][aria-pressed=true]").first.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: an entry's text didn't pick {picked}, or its row is out of view")
+        if sheet.count():
+            page.get_by_test_id("phases").get_by_role("button", name="Close", exact=True).click()
         panel.get_by_role("button", name="Close").click()
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
@@ -1529,6 +1594,7 @@ def main():
                 installable(context, page, origin, name, failures)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
+                outline_journey(page, view, plan, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:

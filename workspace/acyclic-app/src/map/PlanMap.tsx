@@ -8,6 +8,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
+import { useWide } from "../wide";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
@@ -337,25 +338,15 @@ export default function PlanMap({
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
 }
 
-/** Where the panes sit side by side, as app.css has it. */
-const SIDE_BY_SIDE = "(min-width: 900px)";
-
 /**
  * The top level's shape. Where the panes sit side by side, roughly the Map's own, rounded to a fifth so that resizing
  * a window lays the top level out again only now and then; on a phone, portrait, which a keyboard opening never
  * changes.
  */
 function useAspect(host: RefObject<HTMLDivElement | null>): number | null {
-  const query = useMemo(() => (typeof matchMedia === "undefined" ? null : matchMedia(SIDE_BY_SIDE)), []);
-  const [wide, setWide] = useState(() => query?.matches ?? false);
+  const wide = useWide();
   // Unknown until the Map is measured, so the first layout is the one at its real shape.
   const [shape, setShape] = useState<number | null>(null);
-  useEffect(() => {
-    if (query === null) return;
-    const change = () => setWide(query.matches);
-    query.addEventListener("change", change);
-    return () => query.removeEventListener("change", change);
-  }, [query]);
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
