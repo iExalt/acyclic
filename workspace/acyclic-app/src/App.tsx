@@ -427,6 +427,8 @@ export function App() {
           aria-label={`Review: ${load.needs.length} waiting`}
           onClick={() => {
             setSelected(null);
+            // The phases' sheet shows over the list, so the list it opens would be hidden under it.
+            setShowPhases(false);
             setShowNeeds((was) => !was);
           }}
         >
