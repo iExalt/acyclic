@@ -112,7 +112,8 @@ export default function PlanMap({
     let live = true;
     const start = performance.now();
     if (aspect === null) return;
-    // How many layouts the Map has asked for, so a journey can tell that a first load asks for one.
+    // How many layouts the Map has asked for, so a journey can tell that a first load asks for one; a development
+    // build's StrictMode runs effects twice, and counts two.
     if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
     Promise.all([layouts.layout(view, aspect), fontLoaded]).then(([result]) => {
       if (!live || result === null) return;
