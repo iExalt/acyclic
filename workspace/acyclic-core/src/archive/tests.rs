@@ -75,6 +75,21 @@ fn a_gated_goal_is_eligible_once_done_and_merged() {
 }
 
 #[test]
+fn a_parent_done_by_its_leaves_archives_on_their_merges_and_times() {
+    let mut r = setup();
+    model::set_state(&mut r, "g", ItemState::Backlog, user(2 * DAY)).unwrap();
+    assert_eq!(reasons(&r, "g", 4 * DAY), vec![Reason::Waiting { until: DAY + GATELESS_WAIT }]);
+    done(&mut r, "a", Some("bbbb222"), 4 * DAY);
+    assert_eq!(reasons(&r, "g", 5 * DAY), vec![Reason::Unmerged { item: "a".into() }]);
+    done(&mut r, "a", Some("aaaa111"), 4 * DAY);
+    model::set_state(&mut r, "b", ItemState::InProgress, user(4 * DAY)).unwrap();
+    assert_eq!(
+        reasons(&r, "g", 5 * DAY),
+        vec![Reason::Open { item: "b".into() }, Reason::Open { item: "g".into() }]
+    );
+}
+
+#[test]
 fn open_unmerged_and_depended_on_subtrees_say_why() {
     let mut r = setup();
     model::set(&mut r, &item_key("g").unwrap(), field::GATE, Some(&"ships"), user(2)).unwrap();

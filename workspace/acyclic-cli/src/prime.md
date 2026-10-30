@@ -101,8 +101,9 @@ standard output.
    thread show <thread>` still names you as holder.
 3. `acyclic done <item> --repository <record> --commit <id>` when an item is finished, or `--note` when the result
    isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are done;
-   don't use `--force` to finish someone else's work. Finished items hold no resources. `acyclic release <thread>`
-   once none of its items is left ready.
+   don't use `--force` to finish someone else's work. A parent needs no `done`: its `progress` reads done once every
+   leaf under it is, and work waiting on it waits on those leaves. Finished items hold no resources. `acyclic release
+   <thread>` once none of its items is left ready.
 4. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
    with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
    `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its

@@ -279,6 +279,26 @@ impl Item {
     }
 }
 
+/// A parent's progress, from the leaves under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    /// The state it reads as: its own when parked or done by hand, else done when every leaf under it is finished, in
+    /// progress once any leaf is started or done, and backlog until then.
+    pub state: ItemState,
+    /// Its leaves that are done, archived ones aside.
+    pub done: usize,
+    /// Its leaves, archived ones aside: none when every one is archived, and it then reads as done.
+    pub total: usize,
+}
+
+/// What counting a parent's leaves finds.
+#[derive(Default)]
+struct Tally {
+    done: usize,
+    total: usize,
+    started: bool,
+}
+
 /// A link as read.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
@@ -558,6 +578,60 @@ impl Model {
         }
     }
 
+    /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked or done, set by
+    /// hand; any other is what reopening a child left, and its leaves decide. A parent under it done by hand counts
+    /// every leaf under it as done, so a closed part reads closed from above too.
+    #[must_use]
+    pub fn progress(&self, id: &str) -> Option<Progress> {
+        let item = self.items.get(id)?;
+        if self.children(id).is_empty() {
+            return None;
+        }
+        let mut tally = Tally::default();
+        self.tally(id, &mut BTreeSet::from([id]), &mut tally);
+        let state = if item.state == Value::One(ItemState::Parked) {
+            ItemState::Parked
+        } else if item.is_done() || tally.done == tally.total {
+            ItemState::Done
+        } else if tally.started || tally.done > 0 {
+            ItemState::InProgress
+        } else {
+            ItemState::Backlog
+        };
+        Some(Progress { state, done: tally.done, total: tally.total })
+    }
+
+    /// Counts the leaves under `id`, archived ones aside, each item once, so a parent cycle ends the walk.
+    fn tally<'a>(&'a self, id: &'a str, seen: &mut BTreeSet<&'a str>, tally: &mut Tally) {
+        for child in self.children(id) {
+            if !seen.insert(child) || self.is_archived(child) {
+                continue;
+            }
+            let Some(item) = self.items.get(child) else { continue };
+            if self.children(child).is_empty() {
+                tally.total += 1;
+                tally.done += usize::from(item.is_done());
+                tally.started |= item.state == Value::One(ItemState::InProgress);
+            } else if item.is_done() {
+                let mut closed = Tally::default();
+                self.tally(child, seen, &mut closed);
+                tally.total += closed.total;
+                tally.done += closed.total;
+            } else {
+                self.tally(child, seen, tally);
+            }
+        }
+    }
+
+    /// Whether an item reads as done: a leaf by its own state, a parent by its progress.
+    #[must_use]
+    pub fn reads_done(&self, id: &str) -> bool {
+        match self.progress(id) {
+            Some(progress) => progress.state == ItemState::Done,
+            None => self.items.get(id).is_some_and(Item::is_done),
+        }
+    }
+
     /// Whether an item or any ancestor is an archived subtree's root.
     #[must_use]
     pub fn is_archived(&self, id: &str) -> bool {
@@ -606,7 +680,7 @@ impl Model {
             .runs
             .values()
             .any(|run| run.is_active() && run.thread.all().into_iter().any(|t| t == thread));
-        !members.is_empty() && members.iter().all(|id| self.items[*id].is_done()) && !running
+        !members.is_empty() && members.iter().all(|id| self.reads_done(id)) && !running
     }
 
     /// The repository records naming `owner`/`name`, compared without regard to case as GitHub does: none, one, or
@@ -676,7 +750,7 @@ impl Model {
         let mut open: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for item in self.items.values() {
             if let Some(thread) = item.thread.one()
-                && !item.is_done()
+                && !self.reads_done(&item.id)
                 && !self.is_archived(&item.id)
             {
                 open.entry(thread.as_str()).or_default().push(item.id.as_str());

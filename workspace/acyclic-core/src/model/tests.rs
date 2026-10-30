@@ -284,12 +284,13 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     assert_eq!(heads(&r), ["d"]);
 }
 
-/// Heads as their definition reads, walking every link from each leaf with nothing gathered ahead.
+/// Heads as their definition reads, walking every link from each leaf with nothing gathered ahead. A member parent is
+/// open until it reads as done, by hand or by its leaves.
 fn heads_by_definition<'a>(m: &'a Model, thread: &str) -> Vec<&'a str> {
     let open: Vec<&str> = m
         .members(thread)
         .into_iter()
-        .filter(|id| !m.items[*id].is_done() && !m.is_archived(id))
+        .filter(|id| !m.reads_done(id) && !m.is_archived(id))
         .collect();
     let lift = |id: &'a str| std::iter::once(id).chain(m.ancestors(id));
     let follows_another = |leaf: &'a str| {
@@ -592,4 +593,73 @@ fn a_thread_is_finished_once_gone_or_all_done_with_no_run_under_way() {
     assert!(!model(&r).thread_finished("t1"), "r1 is under way");
     set_run_state(&mut r, "r1", RunState::Done, by(5)).unwrap();
     assert!(model(&r).thread_finished("t1"));
+}
+
+#[test]
+fn a_parent_reads_as_its_leaves_make_it_unless_parked_or_done_by_hand() {
+    let mut r = replica("a");
+    items(&mut r, &["top", "mid", "a", "b", "c", "gone"]);
+    for (child, parent) in
+        [("mid", "top"), ("a", "mid"), ("b", "mid"), ("c", "top"), ("gone", "top")]
+    {
+        set_parent(&mut r, child, Some(parent), by(2)).unwrap();
+    }
+    put(&mut r, &item_key("gone").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
+    let progress = |r: &Replica, id: &str| model(r).progress(id).unwrap();
+    let reads = |state, done, total| Progress { state, done, total };
+    // Leaves count at every depth, archived ones aside, and a leaf has no progress.
+    assert_eq!(progress(&r, "top"), reads(ItemState::Backlog, 0, 3));
+    assert_eq!(model(&r).progress("a"), None);
+    set_state(&mut r, "a", ItemState::InProgress, by(3)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::InProgress, 0, 3));
+    for leaf in ["a", "b", "c"] {
+        set_state(&mut r, leaf, ItemState::Done, by(4)).unwrap();
+    }
+    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 3, 3));
+    assert_eq!(progress(&r, "mid"), reads(ItemState::Done, 2, 2));
+    assert!(model(&r).reads_done("top") && !model(&r).items["top"].is_done());
+    // Reopening a leaf brings its parents back; a state reopening left on a parent counts for nothing.
+    set_state(&mut r, "b", ItemState::InProgress, by(5)).unwrap();
+    set_state(&mut r, "mid", ItemState::InProgress, by(5)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::InProgress, 2, 3));
+    // Parked or done by hand, a parent's own state holds.
+    set_state(&mut r, "top", ItemState::Parked, by(6)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::Parked, 2, 3));
+    set_state(&mut r, "top", ItemState::Done, by(7)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 2, 3));
+    // A part closed by hand reads closed from above, whatever is open under it.
+    set_state(&mut r, "top", ItemState::Backlog, by(7)).unwrap();
+    set_state(&mut r, "mid", ItemState::Done, by(7)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 3, 3));
+    // A parent whose leaves are all archived is done.
+    put(&mut r, &item_key("mid").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
+    put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
+    set_state(&mut r, "top", ItemState::Backlog, by(9)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 0, 0));
+}
+
+#[test]
+fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its_leaves() {
+    let (mut a, mut b) = pair(&["p", "x", "y"]);
+    for replica in [&mut a, &mut b] {
+        set_parent(replica, "x", Some("p"), by(2)).unwrap();
+        set_parent(replica, "y", Some("p"), by(2)).unwrap();
+    }
+    set_state(&mut a, "x", ItemState::Done, by(3)).unwrap();
+    set_state(&mut b, "x", ItemState::Done, by(3)).unwrap();
+    set_state(&mut a, "y", ItemState::Done, by(3)).unwrap();
+    set_state(&mut b, "y", ItemState::Parked, by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert!(model(&a).items["y"].state.is_conflict());
+    assert_eq!(
+        model(&a).progress("p").map(|p| (p.state, p.done)),
+        Some((ItemState::InProgress, 1))
+    );
+    // A parent put in a thread is finished once its leaves are.
+    let thread = Key::new(kind::THREAD, "t").unwrap();
+    set(&mut a, &thread, crate::schema::thread::TITLE, Some(&"t"), by(4)).unwrap();
+    put(&mut a, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(4)).unwrap();
+    assert!(!model(&a).thread_finished("t"));
+    set_state(&mut a, "y", ItemState::Done, by(5)).unwrap();
+    assert!(model(&a).thread_finished("t"));
 }

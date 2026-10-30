@@ -160,7 +160,7 @@ fn an_archived_dependency_is_met() {
 }
 
 #[test]
-fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_own_state() {
+fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_met() {
     let mut r = replica("a");
     items(&mut r, &["goal", "child", "dep", "after-goal"]);
     set_parent(&mut r, "child", Some("goal"), by(2)).unwrap();
@@ -433,4 +433,39 @@ fn an_item_is_busy_whenever_its_thread_is_even_through_another_members_resource(
     let readiness = Readiness::new(&r.state, &model, NOW, &none);
     assert!(matches!(readiness.thread("main").unwrap(), ThreadStatus::ResourceBusy { .. }));
     assert_eq!(readiness.ready(false, "session/me").unwrap(), []);
+}
+
+#[test]
+fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() {
+    let mut r = replica("a");
+    items(&mut r, &["goal", "mid", "a", "b", "old", "same", "other"]);
+    for (child, parent) in [("mid", "goal"), ("a", "mid"), ("b", "goal"), ("old", "goal")] {
+        set_parent(&mut r, child, Some(parent), by(2)).unwrap();
+    }
+    for id in ["a", "b", "old", "same"] {
+        thread(&mut r, id, "t1");
+    }
+    thread(&mut r, "other", "t2");
+    for id in ["same", "other"] {
+        link(&mut r, id, "goal", LinkKind::Blocks, by(2)).unwrap();
+    }
+    // An archived leaf is met already; an open one, however deep, holds the dependency.
+    model::put(&mut r, &item_key("old").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
+    done_with(&mut r, "b", Some("c1"));
+    let unmerged = Fake::with(&[("c1", Ok(false)), ("c2", Ok(false))]);
+    assert_eq!(status(&r, &unmerged, "same"), blocked(&[("goal", Wait::Open)]));
+    // Done in the leaves' thread is enough there; across threads each leaf's commit must be merged.
+    done_with(&mut r, "a", Some("c2"));
+    assert_eq!(status(&r, &unmerged, "same"), Status::Ready);
+    assert_eq!(status(&r, &unmerged, "other"), blocked(&[("goal", Wait::InReview)]));
+    let merged = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
+    assert_eq!(status(&r, &merged, "other"), Status::Ready);
+    // A part closed by hand counts as closed, whatever is open under it.
+    set_state(&mut r, "a", ItemState::InProgress, by(3)).unwrap();
+    assert_eq!(status(&r, &merged, "same"), blocked(&[("goal", Wait::Open)]));
+    set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
+    assert_eq!(status(&r, &merged, "same"), Status::Ready);
+    // A parked parent meets nothing, whatever its leaves.
+    set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
+    assert_eq!(status(&r, &merged, "other"), blocked(&[("goal", Wait::Open)]));
 }

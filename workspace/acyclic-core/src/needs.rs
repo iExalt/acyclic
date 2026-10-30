@@ -312,7 +312,10 @@ fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) 
 /// need no decision, since no run will take them.
 fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
     let mut members: BTreeMap<&str, usize> = BTreeMap::new();
-    for item in model.items.values().filter(|item| !item.is_done() && !model.is_archived(&item.id))
+    for item in model
+        .items
+        .values()
+        .filter(|item| !model.reads_done(&item.id) && !model.is_archived(&item.id))
     {
         if let Some(thread) = item.thread.one() {
             *members.entry(thread).or_default() += 1;
