@@ -1262,6 +1262,9 @@ def needs_journey(page, env, plan, thread, name, failures):
     )
     run(env, "item", "edit", outside, "--thread", thread)
     before = int(count.inner_text())
+    # The signal is a "!", never a number a thread's badge could have.
+    if page.get_by_test_id("needs-badge").inner_text() != "!":
+        failures.append(f"{name}: the needs-you badge doesn't read !")
     refresh(page)
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=needs-count]').textContent) === n",

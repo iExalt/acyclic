@@ -1,8 +1,9 @@
 // Threads drawn as the lines of a transit map: each has a colour, and a badge with its number wherever the thread is
-// named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of about 27
-// threads is a notch lighter than the last: thread 7 and thread 34 share a hue but not a lightness. Lines far apart
-// can still look alike, which is safe only because the Map lights one thread at a time and every list names the
-// thread: never ask anyone to tell two threads apart by colour alone.
+// named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of 27
+// threads is lighter than the last: thread 7 and thread 34 share a hue but not a lightness. After 108 threads the
+// spiral starts again, and colours that differ only in lightness are hard to tell apart for some eyes, which is safe
+// only because the Map lights one thread at a time and every list names the thread: never ask anyone to tell two
+// threads apart by colour alone.
 
 import type { Thread } from "./api";
 
@@ -22,9 +23,9 @@ export const TOKENS = {
   ink: "#e6ebef",
   muted: "#95a3ae",
   /**
-   * What needs the user, conflicts, and links that cross boxes: never a line's colour. It is never a cue by colour
-   * alone either (crossing links are dashed, "Needs you" is text), since brown, its nearest line, looks alike to
-   * colour-blind eyes: so never draw it as a solid border.
+   * What needs the user, conflicts, and links that cross boxes. Lines may share its hue, so it is never a cue by colour
+   * alone: crossing links are dashed, conflicts have a dashed border, and the needs-you badge reads "!", which no
+   * thread's badge does. So never draw it as a solid border or a badge with a number.
    */
   signal: "#f2b33d",
 } as const;
@@ -35,27 +36,24 @@ export const TOKENS = {
  */
 const DARKEST = 0.7;
 const LIGHTEST = 0.86;
-/** How much lighter each lap round the wheel is than the last, until the lightest, when the laps turn darker again. */
-const LAP_LIGHTER = 0.04;
+/** Threads to a lap of the hue wheel. */
+const LAP = 27;
+/** Laps from the darkest to the lightest, after which the spiral starts again from the darkest. */
+const LAPS = 4;
 /** How colourful every line is, in OKLCH, where the sRGB gamut allows. */
 const CHROMA = 0.13;
-/** The signal's hue in OKLCH, and how far every line keeps from it either side. */
-const SIGNAL_HUE = 78;
-const SIGNAL_GAP = 34;
-/** The hue between one number's line and the next: the walk passes the wheel in about 27 threads. */
-const STEP = 11;
+/** Where the walk starts: thread 0 a yellow green. */
+const START = 110;
 
 /**
- * The line colour of position `at`: a spiral round the hue wheel that skips the band about the signal and grows lighter
- * a notch each lap, then darker again, so a line that comes round to an earlier one's hue differs from it in lightness.
+ * The line colour of position `at`: a spiral round the hue wheel that grows lighter as it goes, so a line that comes
+ * round to an earlier one's hue differs from it in lightness. After four laps, 108 threads, it starts again from the
+ * darkest: those are the only lines that share a colour.
  */
 export function lineColour(at: number): string {
-  const band = 360 - 2 * SIGNAL_GAP;
-  const hue = (SIGNAL_HUE + SIGNAL_GAP + ((at * STEP) % band)) % 360;
-  const span = LIGHTEST - DARKEST;
-  const climbed = ((at * STEP) / band) * LAP_LIGHTER;
-  const along = climbed % (2 * span);
-  return oklch(DARKEST + (along <= span ? along : 2 * span - along), CHROMA, hue);
+  const along = at % (LAP * LAPS);
+  const hue = (START + (along * 360) / LAP) % 360;
+  return oklch(DARKEST + ((LIGHTEST - DARKEST) * along) / (LAP * LAPS), CHROMA, hue);
 }
 
 /** The badge's text colours: the ground's dark for light lines, white for dark ones. */

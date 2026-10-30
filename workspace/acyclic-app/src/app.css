@@ -241,9 +241,8 @@ button.icon {
   --line: var(--signal);
   --line-ink: var(--ground);
 }
-.needs-button[data-none="true"] .badge {
-  --line: var(--tile);
-  --line-ink: var(--muted);
+.needs-button[data-none="true"] {
+  color: var(--muted);
 }
 .needs-button[aria-pressed="true"],
 .thread[aria-pressed="true"] {

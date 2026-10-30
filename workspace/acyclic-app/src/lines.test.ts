@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contrast, inkOn, lineColour, lineOf, linesOf, TOKENS } from "./lines";
 
-/** Every line up to thread 500, which covers the walk round the wheel many times over. */
-const LINES = Array.from({ length: 501 }, (_, at) => lineColour(at));
+/** Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has. */
+const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at));
 
 describe("lineOf", () => {
   it("takes the number a title starts with, in either style, and leaves the rest as the name", () => {
@@ -45,13 +45,14 @@ describe("lineColour", () => {
     expect(distance(lineColour(7), lineColour(8))).toBeLessThan(distance(lineColour(7), lineColour(20)));
   });
 
-  it("spirals, so no two of the first 110 threads are as alike as neighbours may be, though laps share hues", () => {
-    const first = LINES.slice(0, 110);
-    for (const [at, colour] of first.entries()) {
-      for (const [other, again] of first.slice(at + 1).entries()) {
+  it("spirals, so no two lines are as alike as neighbours may be until it starts again", () => {
+    for (const [at, colour] of LINES.entries()) {
+      for (const [other, again] of LINES.slice(at + 1).entries()) {
         expect(distance(colour, again), `${at} and ${at + 1 + other}`).toBeGreaterThan(8);
       }
     }
+    expect(lineColour(108)).toBe(lineColour(0));
+    expect(lineColour(2 ** 32 - 1)).toBe(lineColour((2 ** 32 - 1) % 108));
   });
 });
 
@@ -87,22 +88,6 @@ describe("the palette", () => {
       for (const surface of [TOKENS.tile, TOKENS.box, TOKENS.ground, TOKENS.chrome, TOKENS.sheet]) {
         expect(contrast(colour, surface), `${colour} on ${surface}`).toBeGreaterThanOrEqual(3);
       }
-    }
-  });
-
-  it("keeps the signal apart from every line, so a crossing link never reads as a thread", () => {
-    // Hue, not contrast: amber against orange or yellow has little contrast either way, so neither is a line.
-    const hue = (hex: string) => {
-      const [r = 0, g = 0, b = 0] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255);
-      const max = Math.max(r, g, b);
-      const span = max - Math.min(r, g, b);
-      const turn = max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
-      return (turn * 60 + 360) % 360;
-    };
-    const signal = hue(TOKENS.signal);
-    for (const colour of LINES) {
-      const apart = Math.abs(hue(colour) - signal);
-      expect(Math.min(apart, 360 - apart), colour).toBeGreaterThanOrEqual(20);
     }
   });
 });
