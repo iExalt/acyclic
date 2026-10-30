@@ -4,14 +4,14 @@
 // target, a tap picks one instead. Dragging pans, the wheel zooms; nothing moves items.
 
 import cytoscape, { type Core } from "cytoscape";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
-import { PORTRAIT, SQUARE } from "./elk";
+import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
@@ -72,7 +72,7 @@ export default function PlanMap({
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
-  const aspect = useAspect();
+  const aspect = useAspect(host);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
@@ -313,17 +313,31 @@ export default function PlanMap({
 /** Where the panes sit side by side, as app.css has it. */
 const SIDE_BY_SIDE = "(min-width: 900px)";
 
-/** The top level's shape: roughly square where the panes sit side by side, else portrait, following the window. */
-function useAspect(): number {
+/**
+ * The top level's shape. Where the panes sit side by side, roughly the Map's own, rounded to a fifth so that resizing
+ * a window lays the top level out again only now and then; on a phone, portrait, which a keyboard opening never
+ * changes.
+ */
+function useAspect(host: RefObject<HTMLDivElement | null>): number {
   const query = useMemo(() => (typeof matchMedia === "undefined" ? null : matchMedia(SIDE_BY_SIDE)), []);
   const [wide, setWide] = useState(() => query?.matches ?? false);
+  const [shape, setShape] = useState(() =>
+    typeof window === "undefined" ? PORTRAIT : shapeOf(window.innerWidth, window.innerHeight),
+  );
   useEffect(() => {
     if (query === null) return;
     const change = () => setWide(query.matches);
     query.addEventListener("change", change);
     return () => query.removeEventListener("change", change);
   }, [query]);
-  return wide ? SQUARE : PORTRAIT;
+  useEffect(() => {
+    const element = host.current;
+    if (element === null) return;
+    const observer = new ResizeObserver(() => setShape(shapeOf(element.clientWidth, element.clientHeight)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [host]);
+  return wide ? shape : PORTRAIT;
 }
 
 /** Lets the Map zoom out until the whole plan fits it, and no further; a zoom already further out stays until moved. */

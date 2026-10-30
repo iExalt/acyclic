@@ -25,12 +25,13 @@ const PACKED = {
   "elk.rectpacking.orderBySize": "false",
 };
 
-/**
- * The top level's shape, width over height: portrait for a phone, and roughly square where the panes sit side by side.
- * Fixed for each, so a plan lays out the same on every screen of a kind and its cache holds across resizes.
- */
+/** The top level's shape, width over height, on a phone: portrait. A wider screen gives its own. */
 export const PORTRAIT = 0.6;
-export const SQUARE = 1;
+
+/** A width over height, rounded to a fifth, within what packing boxes into rows can sensibly make. */
+export function shapeOf(width: number, height: number): number {
+  return Math.min(3, Math.max(PORTRAIT, Math.round((5 * width) / Math.max(1, height)) / 5));
+}
 
 /** Anything that lays out an ELK graph: ELK's API in the browser, its bundled build in tests. */
 export interface Engine {

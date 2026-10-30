@@ -1,7 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { describe, expect, it } from "vitest";
-import { dependencyOrder, elkLayBox, PORTRAIT, SQUARE } from "./elk";
+import { dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
 import { item } from "./fixture";
 import { type LayBox, LayoutCache, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
@@ -87,7 +87,7 @@ describe("place", () => {
     const cache = new LayoutCache();
     const view = visible(buildModel(plan), open);
     await place(view, cache, engine.layBox, PORTRAIT);
-    expect((await place(view, cache, engine.layBox, SQUARE)).laidOut).toEqual([ROOT]);
+    expect((await place(view, cache, engine.layBox, 1.4)).laidOut).toEqual([ROOT]);
     expect((await place(view, cache, engine.layBox, PORTRAIT)).laidOut).toEqual([]);
   });
 
@@ -168,6 +168,13 @@ describe("elkLayBox", () => {
       expect((at?.x ?? Infinity) + box.width).toBeLessThanOrEqual(packed.width);
       expect((at?.y ?? Infinity) + box.height).toBeLessThanOrEqual(packed.height);
     }
+  });
+
+  it("shapes the top level like the Map, to a fifth, within portrait and three wide", () => {
+    expect(shapeOf(1180, 850)).toBe(1.4);
+    expect(shapeOf(1000, 1000)).toBe(1);
+    expect(shapeOf(300, 900)).toBe(PORTRAIT);
+    expect(shapeOf(5000, 400)).toBe(3);
   });
 
   it("breaks a dependency cycle at its least id", () => {
