@@ -304,6 +304,11 @@ def first_view_readable(page, name, failures):
         failures.append(
             f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
         )
+    # One layout for a first load: a second, at a shape guessed before the Map was measured, would re-pack the plan
+    # as it is first seen.
+    asked = page.get_by_test_id("map").get_attribute("data-layouts")
+    if asked != "1":
+        failures.append(f"{name}: the first load asked for {asked} layouts, not one")
 
 
 def map_journey(page, view, plan, name, failures, hint=None):

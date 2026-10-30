@@ -4,13 +4,14 @@
 // target, a tap picks one instead. Dragging pans, the wheel zooms; nothing moves items.
 
 import cytoscape, { type Core } from "cytoscape";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
+import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
@@ -69,8 +70,9 @@ export default function PlanMap({
   const model = useMemo(() => buildModel(items), [items]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-  /** The last layout, with the view it was computed for. */
-  const [laid, setLaid] = useState<{ view: View; placed: Placed } | null>(null);
+  /** The last layout, with the view and the top level's shape it was computed for. */
+  const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
+  const aspect = useAspect(host);
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
@@ -82,7 +84,7 @@ export default function PlanMap({
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
   const view = useMemo(() => visible(model, { collapsed, showArchived }), [model, collapsed, showArchived]);
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
-  const placed = laid !== null && laid.view === view ? laid.placed : null;
+  const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
 
   // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
@@ -109,19 +111,23 @@ export default function PlanMap({
   useEffect(() => {
     let live = true;
     const start = performance.now();
-    Promise.all([layouts.layout(view), fontLoaded]).then(([result]) => {
+    if (aspect === null) return;
+    // How many layouts the Map has asked for, so a journey can tell that a first load asks for one; a development
+    // build's StrictMode runs effects twice, and counts two.
+    if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
+    Promise.all([layouts.layout(view, aspect), fontLoaded]).then(([result]) => {
       if (!live || result === null) return;
       // How long the layout took and how many boxes it laid out afresh, for timing runs.
       if (host.current !== null) {
         host.current.dataset.layoutMs = String(Math.round(performance.now() - start));
         host.current.dataset.layoutCalls = String(result.laidOut.length);
       }
-      setLaid({ view, placed: result });
+      setLaid({ view, aspect, placed: result });
     });
     return () => {
       live = false;
     };
-  }, [layouts, view]);
+  }, [layouts, view, aspect]);
 
   useEffect(() => {
     if (host.current === null) return;
@@ -306,6 +312,35 @@ export default function PlanMap({
   }, []);
 
   return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+}
+
+/** Where the panes sit side by side, as app.css has it. */
+const SIDE_BY_SIDE = "(min-width: 900px)";
+
+/**
+ * The top level's shape. Where the panes sit side by side, roughly the Map's own, rounded to a fifth so that resizing
+ * a window lays the top level out again only now and then; on a phone, portrait, which a keyboard opening never
+ * changes.
+ */
+function useAspect(host: RefObject<HTMLDivElement | null>): number | null {
+  const query = useMemo(() => (typeof matchMedia === "undefined" ? null : matchMedia(SIDE_BY_SIDE)), []);
+  const [wide, setWide] = useState(() => query?.matches ?? false);
+  // Unknown until the Map is measured, so the first layout is the one at its real shape.
+  const [shape, setShape] = useState<number | null>(null);
+  useEffect(() => {
+    if (query === null) return;
+    const change = () => setWide(query.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, [query]);
+  useEffect(() => {
+    const element = host.current;
+    if (element === null) return;
+    const observer = new ResizeObserver(() => setShape(shapeOf(element.clientWidth, element.clientHeight)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [host]);
+  return wide ? shape : PORTRAIT;
 }
 
 /** Lets the Map zoom out until the whole plan fits it, and no further; a zoom already further out stays until moved. */

@@ -4,6 +4,7 @@
 // edit lays out again exactly the boxes whose signature changed, from the inside out, and returning to a view already
 // laid out costs nothing. Pure apart from the `LayBox` it is given, which is ELK in the app and a fake in tests.
 
+import { natural } from "../natural";
 import type { Kind, View } from "./model";
 
 /** The scope above the top-level items. */
@@ -21,6 +22,8 @@ export interface BoxInput {
   id: string;
   children: ({ id: string } & Size)[];
   edges: { source: string; target: string }[];
+  /** The width over height the top level is packed to; only the top level has one. */
+  aspect?: number;
 }
 
 /** A box's layout: its size, and where each child sits within it. */
@@ -72,7 +75,7 @@ export function scopes(view: View): Scopes {
       }),
     );
   }
-  for (const list of kids.values()) list.sort();
+  for (const list of kids.values()) list.sort(natural);
   return { kids, edges, kind };
 }
 
@@ -145,7 +148,7 @@ function sizeOf(kind: Kind | undefined, boxes: Map<string, BoxLayout>, id: strin
  * a box with no boxes inside) don't depend on each other, so each height's boxes are asked for at once and the engine
  * never waits for the next request; a box is asked for only once every box inside it has its size.
  */
-export async function place(view: View, cache: LayoutCache, layBox: LayBox): Promise<Placed> {
+export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspect: number): Promise<Placed> {
   const scope = scopes(view);
   const boxes = new Map<string, BoxLayout>();
   const laidOut: string[] = [];
@@ -170,9 +173,10 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox): Pro
             ...sizeOf(scope.kind.get(child), boxes, child),
           })),
           edges: scope.edges.get(id) ?? [],
+          ...(id === ROOT ? { aspect } : {}),
         };
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
-        const signature = JSON.stringify([input.children, input.edges]);
+        const signature = JSON.stringify([input.children, input.edges, input.aspect]);
         let layout = cache.get(signature);
         if (layout === undefined) {
           layout = await layBox(input);
