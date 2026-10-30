@@ -1,7 +1,10 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { contrast, inkOn, LINE_COLOURS, lineOf, linesOf, TOKENS } from "./lines";
+import { contrast, inkOn, lineColour, lineOf, linesOf, TOKENS } from "./lines";
+
+/** Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has. */
+const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at));
 
 describe("lineOf", () => {
   it("takes the number a title starts with, in either style, and leaves the rest as the name", () => {
@@ -33,6 +36,33 @@ describe("lineOf", () => {
   });
 });
 
+describe("lineColour", () => {
+  it("walks the hue wheel by number, so neighbouring threads look alike but never the same", () => {
+    for (const [at, colour] of LINES.entries()) {
+      expect(colour, String(at)).toMatch(/^#[0-9a-f]{6}$/);
+      if (at > 0) expect(distance(colour, LINES[at - 1] ?? colour), String(at)).toBeGreaterThan(8);
+    }
+    expect(distance(lineColour(7), lineColour(8))).toBeLessThan(distance(lineColour(7), lineColour(20)));
+  });
+
+  it("spirals, so no two lines are as alike as neighbours may be until it starts again", () => {
+    for (const [at, colour] of LINES.entries()) {
+      for (const [other, again] of LINES.slice(at + 1).entries()) {
+        expect(distance(colour, again), `${at} and ${at + 1 + other}`).toBeGreaterThan(8);
+      }
+    }
+    expect(lineColour(108)).toBe(lineColour(0));
+    expect(lineColour(2 ** 32 - 1)).toBe(lineColour((2 ** 32 - 1) % 108));
+  });
+});
+
+/** The distance between two `#RRGGBB` colours in 8-bit RGB: a floor against two lines being the same colour. */
+function distance(a: string, b: string): number {
+  const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+  const [x, y] = [channels(a), channels(b)];
+  return Math.hypot(...x.map((value, at) => value - (y[at] ?? 0)));
+}
+
 describe("the palette", () => {
   it("is the one app.css uses", () => {
     const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
@@ -48,32 +78,16 @@ describe("the palette", () => {
         expect(contrast(text, surface), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
       }
     }
-    for (const colour of LINE_COLOURS) {
+    for (const colour of LINES) {
       expect(contrast(colour, inkOn(colour)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
   it("draws a lit border at 3:1 against the tile, the box and the ground on either side of it", () => {
-    for (const colour of LINE_COLOURS) {
+    for (const colour of LINES) {
       for (const surface of [TOKENS.tile, TOKENS.box, TOKENS.ground, TOKENS.chrome, TOKENS.sheet]) {
         expect(contrast(colour, surface), `${colour} on ${surface}`).toBeGreaterThanOrEqual(3);
       }
-    }
-  });
-
-  it("keeps the signal apart from every line, so a crossing link never reads as a thread", () => {
-    // Hue, not contrast: amber against orange or yellow has little contrast either way, so neither is a line.
-    const hue = (hex: string) => {
-      const [r = 0, g = 0, b = 0] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255);
-      const max = Math.max(r, g, b);
-      const span = max - Math.min(r, g, b);
-      const turn = max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
-      return (turn * 60 + 360) % 360;
-    };
-    const signal = hue(TOKENS.signal);
-    for (const colour of LINE_COLOURS) {
-      const apart = Math.abs(hue(colour) - signal);
-      expect(Math.min(apart, 360 - apart), colour).toBeGreaterThanOrEqual(20);
     }
   });
 });

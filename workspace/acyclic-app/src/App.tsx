@@ -379,15 +379,25 @@ export function App() {
           data-testid="needs-button"
           data-none={load.needs.length === 0}
           aria-pressed={showNeeds}
+          aria-label={`Needs you: ${load.needs.length}`}
           onClick={() => {
             setSelected(null);
             setShowNeeds((was) => !was);
           }}
         >
-          <span className="badge" data-testid="needs-count">
-            {load.needs.length}
-          </span>
+          {/* A "!" rather than the count, so the signal never looks like a thread's numbered badge; with nothing
+              waiting, neither shows. */}
+          {load.needs.length > 0 && (
+            <span className="badge" data-testid="needs-badge" aria-hidden="true">
+              !
+            </span>
+          )}
           Needs you
+          {load.needs.length > 0 && (
+            <span className="count" data-testid="needs-count">
+              {load.needs.length}
+            </span>
+          )}
         </button>
         <button
           type="button"

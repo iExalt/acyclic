@@ -1,6 +1,9 @@
 // Threads drawn as the lines of a transit map: each has a colour, and a badge with its number wherever the thread is
-// named. Some colours merge for colour-blind eyes, which is safe only because the Map lights one thread at a time and
-// every list names the thread too: never ask anyone to tell two threads apart by colour alone.
+// named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of 27
+// threads is lighter than the last: thread 7 and thread 34 share a hue but not a lightness. After 108 threads the
+// spiral starts again, and colours that differ only in lightness are hard to tell apart for some eyes, which is safe
+// only because the Map lights one thread at a time and every list names the thread: never ask anyone to tell two
+// threads apart by colour alone.
 
 import type { Thread } from "./api";
 
@@ -20,24 +23,38 @@ export const TOKENS = {
   ink: "#e6ebef",
   muted: "#95a3ae",
   /**
-   * What needs the user, conflicts, and links that cross boxes: never a line's colour. It is never a cue by colour
-   * alone either (crossing links are dashed, "Needs you" is text), since brown, its nearest line, looks alike to
-   * colour-blind eyes: so never draw it as a solid border.
+   * What needs the user, conflicts, and links that cross boxes. Lines may share its hue, so it is never a cue by colour
+   * alone: crossing links are dashed, conflicts have a dashed border, and the needs-you badge reads "!", which no
+   * thread's badge does. So never draw it as a solid border or a badge with a number.
    */
   signal: "#f2b33d",
 } as const;
 
-/** Eight line colours, none near the signal amber, each readable as a border on an item, a box and the ground. */
-export const LINE_COLOURS = [
-  "#ec5d5e",
-  "#46a758",
-  "#12a594",
-  "#0090ff",
-  "#a97be0",
-  "#e25aab",
-  "#a18072",
-  "#8da4ef",
-] as const;
+/**
+ * How light lines are, in OKLCH: never darker than a border at 3:1 on the tile and a badge at 4.5:1 in dark ink allow,
+ * nor so light that the colour washes out.
+ */
+const DARKEST = 0.7;
+const LIGHTEST = 0.86;
+/** Threads to a lap of the hue wheel. */
+const LAP = 27;
+/** Laps from the darkest to the lightest, after which the spiral starts again from the darkest. */
+const LAPS = 4;
+/** How colourful every line is, in OKLCH, where the sRGB gamut allows. */
+const CHROMA = 0.13;
+/** Where the walk starts: thread 0 a yellow green. */
+const START = 110;
+
+/**
+ * The line colour of position `at`: a spiral round the hue wheel that grows lighter as it goes, so a line that comes
+ * round to an earlier one's hue differs from it in lightness. After four laps, 108 threads, it starts again from the
+ * darkest: those are the only lines that share a colour.
+ */
+export function lineColour(at: number): string {
+  const along = at % (LAP * LAPS);
+  const hue = (START + (along * 360) / LAP) % 360;
+  return oklch(DARKEST + ((LIGHTEST - DARKEST) * along) / (LAP * LAPS), CHROMA, hue);
+}
 
 /** The badge's text colours: the ground's dark for light lines, white for dark ones. */
 const INKS = [TOKENS.ground, "#ffffff"] as const;
@@ -68,7 +85,7 @@ export function lineOf(thread: Thread): Line {
   const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
   const number = rest === "" ? null : (numbered?.[1] ?? null);
   const at = numbered?.[1] === undefined ? hash(thread.id) : Number(numbered[1]);
-  const colour = LINE_COLOURS[at % LINE_COLOURS.length] ?? LINE_COLOURS[0];
+  const colour = lineColour(at);
   return { number, name: number === null ? thread.title : rest, colour, ink: inkOn(colour) };
 }
 
@@ -81,6 +98,45 @@ export function linesOf(threads: Thread[]): Map<string, Line> {
 export function inkOn(colour: string): string {
   const [dark, light] = INKS;
   return contrast(colour, dark) >= contrast(colour, light) ? dark : light;
+}
+
+/**
+ * An OKLCH colour as `#RRGGBB`, with its chroma lowered until it fits sRGB, so the hue and the lightness hold: at the lines'
+ * lightness, a few cyans fit slightly less chroma than the rest.
+ */
+export function oklch(lightness: number, chroma: number, hue: number): string {
+  const angle = (hue * Math.PI) / 180;
+  for (let c = chroma; ; c -= 0.002) {
+    const rgb = oklabToLinear(lightness, Math.max(0, c) * Math.cos(angle), Math.max(0, c) * Math.sin(angle));
+    if (c <= 0 || rgb.every((channel) => channel >= 0 && channel <= 1)) {
+      return `#${rgb
+        .map((channel) =>
+          Math.round(255 * encode(Math.min(1, Math.max(0, channel))))
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")}`;
+    }
+  }
+}
+
+/** Linear sRGB from OKLab, as Björn Ottosson defines it. */
+function oklabToLinear(l: number, a: number, b: number): [number, number, number] {
+  const [x, y, z] = [
+    l + 0.3963377774 * a + 0.2158037573 * b,
+    l - 0.1055613458 * a - 0.0638541728 * b,
+    l - 0.0894841775 * a - 1.291485548 * b,
+  ].map((value) => value ** 3) as [number, number, number];
+  return [
+    4.0767416621 * x - 3.3077115913 * y + 0.2309699292 * z,
+    -1.2684380046 * x + 2.6097574011 * y - 0.3413193965 * z,
+    -0.0041960863 * x - 0.7034186147 * y + 1.707614701 * z,
+  ];
+}
+
+/** sRGB's transfer function, from a linear channel. */
+function encode(channel: number): number {
+  return channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
 }
 
 /** A small, stable hash of a string (FNV-1a). */
