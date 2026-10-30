@@ -10,6 +10,7 @@ use crate::claim;
 use crate::model::{self, Level, Model, Value};
 use crate::place;
 use crate::ready::{Readiness, Status, Wait};
+use crate::renumber;
 use crate::schema::{kind, question, set};
 use crate::scope;
 use crate::state::{Error, Millis, State};
@@ -175,6 +176,18 @@ pub enum Entry {
         /// The missing target.
         target: String,
     },
+    /// Threads whose ids end in the same number, so the app draws them alike; renumbering a fresh one resolves it.
+    /// Listed only while one is fresh, since only then is there something to do.
+    NumberClash {
+        /// The number.
+        number: u64,
+        /// The threads.
+        threads: Vec<String>,
+        /// Those that may be renumbered.
+        fresh: Vec<String>,
+        /// The command that resolves it.
+        fix: String,
+    },
     /// A dependency's merge can't be checked.
     Unverified {
         /// The dependency.
@@ -223,6 +236,7 @@ impl Entry {
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
             | Self::Dangling { .. }
+            | Self::NumberClash { .. }
             | Self::Unverified { .. } => false,
         }
     }
@@ -275,6 +289,17 @@ pub fn needs_you(
     awaiting_approval(model, &mut entries);
     reopened_and_early(model, &mut entries);
     dangling(model, &mut entries);
+    for clash in renumber::clashes(state, model, now)? {
+        if let Some(first) = clash.fresh.first() {
+            let fix = format!("acyclic thread renumber {first} --as-user");
+            entries.insert(Entry::NumberClash {
+                number: clash.number,
+                threads: clash.threads,
+                fresh: clash.fresh,
+                fix,
+            });
+        }
+    }
     for (id, item) in &model.items {
         if item.is_done() || !model.children(id).is_empty() {
             continue;

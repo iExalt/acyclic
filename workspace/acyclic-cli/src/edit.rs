@@ -173,9 +173,12 @@ fn write_change<T: Serialize>(
 }
 
 /// Whether a thread exists: it has fields of its own, or an item names it.
-fn thread_exists(model: &Model, id: &str) -> bool {
-    model.threads.contains_key(id)
-        || model.items.values().any(|item| item.thread.all().contains(&&id.to_owned()))
+fn thread_exists(state: &State, model: &Model, id: &str) -> bool {
+    // A deleted thread stays gone, though items another replica moved into it still name it.
+    let deleted = Key::new(kind::THREAD, id).is_ok_and(|key| model::is_deleted(state, &key));
+    !deleted
+        && (model.threads.contains_key(id)
+            || model.items.values().any(|item| item.thread.all().contains(&&id.to_owned())))
 }
 
 /// Refuses a thread or repository that isn't there, before anything is written.
@@ -188,7 +191,7 @@ fn check_targets(
         return Ok(());
     }
     let model = Model::read(state)?;
-    if let Some(thread) = thread.filter(|thread| !thread_exists(&model, thread)) {
+    if let Some(thread) = thread.filter(|thread| !thread_exists(state, &model, thread)) {
         return Err(not_found(format!(
             "no thread {thread}; add it with `acyclic thread add {thread} --title <TITLE>`"
         )));
@@ -351,7 +354,8 @@ pub(crate) fn new_id(
 ) -> Result<String, CliError> {
     if let Some(id) = given {
         let exists = if of == kind::THREAD {
-            thread_exists(&Model::read(replica.state())?, id)
+            replica.state().entity(&thread_key(id)?).is_some()
+                || thread_exists(replica.state(), &Model::read(replica.state())?, id)
         } else {
             replica.state().entity(&model::item_key(id)?).is_some()
         };
@@ -496,7 +500,7 @@ pub(crate) fn edit_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<Written, CliError> {
-    if !thread_exists(&Model::read(replica.state())?, id) {
+    if !thread_exists(replica.state(), &Model::read(replica.state())?, id) {
         return Err(not_found(format!("no thread {id}; `acyclic thread list` lists them")));
     }
     write_thread(replica, id, fields, by)
@@ -510,6 +514,9 @@ pub(crate) fn add_thread(
     by: By<'_>,
 ) -> Result<Written, CliError> {
     let key = thread_key(id)?;
+    if model::is_deleted(replica.state(), &key) {
+        return Err(model::WriteError::Deleted(id.to_owned()).into());
+    }
     if replica.state().entity(&key).is_none() {
         return write_thread(replica, id, fields, by);
     }

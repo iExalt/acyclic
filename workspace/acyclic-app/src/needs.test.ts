@@ -154,4 +154,22 @@ describe("needView", () => {
     });
     expect(clash.text).toMatch(/T, U$/);
   });
+
+  it("names the threads two machines numbered alike, with the command that renumbers one", () => {
+    const clash = needView(
+      {
+        kind: "number-clash",
+        number: 32,
+        threads: [thread("thread-mac-32"), thread("thread-pi-32")],
+        fresh: ["thread-pi-32"],
+        fix: "acyclic thread renumber thread-pi-32 --as-user",
+      },
+      none,
+    );
+    expect(clash).toMatchObject({
+      key: "number-clash:32",
+      threads: [{ id: "thread-mac-32" }, { id: "thread-pi-32" }],
+      note: "acyclic thread renumber thread-pi-32 --as-user",
+    });
+  });
 });

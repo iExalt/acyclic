@@ -7,6 +7,7 @@ use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
+use acyclic_core::renumber::RenumberError;
 use acyclic_core::scope::ScopeError;
 use acyclic_core::state::Error as StateError;
 use acyclic_core::store::{BatchError, StoreError};
@@ -169,6 +170,20 @@ impl From<DeleteError> for CliError {
             DeleteError::NotAllowed { .. } => Self::refused("user-only", message),
             DeleteError::InUse { item, reasons } => {
                 Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
+            },
+        }
+    }
+}
+
+impl From<RenumberError> for CliError {
+    fn from(err: RenumberError) -> Self {
+        let message = err.to_string();
+        match err {
+            RenumberError::Write(err) => err.into(),
+            RenumberError::NotTheUser(_) => Self::refused("user-only", message),
+            RenumberError::NoThread(_) => Self::new("not-found", exit::NOT_FOUND, message),
+            RenumberError::InUse { thread, reasons } => {
+                Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
             },
         }
     }

@@ -186,6 +186,18 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("repo list", AGENT), 0);
     let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
     assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
+    // The tracker assigns a thread's id when the add leaves it out. Only the user renumbers a thread, and only one
+    // whose number another thread's id shares, which this one's doesn't.
+    let (code, added) = sh.output("thread add --title Spare", AGENT);
+    let spare = added["data"]["thread"].as_str().unwrap().to_owned();
+    assert_eq!(code, 0, "{added}");
+    assert_eq!(sh.run(&format!("thread renumber {spare}"), AGENT), 1, "only the user renumbers");
+    let (code, out) = sh.output(&format!("thread renumber {spare} --as-user"), AGENT);
+    assert_eq!(
+        (code, &out["error"]["details"]["reasons"][0]["why"]),
+        (1, &json!("no-clash")),
+        "{out}"
+    );
     assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
     let (code, out) = sh.output("graph --format mermaid --file graph.mmd", AGENT);
     assert_eq!((code, out["data"]["counts"]["items"].as_u64()), (0, Some(2)));
@@ -455,6 +467,23 @@ fn two_machines_sync_through_a_shared_repository() {
     let (_, out) = sh.output("item edit a1 --no-thread --as-user", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
+    // Threads each machine numbers before seeing the other's clash once a sync brings them together.
+    sh.run("thread add --title Beds", AGENT);
+    sh.run("thread add --title Rows", pi);
+    sh.run("sync", pi);
+    let (_, out) = sh.output("sync", AGENT);
+    let clash = &out["data"]["number_clashes"][0];
+    assert_eq!(
+        (clash["number"].as_u64(), clash["threads"].as_array().map(Vec::len)),
+        (Some(1), Some(2)),
+        "{out}"
+    );
+    let listed = needs(&mut sh);
+    assert_eq!(
+        (listed.len(), &listed[0]["kind"]),
+        (1, &serde_json::json!("number-clash")),
+        "{listed:?}"
+    );
 }
 
 /// A run's operation applied to the shell's tracker as run `r1`.

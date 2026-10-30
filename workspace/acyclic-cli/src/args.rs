@@ -773,6 +773,12 @@ pub enum ThreadCommand {
         /// The thread.
         thread: String,
     },
+    /// Moves a thread whose id ends in another's number to a fresh id, with its fields and members (user only); only
+    /// a thread no run, question, claim or open proposal names.
+    Renumber {
+        /// The thread.
+        thread: String,
+    },
 }
 
 /// What `thread edit` changes.

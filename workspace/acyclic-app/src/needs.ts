@@ -80,9 +80,11 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
   const threads =
     need.kind === "resource-clash"
       ? holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null)
-      : thread === null
-        ? []
-        : [thread];
+      : need.kind === "number-clash"
+        ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
+        : thread === null
+          ? []
+          : [thread];
   // A badge only for an entry naming one thread, and a thread named by its line's name only beside that badge.
   const line = threads.length === 1 ? lines.get(threads[0]?.id ?? "") : undefined;
   const lineName = (one: Row) => {
@@ -196,6 +198,13 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         note: IN_A_TERMINAL,
       };
     }
+    case "number-clash":
+      return {
+        ...base,
+        key: `number-clash:${shown(need.number)}`,
+        text: `Threads two machines numbered alike share ${shown(need.number)}: ${threads.map(lineName).join(", ")}`,
+        note: str(need.fix) || IN_A_TERMINAL,
+      };
     case "dangling":
       return {
         ...base,

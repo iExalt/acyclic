@@ -137,6 +137,8 @@ pub mod thread {
     pub const LAUNCH: &str = "launch";
     /// Where the thread runs: the cluster or the Mac.
     pub const PLACEMENT: &str = "placement";
+    /// Set when a renumber retired the thread's id; the same field as an item's, read by `model::is_deleted`.
+    pub const DELETED: &str = super::item::DELETED;
 }
 
 /// Global settings fields.
