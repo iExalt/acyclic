@@ -21,7 +21,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
     "changed": true,
     "item": "a1",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "First"
   },
   "ok": true
 }
@@ -33,7 +34,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
     "changed": true,
     "item": "a2",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Second"
   },
   "ok": true
 }
@@ -45,7 +47,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
     "changed": false,
     "item": "a2",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Second"
   },
   "ok": true
 }
@@ -92,7 +95,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t0 --title Start
   "data": {
     "changed": true,
     "proposals": [],
-    "thread": "t0"
+    "thread": "t0",
+    "title": "Start"
   },
   "ok": true
 }
@@ -412,7 +416,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
   "data": {
     "changed": true,
     "proposals": [],
-    "thread": "t1"
+    "thread": "t1",
+    "title": "Work"
   },
   "ok": true
 }
@@ -423,7 +428,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
   "data": {
     "changed": false,
     "proposals": [],
-    "thread": "t1"
+    "thread": "t1",
+    "title": "Work"
   },
   "ok": true
 }
@@ -811,7 +817,7 @@ thread     t1
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First -o pretty
 # exit 0
-no change to item a1
+no change to item a1 "First"
 
 $ ACYCLIC_ACTOR=session/mac acyclic show nope -o pretty
 # exit 3
@@ -1272,7 +1278,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t2 --title Follow-ups
   "data": {
     "changed": true,
     "proposals": [],
-    "thread": "t2"
+    "thread": "t2",
+    "title": "Follow-ups"
   },
   "ok": true
 }
@@ -1397,7 +1404,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
     "changed": true,
     "item": "a3",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Second-follow-up"
   },
   "ok": true
 }
@@ -1431,7 +1439,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent
         "thread": "t2"
       }
     ],
-    "proposals": []
+    "proposals": [],
+    "title": "Third-follow-up"
   },
   "ok": true
 }
@@ -1443,7 +1452,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1 --title Goal
     "changed": true,
     "item": "g1",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Goal"
   },
   "ok": true
 }
@@ -1455,7 +1465,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
     "changed": true,
     "item": "g1-a",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Part"
   },
   "ok": true
 }
@@ -1538,7 +1549,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2 --title Goal
     "changed": true,
     "item": "g2",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Goal"
   },
   "ok": true
 }
@@ -1550,7 +1562,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
     "changed": true,
     "item": "g2-a",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Part"
   },
   "ok": true
 }
@@ -1574,7 +1587,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
     "changed": true,
     "item": "d1",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Doomed"
   },
   "ok": true
 }
@@ -1586,7 +1600,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1-a --title Part --parent d1
     "changed": true,
     "item": "d1-a",
     "placed": [],
-    "proposals": []
+    "proposals": [],
+    "title": "Part"
   },
   "ok": true
 }

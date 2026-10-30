@@ -164,6 +164,7 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("not-found", exit::NOT_FOUND, ""),
         CliError::new("usage", exit::USAGE, ""),
         CliError::new("invalid-commit", exit::USAGE, ""),
+        CliError::new("reserved-id", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("user-from-environment", exit::USAGE, ""),
         CliError::new("operator-actor", exit::USAGE, ""),

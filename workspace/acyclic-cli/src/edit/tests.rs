@@ -263,3 +263,56 @@ fn only_the_user_flags_a_thread_as_project_management_and_clears_it() {
     edit_thread(&mut r, "t", &unflag, USER_BY).unwrap();
     assert!(!pm(&r));
 }
+
+#[test]
+fn an_add_without_an_id_is_given_the_next_and_a_retry_names_the_first() {
+    let mut r = replica();
+    let id = |r: &Replica, of: &str, given: Option<&str>, title: &str| {
+        new_id(r, of, given, title).map_err(|err| (err.code, err.details))
+    };
+    assert_eq!(id(&r, kind::ITEM, None, "Sow"), Ok("item-mac-1".to_owned()));
+    add_item(&mut r, "item-mac-1", &titled("Sow"), AGENT).unwrap();
+    // A retry of the same add is refused, naming the item it made; an explicit id adds a second.
+    assert_eq!(
+        id(&r, kind::ITEM, None, "Sow"),
+        Err(("already-exists", json!({"id": "item-mac-1"})))
+    );
+    assert_eq!(id(&r, kind::ITEM, Some("sow-again"), "Sow"), Ok("sow-again".to_owned()));
+    // A new id in the tracker's form is refused; repeating the add of one that exists isn't.
+    assert_eq!(id(&r, kind::ITEM, Some("item-x"), "X").unwrap_err().0, "reserved-id");
+    assert_eq!(id(&r, kind::ITEM, Some("item-mac-1"), "Sow"), Ok("item-mac-1".to_owned()));
+    // Threads match on title too, and number apart from items.
+    assert_eq!(id(&r, kind::THREAD, None, "Sow"), Ok("thread-mac-1".to_owned()));
+    let fields = ThreadFields { title: Some("Beds".into()), ..ThreadFields::default() };
+    add_thread(&mut r, "thread-mac-1", &fields, USER_BY).unwrap();
+    assert_eq!(id(&r, kind::THREAD, None, "Beds").unwrap_err().0, "already-exists");
+    assert_eq!(id(&r, kind::THREAD, None, "Rows"), Ok("thread-mac-2".to_owned()));
+}
+
+#[test]
+fn a_retry_ignores_done_archived_and_deleted_items() {
+    let mut r = replica();
+    add_item(&mut r, "c", &titled("Weed"), USER_BY).unwrap();
+    model::set_state(&mut r, "c", ItemState::Done, USER_BY).unwrap();
+    add_item(&mut r, "a", &titled("Sow"), USER_BY).unwrap();
+    let key = model::item_key("a").unwrap();
+    r.write(&key, field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
+    add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
+    acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
+    for title in ["Weed", "Sow", "Rows"] {
+        assert_eq!(new_id(&r, kind::ITEM, None, title).unwrap(), "item-mac-1", "{title}");
+    }
+}
+
+#[test]
+fn an_agents_add_without_an_id_into_an_approved_thread_is_assigned_one_and_waits_as_a_proposal() {
+    let mut r = replica();
+    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
+    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
+    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
+    let id = new_id(&r, kind::ITEM, None, "A").unwrap();
+    let fields = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
+    let written = add_item(&mut r, &id, &fields, AGENT).unwrap();
+    assert_eq!(id, "item-mac-1");
+    assert_eq!(written.proposals.iter().map(|p| p.field.as_str()).collect::<Vec<_>>(), ["thread"]);
+}

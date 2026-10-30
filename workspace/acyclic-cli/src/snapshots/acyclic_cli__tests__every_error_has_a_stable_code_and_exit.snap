@@ -63,6 +63,7 @@ expression: table
 3 not-found spends
 2 usage spends
 2 invalid-commit spends
+2 reserved-id spends
 2 invalid-actor spends
 2 user-from-environment spends
 2 operator-actor spends
