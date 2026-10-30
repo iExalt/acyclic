@@ -221,6 +221,76 @@ pub struct ReadyThread {
     pub items: Vec<String>,
 }
 
+/// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
+/// each parent. In progress means started, or ready in a thread someone holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Stage {
+    /// Done, and merged where that matters.
+    Done,
+    /// Done, but its commit isn't on the default branch yet, or that can't be checked.
+    InReview,
+    /// Started, or ready in a claimed thread.
+    InProgress,
+    /// Ready to start.
+    Ready,
+    /// Waiting on something: a dependency, a cycle, a conflict, or a resource another thread holds.
+    Blocked,
+    /// Set aside on purpose, or under a part that is.
+    Parked,
+    /// In no thread, so never ready.
+    Unthreaded,
+}
+
+/// A parent's leaves counted by stage, archived ones aside.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct Stages {
+    pub done: usize,
+    pub in_review: usize,
+    pub in_progress: usize,
+    pub ready: usize,
+    pub blocked: usize,
+    pub parked: usize,
+    pub unthreaded: usize,
+}
+
+impl Stages {
+    fn add(&mut self, stage: Stage, count: usize) {
+        let slot = match stage {
+            Stage::Done => &mut self.done,
+            Stage::InReview => &mut self.in_review,
+            Stage::InProgress => &mut self.in_progress,
+            Stage::Ready => &mut self.ready,
+            Stage::Blocked => &mut self.blocked,
+            Stage::Parked => &mut self.parked,
+            Stage::Unthreaded => &mut self.unthreaded,
+        };
+        *slot += count;
+    }
+
+    /// The leaves counted, every stage together.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.done
+            + self.in_review
+            + self.in_progress
+            + self.ready
+            + self.blocked
+            + self.parked
+            + self.unthreaded
+    }
+}
+
+/// A parent's progress as it reads now, with its leaves counted by stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rollup {
+    /// Its state, and its leaves done and in all, as the model counts them.
+    pub progress: Progress,
+    /// The same leaves by stage: the done and in-review ones together are the model's done.
+    pub stages: Stages,
+}
+
 /// Readiness over one state, with ancestry checks cached by repository and commit.
 pub struct Readiness<'a> {
     state: &'a State,
@@ -240,6 +310,8 @@ pub struct Readiness<'a> {
     winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
     /// Whether another thread holds a resource each thread needs, memoized.
     busy: RefCell<BTreeMap<String, Option<claim::Held>>>,
+    /// Each item's stage, memoized, since a rollup counts every leaf under every parent.
+    stages: RefCell<BTreeMap<String, Option<Stage>>>,
 }
 
 impl<'a> Readiness<'a> {
@@ -270,6 +342,7 @@ impl<'a> Readiness<'a> {
             resources: OnceCell::new(),
             winners: RefCell::default(),
             busy: RefCell::default(),
+            stages: RefCell::default(),
         }
     }
 
@@ -423,6 +496,7 @@ impl<'a> Readiness<'a> {
                 resources: OnceCell::new(),
                 winners: RefCell::new(self.winners.borrow().clone()),
                 busy: RefCell::default(),
+                stages: RefCell::default(),
             };
             return unarchived.ready(false, actor);
         }
@@ -454,21 +528,93 @@ impl<'a> Readiness<'a> {
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
     }
 
-    /// A parent's progress, reading in progress, rather than backlog, while a live claim holds the thread of any open
-    /// leaf under it. A claim names a thread, not an item, and expires, so this is how the parent reads now; nothing
-    /// is waiting on it.
+    /// A leaf's stage, or `None` for a parent, an archived item or an unknown one. A leaf started by hand reads in
+    /// progress whatever else holds it, such as a link added since; otherwise its readiness decides.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn progress(&self, id: &str) -> Result<Option<Progress>, Error> {
-        let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
-        if progress.state == ItemState::Backlog
-            && self.claimed_under(id, &mut BTreeSet::from([id]))?
-        {
-            progress.state = ItemState::InProgress;
+    pub fn stage(&self, id: &str) -> Result<Option<Stage>, Error> {
+        if let Some(known) = self.stages.borrow().get(id) {
+            return Ok(*known);
         }
-        Ok(Some(progress))
+        let started = self
+            .model
+            .items
+            .get(id)
+            .is_some_and(|item| item.state == Value::One(ItemState::InProgress));
+        let stage = self.of(id)?.and_then(|status| match status {
+            Status::Archived | Status::Parent => None,
+            Status::Done => Some(Stage::Done),
+            Status::InReview | Status::Unverified { .. } => Some(Stage::InReview),
+            Status::Parked => Some(Stage::Parked),
+            _ if started => Some(Stage::InProgress),
+            Status::Claimed { .. } | Status::Contested { .. } => Some(Stage::InProgress),
+            Status::Ready => Some(Stage::Ready),
+            Status::Unthreaded => Some(Stage::Unthreaded),
+            Status::Blocked { .. }
+            | Status::ResourceBusy { .. }
+            | Status::InCycle
+            | Status::Conflicted { .. } => Some(Stage::Blocked),
+        });
+        self.stages.borrow_mut().insert(id.to_owned(), stage);
+        Ok(stage)
+    }
+
+    /// A parent's progress as it reads now, with its leaves by stage. It reads in progress, rather than backlog, once
+    /// a leaf under it is, or while a live claim holds the thread of any open leaf under it, even one still blocked.
+    /// A claim names a thread, not an item, and expires, so this is how the parent reads now; nothing is waiting on
+    /// it. Under a part parked by hand, this one included, open leaves count as parked and don't make it read in
+    /// progress.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn progress(&self, id: &str) -> Result<Option<Rollup>, Error> {
+        let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
+        let mut stages = Stages::default();
+        let parked = progress.state == ItemState::Parked;
+        self.tally(id, parked, &mut BTreeSet::from([id]), &mut stages)?;
+        if progress.state == ItemState::InProgress || progress.state == ItemState::Backlog {
+            let moving = stages.in_progress > 0
+                || progress.done > 0
+                || self.claimed_under(id, &mut BTreeSet::from([id]))?;
+            progress.state = if moving { ItemState::InProgress } else { ItemState::Backlog };
+        }
+        Ok(Some(Rollup { progress, stages }))
+    }
+
+    /// Counts the leaves under `id` by stage, walking as the model's own tally does: archived ones aside, each item
+    /// once, every leaf of a part done by hand as done, and the open leaves of a part parked by hand as parked.
+    fn tally<'b>(
+        &self,
+        id: &'b str,
+        parked: bool,
+        seen: &mut BTreeSet<&'b str>,
+        stages: &mut Stages,
+    ) -> Result<(), Error>
+    where
+        'a: 'b,
+    {
+        for child in self.model.children(id) {
+            if !seen.insert(child) || self.is_archived(child) {
+                continue;
+            }
+            let Some(item) = self.model.items.get(child) else { continue };
+            if self.model.children(child).is_empty() {
+                let stage = self.stage(child)?.unwrap_or(Stage::Blocked);
+                let open = !matches!(stage, Stage::Done | Stage::InReview);
+                stages.add(if parked && open { Stage::Parked } else { stage }, 1);
+            } else if item.is_done() {
+                let mut closed = Stages::default();
+                self.tally(child, false, seen, &mut closed)?;
+                stages.add(Stage::Done, closed.total());
+            } else {
+                let parks = parked || item.state == Value::One(ItemState::Parked);
+                self.tally(child, parks, seen, stages)?;
+            }
+        }
+        Ok(())
     }
 
     /// Whether a live claim holds the thread of an open leaf under `id`. What is parked, or under a parked part, isn't

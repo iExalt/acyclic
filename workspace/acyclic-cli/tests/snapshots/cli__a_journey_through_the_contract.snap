@@ -149,6 +149,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
             "readiness": {
               "status": "ready"
             },
+            "stage": "ready",
             "state": "backlog",
             "thread": "t0",
             "title": "First"
@@ -319,6 +320,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
           "readiness": {
             "status": "done"
           },
+          "stage": "done",
           "state": "done",
           "thread": "t0",
           "title": "First"
@@ -332,6 +334,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
             "holder": "session/mac",
             "status": "claimed"
           },
+          "stage": "in-progress",
           "state": "backlog",
           "thread": "t0",
           "title": "Second"
@@ -398,6 +401,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
             "readiness": {
               "status": "ready"
             },
+            "stage": "ready",
             "state": "backlog",
             "thread": "t0",
             "title": "Second"
@@ -502,6 +506,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a2
       "resources": [],
       "role": "item",
       "size": null,
+      "stage": "ready",
       "state": "backlog",
       "thread": "t0",
       "title": "Second"
@@ -569,6 +574,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
             "readiness": {
               "status": "ready"
             },
+            "stage": "ready",
             "state": "backlog",
             "thread": "t1",
             "title": "Second"
@@ -610,6 +616,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
           "readiness": {
             "status": "done"
           },
+          "stage": "done",
           "state": "done",
           "thread": "t0",
           "title": "First"
@@ -682,6 +689,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic proposal list
           "readiness": {
             "status": "done"
           },
+          "stage": "done",
           "state": "done",
           "thread": "t0",
           "title": "First"
@@ -731,6 +739,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic list
         "readiness": {
           "status": "done"
         },
+        "stage": "done",
         "state": "done",
         "thread": "t1",
         "title": "First"
@@ -741,6 +750,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic list
         "readiness": {
           "status": "ready"
         },
+        "stage": "ready",
         "state": "backlog",
         "thread": "t1",
         "title": "Second"
@@ -812,6 +822,7 @@ links      waited_on_by a2
 readiness  done
 reopened   no
 role       item
+stage      done
 state      done
 thread     t1
 
@@ -852,6 +863,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "readiness": {
             "status": "done"
           },
+          "stage": "done",
           "state": "done",
           "thread": "t1",
           "title": "First"
@@ -864,6 +876,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "readiness": {
             "status": "ready"
           },
+          "stage": "ready",
           "state": "backlog",
           "thread": "t1",
           "title": "Second"
@@ -929,6 +942,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
       "resources": [],
       "role": "item",
       "size": null,
+      "stage": "done",
       "state": "done",
       "thread": "t1",
       "title": "First"
@@ -960,6 +974,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
       "resources": [],
       "role": "item",
       "size": null,
+      "stage": "ready",
       "state": "backlog",
       "thread": "t1",
       "title": "Second"
