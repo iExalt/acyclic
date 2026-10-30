@@ -1,7 +1,7 @@
 // The Map: the plan drawn as nested boxes on a canvas, with Cytoscape.js placing nodes exactly where the scoped
 // layout put them. Tapping a box's chevron collapses or expands it, and the box stays where it was on screen; tapping
 // anything else selects it, lighting up its thread and drawing its links across boxes. While an edit waits for a
-// target, a tap picks one instead. Dragging pans; nothing moves items.
+// target, a tap picks one instead. Dragging pans, the wheel zooms; nothing moves items.
 
 import cytoscape, { type Core } from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import { buildModel, collapsedWith, type Model, type View, visible } from "./mod
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
 import { type Selection, scene } from "./scene";
 import { STYLE } from "./style";
+import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
@@ -134,7 +135,22 @@ export default function PlanMap({
     cy.current = core;
     // Browser journeys reach the renderer through its element, to find where a node is drawn on the canvas.
     Object.assign(host.current, { cy: core });
+    // The wheel zooms by the app's own steps. Cytoscape listens on the Map itself while capturing, so only a listener
+    // on the window, capturing, runs first and can keep the event from it; a touch pinch is still the renderer's.
+    const element = host.current;
+    const wheel = (event: WheelEvent) => {
+      if (!(event.target instanceof Node) || !element.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const at = element.getBoundingClientRect();
+      core.zoom({
+        level: wheelZoom(core.zoom(), event, core.minZoom(), core.maxZoom(), element.clientHeight),
+        renderedPosition: { x: event.clientX - at.left, y: event.clientY - at.top },
+      });
+    };
+    window.addEventListener("wheel", wheel, { capture: true, passive: false });
     return () => {
+      window.removeEventListener("wheel", wheel, { capture: true });
       core.destroy();
       cy.current = null;
       held.current = new Map();
