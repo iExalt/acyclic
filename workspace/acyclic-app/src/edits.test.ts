@@ -54,7 +54,8 @@ describe("newId", () => {
     expect(newId("Sow the Beans!", new Set())).toBe("sow-the-beans");
     expect(newId("Crème brûlée", new Set())).toBe("creme-brulee");
     expect(newId("Sow", new Set(["sow", "sow-2"]))).toBe("sow-3");
-    expect(newId("日本", new Set())).toBe("item");
+    expect(newId("日本", new Set())).toBe("untitled");
+    expect(newId("Item 5", new Set())).toBe("item5");
     const long = "a".repeat(70);
     expect(newId(long, new Set())).toBe("a".repeat(64));
     expect(newId(long, new Set(["a".repeat(64)]))).toBe(`${"a".repeat(62)}-2`);

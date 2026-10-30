@@ -44,6 +44,16 @@
       }
     },
     {
+      "name": "add with an id the tracker assigns",
+      "command": {
+        "item": {
+          "add": {
+            "title": "F"
+          }
+        }
+      }
+    },
+    {
       "name": "move to the top level",
       "command": {
         "item": {

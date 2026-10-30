@@ -81,7 +81,8 @@ fn within(command: &Command, thread: &str) -> Result<Vec<Within>, CliError> {
             if named.as_deref() == Some(thread) {
                 Ok(parent(up))
             } else {
-                Err(outside(thread, format!("new item {item}, added with no thread or another")))
+                let item = item.as_deref().map(|id| format!(" {id}")).unwrap_or_default();
+                Err(outside(thread, format!("new item{item}, added with no thread or another")))
             }
         },
         Command::Item(ItemCommand::Edit(edit)) => {
@@ -483,15 +484,21 @@ impl<'a> Session<'a> {
                     resources: Delta { add: resource.clone(), remove: Vec::new() },
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
-                self.write(|replica, by| Ok(edit::add_item(replica, item, &fields, by)?.item(item)))
-                    .map_err(|error| {
-                        self.misplaced(error, parent.as_deref(), || {
-                            format!(
-                                "acyclic item add {item} --title <TITLE> --thread {}",
-                                parent.as_deref().unwrap_or_default()
-                            )
-                        })
+                self.write(|replica, by| {
+                    let id = edit::new_id(replica, kind::ITEM, item.as_deref(), title)?;
+                    let mut data = edit::add_item(replica, &id, &fields, by)?.item(&id);
+                    data["title"] = json!(title);
+                    Ok(data)
+                })
+                .map_err(|error| {
+                    self.misplaced(error, parent.as_deref(), || {
+                        let item = item.as_deref().map(|id| format!(" {id}")).unwrap_or_default();
+                        format!(
+                            "acyclic item add{item} --title <TITLE> --thread {}",
+                            parent.as_deref().unwrap_or_default()
+                        )
                     })
+                })
             },
             Command::Item(ItemCommand::Edit(edit)) => {
                 let fields = ItemFields {
@@ -592,7 +599,11 @@ impl<'a> Session<'a> {
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    Ok(edit::add_thread(replica, thread, &fields, by)?.thread(thread))
+                    let id = edit::new_id(replica, kind::THREAD, thread.as_deref(), title)?;
+                    let written = edit::add_thread(replica, &id, &fields, by)?;
+                    let mut data = written.thread(&id);
+                    data["title"] = json!(title);
+                    Ok(data)
                 })
             },
             Command::Thread(ThreadCommand::Edit(edit)) => {

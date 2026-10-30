@@ -526,8 +526,8 @@ impl StateWord {
 pub enum ItemCommand {
     /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused.
     Add {
-        /// The new item.
-        item: String,
+        /// The new item's id; leave it out for the tracker to assign one, such as `item-mac-143`.
+        item: Option<String>,
         /// Its title.
         #[arg(short = 't', long)]
         title: String,
@@ -745,8 +745,8 @@ pub enum ThreadCommand {
     },
     /// Adds a thread; adding it again with the same fields changes nothing, and with other fields is refused.
     Add {
-        /// The new thread.
-        thread: String,
+        /// The new thread's id; leave it out for the tracker to assign one, such as `thread-mac-32`.
+        thread: Option<String>,
         /// Its title.
         #[arg(short = 't', long)]
         title: String,

@@ -5,6 +5,7 @@
 //! Membership and repositories of items and threads go through the scope rules, as every other write to them does: an
 //! agent's change to approved scope waits as a proposal, which the result lists.
 
+use acyclic_core::ids;
 use acyclic_core::model::{self, By, ItemState, Level, Model, SetField, Size, Value};
 use acyclic_core::place::{self, Inherited};
 use acyclic_core::schema::{item as field, kind, repository as repo_field, thread as thread_field};
@@ -336,6 +337,58 @@ pub(crate) fn edit_item(
         written.inherited = place::place(replica, &[id.to_owned()], by)?;
     }
     Ok(written)
+}
+
+/// The id an add writes: the one given, unless it is new and the tracker's to assign, or else the next the tracker
+/// assigns. An add without an id whose title is already a thread's, or an unarchived item's, is refused naming that
+/// record, so a retried add doesn't make a second one; give an id to add another with the same title.
+pub(crate) fn new_id(
+    replica: &Replica,
+    of: &str,
+    given: Option<&str>,
+    title: &str,
+) -> Result<String, CliError> {
+    let model = Model::read(replica.state())?;
+    if let Some(id) = given {
+        let exists = if of == kind::THREAD {
+            thread_exists(&model, id)
+        } else {
+            replica.state().entity(&model::item_key(id)?).is_some()
+        };
+        if !exists && ids::reserved(of, id) {
+            return Err(CliError::new(
+                "reserved-id",
+                exit::USAGE,
+                format!(
+                    "ids starting with {of}- are the tracker's to assign: leave out the id, or choose another"
+                ),
+            ));
+        }
+        return Ok(id.to_owned());
+    }
+    let same = if of == kind::THREAD {
+        model
+            .threads
+            .values()
+            .find(|thread| thread.title.one().is_some_and(|t| t == title))
+            .map(|t| &t.id)
+    } else {
+        model
+            .items
+            .values()
+            .find(|item| {
+                item.title.one().is_some_and(|t| t == title) && !model.is_archived(&item.id)
+            })
+            .map(|item| &item.id)
+    };
+    if let Some(id) = same {
+        return Err(CliError::refused(
+            "already-exists",
+            format!("{of} {id} has this title; give an id to add another with the same title"),
+        )
+        .with(json!({"id": id})));
+    }
+    Ok(ids::next(replica.state(), of, replica.id()))
 }
 
 /// Adds an item, or accepts the same add again.

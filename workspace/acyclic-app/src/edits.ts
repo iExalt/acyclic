@@ -39,8 +39,8 @@ export function unlinkCommand(from: string, kind: LinkKind, to: string): Command
 }
 
 /**
- * An id for a new item, from its title: lowercase ASCII letters and digits joined by '-', or `item` for a title with
- * none, with -2, -3… when the id is taken. The client can't see every id taken, such as a deleted item's or one in a
+ * An id for a new item, from its title: lowercase ASCII letters and digits joined by '-', or `untitled` for a title
+ * with none, with -2, -3… when the id is taken. The client can't see every id taken, such as a deleted item's or one in a
  * replica not yet synced, so the user can still change it.
  */
 export function newId(title: string, taken: ReadonlySet<string>): string {
@@ -53,7 +53,8 @@ export function newId(title: string, taken: ReadonlySet<string>): string {
     .trim()
     .split(" ")
     .filter((word) => word !== "");
-  const base = words.length === 0 ? "item" : words.join("-");
+  // "item-" starts the ids the tracker assigns, which it refuses from anyone else.
+  const base = words.length === 0 ? "untitled" : words.join("-").replace(/^item-/, "item");
   const trimmed = (stem: string, suffix: string) =>
     `${stem.slice(0, MAX_ID - suffix.length).replace(/-+$/, "")}${suffix}`;
   let id = trimmed(base, "");

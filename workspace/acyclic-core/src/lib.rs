@@ -9,6 +9,7 @@ pub mod claim;
 pub mod delete;
 pub mod export;
 pub mod graph;
+pub mod ids;
 pub mod import;
 pub mod locate;
 pub mod model;
