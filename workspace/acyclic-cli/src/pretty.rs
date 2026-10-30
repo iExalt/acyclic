@@ -185,12 +185,20 @@ fn write(data: &Json) -> String {
     let fields = data.as_object().expect("a write's data is an object");
     let entity = ENTITIES.iter().find(|entity| fields.get(**entity).is_some_and(Json::is_string));
     let changed = if data["changed"] == true { "changed" } else { "no change to" };
-    let mut parts = vec![match entity {
-        Some(entity) => format!("{changed} {entity} {}", compact(&data[*entity])),
-        None => changed.to_owned(),
+    // The entity's title, when the write carries it, reads as part of its name.
+    let title = data["title"].as_str().filter(|_| entity.is_some());
+    let mut parts = vec![match (entity, title) {
+        (Some(entity), Some(title)) => {
+            format!("{changed} {entity} {} {}", compact(&data[*entity]), Json::from(title))
+        },
+        (Some(entity), None) => format!("{changed} {entity} {}", compact(&data[*entity])),
+        (None, _) => changed.to_owned(),
     }];
     for (key, value) in fields {
-        if key == "changed" || entity.is_some_and(|entity| *entity == key.as_str()) || empty(value)
+        if key == "changed"
+            || entity.is_some_and(|entity| *entity == key.as_str())
+            || (key == "title" && title.is_some())
+            || empty(value)
         {
             continue;
         }

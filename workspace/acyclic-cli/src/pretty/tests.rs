@@ -61,11 +61,17 @@ fn records_are_blocks_and_writes_are_one_line() {
     let edited = json!({"changed": true, "item": "plant", "placed": [],
         "proposals": [{"id": "mac-9", "field": "thread"}]});
     let unchanged = json!({"changed": false, "thread": "t1"});
+    // A write that carries its entity's title names it right after the id, and leaves out a title it hasn't got.
+    let titled =
+        json!({"changed": true, "thread": "t1", "title": "Sow the beds", "approved": true});
+    let untitled = json!({"changed": true, "thread": "t2", "title": null, "approved": false});
     insta::assert_snapshot!(format!(
-        "{}\n{}{}",
+        "{}\n{}{}{}{}",
         render(&command("show plant"), &shown, None),
         render(&command("item edit plant --thread t1"), &edited, None),
-        render(&command("thread add t1 --title T"), &unchanged, None)
+        render(&command("thread add t1 --title T"), &unchanged, None),
+        render(&command("thread approve t1"), &titled, None),
+        render(&command("thread revoke t2"), &untitled, None)
     ));
 }
 

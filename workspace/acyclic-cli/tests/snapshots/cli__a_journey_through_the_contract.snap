@@ -533,7 +533,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread approve t1 --as-user
   "data": {
     "approved": true,
     "changed": true,
-    "thread": "t1"
+    "thread": "t1",
+    "title": "Work"
   },
   "ok": true
 }
@@ -1137,7 +1138,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
   "data": {
     "approved": false,
     "changed": true,
-    "thread": "t1"
+    "thread": "t1",
+    "title": "Work"
   },
   "ok": true
 }
