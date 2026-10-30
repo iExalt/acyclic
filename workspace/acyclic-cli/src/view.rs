@@ -74,9 +74,10 @@ pub(crate) struct View<'a> {
 }
 
 impl View<'_> {
-    /// The item summary: `{id, title, state, parent, thread, readiness}`, and a parent's `progress`, `{state, counts:
-    /// {done, leaves}}`, from the leaves under it and the claims on their threads. An id the model lacks has only its
-    /// id.
+    /// The item summary: `{id, title, state, parent, thread, readiness}`, with a leaf's `stage` unless it is archived,
+    /// and a parent's `progress`, `{state, counts}`, from the leaves under it and the claims on their threads. `counts`
+    /// has its leaves, those `done`, and every other leaf by stage, so they add up to `leaves`; `in_review` counts the
+    /// done ones not merged yet. An id the model lacks has only its id.
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
         let Some(item) = self.model.items.get(id) else {
             return Ok(json!({
@@ -92,10 +93,18 @@ impl View<'_> {
             "thread": item.thread,
             "readiness": self.readiness.of(id)?,
         });
-        if let Some(progress) = self.readiness.progress(id)? {
+        if let Some(stage) = self.readiness.stage(id)? {
+            row["stage"] = json!(stage);
+        }
+        if let Some(rollup) = self.readiness.progress(id)? {
+            let (progress, stages) = (rollup.progress, rollup.stages);
             row["progress"] = json!({
                 "state": progress.state,
-                "counts": {"done": progress.done, "leaves": progress.total},
+                "counts": {
+                    "done": progress.done, "leaves": progress.total, "in_review": stages.in_review,
+                    "in_progress": stages.in_progress, "ready": stages.ready, "blocked": stages.blocked,
+                    "parked": stages.parked, "unthreaded": stages.unthreaded,
+                },
             });
         }
         Ok(row)
@@ -666,13 +675,14 @@ mod tests {
             assert_eq!(
                 row,
                 json!({"id": "c", "title": "C", "state": "backlog", "parent": null, "thread": null,
-                       "readiness": {"status": "blocked", "waiting": {"a": {"why": "open"}}}})
+                       "readiness": {"status": "blocked", "waiting": {"a": {"why": "open"}}}, "stage": "blocked"})
             );
             // A parent's summary adds its progress from its leaves, in progress while their thread is claimed though
             // none is started; a leaf's has none.
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
-                json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2}})
+                json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_review": 0, "in_progress": 2,
+                       "ready": 0, "blocked": 0, "parked": 0, "unthreaded": 0}})
             );
             let shown = view.item("a", &view.model.items["a"]).unwrap();
             assert_eq!(shown.get("progress"), None);
