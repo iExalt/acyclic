@@ -318,6 +318,20 @@ def map_journey(page, view, plan, name, failures, hint=None):
     if wait_drawn(page, expected).get("font") != "true":
         failures.append(f"{name}: the Map drew before its font loaded")
     first_view_readable(page, name, failures)
+    # Each task drawn carries the stage the tracker gives it, as a class its tint and marks follow.
+    drawn_stages = page.get_by_test_id("map").evaluate(
+        "m => Object.fromEntries(m.cy.nodes('.leaf').map(n => [n.id(),"
+        " (n.classes().find(c => c.startsWith('stage-')) ?? '').slice(6) || null]))"
+    )
+    # A parent drawn as a task, everything under it archived, has no stage of its own: its state says what it can.
+    told = {
+        id: plan.items[id].get("stage")
+        or (state if (state := plan.items[id]["state"]) in ("done", "parked", "in-progress") else None)
+        for id in drawn_stages
+    }
+    if drawn_stages != told:
+        wrong = sorted(id for id in told if drawn_stages[id] != told[id])[:5]
+        failures.append(f"{name}: tasks drawn with the wrong stage: {wrong}")
     # Dragging pans from anywhere, an item or a box as well as the background.
     for id in [
         next(id for id in plan.default() if plan.depth(id) == 1),

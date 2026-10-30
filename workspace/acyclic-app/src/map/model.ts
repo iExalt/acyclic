@@ -1,7 +1,7 @@
 // The plan as the Map draws it: the outcome tree as nested boxes, and waits-for links as edges from the item that
 // must come first to the item that waits. Pure functions, tested without a browser.
 
-import type { Item } from "../api";
+import type { Counts, Item, Stage } from "../api";
 
 /** An item, with what the Map reads of it. */
 export interface MapItem {
@@ -11,8 +11,10 @@ export interface MapItem {
   parent: string | null;
   thread: string | null;
   archived: boolean;
-  /** A parent's leaves done and in all, or null for a leaf or a parent whose leaves are all archived. */
-  progress: { done: number; leaves: number } | null;
+  /** A leaf's stage, or null for a parent or an archived item. */
+  stage: Stage | null;
+  /** A parent's leaves by stage, or null for a leaf or a parent whose leaves are all archived. */
+  progress: Counts | null;
   /** The items this one waits for. */
   waitsFor: string[];
 }
@@ -36,6 +38,7 @@ export function buildModel(items: Item[]): Model {
         parent: item.parent,
         thread: item.thread,
         archived: item.archived,
+        stage: item.stage ?? null,
         progress: item.progress === undefined || item.progress.counts.leaves === 0 ? null : item.progress.counts,
         waitsFor: [...item.links.waits_for],
       },
@@ -124,8 +127,12 @@ export interface VisibleNode {
   hidden: number;
   /** In an archived subtree: archived itself, or under an item that is. */
   archived: boolean;
-  /** A parent's leaves done and in all, as its item has them. */
-  progress: { done: number; leaves: number } | null;
+  /** A leaf's stage, as its item has it. */
+  stage: Stage | null;
+  /** A leaf's thread, which its stripe and badge show. */
+  thread: string | null;
+  /** A parent's leaves by stage, as its item has them. */
+  progress: Counts | null;
 }
 
 /** An edge from the item that must come first to the one that waits for it, between visible nodes. */
@@ -177,6 +184,8 @@ export function visible(model: Model, state: ViewState): View {
       kind: kids.length === 0 ? "leaf" : collapsed ? "collapsed" : "box",
       hidden: collapsed ? count(id) : 0,
       archived,
+      stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : null,
+      thread: item.thread,
       progress: item.progress,
     });
     for (const child of kids) walk(child, id, collapsed ? id : null, archived);
@@ -213,4 +222,12 @@ export function visible(model: Model, state: ViewState): View {
   }
   for (const members of threads.values()) members.sort();
   return { nodes, edges, threads };
+}
+
+/**
+ * A stage for a task core gives none: one archived, or a parent drawn as a task because everything under it is
+ * archived. Its own state says what it can: done, parked or started, and nothing otherwise.
+ */
+export function fallbackStage(state: string): Stage | null {
+  return state === "done" || state === "parked" || state === "in-progress" ? state : null;
 }

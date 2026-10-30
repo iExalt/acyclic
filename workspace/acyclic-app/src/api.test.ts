@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CommandError,
   command,
+  countsText,
   failure,
   globalLevel,
   items,
@@ -169,13 +170,20 @@ describe("failure", () => {
 });
 
 describe("stateText", () => {
-  const counts = (done: number, leaves: number) => ({ counts: { done, leaves } });
+  const none = { done: 0, leaves: 0, in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+  // 9 finished, 2 of them in review, and 5 more by stage: 14 leaves.
+  const counts = { ...none, done: 9, leaves: 14, in_review: 2, in_progress: 1, ready: 3, unthreaded: 1 };
 
-  it("reads a parent by the work under it, with how many of its leaves are done, and a leaf by its own state", () => {
-    const parent = { state: "backlog", archived: false, progress: { state: "in-progress", ...counts(9, 14) } };
-    expect(stateText(parent)).toBe("in-progress (9/14)");
-    expect(stateText({ ...parent, progress: { state: "parked", ...counts(9, 14) } })).toBe("parked (9/14)");
-    expect(stateText({ ...parent, progress: { state: "done", ...counts(0, 0) } })).toBe("done (all archived)");
+  it("reads a parent by the work under it, with its leaves by stage in words, and a leaf by its own state", () => {
+    const parent = { state: "backlog", archived: false, progress: { state: "in-progress", counts } };
+    expect(stateText(parent)).toBe("in-progress: 7 done, 2 in review, 1 in progress, 3 ready, 1 not in a thread");
+    expect(stateText({ ...parent, progress: { state: "done", counts: none } })).toBe("done (all archived)");
     expect(stateText({ state: "in-progress", archived: true })).toBe("in-progress, archived");
+  });
+
+  it("names every stage, done ones apart from those in review, and leaves out stages with none", () => {
+    const all = { done: 3, leaves: 9, in_review: 1, in_progress: 1, ready: 1, blocked: 1, parked: 1, unthreaded: 1 };
+    expect(countsText(all)).toBe("2 done, 1 in review, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 not in a thread");
+    expect(countsText({ ...none, leaves: 2, blocked: 2 })).toBe("2 blocked");
   });
 });

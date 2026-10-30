@@ -19,16 +19,53 @@ interface RawItem {
   size: Raw<string>;
   archived: boolean;
   links: { waits_for: string[]; waited_on_by: string[]; relates_to: string[]; related_from: string[] };
-  /** A parent's state as the work under it makes it, and how many of its leaves are done; a leaf has none. */
+  /** A leaf's stage, as core tells it; a parent or an archived item has none. */
+  stage?: Stage;
+  /** A parent's state as the work under it makes it, and its leaves counted by stage; a leaf has none. */
   progress?: Progress;
+}
+
+/** Where a leaf stands: core's seven stages, which tell every leaf apart. */
+export type Stage = "done" | "in-review" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
+
+/**
+ * A parent's leaves: all of them, those `done` (the ones in review among them), and every other one by stage, so
+ * `done` and the other five add up to `leaves`.
+ */
+export interface Counts {
+  done: number;
+  leaves: number;
+  in_review: number;
+  in_progress: number;
+  ready: number;
+  blocked: number;
+  parked: number;
+  unthreaded: number;
 }
 
 export interface Progress {
   state: string;
-  counts: { done: number; leaves: number };
+  counts: Counts;
 }
 
-/** How an item's state reads: a parent's from the work under it, with how much of it is done. */
+/** A parent's leaves by stage in words, in the order work moves through them, leaving out stages with none. */
+export function countsText(counts: Counts): string {
+  const said: [number, string][] = [
+    [counts.done - counts.in_review, "done"],
+    [counts.in_review, "in review"],
+    [counts.in_progress, "in progress"],
+    [counts.ready, "ready"],
+    [counts.blocked, "blocked"],
+    [counts.parked, "parked"],
+    [counts.unthreaded, "not in a thread"],
+  ];
+  return said
+    .filter(([count]) => count > 0)
+    .map(([count, word]) => `${count} ${word}`)
+    .join(", ");
+}
+
+/** How an item's state reads: a parent's from the work under it, with its leaves by stage. */
 export function stateText(item: Pick<Item, "state" | "archived" | "progress">): string {
   const progress = item.progress;
   const state =
@@ -36,7 +73,7 @@ export function stateText(item: Pick<Item, "state" | "archived" | "progress">): 
       ? item.state
       : progress.counts.leaves === 0
         ? `${progress.state} (all archived)`
-        : `${progress.state} (${progress.counts.done}/${progress.counts.leaves})`;
+        : `${progress.state}: ${countsText(progress.counts)}`;
   return item.archived ? `${state}, archived` : state;
 }
 

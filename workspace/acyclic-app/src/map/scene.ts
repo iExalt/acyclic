@@ -1,7 +1,11 @@
 // What the Map draws for a laid-out view and the user's selection: every node at its place, the edges worth
 // drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
+import { countsText, type Stage } from "../api";
+import { TITLE } from "./chevron";
+import { cut, type Measure, wrap } from "./fit";
 import { type Placed, withinOneBox } from "./layout";
+import { MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, View, VisibleNode } from "./model";
 
 /** What the user has picked: an item, a thread, or neither. An item's thread lights up unless a thread is picked. */
@@ -12,8 +16,13 @@ export interface Selection {
 
 export interface SceneNode {
   id: string;
+  /** Its label, a line at a time, each cut to fit `textWidth`. */
   label: string;
+  textWidth: number;
   kind: Kind;
+  /** A task's stage and thread, which its marks show; null for a box. */
+  stage: Stage | null;
+  thread: string | null;
   /** The node's centre, as the renderer places nodes. */
   x: number;
   y: number;
@@ -26,6 +35,20 @@ export interface SceneNode {
   selected: boolean;
   /** In an archived subtree, which only shows when asked for. */
   archived: boolean;
+}
+
+/** How wide labels are drawn: a task's in the face's regular weight, a box's in bold. */
+export interface Fonts {
+  regular: Measure;
+  bold: Measure;
+}
+
+/** Everything fits: for scenes whose labels nobody reads, such as tests of anything else. */
+export const UNMEASURED: Fonts = { regular: () => 0, bold: () => 0 };
+
+/** How wide a node's label may be drawn: a task's between its marks, a box's after its chevron. */
+export function textWidthOf(kind: Kind, width: number): number {
+  return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : TITLE + 10));
 }
 
 export interface SceneEdge {
@@ -56,6 +79,7 @@ export function scene(
   placed: Placed,
   selection: Selection,
   threadOf: (id: string) => string | null,
+  fonts: Fonts = UNMEASURED,
 ): Scene {
   const thread = selection.thread ?? (selection.item === null ? null : threadOf(selection.item));
   const lit = new Set(thread === null ? [] : (view.threads.get(thread) ?? []));
@@ -66,10 +90,14 @@ export function scene(
     if (at === undefined) continue;
     const depth = node.parent === null ? 0 : (layer.get(node.parent) ?? 0) + 1;
     layer.set(node.id, depth);
+    const textWidth = textWidthOf(node.kind, at.width);
     nodes.push({
       id: node.id,
-      label: labelOf(node),
+      label: labelOf(node, textWidth, fonts),
+      textWidth,
       kind: node.kind,
+      stage: node.kind === "leaf" ? node.stage : null,
+      thread: node.kind === "leaf" ? node.thread : null,
       x: at.x + at.width / 2,
       y: at.y + at.height / 2,
       width: at.width,
@@ -102,10 +130,16 @@ export function scene(
 }
 
 /**
- * A node's label: a parent's leaves done and in all go first, where a box's title cut short can't hide them, and a
- * collapsed box ends with how many items it hides.
+ * A node's label, in lines cut to fit `width`. A task's title takes two lines. A box's takes one, ending, when it is
+ * collapsed, with how many items it hides, and a parent's leaves by stage take the line under it.
  */
-export function labelOf(node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress">): string {
-  const done = node.progress === null ? "" : `${node.progress.done}/${node.progress.leaves} – `;
-  return node.kind === "collapsed" ? `${done}${node.title} (+${node.hidden})` : `${done}${node.title}`;
+export function labelOf(
+  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress">,
+  width: number,
+  fonts: Fonts,
+): string {
+  if (node.kind === "leaf") return wrap(node.title, width, 2, fonts.regular).join("\n");
+  const hidden = node.kind === "collapsed" ? ` (+${node.hidden})` : "";
+  const title = cut(node.title, width - fonts.bold(hidden), fonts.bold) + hidden;
+  return node.progress === null ? title : `${title}\n${cut(countsText(node.progress), width, fonts.bold)}`;
 }

@@ -5,6 +5,7 @@
 
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
+import { STRIP } from "./chevron";
 import { type BoxInput, type LayBox, ROOT } from "./layout";
 
 const LAYERED = {
@@ -12,8 +13,8 @@ const LAYERED = {
   "elk.direction": "DOWN",
   "elk.layered.spacing.nodeNodeBetweenLayers": "40",
   "elk.spacing.nodeNode": "24",
-  // Room at the top for the box's title.
-  "elk.padding": "[top=36,left=12,bottom=12,right=12]",
+  // Room at the top for the box's title strip.
+  "elk.padding": `[top=${STRIP},left=12,bottom=12,right=12]`,
 };
 
 const PACKED = {

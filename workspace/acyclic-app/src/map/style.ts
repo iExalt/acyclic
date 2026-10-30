@@ -2,8 +2,10 @@
 // archived, and a lit thread takes its line's colour.
 
 import type cytoscape from "cytoscape";
+import type { Stage } from "../api";
 import { TOKENS } from "../lines";
-import { TITLE } from "./chevron";
+import { STRIP, TITLE } from "./chevron";
+import { MARKS_LEFT, QUIET, TINTS } from "./marks";
 
 /** The face labels are drawn in. */
 export const FONT = "Overpass, system-ui, sans-serif";
@@ -19,6 +21,13 @@ export const CLOSED = svg(12, `<path d="M4 2l4 4-4 4" ${stroke}/>`);
 export const HATCH = svg(8, `<path d="M-2 2l4-4M0 8l8-8M6 10l4-4" stroke="${TOKENS.muted}" stroke-width="1"/>`);
 /** Where a chevron is drawn: in the middle of the square at the left of the title strip. */
 const CHEVRON_AT = `${(TITLE - 12) / 2}px`;
+const CHEVRON_DOWN = `${(STRIP - 12) / 2}px`;
+
+/** Each stage's tint, and a quieter title for work finished or set aside. */
+const STAGES: cytoscape.StylesheetJson = (Object.keys(TINTS) as Stage[]).map((stage) => ({
+  selector: `node.leaf.stage-${stage}`,
+  style: { "background-color": TINTS[stage], color: QUIET.has(stage) ? TOKENS.muted : TOKENS.ink },
+}));
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 export const STYLE: cytoscape.StylesheetJson = [
@@ -33,8 +42,10 @@ export const STYLE: cytoscape.StylesheetJson = [
       "font-family": FONT,
       "font-size": 13,
       "font-weight": 500,
-      "text-wrap": "ellipsis",
-      "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth")}px`,
+      // Labels come cut to fit, a line at a time; the slack keeps the renderer from wrapping a line again.
+      "text-wrap": "wrap",
+      "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth") + 4}px`,
+      "line-height": 1.25,
       "text-valign": "center",
       "text-halign": "center",
       "background-color": TOKENS.tile,
@@ -54,13 +65,28 @@ export const STYLE: cytoscape.StylesheetJson = [
       color: TOKENS.muted,
       "font-weight": 700,
       "text-valign": "top",
-      // The label's centre sits on the box's top edge; this brings it into the title strip.
-      "text-margin-y": TITLE / 2 + 6,
+      // The label's foot sits on the box's top edge; this brings it down into the title strip.
+      "text-margin-y": STRIP - 8,
       "background-image": OPEN,
       "background-position-x": CHEVRON_AT,
-      "background-position-y": CHEVRON_AT,
+      "background-position-y": CHEVRON_DOWN,
     },
   },
+  // A task's marks, its thread's stripe and badge and its stage's icon, with its title between them.
+  {
+    selector: "node.leaf",
+    style: {
+      "background-image": "data(mark)",
+      "background-fit": "none",
+      "background-clip": "node",
+      "background-position-x": "0px",
+      "background-position-y": "0px",
+      "text-halign": "left-inside",
+      "text-justification": "left",
+      "text-margin-x": MARKS_LEFT,
+    },
+  },
+  ...STAGES,
   // A box's title starts at its left, after the chevron.
   {
     selector: "node.box, node.collapsed",
@@ -79,7 +105,13 @@ export const STYLE: cytoscape.StylesheetJson = [
   // Archived items are crossed out with lines; an open archived box, which holds them, has a dashed edge instead.
   {
     selector: "node.leaf.archived",
-    style: { "background-image": HATCH, "background-repeat": "repeat", "background-image-opacity": 0.3 },
+    style: {
+      "background-image": (node: cytoscape.NodeSingular) => [HATCH, node.data("mark")],
+      "background-repeat": ["repeat", "no-repeat"],
+      "background-image-opacity": [0.3, 1],
+      "background-position-x": ["0px", "0px"],
+      "background-position-y": ["0px", "0px"],
+    },
   },
   {
     selector: "node.collapsed.archived",

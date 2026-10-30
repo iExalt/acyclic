@@ -5,22 +5,27 @@
 // change in place.
 
 import type { Core, ElementDefinition } from "cytoscape";
-import { TOKENS } from "../lines";
-import { TITLE } from "./chevron";
+import { type Line, TOKENS } from "../lines";
+import { markOf } from "./marks";
 import type { Scene } from "./scene";
 
 /** An element as the renderer is given it; `data.id` is its id. */
 export type Drawn = ElementDefinition & { data: { id: string } & Record<string, unknown>; classes: string };
 
-/** The elements for a scene, with the lit thread's colour, if any. */
-export function elementsOf(scene: Scene, colour: string | undefined): Drawn[] {
+/** The elements for a scene, with the lit thread's colour, if any, and each task's marks from its thread's line. */
+export function elementsOf(scene: Scene, colour: string | undefined, lines: ReadonlyMap<string, Line>): Drawn[] {
   const layers = new Map(scene.nodes.map((node) => [node.id, node.layer]));
   const line = colour ?? TOKENS.ink;
   return [
     ...scene.nodes.map((node) => ({
       group: "nodes" as const,
-      // A box's title starts after its chevron.
-      data: { ...node, textWidth: Math.max(40, node.width - (node.kind === "leaf" ? 16 : TITLE + 10)), line },
+      data: {
+        ...node,
+        line,
+        ...(node.kind === "leaf"
+          ? { mark: markOf(node.stage, threadOf(node.thread, lines), node.width, node.height) }
+          : {}),
+      },
       position: { x: node.x, y: node.y },
       classes: [
         node.kind,
@@ -28,6 +33,7 @@ export function elementsOf(scene: Scene, colour: string | undefined): Drawn[] {
         node.dim ? "dim" : "",
         node.selected ? "selected" : "",
         node.archived ? "archived" : "",
+        node.stage === null ? "" : `stage-${node.stage}`,
       ].join(" "),
     })),
     ...scene.edges.map((edge) => ({
@@ -44,6 +50,12 @@ export function elementsOf(scene: Scene, colour: string | undefined): Drawn[] {
       classes: [edge.crossing ? "crossing" : "", edge.lit ? "lit" : "", edge.dim ? "dim" : ""].join(" "),
     })),
   ];
+}
+
+/** A task's thread as its marks show it, or null for one in no thread, or in one the plan doesn't list. */
+function threadOf(thread: string | null, lines: ReadonlyMap<string, Line>) {
+  const line = thread === null ? undefined : lines.get(thread);
+  return line === undefined ? null : { colour: line.colour, number: line.number, ink: line.ink };
 }
 
 export interface Update {
