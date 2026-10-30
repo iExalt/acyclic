@@ -93,6 +93,15 @@ describe("draw", () => {
     }
   });
 
+  it("sets a box's title alone, with no counts under it, a line lower", () => {
+    const counts = { done: 0, leaves: 2, in_review: 0, in_progress: 0, ready: 1, blocked: 1, parked: 0, unthreaded: 0 };
+    const counted = base.map((one) => (one.id === "beds" ? { ...one, progress: { state: "backlog", counts } } : one));
+    const oneLine = elements({ items: counted })
+      .filter((one) => one.classes.split(" ").includes("one-line"))
+      .map((one) => one.data.id);
+    expect(oneLine).toEqual(["garden", "plant"]);
+  });
+
   it("changes nothing when nothing changed, and only what did otherwise", () => {
     const before = elements(start);
     const drawn = new Map(before.map((one) => [one.data.id, one]));

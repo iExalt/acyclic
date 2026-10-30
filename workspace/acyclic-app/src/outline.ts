@@ -19,8 +19,9 @@ export interface Outline {
 
 /**
  * The outline of `model` as the Map shows it, archived subtrees only when `showArchived`, for `threads` in their
- * order, and its phases in their ids' natural order, as the Map lays them out. A phase is a top-level item with something under it shown; a thread is in a phase when any item shown in it,
- * the phase itself included, is in the thread.
+ * order, and its phases in their ids' natural order, as the Map lays them out. A phase is a top-level item with
+ * something under it shown; a thread is in a phase when any item shown in it, the phase itself included, is in the
+ * thread.
  */
 export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
   const shown = (id: string) => showArchived || !model.items.get(id)?.archived;
