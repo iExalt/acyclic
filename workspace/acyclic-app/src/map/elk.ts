@@ -4,6 +4,7 @@
 // selection anyway. Packing keeps only the order it is given, so the top level's boxes are given in dependency order.
 
 import type { ElkNode } from "elkjs/lib/elk-api.js";
+import { natural } from "../natural";
 import { type BoxInput, type LayBox, ROOT } from "./layout";
 
 const LAYERED = {
@@ -17,8 +18,6 @@ const LAYERED = {
 
 const PACKED = {
   "elk.algorithm": "rectpacking",
-  // Portrait, for the phone; fixed, so a plan lays out the same on every screen and its cache holds across resizes.
-  "elk.aspectRatio": "0.6",
   "elk.spacing.nodeNode": "24",
   "elk.padding": "[top=12,left=12,bottom=12,right=12]",
   // Every box keeps the size its own layout gave it, or what it holds would no longer fit it.
@@ -26,14 +25,25 @@ const PACKED = {
   "elk.rectpacking.orderBySize": "false",
 };
 
+/**
+ * The top level's shape, width over height: portrait for a phone, and roughly square where the panes sit side by side.
+ * Fixed for each, so a plan lays out the same on every screen of a kind and its cache holds across resizes.
+ */
+export const PORTRAIT = 0.6;
+export const SQUARE = 1;
+
 /** Anything that lays out an ELK graph: ELK's API in the browser, its bundled build in tests. */
 export interface Engine {
   layout(graph: ElkNode): Promise<ElkNode>;
 }
 
-/** The children in dependency order: each after everything it waits for, ties by id, and a cycle broken at its least id. */
+/**
+ * The children in dependency order: each after everything it waits for, ties by id in natural order, so the boxes of a
+ * plan without links come in the order their ids were given (phase-2 before phase-10), and a cycle broken at its least
+ * id.
+ */
 export function dependencyOrder(input: BoxInput): string[] {
-  const ids = input.children.map((child) => child.id).sort();
+  const ids = input.children.map((child) => child.id).sort(natural);
   const waiting = new Map(ids.map((id) => [id, new Set<string>()]));
   for (const edge of input.edges) waiting.get(edge.target)?.add(edge.source);
   const order: string[] = [];
@@ -58,7 +68,7 @@ export function elkLayBox(engine: Engine): LayBox {
     }));
     const graph: ElkNode = {
       id: root ? "root" : input.id,
-      layoutOptions: root ? PACKED : LAYERED,
+      layoutOptions: root ? { ...PACKED, "elk.aspectRatio": String(input.aspect ?? PORTRAIT) } : LAYERED,
       children,
       edges: root
         ? []
