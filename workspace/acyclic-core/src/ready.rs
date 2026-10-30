@@ -19,6 +19,9 @@ use crate::model::{Evidence, Item, ItemState, LinkKind, Model, Progress, Reposit
 use crate::natural;
 use crate::state::{Error, Millis, State};
 
+mod waves;
+pub use waves::Waves;
+
 /// Whether a commit is on a repository's default branch.
 pub trait Ancestry {
     /// `Ok(true)` when `commit` is on `repository`'s default branch, `Ok(false)` when it isn't yet, and `Err` with

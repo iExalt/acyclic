@@ -30,7 +30,7 @@ fn lists_are_tables_fitted_to_a_terminal_and_bare_in_a_pipe() {
 }
 
 #[test]
-fn ready_names_each_thread_once_and_thread_list_shows_counts() {
+fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
     let ready = json!({"ready": [
         {"id": "t1", "title": "Garden", "approved": true, "heads": ["beds"],
          "counts": {"members": 2, "done": 0, "conflicted": 0},
@@ -39,7 +39,7 @@ fn ready_names_each_thread_once_and_thread_list_shows_counts() {
          "counts": {"members": 1, "done": 0, "conflicted": 0},
          "items": [item("tap", "Tap", "ready")]},
     ]});
-    let threads = json!({"threads": ready["ready"]});
+    let threads = json!({"threads": ready["ready"], "waves": [["t1"]], "anytime": ["t2"]});
     insta::assert_snapshot!(format!(
         "{}\n{}",
         render(&command("ready"), &ready, None),

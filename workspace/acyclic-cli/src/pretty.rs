@@ -2,6 +2,7 @@
 //! record, and one line for a write. Fitted to the terminal's width when printing to one, and without borders or
 //! wrapping when not, so it stays easy to pipe.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use comfy_table::{ContentArrangement, LineStyle, Table, TableStyle, presets};
@@ -162,18 +163,32 @@ fn ready(data: &Json, width: Option<u16>) -> String {
     table(lines.iter().collect(), &columns, width)
 }
 
-/// `thread list`: each thread's summary, with its counts as columns.
+/// `thread list`: each thread's summary, with its counts as columns, and its wave: a number, `any` for a thread that
+/// can start any time, or nothing once its work is done.
 fn threads(data: &Json, width: Option<u16>) -> String {
+    let mut wave: BTreeMap<&str, String> = BTreeMap::new();
+    for (i, ids) in rows(&data["waves"]).into_iter().enumerate() {
+        wave.extend(
+            rows(ids).into_iter().filter_map(Json::as_str).map(|id| (id, (i + 1).to_string())),
+        );
+    }
+    wave.extend(
+        rows(&data["anytime"])
+            .into_iter()
+            .filter_map(Json::as_str)
+            .map(|id| (id, "any".to_owned())),
+    );
     let lines: Vec<Json> = rows(&data["threads"])
         .into_iter()
         .map(|thread| {
             serde_json::json!({
                 "id": thread["id"], "title": thread["title"], "approved": thread["approved"],
                 "members": thread["counts"]["members"], "done": thread["counts"]["done"], "heads": thread["heads"],
+                "wave": thread["id"].as_str().and_then(|id| wave.get(id)),
             })
         })
         .collect();
-    let columns: Vec<String> = ["id", "title", "approved", "members", "done", "heads"]
+    let columns: Vec<String> = ["id", "title", "approved", "members", "done", "wave", "heads"]
         .iter()
         .map(|key| (*key).to_owned())
         .collect();
