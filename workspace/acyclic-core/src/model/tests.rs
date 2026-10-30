@@ -627,6 +627,10 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_or_done_by_hand() {
     assert_eq!(progress(&r, "top"), reads(ItemState::Parked, 2, 3));
     set_state(&mut r, "top", ItemState::Done, by(7)).unwrap();
     assert_eq!(progress(&r, "top"), reads(ItemState::Done, 2, 3));
+    // A part closed by hand reads closed from above, whatever is open under it.
+    set_state(&mut r, "top", ItemState::Backlog, by(7)).unwrap();
+    set_state(&mut r, "mid", ItemState::Done, by(7)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 3, 3));
     // A parent whose leaves are all archived is done.
     put(&mut r, &item_key("mid").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
     put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();

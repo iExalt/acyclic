@@ -291,6 +291,14 @@ pub struct Progress {
     pub total: usize,
 }
 
+/// What counting a parent's leaves finds.
+#[derive(Default)]
+struct Tally {
+    done: usize,
+    total: usize,
+    started: bool,
+}
+
 /// A link as read.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
@@ -571,31 +579,48 @@ impl Model {
     }
 
     /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked or done, set by
-    /// hand; any other is what reopening a child left, and its leaves decide.
+    /// hand; any other is what reopening a child left, and its leaves decide. A parent under it done by hand counts
+    /// every leaf under it as done, so a closed part reads closed from above too.
     #[must_use]
     pub fn progress(&self, id: &str) -> Option<Progress> {
         let item = self.items.get(id)?;
         if self.children(id).is_empty() {
             return None;
         }
-        let leaves: Vec<&Item> = self
-            .subtree(id)
-            .into_iter()
-            .filter(|leaf| self.children(leaf).is_empty() && !self.is_archived(leaf))
-            .filter_map(|leaf| self.items.get(leaf))
-            .collect();
-        let done = leaves.iter().filter(|leaf| leaf.is_done()).count();
-        let started = leaves.iter().any(|leaf| leaf.state == Value::One(ItemState::InProgress));
+        let mut tally = Tally::default();
+        self.tally(id, &mut BTreeSet::from([id]), &mut tally);
         let state = if item.state == Value::One(ItemState::Parked) {
             ItemState::Parked
-        } else if item.is_done() || done == leaves.len() {
+        } else if item.is_done() || tally.done == tally.total {
             ItemState::Done
-        } else if started || done > 0 {
+        } else if tally.started || tally.done > 0 {
             ItemState::InProgress
         } else {
             ItemState::Backlog
         };
-        Some(Progress { state, done, total: leaves.len() })
+        Some(Progress { state, done: tally.done, total: tally.total })
+    }
+
+    /// Counts the leaves under `id`, archived ones aside, each item once, so a parent cycle ends the walk.
+    fn tally<'a>(&'a self, id: &'a str, seen: &mut BTreeSet<&'a str>, tally: &mut Tally) {
+        for child in self.children(id) {
+            if !seen.insert(child) || self.is_archived(child) {
+                continue;
+            }
+            let Some(item) = self.items.get(child) else { continue };
+            if self.children(child).is_empty() {
+                tally.total += 1;
+                tally.done += usize::from(item.is_done());
+                tally.started |= item.state == Value::One(ItemState::InProgress);
+            } else if item.is_done() {
+                let mut closed = Tally::default();
+                self.tally(child, seen, &mut closed);
+                tally.total += closed.total;
+                tally.done += closed.total;
+            } else {
+                self.tally(child, seen, tally);
+            }
+        }
     }
 
     /// Whether an item reads as done: a leaf by its own state, a parent by its progress.

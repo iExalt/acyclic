@@ -460,7 +460,12 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     assert_eq!(status(&r, &unmerged, "other"), blocked(&[("goal", Wait::InReview)]));
     let merged = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     assert_eq!(status(&r, &merged, "other"), Status::Ready);
+    // A part closed by hand counts as closed, whatever is open under it.
+    set_state(&mut r, "a", ItemState::InProgress, by(3)).unwrap();
+    assert_eq!(status(&r, &merged, "same"), blocked(&[("goal", Wait::Open)]));
+    set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
+    assert_eq!(status(&r, &merged, "same"), Status::Ready);
     // A parked parent meets nothing, whatever its leaves.
-    set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
+    set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
     assert_eq!(status(&r, &merged, "other"), blocked(&[("goal", Wait::Open)]));
 }

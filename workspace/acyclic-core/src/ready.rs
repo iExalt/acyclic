@@ -4,7 +4,8 @@
 //! archived dependency always is.
 //!
 //! Only leaves are claimed or ready. A dependency on a parent is met when the parent was marked done by hand, and
-//! otherwise once every leaf under it meets it, each judged as a dependency of its own: a parked parent meets none.
+//! otherwise once everything under it meets it, each child judged as a dependency of its own, so a part closed by hand
+//! counts as closed: a parked parent meets none.
 //! A parent's dependencies hold back every item under it.
 
 use std::cell::{OnceCell, RefCell};
@@ -556,15 +557,18 @@ impl<'a> Readiness<'a> {
         if same_thread { None } else { self.own_wait(item) }
     }
 
-    /// Why the leaves under a parent don't yet satisfy `dependent`, or `None` when every one does: the first wait,
-    /// a leaf still open before one in review.
+    /// Why the work under a parent doesn't yet satisfy `dependent`, or `None` when all of it does: each child judged
+    /// as a dependency of its own, so a leaf by its state, a parent under it done or parked by hand by that, and any
+    /// other by what is under it in turn. The first wait wins, one still open before one in review. A leaf waiting on
+    /// its own ancestor is among what it waits on, so only closing the ancestor by hand meets it.
     fn leaves_wait(&self, dependent: &str, parent: &str) -> Option<Wait> {
+        // A parent cycle, which only a join makes, has no bottom to reach.
+        if self.cyclic.contains(parent) {
+            return Some(Wait::Open);
+        }
         let mut found = None;
-        for leaf in self.model.subtree(parent) {
-            if leaf == parent || !self.model.children(leaf).is_empty() {
-                continue;
-            }
-            match self.dependency_wait(dependent, leaf) {
+        for child in self.model.children(parent) {
+            match self.dependency_wait(dependent, child) {
                 Some(Wait::Open) => return Some(Wait::Open),
                 Some(wait) => found = found.or(Some(wait)),
                 None => {},
