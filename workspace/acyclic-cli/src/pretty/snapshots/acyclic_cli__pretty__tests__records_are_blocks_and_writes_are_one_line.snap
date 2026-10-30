@@ -1,6 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/pretty/tests.rs
-expression: "format!(\"{}\\n{}{}\", render(&command(\"show plant\"), &shown, None),\nrender(&command(\"item edit plant --thread t1\"), &edited, None),\nrender(&command(\"thread add t1 --title T\"), &unchanged, None))"
+expression: "format!(\"{}\\n{}{}{}{}\", render(&command(\"show plant\"), &shown, None),\nrender(&command(\"item edit plant --thread t1\"), &edited, None),\nrender(&command(\"thread add t1 --title T\"), &unchanged, None),\nrender(&command(\"thread approve t1\"), &titled, None),\nrender(&command(\"thread revoke t2\"), &untitled, None))"
 ---
 id        plant
 title     Plant
@@ -13,3 +13,5 @@ session/s  2026-10-15T01:00:00Z  2026-10-15T00:00:00Z  mac
 
 changed item plant · proposals mac-9 (thread)
 no change to thread t1
+changed thread t1 "Sow the beds" · approved yes
+changed thread t2 · approved no

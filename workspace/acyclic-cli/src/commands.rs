@@ -816,11 +816,14 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// Approves a thread's scope, or revokes the approval.
+    /// Approves a thread's scope, or revokes the approval, naming the thread by its title too, so a wrong id shows. A
+    /// thread only its items name, or whose title is in conflict, has none.
     fn approve(&self, id: &str, approved: bool) -> Result<Json, CliError> {
         self.write(|replica, by| {
             scope::approve(replica, id, approved, by)?;
-            Ok(json!({"thread": id, "approved": approved}))
+            let model = Model::read(replica.state())?;
+            let title = model.threads.get(id).and_then(|thread| thread.title.one());
+            Ok(json!({"thread": id, "title": title, "approved": approved}))
         })
     }
 
