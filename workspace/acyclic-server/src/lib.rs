@@ -551,8 +551,7 @@ fn pair(listener: &Listener, port: u16, token: &Token, query: Option<&str>) -> R
                 cookie(port),
                 token.browser()
             );
-            (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, "/".to_owned())])
-                .into_response()
+            (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, "/".to_owned())]).into_response()
         },
         _ => page(StatusCode::FORBIDDEN, SPENT),
     }
