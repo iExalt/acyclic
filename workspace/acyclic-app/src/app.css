@@ -336,6 +336,105 @@ button.icon {
 .thread[aria-pressed="true"] {
   border-color: var(--line);
 }
+/* A phone's strip holds only the button that opens the phases' sheet. */
+.phases-button {
+  flex: none;
+}
+
+/* The outline: phases, each opening into its threads, then the threads in none. */
+.outline {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+.outline ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.outline .heading {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.outline .count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.phase-row {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+.phase[aria-current="true"] > .phase-row {
+  background: var(--tile);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+.phase-row .count {
+  padding: 0 10px;
+}
+button.chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+  border-color: transparent;
+}
+/* Drawn from two borders: pointing right while closed, down while open. */
+button.chevron::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateX(-2px) rotate(-45deg);
+}
+button.chevron[aria-expanded="true"]::before {
+  transform: translateY(-2px) rotate(45deg);
+}
+button.phase-title {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  border-color: transparent;
+  text-align: left;
+}
+.outline .subheading {
+  padding: 4px 10px 2px 34px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.outline .thread {
+  width: 100%;
+  max-width: none;
+}
+/* A phase's threads sit under its title, inside the list's width. */
+.phase ul {
+  padding-left: 24px;
+}
+.outline .thread[aria-current="true"] {
+  background: var(--tile);
+}
+.thread .also {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 .stage {
   position: relative;
@@ -685,8 +784,8 @@ button.row {
     grid-column: 1 / -1;
   }
   .threads {
-    flex-direction: column;
-    gap: 2px;
+    display: block;
+    overflow-x: hidden;
     overflow-y: auto;
     border-bottom: none;
     border-right: 1px solid var(--rule);

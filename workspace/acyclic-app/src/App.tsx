@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
-import { Badge, lineStyle } from "./Badge";
 import { Choice } from "./Choice";
 import {
   addCommand,
@@ -27,9 +26,11 @@ import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import { countText, type Need } from "./needs";
-import { Prose } from "./Prose";
+import { currentRows, outlineOf } from "./outline";
+import { Phases, PhasesSheet } from "./Phases";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
+import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
 const mapModule = import("./map/PlanMap");
@@ -74,6 +75,9 @@ export function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [showArchived, setShowArchived] = useState(false);
   const [thread, setThread] = useState<string | null>(null);
+  /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
+  const [showPhases, setShowPhases] = useState(false);
+  const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
@@ -138,6 +142,21 @@ export function App() {
   const lines = useMemo(() => linesOf(sorted), [sorted]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
+  const outline = useMemo(
+    () =>
+      model === null
+        ? null
+        : outlineOf(
+            model,
+            sorted.map((one) => one.id),
+            showArchived,
+          ),
+    [model, sorted, showArchived],
+  );
+  const current = useMemo(
+    () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
+    [model, outline, selected],
+  );
   // An item that went away, deleted or moved out of reach elsewhere, is no longer selected.
   useEffect(() => {
     if (model !== null && selected !== null && !model.items.has(selected)) setSelected(null);
@@ -151,6 +170,11 @@ export function App() {
   const select = useCallback((id: string | null, pin: string | null = null) => {
     setSelected(id);
     if (id !== null) setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
+  }, []);
+  /** Picks a thread from the outline, or unpicks the one picked. */
+  const pickThread = useCallback((id: string) => {
+    setSelected(null);
+    setThread((was) => (was === id ? null : id));
   }, []);
 
   /**
@@ -249,6 +273,7 @@ export function App() {
     adding: adding !== null,
     item: chosen !== undefined,
     needs: showNeeds,
+    phases: showPhases && !wide,
     thread: thread !== null,
   };
   const top = topLayer(open);
@@ -273,6 +298,7 @@ export function App() {
       else if (layer === "add") setAdding(null);
       else if (layer === "item") setSelected(null);
       else if (layer === "needs") setShowNeeds(false);
+      else if (layer === "phases") setShowPhases(false);
       else setThread(null);
     }
     return closing.length;
@@ -434,27 +460,27 @@ export function App() {
           </button>
         </Menu>
       </header>
-      <nav className="threads" aria-label="Threads">
-        {sorted.map((one) => (
+      <nav className="threads" aria-label="Phases and threads">
+        {outline === null ? null : wide ? (
+          <Phases
+            outline={outline}
+            lines={lines}
+            picked={thread}
+            current={current}
+            onPickThread={pickThread}
+            onSelectPhase={(id) => select(id, null)}
+          />
+        ) : (
           <button
             type="button"
-            key={one.id}
-            className="thread"
-            style={lineStyle(lines.get(one.id))}
-            aria-pressed={one.id === thread}
-            data-thread={one.id}
-            title={one.title}
-            onClick={() => {
-              setSelected(null);
-              setThread(one.id === thread ? null : one.id);
-            }}
+            className="phases-button"
+            data-testid="phases-button"
+            aria-pressed={showPhases}
+            onClick={() => setShowPhases((was) => !was)}
           >
-            <Badge line={lines.get(one.id)} />
-            <span className="name">
-              <Prose text={lines.get(one.id)?.name ?? one.title} />
-            </span>
+            Phases
           </button>
-        ))}
+        )}
       </nav>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} data-reads={reads.current.shown}>
@@ -537,6 +563,24 @@ export function App() {
             }}
             onClose={() => setShowNeeds(false)}
           />
+        ) : null}
+        {top === "phases" && outline !== null ? (
+          <PhasesSheet onClose={() => setShowPhases(false)}>
+            <Phases
+              outline={outline}
+              lines={lines}
+              picked={thread}
+              current={current}
+              onPickThread={(id) => {
+                setShowPhases(false);
+                pickThread(id);
+              }}
+              onSelectPhase={(id) => {
+                setShowPhases(false);
+                select(id, null);
+              }}
+            />
+          </PhasesSheet>
         ) : null}
         {top === "thread" && thread !== null ? (
           <ThreadPanel
