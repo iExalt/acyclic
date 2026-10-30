@@ -189,7 +189,7 @@ fn write(data: &Json) -> String {
     let title = data["title"].as_str().filter(|_| entity.is_some());
     let mut parts = vec![match (entity, title) {
         (Some(entity), Some(title)) => {
-            format!("{changed} {entity} {} \"{title}\"", compact(&data[*entity]))
+            format!("{changed} {entity} {} {}", compact(&data[*entity]), Json::from(title))
         },
         (Some(entity), None) => format!("{changed} {entity} {}", compact(&data[*entity])),
         (None, _) => changed.to_owned(),
