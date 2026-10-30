@@ -548,6 +548,9 @@ button.phase-title {
   pointer-events: none;
   color: var(--edge);
 }
+.arrows.over {
+  z-index: 2;
+}
 .arrows path {
   fill: none;
   stroke: currentColor;

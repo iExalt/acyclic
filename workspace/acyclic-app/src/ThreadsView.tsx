@@ -159,21 +159,34 @@ function Arrows({
     return () => watch.disconnect();
   }, [view, within]);
   return (
-    <svg className="arrows" aria-hidden="true" width={size.width} height={size.height}>
-      {arrows.map((arrow) => {
-        const on = lit !== null && (arrow.from === lit || arrow.to === lit);
-        const colour = on ? lines.get(lit)?.colour : undefined;
-        return (
-          <g
-            key={arrow.key}
-            className={[arrow.looped ? "looped" : "", on ? "lit" : lit === null ? "" : "dim"].join(" ")}
-            style={colour === undefined ? undefined : { color: colour }}
-          >
-            <path d={arrow.path} />
-            <path className="head" d={arrow.head} />
-          </g>
-        );
-      })}
-    </svg>
+    <>
+      {[false, true].map((over) => (
+        // The lit arrows are drawn over the cards: under them, one that skips a wave would seem to end at the card
+        // it passes beneath.
+        <svg
+          key={String(over)}
+          className={over ? "arrows over" : "arrows"}
+          aria-hidden="true"
+          width={size.width}
+          height={size.height}
+        >
+          {arrows.map((arrow) => {
+            const on = lit !== null && (arrow.from === lit || arrow.to === lit);
+            if (on !== over) return null;
+            const colour = on ? lines.get(lit)?.colour : undefined;
+            return (
+              <g
+                key={arrow.key}
+                className={[arrow.looped ? "looped" : "", on ? "lit" : lit === null ? "" : "dim"].join(" ")}
+                style={colour === undefined ? undefined : { color: colour }}
+              >
+                <path d={arrow.path} />
+                <path className="head" d={arrow.head} />
+              </g>
+            );
+          })}
+        </svg>
+      ))}
+    </>
   );
 }
