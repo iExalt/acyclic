@@ -1412,11 +1412,19 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 
 def needs_journey(page, env, plan, thread, name, failures):
-    """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows."""
+    """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows. Opened
+    from over the phases' sheet, the list shows in its place."""
     count = page.get_by_test_id("needs-count")
+    page.get_by_test_id("phases-button").click()
+    page.get_by_test_id("phases").wait_for()
     page.get_by_test_id("needs-button").click()
     needs = page.get_by_test_id("needs")
-    needs.wait_for(timeout=10_000)
+    try:
+        needs.wait_for(timeout=10_000)
+        page.get_by_test_id("phases").wait_for(state="detached", timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: Review opened over the phases' sheet left its list hidden")
+        return
     outside = next(
         id
         for id, row in sorted(plan.items.items())
