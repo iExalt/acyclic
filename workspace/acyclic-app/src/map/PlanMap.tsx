@@ -111,6 +111,9 @@ export default function PlanMap({
   useEffect(() => {
     let live = true;
     const start = performance.now();
+    if (aspect === null) return;
+    // How many layouts the Map has asked for, so a journey can tell that a first load asks for one.
+    if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
     Promise.all([layouts.layout(view, aspect), fontLoaded]).then(([result]) => {
       if (!live || result === null) return;
       // How long the layout took and how many boxes it laid out afresh, for timing runs.
@@ -318,12 +321,11 @@ const SIDE_BY_SIDE = "(min-width: 900px)";
  * a window lays the top level out again only now and then; on a phone, portrait, which a keyboard opening never
  * changes.
  */
-function useAspect(host: RefObject<HTMLDivElement | null>): number {
+function useAspect(host: RefObject<HTMLDivElement | null>): number | null {
   const query = useMemo(() => (typeof matchMedia === "undefined" ? null : matchMedia(SIDE_BY_SIDE)), []);
   const [wide, setWide] = useState(() => query?.matches ?? false);
-  const [shape, setShape] = useState(() =>
-    typeof window === "undefined" ? PORTRAIT : shapeOf(window.innerWidth, window.innerHeight),
-  );
+  // Unknown until the Map is measured, so the first layout is the one at its real shape.
+  const [shape, setShape] = useState<number | null>(null);
   useEffect(() => {
     if (query === null) return;
     const change = () => setWide(query.matches);
