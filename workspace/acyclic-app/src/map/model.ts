@@ -11,6 +11,8 @@ export interface MapItem {
   parent: string | null;
   thread: string | null;
   archived: boolean;
+  /** A parent's leaves done and in all, or null for a leaf or a parent whose leaves are all archived. */
+  progress: { done: number; leaves: number } | null;
   /** The items this one waits for. */
   waitsFor: string[];
 }
@@ -34,6 +36,7 @@ export function buildModel(items: Item[]): Model {
         parent: item.parent,
         thread: item.thread,
         archived: item.archived,
+        progress: item.progress === undefined || item.progress.counts.leaves === 0 ? null : item.progress.counts,
         waitsFor: [...item.links.waits_for],
       },
     ]),
@@ -121,6 +124,8 @@ export interface VisibleNode {
   hidden: number;
   /** In an archived subtree: archived itself, or under an item that is. */
   archived: boolean;
+  /** A parent's leaves done and in all, as its item has them. */
+  progress: { done: number; leaves: number } | null;
 }
 
 /** An edge from the item that must come first to the one that waits for it, between visible nodes. */
@@ -172,6 +177,7 @@ export function visible(model: Model, state: ViewState): View {
       kind: kids.length === 0 ? "leaf" : collapsed ? "collapsed" : "box",
       hidden: collapsed ? count(id) : 0,
       archived,
+      progress: item.progress,
     });
     for (const child of kids) walk(child, id, collapsed ? id : null, archived);
   };

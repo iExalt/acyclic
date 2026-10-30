@@ -2,7 +2,7 @@
 // drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
 import { type Placed, withinOneBox } from "./layout";
-import type { Kind, View } from "./model";
+import type { Kind, View, VisibleNode } from "./model";
 
 /** What the user has picked: an item, a thread, or neither. An item's thread lights up unless a thread is picked. */
 export interface Selection {
@@ -68,7 +68,7 @@ export function scene(
     layer.set(node.id, depth);
     nodes.push({
       id: node.id,
-      label: node.kind === "collapsed" ? `${node.title} (+${node.hidden})` : node.title,
+      label: labelOf(node),
       kind: node.kind,
       x: at.x + at.width / 2,
       y: at.y + at.height / 2,
@@ -99,4 +99,13 @@ export function scene(
     });
   }
   return { nodes, edges, thread };
+}
+
+/**
+ * A node's label: a parent's leaves done and in all go first, where a box's title cut short can't hide them, and a
+ * collapsed box ends with how many items it hides.
+ */
+export function labelOf(node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress">): string {
+  const done = node.progress === null ? "" : `${node.progress.done}/${node.progress.leaves} – `;
+  return node.kind === "collapsed" ? `${done}${node.title} (+${node.hidden})` : `${done}${node.title}`;
 }

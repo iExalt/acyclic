@@ -2,7 +2,7 @@
 // selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
 
 import { type ReactNode, useRef, useState } from "react";
-import type { Command, Item, Thread } from "./api";
+import { type Command, type Item, stateText, type Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
@@ -103,7 +103,7 @@ export function Inspector({
         <dt>Id</dt>
         <dd>{item.id}</dd>
         <dt>State</dt>
-        <dd data-testid="state">{item.archived ? `${item.state}, archived` : item.state}</dd>
+        <dd data-testid="state">{stateText(item)}</dd>
         {item.thread === null ? null : (
           <>
             <dt>Thread</dt>

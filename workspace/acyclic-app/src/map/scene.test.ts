@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
 import type { Placed } from "./layout";
 import { buildModel, visible } from "./model";
-import { scene } from "./scene";
+import { labelOf, scene } from "./scene";
 
 // top: a, b (waits for a); c (waits for a), in thread t with a
 const plan = [
@@ -86,5 +86,26 @@ describe("scene", () => {
       ["a", 1, 45],
       ["b", 1, 65],
     ]);
+  });
+});
+
+describe("labelOf", () => {
+  it("puts a parent's progress first, where a cut title can't hide it, and a collapsed box's count last", () => {
+    const node = { title: "Phase 2", kind: "box" as const, hidden: 0, progress: { done: 9, leaves: 15 } };
+    expect(labelOf(node)).toBe("9/15 – Phase 2");
+    expect(labelOf({ ...node, kind: "collapsed", hidden: 20 })).toBe("9/15 – Phase 2 (+20)");
+    expect(labelOf({ ...node, kind: "leaf", progress: null })).toBe("Phase 2");
+  });
+});
+
+describe("buildModel", () => {
+  it("takes a parent's progress from its item, and none when every leaf under it is archived", () => {
+    const progress = (done: number, leaves: number) => ({ state: "done", counts: { done, leaves } });
+    const model = buildModel([
+      item("p", null, [], { progress: progress(2, 2) }),
+      item("q", null, [], { progress: progress(0, 0) }),
+    ]);
+    expect(model.items.get("p")?.progress).toEqual({ done: 2, leaves: 2 });
+    expect(model.items.get("q")?.progress).toBeNull();
   });
 });

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, failure, globalLevel, items, proposals, settle, thread, threads } from "./api";
+import {
+  CommandError,
+  command,
+  failure,
+  globalLevel,
+  items,
+  proposals,
+  settle,
+  stateText,
+  thread,
+  threads,
+} from "./api";
 import { examples } from "./commands.examples.json";
 
 /** The command the server's tests run under this name. */
@@ -154,5 +165,17 @@ describe("failure", () => {
     expect(bug?.code).toBe("network");
     expect(bug?.message).not.toBe("Can't reach the server");
     expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "try again" });
+  });
+});
+
+describe("stateText", () => {
+  const counts = (done: number, leaves: number) => ({ counts: { done, leaves } });
+
+  it("reads a parent by the work under it, with how many of its leaves are done, and a leaf by its own state", () => {
+    const parent = { state: "backlog", archived: false, progress: { state: "in-progress", ...counts(9, 14) } };
+    expect(stateText(parent)).toBe("in-progress (9/14)");
+    expect(stateText({ ...parent, progress: { state: "parked", ...counts(9, 14) } })).toBe("parked (9/14)");
+    expect(stateText({ ...parent, progress: { state: "done", ...counts(0, 0) } })).toBe("done (all archived)");
+    expect(stateText({ state: "in-progress", archived: true })).toBe("in-progress, archived");
   });
 });
