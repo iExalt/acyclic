@@ -1,7 +1,8 @@
 // Threads drawn as the lines of a transit map: each has a colour, and a badge with its number wherever the thread is
-// named. Colours walk the hue wheel by number, so neighbouring threads look alike and the walk wraps every few dozen
-// threads: thread 7 and thread 34 look alike too. That is safe only because the Map lights one thread at a time and
-// every list names the thread: never ask anyone to tell two threads apart by colour alone.
+// named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of about 27
+// threads is a notch lighter than the last: thread 7 and thread 34 share a hue but not a lightness. Lines far apart
+// can still look alike, which is safe only because the Map lights one thread at a time and every list names the
+// thread: never ask anyone to tell two threads apart by colour alone.
 
 import type { Thread } from "./api";
 
@@ -28,8 +29,14 @@ export const TOKENS = {
   signal: "#f2b33d",
 } as const;
 
-/** How light every line is, in OKLCH: light enough for a border at 3:1 on the tile and a badge at 4.5:1 in dark ink. */
-const LIGHTNESS = 0.74;
+/**
+ * How light lines are, in OKLCH: never darker than a border at 3:1 on the tile and a badge at 4.5:1 in dark ink allow,
+ * nor so light that the colour washes out.
+ */
+const DARKEST = 0.7;
+const LIGHTEST = 0.86;
+/** How much lighter each lap round the wheel is than the last, until the lightest, when the laps turn darker again. */
+const LAP_LIGHTER = 0.04;
 /** How colourful every line is, in OKLCH, where the sRGB gamut allows. */
 const CHROMA = 0.13;
 /** The signal's hue in OKLCH, and how far every line keeps from it either side. */
@@ -38,11 +45,17 @@ const SIGNAL_GAP = 34;
 /** The hue between one number's line and the next: the walk passes the wheel in about 27 threads. */
 const STEP = 11;
 
-/** The line colour of position `at`: a walk round the hue wheel that skips the band about the signal. */
+/**
+ * The line colour of position `at`: a spiral round the hue wheel that skips the band about the signal and grows lighter
+ * a notch each lap, then darker again, so a line that comes round to an earlier one's hue differs from it in lightness.
+ */
 export function lineColour(at: number): string {
   const band = 360 - 2 * SIGNAL_GAP;
   const hue = (SIGNAL_HUE + SIGNAL_GAP + ((at * STEP) % band)) % 360;
-  return oklch(LIGHTNESS, CHROMA, hue);
+  const span = LIGHTEST - DARKEST;
+  const climbed = ((at * STEP) / band) * LAP_LIGHTER;
+  const along = climbed % (2 * span);
+  return oklch(DARKEST + (along <= span ? along : 2 * span - along), CHROMA, hue);
 }
 
 /** The badge's text colours: the ground's dark for light lines, white for dark ones. */

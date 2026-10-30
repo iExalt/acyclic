@@ -44,6 +44,15 @@ describe("lineColour", () => {
     }
     expect(distance(lineColour(7), lineColour(8))).toBeLessThan(distance(lineColour(7), lineColour(20)));
   });
+
+  it("spirals, so no two of the first 110 threads are as alike as neighbours may be, though laps share hues", () => {
+    const first = LINES.slice(0, 110);
+    for (const [at, colour] of first.entries()) {
+      for (const [other, again] of first.slice(at + 1).entries()) {
+        expect(distance(colour, again), `${at} and ${at + 1 + other}`).toBeGreaterThan(8);
+      }
+    }
+  });
 });
 
 /** The distance between two `#RRGGBB` colours in 8-bit RGB: a floor against two lines being the same colour. */
