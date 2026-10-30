@@ -1244,7 +1244,7 @@ def thread_journey(page, env, plan, thread, name, failures):
     settled_control(
         page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
     )
-    # The switch shows the tracker's flag, so it reads "apply" once the edit is saved and read back, not on the pick.
+    # The choice shows the tracker's flag, so it reads "apply" once the edit is saved and read back, not on the pick.
     panel.locator("select[name=pm]").select_option("apply")
     settled_control(page, "[data-testid=thread-panel] select[name=pm]", "value", "apply")
 
