@@ -974,9 +974,17 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Every thread's summary, with the threads it waits on, and the threads with work left in waves.
     fn threads(&self) -> Result<Json, CliError> {
-        let (_, model) = self.read()?;
-        Ok(json!({"threads": view::thread_rows(&model)}))
+        self.with_view(|view| {
+            let waves = view.readiness.waves()?;
+            let mut rows = view::thread_rows(view.model);
+            for row in &mut rows {
+                let waits = row["id"].as_str().and_then(|id| waves.waits_for.get(id));
+                row["waits_for"] = json!(waits.cloned().unwrap_or_default());
+            }
+            Ok(json!({"threads": rows, "waves": waves.waves, "anytime": waves.anytime}))
+        })
     }
 
     fn show_threads(&self, ids: &[String]) -> Result<Json, CliError> {

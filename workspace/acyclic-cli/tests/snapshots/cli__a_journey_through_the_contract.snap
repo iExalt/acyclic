@@ -764,6 +764,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
 # exit 0
 {
   "data": {
+    "anytime": [
+      "t1"
+    ],
     "threads": [
       {
         "approved": false,
@@ -774,7 +777,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         },
         "heads": [],
         "id": "t0",
-        "title": "Start"
+        "title": "Start",
+        "waits_for": []
       },
       {
         "approved": true,
@@ -787,9 +791,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
           "a2"
         ],
         "id": "t1",
-        "title": "Work"
+        "title": "Work",
+        "waits_for": []
       }
-    ]
+    ],
+    "waves": []
   },
   "ok": true
 }
@@ -807,9 +813,9 @@ t1 Work  a2    Second  yes
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread list -o pretty
 # exit 0
-ID  TITLE  APPROVED  MEMBERS  DONE  HEADS
+ID  TITLE  APPROVED  MEMBERS  DONE  WAVE  HEADS
 t0  Start  no        0        0
-t1  Work   yes       2        1     a2
+t1  Work   yes       2        1     any   a2
 
 $ ACYCLIC_ACTOR=session/mac acyclic show a1 -o pretty
 # exit 0

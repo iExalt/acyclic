@@ -626,7 +626,7 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
     for (i, id) in ids.iter().enumerate() {
         add_item(&mut r, id, id, by(1)).unwrap();
         if below(4) != 0 {
-            thread(&mut r, id, ["t0", "t1"][below(2)]);
+            thread(&mut r, id, ["t0", "t1", "t2"][below(3)]);
         }
         if i > 0 && below(3) != 0 {
             set_parent(&mut r, id, Some(&ids[below(i)]), by(2)).unwrap();
@@ -676,6 +676,166 @@ fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
         assert_eq!((rolled.progress.done, rolled.progress.total), (counted.done, counted.total));
         if !claims && !parks {
             assert_eq!(rolled.progress.state, counted.state, "{id}: {stages:?}");
+        }
+    }
+}
+
+fn waves(r: &Replica, ancestry: &dyn Ancestry) -> Waves {
+    let model = Model::read(&r.state).unwrap();
+    Readiness::new(&r.state, &model, NOW, ancestry).waves().unwrap()
+}
+
+fn ids(lists: &[&[&str]]) -> Vec<Vec<String>> {
+    lists.iter().map(|list| list.iter().map(|id| (*id).to_owned()).collect()).collect()
+}
+
+/// A leaf in thread `t` waiting on one in thread `u`.
+fn waits(r: &mut Replica, leaf: (&str, &str), on: (&str, &str)) {
+    for (id, in_thread) in [leaf, on] {
+        if !Model::read(&r.state).unwrap().items.contains_key(id) {
+            add_item(r, id, id, by(1)).unwrap();
+        }
+        thread(r, id, in_thread);
+    }
+    link(r, leaf.0, on.0, LinkKind::Blocks, by(2)).unwrap();
+}
+
+#[test]
+fn threads_come_in_waves_after_the_threads_they_wait_on() {
+    let mut r = replica("a");
+    // t9 and t10 start; t2 waits on t9, t3 on t2 and t10; t1 waits on nothing and nothing on it.
+    waits(&mut r, ("b", "t2"), ("a", "t9"));
+    waits(&mut r, ("c", "t3"), ("b", "t2"));
+    waits(&mut r, ("d", "t3"), ("e", "t10"));
+    items(&mut r, &["lone"]);
+    thread(&mut r, "lone", "t1");
+    let found = waves(&r, &Fake::default());
+    assert_eq!(
+        found.waves,
+        ids(&[&["t9", "t10"], &["t2"], &["t3"]]),
+        "natural order within a wave"
+    );
+    assert_eq!(found.anytime, ["t1"]);
+    assert_eq!(found.waits_for["t3"], ["t2", "t10"]);
+    assert_eq!(found.waits_for["t9"], Vec::<String>::new());
+    // A thread whose work is all done is in none, and waits on and holds back nothing.
+    done_with(&mut r, "lone", None);
+    done_with(&mut r, "a", None);
+    let found = waves(&r, &Fake::default());
+    assert_eq!(found.waves, ids(&[&["t2", "t10"], &["t3"]]));
+    assert!(found.anytime.is_empty() && !found.waits_for.contains_key("t1"));
+}
+
+#[test]
+fn work_in_review_holds_its_waiters_back_and_a_cycle_shares_a_wave() {
+    let mut r = replica("a");
+    waits(&mut r, ("b", "t2"), ("a", "t1"));
+    done_with(&mut r, "a", Some("open"));
+    let review = Fake::with(&[("open", Ok(false))]);
+    assert_eq!(status(&r, &review, "b"), blocked(&[("a", Wait::InReview)]));
+    assert_eq!(waves(&r, &review).waves, ids(&[&["t1"], &["t2"]]), "as its leaf reads blocked");
+    let merged = Fake::with(&[("open", Ok(true))]);
+    assert_eq!(waves(&r, &merged).anytime, ["t2"], "merged, t1 is finished and t2 is free");
+    let mut r = replica("a");
+    waits(&mut r, ("x", "t1"), ("y", "t2"));
+    waits(&mut r, ("y2", "t2"), ("x2", "t1"));
+    waits(&mut r, ("z", "t3"), ("y", "t2"));
+    assert_eq!(waves(&r, &Fake::default()).waves, ids(&[&["t1", "t2"], &["t3"]]));
+}
+
+#[test]
+fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back() {
+    let mut r = replica("a");
+    items(&mut r, &["box", "in1", "in2"]);
+    thread(&mut r, "in1", "t1");
+    thread(&mut r, "in2", "t2");
+    for leaf in ["in1", "in2"] {
+        set_parent(&mut r, leaf, Some("box"), by(2)).unwrap();
+    }
+    waits(&mut r, ("w", "t3"), ("box", "main"));
+    let found = waves(&r, &Fake::default());
+    assert_eq!(found.waits_for["t3"], ["t1", "t2"]);
+    model::put(&mut r, &item_key("in2").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
+    let found = waves(&r, &Fake::default());
+    assert_eq!(found.waits_for["t3"], ["t1"]);
+    assert!(!found.waits_for.contains_key("t2"), "archived work leaves its thread nothing to do");
+}
+
+/// Every thread with a leaf left is in one wave or apart, and no other; each thread waited on comes in an earlier
+/// wave, or the same when they wait on each other; and a leaf blocked on work in another thread makes its thread wait
+/// on that one.
+#[hegel::test]
+fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
+    let r = random_plan(&tc, tc.draw(gs::booleans()), tc.draw(gs::booleans()));
+    let model = Model::read(&r.state).unwrap();
+    let ancestry = Fake::with(&[("merged", Ok(true)), ("open", Ok(false))]);
+    let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
+    let found = readiness.waves().unwrap();
+    let wave: BTreeMap<&str, usize> = found
+        .waves
+        .iter()
+        .enumerate()
+        .flat_map(|(i, wave)| wave.iter().map(move |id| (id.as_str(), i)))
+        .collect();
+    let placed: Vec<&str> =
+        found.waves.iter().flatten().chain(&found.anytime).map(String::as_str).collect();
+    let left: BTreeSet<&str> = model
+        .items
+        .keys()
+        .filter(|id| readiness.stage(id).unwrap().is_some_and(|stage| stage != Stage::Done))
+        .filter_map(|id| model.thread_of(id))
+        .filter(|thread| model.threads.contains_key(*thread))
+        .collect();
+    assert_eq!(placed.len(), left.len(), "each once: {found:?}");
+    assert_eq!(placed.iter().copied().collect::<BTreeSet<_>>(), left);
+    let reaches = |from: &str, to: &str| {
+        let mut stack = vec![from];
+        let mut seen = BTreeSet::new();
+        while let Some(at) = stack.pop() {
+            if at == to {
+                return true;
+            }
+            if seen.insert(at) {
+                stack.extend(found.waits_for[at].iter().map(String::as_str));
+            }
+        }
+        false
+    };
+    for (thread, on) in &found.waits_for {
+        for first in on {
+            let (a, b) = (wave[first.as_str()], wave[thread.as_str()]);
+            assert!(
+                a < b || (a == b && reaches(first, thread)),
+                "{first} before {thread}: {found:?}"
+            );
+        }
+    }
+    for id in model.items.keys() {
+        let Some(Status::Blocked { waiting }) = readiness.of(id).unwrap() else { continue };
+        let Some(thread) = model.thread_of(id).filter(|t| model.threads.contains_key(*t)) else {
+            continue;
+        };
+        if model.items[id].is_done() || readiness.stage(id).unwrap().is_none() {
+            continue;
+        }
+        for dependency in waiting.keys() {
+            let mut stack = vec![dependency.as_str()];
+            let mut seen = BTreeSet::new();
+            while let Some(at) = stack.pop() {
+                if !seen.insert(at) {
+                    continue;
+                }
+                if let Some(other) = model.thread_of(at).filter(|t| left.contains(t))
+                    && other != thread
+                    && readiness.stage(at).unwrap().is_some_and(|stage| stage != Stage::Done)
+                {
+                    assert!(
+                        found.waits_for[thread].iter().any(|t| t == other),
+                        "{id} waits on {at}: {found:?}"
+                    );
+                }
+                stack.extend(model.children(at));
+            }
         }
     }
 }
