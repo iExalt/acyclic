@@ -652,9 +652,12 @@ def threads_journey(page, view, env, name, failures):
     except PlaywrightTimeout:
         drawn = page.locator(".arrows g").count()
         failures.append(f"{name}: the Threads view drew {drawn} arrows, expected {arrows}")
-    # One not picked already, so the click picks rather than unpicks it.
-    picked = page.locator("[data-card][aria-pressed=false]").first.get_attribute("data-card")
+    # A thread with work to start, whose panel offers it; picked already, a click would unpick it, so it is unpicked.
+    ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
+    picked = ready[0] if ready else next(iter(want))
     card = page.locator(f"[data-card='{picked}']")
+    if card.get_attribute("aria-pressed") == "true":
+        card.click()
     card.click()
     try:
         page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
@@ -662,8 +665,23 @@ def threads_journey(page, view, env, name, failures):
         failures.append(f"{name}: picking {picked}'s card opened no panel")
     if card.get_attribute("aria-pressed") != "true":
         failures.append(f"{name}: picking {picked}'s card didn't mark it")
-    page.keyboard.press("Escape")
-    page.locator("[data-view=map]").click()
+    # A task chosen from a thread's panel is shown on the Map: the view goes back to it, the task selected.
+    row = page.locator("[data-testid=thread-panel] [data-select]").first
+    if row.count() == 0:
+        failures.append(f"{name}: {picked}'s panel offers no task to start, so going back to the Map went unchecked")
+        page.keyboard.press("Escape")
+        page.locator("[data-view=map]").click()
+    else:
+        task = row.get_attribute("data-select")
+        row.click()
+        try:
+            page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+            page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: choosing {task} from {picked}'s panel left the Threads view over the Map")
+        if page.locator("[data-view=map]").get_attribute("aria-pressed") != "true":
+            failures.append(f"{name}: choosing {task} didn't switch to the Map")
+        page.keyboard.press("Escape")
     page.get_by_test_id("threads-view").wait_for(state="detached")
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
@@ -1633,7 +1651,6 @@ def main():
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
-                threads_journey(page, view, env, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
@@ -1651,6 +1668,9 @@ def main():
                     thread_journey(page, env, plan, "thread-0", name, failures)
                     needs_journey(page, env, plan, "thread-0", name, failures)
                     plan = Plan(env)
+                # Last, since a task chosen from a thread opens the boxes it sits in, which the journeys before it
+                # count on being closed.
+                threads_journey(page, view, env, name, failures)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
                     failures.append(

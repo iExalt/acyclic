@@ -177,7 +177,10 @@ export function App() {
 
   const select = useCallback((id: string | null, pin: string | null = null) => {
     setSelected(id);
-    if (id !== null) setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
+    if (id === null) return;
+    setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
+    // An item is shown on the Map, so selecting one from a panel over the Threads view goes back to it.
+    setView("map");
   }, []);
   /** Picks a thread from the outline, or unpicks the one picked. */
   const pickThread = useCallback((id: string) => {
