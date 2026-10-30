@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{Evidence, Item, ItemState, LinkKind, Model, Repository, Value};
+use crate::model::{Evidence, Item, ItemState, LinkKind, Model, Progress, Repository, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
 
@@ -452,6 +452,33 @@ impl<'a> Readiness<'a> {
                 .then_with(|| x.thread.cmp(&y.thread))
         });
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
+    }
+
+    /// A parent's progress, reading in progress, rather than backlog, while a live claim holds the thread of any open
+    /// leaf under it. A claim names a thread, not an item, and expires, so this is how the parent reads now; nothing
+    /// is waiting on it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn progress(&self, id: &str) -> Result<Option<Progress>, Error> {
+        let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
+        if progress.state == ItemState::Backlog {
+            for leaf in self.model.subtree(id) {
+                let Some(item) = self.model.items.get(leaf) else { continue };
+                if !self.model.children(leaf).is_empty() || item.is_done() || self.is_archived(leaf)
+                {
+                    continue;
+                }
+                if let Some(thread) = item.thread.one()
+                    && self.winner(thread)?.is_some()
+                {
+                    progress.state = ItemState::InProgress;
+                    break;
+                }
+            }
+        }
+        Ok(Some(progress))
     }
 
     /// The unmet hard dependencies of an item and its ancestors.

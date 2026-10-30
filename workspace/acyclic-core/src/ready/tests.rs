@@ -469,3 +469,26 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
     assert_eq!(status(&r, &merged, "other"), blocked(&[("goal", Wait::Open)]));
 }
+
+#[test]
+fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_otherwise() {
+    let mut r = replica("a");
+    items(&mut r, &["goal", "x", "y"]);
+    for leaf in ["x", "y"] {
+        set_parent(&mut r, leaf, Some("goal"), by(2)).unwrap();
+    }
+    thread(&mut r, "y", "other");
+    let none = Fake::default();
+    let state = |r: &Replica, now: Millis| {
+        let model = Model::read(&r.state).unwrap();
+        Readiness::new(&r.state, &model, now, &none).progress("goal").unwrap().unwrap().state
+    };
+    assert_eq!(state(&r, NOW), ItemState::Backlog);
+    // A claim lasts its lease: the parent reads in progress while it lives, and backlog once it lapses.
+    claim::claim(&mut r, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    assert_eq!(state(&r, NOW), ItemState::InProgress);
+    assert_eq!(state(&r, 2_000), ItemState::Backlog);
+    // A state set by hand holds.
+    set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
+    assert_eq!(state(&r, NOW), ItemState::Parked);
+}
