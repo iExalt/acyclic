@@ -340,18 +340,18 @@ pub(crate) fn edit_item(
 }
 
 /// The id an add writes: the one given, unless it is new and the tracker's to assign, or else the next the tracker
-/// assigns. An add without an id whose title is already a thread's, or an unarchived item's, is refused naming that
-/// record, so a retried add doesn't make a second one; give an id to add another with the same title.
+/// assigns. An add without an id whose title is already a thread's, or an open item's, is refused naming that record,
+/// so a retried add doesn't make a second one; give an id to add another with the same title. A done item's title is
+/// free again, since titles recur once work is finished.
 pub(crate) fn new_id(
     replica: &Replica,
     of: &str,
     given: Option<&str>,
     title: &str,
 ) -> Result<String, CliError> {
-    let model = Model::read(replica.state())?;
     if let Some(id) = given {
         let exists = if of == kind::THREAD {
-            thread_exists(&model, id)
+            thread_exists(&Model::read(replica.state())?, id)
         } else {
             replica.state().entity(&model::item_key(id)?).is_some()
         };
@@ -366,6 +366,7 @@ pub(crate) fn new_id(
         }
         return Ok(id.to_owned());
     }
+    let model = Model::read(replica.state())?;
     let same = if of == kind::THREAD {
         model
             .threads
@@ -377,7 +378,9 @@ pub(crate) fn new_id(
             .items
             .values()
             .find(|item| {
-                item.title.one().is_some_and(|t| t == title) && !model.is_archived(&item.id)
+                item.title.one().is_some_and(|t| t == title)
+                    && !item.is_done()
+                    && !model.is_archived(&item.id)
             })
             .map(|item| &item.id)
     };

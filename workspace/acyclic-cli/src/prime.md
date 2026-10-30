@@ -55,8 +55,9 @@ For example, `acyclic item edit beds --thread garden --no-notes --area soil --no
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
 
 Leave out the id in `acyclic item add` and `acyclic thread add`: the tracker assigns one, such as `item-mac-143`, and
-prints it. Ids starting `item-` or `thread-` are the tracker's alone. If an add without an id fails `already-exists`,
-an earlier try made the record, and the error's details give its id. Never put counters in titles.
+prints it. Ids starting `item-` or `thread-` are the tracker's alone. If an add without an id fails `already-exists`, a
+thread or open item has that title, most likely from an earlier try; the error's details give its id. Give an id only
+to add a second record with the same title. Never put counters in titles.
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence
 or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic link` has

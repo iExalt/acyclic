@@ -290,14 +290,29 @@ fn an_add_without_an_id_is_given_the_next_and_a_retry_names_the_first() {
 }
 
 #[test]
-fn a_retry_ignores_archived_and_deleted_items() {
+fn a_retry_ignores_done_archived_and_deleted_items() {
     let mut r = replica();
+    add_item(&mut r, "c", &titled("Weed"), USER_BY).unwrap();
+    model::set_state(&mut r, "c", ItemState::Done, USER_BY).unwrap();
     add_item(&mut r, "a", &titled("Sow"), USER_BY).unwrap();
     let key = model::item_key("a").unwrap();
     r.write(&key, field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
     add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
-    for title in ["Sow", "Rows"] {
+    for title in ["Weed", "Sow", "Rows"] {
         assert_eq!(new_id(&r, kind::ITEM, None, title).unwrap(), "item-mac-1", "{title}");
     }
+}
+
+#[test]
+fn an_agents_add_without_an_id_into_an_approved_thread_is_assigned_one_and_waits_as_a_proposal() {
+    let mut r = replica();
+    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
+    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
+    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
+    let id = new_id(&r, kind::ITEM, None, "A").unwrap();
+    let fields = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
+    let written = add_item(&mut r, &id, &fields, AGENT).unwrap();
+    assert_eq!(id, "item-mac-1");
+    assert_eq!(written.proposals.iter().map(|p| p.field.as_str()).collect::<Vec<_>>(), ["thread"]);
 }

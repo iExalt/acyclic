@@ -54,7 +54,7 @@ export function newId(title: string, taken: ReadonlySet<string>): string {
     .split(" ")
     .filter((word) => word !== "");
   // "item-" starts the ids the tracker assigns, which it refuses from anyone else.
-  const base = words.length === 0 ? "untitled" : words.join("-").replace(/^item-/, "item");
+  const base = words.length === 0 ? "untitled" : words.join("-").replace(/^item(-|$)/, "items$1");
   const trimmed = (stem: string, suffix: string) =>
     `${stem.slice(0, MAX_ID - suffix.length).replace(/-+$/, "")}${suffix}`;
   let id = trimmed(base, "");

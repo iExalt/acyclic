@@ -55,7 +55,9 @@ describe("newId", () => {
     expect(newId("Crème brûlée", new Set())).toBe("creme-brulee");
     expect(newId("Sow", new Set(["sow", "sow-2"]))).toBe("sow-3");
     expect(newId("日本", new Set())).toBe("untitled");
-    expect(newId("Item 5", new Set())).toBe("item5");
+    // Never an id the tracker keeps for itself, however the title or the ids taken fall.
+    expect(newId("Item 5", new Set())).toBe("items-5");
+    expect(newId("Item", new Set(["items"]))).toBe("items-2");
     const long = "a".repeat(70);
     expect(newId(long, new Set())).toBe("a".repeat(64));
     expect(newId(long, new Set(["a".repeat(64)]))).toBe(`${"a".repeat(62)}-2`);
