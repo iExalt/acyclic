@@ -87,16 +87,22 @@ describe("threads", () => {
         ok: true,
         data: {
           threads: [
-            { id: "t", title: "T" },
-            { id: "u", title: { conflict: ["U", "V"] } },
+            { id: "t", title: "T", waits_for: [] },
+            { id: "u", title: { conflict: ["U", "V"] }, waits_for: ["t"] },
           ],
+          waves: [["t"], ["u"]],
+          anytime: [],
         },
       },
     });
-    await expect(threads(fetcher)).resolves.toEqual([
-      { id: "t", title: "T" },
-      { id: "u", title: "u" },
-    ]);
+    await expect(threads(fetcher)).resolves.toEqual({
+      threads: [
+        { id: "t", title: "T", waitsFor: [] },
+        { id: "u", title: "u", waitsFor: ["t"] },
+      ],
+      waves: [["t"], ["u"]],
+      anytime: [],
+    });
     expect(sent).toEqual([example("threads")]);
   });
 });

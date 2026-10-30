@@ -7,6 +7,9 @@
 
 import type { Thread } from "./api";
 
+/** What a line is drawn from: a thread's id and title. */
+type Named = Pick<Thread, "id" | "title">;
+
 /** The app's colours, which app.css repeats as custom properties and the Map's stylesheet reads from here. */
 export const TOKENS = {
   /** The Map's surface. */
@@ -95,7 +98,7 @@ function parts(id: string): { number: number; clone: string | null } | null {
  * and go, else coloured by its id and badged with a dot. A title that starts with that same number has it taken off
  * its name, so the number shows once.
  */
-export function lineOf(thread: Thread, clone = ""): Line {
+export function lineOf(thread: Named, clone = ""): Line {
   const own = parts(thread.id);
   const numbered = NUMBERED.exec(thread.title);
   const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
@@ -108,7 +111,7 @@ export function lineOf(thread: Thread, clone = ""): Line {
  * Each thread's line, by id. Threads whose numbers clash are told apart by their clones' initials, or by their whole
  * clone ids when two initials match; an older id, with no clone, keeps its bare number.
  */
-export function linesOf(threads: Thread[]): Map<string, Line> {
+export function linesOf(threads: Named[]): Map<string, Line> {
   const owned = threads.map((thread) => ({ thread, own: parts(thread.id) }));
   const sharing = (number: number) => owned.filter(({ own }) => own?.number === number);
   return new Map(
@@ -123,7 +126,7 @@ export function linesOf(threads: Thread[]): Map<string, Line> {
 }
 
 /** Threads in the order they are listed: by number, then by title, with those without a number last. */
-export function byNumber(a: Thread, b: Thread): number {
+export function byNumber(a: Named, b: Named): number {
   const [x, y] = [parts(a.id)?.number ?? null, parts(b.id)?.number ?? null];
   if (x !== y) return x === null ? 1 : y === null ? -1 : x - y;
   return a.title.localeCompare(b.title, undefined, { numeric: true });

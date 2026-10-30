@@ -175,15 +175,38 @@ export async function items(fetcher: Fetch = fetch): Promise<Item[]> {
 export interface Thread {
   id: string;
   title: string;
+  /** The threads whose work its own waits on. */
+  waitsFor: string[];
 }
 
-/** Every thread. */
-export async function threads(fetcher: Fetch = fetch): Promise<Thread[]> {
-  const { threads: rows } = await command<{ threads: { id: string; title: Raw<string> }[] }>(
-    { thread: "list" },
-    fetcher,
-  );
-  return rows.map((row) => ({ id: row.id, title: typeof row.title === "string" ? row.title : row.id }));
+/**
+ * Every thread, and those with work left in waves, first to last: each after the threads it waits on, unless they
+ * wait on each other, when they share one. Those that wait on none and that none waits on can start any time.
+ */
+export interface Threads {
+  threads: Thread[];
+  waves: string[][];
+  anytime: string[];
+}
+
+interface RawThreads {
+  threads: { id: string; title: Raw<string>; waits_for: string[] }[];
+  waves: string[][];
+  anytime: string[];
+}
+
+/** Every thread, in waves. */
+export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
+  const raw = await command<RawThreads>({ thread: "list" }, fetcher);
+  return {
+    threads: raw.threads.map((row) => ({
+      id: row.id,
+      title: typeof row.title === "string" ? row.title : row.id,
+      waitsFor: row.waits_for,
+    })),
+    waves: raw.waves,
+    anytime: raw.anytime,
+  };
 }
 
 /** A thread as its panel shows it. */

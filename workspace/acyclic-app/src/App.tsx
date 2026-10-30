@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
-import { type Command, command, failure, globalLevel, type Item, items, needs, type Thread, threads } from "./api";
+import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import {
   addCommand,
@@ -30,6 +30,8 @@ import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
+import { ThreadsView } from "./ThreadsView";
+import { wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -38,7 +40,7 @@ const PlanMap = lazy(() => mapModule);
 
 type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Thread[]; level: string; needs: Need[]; unread: Unread[] }
+  | { state: "loaded"; items: Item[]; threads: Threads; level: string; needs: Need[]; unread: Unread[] }
   | { state: "failed"; message: string };
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
@@ -77,6 +79,8 @@ export function App() {
   const [thread, setThread] = useState<string | null>(null);
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
+  /** The Map, or the threads in waves over it. */
+  const [view, setView] = useState<"map" | "threads">("map");
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -138,7 +142,7 @@ export function App() {
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
   );
-  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads].sort(byNumber)), [loaded]);
+  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
   const lines = useMemo(() => linesOf(sorted), [sorted]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
@@ -152,6 +156,10 @@ export function App() {
             showArchived,
           ),
     [model, sorted, showArchived],
+  );
+  const waves = useMemo(
+    () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
+    [loaded, shown, outline],
   );
   const current = useMemo(
     () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
@@ -350,6 +358,15 @@ export function App() {
   const unlink = (from: string, kind: LinkKind, to: string) =>
     send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
+  const viewSwitch = (
+    <fieldset className="view-switch" aria-label="View">
+      {(["map", "threads"] as const).map((one) => (
+        <button key={one} type="button" data-view={one} aria-pressed={view === one} onClick={() => setView(one)}>
+          {one === "map" ? "Map" : "Threads"}
+        </button>
+      ))}
+    </fieldset>
+  );
   const noticeView =
     notice === null ? null : (
       <div className="notice" role="alert" data-testid="notice">
@@ -471,15 +488,18 @@ export function App() {
             onSelectPhase={(id) => select(id, null)}
           />
         ) : (
-          <button
-            type="button"
-            className="phases-button"
-            data-testid="phases-button"
-            aria-pressed={showPhases}
-            onClick={() => setShowPhases((was) => !was)}
-          >
-            Phases
-          </button>
+          <>
+            <button
+              type="button"
+              className="phases-button"
+              data-testid="phases-button"
+              aria-pressed={showPhases}
+              onClick={() => setShowPhases((was) => !was)}
+            >
+              Phases
+            </button>
+            {viewSwitch}
+          </>
         )}
       </nav>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
@@ -498,6 +518,10 @@ export function App() {
             }
           />
         </Suspense>
+        {wide ? viewSwitch : null}
+        {view === "threads" && waves !== null ? (
+          <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
+        ) : null}
         {top === "add" || top === "item" ? null : noticeView}
         {top === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">

@@ -630,6 +630,44 @@ def outline_journey(page, view, plan, name, failures):
     print(f"{name}: selecting {picked} marked its phase and its thread's row")
 
 
+def threads_journey(page, view, env, name, failures):
+    """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
+    and none on a phone; picking a card opens its thread's panel, and the Map comes back as it was."""
+    listed = json.loads(run(env, "thread", "list"))["data"]
+    want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
+    want |= {id: "anytime" for id in listed["anytime"]}
+    page.locator("[data-view=threads]").click()
+    page.get_by_test_id("threads-view").wait_for()
+    got = page.locator(".wave [data-card]").evaluate_all(
+        "cards => cards.map(card => [card.dataset.card, card.closest('.wave').dataset.wave])"
+    )
+    if dict(got) != want or len(got) != len(want):
+        failures.append(f"{name}: the Threads view's waves {got} aren't the tracker's {want}")
+    waits = sum(len(row["waits_for"]) for row in listed["threads"] if row["id"] in want)
+    arrows = 0 if view.get("has_touch") else waits
+    try:
+        page.wait_for_function(
+            f"() => document.querySelectorAll('.arrows g').length === {arrows}", timeout=5_000
+        )
+    except PlaywrightTimeout:
+        drawn = page.locator(".arrows g").count()
+        failures.append(f"{name}: the Threads view drew {drawn} arrows, expected {arrows}")
+    # One not picked already, so the click picks rather than unpicks it.
+    picked = page.locator("[data-card][aria-pressed=false]").first.get_attribute("data-card")
+    card = page.locator(f"[data-card='{picked}']")
+    card.click()
+    try:
+        page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: picking {picked}'s card opened no panel")
+    if card.get_attribute("aria-pressed") != "true":
+        failures.append(f"{name}: picking {picked}'s card didn't mark it")
+    page.keyboard.press("Escape")
+    page.locator("[data-view=map]").click()
+    page.get_by_test_id("threads-view").wait_for(state="detached")
+    print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
+
+
 def item(env, id):
     """The item as the tracker shows it, or None while there is no such item."""
     out = subprocess.run(
@@ -1595,6 +1633,7 @@ def main():
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
+                threads_journey(page, view, env, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
