@@ -546,12 +546,12 @@ fn pair(listener: &Listener, port: u16, token: &Token, query: Option<&str>) -> R
     let made = code.and_then(|code| Some((code, token.verify(code, now)?)));
     match made {
         Some((code, made)) if listener.spent.spend(code, made, now) => {
-            let cookie = format!(
+            let set = format!(
                 "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_AGE}",
                 cookie(port),
                 token.browser()
             );
-            (StatusCode::SEE_OTHER, [(SET_COOKIE, cookie), (LOCATION, "/".to_owned())])
+            (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, "/".to_owned())])
                 .into_response()
         },
         _ => page(StatusCode::FORBIDDEN, SPENT),
