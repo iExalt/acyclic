@@ -8,7 +8,7 @@ thread's members lit. On the phone, an item is added, moved, linked and unlinked
 as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
 thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
 are set; from the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
-subscription it is given, shows a pushed notification, and opens the needs-you list it names. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list it names. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -1338,7 +1338,8 @@ def push_journey(context, page, env, origin, name, failures):
     """Subscribes a device as the browser would, delivers a push through the service worker, and opens what it names.
 
     Headless Chromium reaches no real push service, so the subscription is one the page makes up, with a real P-256 key,
-    and the message comes in through DevTools rather than from the server.
+    and the message comes in through DevTools rather than from the server. The worker's display call is recorded
+    without sending a notification to the operating system.
     """
     context.grant_permissions(["notifications"], origin=origin)
     # The switch reads the permission as the list opens.
@@ -1384,28 +1385,34 @@ def push_journey(context, page, env, origin, name, failures):
         "body": "A proposal for the journey",
         "url": "/?needs",
     }
-    # Headless Chromium can lose a notification shown while its notifications are being read: probed, about half the
-    # runs that read at once after delivering saw none, 4 of 4 that read once beforehand saw none, and 9 of 9 that
-    # waited 0.5 s saw it. So each read waits 0.5 s after a delivery, and a lost one is delivered again; a worker that
-    # shows nothing fails all five.
-    shown, deliveries = [], 0
-    while not shown and deliveries < 5:
-        deliveries += 1
-        cdp.send(
-            "ServiceWorker.deliverPushMessage",
-            {
-                "origin": origin,
-                "registrationId": registrations[0]["registrationId"],
-                "data": json.dumps(message),
-            },
-        )
-        page.wait_for_timeout(500)
-        shown = context.service_workers[0].evaluate(
-            """async () => (await self.registration.getNotifications({ tag: "needs" }))
-                .map((one) => ({ title: one.title, body: one.body, url: one.data?.url }))"""
-        )
-    if shown != [message]:
-        failures.append(f"{name}: the push showed {shown}, not {message}")
+    # Record at the OS display boundary: even headless Chrome can show desktop banners.
+    # Keep the real push event and worker handler, but never invoke native notification UI.
+    worker = context.service_workers[0]
+    worker.evaluate(
+        """() => {
+            self.recordedNotifications = [];
+            self.registration.showNotification = async (title, options) => {
+                self.recordedNotifications.push({ title, body: options.body, url: options.data?.url, tag: options.tag });
+            };
+        }"""
+    )
+    cdp.send(
+        "ServiceWorker.deliverPushMessage",
+        {
+            "origin": origin,
+            "registrationId": registrations[0]["registrationId"],
+            "data": json.dumps(message),
+        },
+    )
+    deadline = time.monotonic() + 10
+    shown = []
+    while not shown and time.monotonic() < deadline:
+        shown = worker.evaluate("self.recordedNotifications")
+        if not shown:
+            page.wait_for_timeout(50)
+    expected = {**message, "tag": "needs"}
+    if shown != [expected]:
+        failures.append(f"{name}: the push recorded {shown}, not {expected}")
     # Opening the notification goes to what it names: the needs-you list.
     page.goto(origin + message["url"])
     page.get_by_test_id("needs").wait_for(timeout=10_000)
@@ -1421,7 +1428,7 @@ def push_journey(context, page, env, origin, name, failures):
         failures.append(f"{name}: unsubscribing left the device")
     page.screenshot(path=SHOTS / f"app-{name}-notify.png")
     print(
-        f"{name}: subscribed, showed a pushed notification after {deliveries} deliveries, and opened the needs-you list"
+        f"{name}: subscribed, recorded a pushed notification, and opened the needs-you list"
     )
 
 
@@ -1505,7 +1512,7 @@ def main():
                         f"{name}: the page threw or logged errors: {errors}"
                     )
                 context.close()
-            # Chromium's headless shell refuses notifications; its full build, headless, shows them.
+            # The full build supports push delivery; the journey records display calls before sending a push.
             notifying = playwright.chromium.launch(channel="chromium")
             context, page, origin, errors = open_app(
                 notifying, VIEWS["phone"], link, failures, "notifying phone"
