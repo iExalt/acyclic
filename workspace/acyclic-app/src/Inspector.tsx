@@ -9,6 +9,7 @@ import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import type { Line } from "./lines";
+import { Prose } from "./Prose";
 
 export interface InspectorProps {
   item: Item;
@@ -58,7 +59,7 @@ export function Inspector({
   useFocusIn(panel);
   const chip = (id: string) => (
     <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
-      {titleOf(id)}
+      <Prose text={titleOf(id)} />
     </button>
   );
   /** A list of links, each removable from the item that holds it. */
@@ -93,7 +94,9 @@ export function Inspector({
       aria-label="Selected item"
     >
       <header>
-        <h2>{item.title}</h2>
+        <h2>
+          <Prose text={item.title} />
+        </h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
@@ -162,7 +165,7 @@ export function Inspector({
       {links("Related from", item.links.related_from, (id) => onUnlink(id, "relates-to", item.id), "related-from")}
       {item.notes === null ? null : (
         <p className="notes" data-testid="notes">
-          {item.notes}
+          <Prose text={item.notes} />
         </p>
       )}
     </aside>
