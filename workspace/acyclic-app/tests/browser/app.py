@@ -361,6 +361,23 @@ def map_journey(page, view, plan, name, failures, hint=None):
             failures.append(
                 f"{name}: a pinch from {id} didn't zoom the Map about it (drifted {drift:.0f} px)"
             )
+    else:
+        # A notch of a Mac's mouse wheel, 80 pixels, zooms 12%, by the app's own step and not the renderer's as well.
+        # centre() sets the zoom to 1 first, so the notch is well short of the furthest zoom in.
+        drawn = page.get_by_test_id("map")
+        centre(page, id)
+        zoom = drawn.evaluate("m => m.cy.zoom()")
+        box = drawn.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.wheel(0, -80)
+        page.wait_for_function(
+            "z => document.querySelector('[data-testid=map]').cy.zoom() !== z", arg=zoom
+        )
+        ratio = drawn.evaluate("m => m.cy.zoom()") / zoom
+        if abs(ratio - 1.12) > 0.01:
+            failures.append(
+                f"{name}: a wheel notch zoomed the Map by {ratio:.3f}, not 1.12"
+            )
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
