@@ -5,10 +5,14 @@
 //! `needs` lists the clash. The user resolves it by renumbering one of them.
 //!
 //! A thread's id is named in more places than its members: runs, questions, proposals, claims and the server's
-//! repositories for its runs. So only a fresh thread is renumbered, one that has never had a run and has no question,
-//! live claim or open proposal naming it. Its own fields and its explicit repositories are copied to the new id, its
-//! members move there, done ones included, and the old id is deleted: a tombstone, as for items, so the id is never
-//! assigned again and a replica that still adds members under it sees them dangle in `needs`.
+//! repositories for its runs. So only a thread whose number clashes is renumbered, and only a fresh one: one that has
+//! never had a run and has no question, live claim or open proposal naming it. Its own fields and its explicit
+//! repositories are copied to the new id, its members move there, done ones included, and the old id is deleted: a
+//! tombstone, as for items, so the id is never assigned again and a replica that still adds members under it sees
+//! them dangle in `needs`.
+//!
+//! The user renumbering one thread on two replicas before they sync makes two new threads; each member's thread then
+//! conflicts between them, and `needs` lists that.
 
 use std::fmt;
 
@@ -58,6 +62,8 @@ pub enum Reason {
         /// The proposal.
         proposal: String,
     },
+    /// No other thread's id ends in its number, so there is nothing to resolve, and its id stays.
+    NoClash,
     /// A field it carries, or a member's thread, holds conflicting values.
     Conflict {
         /// The entity's kind.
@@ -76,6 +82,7 @@ impl fmt::Display for Reason {
             Self::Question { question } => write!(f, "question {question} names it"),
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
             Self::Proposal { proposal } => write!(f, "proposal {proposal} would change its scope"),
+            Self::NoClash => write!(f, "no other thread's id ends in its number"),
             Self::Conflict { kind, id, field } => write!(f, "{kind} {id}'s {field} is in conflict"),
         }
     }
@@ -166,6 +173,15 @@ fn touches(edit: &ScopeEdit, model: &Model, id: &str) -> bool {
 /// Why `id` isn't fresh, judged at `now`.
 fn reasons(state: &State, model: &Model, id: &str, now: Millis) -> Result<Vec<Reason>, Error> {
     let mut found = Vec::new();
+    let number = ids::number(kind::THREAD, id);
+    let clashes = number.is_some()
+        && model
+            .threads
+            .keys()
+            .any(|other| other != id && ids::number(kind::THREAD, other) == number);
+    if !clashes {
+        found.push(Reason::NoClash);
+    }
     for run in model.runs.values().filter(|run| run.thread.all().iter().any(|t| *t == id)) {
         found.push(Reason::HadRun { run: run.id.clone() });
     }
@@ -252,7 +268,7 @@ pub fn renumber(replica: &mut Replica, id: &str, by: By<'_>) -> Result<Renumbere
     for member in &moved {
         model::put(replica, &model::item_key(member)?, item::THREAD, Some(&new_id), by)?;
     }
-    model::put(replica, &old, item::DELETED, Some(&true), by)?;
+    model::put(replica, &old, thread::DELETED, Some(&true), by)?;
     Ok(Renumbered { thread: new_id, from: id.to_owned(), moved })
 }
 

@@ -46,6 +46,12 @@ fn with_thread(name: &str, id: &str) -> Replica {
     r
 }
 
+/// Gives `r` an older thread whose id ends in 32 too, which `thread-pi-32` clashes with.
+fn partnered(mut r: Replica) -> Replica {
+    put(&mut r, &key("thread-32"), thread::TITLE, json!("Partner"));
+    r
+}
+
 fn why(result: Result<Renumbered, RenumberError>) -> Vec<String> {
     match result {
         Err(RenumberError::InUse { reasons, .. }) => reasons
@@ -58,7 +64,7 @@ fn why(result: Result<Renumbered, RenumberError>) -> Vec<String> {
 
 #[test]
 fn a_fresh_thread_moves_with_its_fields_and_members_and_its_old_id_is_retired() {
-    let mut r = with_thread("mac", "thread-pi-32");
+    let mut r = partnered(with_thread("mac", "thread-pi-32"));
     let done = renumber(&mut r, "thread-pi-32", user(2)).unwrap();
     assert_eq!(
         done,
@@ -87,7 +93,7 @@ fn a_fresh_thread_moves_with_its_fields_and_members_and_its_old_id_is_retired() 
 }
 
 #[test]
-fn only_the_user_renumbers_and_only_a_fresh_thread() {
+fn only_the_user_renumbers_and_only_a_fresh_thread_that_clashes() {
     let mut r = with_thread("mac", "t");
     let agent = By { actor: "session/mac", at: 2, seen: None };
     assert!(matches!(renumber(&mut r, "t", agent), Err(RenumberError::NotTheUser(_))));
@@ -108,7 +114,7 @@ fn only_the_user_renumbers_and_only_a_fresh_thread() {
     let before = r.changes();
     assert_eq!(
         why(renumber(&mut r, "t", user(3))),
-        ["had-run", "question", "claimed", "proposal", "conflict", "conflict"]
+        ["no-clash", "had-run", "question", "claimed", "proposal", "conflict", "conflict"]
     );
     assert_eq!(r.changes(), before, "a refusal writes nothing");
 }
@@ -150,7 +156,7 @@ fn threads_ending_in_one_number_clash_until_a_fresh_one_is_renumbered() {
 
 #[test]
 fn a_member_added_under_the_old_id_meanwhile_dangles_rather_than_bringing_it_back() {
-    let mut mac = with_thread("mac", "thread-pi-32");
+    let mut mac = partnered(with_thread("mac", "thread-pi-32"));
     let mut pi = with_thread("pi", "thread-pi-32");
     renumber(&mut mac, "thread-pi-32", user(2)).unwrap();
     add_item(&mut pi, "late", "late", user(3)).unwrap();

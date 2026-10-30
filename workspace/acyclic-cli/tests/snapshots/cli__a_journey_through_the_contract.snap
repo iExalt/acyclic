@@ -1174,16 +1174,21 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1 --as-user
-# exit 0
+# exit 1
 {
-  "data": {
-    "changed": true,
-    "from": "thread-mac-1",
-    "moved": [],
-    "thread": "thread-mac-2",
-    "title": "Spare"
+  "error": {
+    "code": "in-use",
+    "details": {
+      "reasons": [
+        {
+          "why": "no-clash"
+        }
+      ],
+      "thread": "thread-mac-1"
+    },
+    "message": "thread-mac-1 can't be renumbered: no other thread's id ends in its number"
   },
-  "ok": true
+  "ok": false
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic graph --thread t1
