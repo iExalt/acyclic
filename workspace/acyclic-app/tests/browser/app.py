@@ -8,7 +8,8 @@ thread's members lit. On the phone, an item is added, moved, linked and unlinked
 as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
 thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
 are set; from the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
-subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list it names. WebKit draws the default view at the phone's size. Chromium then draws the 3,500-item fixture.
+subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list it names. WebKit draws the default view at the phone's size. In Chromium and WebKit, a page on another port of the same
+host can neither write with the paired browser's cookie nor frame the app. Chromium then draws the 3,500-item fixture.
 What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
 to target/browser/.
 
@@ -21,8 +22,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -653,6 +656,89 @@ def installable(context, page, origin, name, failures):
     for icon in json.loads(manifest["data"])["icons"]:
         if (status := page.request.get(origin + icon["src"]).status) != 200:
             failures.append(f"{name}: icon {icon['src']} answered {status}")
+
+
+def pairing_journey(context, page, origin, env, name, failures):
+    """The paired browser's cookie is the app's alone: page script can't read it, and a page on another port of the
+    same host, which the browser sends it to, can neither write with it nor frame the app.
+
+    A cross-origin JSON post needs a preflight the server never answers, so the browser refuses it before it is sent;
+    the attacker's one way to send the cookie with a write is a form, which can't say it holds JSON. That the server
+    also checks a cookie's request comes from its own origin is proven by its unit tests, since no browser sends one.
+    """
+    port = urlsplit(origin).port
+    cookies = [c for c in context.cookies(origin) if c["name"].startswith("acyclic-up")]
+    held = [(c["name"], c["httpOnly"], c["sameSite"], c["path"]) for c in cookies]
+    if held != [(f"acyclic-up-{port}", True, "Strict", "/")]:
+        failures.append(f"{name}: the paired browser holds the cookies {held}")
+    if "acyclic-up" in page.evaluate("document.cookie"):
+        failures.append(f"{name}: the page's script can read the session's cookie")
+    form, fetched = f"cross-port-{name.replace(' ', '-')}", f"cross-port-fetch-{name.replace(' ', '-')}"
+    # A text/plain form's body is its field's name, '=' and its value: together, a command that would add an item.
+    body = json.dumps({"item": {"add": {"item": form, "title": "Cross-port", "notes": "="}}})
+    field, value = body.split("=", 1)
+    write = json.dumps({"item": {"add": {"item": fetched, "title": "Cross-port"}}})
+    pages = {
+        "/form": f"""<form method=post action="{origin}/api/command" enctype=text/plain>
+            <input type=hidden name='{field}' value='{value}'></form>""",
+        "/frame": f'<iframe src="{origin}/"></iframe>',
+    }
+
+    class Attacker(BaseHTTPRequestHandler):
+        def do_GET(self):
+            page = pages[self.path].encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+
+        def log_message(self, *_):
+            pass
+
+    # Another port of the same host, served from loopback as a local server's page would be: the same site, so the
+    # browser sends the cookie with its requests. A page from nowhere, such as one a route fulfils, isn't local, and
+    # Chromium would refuse its loads from loopback before the server's own refusals were tried.
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Attacker)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    attacker = f"http://127.0.0.1:{server.server_address[1]}"
+    other = context.new_page()
+    other.route(
+        "**/*",
+        lambda route: (
+            route.continue_()
+            if route.request.url.startswith((attacker + "/", origin + "/"))
+            else route.abort()
+        ),
+    )
+    other.goto(attacker + "/form")
+    sent = other.evaluate(
+        "([url, body]) => fetch(url, {method: 'POST', credentials: 'include',"
+        " headers: {'Content-Type': 'application/json'}, body}).then(() => 'answered', () => 'refused')",
+        [f"{origin}/api/command", write],
+    )
+    if sent != "refused":
+        failures.append(f"{name}: another port's JSON write was {sent}, not refused by the browser")
+    with other.expect_navigation(url=f"{origin}/api/command") as navigation:
+        other.evaluate("document.forms[0].submit()")
+    answer = navigation.value
+    refused = (answer.status, answer.json()["error"]["code"]) if answer else None
+    # 401 no-session would mean the cookie never went, and the check would prove nothing.
+    if refused != (415, "not-json"):
+        failures.append(f"{name}: another port's form write was answered {refused}, not 415 not-json")
+    # The page's load waits for its frame's; a refused frame holds an engine's error page, which has no #root.
+    other.goto(attacker + "/frame", timeout=5_000)
+    frames = other.frames
+    framed = len(frames) != 2 or frames[1].evaluate("!!document.getElementById('root')")
+    other.close()
+    server.shutdown()
+    server.server_close()
+    listed = {row["id"] for row in json.loads(run(env, "list"))["data"]["items"]}
+    if landed := listed & {form, fetched}:
+        failures.append(f"{name}: another port's writes reached the tracker: {sorted(landed)}")
+    if framed:
+        failures.append(f"{name}: a page on another port framed the app, or no frame was drawn")
+    print(f"{name}: the cookie stayed the app's, and another port could neither write with it nor frame the app")
 
 
 def first_view_readable(page, name, failures):
@@ -2213,6 +2299,7 @@ def main():
                 deep_link_journey(context, origin, view, plan, name, failures)
                 command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
+                    pairing_journey(context, page, origin, env, name, failures)
                     keys_journey(page, plan, name, failures)
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
@@ -2250,9 +2337,10 @@ def main():
             context.close()
             notifying.close()
             webkit = playwright.webkit.launch()
-            context, page, _, errors = open_app(
+            context, page, origin, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )
+            pairing_journey(context, page, origin, env, "webkit phone", failures)
             to_map(page)
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
