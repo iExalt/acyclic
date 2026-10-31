@@ -64,6 +64,8 @@ interface After {
   undo?: true;
   /** Said once saved, for an undo: what it did. */
   undone?: string;
+  /** Said once saved, for a write that takes away what it was done from, as settling a need does. */
+  done?: string;
 }
 
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
@@ -79,6 +81,8 @@ interface Notice {
   link?: string;
   /** What Undo takes back, with the offer "undo". */
   undo?: Undo;
+  /** News, not a failure: told politely, as a status. */
+  polite?: true;
 }
 
 const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null };
@@ -352,6 +356,8 @@ export function App() {
       if (text !== null) setNotice({ text, offer, retry: offer === "retry" ? { body, after } : null });
       else if (undo !== null) setNotice({ text: undo.text, offer: "undo", retry: null, undo });
       else if (saved && after.undone !== undefined) setNotice({ text: after.undone, offer: null, retry: null });
+      else if (saved && after.done !== undefined)
+        setNotice({ text: after.done, offer: null, retry: null, polite: true });
       else setNotice(null);
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
@@ -792,7 +798,8 @@ export function App() {
 
   const noticeView =
     notice === null ? null : (
-      <div className="notice" role="alert" data-testid="notice">
+      // News is told by the status line below, always there, as a live region must be to be heard.
+      <div className="notice" role={notice.polite ? undefined : "alert"} data-testid="notice">
         <span className={notice.link === undefined ? "grow" : undefined}>{notice.text}</span>
         {notice.retry === null ? null : (
           <button
@@ -960,6 +967,10 @@ export function App() {
       }}
       shortcuts={shortcuts}
     >
+      {/* Outside the stage, whose busy state would hold it back. */}
+      <p className="visually-hidden" role="status">
+        {notice?.polite ? notice.text : ""}
+      </p>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
@@ -1077,7 +1088,7 @@ export function App() {
             lines={lines}
             membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
-            onCommand={(edit) => send(edit, { select: null, pin: null })}
+            onCommand={(edit, done) => send(edit, { select: null, pin: null, done })}
             onSelect={(id) => select(id, null)}
             onPickThread={(id) => {
               setShowNeeds(false);

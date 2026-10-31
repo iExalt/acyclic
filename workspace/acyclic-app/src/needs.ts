@@ -28,6 +28,8 @@ export interface Action {
   command: Command;
   /** Names the action for tests: `keep`, `drop`, `approve` or `use`. */
   action: string;
+  /** What the app says once it is saved, since the entry it settles goes. */
+  done: string;
 }
 
 export interface NeedView {
@@ -145,26 +147,28 @@ function viewOf(
       const proposal = need.proposal as { id?: string; actor?: string; edit?: Record<string, unknown> } | null;
       const id = proposal?.id ?? "";
       const edit = proposal?.edit ?? {};
+      const change = `${proposal?.actor ?? "an agent"}'s ${str(edit.field)} change`;
       return {
         ...base,
         key: `proposal:${id}`,
         text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)} ${shown(edit.before)} → ${shown(edit.after)}${item === null ? "" : ` for ${titled(item)}`}`,
         actions: [
-          { label: "Keep", command: keepCommand(id), action: "keep" },
-          { label: "Drop", command: dropCommand(id), action: "drop" },
+          { label: "Keep", command: keepCommand(id), action: "keep", done: `Kept ${change}` },
+          { label: "Drop", command: dropCommand(id), action: "drop", done: `Dropped ${change}` },
         ],
       };
     }
     case "unapproved": {
       const id = item?.id ?? "";
       const to = thread?.id ?? "";
+      const [title, name] = [item === null ? id : titled(item), thread === null ? to : lineName(thread)];
       return {
         ...base,
         key: `unapproved:${id}:${to}`,
-        text: `${item === null ? id : titled(item)} joined ${thread === null ? to : lineName(thread)} after its approval`,
+        text: `${title} joined ${name} after its approval`,
         actions: [
-          { label: "Keep", command: keepMemberCommand(id, to), action: "keep" },
-          { label: "Drop", command: dropMemberCommand(id), action: "drop" },
+          { label: "Keep", command: keepMemberCommand(id, to), action: "keep", done: `Kept ${title} in ${name}` },
+          { label: "Drop", command: dropMemberCommand(id), action: "drop", done: `Dropped ${title} from ${name}` },
         ],
       };
     }
@@ -179,17 +183,20 @@ function viewOf(
         : [];
       const known = members(id);
       const listed = (known.length > 0 ? known : heads).slice(0, LISTED);
+      const name = thread === null ? id : lineName(thread);
+      const items = `${count} ${count === 1 ? "item" : "items"}`;
       return {
         ...base,
         key: `awaiting-approval:${id}`,
         items: listed,
         more: Math.max(0, count - listed.length),
-        text: `${thread === null ? id : lineName(thread)} waits for your approval`,
+        text: `${name} waits for your approval`,
         actions: [
           {
-            label: `Approve ${count} ${count === 1 ? "item" : "items"}`,
+            label: `Approve ${items}`,
             command: approveCommand(id),
             action: "approve",
+            done: `Approved ${name}: ${items}`,
           },
         ],
       };
@@ -204,7 +211,13 @@ function viewOf(
       const why: string[] = [];
       for (const value of values) {
         const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
-        if (command !== null) actions.push({ label: `Use ${shown(value)}`, command, action: "use" });
+        if (command !== null)
+          actions.push({
+            label: `Use ${shown(value)}`,
+            command,
+            action: "use",
+            done: `Used ${shown(value)} for ${field}`,
+          });
         else
           why.push(
             `${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`,

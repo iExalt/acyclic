@@ -44,7 +44,9 @@ describe("needView", () => {
       },
       none,
     );
-    expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
+    expect(waiting.actions).toEqual([
+      { label: "Approve 12 items", command: approveCommand("u"), action: "approve", done: "Approved U: 12 items" },
+    ]);
     expect(waiting.items).toEqual(["z"]);
     expect(waiting.more).toBe(11);
     // Where the plan holds its items, it lists them, the first few, and says how many more the count covers.

@@ -21,7 +21,8 @@ export interface NeedsListProps {
   /** A thread's items, as an approval covers them. */
   membersOf?: (thread: string) => string[];
   busy: boolean;
-  onCommand: (command: Command) => void;
+  /** Sends an entry's action, with what to say once it is saved. */
+  onCommand: (command: Command, done: string) => void;
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   onClose: () => void;
@@ -57,6 +58,23 @@ export function NeedsList({
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
+  // Where an action was pressed, to keep the keyboard there once it is done: on the entry if it stayed, else on the
+  // one that took its place, so settling the list is pressing Enter down it.
+  const acted = useRef<{ key: string; index: number } | null>(null);
+  const keys = views.map((view) => view.key).join("\n");
+  useEffect(() => {
+    const was = acted.current;
+    if (busy || was === null) return;
+    acted.current = null;
+    const list = panel.current;
+    // Only from where the action left it: a click elsewhere since has moved on.
+    if (list === null || !(list.contains(document.activeElement) || document.activeElement === document.body)) return;
+    const entries = [...list.querySelectorAll<HTMLElement>("[data-need]")];
+    const entry =
+      entries.find((one) => one.dataset.need === was.key) ?? entries[Math.min(was.index, entries.length - 1)];
+    // With nothing left to settle, the panel's Close.
+    (entry?.querySelector<HTMLElement>(".need-actions button") ?? list.querySelector<HTMLElement>(".close"))?.focus();
+  }, [busy, keys]);
   useEffect(() => {
     if (at === null) return;
     const entry = panel.current?.querySelector<HTMLElement>(`[data-need="${CSS.escape(at)}"]`);
@@ -91,7 +109,7 @@ export function NeedsList({
       )}
       {views.length === 0 ? <p className="empty">Nothing needs you. New approvals and blockers show here.</p> : null}
       <ul className="needs">
-        {views.map((view) => (
+        {views.map((view, index) => (
           <li
             key={view.key}
             data-need={view.key}
@@ -168,8 +186,13 @@ export function NeedsList({
                     key={action.label}
                     className={PRIMARY.has(action.action) ? "primary" : "quiet"}
                     data-action={action.action}
-                    disabled={busy}
-                    onClick={() => onCommand(action.command)}
+                    // Held, not disabled, while a write is out: a disabled button loses the focus it had.
+                    aria-disabled={busy || undefined}
+                    onClick={() => {
+                      if (busy) return;
+                      acted.current = { key: view.key, index };
+                      onCommand(action.command, action.done);
+                    }}
                   >
                     {action.label}
                   </button>
