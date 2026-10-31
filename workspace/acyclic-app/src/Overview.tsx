@@ -4,7 +4,7 @@
 
 import type { Counts, Item } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import { ChevronRight, Icon } from "./icons";
+import { ChevronRight, Icon, Inbox } from "./icons";
 import type { Line } from "./lines";
 import { countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
@@ -115,8 +115,8 @@ export function Overview({
                     onClick={() => onNeeds(view.key)}
                   >
                     {view.line === undefined ? (
-                      <span className="badge needs-mark" aria-hidden="true">
-                        !
+                      <span className="badge plain" aria-hidden="true">
+                        <Icon of={Inbox} size={16} />
                       </span>
                     ) : (
                       <Badge line={view.line} />

@@ -143,18 +143,20 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       },
     },
     { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
-    { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 3 } },
+    { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 2 } },
     { selector: "node.dim", style: { opacity: 0.35 } },
-    // The selection is told by its shape as well as its colour, an ink ring standing off the node, since a lit border
-    // may be any hue.
+    // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
+    // soft halo around it that widens the node, as a focused card's. Never dimmed, even outside the thread lit.
     {
       selector: "node.selected",
       style: {
+        opacity: 1,
         "border-color": p.ink,
         "border-width": 2,
-        "outline-width": 2,
-        "outline-color": p.ink,
-        "outline-offset": 3,
+        "underlay-color": p.ink,
+        "underlay-opacity": 0.14,
+        "underlay-padding": 5,
+        "underlay-shape": "round-rectangle",
       },
     },
     {
@@ -191,7 +193,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       style: { "line-style": "dashed", "line-color": p.signal, "target-arrow-color": p.signal },
     },
     // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
-    { selector: "edge.lit", style: { width: 3, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
+    { selector: "edge.lit", style: { width: 2.25, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
     { selector: "edge.dim", style: { opacity: 0.35 } },
     // Where a trunk splits: a dot in the links' colour, over them, told from two links crossing.
     {

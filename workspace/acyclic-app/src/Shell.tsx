@@ -89,13 +89,7 @@ function NeedsButton({ needs, needsOpen, onNeeds }: Pick<ShellProps, "needs" | "
       onClick={onNeeds}
     >
       <Icon of={Inbox} />
-      {/* A "!" rather than the count beside the icon, so the signal never looks like a thread's numbered badge; with
-          nothing waiting, neither shows. */}
-      {needs > 0 && (
-        <span className="badge needs-mark" data-testid="needs-badge" aria-hidden="true">
-          !
-        </span>
-      )}
+      {/* The count alone says something waits, as an inbox's does; with nothing waiting, none shows. */}
       <span className="label">
         Needs you
         {needs > 0 && (

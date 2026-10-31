@@ -153,7 +153,7 @@ def pick_thread(page, plan, thread):
 def from_menu(page, act):
     """Does `act` in the bar's menu, opening it first, as a hand would. Acting closes the menu, so the next tap reaches
     what it lands on rather than only closing the menu."""
-    menu = page.locator("details.menu")
+    menu = page.locator("details.menu:has(> [data-testid=menu])")
     if not menu.evaluate("d => d.open"):
         page.get_by_test_id("menu").click()
     act()
@@ -1115,6 +1115,19 @@ def check_tracker(env, id, check, what, failures, name):
         failures.append(f"{name}: the tracker doesn't show {what}")
 
 
+def item_action(page, action):
+    """Runs one of the item panel's actions from its menu, where all but Edit are."""
+    page.get_by_test_id("item-menu").click()
+    page.locator(f"[data-testid=inspector] [data-action={action}]").click()
+
+
+def unlink(page, testid):
+    """Removes a panel's first link of a kind, its button shown as a pointer comes over its row."""
+    row = page.locator(f"[data-testid={testid}] .link").first
+    row.hover()
+    row.locator(".unlink").click()
+
+
 def wait_inspector(page, selector, state="visible"):
     page.locator(f"[data-testid=inspector] {selector}").first.wait_for(
         state=state, timeout=10_000
@@ -1178,7 +1191,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
     added = "journey-added"
     before = settled_corner(page, first)
-    page.locator("[data-action=add-child]").click()
+    item_action(page, "add-child")
     form = page.get_by_test_id("add-form")
     form.locator("input[name=title]").fill("Journey: added!")
     if form.locator("input[name=id]").input_value() != added:
@@ -1216,12 +1229,12 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
     # Move it into the second leaf, picked on the Map: the prompt leaves the Map free, and the new parent holds still.
-    page.locator("[data-action=move]").click()
+    item_action(page, "move")
     prompt = page.get_by_test_id("prompt").bounding_box()
     if prompt is None or prompt["height"] > 60:
         failures.append(f"{name}: the move prompt covers the Map: {prompt}")
     # The menu over a mode closes alone: on an Escape pressed as it opens, and on a tap on the Map, which picks nothing.
-    menu = page.locator("details.menu")
+    menu = page.locator("details.menu:has(> [data-testid=menu])")
     for close in (
         lambda: page.keyboard.press("Escape"),
         # In the middle of the Map, below the open menu, which the backdrop must stop it reaching.
@@ -1263,7 +1276,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
 
     # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
     edge = f"{first}->{added}"
-    page.locator("[data-action=waits-for]").click()
+    item_action(page, "waits-for")
     tap_middle(page, view, first)
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
     page.wait_for_function(
@@ -1281,7 +1294,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         name,
     )
     # Unlinked from the inspector: gone from the Map and the tracker.
-    page.locator("[data-testid=waits-for] .unlink").click()
+    unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
@@ -1310,7 +1323,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
-    page.locator("[data-testid=waits-for] .unlink").click()
+    unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
     run(env, "--as-user", "link", "add", added, "waits-for", first)
@@ -1328,7 +1341,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     if sent:
         failures.append(f"{name}: a refused undo sent {sent}")
     # Unlinked once more, as the journeys after expect: a new wait in an approved thread needs the user.
-    page.locator("[data-testid=waits-for] .unlink").click()
+    unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
@@ -1380,7 +1393,7 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
             )
-        if page.locator("details.menu").evaluate("d => d.open"):
+        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             failures.append(
                 f"{name}: Enter on the autonomy list wrote, but left the menu open"
             )
@@ -1397,7 +1410,7 @@ def level_keys_journey(page, name, failures):
         # Only an act closes the menu: Enter on the list with nothing chosen isn't one.
         levels.focus()
         page.keyboard.press("Enter")
-        if not page.locator("details.menu").evaluate("d => d.open"):
+        if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             failures.append(
                 f"{name}: Enter on the autonomy list, unchanged, closed the menu"
             )
@@ -1419,7 +1432,7 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
             )
-        if page.locator("details.menu").evaluate("d => d.open"):
+        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             page.get_by_test_id("menu").click()
         print(
             f"{name}: arrow keys on the autonomy list wrote once, on Enter, and a pick at once"
@@ -1769,7 +1782,7 @@ def form_journey(page, view, env, remote, id, name, failures):
     # Reopen: finished elsewhere, reopened here.
     run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
     refresh(page)
-    page.locator("[data-action=reopen]").click()
+    item_action(page, "reopen")
     page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
     check_tracker(
         env, id, lambda row: row["state"] != "done", f"{id} reopened", failures, name
@@ -1914,9 +1927,9 @@ def needs_journey(page, env, plan, thread, name, failures):
     )
     run(env, "item", "edit", outside, "--thread", thread)
     before = int(count.inner_text())
-    # The signal is a "!", never a number a thread's badge could have.
-    if page.get_by_test_id("needs-badge").inner_text() != "!":
-        failures.append(f"{name}: the needs-you badge doesn't read !")
+    # The count alone says something waits, as an inbox's does: no "!" beside it.
+    if page.get_by_test_id("needs-badge").count() or not count.is_visible():
+        failures.append(f"{name}: Needs you shows a badge, or no count")
     refresh(page)
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=needs-count]').textContent) === n",
@@ -2213,7 +2226,7 @@ def main():
             page.get_by_test_id("menu").click()
             tap_middle(page, VIEWS["phone"], target)
             if (
-                page.locator("details.menu").evaluate("d => d.open")
+                page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open")
                 or page.get_by_test_id("inspector").count()
                 or drawn.get_attribute("data-state") != "drawn"
                 or drawn.get_attribute("data-nodes") != before

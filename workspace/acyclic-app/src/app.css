@@ -37,8 +37,6 @@
   --muted: #a2aab4;
   --link: #6c7580;
   --signal: #f2b33d;
-  --signal-fill: #f2b33d;
-  --signal-ink: #121417;
   --danger: #ff8a80;
   --accent: #e8eaed;
   --accent-ink: #121417;
@@ -58,8 +56,6 @@
     --muted: #5b626c;
     --link: #878e98;
     --signal: #8f5100;
-    --signal-fill: #f2b33d;
-    --signal-ink: #121417;
     --danger: #b3261e;
     --accent: #1a1c20;
     --accent-ink: #ffffff;
@@ -69,6 +65,8 @@
 :root {
   /* At least 44 px to a fingertip; a mouse makes do with less. */
   --hit: 44px;
+  /* What a row or quiet control under the pointer is filled with: seen on any surface, white ones too. */
+  --hover: color-mix(in srgb, var(--ink) 7%, transparent);
   --radius: 8px;
   font-family: Overpass, system-ui, sans-serif;
   font-size: 15px;
@@ -234,6 +232,10 @@ label:has(> input[type="checkbox"]) {
   /* Overpass sits high in its line box; this centres the figures. */
   padding-top: 0.12em;
 }
+.badge.plain {
+  background: none;
+  color: var(--muted);
+}
 .badge.dot {
   min-width: 0;
   width: 0.9em;
@@ -327,10 +329,6 @@ button.view[aria-current="page"] {
 button.view[aria-pressed="true"] {
   color: var(--ink);
 }
-.needs-mark {
-  --line: var(--signal-fill);
-  --line-ink: var(--signal-ink);
-}
 .needs-button .label {
   display: flex;
   flex: 1;
@@ -339,8 +337,9 @@ button.view[aria-pressed="true"] {
 }
 .needs-n {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--ink);
   font-size: 13px;
+  font-weight: 600;
 }
 .needs-button:not([data-none="true"]) {
   color: var(--ink);
@@ -433,18 +432,14 @@ button.icon[aria-pressed="true"] {
   z-index: -1;
   background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
-/* Beside the icon, so the label stays put whether or not anything waits. */
-.tabbar .needs-mark {
-  position: absolute;
-  top: 4px;
-  left: calc(50% + 6px);
-  font-size: 10px;
-}
+/* Its name sits level with the other views': not stretched down the column, the count in the name's size. */
 .tabbar .needs-button .label {
+  flex: none;
   gap: 4px;
 }
 .tabbar .needs-n {
   margin-left: 0;
+  font-size: inherit;
 }
 /* A form takes the whole height, the keyboard below it, which the views' bar would only ride up on. Hidden while the
    form is open, not while a field has focus: focus moving from a field to Save would bring the bar back and move Save
@@ -574,9 +569,13 @@ button.icon[aria-pressed="true"] {
   width: min(300px, calc(100vw - 16px));
   padding: 12px 14px;
   background: var(--sheet);
-  border: 1px solid var(--rule);
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
   border-radius: 12px;
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.12),
+    0 10px 28px rgb(0 0 0 / 0.18);
 }
+
 .menu-body label:not(:has(> input[type="checkbox"])) {
   display: grid;
   gap: 4px;
@@ -918,6 +917,7 @@ button.phase-title {
   font-weight: 600;
   color: var(--muted);
 }
+
 .facts {
   margin: 2px 0;
 }
@@ -1022,25 +1022,6 @@ code {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-.links ul {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 4px;
-}
-.links li {
-  display: flex;
-  align-items: center;
-}
-dl.facts .chip {
-  margin: 0;
-}
-.links .unlink {
-  min-width: 36px;
-  padding: 0;
-  border-color: transparent;
-  color: var(--muted);
-  font-size: 18px;
 }
 
 .conflicts {
@@ -1199,6 +1180,8 @@ button.row {
   font-weight: 500;
 }
 code.id {
+  padding: 0;
+  background: none;
   color: var(--muted);
   font-size: 13px;
 }
@@ -1515,5 +1498,134 @@ button.more {
     max-height: none;
     border: 0;
     border-radius: 0;
+  }
+}
+
+/* The item panel, quiet as Linear's: its properties as text, Edit alone in view, the rest in its menu, and its links
+   as rows. Last, as each refines a rule above. */
+.inspector h3 .count {
+  margin-left: 4px;
+  font-weight: 500;
+}
+.inspector header .menu summary {
+  color: var(--muted);
+}
+/* Properties as text, each a quiet button that fills under the pointer and rings with focus. */
+dl.facts .chip,
+dl.facts .chip.line {
+  min-height: 30px;
+  padding: 2px 6px;
+  margin: 0 0 0 -6px;
+  border-color: transparent;
+  background: none;
+}
+dl.facts .chip:hover:not(:disabled) {
+  background: var(--hover);
+}
+dl.facts dt {
+  padding: 5px 0;
+}
+/* Edit, the one action in view: quiet, beside where the rest open from. */
+.inspector > .toolbar {
+  margin: 10px 0 2px -8px;
+}
+.inspector > .toolbar button {
+  min-height: 32px;
+  padding: 0 8px;
+  border-color: transparent;
+}
+.inspector > .toolbar button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.links {
+  margin-top: 14px;
+}
+.links h3 {
+  margin: 0 0 2px;
+}
+.links ul {
+  margin-left: -8px;
+}
+.links .link {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.links .link:hover {
+  background: var(--hover);
+}
+.link-row {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: none;
+  font-weight: 400;
+  text-align: left;
+}
+.link-row:hover:not(:disabled) {
+  background: none;
+}
+.link-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Shown where it can be reached: on hover, with focus anywhere in its row, and always where there may be no hover. */
+.links .unlink {
+  min-width: 28px;
+  min-height: 28px;
+  margin-right: 2px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  visibility: hidden;
+}
+.links .link:hover .unlink,
+.links .link:focus-within .unlink {
+  visibility: visible;
+}
+@media (hover: none), (any-pointer: coarse) {
+  .links .unlink {
+    visibility: visible;
+  }
+  .link-row {
+    min-height: var(--hit);
+  }
+}
+/* A list of actions: a row each, its icon, its name and its key. */
+.menu-list {
+  gap: 0;
+  width: 220px;
+  padding: 4px;
+  border-radius: var(--radius);
+}
+.menu-list .menu-action {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+}
+.menu-list .menu-action .grow {
+  color: var(--ink);
+}
+.menu-list .menu-action:hover:not(:disabled),
+.menu-list .menu-action:focus-visible {
+  background: var(--hover);
+}
+@media (pointer: coarse) {
+  .menu-list .menu-action {
+    min-height: var(--hit);
   }
 }

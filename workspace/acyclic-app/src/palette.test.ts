@@ -19,10 +19,7 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
     const declared = Object.fromEntries(
       [...block.matchAll(/--([a-z-]+):\s*(#[0-9A-Fa-f]{6});/g)].map((m) => [m[1], m[2]]),
     );
-    const named = { ...p, "signal-fill": p.signalFill, "signal-ink": p.signalInk, "accent-ink": p.accentInk } as Record<
-      string,
-      unknown
-    >;
+    const named = { ...p, "accent-ink": p.accentInk } as Record<string, unknown>;
     expect(Object.keys(declared).sort()).toEqual(
       [
         "ground",
@@ -36,8 +33,6 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
         "muted",
         "link",
         "signal",
-        "signal-fill",
-        "signal-ink",
         "danger",
         "accent",
         "accent-ink",
@@ -57,7 +52,6 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
         expect(contrast(text, surface), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
       }
     }
-    expect(contrast(p.signalInk, p.signalFill), "the needs badge's !").toBeGreaterThanOrEqual(4.5);
     expect(contrast(p.accentInk, p.accent), "a primary button's label").toBeGreaterThanOrEqual(4.5);
     for (const colour of LINES) {
       expect(contrast(colour, inkOn(colour, p)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);

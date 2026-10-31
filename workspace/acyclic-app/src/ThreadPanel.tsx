@@ -195,7 +195,7 @@ export function ThreadPanel({
         <div className="notes-block">
           <h3>Brief</h3>
           <p className="notes">
-            <Prose text={detail.brief} />
+            <Prose text={detail.brief} notes />
           </p>
         </div>
       )}

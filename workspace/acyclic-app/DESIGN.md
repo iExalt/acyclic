@@ -69,10 +69,20 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   red text, last in its group.
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons.
 - **Thread badges:** the thread's number on its line's colour.
-- **Needs-you mark:** a "!" on the amber fill.
+- **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
+  need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
+  place in the quiet look.)
 - **Notices:** a refusal, a failure, an offered Undo or something to copy, with its own Dismiss; in the panel on top,
   under its heading, else over the Map. One shows at a time: the next replaces it, including one a link from a
   notification brings, as the user has moved on.
+- **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
+  Edit alone in view; Move, Reopen, Add inside, Waits for and Relates to in the ⋯ menu beside the title, each with
+  its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove
+  button shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over
+  one row of quiet buttons and over today's layout unboxed, as the calmest.)
+- **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
+- **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
+  emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
@@ -121,9 +131,10 @@ you. Errors say what to check before what went wrong.
 ## Do's and Don'ts
 
 - **The One Primary Rule.** One filled button per decision; everything else steps down a tier.
-- **The Shape Rule.** Selection is drawn by shape (an ink border and outline, a fill, a pill), never by hue alone.
-- **The Signal Rule.** The signal is text, dashes and the "!" fill. Never a solid border, and never a badge with a
-  number, which a thread's badge could be mistaken for.
+- **The Shape Rule.** Selection is drawn by shape (an ink edge with a soft halo, a fill, a pill), never by hue alone.
+  One ring, not two: a double ring of ink read as heavy in both schemes.
+- **The Signal Rule.** The signal is text and dashes. Never a solid border, a fill, or a badge with a number, which
+  a thread's badge could be mistaken for.
 - **The Text Rule.** Stage counts are always written out; icons only accompany them.
 - **The List Rule.** The Overview is lists to scan, never tiles or charts.
 

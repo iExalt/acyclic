@@ -1,5 +1,7 @@
-// The selected item: its fields, its conflicts with a way to settle each, and its links both ways, each a button that
-// selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
+// The selected item: its fields, its conflicts with a way to settle each, and its links both ways, each a row that
+// selects the item it names. Quiet, as Linear's: Edit in view, the rest of what can be done in the ⋯ menu beside the
+// title and on their keys. Notes are agents' text, so only a small, safe part of Markdown is read in them, built as
+// elements and never as markup.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
@@ -11,6 +13,7 @@ import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, Link2, Pencil, Plus, RotateCcw, X } from "./icons";
 import type { Line } from "./lines";
+import { Menu } from "./Menu";
 import { Prose } from "./Prose";
 import { StageCounts, StageIcon, StageLabel } from "./Stage";
 import { stateWords } from "./stages";
@@ -81,9 +84,34 @@ export function Inspector({
     asked.current = editAsked;
     if (!busy) setEditing(true);
   }, [editAsked, busy]);
-  /** A button's key, for the eye and for assistive technology, while shortcuts are on. */
+  /** A button's key, for assistive technology and a tooltip, while shortcuts are on. */
   const key = (label: string, letter: string) =>
     shortcuts ? { title: `${label} (${letter})`, "aria-keyshortcuts": letter } : {};
+  /** An action in the menu, with its key shown at the row's end while shortcuts are on. */
+  const action = (
+    name: string,
+    label: string,
+    icon: Parameters<typeof Icon>[0]["of"],
+    run: () => void,
+    letter = "",
+  ) => (
+    <button
+      type="button"
+      className="menu-action"
+      onClick={run}
+      data-action={name}
+      disabled={busy}
+      {...(letter === "" ? {} : key(label, letter))}
+    >
+      <Icon of={icon} size={16} />
+      <span className="grow">{label}</span>
+      {shortcuts && letter !== "" ? (
+        <span className="kbd" aria-hidden="true">
+          {letter}
+        </span>
+      ) : null}
+    </button>
+  );
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
   const chip = (id: string) => {
@@ -95,26 +123,42 @@ export function Inspector({
       </button>
     );
   };
-  /** A list of links, each removable from the item that holds it. */
+  /** A list of links, a row each, cut to a line, its remove button shown on hover or focus where there is hover. */
   const links = (label: string, ids: string[], unlink: (id: string) => void, testid: string) =>
     ids.length === 0 ? null : (
       <div className="links" data-testid={testid}>
-        <h3>{label}</h3>
+        <h3>
+          {label} <span className="count">{ids.length}</span>
+        </h3>
         <ul>
-          {ids.map((id) => (
-            <li key={id}>
-              {chip(id)}
-              <button
-                type="button"
-                className="unlink"
-                aria-label={`Remove the link to ${id}`}
-                disabled={busy}
-                onClick={() => unlink(id)}
-              >
-                <Icon of={X} />
-              </button>
-            </li>
-          ))}
+          {ids.map((id) => {
+            const stage = stageOf(id);
+            return (
+              <li key={id} className="link">
+                <button
+                  type="button"
+                  className="link-row"
+                  data-select={id}
+                  title={titleOf(id)}
+                  onClick={() => onSelect(id)}
+                >
+                  {stage === undefined ? null : <StageIcon stage={stage} />}
+                  <span className="link-title">
+                    <Prose text={titleOf(id)} />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="unlink"
+                  aria-label={`Remove the link to ${id}`}
+                  disabled={busy}
+                  onClick={() => unlink(id)}
+                >
+                  <Icon of={X} size={16} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
     );
@@ -130,6 +174,15 @@ export function Inspector({
         <h2>
           <Prose text={item.title} />
         </h2>
+        <Menu label="Item actions" testid="item-menu" list>
+          {action("move", "Move…", FolderInput, onMove, "M")}
+          {item.state === "done"
+            ? action("reopen", "Reopen", RotateCcw, () => onCommand(reopenCommand(item.id)))
+            : null}
+          {action("add-child", "Add inside", Plus, onAdd, "A")}
+          {action("waits-for", "Waits for…", ArrowUpLeft, () => onLink("waits-for"), "W")}
+          {action("relates-to", "Relates to…", Link2, () => onLink("relates-to"), "R")}
+        </Menu>
         <CopyLink onCopy={onCopyLink} />
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
@@ -194,40 +247,6 @@ export function Inspector({
           <Icon of={Pencil} size={16} />
           Edit
         </button>
-        {item.state === "done" ? (
-          <button type="button" onClick={() => onCommand(reopenCommand(item.id))} data-action="reopen" disabled={busy}>
-            <Icon of={RotateCcw} size={16} />
-            Reopen
-          </button>
-        ) : null}
-        <button type="button" onClick={onAdd} data-action="add-child" {...key("Add inside", "A")} disabled={busy}>
-          <Icon of={Plus} size={16} />
-          Add inside
-        </button>
-        <button type="button" onClick={onMove} data-action="move" {...key("Move", "M")} disabled={busy}>
-          <Icon of={FolderInput} size={16} />
-          Move
-        </button>
-        <button
-          type="button"
-          onClick={() => onLink("waits-for")}
-          data-action="waits-for"
-          {...key("Waits for…", "W")}
-          disabled={busy}
-        >
-          <Icon of={ArrowUpLeft} size={16} />
-          Waits for…
-        </button>
-        <button
-          type="button"
-          onClick={() => onLink("relates-to")}
-          data-action="relates-to"
-          {...key("Relates to…", "R")}
-          disabled={busy}
-        >
-          <Icon of={Link2} size={16} />
-          Relates to…
-        </button>
       </div>
       {links("Waits for", item.links.waits_for, (id) => onUnlink(item.id, "waits-for", id), "waits-for")}
       {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, "waits-for", item.id), "waited-on-by")}
@@ -237,7 +256,7 @@ export function Inspector({
         <div className="notes-block">
           <h3>Notes</h3>
           <p className="notes" data-testid="notes">
-            <Prose text={item.notes} />
+            <Prose text={item.notes} notes />
           </p>
         </div>
       )}

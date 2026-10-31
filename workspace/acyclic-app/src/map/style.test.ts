@@ -29,16 +29,21 @@ describe("style", () => {
         images: one.pstyle("background-image").value,
         border: one.pstyle("border-style").value,
         align: one.pstyle("text-halign").value,
+        opacity: one.pstyle("opacity").value,
       };
     };
-    expect(drawn("leaf")).toEqual({ images: [MARK], border: "solid", align: "left-inside" });
-    expect(drawn("leaf archived")).toEqual({ images: [HATCH, MARK], border: "solid", align: "left-inside" });
-    expect(drawn("box")).toEqual({ images: [OPEN], border: "solid", align: "left-inside" });
-    expect(drawn("box archived")).toEqual({ images: [OPEN], border: "dashed", align: "left-inside" });
-    expect(drawn("collapsed")).toEqual({ images: [CLOSED], border: "solid", align: "left-inside" });
-    expect(drawn("collapsed archived")).toEqual({ images: [HATCH, CLOSED], border: "solid", align: "left-inside" });
+    const plain = { border: "solid", align: "left-inside", opacity: 1 };
+    expect(drawn("leaf")).toEqual({ ...plain, images: [MARK] });
+    expect(drawn("leaf archived")).toEqual({ ...plain, images: [HATCH, MARK] });
+    expect(drawn("box")).toEqual({ ...plain, images: [OPEN] });
+    expect(drawn("box archived")).toEqual({ ...plain, images: [OPEN], border: "dashed" });
+    expect(drawn("collapsed")).toEqual({ ...plain, images: [CLOSED] });
+    expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, CLOSED] });
     // Lit or selected, an open archived box keeps its dash.
     expect(drawn("box archived lit selected").border).toBe("dashed");
+    // Selected outside the thread lit, a task is drawn whole, not dimmed with the rest.
+    expect(drawn("leaf dim").opacity).toBe(0.35);
+    expect(drawn("leaf dim selected").opacity).toBe(1);
   });
 });
 

@@ -27,15 +27,11 @@ export interface Palette {
   /** A link on the Map: quieter than text, so the items lead, but at 3:1 on the ground and boxes it is drawn over. */
   link: string;
   /**
-   * What needs the user, conflicts, and links that cross boxes. Lines may share its hue, so it is never a cue by colour
-   * alone: crossing links are dashed, conflicts have a dashed border, and the needs-you badge reads "!", which no
-   * thread's badge does. So never draw it as a solid border or a badge with a number. Also set as text, so it reads at
-   * 4.5:1 like any.
+   * Conflicts, links that cross boxes, and a thread waiting for approval. Lines may share its hue, so it is never a cue
+   * by colour alone: crossing links are dashed, conflicts have a dashed border, a waiting thread says so. So never draw
+   * it as a solid border or a badge with a number. Also set as text, so it reads at 4.5:1 like any.
    */
   signal: string;
-  /** The needs-you badge's fill, amber in either scheme, and the "!" on it, which carries its meaning. */
-  signalFill: string;
-  signalInk: string;
   danger: string;
   /** The primary action's fill, the current view and the focus ring; and the text on that fill. */
   accent: string;
@@ -65,8 +61,6 @@ export const PALETTES: Record<Scheme, Palette> = {
     muted: "#a2aab4",
     link: "#6c7580",
     signal: "#f2b33d",
-    signalFill: "#f2b33d",
-    signalInk: DARK_GROUND,
     danger: "#ff8a80",
     accent: "#e8eaed",
     accentInk: DARK_GROUND,
@@ -95,8 +89,6 @@ export const PALETTES: Record<Scheme, Palette> = {
     muted: "#5b626c",
     link: "#878e98",
     signal: "#8f5100",
-    signalFill: "#f2b33d",
-    signalInk: DARK_GROUND,
     danger: "#b3261e",
     accent: "#1a1c20",
     accentInk: "#ffffff",
