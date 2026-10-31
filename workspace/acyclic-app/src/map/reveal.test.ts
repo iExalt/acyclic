@@ -75,6 +75,10 @@ describe("startOf", () => {
     expect(start(box(0, 0, 1200, 800), item(500, 40, 600))).toEqual({ x: 500, y: 0 });
   });
 
+  it("starts at the top of a first box taller than the screen, not partway down it", () => {
+    expect(start(box(0, 0, 300, 5000), item(12, 40), box(400, 0, 300, 200))).toEqual({ x: 0, y: 0 });
+  });
+
   it("starts at a top-level task's own corner, and nowhere without nodes", () => {
     expect(start({ ...item(0, 0), top: true })).toEqual({ x: 0, y: 0 });
     expect(start()).toBeUndefined();

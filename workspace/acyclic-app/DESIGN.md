@@ -100,11 +100,12 @@ you. Errors say what to check before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **Every link drawn.** A link is left out only when a longer way through items in the same box already implies it;
+- **No link hidden without cause.** A link is left out only when a longer way through items in the same box already implies it;
   selecting an item, or lighting its thread, shows every link it has.
 - **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
-  run as one line, and a link would seem to join items it doesn't.
+  run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
+  cross have none.
 - **Opening view.** The whole plan when it fits at a readable zoom (`READABLE`); otherwise the first box's corner, its
   title and first item whole, at that zoom.
 
