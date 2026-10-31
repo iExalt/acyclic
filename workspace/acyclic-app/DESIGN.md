@@ -141,6 +141,12 @@ you. Errors say what to check before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
+- **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
+  the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
+- **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the
+  Overview's phases come in that same order (`topOrder`), so a list and the Map never disagree.
+- **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
+  shows it.
 - **No link hidden without cause.** A link is left out only when a longer way through items in the same box already
   implies it; selecting an item, or lighting its thread, shows every link it has.
 - **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each

@@ -1385,8 +1385,9 @@ button.more {
     width: 220px;
   }
   .wave.anytime {
-    padding-left: 32px;
-    border-left: 1px dashed var(--edge);
+    padding-right: 32px;
+    border-right: 1px dashed var(--edge);
+    box-sizing: content-box;
   }
 }
 

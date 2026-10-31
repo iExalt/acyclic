@@ -175,15 +175,10 @@ describe("place", () => {
 
 describe("elkLayBox", () => {
   it("packs the top level in dependency order and keeps every box's size", async () => {
-    const order = dependencyOrder({
-      id: ROOT,
-      children: ["a", "b", "c"].map((id) => ({ id, width: 10, height: 10 })),
-      edges: [{ source: "b", target: "a" }],
-    });
+    const order = dependencyOrder(["a", "b", "c"], [{ source: "b", target: "a" }]);
     expect(order).toEqual(["b", "a", "c"]);
     // Without links, ids come in natural order, as the CLI lists them.
-    const unlinked = ["i10", "i2", "phase-10", "phase-2"].map((id) => ({ id, width: 10, height: 10 }));
-    expect(dependencyOrder({ id: ROOT, children: unlinked, edges: [] })).toEqual(["i2", "i10", "phase-2", "phase-10"]);
+    expect(dependencyOrder(["i10", "i2", "phase-10", "phase-2"], [])).toEqual(["i2", "i10", "phase-2", "phase-10"]);
     const sizes = [
       { id: "a", width: 900, height: 120 },
       { id: "b", width: 200, height: 700 },
@@ -215,12 +210,11 @@ describe("elkLayBox", () => {
   });
 
   it("breaks a dependency cycle at its least id", () => {
-    const children = ["a", "b"].map((id) => ({ id, width: 1, height: 1 }));
     const edges = [
       { source: "a", target: "b" },
       { source: "b", target: "a" },
     ];
-    expect(dependencyOrder({ id: ROOT, children, edges })).toEqual(["a", "b"]);
+    expect(dependencyOrder(["a", "b"], edges)).toEqual(["a", "b"]);
   });
 });
 
@@ -234,17 +228,20 @@ describe("beside", () => {
     expect(beside(graph, [])).toBe(graph);
   });
 
-  it("stands the unlinked beside the graph, in columns as tall as it, after a wider gap", () => {
+  it("stands the unlinked on the graph's left, in columns as tall as it, a wider gap before the graph", () => {
     // A graph of three layers holds three tasks a column; five more take two columns.
     const graph = { width: 224, height: STRIP + 3 * 48 + 2 * 40 + 12, at: { a: { x: 12, y: STRIP } } };
-    const routes = { "a->b": [] };
-    const out = beside({ ...graph, routes }, tasks(5));
-    expect(out.at.a).toEqual({ x: 12, y: STRIP });
-    // The graph's links keep their routes, since its children keep their places.
-    expect(out.routes).toBe(routes);
-    expect(out.at.t0).toEqual({ x: 224 - 12 + 40, y: STRIP });
-    expect(out.at.t3).toEqual({ x: 224 - 12 + 40 + 200 + 24, y: STRIP });
-    expect(out.width).toBe(224 - 12 + 40 + 2 * 200 + 24 + 12);
+    const routes = { "a->b": [{ x: 112, y: 100 }] };
+    const junctions = { "a->b": [{ x: 50, y: 90 }] };
+    const out = beside({ ...graph, routes, junctions }, tasks(5));
+    expect(out.at.t0).toEqual({ x: 12, y: STRIP });
+    expect(out.at.t3).toEqual({ x: 12 + 200 + 24, y: STRIP });
+    // The graph moves right past the two columns and the gap, its links and their splits with it.
+    const dx = 12 + 2 * 200 + 24 + 40 - 12;
+    expect(out.at.a).toEqual({ x: 12 + dx, y: STRIP });
+    expect(out.routes).toEqual({ "a->b": [{ x: 112 + dx, y: 100 }] });
+    expect(out.junctions).toEqual({ "a->b": [{ x: 50 + dx, y: 90 }] });
+    expect(out.width).toBe(dx + 224);
     expect(out.height).toBe(graph.height);
   });
 

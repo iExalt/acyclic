@@ -1,5 +1,5 @@
 // The Threads view: the threads with work left in waves of what to start first, a column a wave, and those that can
-// start any time apart. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
+// start any time apart, first, on the left. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
 // hovered thread's stand out. A card always says what it comes after, so the arrows are never the only telling.
 
 import { useLayoutEffect, useMemo, useState } from "react";
@@ -91,6 +91,14 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         {wide ? (
           <Arrows view={view} waits={waits} widths={widths} lines={lines} lit={hovered ?? picked} within={columns} />
         ) : null}
+        {view.anytime.length === 0 ? null : (
+          <section className="wave anytime" data-wave="anytime" aria-label="Any time">
+            <h2>
+              Any time <small>waits on no thread, and none on it</small>
+            </h2>
+            <ul>{view.anytime.map(card)}</ul>
+          </section>
+        )}
         {view.waves.map((cards, at) => (
           <section
             key={at}
@@ -100,8 +108,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             style={
               wide
                 ? {
-                    marginRight:
-                      (widths[at] ?? GAP) - (at + 1 < view.waves.length || view.anytime.length > 0 ? GAP : 0),
+                    marginRight: (widths[at] ?? GAP) - (at + 1 < view.waves.length ? GAP : 0),
                   }
                 : undefined
             }
@@ -112,14 +119,6 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             <ul>{cards.map(card)}</ul>
           </section>
         ))}
-        {view.anytime.length === 0 ? null : (
-          <section className="wave anytime" data-wave="anytime" aria-label="Any time">
-            <h2>
-              Any time <small>waits on no thread, and none on it</small>
-            </h2>
-            <ul>{view.anytime.map(card)}</ul>
-          </section>
-        )}
       </div>
     </section>
   );
