@@ -84,9 +84,9 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   notification brings, as the user has moved on.
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
   Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
-  to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove
-  button shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over
-  one row of quiet buttons and over today's layout unboxed, as the calmest.)
+  to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it
+  holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
+  (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
   muted rows, then its decision, compact, after what it acts on. A hairline between entries; the filters are tabs,
   the one shown filled.
