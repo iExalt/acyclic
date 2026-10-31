@@ -33,6 +33,7 @@
   --sheet: #1c2025;
   --rule: #2b3138;
   --edge: #4a535e;
+  --field: #6c7580;
   --ink: #e8eaed;
   --muted: #a2aab4;
   --link: #6c7580;
@@ -52,6 +53,7 @@
     --sheet: #ffffff;
     --rule: #d0d5db;
     --edge: #aab0b9;
+    --field: #80878f;
     --ink: #1a1c20;
     --muted: #5b626c;
     --link: #878e98;
@@ -172,7 +174,7 @@ input:not([type="checkbox"]),
 textarea {
   min-height: var(--hit);
   padding: 6px 10px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--field);
   border-radius: var(--radius);
   background: var(--ground);
   /* Under 16 px, a phone zooms in on the field. */
@@ -1782,7 +1784,10 @@ dl.facts .chip.line {
   /* 16 px keeps a phone from zooming into a field; wide, a panel's fields take its own size. */
   .inspector select,
   .inspector input:not([type="checkbox"]),
-  .inspector textarea {
+  .inspector textarea,
+  .sheet select,
+  .sheet input:not([type="checkbox"]),
+  .sheet textarea {
     font-size: 14px;
   }
 }

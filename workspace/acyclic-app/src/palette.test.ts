@@ -29,6 +29,7 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
         "sheet",
         "rule",
         "edge",
+        "field",
         "ink",
         "muted",
         "link",
@@ -56,6 +57,11 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
     for (const colour of LINES) {
       expect(contrast(colour, inkOn(colour, p)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  it("draws a field's edge at 3:1 on the surfaces fields sit on and the ground they are filled with", () => {
+    for (const surface of [p.ground, p.chrome, p.tile, p.sheet])
+      expect(contrast(p.field, surface), surface).toBeGreaterThanOrEqual(3);
   });
 
   it("draws a link at 3:1 on the ground and the boxes it crosses", () => {

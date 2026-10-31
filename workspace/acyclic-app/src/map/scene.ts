@@ -122,8 +122,9 @@ export function scene(
       height: at.height,
       layer: depth,
       lit: lit.has(node.id),
-      // Dimming says "not in this thread"; a box isn't a member just because it holds members, so it isn't dimmed.
-      dim: thread !== null && !lit.has(node.id) && node.kind !== "box",
+      // Dimming says "not in this thread"; a box isn't a member just because it holds members, so it isn't dimmed. Nor is
+      // the selection, outside the thread or not.
+      dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
       selected: node.id === selection.item,
       archived: node.archived,
     });

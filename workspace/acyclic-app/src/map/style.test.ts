@@ -6,6 +6,8 @@ import { PALETTES, type Palette } from "../palette";
 import { markOf } from "./marks";
 import { closedOf, hatchOf, openOf, styleFor } from "./style";
 
+/** A hex colour as Cytoscape gives a parsed one back. */
+const rgb = (hex: string) => `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(",")})`;
 const [OPEN, CLOSED, HATCH] = [openOf, closedOf, hatchOf].map((of) => of(PALETTES.dark));
 
 /** A task's marks, as an image its data carries. */
@@ -23,16 +25,18 @@ describe("style", () => {
     const drawn = (classes: string) => {
       // The parsed style, which Cytoscape's types leave out.
       const one = node(classes.replaceAll(" ", "-"), classes) as unknown as {
-        pstyle(name: string): { value: unknown };
+        pstyle(name: string): { value: unknown; strValue: string };
       };
       return {
         images: one.pstyle("background-image").value,
         border: one.pstyle("border-style").value,
         align: one.pstyle("text-halign").value,
         opacity: one.pstyle("opacity").value,
+        fill: one.pstyle("background-opacity").value,
+        colour: one.pstyle("color").strValue,
       };
     };
-    const plain = { border: "solid", align: "left-inside", opacity: 1 };
+    const plain = { border: "solid", align: "left-inside", opacity: 1, fill: 1, colour: expect.any(String) };
     expect(drawn("leaf")).toEqual({ ...plain, images: [MARK] });
     expect(drawn("leaf archived")).toEqual({ ...plain, images: [HATCH, MARK] });
     expect(drawn("box")).toEqual({ ...plain, images: [OPEN] });
@@ -41,9 +45,8 @@ describe("style", () => {
     expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, CLOSED] });
     // Lit or selected, an open archived box keeps its dash.
     expect(drawn("box archived lit selected").border).toBe("dashed");
-    // Selected outside the thread lit, a task is drawn whole, not dimmed with the rest.
-    expect(drawn("leaf dim").opacity).toBe(0.35);
-    expect(drawn("leaf dim selected").opacity).toBe(1);
+    // Outside the thread lit, a task fades, but its title stays at full strength, muted.
+    expect(drawn("leaf dim")).toMatchObject({ opacity: 1, fill: 0.35, colour: rgb(PALETTES.dark.muted) });
   });
 });
 

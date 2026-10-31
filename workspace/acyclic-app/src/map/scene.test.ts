@@ -114,6 +114,10 @@ describe("scene", () => {
     // A picked thread wins over the selected item's own.
     expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).thread).toBe("t");
     expect(scene(view, placed, { item: "b", thread: null }, threadOf).nodes.some((node) => node.dim)).toBe(false);
+    // Selected outside the thread picked, an item is drawn whole.
+    expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).nodes.find((node) => node.id === "b")?.dim).toBe(
+      false,
+    );
   });
 
   it("places nodes by their centres, a box under what it holds, and labels a collapsed box with what it hides", () => {

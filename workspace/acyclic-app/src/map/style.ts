@@ -149,13 +149,18 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     },
     { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 2 } },
-    { selector: "node.dim", style: { opacity: 0.35 } },
+    // Outside the thread lit, a task fades but its title stays legible, muted at full strength, since it can still be
+    // picked. The selection is never dimmed.
+    {
+      selector: "node.dim",
+      style: { "background-opacity": 0.35, "border-opacity": 0.35, "background-image-opacity": 0.35, color: p.muted },
+    },
+    { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
-    // soft halo around it that widens the node, as a focused card's. Never dimmed, even outside the thread lit.
+    // soft halo around it that widens the node, as a focused card's.
     {
       selector: "node.selected",
       style: {
-        opacity: 1,
         "border-color": p.ink,
         "border-width": 2,
         "underlay-color": p.ink,

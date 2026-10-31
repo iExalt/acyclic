@@ -22,6 +22,8 @@ export interface Palette {
   rule: string;
   /** A control's edge: stronger than a rule, so an outlined button reads as one. */
   edge: string;
+  /** A field's edge, which alone marks it out: at 3:1 on the surfaces a field sits on and the ground it is filled with. */
+  field: string;
   ink: string;
   muted: string;
   /** A link on the Map: quieter than text, so the items lead, but at 3:1 on the ground and boxes it is drawn over. */
@@ -57,6 +59,7 @@ export const PALETTES: Record<Scheme, Palette> = {
     sheet: "#1c2025",
     rule: "#2b3138",
     edge: "#4a535e",
+    field: "#6c7580",
     ink: "#e8eaed",
     muted: "#a2aab4",
     link: "#6c7580",
@@ -85,6 +88,7 @@ export const PALETTES: Record<Scheme, Palette> = {
     sheet: "#ffffff",
     rule: "#d0d5db",
     edge: "#aab0b9",
+    field: "#80878f",
     ink: "#1a1c20",
     muted: "#5b626c",
     link: "#878e98",
