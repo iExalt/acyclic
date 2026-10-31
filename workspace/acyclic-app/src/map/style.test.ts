@@ -6,14 +6,14 @@ import { PALETTES, type Palette } from "../palette";
 import { markOf } from "./marks";
 import { closedOf, hatchOf, openOf, styleFor } from "./style";
 
-const [OPEN, CLOSED, HATCH] = [openOf, closedOf, hatchOf].map((of) => of(PALETTES.a.dark));
+const [OPEN, CLOSED, HATCH] = [openOf, closedOf, hatchOf].map((of) => of(PALETTES.dark));
 
 /** A task's marks, as an image its data carries. */
 const MARK = "data:image/svg+xml;utf8,%3Csvg%2F%3E";
 
 describe("style", () => {
   it("draws each kind of box with its chevron, a task with its marks, crosses out what is archived, and dashes an open archived box", () => {
-    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.a.dark) });
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
     const node = (id: string, classes: string) =>
       core.add({
         group: "nodes",
@@ -44,7 +44,7 @@ describe("style", () => {
 
 describe("a scheme's drawing", () => {
   it("holds only its own palette's colours and lines, whichever scheme was drawn before it", () => {
-    const stages = Object.keys(PALETTES.a.dark.tints) as Stage[];
+    const stages = Object.keys(PALETTES.dark.tints) as Stage[];
     const drawing = (p: Palette) => {
       const lines = linesOf(
         [
@@ -66,9 +66,7 @@ describe("a scheme's drawing", () => {
         lines,
       };
     };
-    const all = (["a", "b"] as const).flatMap((look) =>
-      (["dark", "light"] as const).map((scheme) => PALETTES[look][scheme]),
-    );
+    const all = [PALETTES.dark, PALETTES.light];
     for (const [at, p] of all.entries()) {
       const then = `${at}`;
       drawing(all[(at + all.length - 1) % all.length] as Palette);

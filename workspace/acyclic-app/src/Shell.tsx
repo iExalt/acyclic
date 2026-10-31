@@ -1,24 +1,23 @@
 // The frame around the views: where the views, Needs you, adding and the menu are reached. A phone has one bar on top
-// and the views along the bottom; a wider screen has look A's sidebar or look B's header and tabs. Only the frame
-// differs between the looks: what is inside it is the same.
+// and the views along the bottom; a wider screen has a quiet sidebar.
 
 import type { ReactNode } from "react";
 import { Icon, Inbox, LayoutDashboard, ListTree, MapIcon, Plus, Waypoints } from "./icons";
-import { DESIGN, type Look } from "./look";
 import { Menu } from "./Menu";
 import { countText } from "./needs";
 
 export type View = "overview" | "map" | "threads";
 
-/** The views, the Overview first where it is the home being compared. */
+/** The view the app opens on, and Back on a phone returns to before it leaves the app. */
+export const HOME: View = "overview";
+
 const VIEWS: { view: View; label: string; icon: typeof MapIcon }[] = [
-  ...(DESIGN.home === "overview" ? [{ view: "overview" as const, label: "Overview", icon: LayoutDashboard }] : []),
+  { view: "overview", label: "Overview", icon: LayoutDashboard },
   { view: "map", label: "Map", icon: MapIcon },
   { view: "threads", label: "Threads", icon: Waypoints },
 ];
 
 export interface ShellProps {
-  look: Look;
   wide: boolean;
   /** How many items the plan shows. */
   count: number;
@@ -43,7 +42,7 @@ export interface ShellProps {
 
 export function Shell(props: ShellProps) {
   if (!props.wide) return <PhoneShell {...props} />;
-  return props.look === "a" ? <SidebarShell {...props} /> : <HeaderShell {...props} />;
+  return <SidebarShell {...props} />;
 }
 
 /** The views, each a destination: the one shown is the current page. */
@@ -64,14 +63,7 @@ function ViewLinks({ view, onView, short }: Pick<ShellProps, "view" | "onView"> 
 }
 
 /** Needs you: a layer over the views, so a toggle rather than a destination. */
-function NeedsButton({
-  needs,
-  needsOpen,
-  onNeeds,
-  compact,
-}: Pick<ShellProps, "needs" | "needsOpen" | "onNeeds"> & {
-  compact?: boolean;
-}) {
+function NeedsButton({ needs, needsOpen, onNeeds }: Pick<ShellProps, "needs" | "needsOpen" | "onNeeds">) {
   return (
     <button
       type="button"
@@ -90,7 +82,7 @@ function NeedsButton({
           !
         </span>
       )}
-      <span className={compact ? "label short" : "label"}>
+      <span className="label">
         Needs you
         {needs > 0 && (
           <span className="count needs-n" data-testid="needs-count">
@@ -127,7 +119,7 @@ export function Wordmark() {
   );
 }
 
-/** Look A: a quiet sidebar holding the views, Needs you, adding and the outline, the menu at its foot. */
+/** A quiet sidebar holding the views, Needs you, adding and the outline, the menu at its foot. */
 function SidebarShell(props: ShellProps) {
   return (
     <div className="shell sidebar-shell">
@@ -154,33 +146,6 @@ function SidebarShell(props: ShellProps) {
           <Menu up>{props.menu}</Menu>
         </footer>
       </aside>
-      {props.children}
-    </div>
-  );
-}
-
-/** Look B: a header with the product, Needs you, adding and the menu, over tabs for the views; the outline at the left. */
-function HeaderShell(props: ShellProps) {
-  return (
-    <div className="shell header-shell">
-      <header className="bar">
-        <Wordmark />
-        <Count count={props.count} />
-        <span className="grow" />
-        <span className="autonomy">Autonomy: {props.autonomy}</span>
-        <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} compact />
-        <button type="button" className="primary new" onClick={props.onAdd} data-action="add-top">
-          <Icon of={Plus} />
-          New item
-        </button>
-        <Menu>{props.menu}</Menu>
-      </header>
-      <nav className="tabs" aria-label="Views">
-        <ViewLinks view={props.view} onView={props.onView} />
-      </nav>
-      <nav className="threads" aria-label="Phases and threads">
-        {props.outline}
-      </nav>
       {props.children}
     </div>
   );

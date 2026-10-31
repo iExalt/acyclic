@@ -385,6 +385,63 @@ def open_app(browser, view, link, failures, name):
     return context, page, origin, errors
 
 
+def to_map(page):
+    """Chooses the Map, which the journeys drawing on it start from: the app opens on the Overview."""
+    page.locator("[data-view=map]").click()
+    page.locator("[data-view=map][aria-current=page]").wait_for(timeout=5_000)
+    page.get_by_test_id("overview").wait_for(state="detached", timeout=5_000)
+
+
+def overview_journey(page, view, name, failures):
+    """The app opens on the Overview: its four lists, a thread's row opening its panel, a needs row opening the list at
+    its entry, the open list marked less than the view shown, and on a phone Back from the Map coming home."""
+    overview = page.get_by_test_id("overview")
+    overview.wait_for(timeout=5_000)
+    headings = overview.locator(".overview-section h2").all_inner_texts()
+    if headings != ["Needs you", "In progress", "Up next", "Phases"]:
+        failures.append(f"{name}: the Overview's lists are {headings}")
+    row = overview.locator("[data-overview-thread]").first
+    thread = row.get_attribute("data-overview-thread")
+    row.click()
+    panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
+    try:
+        panel.wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: {thread}'s row on the Overview opened no panel")
+    page.keyboard.press("Escape")
+    panel.wait_for(state="detached", timeout=5_000)
+    entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
+    entry.click()
+    needs = page.get_by_test_id("needs")
+    needs.wait_for(timeout=5_000)
+    at = needs.locator("[data-at=true]")
+    if at.count() != 1 or not at.evaluate("e => e === document.activeElement"):
+        failures.append(f"{name}: a needs row on the Overview didn't open the list at its entry, focused")
+    # The view shown and the open list differ by more than colour: a fill, or on a phone a pill behind the icon.
+    marks = page.evaluate(
+        """() => ["[data-view=overview]", "[data-testid=needs-button]"].map(sel => {
+            const el = document.querySelector(sel);
+            return [getComputedStyle(el).backgroundColor, getComputedStyle(el, "::before").content];
+        })"""
+    )
+    if marks[0] == marks[1]:
+        failures.append(f"{name}: the open Needs you is marked as the view shown is: {marks}")
+    page.keyboard.press("Escape")
+    needs.wait_for(state="detached", timeout=5_000)
+    if view.get("has_touch"):
+        # A phone's Back from another view comes home to the Overview, inside the app.
+        url = page.url
+        to_map(page)
+        page.go_back()
+        try:
+            overview.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the Map didn't come home to the Overview")
+        if page.url != url:
+            failures.append(f"{name}: Back from the Map left the app")
+    print(f"{name}: the Overview listed {headings}, and its rows opened what they name")
+
+
 def installable(context, page, origin, name, failures):
     cdp = context.new_cdp_session(page)
     if errors := cdp.send("Page.getInstallabilityErrors")["installabilityErrors"]:
@@ -641,12 +698,13 @@ def map_journey(page, view, plan, name, failures, hint=None):
         if not panel.count():
             pick_thread(page, plan, thread)
         panel.wait_for()
-        # Closed in the app, a layer gives its entry back, so the next Back closes what's open then.
+        # Closed in the app, a layer gives its entry back, so the next Back closes what's open then. Under the panel,
+        # the Map, away from the Overview, holds an entry of its own.
         page.get_by_test_id("needs-button").click()
         needs.get_by_role("button", name="Close").click()
         needs.wait_for(state="detached")
         try:
-            page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
+            page.wait_for_function("() => history.state?.layers === 2", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
                 f"{name}: closing the needs-you list left the history at {page.evaluate('JSON.stringify(history.state)')}"
@@ -658,7 +716,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
         try:
             needs.wait_for(state="detached", timeout=5_000)
             panel.wait_for(state="detached", timeout=5_000)
-            page.wait_for_function("() => history.state === null", timeout=5_000)
+            page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
                 f"{name}: going back two entries didn't close both the needs-you list and the thread's panel"
@@ -794,7 +852,7 @@ def threads_journey(page, view, env, name, failures):
         page.keyboard.press("Escape")
     page.get_by_test_id("threads-view").wait_for(state="detached")
     # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; the
-    # thread's panel, still picked, over the view, closes first.
+    # thread's panel, still picked, over the view, closes first. The Map is chosen again for the journeys after.
     if view.get("has_touch"):
         page.locator("[data-view=threads]").click()
         page.get_by_test_id("threads-view").wait_for()
@@ -807,7 +865,8 @@ def threads_journey(page, view, env, name, failures):
         try:
             page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
-            failures.append(f"{name}: Back from the Threads view didn't go home to the Map")
+            failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
+        to_map(page)
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
@@ -895,6 +954,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     first leaf's notes to be HOSTILE. Starts from a fresh page, so whatever the journeys before it opened on the Map
     is closed again."""
     page.reload()
+    to_map(page)
     wait_drawn(page, len(plan.default()))
     leaves = sorted(id for id in plan.children(box) if not plan.children(id))[:2]
     if len(leaves) < 2:
@@ -1863,6 +1923,8 @@ def main():
                         f"{name}: the page lists {count} items, expected {len(plan.items)}"
                     )
                 installable(context, page, origin, name, failures)
+                overview_journey(page, view, name, failures)
+                to_map(page)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
@@ -1907,6 +1969,7 @@ def main():
             context, page, _, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )
+            to_map(page)
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
             # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
@@ -1955,6 +2018,7 @@ def main():
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )
+            to_map(page)
             start = time.monotonic()
             wait_drawn(page, len(large.default()), timeout=LARGE_LIMIT_MS)
             print(

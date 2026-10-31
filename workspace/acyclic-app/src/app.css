@@ -24,7 +24,7 @@
 }
 /* The palettes: palette.ts's, which a unit test holds these to. A control's edge is stronger than a rule, so an
    outlined button reads as one. */
-/* palette a dark */
+/* palette dark */
 :root {
   --ground: #121417;
   --chrome: #16191d;
@@ -44,7 +44,7 @@
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
-  /* palette a light */
+  /* palette light */
   :root {
     --ground: #f3f4f6;
     --chrome: #eceef1;
@@ -64,46 +64,6 @@
     color-scheme: light;
   }
 }
-/* palette b dark */
-:root[data-look="b"] {
-  --ground: #0f1318;
-  --chrome: #161b22;
-  --box: #13181e;
-  --tile: #1c2229;
-  --sheet: #161b22;
-  --rule: #2d343d;
-  --edge: #454e59;
-  --ink: #e6eaee;
-  --muted: #9aa3ad;
-  --signal: #e3a72f;
-  --signal-fill: #e3a72f;
-  --signal-ink: #0f1318;
-  --danger: #ff7b72;
-  --accent: #4c94f0;
-  --accent-ink: #0f1318;
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: light) {
-  /* palette b light */
-  :root[data-look="b"] {
-    --ground: #f6f8fa;
-    --chrome: #ffffff;
-    --box: #ffffff;
-    --tile: #ffffff;
-    --sheet: #ffffff;
-    --rule: #d1d8df;
-    --edge: #b4bcc5;
-    --ink: #1f2329;
-    --muted: #57606a;
-    --signal: #8c5a00;
-    --signal-fill: #e3a72f;
-    --signal-ink: #0f1318;
-    --danger: #c62a2f;
-    --accent: #0a66d8;
-    --accent-ink: #ffffff;
-    color-scheme: light;
-  }
-}
 :root {
   /* At least 44 px to a fingertip; a mouse makes do with less. */
   --hit: 44px;
@@ -119,11 +79,6 @@
   :root {
     --hit: 34px;
   }
-}
-/* Look B's type is the system's, as familiar tools set theirs; the Map's canvas keeps Overpass in both looks. */
-:root[data-look="b"] {
-  --radius: 6px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
 }
 @media (min-width: 900px) {
   :root {
@@ -358,10 +313,13 @@ button.view {
 button.view:hover:not(:disabled) {
   color: var(--ink);
 }
-button.view[aria-current="page"],
-button.view[aria-pressed="true"] {
+/* The view shown is filled; Needs you open over it is only inked, so one place reads as where the user is. */
+button.view[aria-current="page"] {
   color: var(--ink);
   background: var(--tile);
+}
+button.view[aria-pressed="true"] {
+  color: var(--ink);
 }
 .needs-mark {
   --line: var(--signal-fill);
@@ -441,6 +399,7 @@ button.icon[aria-pressed="true"] {
 }
 .tabbar button.view {
   position: relative;
+  isolation: isolate;
   flex-direction: column;
   gap: 2px;
   justify-content: center;
@@ -449,13 +408,24 @@ button.icon[aria-pressed="true"] {
   font-size: 12px;
   background: none;
 }
-.tabbar button.view[aria-current="page"],
-.tabbar button.view[aria-pressed="true"] {
+.tabbar button.view[aria-current="page"] {
   background: none;
 }
 .tabbar button.view[aria-current="page"] .icon-svg,
 .tabbar button.view[aria-pressed="true"] .icon-svg {
   stroke-width: 2.25;
+}
+/* On a phone, the view shown has a pill behind its icon; Needs you open is only inked. */
+.tabbar button.view[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: calc(50% - 28px);
+  width: 56px;
+  height: 28px;
+  border-radius: 14px;
+  z-index: -1;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
 /* Beside the icon, so the label stays put whether or not anything waits. */
 .tabbar .needs-mark {
@@ -534,59 +504,6 @@ button.icon[aria-pressed="true"] {
 }
 
 /* Look B, wide: the header over the tabs, the outline at the left of the views. */
-.header-shell {
-  grid-template-rows: auto auto 1fr;
-  grid-template-columns: 272px 1fr;
-}
-.header-shell .bar {
-  grid-column: 1 / -1;
-  gap: 12px;
-  padding: 8px 12px 8px 16px;
-  border-bottom: none;
-}
-.header-shell .bar .needs-button {
-  min-height: 32px;
-  padding: 0 10px;
-  border-color: var(--edge);
-  font-size: 14px;
-}
-.header-shell button.new {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 14px;
-}
-.tabs {
-  display: flex;
-  grid-column: 1 / -1;
-  gap: 4px;
-  padding: 0 12px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--rule);
-}
-.tabs button.view {
-  min-height: 40px;
-  padding: 0 10px;
-  border-radius: 0;
-  font-size: 14px;
-  background: none;
-  box-shadow: inset 0 -2px 0 transparent;
-}
-.tabs button.view[aria-current="page"] {
-  background: none;
-  font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-.header-shell .threads {
-  min-height: 0;
-  padding: 8px 8px 12px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--ground);
-  border-right: 1px solid var(--rule);
-}
 
 /* The menu of what's changed rarely: archived items, autonomy, a refresh. */
 .menu {
@@ -1382,60 +1299,6 @@ button.more {
 }
 
 /* Over the Map home while anything needs the user. */
-.needs-strip {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  z-index: 1;
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  max-width: calc(100% - 20px);
-  padding: 2px 2px 2px 10px;
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
-  transform: translateX(-50%);
-}
-.needs-strip button.strip-open {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 8px;
-  align-items: baseline;
-  border-color: transparent;
-  font-weight: 400;
-  text-align: left;
-}
-/* A phone gives the strip a row of its own under the bar, the Map below it rather than under it, and keeps it to one
-   line: the count, with its breakdown a tap away. */
-.phone-shell .needs-strip {
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 48px;
-  max-width: none;
-  padding: 0 4px 0 12px;
-  border-width: 0 0 1px;
-  border-radius: 0;
-  box-shadow: none;
-  transform: none;
-}
-.phone-shell .stage:has(> .needs-strip) .map {
-  top: 48px;
-}
-.phone-shell .needs-strip .muted {
-  display: none;
-}
-.phone-shell .needs-strip button.strip-open {
-  flex: 1;
-  align-self: stretch;
-  align-items: center;
-}
-.needs-strip button.close {
-  width: 32px;
-  min-height: 32px;
-}
 
 .visually-hidden {
   position: absolute;

@@ -45,8 +45,8 @@ function elements({ items, collapsed = [], archived = false, selection, colour }
   return elementsOf(
     scene(view, placed, picked, (id) => model.items.get(id)?.thread ?? null),
     colour,
-    linesOf([{ id: "t", title: "Tools" }], PALETTES.a.dark),
-    PALETTES.a.dark,
+    linesOf([{ id: "t", title: "Tools" }], PALETTES.dark),
+    PALETTES.dark,
   );
 }
 

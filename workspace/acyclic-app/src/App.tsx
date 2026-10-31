@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AddForm } from "./AddForm";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
-import { DesignChoice } from "./DesignChoice";
 import {
   addCommand,
   type Edited,
@@ -23,18 +22,16 @@ import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
-import { DESIGN } from "./look";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
-import { NeedsStrip } from "./NeedsStrip";
 import type { Need } from "./needs";
 import { Overview } from "./Overview";
 import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
-import { Shell, type View, Wordmark } from "./Shell";
+import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { threadCounts, wavesView } from "./waves";
@@ -86,7 +83,7 @@ export function App() {
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The Map, or the threads in waves over it. */
-  const [view, setView] = useState<View>(DESIGN.home);
+  const [view, setView] = useState<View>(HOME);
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -151,7 +148,7 @@ export function App() {
     [loaded, pending],
   );
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
-  const palette = PALETTES[DESIGN.look][useScheme()];
+  const palette = PALETTES[useScheme()];
   const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
@@ -297,7 +294,7 @@ export function App() {
     needs: showNeeds,
     phases: showPhases && !wide,
     thread: thread !== null,
-    away: !wide && view !== DESIGN.home,
+    away: !wide && view !== HOME,
   };
   const top = topLayer(open);
   const layers = depth(open);
@@ -322,7 +319,7 @@ export function App() {
       else if (layer === "item") setSelected(null);
       else if (layer === "needs") setShowNeeds(false);
       else if (layer === "phases") setShowPhases(false);
-      else if (layer === "away") setView(DESIGN.home);
+      else if (layer === "away") setView(HOME);
       else setThread(null);
     }
     return closing.length;
@@ -451,7 +448,6 @@ export function App() {
       <button type="button" onClick={refresh}>
         Refresh
       </button>
-      <DesignChoice />
     </>
   );
   /**
@@ -475,7 +471,6 @@ export function App() {
   };
   return (
     <Shell
-      look={DESIGN.look}
       wide={wide}
       count={shown.length}
       autonomy={levelLabel(load.level)}
@@ -553,9 +548,6 @@ export function App() {
               New item
             </button>
           </div>
-        ) : null}
-        {view === "map" && DESIGN.home === "map" && !showNeeds ? (
-          <NeedsStrip needs={load.needs} onOpen={() => openNeeds()} />
         ) : null}
         {top === "add" || top === "item" ? null : noticeView}
         {top === "mode" ? (

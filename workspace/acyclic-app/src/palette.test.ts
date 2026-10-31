@@ -4,20 +4,17 @@ import { describe, expect, it } from "vitest";
 import { contrast, inkOn, lineColour } from "./lines";
 import { PALETTES, type Palette } from "./palette";
 
-const DESIGNS = (["a", "b"] as const).flatMap((look) =>
-  (["dark", "light"] as const).map((scheme) => [look, scheme] as const),
-);
 const linesOf = (palette: Palette) => Array.from({ length: 108 }, (_, at) => lineColour(at, palette));
 /** Every surface something is drawn on, the stages' tints among them. */
 const surfaces = (p: Palette) => [p.ground, p.chrome, p.sheet, p.tile, p.box, ...Object.values(p.tints)];
 
-describe.each(DESIGNS)("look %s's %s palette", (look, scheme) => {
-  const p = PALETTES[look][scheme];
+describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
+  const p = PALETTES[scheme];
   const LINES = linesOf(p);
 
   it("is the one app.css declares for its scheme", () => {
     const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
-    const marker = css.indexOf(`/* palette ${look} ${scheme} */`);
+    const marker = css.indexOf(`/* palette ${scheme} */`);
     const block = css.slice(marker, css.indexOf("}", marker));
     const declared = Object.fromEntries(
       [...block.matchAll(/--([a-z-]+):\s*(#[0-9A-Fa-f]{6});/g)].map((m) => [m[1], m[2]]),
@@ -48,10 +45,9 @@ describe.each(DESIGNS)("look %s's %s palette", (look, scheme) => {
     for (const [name, value] of Object.entries(declared)) expect(value, name).toBe(named[name]);
     expect(block).toContain(`color-scheme: ${scheme}`);
     const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-    if (look === "a")
-      expect(html, "the bar's colour").toContain(
-        `<meta name="theme-color" content="${p.chrome}" media="(prefers-color-scheme: ${scheme})" />`,
-      );
+    expect(html, "the bar's colour").toContain(
+      `<meta name="theme-color" content="${p.chrome}" media="(prefers-color-scheme: ${scheme})" />`,
+    );
   });
 
   it("reads: text at 4.5:1 on every surface, the signal and danger as text too, and badges in their ink", () => {

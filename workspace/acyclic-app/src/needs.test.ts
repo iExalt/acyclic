@@ -54,7 +54,7 @@ describe("needView", () => {
         { id: "thread-3", title: "3. Ship it now" },
         { id: "thread-7", title: "7. Build it" },
       ],
-      PALETTES.a.dark,
+      PALETTES.dark,
     );
     const waiting = (id: string, title: string) =>
       needView({ kind: "awaiting-approval", thread: { id, title, heads: [] } }, lines);
