@@ -27,12 +27,14 @@ import { DESIGN } from "./look";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
+import { NeedsStrip } from "./NeedsStrip";
 import type { Need } from "./needs";
+import { Overview } from "./Overview";
 import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
-import { Shell, type View } from "./Shell";
+import { Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { threadCounts, wavesView } from "./waves";
@@ -84,7 +86,7 @@ export function App() {
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The Map, or the threads in waves over it. */
-  const [view, setView] = useState<View>("map");
+  const [view, setView] = useState<View>(DESIGN.home);
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -163,6 +165,7 @@ export function App() {
     [model, sorted, showArchived],
   );
   const counts = useMemo(() => threadCounts(shown), [shown]);
+  const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
     [loaded, shown, outline],
@@ -351,12 +354,23 @@ export function App() {
     return () => window.removeEventListener("popstate", onMove);
   }, [act]);
 
-  if (load.state === "loading") return <p className="status">Loading…</p>;
+  if (load.state === "loading")
+    return (
+      <div className="status-page" aria-busy="true">
+        <Wordmark />
+        <p className="muted">Loading the plan…</p>
+      </div>
+    );
   if (load.state === "failed")
     return (
-      <p className="status" role="alert">
-        {load.message}
-      </p>
+      <div className="status-page" role="alert">
+        <Wordmark />
+        <h1>Couldn't load the plan</h1>
+        <p className="muted">{load.message}</p>
+        <button type="button" className="primary" onClick={refresh}>
+          Try again
+        </button>
+      </div>
     );
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;
   const startAdd = (parent: string | null) => {
@@ -447,6 +461,9 @@ export function App() {
     setShowPhases(false);
     setShowNeeds((was) => !was);
   };
+  const openNeeds = () => {
+    if (!showNeeds || topLayer(open) !== "needs") toggleNeeds();
+  };
   return (
     <Shell
       look={DESIGN.look}
@@ -492,8 +509,41 @@ export function App() {
             }
           />
         </Suspense>
+        {/* Wider, the sidebar or tabs show the view's name; it heads the page for assistive technology all the same. */}
+        {wide && view !== "overview" ? <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1> : null}
         {view === "threads" && waves !== null ? (
           <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
+        ) : null}
+        {view === "overview" ? (
+          <Overview
+            needs={load.needs}
+            lines={lines}
+            counts={counts}
+            waves={waves}
+            outline={outline}
+            items={itemsById}
+            onNeeds={openNeeds}
+            onPickThread={(id) => {
+              setSelected(null);
+              setThread(id);
+            }}
+            onSelectPhase={(id) => select(id, null)}
+            onView={setView}
+          />
+        ) : null}
+        {view === "map" && shown.length === 0 ? (
+          <div className="empty-plan" data-testid="empty-plan">
+            <h2>No items yet</h2>
+            <p className="muted">
+              Add a project at the top level, then the work inside it. Agents' imports show here too.
+            </p>
+            <button type="button" className="primary" onClick={() => startAdd(null)}>
+              New item
+            </button>
+          </div>
+        ) : null}
+        {view === "map" && DESIGN.home === "map" && !showNeeds ? (
+          <NeedsStrip needs={load.needs} onOpen={openNeeds} />
         ) : null}
         {top === "add" || top === "item" ? null : noticeView}
         {top === "mode" ? (

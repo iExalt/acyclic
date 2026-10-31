@@ -3,14 +3,16 @@
 // differs between the looks: what is inside it is the same.
 
 import type { ReactNode } from "react";
-import { Icon, Inbox, ListTree, MapIcon, Plus, Waypoints } from "./icons";
-import type { Look } from "./look";
+import { Icon, Inbox, LayoutDashboard, ListTree, MapIcon, Plus, Waypoints } from "./icons";
+import { DESIGN, type Look } from "./look";
 import { Menu } from "./Menu";
 import { countText } from "./needs";
 
-export type View = "map" | "threads";
+export type View = "overview" | "map" | "threads";
 
+/** The views, the Overview first where it is the home being compared. */
 const VIEWS: { view: View; label: string; icon: typeof MapIcon }[] = [
+  ...(DESIGN.home === "overview" ? [{ view: "overview" as const, label: "Overview", icon: LayoutDashboard }] : []),
   { view: "map", label: "Map", icon: MapIcon },
   { view: "threads", label: "Threads", icon: Waypoints },
 ];
@@ -111,7 +113,7 @@ function Count({ count }: { count: number }) {
   );
 }
 
-function Wordmark() {
+export function Wordmark() {
   return (
     <span className="wordmark">
       <svg viewBox="0 0 512 512" aria-hidden="true" focusable="false">

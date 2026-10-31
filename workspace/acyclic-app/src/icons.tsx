@@ -10,6 +10,7 @@ export {
   CircleAlert,
   FolderInput,
   Inbox,
+  LayoutDashboard,
   Link2,
   ListTree,
   Map as MapIcon,
