@@ -481,6 +481,25 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         title.wait_for(timeout=10_000)
         if title.inner_text() != plan.items[id]["title"]:
             failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
+        # A link to the task drawn furthest right, where the panel will open, brings it out from under the panel.
+        drawn = "() => document.querySelector('[data-testid=map]')?.dataset.state === 'drawn'"
+        page.goto(f"{origin}/?view=map")
+        page.wait_for_function(drawn, timeout=20_000)
+        far = page.get_by_test_id("map").evaluate(
+            "m => m.cy.nodes('.leaf').max(n => n.renderedBoundingBox().x2).ele.id()"
+        )
+        page.goto(f"{origin}/?item={quote(far)}")
+        title.wait_for(timeout=10_000)
+        page.wait_for_function(drawn, timeout=20_000)
+        clear = page.evaluate(
+            """id => { const m = document.querySelector('[data-testid=map]'); const r = m.getBoundingClientRect();
+                const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+                const panel = document.querySelector('[data-testid=inspector]').getBoundingClientRect();
+                return [Math.round(r.left + b.x1), Math.round(r.left + b.x2), Math.round(panel.left)]; }""",
+            far,
+        )
+        if not (clear[0] >= 0 and clear[1] <= clear[2]):
+            failures.append(f"{name}: a link to {far} drew it at {clear[:2]}, under the panel from {clear[2]}")
     # A link to an item gone says so, and opens the rest it names: two layers, closed quicker than the history moves,
     # leave the address saying what's open.
     page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
@@ -498,7 +517,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     if errors:
         failures.append(f"{name}: links threw {errors}")
     page.close()
-    kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it"
+    kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
     print(f"{name}: a link opened {id}, {kept}, and a stale link said so")
 
 def command_journey(page, view, origin, plan, name, failures):
