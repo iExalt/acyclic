@@ -53,8 +53,8 @@ READABLE = 0.85
 # How long the 3,500-item Map may take to draw: a loose bound against hanging, not a timing.
 LARGE_LIMIT_MS = 60_000
 # How long the whole run may take on CI: past the first it warns, past the second it fails, so the journeys can't grow
-# unnoticed. Shared runners vary by about a fifth between runs of the same code.
-BUDGET_S, LIMIT_S = 60, 90
+# unnoticed. Shared runners took from 58 to 81 s over runs of the same code, so the limit leaves room for a slow one.
+BUDGET_S, LIMIT_S = 60, 120
 # Each timed step's name and seconds, for the run's summary.
 TIMES = []
 
