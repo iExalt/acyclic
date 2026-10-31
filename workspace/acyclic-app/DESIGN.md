@@ -55,8 +55,9 @@ and a unit test keeps the two in step.
 Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
-Text sets at 500, not the face's 400, and every heavier weight a step up with it: the Map's titles 600 and its boxes'
-700, as its renderer takes only hundreds. Overpass's regular strokes are thin on a screen, and the text strained to read
+Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's task titles stay at 500,
+as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a phase's title barely led its
+tasks. Overpass's regular strokes are thin on a screen, and the text strained to read
 beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
 cold; Overpass, heavier, keeps the app's voice.
 

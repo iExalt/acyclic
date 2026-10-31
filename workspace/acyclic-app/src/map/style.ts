@@ -9,9 +9,9 @@ import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
 export const FONT = "Overpass, system-ui, sans-serif";
-/** Its weights, a task's title and a box's: a step above the face's regular, as the app's text; in hundreds, as the
- *  renderer takes no other. */
-export const WEIGHT = { regular: 600, bold: 700 } as const;
+/** Its weights, a task's title and a box's: the app's text weight, and two steps above it, so a phase's title leads
+ *  its tasks; in hundreds, as the renderer takes no other. */
+export const WEIGHT = { regular: 500, bold: 700 } as const;
 
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>
