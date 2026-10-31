@@ -1206,7 +1206,8 @@ def edit_journey(page, view, env, plan, box, name, failures):
             return [close.getBoundingClientRect().height, at(chip, -21) && at(chip, 21)];
         }"""
     )
-    if view.get("has_touch") and (reach[0] < 44 or not reach[1]):
+    # Half a pixel's slack for a sheet still rising, whose box is measured between pixels.
+    if view.get("has_touch") and (reach[0] < 43.5 or not reach[1]):
         failures.append(
             f"{name}: too small to tap: close {reach[0]} px, chip reached {reach[1]}"
         )
@@ -1745,6 +1746,8 @@ def form_journey(page, view, env, remote, id, name, failures):
     )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
+    # Drawn at once, the edit is saved only once the app is no longer busy.
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     if not in_open_view(page, id):
         failures.append(f"{name}: after saving, {id} is off the Map or under the sheet")
     check_tracker(
