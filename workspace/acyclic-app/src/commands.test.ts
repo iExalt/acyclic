@@ -73,9 +73,14 @@ describe("the command menu", () => {
       Array.from({ length: 3500 }, (_, n) => item(`task-${n}`, null, [], { title: `Task ${n} of the résumé batch` })),
     );
     const listed = entries({ ...plan, model: many });
-    const started = performance.now();
-    for (const query of ["t", "ta", "tas", "task", "task 1", "resume batch"]) rank(query, listed, plan.working);
-    const each = (performance.now() - started) / 6;
+    // The best of a few rounds: a busy machine (a CI runner with every test file at once) only ever slows a round
+    // down, while ranking that grew slower in itself slows every round.
+    const rounds = Array.from({ length: 5 }, () => {
+      const started = performance.now();
+      for (const query of ["t", "ta", "tas", "task", "task 1", "resume batch"]) rank(query, listed, plan.working);
+      return (performance.now() - started) / 6;
+    });
+    const each = Math.min(...rounds);
     expect(rank("task", listed, plan.working)).toHaveLength(MOST);
     expect(each).toBeLessThan(16);
   });
