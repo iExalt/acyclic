@@ -137,7 +137,7 @@ export function ThreadPanel({
       )}
       {detail.heads.length === 0 ? null : (
         <div className="heads">
-          <h3>Ready to start</h3>
+          <h3>Unblocked</h3>
           <ul className="rows">
             {detail.heads.map((head) => {
               const stage = stageOf(head);

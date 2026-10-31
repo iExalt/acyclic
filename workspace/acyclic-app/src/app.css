@@ -905,6 +905,7 @@ button.phase-title {
   position: absolute;
   top: 6px;
   left: calc(50% - 18px);
+  z-index: 2;
   width: 36px;
   height: 4px;
   border-radius: 2px;
@@ -945,6 +946,17 @@ button.phase-title {
   align-items: start;
   gap: 8px;
   margin: -6px -8px 6px 0;
+}
+/* A panel's own heading stays in view as it scrolls, with its close button: on a phone without a Back button, the
+   way out. */
+.inspector > header,
+.sheet > header {
+  position: sticky;
+  top: -18px;
+  z-index: 1;
+  padding: 12px 0 4px;
+  margin-top: -18px;
+  background: var(--sheet);
 }
 .inspector h2,
 .sheet h2 {
@@ -1194,8 +1206,9 @@ dl.facts .chip {
 }
 /* The entry the Overview opened the list at, marked until the list closes. */
 .needs > li[data-at="true"] {
-  box-shadow: inset 3px 0 0 var(--accent);
   padding-left: 10px;
+  box-shadow: inset 3px 0 0 var(--accent);
+  scroll-margin-top: 48px;
 }
 .notify {
   margin: 0 0 4px;
