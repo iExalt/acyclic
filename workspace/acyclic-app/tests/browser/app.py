@@ -1425,7 +1425,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Needs you opened over the phases' sheet left its list hidden")
         return
-    # The queue has one name, as the push notification that opens it says, apart from the in-review stage.
+    # The queue has the name its push notification gives it, apart from the in-review stage.
     named = (page.get_by_test_id("needs-button").get_attribute("aria-label"), needs.locator("h2").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":
         failures.append(f"{name}: the queue's button and heading read {named}, not Needs you")
