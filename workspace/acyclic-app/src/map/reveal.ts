@@ -107,12 +107,14 @@ export function nearest(nodes: Box[], open: Box): Box | null {
 }
 
 /**
- * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them,
- * centred, at the closest zoom up to `most` that fits them, when that is readable; else at a readable zoom from the
- * first of them in reading order, at the top-left of `open`.
+ * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them
+ * at the closest zoom up to `most` that fits them, when that is readable, centred but moved, if need be, so no edge of
+ * the `plan` stands inside `open` with blank canvas beyond it; else at a readable zoom from the first of them in
+ * reading order, at the top-left of `open`.
  */
 export function frame(
   boxes: readonly Box[],
+  plan: Box,
   open: Box,
   most: number,
   padding = 24,
@@ -131,11 +133,18 @@ export function frame(
   );
   if (fit >= READABLE) {
     const zoom = Math.min(most, fit);
+    // Centred, then held between the plan's far edge at the open part's far side and its near edge at the near side;
+    // a plan smaller than the open part stays centred on the thread.
+    const along = (centred: number, near: number, far: number, from: number, to: number) => {
+      const least = to - padding - far * zoom;
+      const most = from + padding - near * zoom;
+      return least > most ? centred : Math.min(most, Math.max(least, centred));
+    };
     return {
       zoom,
       pan: {
-        x: open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom,
-        y: open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom,
+        x: along(open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom, plan.x1, plan.x2, open.x1, open.x2),
+        y: along(open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom, plan.y1, plan.y2, open.y1, open.y2),
       },
     };
   }

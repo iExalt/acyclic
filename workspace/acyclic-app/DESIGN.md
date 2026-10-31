@@ -52,6 +52,10 @@ and a unit test keeps the two in step.
 Overpass, variable, for the app and the Map's canvas. 15 px base, 14 px from 900 px wide. Sentence case. Tabular
 figures where counts are compared. Monospace only for ids.
 
+Panels, wide, set everything in one size, 13 px, labels and values alike, their fields too; the title is 17 px at 600,
+not bold; section headings 12 px at 500, muted, so the content leads. A phone's panels keep the base size. (Mixed
+sizes and weights, a 20 px bold title over 13 px labels and 14 px values, read as awkward.)
+
 ## Layout
 
 - **Phone (under 900 px):** a bar on top (the view's name, the outline, New item, the menu), the views and Needs you
@@ -79,10 +83,13 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   under its heading, else over the Map. One shows at a time: the next replaces it, including one a link from a
   notification brings, as the user has moved on.
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
-  Edit alone in view; Move, Reopen, Add inside, Waits for and Relates to in the ⋯ menu beside the title, each with
-  its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove
+  Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
+  to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove
   button shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over
   one row of quiet buttons and over today's layout unboxed, as the calmest.)
+- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
+  muted rows, then its decision, compact, after what it acts on. A hairline between entries; the filters are tabs,
+  the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
@@ -137,7 +144,9 @@ you. Errors say what to check before what went wrong.
 
 ## Do's and Don'ts
 
-- **The One Primary Rule.** One filled button per decision; everything else steps down a tier.
+- **The One Primary Rule.** One filled button per decision; everything else steps down a tier. In a list of
+  decisions, with a pointer, an entry's main action is outlined until the entry is under the pointer or holds the
+  focus: a column of identical filled buttons read as clutter. Without hover, they stay filled.
 - **The Shape Rule.** Selection is drawn by shape (an ink edge with a soft halo, a fill, a pill), never by hue alone.
   One ring, not two: a double ring of ink read as heavy in both schemes.
 - **The Signal Rule.** The signal is text and dashes. Never a solid border, a fill, or a badge with a number, which

@@ -240,7 +240,7 @@ export function App() {
   }, []);
   /**
    * Takes the user to the Map for a thread: picked, its panel open, and its items framed in the part of the Map the
-   * panel leaves. A pick on the Map itself leaves the view alone, unless nothing of the thread is in view.
+   * panel leaves, unlike `pickThread`.
    */
   const toThread = useCallback((id: string) => {
     setSelected(null);
@@ -248,7 +248,10 @@ export function App() {
     setView("map");
     setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
-  /** Picks a thread from the outline, or unpicks the one picked. */
+  /**
+   * Picks a thread from the outline, or unpicks the one picked, leaving the Map's view alone unless nothing of the
+   * thread is in it.
+   */
   const pickThread = useCallback((id: string) => {
     setSelected(null);
     setThread((was) => (was === id ? null : id));

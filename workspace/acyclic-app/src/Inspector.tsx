@@ -174,6 +174,18 @@ export function Inspector({
         <h2>
           <Prose text={item.title} />
         </h2>
+        <button
+          type="button"
+          className="close"
+          aria-label="Edit"
+          title="Edit"
+          onClick={() => setEditing(true)}
+          data-action="edit"
+          {...key("Edit", "E")}
+          disabled={editing || busy}
+        >
+          <Icon of={Pencil} />
+        </button>
         <Menu label="Item actions" testid="item-menu" list>
           {action("move", "Move…", FolderInput, onMove, "M")}
           {item.state === "done"
@@ -236,18 +248,6 @@ export function Inspector({
           }}
         />
       ) : null}
-      <div className="actions toolbar">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          data-action="edit"
-          {...key("Edit", "E")}
-          disabled={editing || busy}
-        >
-          <Icon of={Pencil} size={16} />
-          Edit
-        </button>
-      </div>
       {links("Waits for", item.links.waits_for, (id) => onUnlink(item.id, "waits-for", id), "waits-for")}
       {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, "waits-for", item.id), "waited-on-by")}
       {links("Relates to", item.links.relates_to, (id) => onUnlink(item.id, "relates-to", id), "relates-to")}

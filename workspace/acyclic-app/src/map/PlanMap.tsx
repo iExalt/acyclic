@@ -313,7 +313,7 @@ export default function PlanMap({
       const drawnNode = core.getElementById(node.id);
       return node.lit && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
     });
-    const view = frame(boxes, openPart(element), 1);
+    const view = frame(boxes, core.nodes().boundingBox({ includeLabels: false }), openPart(element), 1);
     if (view !== null) core.viewport(view);
   }, [framed, thread, drawn]);
   useEffect(() => {

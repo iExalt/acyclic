@@ -1,4 +1,5 @@
-// The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
+// The needs-you list: each entry in a line, with what it names to select under it, then the actions the app can take
+// on it, so the button comes after what it acts on.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
@@ -98,14 +99,14 @@ export function NeedsList({
             tabIndex={-1}
           >
             {view.thread === null ? (
-              <p className="facts line" style={lineStyle(view.line)}>
+              <p className="facts line need-head" style={lineStyle(view.line)}>
                 <Badge line={view.line} />
                 <span>{view.text}</span>
               </p>
             ) : (
               <button
                 type="button"
-                className="row line"
+                className="row line need-head"
                 style={lineStyle(view.line)}
                 data-pick-thread={view.thread}
                 onClick={() => view.thread !== null && onPickThread(view.thread)}
@@ -114,24 +115,8 @@ export function NeedsList({
                 <span>{view.text}</span>
               </button>
             )}
-            {view.actions.length === 0 ? null : (
-              <div className="actions">
-                {view.actions.map((action) => (
-                  <button
-                    type="button"
-                    key={action.label}
-                    className={PRIMARY.has(action.action) ? "primary" : "quiet"}
-                    data-action={action.action}
-                    disabled={busy}
-                    onClick={() => onCommand(action.command)}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-            )}
-            {view.note === null ? null : <p className="why">{view.note}</p>}
-            <ul className="rows">
+            {view.note === null ? null : <p className="why need-why">{view.note}</p>}
+            <ul className="rows need-items">
               {view.threads.map((thread) => {
                 const label = threadLabel(thread, lines);
                 return (
@@ -156,6 +141,22 @@ export function NeedsList({
                 </li>
               ))}
             </ul>
+            {view.actions.length === 0 ? null : (
+              <div className="actions need-actions">
+                {view.actions.map((action) => (
+                  <button
+                    type="button"
+                    key={action.label}
+                    className={PRIMARY.has(action.action) ? "primary" : "quiet"}
+                    data-action={action.action}
+                    disabled={busy}
+                    onClick={() => onCommand(action.command)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ul>
