@@ -1,6 +1,6 @@
 // ELK as the Map's layout engine, one box at a time. Inside a box, children are layered top to bottom by their links,
-// and those with no link in the box stand aside in columns, since they can start any time and would only widen the
-// graph's first layer.
+// and those with no link in the box stand aside in columns on its left, first, since they can start any time and would
+// only widen the graph's first layer.
 // The top level is packed into rows instead: there the children are the plan's largest boxes, layering them stacks
 // them in a tall diagonal strip, and its links all run between items inside them, which the Map draws only for the
 // selection anyway. Packing keeps only the order it is given, so the top level's boxes are given in dependency order.
@@ -8,7 +8,8 @@
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
-import { type BoxInput, type BoxLayout, type LayBox, LEAF, ROOT, type Size } from "./layout";
+import { type BoxLayout, type LayBox, LEAF, ROOT, type Size, scopes } from "./layout";
+import { type Model, visible } from "./model";
 import type { Point } from "./route";
 
 /** A box's padding, the space between its children, and the wider gap between its graph and the tasks aside. */
@@ -21,8 +22,13 @@ const LAYERED = {
   "elk.direction": "DOWN",
   "elk.layered.spacing.nodeNodeBetweenLayers": "40",
   "elk.spacing.nodeNode": String(GAP),
-  // Each link gets its own way out of its node, so links leaving one node can be told apart.
+  // Each link arrives at its own point, with its own arrowhead; the links leaving a node leave as one trunk, from one
+  // port, which splits on the way. Shared on both ends, an outgoing trunk and an incoming one could run as one line, and
+  // a link would seem to join two items it doesn't.
   "elk.layered.mergeEdges": "false",
+  // Of the placements Brandes and Köpf's method makes, their balance: a task waiting on two sits centred under them,
+  // as each pulls it equally, not under whichever the first placement favoured.
+  "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   // Room at the top for the box's title strip.
   "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
@@ -54,10 +60,13 @@ export interface Engine {
  * plan without links come in the order their ids were given (phase-2 before phase-10), and a cycle broken at its least
  * id.
  */
-export function dependencyOrder(input: BoxInput): string[] {
-  const ids = input.children.map((child) => child.id).sort(natural);
+export function dependencyOrder(
+  children: readonly string[],
+  edges: readonly { source: string; target: string }[],
+): string[] {
+  const ids = [...children].sort(natural);
   const waiting = new Map(ids.map((id) => [id, new Set<string>()]));
-  for (const edge of input.edges) waiting.get(edge.target)?.add(edge.source);
+  for (const edge of edges) waiting.get(edge.target)?.add(edge.source);
   const order: string[] = [];
   const left = new Set(ids);
   while (left.size > 0) {
@@ -70,9 +79,18 @@ export function dependencyOrder(input: BoxInput): string[] {
 }
 
 /**
- * A box's layout with its unlinked children aside: the graph as ELK laid it out, or none when nothing in the box is
- * linked, then the unlinked in order in columns to its right. A column holds as many as fit the graph's height, or a
- * near-square grid's when that is taller, so a box of only unlinked tasks is about as tall as it is wide in tasks.
+ * The top-level items shown, in the order the top level is packed in, which is the Map's reading order: the same
+ * links, lifted to the top level as any view lifts them, whatever is collapsed.
+ */
+export function topOrder(model: Model, showArchived: boolean): string[] {
+  const top = scopes(visible(model, { collapsed: new Set(), showArchived }));
+  return dependencyOrder(top.kids.get(ROOT) ?? [], top.edges.get(ROOT) ?? []);
+}
+
+/**
+ * A box's layout with its unlinked children aside: in order in columns on the left, then the graph as ELK laid it out,
+ * moved right past them, or none when nothing in the box is linked. A column holds as many as fit the graph's height,
+ * or a near-square grid's when that is taller, so a box of only unlinked tasks is about as tall as it is wide in tasks.
  */
 export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string } & Size)[]): BoxLayout {
   const empty = { width: 2 * PAD, height: STRIP + PAD, at: {} };
@@ -81,12 +99,26 @@ export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string
   const cap = Math.max(inner, Math.ceil(Math.sqrt(unlinked.length)) * (LEAF.height + GAP) - GAP);
   // Filled to the cap, the last column could hold one; so the columns that takes share the children evenly.
   const share = Math.ceil(unlinked.length / stack(unlinked, cap, Infinity, 0, 0).columns);
-  const placed = stack(unlinked, cap, share, graph === null ? PAD : graph.width - PAD + ASIDE, STRIP);
+  const placed = stack(unlinked, cap, share, PAD, STRIP);
+  const height = Math.max(graph?.height ?? 0, placed.bottom + PAD);
+  if (graph === null) return { width: placed.right + PAD, height, at: placed.at };
+  // The graph's own padding stays on its left, so its first child stands the wider gap from the last column.
+  const dx = placed.right + ASIDE - PAD;
+  const moved = (points: Point[]) => points.map(({ x, y }) => ({ x: x + dx, y }));
+  const shifted = (all: Record<string, Point[]> | undefined) =>
+    all === undefined
+      ? undefined
+      : Object.fromEntries(Object.entries(all).map(([key, points]) => [key, moved(points)]));
+  const at = { ...placed.at };
+  for (const [id, { x, y }] of Object.entries(graph.at)) at[id] = { x: x + dx, y };
+  const routes = shifted(graph.routes);
+  const junctions = shifted(graph.junctions);
   return {
-    ...graph,
-    width: placed.right + PAD,
-    height: Math.max(graph?.height ?? 0, placed.bottom + PAD),
-    at: { ...graph?.at, ...placed.at },
+    width: dx + graph.width,
+    height,
+    at,
+    ...(routes === undefined ? {} : { routes }),
+    ...(junctions === undefined ? {} : { junctions }),
   };
 }
 
@@ -116,7 +148,7 @@ export function elkLayBox(engine: Engine): LayBox {
         await engine.layout({
           id: "root",
           layoutOptions: { ...PACKED, "elk.aspectRatio": String(input.aspect ?? PORTRAIT) },
-          children: dependencyOrder(input).flatMap((id) => size.get(id) ?? []),
+          children: dependencyOrder([...size.keys()], input.edges).flatMap((id) => size.get(id) ?? []),
           edges: [],
         }),
       );
@@ -128,8 +160,18 @@ export function elkLayBox(engine: Engine): LayBox {
             await engine.layout({
               id: input.id,
               layoutOptions: LAYERED,
-              children: [...size.values()].filter((child) => linked.has(child.id)),
-              edges: input.edges.map((edge, i) => ({ id: `e${i}`, sources: [edge.source], targets: [edge.target] })),
+              children: [...size.values()]
+                .filter((child) => linked.has(child.id))
+                .map((child) => ({
+                  ...child,
+                  layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+                  ports: [{ id: out(child.id), width: 0, height: 0, layoutOptions: { "elk.port.side": "SOUTH" } }],
+                })),
+              edges: input.edges.map((edge, i) => ({
+                id: `e${i}`,
+                sources: [out(edge.source)],
+                targets: [edge.target],
+              })),
             }),
             input.edges,
           );
@@ -140,15 +182,24 @@ export function elkLayBox(engine: Engine): LayBox {
   };
 }
 
+/** A node's one way out, which every link leaving it shares. */
+const out = (id: string) => `${id}\u0000out`;
+
 function laid(out: ElkNode, edges: readonly { source: string; target: string }[] = []): BoxLayout {
   const at: Record<string, { x: number; y: number }> = {};
   for (const child of out.children ?? []) at[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
   const routes: Record<string, Point[]> = {};
+  const junctions: Record<string, Point[]> = {};
   for (const edge of out.edges ?? []) {
     const section = edge.sections?.[0];
     const link = edges[Number(edge.id.slice(1))];
     if (section === undefined || link === undefined || edge.sections?.length !== 1) continue;
-    routes[`${link.source}->${link.target}`] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
+    const key = `${link.source}->${link.target}`;
+    routes[key] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
+    // Where a trunk splits, on one of the links that split there.
+    const at = (edge as { junctionPoints?: Point[] }).junctionPoints;
+    if (at !== undefined && at.length > 0) junctions[key] = at.map(({ x, y }) => ({ x, y }));
   }
-  return { width: out.width ?? 0, height: out.height ?? 0, at, ...(edges.length === 0 ? {} : { routes }) };
+  if (edges.length === 0) return { width: out.width ?? 0, height: out.height ?? 0, at };
+  return { width: out.width ?? 0, height: out.height ?? 0, at, routes, junctions };
 }

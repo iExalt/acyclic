@@ -19,6 +19,7 @@ const placed: Placed = {
   height: 100,
   laidOut: [],
   routes: new Map(),
+  junctions: new Map(),
   redundant: new Set(),
   nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }])),
 };
@@ -97,6 +98,20 @@ describe("scene", () => {
     expect(scene(view, placed, { item: null, thread: null }, threadOf).edges.every((edge) => !edge.dim)).toBe(true);
   });
 
+  it("shows a hovered item's links, across boxes too, and dims the rest", () => {
+    const hovered = scene(view, placed, { item: null, thread: null, hovered: "c" }, threadOf);
+    expect(hovered.edges.map((edge) => [edge.id, edge.hovered, edge.dim])).toEqual([
+      ["a->b", false, true],
+      ["a->c", true, false],
+    ]);
+    // The lit thread's route stays lit while another item is hovered.
+    const lit = scene(view, placed, { item: null, thread: "t", hovered: "b" }, threadOf);
+    expect(lit.edges.find((edge) => edge.id === "a->c")).toMatchObject({ lit: true, dim: false });
+    // A box opened under the pointer shows nothing of its own, and dims nothing.
+    const opened = scene(view, placed, { item: null, thread: null, hovered: "top" }, threadOf);
+    expect(opened.edges.every((edge) => !edge.dim && !edge.hovered)).toBe(true);
+  });
+
   it("routes a thread through the collapsed box that hides a member", () => {
     const closed = visible(model, { collapsed: new Set(["top"]), showArchived: false });
     const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);
@@ -113,6 +128,10 @@ describe("scene", () => {
     // A picked thread wins over the selected item's own.
     expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).thread).toBe("t");
     expect(scene(view, placed, { item: "b", thread: null }, threadOf).nodes.some((node) => node.dim)).toBe(false);
+    // Selected outside the thread picked, an item is drawn whole.
+    expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).nodes.find((node) => node.id === "b")?.dim).toBe(
+      false,
+    );
   });
 
   it("places nodes by their centres, a box under what it holds, and labels a collapsed box with what it hides", () => {

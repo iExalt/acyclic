@@ -1,5 +1,7 @@
 // The server's API: one endpoint that runs a CLI command, given as JSON, and answers with the CLI's envelope.
 
+import { STAGE_WORDS, stageCounts } from "./stages";
+
 export type Envelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string; details: unknown } };
@@ -26,6 +28,7 @@ interface RawItem {
 }
 
 /** Where a leaf stands: core's seven stages, which tell every leaf apart. */
+
 export type Stage = "done" | "in-review" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
 
 /**
@@ -50,31 +53,9 @@ export interface Progress {
 
 /** A parent's leaves by stage in words, in the order work moves through them, leaving out stages with none. */
 export function countsText(counts: Counts): string {
-  const said: [number, string][] = [
-    [counts.done - counts.in_review, "done"],
-    [counts.in_review, "in review"],
-    [counts.in_progress, "in progress"],
-    [counts.ready, "ready"],
-    [counts.blocked, "blocked"],
-    [counts.parked, "parked"],
-    [counts.unthreaded, "not in a thread"],
-  ];
-  return said
-    .filter(([count]) => count > 0)
-    .map(([count, word]) => `${count} ${word}`)
+  return stageCounts(counts)
+    .map(({ stage, count }) => `${count} ${STAGE_WORDS[stage].toLowerCase()}`)
     .join(", ");
-}
-
-/** How an item's state reads: a parent's from the work under it, with its leaves by stage. */
-export function stateText(item: Pick<Item, "state" | "archived" | "progress">): string {
-  const progress = item.progress;
-  const state =
-    progress === undefined
-      ? item.state
-      : progress.counts.leaves === 0
-        ? `${progress.state} (all archived)`
-        : `${progress.state}: ${countsText(progress.counts)}`;
-  return item.archived ? `${state}, archived` : state;
 }
 
 /** The fields whose conflicts the app settles for display. */

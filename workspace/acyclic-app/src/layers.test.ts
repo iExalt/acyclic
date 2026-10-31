@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { arrived, depth, follow, openLayers, topLayer } from "./layers";
 
-const none = { mode: false, adding: false, item: false, needs: false, phases: false, thread: false };
+const none = {
+  command: false,
+  mode: false,
+  adding: false,
+  item: false,
+  needs: false,
+  phases: false,
+  thread: false,
+  away: false,
+};
 
 describe("topLayer", () => {
-  it("puts a waiting move over a form, a form over the phases, those over an item, that over the needs list, and those over a thread", () => {
-    const all = { mode: true, adding: true, item: true, needs: true, phases: true, thread: true };
+  it("puts the command menu over all, a waiting move over a form, a form over the phases, those over an item, that over the needs list, and those over a thread", () => {
+    const all = {
+      command: false,
+      mode: true,
+      adding: true,
+      item: true,
+      needs: true,
+      phases: true,
+      thread: true,
+      away: true,
+    };
+    expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
     expect(topLayer({ ...all, mode: false })).toBe("add");
     expect(topLayer({ ...all, mode: false, adding: false })).toBe("phases");
@@ -14,6 +33,9 @@ describe("topLayer", () => {
     expect(topLayer({ ...none, thread: true })).toBe("thread");
     expect(topLayer(none)).toBeNull();
     expect(openLayers({ ...none, thread: true, item: true })).toEqual(["item", "thread"]);
+    // Away from home, on a phone, is under everything: Back closes what's over the view before it goes home.
+    expect(openLayers({ ...none, away: true, item: true, thread: true })).toEqual(["item", "thread", "away"]);
+    expect(topLayer({ ...none, away: true })).toBe("away");
   });
 });
 

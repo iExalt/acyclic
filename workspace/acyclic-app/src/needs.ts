@@ -14,6 +14,9 @@ import {
 } from "./forms";
 import type { Line } from "./lines";
 
+/** The most items an approval lists before it says how many more. */
+export const LISTED = 5;
+
 /** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
 const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see how";
 
@@ -25,6 +28,8 @@ export interface Action {
   command: Command;
   /** Names the action for tests: `keep`, `drop`, `approve` or `use`. */
   action: string;
+  /** What the app says once it is saved, since the entry it settles goes. */
+  done: string;
 }
 
 export interface NeedView {
@@ -35,6 +40,8 @@ export interface NeedView {
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
+  /** How many more items it covers than it lists, as an approval of a large thread lists only its first few. */
+  more: number;
   threads: { id: string; title: string }[];
   /** The thread the badge-led text names, which the text picks: its row would only repeat it. */
   thread: string | null;
@@ -83,11 +90,18 @@ export function threadLabel(thread: { id: string; title: string }, lines: Readon
   return { line, text: line?.name ?? thread.title };
 }
 
-/** One entry as the app shows it, with each thread's line from `lines`. */
-export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView {
+/**
+ * One entry as the app shows it, with each thread's line from `lines`, and a thread's items from `members`, in the
+ * order its work runs, where the plan holds them.
+ */
+export function needView(
+  need: Need,
+  lines: ReadonlyMap<string, Line>,
+  members: (thread: string) => string[] = () => [],
+): NeedView {
   // A badge only where the text names its thread, and then the text picks the thread in place of its row.
   let named = false;
-  const view = viewOf(need, lines, () => {
+  const view = viewOf(need, lines, members, () => {
     named = true;
   });
   if (!named) return { ...view, line: undefined, thread: null };
@@ -96,7 +110,12 @@ export function needView(need: Need, lines: ReadonlyMap<string, Line>): NeedView
 }
 
 /** The entry, calling `named` when its text names the badge's thread by its line. */
-function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void): Omit<NeedView, "thread"> {
+function viewOf(
+  need: Need,
+  lines: ReadonlyMap<string, Line>,
+  members: (thread: string) => string[],
+  named: () => void,
+): Omit<NeedView, "thread"> {
   const item = row(need.item);
   const thread = row(need.thread);
   const holders = Array.isArray(need.holders) ? need.holders : [];
@@ -117,6 +136,7 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
   };
   const base = {
     line,
+    more: 0,
     items: item === null ? [] : [item.id],
     threads: threads.map((one) => ({ id: one.id, title: titled(one) })),
     actions: [] as Action[],
@@ -127,46 +147,56 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
       const proposal = need.proposal as { id?: string; actor?: string; edit?: Record<string, unknown> } | null;
       const id = proposal?.id ?? "";
       const edit = proposal?.edit ?? {};
+      const change = `${proposal?.actor ?? "an agent"}'s ${str(edit.field)} change`;
       return {
         ...base,
         key: `proposal:${id}`,
         text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)} ${shown(edit.before)} → ${shown(edit.after)}${item === null ? "" : ` for ${titled(item)}`}`,
         actions: [
-          { label: "Keep", command: keepCommand(id), action: "keep" },
-          { label: "Drop", command: dropCommand(id), action: "drop" },
+          { label: "Keep", command: keepCommand(id), action: "keep", done: `Kept ${change}` },
+          { label: "Drop", command: dropCommand(id), action: "drop", done: `Dropped ${change}` },
         ],
       };
     }
     case "unapproved": {
       const id = item?.id ?? "";
       const to = thread?.id ?? "";
+      const [title, name] = [item === null ? id : titled(item), thread === null ? to : lineName(thread)];
       return {
         ...base,
         key: `unapproved:${id}:${to}`,
-        text: `${item === null ? id : titled(item)} joined ${thread === null ? to : lineName(thread)} after its approval`,
+        text: `${title} joined ${name} after its approval`,
         actions: [
-          { label: "Keep", command: keepMemberCommand(id, to), action: "keep" },
-          { label: "Drop", command: dropMemberCommand(id), action: "drop" },
+          { label: "Keep", command: keepMemberCommand(id, to), action: "keep", done: `Kept ${title} in ${name}` },
+          { label: "Drop", command: dropMemberCommand(id), action: "drop", done: `Dropped ${title} from ${name}` },
         ],
       };
     }
     case "awaiting-approval": {
       const id = thread?.id ?? "";
-      // All its members, as the thread's panel counts them: approval covers the thread's whole scope.
-      const members = Number((need.thread as { counts?: { members?: number } } | undefined)?.counts?.members ?? 0);
+      // All its members, as the thread's panel counts them: approval covers the thread's whole scope, so the entry
+      // lists the items it covers, as the plan holds them (only where the plan has none, the heads it names), the
+      // first few, and says how many more.
+      const count = Number((need.thread as { counts?: { members?: number } } | undefined)?.counts?.members ?? 0);
       const heads = Array.isArray((need.thread as { heads?: unknown })?.heads)
         ? ((need.thread as { heads: string[] }).heads ?? [])
         : [];
+      const known = members(id);
+      const listed = (known.length > 0 ? known : heads).slice(0, LISTED);
+      const name = thread === null ? id : lineName(thread);
+      const items = `${count} ${count === 1 ? "item" : "items"}`;
       return {
         ...base,
         key: `awaiting-approval:${id}`,
-        items: heads,
-        text: `${thread === null ? id : lineName(thread)} waits for your approval`,
+        items: listed,
+        more: Math.max(0, count - listed.length),
+        text: `${name} waits for your approval`,
         actions: [
           {
-            label: `Approve ${members} ${members === 1 ? "item" : "items"}`,
+            label: `Approve ${items}`,
             command: approveCommand(id),
             action: "approve",
+            done: `Approved ${name}: ${items}`,
           },
         ],
       };
@@ -181,7 +211,13 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
       const why: string[] = [];
       for (const value of values) {
         const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
-        if (command !== null) actions.push({ label: `Use ${shown(value)}`, command, action: "use" });
+        if (command !== null)
+          actions.push({
+            label: `Use ${shown(value)}`,
+            command,
+            action: "use",
+            done: `Used ${shown(value)} for ${field}`,
+          });
         else
           why.push(
             `${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`,
@@ -235,13 +271,16 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
         text: `${str(need.entity)} ${str(need.id)}: ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
         note: IN_A_TERMINAL,
       };
-    case "unverified":
+    case "unverified": {
+      const repository = str(need.repository);
+      const reason = str(need.reason);
       return {
         ...base,
-        key: `unverified:${item?.id ?? ""}:${str(need.repository)}`,
-        text: `Can't check ${item === null ? "an item" : titled(item)}'s merge in ${str(need.repository)}: ${str(need.reason)}`,
-        note: IN_A_TERMINAL,
+        key: `unverified:${item?.id ?? ""}:${repository}`,
+        text: `Can't confirm ${item === null ? "an item" : titled(item)} merged into ${repository}`,
+        note: unverifiedWhy(repository, reason),
       };
+    }
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix) || str(need.resolve);
@@ -261,6 +300,17 @@ function viewOf(need: Need, lines: ReadonlyMap<string, Line>, named: () => void)
       };
     }
   }
+}
+
+/**
+ * Why a done item's merge couldn't be confirmed, and what fixes it: acyclic looks for the item's commit on the
+ * repository's default branch, in this machine's clone of it.
+ */
+function unverifiedWhy(repository: string, reason: string): string {
+  if (reason === "no clone of the repository is mapped")
+    return `This machine has no clone of ${repository} to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml`;
+  if (reason === "not a commit id") return "Its merge evidence isn't a commit id: record the merged commit on the item";
+  return `Looking for its commit in this machine's clone of ${repository} failed: ${reason}`;
 }
 
 function shown(value: unknown): string {

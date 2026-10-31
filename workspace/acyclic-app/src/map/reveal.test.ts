@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstOf, firstView, nearest, READABLE, reveal, uncovered } from "./reveal";
+import { firstOf, firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -60,6 +60,31 @@ describe("firstView", () => {
   });
 });
 
+describe("startOf", () => {
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height, box: true, top: true });
+  const item = (x: number, y: number, width = 200) => ({ x, y, width, height: 48, box: false, top: false });
+  // 400 wide, 16 aside, at zoom 1: 368 of the plan's width shows.
+  const start = (...nodes: Parameters<typeof startOf>[0]) => startOf(nodes, 400, 16, 1);
+
+  it("starts at the first box's corner, with its title, while its first item shows whole there", () => {
+    expect(start(box(0, 0, 1000, 800), item(12, 40), box(1100, 0, 400, 400), item(1110, 20))).toEqual({ x: 0, y: 0 });
+  });
+
+  it("moves right only as far as shows the first item whole, or to the item when it is wider than the screen", () => {
+    expect(start(box(0, 0, 1000, 800), item(500, 40))).toEqual({ x: 332, y: 0 });
+    expect(start(box(0, 0, 1200, 800), item(500, 40, 600))).toEqual({ x: 500, y: 0 });
+  });
+
+  it("starts at the top of a first box taller than the screen, not partway down it", () => {
+    expect(start(box(0, 0, 300, 5000), item(12, 40), box(400, 0, 300, 200))).toEqual({ x: 0, y: 0 });
+  });
+
+  it("starts at a top-level task's own corner, and nowhere without nodes", () => {
+    expect(start({ ...item(0, 0), top: true })).toEqual({ x: 0, y: 0 });
+    expect(start()).toBeUndefined();
+  });
+});
+
 describe("nearest", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 400 };
   const at = (x: number, y: number) => ({ x1: x, y1: y, x2: x + 50, y2: y + 20 });
@@ -71,5 +96,61 @@ describe("nearest", () => {
 
   it("else brings in the one nearest the middle of what shows, which moves the Map least", () => {
     expect(nearest([at(-900, 180), at(500, 180), at(180, 2000)], open)).toEqual(at(500, 180));
+  });
+});
+
+describe("frame", () => {
+  const laptop = { x1: 0, y1: 0, x2: 880, y2: 800 };
+  const big = { x1: 0, y1: 0, x2: 4000, y2: 3000 };
+
+  it("centres a thread that fits in the part left open, zooming in no closer than the most", () => {
+    const boxes = [
+      { x1: 1100, y1: 1100, x2: 1300, y2: 1148 },
+      { x1: 1500, y1: 1300, x2: 1700, y2: 1348 },
+    ];
+    // 600 by 248 fits 880 by 800 at more than 1, so it stays at 1, centred in the part left of the pane.
+    expect(frame(boxes, big, laptop, 1)).toEqual({ zoom: 1, pan: { x: 140 - 1100, y: 276 - 1100 } });
+    // Wider than the open part at 1: zoomed out to fit, still readable.
+    const wide = [{ x1: 1000, y1: 1000, x2: 1920, y2: 1048 }];
+    expect(frame(wide, big, laptop, 1)?.zoom).toBeCloseTo((880 - 48) / 920);
+  });
+
+  it("moves a thread near the plan's edge off the centre, rather than show blank canvas beyond the plan", () => {
+    // Near the top-left corner, centring would leave 176 px of nothing above the plan and 40 px left of it.
+    const corner = [{ x1: 100, y1: 100, x2: 700, y2: 348 }];
+    expect(frame(corner, big, laptop, 1)).toEqual({ zoom: 1, pan: { x: 24, y: 24 } });
+    // Near the bottom, the plan's bottom edge stops at the open part's.
+    const bottom = [{ x1: 1100, y1: 2900, x2: 1700, y2: 2948 }];
+    expect(frame(bottom, big, laptop, 1)?.pan.y).toBe(800 - 24 - 3000);
+    // A plan smaller than the open part stays centred on the thread.
+    expect(frame(corner, { x1: 0, y1: 0, x2: 720, y2: 400 }, laptop, 1)?.pan).toEqual({ x: 40, y: 176 });
+  });
+
+  it("starts at the first in reading order, at a readable zoom, when the thread is too spread out to fit", () => {
+    const boxes = [
+      { x1: 3000, y1: 900, x2: 3200, y2: 948 },
+      { x1: 400, y1: 904, x2: 600, y2: 952 },
+      { x1: 100, y1: 2000, x2: 300, y2: 2048 },
+    ];
+    // The tops at 900 and 904 read as one row, so the one at 400, its leftmost, comes first.
+    expect(frame(boxes, big, laptop, 1)).toEqual({
+      zoom: READABLE,
+      pan: { x: 24 - 400 * READABLE, y: 24 - 904 * READABLE },
+    });
+    // Starting at a first item near the plan's right edge, it moves only as far as the plan goes, the item in view.
+    const edge = [
+      { x1: 1900, y1: 100, x2: 2000, y2: 148 },
+      { x1: 100, y1: 2900, x2: 300, y2: 2948 },
+    ];
+    const view = frame(edge, { x1: 0, y1: 0, x2: 2000, y2: 3000 }, laptop, 1);
+    expect(view?.pan.x).toBeCloseTo(880 - 24 - 2000 * READABLE);
+    expect(1900 * READABLE + (view?.pan.x ?? 0)).toBeGreaterThan(0);
+  });
+
+  it("frames in the part above a phone's sheet, and frames nothing when the thread has nothing drawn", () => {
+    const phone = uncovered(384, 700, { x1: 0, y1: 400, x2: 384, y2: 700 });
+    const view = frame([{ x1: 1000, y1: 1000, x2: 1200, y2: 1048 }], big, phone, 1);
+    expect(view).toEqual({ zoom: 1, pan: { x: 92 - 1000, y: 176 - 1000 } });
+    expect(frame([], big, phone, 1)).toBeNull();
   });
 });

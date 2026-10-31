@@ -55,6 +55,35 @@ export function firstView(
   return { zoom, pan: { x: (screen.width - plan.width * zoom) / 2, y: (screen.height - plan.height * zoom) / 2 } };
 }
 
+type Placed = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where the first view starts when the plan is too big to show whole, of `nodes` (top-left corners, `box` for those
+ * holding others, `top` for those at the top level): the first top-level node's corner, where a box's title is, moved
+ * right only as far as shows its first item whole on a screen `width` wide at `zoom`. Starting at the item itself
+ * would cut off whatever of its box lies left of it.
+ */
+export function startOf(
+  nodes: readonly (Placed & { box: boolean; top: boolean })[],
+  width: number,
+  padding: number,
+  zoom: number,
+): { x: number; y: number } | undefined {
+  const top = firstOf(nodes.filter((node) => node.top));
+  const box = nodes.find((node) => node.top && node.x === top?.x && node.y === top?.y);
+  if (box === undefined) return undefined;
+  const within = (node: Placed) =>
+    node.x >= box.x &&
+    node.y >= box.y &&
+    node.x + node.width <= box.x + box.width &&
+    node.y + node.height <= box.y + box.height;
+  const corner = firstOf(nodes.filter((node) => !node.box && within(node)));
+  const item = nodes.find((node) => !node.box && node.x === corner?.x && node.y === corner?.y);
+  if (item === undefined) return { x: box.x, y: box.y };
+  const seen = (width - 2 * padding) / zoom;
+  return { x: Math.min(item.x, Math.max(box.x, item.x + item.width - seen)), y: box.y };
+}
+
 /** How far apart two tops can be and still read as one row. */
 const ROW = 8;
 
@@ -75,4 +104,56 @@ export function nearest(nodes: Box[], open: Box): Box | null {
   const cy = (open.y1 + open.y2) / 2;
   const away = (b: Box) => Math.hypot((b.x1 + b.x2) / 2 - cx, (b.y1 + b.y2) / 2 - cy);
   return nodes.reduce((best, b) => (away(b) < away(best) ? b : best));
+}
+
+/**
+ * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them
+ * at the closest zoom up to `most` that fits them, when that is readable, centred; else at a readable zoom from the
+ * first of them in reading order, at the top-left of `open`. Either way moved, if need be, so no edge of the `plan`
+ * stands inside `open` with blank canvas beyond it.
+ */
+export function frame(
+  boxes: readonly Box[],
+  plan: Box,
+  open: Box,
+  most: number,
+  padding = 24,
+): { zoom: number; pan: { x: number; y: number } } | null {
+  if (boxes.length === 0) return null;
+  const all = {
+    x1: Math.min(...boxes.map((b) => b.x1)),
+    y1: Math.min(...boxes.map((b) => b.y1)),
+    x2: Math.max(...boxes.map((b) => b.x2)),
+    y2: Math.max(...boxes.map((b) => b.y2)),
+  };
+  const [width, height] = [open.x2 - open.x1, open.y2 - open.y1];
+  const fit = Math.min(
+    (width - 2 * padding) / Math.max(1, all.x2 - all.x1),
+    (height - 2 * padding) / Math.max(1, all.y2 - all.y1),
+  );
+  // Held between the plan's far edge at the open part's far side and its near edge at the near side, so no blank canvas
+  // shows beyond the plan; a plan smaller than the open part stays where it was put.
+  const held = (zoom: number, pan: { x: number; y: number }) => {
+    const along = (at: number, near: number, far: number, from: number, to: number) => {
+      const least = to - padding - far * zoom;
+      const upper = from + padding - near * zoom;
+      return least > upper ? at : Math.min(upper, Math.max(least, at));
+    };
+    return {
+      zoom,
+      pan: {
+        x: along(pan.x, plan.x1, plan.x2, open.x1, open.x2),
+        y: along(pan.y, plan.y1, plan.y2, open.y1, open.y2),
+      },
+    };
+  };
+  if (fit >= READABLE) {
+    const zoom = Math.min(most, fit);
+    return held(zoom, {
+      x: open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom,
+      y: open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom,
+    });
+  }
+  const first = firstOf(boxes.map((b) => ({ x: b.x1, y: b.y1 }))) ?? { x: all.x1, y: all.y1 };
+  return held(READABLE, { x: open.x1 + padding - first.x * READABLE, y: open.y1 + padding - first.y * READABLE });
 }

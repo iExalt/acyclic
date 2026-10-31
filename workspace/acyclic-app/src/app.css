@@ -1,5 +1,5 @@
 /* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
-   The colours are lines.ts's TOKENS, which a unit test holds these to. */
+   The colours are palette.ts's, which a unit test holds these to. */
 /* Overpass leaves out the backtick, U+0060: its font classes it as a mark, so browsers stacked it on the letter beside
    it as an accent. It falls back to the system face, on the Map's canvas too. */
 @font-face {
@@ -22,23 +22,58 @@
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
+/* The palettes: palette.ts's, which a unit test holds these to. A control's edge is stronger than a rule, so an
+   outlined button reads as one. */
+/* palette dark */
 :root {
-  --ground: #141a1f;
-  --chrome: #1b2228;
-  --box: #1b2329;
-  --tile: #26313a;
-  --sheet: #222b33;
-  --rule: #34404a;
-  --ink: #e6ebef;
-  --muted: #95a3ae;
+  --ground: #121417;
+  --chrome: #16191d;
+  --box: #181b1f;
+  --tile: #23282e;
+  --sheet: #1c2025;
+  --rule: #2b3138;
+  --edge: #4a535e;
+  --field: #6c7580;
+  --ink: #e8eaed;
+  --muted: #a2aab4;
+  --link: #6c7580;
   --signal: #f2b33d;
-  /* A control's edge: stronger than a rule, so an outlined button reads as one. */
-  --edge: #4e5d69;
   --danger: #ff8a80;
+  --accent: #e8eaed;
+  --accent-ink: #121417;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  /* palette light */
+  :root {
+    --ground: #f3f4f6;
+    --chrome: #eceef1;
+    --box: #f9fafb;
+    --tile: #ffffff;
+    --sheet: #ffffff;
+    --rule: #d0d5db;
+    --edge: #aab0b9;
+    --field: #80878f;
+    --ink: #1a1c20;
+    --muted: #5b626c;
+    --link: #878e98;
+    --signal: #8f5100;
+    --danger: #b3261e;
+    --accent: #1a1c20;
+    --accent-ink: #ffffff;
+    color-scheme: light;
+  }
+}
+:root {
   /* At least 44 px to a fingertip; a mouse makes do with less. */
   --hit: 44px;
-  color-scheme: dark;
+  /* What a row or quiet control under the pointer is filled with: seen on any surface, white ones too. */
+  --hover: color-mix(in srgb, var(--ink) 7%, transparent);
+  --radius: 8px;
   font-family: Overpass, system-ui, sans-serif;
+  /* A step heavier than the face's regular: Overpass's strokes are thin for a screen, and at 500 it sets as dark as
+     Inter does at 450. Every weight here sits a step up to keep its distance from the text. */
+  font-weight: 500;
   font-size: 15px;
   line-height: 1.4;
   background: var(--ground);
@@ -48,6 +83,12 @@
 @media (pointer: fine) {
   :root {
     --hit: 34px;
+  }
+}
+/* Wide, the chrome (the sidebar) a step smaller than what it frames. */
+@media (min-width: 900px) {
+  .sidebar {
+    font-size: 14px;
   }
 }
 * {
@@ -64,8 +105,17 @@ h3,
 p {
   margin: 0;
 }
+/* A panel takes focus as it opens so keys reach it; the panel itself is no control to ring. */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+/* A Needs you entry J and K move to is no control either, but where the keys are has to show: the ring, inside it. */
+li[data-row]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 :focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -82,37 +132,44 @@ button {
   min-height: var(--hit);
   padding: 0 14px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
 }
-button:hover:not(:disabled) {
+button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--tile);
 }
-button:disabled {
+/* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. */
+button:disabled,
+button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }
 button.primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--ground);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
-button.primary:hover:not(:disabled) {
-  background: #ffffff;
+button.primary:hover:not(:disabled, [aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--accent) 85%, var(--ground));
 }
 button.quiet,
 button.close {
   border-color: transparent;
   color: var(--muted);
 }
+/* Reversing what the user did, such as an approval: plain text in the danger colour, placed last. */
+button.danger-quiet {
+  border-color: transparent;
+  color: var(--danger);
+}
 button.close,
 button.icon {
   width: var(--hit);
   padding: 0;
   font-size: 24px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
 }
 select,
@@ -120,8 +177,8 @@ input:not([type="checkbox"]),
 textarea {
   min-height: var(--hit);
   padding: 6px 10px;
-  border: 1px solid var(--edge);
-  border-radius: 8px;
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
   background: var(--ground);
   /* Under 16 px, a phone zooms in on the field. */
   font-size: 16px;
@@ -183,6 +240,10 @@ label:has(> input[type="checkbox"]) {
   /* Overpass sits high in its line box; this centres the figures. */
   padding-top: 0.12em;
 }
+.badge.plain {
+  background: none;
+  color: var(--muted);
+}
 .badge.dot {
   min-width: 0;
   width: 0.9em;
@@ -193,63 +254,286 @@ label:has(> input[type="checkbox"]) {
 .count {
   font-variant-numeric: tabular-nums;
 }
+/* A stage: the Map's icon beside its word, quieter for work finished or set aside. */
+.stage-mark {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.stage-icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--ink);
+}
+.stage-icon[data-quiet="true"] {
+  color: var(--muted);
+}
+.stage-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.muted {
+  color: var(--muted);
+}
+.status-value {
+  display: grid;
+  gap: 4px;
+}
 
-/* The shell: a bar on top, the lines beside the Map on a wide screen and above it on a phone. */
+/* The frame. A phone: one bar on top, the views along the bottom. Wider, a sidebar beside the views. */
 .shell {
   display: grid;
-  grid-template-rows: auto auto 1fr;
   height: 100%;
+  min-height: 0;
 }
+.icon-svg {
+  flex: none;
+}
+.wordmark {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 750;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.wordmark svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  color: var(--ink);
+}
+.items,
+.autonomy {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+}
+
+/* A view, Needs you, or a tab: a quiet row that marks the current one. */
+button.view {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-color: transparent;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+}
+button.view:hover:not(:disabled) {
+  color: var(--ink);
+}
+/* The view shown is filled; Needs you open over it is only inked, so one place reads as where the user is. */
+button.view[aria-current="page"] {
+  color: var(--ink);
+  background: var(--tile);
+}
+button.view[aria-pressed="true"] {
+  color: var(--ink);
+}
+.needs-button .label {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+}
+.needs-n {
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.needs-button:not([data-none="true"]) {
+  color: var(--ink);
+}
+
+/* The bar, a phone's only one. */
 .bar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
-  padding: 6px 6px 6px 12px;
+  min-width: 0;
+  padding: 6px 6px 6px 14px;
   padding-top: max(6px, env(safe-area-inset-top));
   background: var(--chrome);
   border-bottom: 1px solid var(--rule);
 }
+.bar > * {
+  flex: none;
+}
 .brand {
   flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
-}
-.bar > :not(.brand) {
-  flex: none;
 }
 .brand h1 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1.2;
+  font-size: 18px;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 .brand p {
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
+.brand p .items {
+  font-size: inherit;
+}
 button.icon {
-  font-size: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-color: transparent;
+  color: var(--ink);
 }
-.needs-button {
-  display: inline-flex;
-  padding: 0 10px 0 6px;
-  gap: 6px;
-  align-items: center;
-}
-.needs-button .badge {
-  --line: var(--signal);
-  --line-ink: var(--ground);
-}
-.needs-button[data-none="true"] {
-  color: var(--muted);
-}
-.needs-button[aria-pressed="true"],
-.thread[aria-pressed="true"] {
+button.icon[aria-pressed="true"] {
   background: var(--tile);
-  border-color: var(--ink);
+}
+
+/* A phone: the bar, the views, and the views' bar along the bottom, clear of the home indicator. */
+.phone-shell {
+  grid-template-rows: auto 1fr auto;
+}
+.tabbar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 4px 4px max(4px, env(safe-area-inset-bottom));
+  background: var(--chrome);
+  border-top: 1px solid var(--rule);
+}
+.tabbar button.view {
+  position: relative;
+  isolation: isolate;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  min-height: 52px;
+  padding: 4px;
+  font-size: 12px;
+  background: none;
+}
+.tabbar button.view[aria-current="page"] {
+  background: none;
+}
+.tabbar button.view[aria-current="page"] .icon-svg,
+.tabbar button.view[aria-pressed="true"] .icon-svg {
+  stroke-width: 2.25;
+}
+/* On a phone, the view shown has a pill behind its icon; Needs you open is only inked. */
+.tabbar button.view[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: calc(50% - 28px);
+  width: 56px;
+  height: 26px;
+  border-radius: 13px;
+  z-index: -1;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+/* Its name sits level with the other views': not stretched down the column, the count in the name's size. */
+.tabbar .needs-button .label {
+  flex: none;
+  gap: 4px;
+}
+.tabbar .needs-n {
+  margin-left: 0;
+  font-size: inherit;
+}
+/* A form takes the whole height, the keyboard below it, which the views' bar would only ride up on. Hidden while the
+   form is open, not while a field has focus: focus moving from a field to Save would bring the bar back and move Save
+   from under the tap. */
+.phone-shell:has(form) .tabbar {
+  display: none;
+}
+
+/* Wide: the sidebar, the views beside it. */
+.sidebar-shell {
+  grid-template-columns: 248px 1fr;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px 0;
+  background: var(--chrome);
+  border-right: 1px solid var(--rule);
+}
+.workspace {
+  padding: 6px 10px 12px;
+}
+.sidebar .views {
+  display: grid;
+  gap: 1px;
+}
+/* Search, the command menu's way in: a quiet field-like button, its shortcut at its end. */
+.sidebar button.search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  margin: 4px 0 8px;
+  padding: 0 8px 0 10px;
+  border-color: var(--rule);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: start;
+}
+.kbd {
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.sidebar button.view,
+.sidebar button.new {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+.sidebar button.new {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 6px;
+  border-color: var(--rule);
+  font-weight: 600;
+}
+.sidebar .threads {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0 8px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.sidebar-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 -8px;
+  padding: 8px 8px 8px 18px;
+  border-top: 1px solid var(--rule);
+}
+.sidebar-foot .about {
+  display: grid;
+  flex: 1;
+  min-width: 0;
 }
 
 /* The menu of what's changed rarely: archived items, autonomy, a refresh. */
@@ -263,7 +547,7 @@ button.icon {
   place-items: center;
   width: var(--hit);
   height: var(--hit);
-  border-radius: 8px;
+  border-radius: var(--radius);
   list-style: none;
   font-size: 22px;
   font-weight: 800;
@@ -293,52 +577,52 @@ button.icon {
   width: min(300px, calc(100vw - 16px));
   padding: 12px 14px;
   background: var(--sheet);
-  border: 1px solid var(--rule);
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
   border-radius: 12px;
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.12),
+    0 10px 28px rgb(0 0 0 / 0.18);
 }
+
 .menu-body label:not(:has(> input[type="checkbox"])) {
   display: grid;
   gap: 4px;
   font-size: 13px;
   color: var(--muted);
 }
+.menu.up .menu-body {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+}
 .menu-body select {
   color: var(--ink);
 }
 
-/* The lines: a strip to scroll along on a phone, a list down the side when wide. */
-.threads {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 6px 8px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--rule);
-  scrollbar-width: none;
-}
+/* A thread's row in the outline: its badge and name, wrapping rather than cut off. */
 .thread {
   display: flex;
-  flex: none;
   gap: 8px;
-  align-items: center;
-  max-width: 17em;
-  padding: 0 12px 0 6px;
+  align-items: start;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px 6px 6px;
   border-color: transparent;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
+}
+.thread .badge {
+  margin-top: 0.05em;
 }
 .thread .name {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  padding-top: 0.1em;
+  overflow-wrap: anywhere;
 }
 .thread[aria-pressed="true"] {
-  border-color: var(--line);
-}
-/* A phone's strip holds only the button that opens the phases' sheet. */
-.phases-button {
-  flex: none;
+  background: var(--tile);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 /* The outline: phases, each opening into its threads, then the threads in none. */
@@ -357,22 +641,20 @@ button.icon {
 .outline .heading {
   display: flex;
   justify-content: space-between;
-  padding: 10px 10px 4px;
+  padding: 14px 10px 4px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 650;
 }
 .outline .count {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .phase-row {
   display: flex;
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .phase[aria-current="true"] > .phase-row {
   background: var(--tile);
@@ -411,10 +693,8 @@ button.phase-title {
 .outline .subheading {
   padding: 4px 10px 2px 34px;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
 }
 .outline .thread {
   width: 100%;
@@ -429,36 +709,9 @@ button.phase-title {
 }
 .thread .also {
   display: block;
-  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* The switch between the Map and the Threads view: in the strip on a phone, in the bar when wide, where it covers
-   nothing of the Map. */
-.view-switch {
-  display: flex;
-  flex: none;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-}
-.view-switch button {
-  border-radius: 0;
-}
-.view-switch button:first-child {
-  border-radius: 8px 0 0 8px;
-}
-.view-switch button:last-child {
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-}
-.view-switch button[aria-pressed="true"] {
-  background: var(--tile);
-  border-color: var(--ink);
+  font-weight: 500;
 }
 
 /* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
@@ -481,12 +734,13 @@ button.phase-title {
 .wave h2 {
   margin: 0 0 8px;
   font-size: 0.95rem;
+  font-weight: 750;
 }
 .wave h2 small {
   margin-left: 6px;
   color: var(--muted);
   font-size: 0.8rem;
-  font-weight: 500;
+  font-weight: 600;
 }
 .wave ul {
   display: grid;
@@ -505,7 +759,7 @@ button.phase-title {
   border-color: var(--rule);
   border-left: 4px solid var(--line, var(--rule));
   background: var(--tile);
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 .card[aria-pressed="true"] {
@@ -604,6 +858,7 @@ button.phase-title {
   position: absolute;
   top: 6px;
   left: calc(50% - 18px);
+  z-index: 2;
   width: 36px;
   height: 4px;
   border-radius: 2px;
@@ -645,34 +900,69 @@ button.phase-title {
   gap: 8px;
   margin: -6px -8px 6px 0;
 }
+/* A panel's own heading stays in view as it scrolls, with its close button: on a phone without a Back button, the
+   way out. */
+/* Its buttons keep their size beside a long title; held weak, so a button's own rules still apply. */
+:where(.inspector, .sheet) header > :where(button, .menu) {
+  flex: none;
+}
+.inspector > header,
+.sheet > header {
+  position: sticky;
+  top: -18px;
+  z-index: 1;
+  padding: 12px 0 4px;
+  margin-top: -18px;
+  background: var(--sheet);
+}
+/* The title takes what the header's buttons leave and wraps within it, even a long link, so they stay in view. */
 .inspector h2,
 .sheet h2 {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding-top: 8px;
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 750;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
 .inspector h3 {
   margin: 14px 0 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--muted);
 }
+
 .facts {
   margin: 2px 0;
 }
+/* Each label and the first line of its value centred on a chip's height: a baseline would be an icon's foot where a
+   value starts with an icon, as Status and Thread do, and sit the text above the label. */
 dl.facts {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 16px;
-  align-items: baseline;
+  align-items: start;
   margin: 6px 0 0;
+}
+dl.facts dt,
+dl.facts dd:not(.status-value),
+dl.facts .status-value > :first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 30px;
 }
 dl.facts dt {
   color: var(--muted);
   font-size: 13px;
+}
+/* A fingertip's 44 px apart for the chips in rows above one another. */
+@media (pointer: coarse) {
+  dl.facts {
+    row-gap: 14px;
+  }
 }
 dl.facts dd {
   min-width: 0;
@@ -687,7 +977,7 @@ dl.facts dd {
 }
 .why {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* What was backticked: an id or a command, set apart in the system's monospace face. */
 code {
@@ -728,10 +1018,10 @@ code {
   background: var(--tile);
   border-color: var(--rule);
   border-radius: 6px;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
-/* The needs-you list's filters: chips that stay pressed while their group shows. */
+/* The needs-you list's filters, as tabs: text, the one shown filled while its group shows. */
 .filters {
   display: flex;
   min-width: 0;
@@ -739,10 +1029,20 @@ code {
   padding: 0 0 4px;
   border: none;
   flex-wrap: wrap;
-  column-gap: 8px;
+  column-gap: 4px;
+}
+.filters .chip {
+  min-height: 28px;
+  margin: 4px 0;
+  padding: 0 10px;
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
 }
 .filters .chip[aria-pressed="true"] {
-  border-color: var(--ink);
+  background: var(--hover);
+  color: var(--ink);
 }
 .filters .count {
   color: var(--muted);
@@ -759,25 +1059,6 @@ code {
   margin: 0;
   padding: 0;
 }
-.links ul {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 4px;
-}
-.links li {
-  display: flex;
-  align-items: center;
-}
-dl.facts .chip {
-  margin: 0;
-}
-.links .unlink {
-  min-width: 36px;
-  padding: 0;
-  border-color: transparent;
-  color: var(--muted);
-  font-size: 18px;
-}
 
 .conflicts {
   margin: 12px 0;
@@ -791,7 +1072,7 @@ dl.facts .chip {
   margin-top: 8px;
 }
 .conflict .field {
-  font-weight: 600;
+  font-weight: 650;
 }
 .conflicts li {
   display: flex;
@@ -827,14 +1108,14 @@ dl.facts .chip {
   display: grid;
   gap: 4px;
   margin: 10px 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
   color: var(--muted);
 }
 .fields :is(input, select, textarea),
 .sheet.add :is(input, select) {
   color: var(--ink);
-  font-weight: 400;
+  font-weight: 500;
 }
 /* A form's Save and Cancel stay in reach however long the form, above a phone's keyboard as well. */
 .fields > .actions,
@@ -868,7 +1149,17 @@ dl.facts .chip {
   background: var(--sheet);
   border: 1px solid var(--rule);
   border-left: 3px dashed var(--signal);
-  border-radius: 8px;
+  border-radius: var(--radius);
+}
+/* In a panel, under its heading, where it covers neither the heading nor the panel's way out. */
+.inspector > .notice,
+.sheet > .notice {
+  position: static;
+  margin: 0 0 8px;
+}
+.notice input {
+  min-width: 0;
+  font: inherit;
 }
 .status {
   padding: 16px;
@@ -882,13 +1173,19 @@ dl.facts .chip {
   padding: 0;
 }
 .needs > li {
-  padding: 12px 0 8px;
-  border-top: 2px solid var(--rule);
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--rule);
+}
+/* The entry the Overview opened the list at, marked until the list closes. */
+.needs > li[data-at="true"] {
+  padding-left: 10px;
+  box-shadow: inset 3px 0 0 var(--accent);
+  scroll-margin-top: 48px;
 }
 .notify {
   margin: 0 0 4px;
+  color: var(--muted);
 }
-
 /* Items listed to pick from: rows a finger's height, ruled apart, since titles are too long to sit side by side. */
 .rows {
   list-style: none;
@@ -907,33 +1204,294 @@ button.row {
   padding: 0 4px;
   border: none;
   border-radius: 0;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
-@media (min-width: 900px) {
-  .shell {
-    grid-template-rows: auto 1fr;
-    grid-template-columns: 260px 1fr;
+/* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
+   from the badge so the badges make a column to scan; a hairline between entries, as between any rows. */
+/* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. A fingertip keeps it. */
+:is(p, button).need-head {
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 0;
+  padding: 2px 0;
+  font-weight: 600;
+}
+@media (pointer: coarse) {
+  button.need-head {
+    min-height: var(--hit);
   }
-  .bar {
+}
+.need-head .badge {
+  margin-top: 1px;
+}
+.need-items,
+.need-actions,
+.need-why {
+  margin-left: 32px;
+}
+.need-items {
+  margin-top: 4px;
+}
+.need-items li + li {
+  border-top: none;
+}
+.need-items button.row {
+  min-height: 24px;
+  padding: 2px 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.need-items button.row:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+/* How many more an approval covers than it lists: muted, as a count is, opening the thread's panel where it can. */
+.need-items .more {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+.need-actions {
+  margin-top: 8px;
+}
+.need-actions button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* A column of the same filled button shouts: with a pointer, an entry's decision is outlined until the entry is under
+   it or holds the focus, then filled, so one entry at a time shows its main action as main. */
+@media (hover: hover) and (pointer: fine) {
+  .needs > li:not(:hover, :focus-within, [data-at="true"]) .need-actions button.primary {
+    border-color: var(--edge);
+    background: transparent;
+    color: var(--ink);
+  }
+}
+@media (pointer: coarse) {
+  .need-items button.row,
+  .need-actions button {
+    min-height: var(--hit);
+  }
+}
+
+/* A panel's parts. */
+.toolbar button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0 10px;
+  font-weight: 600;
+}
+code.id {
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+.thread-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0 6px;
+  color: var(--muted);
+}
+.thread-status.waiting {
+  color: var(--signal);
+  font-weight: 650;
+}
+.progress {
+  margin: 4px 0 8px;
+}
+.settings,
+.notes-block {
+  margin-top: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--rule);
+}
+.notes-block .notes {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.form-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+input[aria-invalid="true"] + .hint,
+.hint:has(+ input[aria-invalid="true"]) {
+  color: var(--danger);
+}
+.empty {
+  padding: 16px 0;
+  color: var(--muted);
+}
+/* A write in flight: a thin bar along the top of the views, as the panels' buttons wait. */
+.stage[data-busy="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 3;
+  height: 2px;
+  background: var(--accent);
+  animation: working 900ms ease-in-out infinite alternate;
+}
+@keyframes working {
+  from {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage[data-busy="true"]::before {
+    animation: none;
+  }
+}
+
+/* The Overview home: lists to scan over the Map, which stays drawn beneath. */
+.overview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 32px;
+  background: var(--ground);
+}
+.view-title {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+/* A phone's bar names the view already. */
+.phone-shell .overview .view-title {
+  display: none;
+}
+.overview-section {
+  min-width: 0;
+  margin-bottom: 20px;
+}
+.overview-section > header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  /* As tall as a header with a button, so headers side by side line up. */
+  min-height: 34px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.overview-section h2 {
+  font-size: 15px;
+  font-weight: 650;
+}
+.overview-section header button {
+  min-height: 28px;
+}
+/* Wide, the sections stand side by side as the width allows, Needs you first, and the phases span the page below
+   them, their rows in columns; an open panel keeps its width clear. */
+@media (min-width: 900px) {
+  .overview {
+    display: grid;
+    /* At least 320 px a list, and no more than three across: the three lists, not an empty fourth. */
+    grid-template-columns: repeat(auto-fit, minmax(max(320px, calc((100% - 80px) / 3)), 1fr));
+    column-gap: 40px;
+    align-content: start;
+  }
+  .overview > .view-title,
+  .overview > .overview-phases {
     grid-column: 1 / -1;
   }
-  .threads {
-    display: block;
-    overflow-x: hidden;
-    overflow-y: auto;
-    border-bottom: none;
-    border-right: 1px solid var(--rule);
+  .overview-pair {
+    display: contents;
   }
-  .thread {
-    max-width: none;
-    padding: 6px 10px 6px 6px;
-    align-items: start;
+  .overview-phases > .rows {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    column-gap: 40px;
   }
-  .thread .name {
-    white-space: normal;
-    padding-top: 0.15em;
+  .stage:has(> .inspector, > .sheet.add) > .overview {
+    padding-right: calc(360px + 24px);
   }
+}
+.overview-row {
+  border-bottom: 1px solid var(--rule);
+}
+/* Each row rules itself off below, so the list's own rule between rows would double it. */
+.overview .rows li + li {
+  border-top: none;
+}
+.overview-row .what {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 0;
+}
+.overview-row .detail {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+.overview-row .go {
+  color: var(--muted);
+}
+button.more {
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+/* Over the Map home while anything needs the user. */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Before the plan has loaded, or when it couldn't: the page says which, and offers what helps. */
+.status-page {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+.status-page h1 {
+  font-size: 20px;
+}
+.status-page p {
+  max-width: 48ch;
+}
+/* A plan with nothing in it teaches how to start one. */
+.empty-plan {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(420px, calc(100% - 32px));
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+@media (min-width: 900px) {
   .inspector,
   .sheet.add {
     inset: 0 0 0 auto;
@@ -957,8 +1515,295 @@ button.row {
     flex: none;
     width: 220px;
   }
+  /* The divider halfway between Any time and wave 1. */
   .wave.anytime {
-    padding-left: 32px;
-    border-left: 1px dashed var(--edge);
+    padding-right: 32px;
+    margin-right: -32px;
+    border-right: 1px dashed var(--edge);
+    box-sizing: content-box;
+  }
+}
+
+/* The command menu: a dialog over everything, a field over the list it finds. Wide, a panel high in the middle of the
+   screen; on a phone, the whole screen, the field at the top where the keyboard leaves it in view. */
+.command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgb(0 0 0 / 0.4);
+}
+.command {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(480px, calc(100dvh - 96px));
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.35);
+}
+.command-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+}
+.command-field input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  /* 16 px, so a phone doesn't zoom in on the field. */
+  font-size: 16px;
+  outline: none;
+}
+.command-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 6px 8px;
+}
+.command-group {
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.command-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--hit);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+/* The option chosen: a fill, and a bar at its start, so it reads without colour. */
+.command-row[aria-selected="true"] {
+  background: var(--tile);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.command-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  color: var(--muted);
+}
+.command-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.command-title,
+.command-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-detail {
+  color: var(--muted);
+  font-size: 14px;
+}
+.command-key {
+  flex: none;
+  margin-left: auto;
+}
+.command-none {
+  margin: 0;
+  padding: 16px;
+}
+@media (max-width: 899px) {
+  .command-backdrop {
+    padding: 0;
+  }
+  .command {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* The item panel, quiet as Linear's: its properties as text, Edit, Copy link and the menu beside its title, and its
+   links as rows. Last, as each refines a rule above. */
+.inspector h3 .count {
+  font-weight: 600;
+}
+.inspector header .menu summary {
+  color: var(--muted);
+}
+/* Properties as text, each a quiet button that fills under the pointer and rings with focus. */
+dl.facts .chip,
+dl.facts .chip.line {
+  min-height: 30px;
+  padding: 2px 6px;
+  margin: 0 0 0 -6px;
+  border-color: transparent;
+  background: none;
+}
+dl.facts .chip:hover:not(:disabled) {
+  background: var(--hover);
+}
+.links {
+  margin-top: 14px;
+}
+.links h3 {
+  margin: 0 0 2px;
+}
+.links ul {
+  margin-left: -8px;
+}
+.links .link {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.links .link:hover {
+  background: var(--hover);
+}
+.link-row {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: none;
+  font-weight: 500;
+  text-align: left;
+}
+.link-row:hover:not(:disabled) {
+  background: none;
+}
+.link-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Shown where it can be reached: on hover, with focus anywhere in its row, and always where there may be no hover. */
+.links .unlink {
+  min-width: 28px;
+  min-height: 28px;
+  margin-right: 2px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  visibility: hidden;
+}
+.links .link:hover .unlink,
+.links .link:focus-within .unlink {
+  visibility: visible;
+}
+@media (hover: none), (any-pointer: coarse) {
+  .links .unlink {
+    visibility: visible;
+  }
+  .link-row {
+    min-height: var(--hit);
+  }
+}
+/* A list of actions: a row each, its icon, its name and its key. */
+.menu-list {
+  gap: 0;
+  width: 220px;
+  padding: 4px;
+  border-radius: var(--radius);
+}
+.menu-list .menu-action {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+.menu-list .menu-action .grow {
+  color: var(--ink);
+}
+.menu-list .menu-action:hover:not(:disabled),
+.menu-list .menu-action:focus-visible {
+  background: var(--hover);
+}
+@media (pointer: coarse) {
+  .menu-list .menu-action {
+    min-height: var(--hit);
+  }
+}
+
+/* A panel's type, wide: one size for what it says, 14 px, as a list's detail is; the title a step up, at 650 rather
+   than bold; section headings small and muted, so the content leads. A phone keeps the base size, which reads at arm's
+   length. */
+.inspector > header,
+.sheet > header {
+  gap: 2px;
+}
+.inspector h2,
+.sheet h2 {
+  margin-right: 6px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.inspector h3 {
+  margin: 18px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.inspector .notes {
+  line-height: 1.6;
+}
+.settings,
+.notes-block {
+  border-top: none;
+}
+dl.facts dt {
+  font-size: inherit;
+}
+dl.facts .chip,
+dl.facts .chip.line {
+  font-weight: 550;
+}
+@media (min-width: 900px) {
+  .inspector,
+  .sheet {
+    font-size: 14px;
+  }
+  .inspector h2,
+  .sheet h2 {
+    font-size: 19px;
+  }
+  .inspector .notes {
+    font-size: 15px;
+  }
+  .inspector .muted,
+  .inspector .why {
+    font-size: inherit;
+  }
+  /* 16 px keeps a phone from zooming into a field; wide, a panel's fields take its own size. */
+  .inspector select,
+  .inspector input:not([type="checkbox"]),
+  .inspector textarea,
+  .sheet select,
+  .sheet input:not([type="checkbox"]),
+  .sheet textarea {
+    font-size: 14px;
   }
 }

@@ -1,8 +1,8 @@
 // The sidebar's outline: the plan's phases, the top-level items the Map draws as zones, each opening into the threads
 // at work in it, and the threads in none. Pure, so the rules are tested without a browser.
 
+import { dependencyOrder, topOrder } from "./map/elk";
 import type { Model } from "./map/model";
-import { natural } from "./natural";
 
 export interface PhaseRow {
   id: string;
@@ -19,14 +19,14 @@ export interface Outline {
 
 /**
  * The outline of `model` as the Map shows it, archived subtrees only when `showArchived`, for `threads` in their
- * order, and its phases in their ids' natural order, as the Map lays them out. A phase is a top-level item with
- * something under it shown; a thread is in a phase when any item shown in it, the phase itself included, is in the
- * thread.
+ * order, and its phases in the order the Map packs its top level in: each after those it waits on. A phase is a
+ * top-level item with something under it shown; a thread is in a phase when any item shown in it, the phase itself
+ * included, is in the thread.
  */
 export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
   const shown = (id: string) => showArchived || !model.items.get(id)?.archived;
   const phases: { id: string; title: string; threads: Set<string> }[] = [];
-  for (const root of [...model.roots].sort(natural)) {
+  for (const root of topOrder(model, showArchived)) {
     const kids = (model.children.get(root) ?? []).filter(shown);
     if (!shown(root) || kids.length === 0) continue;
     const touched = new Set<string>();
@@ -66,4 +66,29 @@ export function currentRows(
   }
   const phase = outline.phases.some((one) => one.id === root) ? root : null;
   return { phase, thread: model.items.get(selected)?.thread ?? null };
+}
+
+/**
+ * A thread's items not archived, which can be selected, each after those in the thread it waits for, ties by id. An
+ * approval covers the archived too, which the count of what it covers says.
+ */
+export function membersOf(model: Model, thread: string): string[] {
+  const ids = [...model.items.values()]
+    .filter((item) => item.thread === thread && !item.archived)
+    .map((item) => item.id);
+  const inThread = new Set(ids);
+  const edges = ids.flatMap((id) =>
+    (model.items.get(id)?.waitsFor ?? [])
+      .filter((first) => inThread.has(first))
+      .map((first) => ({ source: first, target: id })),
+  );
+  return dependencyOrder(ids, edges);
+}
+
+/**
+ * The thread still picked once `id` is selected: one thing in focus, so selecting an item outside the picked thread
+ * unpicks it, and one in it keeps it.
+ */
+export function pickedAfter(model: Model | null, picked: string | null, id: string): string | null {
+  return picked !== null && model?.items.get(id)?.thread === picked ? picked : null;
 }

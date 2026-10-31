@@ -3,6 +3,7 @@ import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
 import { countText, groupOf, needView, threadLabel } from "./needs";
+import { PALETTES } from "./palette";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
 const item = (id: string) => ({ id, title: id.toUpperCase() });
@@ -43,15 +44,42 @@ describe("needView", () => {
       },
       none,
     );
-    expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
+    expect(waiting.actions).toEqual([
+      { label: "Approve 12 items", command: approveCommand("u"), action: "approve", done: "Approved U: 12 items" },
+    ]);
     expect(waiting.items).toEqual(["z"]);
+    expect(waiting.more).toBe(11);
+    // Where the plan holds its items, it lists them, the first few, and says how many more the count covers.
+    const ten = Array.from({ length: 10 }, (_, n) => `i${n}`);
+    const all = needView(
+      { kind: "awaiting-approval", thread: { ...thread("u", ["z"]), counts: { members: 12 } } },
+      none,
+      (id) => (id === "u" ? ten : []),
+    );
+    expect(all.items).toEqual(ten.slice(0, 5));
+    expect(all.more).toBe(7);
+  });
+
+  it("says which merge it can't confirm, and what to do about it", () => {
+    const unverified = (reason: string) =>
+      needView({ kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "app", reason }, none);
+    expect(unverified("no clone of the repository is mapped")).toMatchObject({
+      text: "Can't confirm Move in merged into app",
+      note: "This machine has no clone of app to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml",
+    });
+    expect(unverified("the clone has no main branch").note).toBe(
+      "Looking for its commit in this machine's clone of app failed: the clone has no main branch",
+    );
   });
 
   it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {
-    const lines = linesOf([
-      { id: "thread-3", title: "3. Ship it now" },
-      { id: "thread-7", title: "7. Build it" },
-    ]);
+    const lines = linesOf(
+      [
+        { id: "thread-3", title: "3. Ship it now" },
+        { id: "thread-7", title: "7. Build it" },
+      ],
+      PALETTES.dark,
+    );
     const waiting = (id: string, title: string) =>
       needView({ kind: "awaiting-approval", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.

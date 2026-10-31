@@ -4,6 +4,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
+import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
@@ -126,7 +127,7 @@ export function PhasesSheet({ onClose, children }: { onClose: () => void; childr
       <header>
         <h2>Phases</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
-          ×
+          <Icon of={X} />
         </button>
       </header>
       {children}

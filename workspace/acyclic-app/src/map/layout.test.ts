@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { STRIP } from "./chevron";
 import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
 import { item } from "./fixture";
-import { impliedOf, type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
+import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
 
 /**
@@ -118,6 +118,18 @@ describe("place", () => {
     expect(one.width).toBeGreaterThan(0);
   });
 
+  it("bundles a node's links on the way out, with a dot where they split, and never on the way in", async () => {
+    // In p: a and b, then c waiting for both, and d for a alone.
+    const items = [item("p"), item("a", "p"), item("b", "p"), item("c", "p", ["a", "b"]), item("d", "p", ["a"])];
+    const placed = await place(visible(buildModel(items), open), new LayoutCache(), elkLayBox(new ELK()), PORTRAIT);
+    const route = (key: string) => placed.routes.get(key) ?? [];
+    // a's two links leave from one point, and split where a dot is drawn.
+    expect(route("a->c")[0]).toEqual(route("a->d")[0]);
+    expect([...placed.junctions.values()].flat().length).toBeGreaterThan(0);
+    // a's and b's links into c arrive apart, each with its own arrowhead.
+    expect(route("a->c").at(-1)).not.toEqual(route("b->c").at(-1));
+  });
+
   it("routes the links inside a box, with real ELK, from the source's border to the target's where they are drawn", async () => {
     // In left, inside top: l1 to l2 to l3, and l1 to l3, which the way through l2 implies.
     const chained = [...plan.filter((one) => !["l2", "l3"].includes(one.id)), item("l2", "left", ["l1"])];
@@ -163,15 +175,10 @@ describe("place", () => {
 
 describe("elkLayBox", () => {
   it("packs the top level in dependency order and keeps every box's size", async () => {
-    const order = dependencyOrder({
-      id: ROOT,
-      children: ["a", "b", "c"].map((id) => ({ id, width: 10, height: 10 })),
-      edges: [{ source: "b", target: "a" }],
-    });
+    const order = dependencyOrder(["a", "b", "c"], [{ source: "b", target: "a" }]);
     expect(order).toEqual(["b", "a", "c"]);
     // Without links, ids come in natural order, as the CLI lists them.
-    const unlinked = ["i10", "i2", "phase-10", "phase-2"].map((id) => ({ id, width: 10, height: 10 }));
-    expect(dependencyOrder({ id: ROOT, children: unlinked, edges: [] })).toEqual(["i2", "i10", "phase-2", "phase-10"]);
+    expect(dependencyOrder(["i10", "i2", "phase-10", "phase-2"], [])).toEqual(["i2", "i10", "phase-2", "phase-10"]);
     const sizes = [
       { id: "a", width: 900, height: 120 },
       { id: "b", width: 200, height: 700 },
@@ -203,12 +210,11 @@ describe("elkLayBox", () => {
   });
 
   it("breaks a dependency cycle at its least id", () => {
-    const children = ["a", "b"].map((id) => ({ id, width: 1, height: 1 }));
     const edges = [
       { source: "a", target: "b" },
       { source: "b", target: "a" },
     ];
-    expect(dependencyOrder({ id: ROOT, children, edges })).toEqual(["a", "b"]);
+    expect(dependencyOrder(["a", "b"], edges)).toEqual(["a", "b"]);
   });
 });
 
@@ -222,17 +228,20 @@ describe("beside", () => {
     expect(beside(graph, [])).toBe(graph);
   });
 
-  it("stands the unlinked beside the graph, in columns as tall as it, after a wider gap", () => {
+  it("stands the unlinked on the graph's left, in columns as tall as it, a wider gap before the graph", () => {
     // A graph of three layers holds three tasks a column; five more take two columns.
     const graph = { width: 224, height: STRIP + 3 * 48 + 2 * 40 + 12, at: { a: { x: 12, y: STRIP } } };
-    const routes = { "a->b": [] };
-    const out = beside({ ...graph, routes }, tasks(5));
-    expect(out.at.a).toEqual({ x: 12, y: STRIP });
-    // The graph's links keep their routes, since its children keep their places.
-    expect(out.routes).toBe(routes);
-    expect(out.at.t0).toEqual({ x: 224 - 12 + 40, y: STRIP });
-    expect(out.at.t3).toEqual({ x: 224 - 12 + 40 + 200 + 24, y: STRIP });
-    expect(out.width).toBe(224 - 12 + 40 + 2 * 200 + 24 + 12);
+    const routes = { "a->b": [{ x: 112, y: 100 }] };
+    const junctions = { "a->b": [{ x: 50, y: 90 }] };
+    const out = beside({ ...graph, routes, junctions }, tasks(5));
+    expect(out.at.t0).toEqual({ x: 12, y: STRIP });
+    expect(out.at.t3).toEqual({ x: 12 + 200 + 24, y: STRIP });
+    // The graph moves right past the two columns and the gap, its links and their splits with it.
+    const dx = 12 + 2 * 200 + 24 + 40 - 12;
+    expect(out.at.a).toEqual({ x: 12 + dx, y: STRIP });
+    expect(out.routes).toEqual({ "a->b": [{ x: 112 + dx, y: 100 }] });
+    expect(out.junctions).toEqual({ "a->b": [{ x: 50 + dx, y: 90 }] });
+    expect(out.width).toBe(dx + 224);
     expect(out.height).toBe(graph.height);
   });
 
@@ -263,24 +272,6 @@ describe("beside", () => {
     ]);
     expect(out.at.a).toEqual({ x: 12 + 500 + 24, y: STRIP });
     expect(out.width).toBe(12 + 500 + 24 + 200 + 12);
-  });
-});
-
-describe("impliedOf", () => {
-  const edges = (...pairs: string[]) => pairs.map((pair) => ({ source: pair[0] ?? "", target: pair[1] ?? "" }));
-  const leaf = (id: string) => id !== id.toUpperCase();
-
-  it("finds a link a longer way through tasks implies, and none a way through a box does", () => {
-    expect([...impliedOf(edges("ab", "bc", "ac", "cd", "ad"), leaf)].sort()).toEqual(["a->c", "a->d"]);
-    // a to B and B to c may join different items inside B, so a to c stands.
-    expect([...impliedOf(edges("aB", "Bc", "ac"), leaf)]).toEqual([]);
-    // Nor does a way imply a link to or from a box.
-    expect([...impliedOf(edges("ab", "bC", "aC"), leaf)]).toEqual([]);
-  });
-
-  it("ends on a cycle, and finds a link implied around it", () => {
-    expect([...impliedOf(edges("ab", "ba"), leaf)]).toEqual([]);
-    expect([...impliedOf(edges("ab", "bc", "ca", "ac"), leaf)]).toEqual(["a->c"]);
   });
 });
 

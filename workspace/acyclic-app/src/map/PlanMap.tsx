@@ -8,6 +8,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
+import type { Palette } from "../palette";
 import { useWide } from "../wide";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
@@ -15,21 +16,24 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
+import { firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
-import { FONT, STYLE } from "./style";
+import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
+/** What the pointer shows the links of: a task, or a collapsed box, which holds its tasks' links. */
+const HOVERABLE = "node.leaf, node.collapsed";
 
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
 const fontLoaded: Promise<unknown> =
   typeof document === "undefined" || !("fonts" in document)
     ? Promise.resolve()
-    : Promise.all([document.fonts.load("500 13px Overpass"), document.fonts.load("700 13px Overpass")]).catch(
-        () => undefined,
-      );
+    : Promise.all([
+        document.fonts.load(`${WEIGHT.regular} 13px Overpass`),
+        document.fonts.load(`${WEIGHT.bold} 13px Overpass`),
+      ]).catch(() => undefined);
 
 /**
  * Measures labels as the renderer draws them, once the face is loaded, which the layout waits for before anything is
@@ -50,7 +54,7 @@ function measuring(): Fonts {
       return width;
     };
   };
-  return { regular: face(500), bold: face(700) };
+  return { regular: face(WEIGHT.regular), bold: face(WEIGHT.bold) };
 }
 
 export interface PlanMapProps {
@@ -60,6 +64,8 @@ export interface PlanMapProps {
   thread: string | null;
   /** Each thread's line, whose colour lights its items. */
   lines: ReadonlyMap<string, Line>;
+  /** The colours to draw in, which change with the system's scheme. */
+  palette: Palette;
   selected: string | null;
   onSelect: (item: string | null) => void;
   /**
@@ -67,8 +73,15 @@ export interface PlanMapProps {
    * on screen. A new `n` asks again.
    */
   focus: Focus | null;
+  /** A thread to frame, its items fitted in the part of the Map nothing covers. A new `n` asks again. */
+  framed?: Framed | null;
   /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
   onPick: ((item: string | null) => void) | null;
+}
+
+export interface Framed {
+  thread: string;
+  n: number;
 }
 
 export interface Focus {
@@ -82,9 +95,11 @@ export default function PlanMap({
   showArchived,
   thread,
   lines,
+  palette,
   selected,
   onSelect,
   focus,
+  framed = null,
   onPick,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -93,6 +108,7 @@ export default function PlanMap({
   const model = useMemo(() => buildModel(items), [items]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const [hovered, setHovered] = useState<string | null>(null);
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
@@ -112,7 +128,13 @@ export default function PlanMap({
   // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
     const core = cy.current;
-    if (focus === null || core === null) return;
+    if (focus === null) return;
+    if (core === null) {
+      // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
+      shown.current = focus.id;
+      setToggles((was) => expandTo(model, focus.id, was));
+      return;
+    }
     const drawn =
       focus.pin === null ? undefined : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
     if (drawn !== undefined) {
@@ -156,8 +178,10 @@ export default function PlanMap({
     if (host.current === null) return;
     const core = cytoscape({
       container: host.current,
-      style: STYLE,
+      style: styleFor(palette),
       autoungrabify: true,
+      // The app marks the selected item itself; Cytoscape's own selection would only be a second, unstyled one.
+      autounselectify: true,
       boxSelectionEnabled: false,
       maxZoom: MAX_ZOOM,
     });
@@ -188,6 +212,16 @@ export default function PlanMap({
     };
   }, []);
 
+  // A scheme changed restyles what is drawn in place, keeping the view, the selection and the boxes open; the elements'
+  // own colours, their marks and lines, follow with the scene below.
+  const styled = useRef(palette);
+  useEffect(() => {
+    const core = cy.current;
+    if (core === null || styled.current === palette) return;
+    styled.current = palette;
+    core.style(styleFor(palette));
+  }, [palette]);
+
   // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows.
   const placedNow = useRef<Placed | null>(null);
   placedNow.current = placed;
@@ -207,9 +241,9 @@ export default function PlanMap({
   const fonts = useMemo(measuring, []);
   const drawn = useMemo(() => {
     if (placed === null) return null;
-    const selection: Selection = { item: selected, thread };
+    const selection: Selection = { item: selected, thread, hovered };
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts);
-  }, [view, placed, selected, thread, model, fonts]);
+  }, [view, placed, selected, thread, hovered, model, fonts]);
 
   // Only the lit thread's colour, so a reload that leaves it alone doesn't redraw.
   const colour = drawn === null || drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
@@ -219,14 +253,22 @@ export default function PlanMap({
     if (core === null || element === null || drawn === null || placed === null) return;
     const first = core.elements().length === 0;
     // Only what changed: on a large plan, a write changes a few elements of thousands.
-    held.current = apply(core, held.current, elementsOf(drawn, colour, lines));
+    held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette));
     zoomOutTo(core, element, placed);
     if (first) {
-      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: its first item.
-      const start = firstOf(
-        drawn.nodes.flatMap((node) => (node.kind === "box" ? [] : (placed.nodes.get(node.id) ?? []))),
-      );
+      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: the first box's
+      // corner, and its first item.
+      const least = Math.min(...drawn.nodes.map((node) => node.layer));
       const screen = { width: element.clientWidth, height: element.clientHeight };
+      const start = startOf(
+        drawn.nodes.flatMap((node) => {
+          const at = placed.nodes.get(node.id);
+          return at === undefined ? [] : [{ ...at, box: node.kind === "box", top: node.layer === least }];
+        }),
+        screen.width,
+        16,
+        READABLE,
+      );
       const view = firstView(placed, screen, 16, MAX_ZOOM, start);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
@@ -245,11 +287,11 @@ export default function PlanMap({
     }
     drawnModel.current = model;
     // What the renderer holds, for the journeys to compare with the plan.
-    element.dataset.nodes = String(core.nodes().length);
+    element.dataset.nodes = String(core.nodes().not(".junction").length);
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
     element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
-    element.dataset.font = String(document.fonts?.check("500 13px Overpass") ?? false);
+    element.dataset.font = String(document.fonts?.check(`${WEIGHT.regular} 13px Overpass`) ?? false);
     // Drawn once the browser has painted the frame after this one's changes.
     const drawing = performance.now();
     requestAnimationFrame(() =>
@@ -258,10 +300,26 @@ export default function PlanMap({
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed, colour, lines]);
+  }, [drawn, placed, colour, lines, palette]);
 
-  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens.
+  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
+  // user came to the Map for is framed instead.
   const sought = useRef<string | null>(null);
+  const framedDone = useRef(0);
+  useEffect(() => {
+    const core = cy.current;
+    const element = host.current;
+    if (framed === null || framed.n === framedDone.current || framed.thread !== thread) return;
+    if (core === null || element === null || drawn === null) return;
+    framedDone.current = framed.n;
+    sought.current = thread;
+    const boxes = drawn.nodes.flatMap((node) => {
+      const drawnNode = core.getElementById(node.id);
+      return node.lit && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
+    });
+    const view = frame(boxes, core.nodes().boundingBox({ includeLabels: false }), openPart(element), 1);
+    if (view !== null) core.viewport(view);
+  }, [framed, thread, drawn]);
   useEffect(() => {
     const core = cy.current;
     const element = host.current;
@@ -323,11 +381,22 @@ export default function PlanMap({
     const release = () => {
       from = null;
     };
+    // A pointer over an item shows its links; touch has no hover, and gives none of these.
+    const enter = (event: cytoscape.EventObject) => setHovered((event.target as cytoscape.NodeSingular).id());
+    const leave = () => setHovered(null);
     core.on("tap", tap);
     core.on("tapstart", "node", press);
     core.on("tapdrag", drag);
     core.on("tapend", release);
+    core.on("mouseover", HOVERABLE, enter);
+    core.on("mouseout", HOVERABLE, leave);
+    // Leaving the Map from over an item gives the renderer no move off it.
+    const element = host.current;
+    element?.addEventListener("mouseleave", leave);
     return () => {
+      element?.removeEventListener("mouseleave", leave);
+      core.off("mouseover", HOVERABLE, enter);
+      core.off("mouseout", HOVERABLE, leave);
       core.off("tap", tap);
       core.off("tapstart", "node", press);
       core.off("tapdrag", drag);

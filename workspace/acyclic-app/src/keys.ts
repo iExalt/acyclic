@@ -1,0 +1,119 @@
+// Single-key shortcuts, in Linear's habits: G then a letter goes to a view, C adds, / searches, ? lists the keys, and
+// with an item's panel shown, E, M, W, R and A act on it. No key approves, keeps, drops or deletes anything. Keys are
+// ignored while the user is typing, composing, holding a modifier or a form holds what they typed, and all of them
+// can be turned off from the menu (WCAG 2.1.4). Pure, so the rules are tested without a browser.
+
+import type { LinkKind } from "./edits";
+import type { Layer } from "./layers";
+import type { View } from "./Shell";
+
+export type KeyAction =
+  | { kind: "go"; view: View }
+  | { kind: "needs" }
+  | { kind: "add" }
+  | { kind: "search" }
+  | { kind: "help" }
+  | { kind: "edit" }
+  | { kind: "move" }
+  | { kind: "link"; link: LinkKind }
+  | { kind: "addInside" }
+  | { kind: "row"; by: 1 | -1 };
+
+/** When G was pressed, waiting for the letter that says where to go; null when nothing waits. */
+export type Waiting = number | null;
+
+/** How long G waits for its letter. */
+export const SEQUENCE_MS = 1000;
+
+export type KeyPress = Pick<
+  KeyboardEvent,
+  "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode" | "repeat" | "timeStamp"
+>;
+
+export interface KeyContext {
+  /** The menu's switch. */
+  enabled: boolean;
+  /** The layer shown under the command menu, if any; null with none. */
+  panel: Layer | null;
+  /** Whether the command menu is open: its field has the keys. */
+  menu: boolean;
+  /** A form holds what the user typed. */
+  dirty: boolean;
+  /** The key went to a field, or anything else that takes typing. */
+  typing: boolean;
+}
+
+/** The letter a key is, from the layout's character, or from where it sits, for layouts without Latin letters. */
+function letterOf(press: KeyPress): string | null {
+  if (/^[a-z]$/i.test(press.key)) return press.key.toLowerCase();
+  const at = /^Key([A-Z])$/.exec(press.code);
+  return at === null ? null : (at[1]?.toLowerCase() ?? null);
+}
+
+const GO: Record<string, KeyAction> = {
+  o: { kind: "go", view: "overview" },
+  m: { kind: "go", view: "map" },
+  t: { kind: "go", view: "threads" },
+  n: { kind: "needs" },
+};
+
+const ON_ITEM: Record<string, KeyAction> = {
+  e: { kind: "edit" },
+  m: { kind: "move" },
+  w: { kind: "link", link: "waits-for" },
+  r: { kind: "link", link: "relates-to" },
+  a: { kind: "addInside" },
+};
+
+/** What a key press does, and what it leaves waiting. */
+export function step(
+  pending: Waiting,
+  press: KeyPress,
+  context: KeyContext,
+): { pending: Waiting; action: KeyAction | null } {
+  const none = { pending: null, action: null };
+  if (!context.enabled || context.menu || context.typing || context.dirty) return none;
+  if (press.isComposing || press.keyCode === 229 || press.repeat) return none;
+  if (press.ctrlKey || press.metaKey || press.altKey) return none;
+  // ? sits on a shifted key on most layouts: the character is what counts.
+  if (press.key === "?") return { pending: null, action: { kind: "help" } };
+  if (press.shiftKey) return none;
+  if (press.key === "/") return { pending: null, action: { kind: "search" } };
+  const letter = letterOf(press);
+  if (letter === null) return none;
+  if (pending !== null && press.timeStamp - pending <= SEQUENCE_MS)
+    return { pending: null, action: GO[letter] ?? null };
+  if (letter === "g") return { pending: press.timeStamp, action: null };
+  if (letter === "c") return { pending: null, action: { kind: "add" } };
+  if (letter === "j") return { pending: null, action: { kind: "row", by: 1 } };
+  if (letter === "k") return { pending: null, action: { kind: "row", by: -1 } };
+  if (context.panel === "item") return { pending: null, action: ON_ITEM[letter] ?? null };
+  return none;
+}
+
+/** The row to move to in a list of `count`, from `at` (-1 for none), by one: the first or last from none, else stopping at the ends. */
+export function nextRow(count: number, at: number, by: 1 | -1): number {
+  if (count === 0) return -1;
+  if (at < 0) return by > 0 ? 0 : count - 1;
+  return Math.min(count - 1, Math.max(0, at + by));
+}
+
+/** Whether a key went to something that takes typing. */
+export function typingIn(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || target.matches("input, textarea, select") || target.closest(".command") !== null;
+}
+
+/** The shortcut for each command menu entry that has one, as it shows; G sequences read "G then M". */
+export const SHORTCUTS: Record<string, string> = {
+  "view:overview": "G then O",
+  "view:map": "G then M",
+  "view:threads": "G then T",
+  needs: "G then N",
+  add: "C",
+  "on-item:edit": "E",
+  "on-item:move": "M",
+  "on-item:waits-for": "W",
+  "on-item:relates-to": "R",
+  "on-item:add-inside": "A",
+};

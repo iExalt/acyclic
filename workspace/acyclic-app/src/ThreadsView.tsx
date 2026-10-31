@@ -1,13 +1,13 @@
 // The Threads view: the threads with work left in waves of what to start first, a column a wave, and those that can
-// start any time apart. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
+// start any time apart, first, on the left. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
 // hovered thread's stand out. A card always says what it comes after, so the arrows are never the only telling.
 
 import { useLayoutEffect, useMemo, useState } from "react";
-import { countsText } from "./api";
 import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
 import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
+import { StageCounts } from "./Stage";
 import type { Card, WavesView } from "./waves";
 
 /** The room between columns when wide, as app.css sets it. */
@@ -54,7 +54,9 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
           <span className="name">
             <Prose text={line?.name ?? one.id} />
           </span>
-          <span className="counts">{countsText(one.counts) || "no tasks shown"}</span>
+          <span className="counts">
+            <StageCounts counts={one.counts} none="No tasks shown" />
+          </span>
           {one.after.length === 0 ? null : <span className="after">after {badges(one.after)}</span>}
           {one.looped.length === 0 ? null : <span className="looped">waits in a cycle with {badges(one.looped)}</span>}
         </button>
@@ -89,6 +91,14 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         {wide ? (
           <Arrows view={view} waits={waits} widths={widths} lines={lines} lit={hovered ?? picked} within={columns} />
         ) : null}
+        {view.anytime.length === 0 ? null : (
+          <section className="wave anytime" data-wave="anytime" aria-label="Any time">
+            <h2>
+              Any time <small>no waits either way</small>
+            </h2>
+            <ul>{view.anytime.map(card)}</ul>
+          </section>
+        )}
         {view.waves.map((cards, at) => (
           <section
             key={at}
@@ -98,8 +108,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             style={
               wide
                 ? {
-                    marginRight:
-                      (widths[at] ?? GAP) - (at + 1 < view.waves.length || view.anytime.length > 0 ? GAP : 0),
+                    marginRight: (widths[at] ?? GAP) - (at + 1 < view.waves.length ? GAP : 0),
                   }
                 : undefined
             }
@@ -110,14 +119,6 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             <ul>{cards.map(card)}</ul>
           </section>
         ))}
-        {view.anytime.length === 0 ? null : (
-          <section className="wave anytime" data-wave="anytime" aria-label="Any time">
-            <h2>
-              Any time <small>waits on no thread, and none on it</small>
-            </h2>
-            <ul>{view.anytime.map(card)}</ul>
-          </section>
-        )}
       </div>
     </section>
   );

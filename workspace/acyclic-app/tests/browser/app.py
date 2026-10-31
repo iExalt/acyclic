@@ -17,13 +17,14 @@ Usage: app.py <acyclic binary> <acyclic-fixtures binary>
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
 from collections import Counter
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
@@ -37,8 +38,10 @@ VIEWS = {
         "device_scale_factor": 2.8125,
         "is_mobile": True,
         "has_touch": True,
+        # The phone in daylight, the laptop at the desk: each scheme has journeys drawn in it.
+        "color_scheme": "light",
     },
-    "desktop": {"viewport": {"width": 1440, "height": 900}},
+    "desktop": {"viewport": {"width": 1440, "height": 900}, "color_scheme": "dark"},
 }
 # The furthest the Map's first view zooms out, as reveal.ts has it.
 READABLE = 0.85
@@ -123,7 +126,8 @@ def tracker(directory, env, items, remote=None):
 
 
 def wait_drawn(page, nodes, timeout=20_000):
-    """Waits until the Map has drawn exactly `nodes` nodes, and returns its element's data."""
+    """Waits until the Map has drawn exactly `nodes` nodes, and returns its element's data. Its edge count includes
+    the links of an item under the pointer, so a check of it moves the pointer off the Map first."""
     page.wait_for_function(
         "n => { const m = document.querySelector('[data-testid=map]');"
         " return m && m.dataset.state === 'drawn' && Number(m.dataset.nodes) === n; }",
@@ -150,7 +154,7 @@ def pick_thread(page, plan, thread):
 def from_menu(page, act):
     """Does `act` in the bar's menu, opening it first, as a hand would. Acting closes the menu, so the next tap reaches
     what it lands on rather than only closing the menu."""
-    menu = page.locator("details.menu")
+    menu = page.locator("details.menu:has(> [data-testid=menu])")
     if not menu.evaluate("d => d.open"):
         page.get_by_test_id("menu").click()
     act()
@@ -263,6 +267,94 @@ def settled_corner(page, id):
     )
 
 
+# The Map's colours as drawn and as the page declares them, as #rrggbb, with what must hold still across a restyle.
+READ_SCHEME = """m => {
+    const hex = (c) => '#' + c.match(/[\\d.]+/g).slice(0, 3).map((x) => Math.round(Number(x)).toString(16).padStart(2, '0')).join('');
+    // A custom property as the browser resolves it, since the build may write a colour shorter.
+    const probe = document.body.appendChild(document.createElement('i'));
+    const v = (n) => { probe.style.color = `var(${n})`; return hex(getComputedStyle(probe).color); };
+    const leaf = m.cy.nodes('.leaf.stage-ready, .leaf.stage-unthreaded').first();
+    const closed = m.cy.nodes('.collapsed').not('.lit, .selected').first();
+    const open = m.cy.nodes('.box').not('.lit, .selected').first();
+    const plain = m.cy.edges().not('.lit, .crossing').first();
+    const badge = document.querySelector('[data-testid=thread-panel] .badge');
+    return {
+        css: { ground: v('--ground'), tile: v('--tile'), box: v('--box'), rule: v('--rule'), muted: v('--muted'), link: v('--link'), ink: v('--ink') },
+        leaf: leaf.nonempty() ? hex(leaf.style('background-color')) : null,
+        closed: closed.nonempty() ? [hex(closed.style('background-color')), hex(closed.style('border-color'))] : null,
+        open: open.nonempty() ? [hex(open.style('background-color')), hex(open.style('border-color'))] : null,
+        edge: plain.nonempty() ? hex(plain.style('line-color')) : null,
+        lit: [...new Set(m.cy.edges('.lit').map((e) => hex(e.style('line-color'))))],
+        badge: badge && hex(getComputedStyle(badge).backgroundColor),
+        _: probe.remove(),
+        marks: m.cy.nodes('.leaf').map((n) => decodeURIComponent(n.data('mark') || '')).join(''),
+        still: { zoom: m.cy.zoom(), pan: m.cy.pan(), n: m.cy.elements().length, layouts: m.dataset.layouts,
+                 lit: m.cy.nodes('.lit').length, selected: m.cy.nodes('.selected').length },
+    };
+}"""
+
+
+def luminance(colour):
+    channels = [int(colour[at : at + 2], 16) / 255 for at in (1, 3, 5)]
+    r, g, b = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    x, y = sorted([luminance(a), luminance(b)], reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+def scheme_switch(page, name, failures):
+    """The system's scheme changed under an open Map, with a thread lit: the Map is restyled in place, every colour the
+    page's own for the new scheme, the lit route its badge's, and nothing else moves; and back again."""
+    drawn = page.get_by_test_id("map")
+    before = drawn.evaluate(READ_SCHEME)
+
+    def follows(scheme, now):
+        css = now["css"]
+        wrong = []
+        if now["leaf"] not in (None, css["tile"]):
+            wrong.append(f"a task {now['leaf']}, not the tile {css['tile']}")
+        if now["closed"] not in (None, [css["tile"], css["muted"]]):
+            wrong.append(f"a closed box {now['closed']}")
+        if now["open"] not in (None, [css["box"], css["rule"]]):
+            wrong.append(f"an open box {now['open']}")
+        if now["edge"] not in (None, css["link"]):
+            wrong.append(f"a link {now['edge']}")
+        if now["lit"] != [now["badge"]] or contrast(now["badge"], css["ground"]) < 3:
+            wrong.append(f"the lit route {now['lit']} against its badge {now['badge']}")
+        if now["still"] != before["still"]:
+            wrong.append(f"the view moved: {before['still']} to {now['still']}")
+        if wrong:
+            failures.append(f"{name}: in the {scheme} scheme the Map drew " + "; ".join(wrong))
+
+    follows("dark", before)
+    for scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=scheme)
+        # Restyled once a plain link is drawn in the scheme's link colour, which the page declares at once.
+        page.wait_for_function(
+            f"m => {{ const now = ({READ_SCHEME})(m); return now.edge === now.css.link"
+            f" && (now.css.link === {before['css']['link']!r}) === {'false' if scheme == 'light' else 'true'}; }}",
+            arg=drawn.element_handle(),
+            timeout=5_000,
+        )
+        now = drawn.evaluate(READ_SCHEME)
+        follows(scheme, now)
+        if scheme == "light":
+            if now["css"] == before["css"]:
+                failures.append(f"{name}: the page kept its dark colours in the light scheme")
+            left = {before["css"][key] for key in ("ink", "muted")} & {
+                c.lower() for c in re.findall(r"#[0-9a-fA-F]{6}", now["marks"])
+            }
+            if left:
+                failures.append(f"{name}: tasks' marks kept dark colours {left} in the light scheme")
+            page.screenshot(path=SHOTS / f"app-{name}-light.png")
+        elif now["css"] != before["css"]:
+            failures.append(f"{name}: switching back left {now['css']}, not {before['css']}")
+    print(f"{name}: switched the scheme to light and back, the Map restyled in place")
+
+
 def open_app(browser, view, link, failures, name):
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
@@ -275,13 +367,14 @@ def open_app(browser, view, link, failures, name):
     )
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
-    # A blocked load, such as one the content policy refuses, shows only as a console error. WebKit on Linux says it
-    # ignores the viewport's keyboard setting, which only Chromium and Firefox read.
+    # A blocked load, such as one the content policy refuses, shows only as a console error, and a style the Map's
+    # renderer can't use only as a warning. WebKit on Linux says it ignores the viewport's keyboard setting, which only
+    # Chromium and Firefox read.
     page.on(
         "console",
         lambda message: (
             errors.append(message.text)
-            if message.type == "error" and '"interactive-widget"' not in message.text
+            if message.type in ("error", "warning") and '"interactive-widget"' not in message.text
             else None
         ),
     )
@@ -292,6 +385,261 @@ def open_app(browser, view, link, failures, name):
         timeout=15_000
     )
     return context, page, origin, errors
+
+
+def to_map(page):
+    """Chooses the Map, which the journeys drawing on it start from: the app opens on the Overview."""
+    page.locator("[data-view=map]").click()
+    page.locator("[data-view=map][aria-current=page]").wait_for(timeout=5_000)
+    page.get_by_test_id("overview").wait_for(state="detached", timeout=5_000)
+
+
+def overview_journey(page, view, name, failures):
+    """The app opens on the Overview: its four lists, a thread's row taking the user to the Map with its panel open, a
+    needs row opening the list at its entry, the open list marked less than the view shown, and on a phone Back from the
+    Map coming home."""
+    overview = page.get_by_test_id("overview")
+    overview.wait_for(timeout=5_000)
+    headings = overview.locator(".overview-section h2").all_inner_texts()
+    if headings != ["Needs you", "In progress", "Up next", "Phases"]:
+        failures.append(f"{name}: the Overview's lists are {headings}")
+    row = overview.locator("[data-overview-thread]").first
+    thread = row.get_attribute("data-overview-thread")
+    row.click()
+    panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
+    try:
+        panel.wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: {thread}'s row on the Overview opened no panel")
+    if page.locator("[data-view=map][aria-current=page]").count() != 1:
+        failures.append(f"{name}: {thread}'s row on the Overview didn't go to the Map")
+    page.keyboard.press("Escape")
+    panel.wait_for(state="detached", timeout=5_000)
+    page.locator("[data-view=overview]").click()
+    entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
+    entry.click()
+    needs = page.get_by_test_id("needs")
+    needs.wait_for(timeout=5_000)
+    at = needs.locator("[data-at=true]")
+    if at.count() != 1 or not at.evaluate("e => e === document.activeElement"):
+        failures.append(f"{name}: a needs row on the Overview didn't open the list at its entry, focused")
+    # The view shown and the open list differ by more than colour: a fill, or on a phone a pill behind the icon.
+    marks = page.evaluate(
+        """() => ["[data-view=overview]", "[data-testid=needs-button]"].map(sel => {
+            const el = document.querySelector(sel);
+            return [getComputedStyle(el).backgroundColor, getComputedStyle(el, "::before").content];
+        })"""
+    )
+    if marks[0] == marks[1]:
+        failures.append(f"{name}: the open Needs you is marked as the view shown is: {marks}")
+    page.keyboard.press("Escape")
+    needs.wait_for(state="detached", timeout=5_000)
+    if view.get("has_touch"):
+        # A phone's Back from another view comes home to the Overview, inside the app.
+        url = page.url
+        to_map(page)
+        page.go_back()
+        try:
+            overview.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the Map didn't come home to the Overview")
+        if page.url != url:
+            failures.append(f"{name}: Back from the Map left the app")
+    print(f"{name}: the Overview listed {headings}, and its rows opened what they name")
+
+
+def deep_link_journey(context, origin, view, plan, name, failures):
+    """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
+    again; quick Escapes leave the address saying what's open; and a stale link says so rather than opening nothing."""
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda err: errors.append(str(err)))
+    page.goto("about:blank")
+    id = min(one for one in plan.default() if plan.depth(one) == 1)
+    link = f"{origin}/?item={quote(id)}"
+    page.goto(link)
+    title = page.locator("[data-testid=inspector] h2")
+    try:
+        title.wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: a link to {id} opened no item")
+        page.close()
+        return
+    if title.inner_text() != plan.items[id]["title"] or page.url != link:
+        failures.append(f"{name}: a link to {id} opened {title.inner_text()!r} at {page.url}")
+    page.go_back()
+    title.wait_for(state="detached", timeout=5_000)
+    # The Map stays shown; on a phone it is away from home, one more Back.
+    want = [f"{origin}/?view=map"] + ([f"{origin}/"] if view.get("has_touch") else [])
+    for url in want:
+        page.wait_for_function("u => location.href === u", arg=url, timeout=5_000)
+        if url != want[-1]:
+            page.go_back()
+    page.go_back()
+    if page.url != "about:blank":
+        failures.append(f"{name}: Back from a link's last layer landed on {page.url}, not the page before the app")
+    if not view.get("has_touch"):
+        # Reading the address back is the same at either size, so one reload proves it.
+        page.goto(link)
+        title.wait_for(timeout=10_000)
+        page.reload()
+        title.wait_for(timeout=10_000)
+        if title.inner_text() != plan.items[id]["title"]:
+            failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
+        # A link to the task drawn furthest right, where the panel will open, brings it out from under the panel.
+        drawn = "() => document.querySelector('[data-testid=map]')?.dataset.state === 'drawn'"
+        page.goto(f"{origin}/?view=map")
+        page.wait_for_function(drawn, timeout=20_000)
+        far = page.get_by_test_id("map").evaluate(
+            "m => m.cy.nodes('.leaf').max(n => n.renderedBoundingBox().x2).ele.id()"
+        )
+        page.goto(f"{origin}/?item={quote(far)}")
+        title.wait_for(timeout=10_000)
+        page.wait_for_function(drawn, timeout=20_000)
+        clear = page.evaluate(
+            """id => { const m = document.querySelector('[data-testid=map]'); const r = m.getBoundingClientRect();
+                const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+                const panel = document.querySelector('[data-testid=inspector]').getBoundingClientRect();
+                return [Math.round(r.left + b.x1), Math.round(r.left + b.x2), Math.round(panel.left)]; }""",
+            far,
+        )
+        if not (clear[0] >= 0 and clear[1] <= clear[2]):
+            failures.append(f"{name}: a link to {far} drew it at {clear[:2]}, under the panel from {clear[2]}")
+    # A link to an item gone says so, and opens the rest it names: two layers, closed quicker than the history moves,
+    # leave the address saying what's open.
+    page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
+    notice = page.get_by_test_id("notice")
+    notice.wait_for(timeout=10_000)
+    if "isn't in the plan" not in notice.inner_text():
+        failures.append(f"{name}: a link to a missing item said {notice.inner_text()!r}")
+    page.get_by_test_id("needs").wait_for(timeout=5_000)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    page.locator("[data-testid=thread-panel]").wait_for(state="detached", timeout=5_000)
+    page.wait_for_timeout(300)
+    if page.url != f"{origin}/?view=map":
+        failures.append(f"{name}: after two quick Escapes the address is {page.url}")
+    if errors:
+        failures.append(f"{name}: links threw {errors}")
+    page.close()
+    kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
+    print(f"{name}: a link opened {id}, {kept}, and a stale link said so")
+
+def command_journey(page, view, origin, plan, name, failures):
+    """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
+    dismissed; on a phone, from the Map, Back then closes the item and comes home."""
+    id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
+    title = plan.items[id]["title"]
+    to_map(page)
+    menu = page.get_by_test_id("command-menu")
+    if view.get("has_touch"):
+        page.locator("[data-action=search]").tap()
+    else:
+        page.keyboard.press("ControlOrMeta+k")
+    menu.wait_for(timeout=5_000)
+    page.keyboard.type(title)
+    row = page.locator(f".command-row[data-command='item:{id}']")
+    row.wait_for(timeout=5_000)
+    if view.get("has_touch"):
+        row.tap()
+    else:
+        # The first found is chosen; ↓ and ↑ come back to it.
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("ArrowUp")
+        if row.get_attribute("aria-selected") != "true":
+            failures.append(f"{name}: the command menu didn't choose {id} first for its own title")
+        page.keyboard.press("Enter")
+    heading = page.locator("[data-testid=inspector] h2")
+    heading.wait_for(timeout=5_000)
+    menu.wait_for(state="detached", timeout=5_000)
+    # Over whatever else is open, such as a thread's panel the journeys before left.
+    if heading.inner_text() != title or parse_qs(urlsplit(page.url).query).get("item") != [id]:
+        failures.append(f"{name}: the command menu opened {heading.inner_text()!r} at {page.url}, not {id}")
+    if view.get("has_touch"):
+        page.go_back()
+        heading.wait_for(state="detached", timeout=5_000)
+        page.go_back()
+        page.get_by_test_id("overview").wait_for(timeout=5_000)
+        if page.url != f"{origin}/":
+            failures.append(f"{name}: Back after the command menu's item didn't come home: {page.url}")
+    else:
+        # Dismissed, the focus goes back to where it was: the item's panel, still open under it.
+        if not page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')"):
+            failures.append(f"{name}: the item the command menu opened didn't take the focus")
+        page.keyboard.press("ControlOrMeta+k")
+        menu.wait_for(timeout=5_000)
+        page.keyboard.press("Escape")
+        menu.wait_for(state="detached", timeout=5_000)
+        back = page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')")
+        if not back or not heading.count():
+            failures.append(f"{name}: Escape from the command menu didn't leave the item open, focused")
+        page.keyboard.press("Escape")
+        heading.wait_for(state="detached", timeout=5_000)
+    print(f"{name}: the command menu found {id} by its title and opened it")
+
+
+def keys_journey(page, plan, name, failures):
+    """Single keys go to views and edit the item shown, a key typed in a field is the field's, and the menu's switch
+    turns them all off."""
+    view = page.locator("[data-view][aria-current=page]")
+    page.keyboard.press("g")
+    page.keyboard.press("t")
+    page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+    page.keyboard.press("g")
+    page.keyboard.press("m")
+    page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+    id = min(one for one in plan.default() if plan.depth(one) == 1)
+    page.keyboard.press("ControlOrMeta+k")
+    page.keyboard.type(plan.items[id]["title"])
+    page.keyboard.press("Enter")
+    page.locator("[data-testid=inspector] h2").wait_for(timeout=5_000)
+    page.keyboard.press("e")
+    form = page.get_by_test_id("item-form")
+    form.wait_for(timeout=5_000)
+    title = form.locator("input").first
+    title.focus()
+    before = title.input_value()
+    page.keyboard.press("End")
+    page.keyboard.press("e")
+    if title.input_value() != before + "e" or page.get_by_test_id("item-form").count() != 1:
+        failures.append(f"{name}: E typed in the title field wasn't the field's: {title.input_value()!r}")
+    form.get_by_role("button", name="Cancel").click()
+    form.wait_for(state="detached", timeout=5_000)
+    page.keyboard.press("Escape")
+    page.locator("[data-testid=inspector]").wait_for(state="detached", timeout=5_000)
+    from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
+    # Off the switch, which as a field would take the keys for itself.
+    page.evaluate("() => document.activeElement?.blur()")
+    page.keyboard.press("g")
+    page.keyboard.press("t")
+    page.wait_for_timeout(200)
+    if view.get_attribute("data-view") != "map":
+        failures.append(f"{name}: with single-key shortcuts off, G then T still went to {view.get_attribute('data-view')}")
+    from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
+    # ⌘Z takes back the autonomy just set, once, however often it is pressed.
+    level = page.get_by_test_id("global-level")
+    page.get_by_test_id("menu").click()
+    was = level.input_value()
+    to = next(one for one in level.locator("option").evaluate_all("os => os.map(o => o.value)") if one != was)
+    level.select_option(to)
+    page.get_by_test_id("notice").get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.evaluate("() => document.activeElement?.blur()")
+    writes = []
+    page.on(
+        "request",
+        lambda request: (
+            writes.append(request.post_data)
+            if request.url.endswith("/api/command") and (request.post_data or "").startswith('{"level":{"level"')
+            else None
+        ),
+    )
+    page.keyboard.press("ControlOrMeta+z")
+    page.keyboard.press("ControlOrMeta+z")
+    page.get_by_text("Autonomy set back to").wait_for(timeout=10_000)
+    page.wait_for_timeout(300)
+    if level.input_value() != was or len(writes) != 1:
+        failures.append(f"{name}: ⌘Z twice set the autonomy to {level.input_value()}, in {len(writes)} writes")
+    print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off; ⌘Z undid once")
 
 
 def installable(context, page, origin, name, failures):
@@ -311,7 +659,7 @@ def first_view_readable(page, name, failures):
     """The Map opens at a zoom its titles can be read at, with an item, not a box, wholly in view, title and all."""
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
-        " shown: m.cy.nodes().not('.box').some(n => { const b = n.renderedBoundingBox();"
+        " shown: m.cy.nodes().not('.box, .junction').some(n => { const b = n.renderedBoundingBox();"
         " return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= w && b.y2 <= h; }) }; }"
     )
     if view["zoom"] < READABLE or not view["shown"]:
@@ -463,8 +811,13 @@ def map_journey(page, view, plan, name, failures, hint=None):
         centre(page, archived)
         page.wait_for_timeout(200)
         page.screenshot(path=SHOTS / f"app-{name}-archived.png")
+        # Selected, then hidden with the rest: what's selected is drawn, so its panel and its address go with it.
+        tap_middle(page, view, archived)
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
     from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, expected)
+    if archived is not None and (page.get_by_test_id("inspector").count() or "item=" in page.url):
+        failures.append(f"{name}: hiding archived items left {archived} open, at {page.url}")
     # A thread lights up its members as drawn.
     thread, _ = Counter(
         row["thread"] for row in plan.items.values() if row["thread"]
@@ -506,6 +859,8 @@ def map_journey(page, view, plan, name, failures, hint=None):
         failures.append(
             f"{name}: {thread}'s links aren't drawn in its line's colour: {route}"
         )
+    if name == "desktop":
+        scheme_switch(page, name, failures)
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     panel.wait_for()
     if panel.locator("[role=alert]").count():
@@ -528,7 +883,6 @@ def map_journey(page, view, plan, name, failures, hint=None):
         needs = page.get_by_test_id("needs")
         page.get_by_test_id("needs-button").click()
         needs.wait_for()
-        url = page.url
         page.go_back()
         needs.wait_for(state="detached")
         try:
@@ -541,19 +895,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
             panel.wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             stayed = False
-        if not stayed or page.url != url:
+        # In the app, on the Map, the address saying so.
+        if not stayed or urlsplit(page.url).query != "view=map":
             failures.append(
-                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app"
+                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app: at {page.url}"
             )
         if not panel.count():
             pick_thread(page, plan, thread)
         panel.wait_for()
-        # Closed in the app, a layer gives its entry back, so the next Back closes what's open then.
+        # Closed in the app, a layer gives its entry back, so the next Back closes what's open then. Under the panel,
+        # the Map, away from the Overview, holds an entry of its own.
         page.get_by_test_id("needs-button").click()
         needs.get_by_role("button", name="Close").click()
         needs.wait_for(state="detached")
         try:
-            page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
+            page.wait_for_function("() => history.state?.layers === 2", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
                 f"{name}: closing the needs-you list left the history at {page.evaluate('JSON.stringify(history.state)')}"
@@ -565,7 +921,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
         try:
             needs.wait_for(state="detached", timeout=5_000)
             panel.wait_for(state="detached", timeout=5_000)
-            page.wait_for_function("() => history.state === null", timeout=5_000)
+            page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
                 f"{name}: going back two entries didn't close both the needs-you list and the thread's panel"
@@ -626,8 +982,18 @@ def outline_journey(page, view, plan, name, failures):
             inspector.wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the phases' sheet closed {picked}'s too")
+    # The item's thread, picked from its panel, closes the item and opens the thread's panel, focus going to it.
+    inspector.locator(f"[data-pick-thread='{thread}']").click()
+    panel = page.get_by_test_id("thread-panel")
+    try:
+        inspector.wait_for(state="detached", timeout=5_000)
+        panel.wait_for(timeout=5_000)
+        if not panel.evaluate("p => p.contains(document.activeElement)"):
+            failures.append(f"{name}: picking {thread} from {picked}'s panel left focus outside the thread's")
+    except PlaywrightTimeout:
+        failures.append(f"{name}: picking {thread} from {picked}'s panel didn't swap it for the thread's")
     page.keyboard.press("Escape")
-    print(f"{name}: selecting {picked} marked its phase and its thread's row")
+    print(f"{name}: selecting {picked} marked its phase and its thread's row, and its thread opened from it")
 
 
 def threads_journey(page, view, env, name, failures):
@@ -686,10 +1052,26 @@ def threads_journey(page, view, env, name, failures):
             page.get_by_test_id("inspector").wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: choosing {task} from {picked}'s panel left the Threads view over the Map")
-        if page.locator("[data-view=map]").get_attribute("aria-pressed") != "true":
+        if page.locator("[data-view=map]").get_attribute("aria-current") != "page":
             failures.append(f"{name}: choosing {task} didn't switch to the Map")
         page.keyboard.press("Escape")
     page.get_by_test_id("threads-view").wait_for(state="detached")
+    # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; the
+    # thread's panel, still picked, over the view, closes first. The Map is chosen again for the journeys after.
+    if view.get("has_touch"):
+        page.locator("[data-view=threads]").click()
+        page.get_by_test_id("threads-view").wait_for()
+        if page.get_by_test_id("thread-panel").count():
+            page.go_back()
+            page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
+            if not page.get_by_test_id("threads-view").is_visible():
+                failures.append(f"{name}: Back from a thread's panel over the Threads view left the view too")
+        page.go_back()
+        try:
+            page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
+        to_map(page)
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
@@ -757,6 +1139,19 @@ def check_tracker(env, id, check, what, failures, name):
         failures.append(f"{name}: the tracker doesn't show {what}")
 
 
+def item_action(page, action):
+    """Runs one of the item panel's actions from its menu, where all but Edit are."""
+    page.get_by_test_id("item-menu").click()
+    page.locator(f"[data-testid=inspector] [data-action={action}]").click()
+
+
+def unlink(page, testid):
+    """Removes a panel's first link of a kind, its button shown as a pointer comes over its row."""
+    row = page.locator(f"[data-testid={testid}] .link").first
+    row.hover()
+    row.locator(".unlink").click()
+
+
 def wait_inspector(page, selector, state="visible"):
     page.locator(f"[data-testid=inspector] {selector}").first.wait_for(
         state=state, timeout=10_000
@@ -777,6 +1172,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     first leaf's notes to be HOSTILE. Starts from a fresh page, so whatever the journeys before it opened on the Map
     is closed again."""
     page.reload()
+    to_map(page)
     wait_drawn(page, len(plan.default()))
     leaves = sorted(id for id in plan.children(box) if not plan.children(id))[:2]
     if len(leaves) < 2:
@@ -811,7 +1207,8 @@ def edit_journey(page, view, env, plan, box, name, failures):
             return [close.getBoundingClientRect().height, at(chip, -21) && at(chip, 21)];
         }"""
     )
-    if view.get("has_touch") and (reach[0] < 44 or not reach[1]):
+    # Half a pixel's slack for a sheet still rising, whose box is measured between pixels.
+    if view.get("has_touch") and (reach[0] < 43.5 or not reach[1]):
         failures.append(
             f"{name}: too small to tap: close {reach[0]} px, chip reached {reach[1]}"
         )
@@ -819,7 +1216,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
     added = "journey-added"
     before = settled_corner(page, first)
-    page.locator("[data-action=add-child]").click()
+    item_action(page, "add-child")
     form = page.get_by_test_id("add-form")
     form.locator("input[name=title]").fill("Journey: added!")
     if form.locator("input[name=id]").input_value() != added:
@@ -857,15 +1254,16 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
     # Move it into the second leaf, picked on the Map: the prompt leaves the Map free, and the new parent holds still.
-    page.locator("[data-action=move]").click()
+    item_action(page, "move")
     prompt = page.get_by_test_id("prompt").bounding_box()
     if prompt is None or prompt["height"] > 60:
         failures.append(f"{name}: the move prompt covers the Map: {prompt}")
     # The menu over a mode closes alone: on an Escape pressed as it opens, and on a tap on the Map, which picks nothing.
-    menu = page.locator("details.menu")
+    menu = page.locator("details.menu:has(> [data-testid=menu])")
     for close in (
         lambda: page.keyboard.press("Escape"),
-        lambda: tap_middle(page, view, second, rise=0.2),
+        # In the middle of the Map, below the open menu, which the backdrop must stop it reaching.
+        lambda: tap_middle(page, view, second),
     ):
         page.get_by_test_id("menu").click()
         close()
@@ -903,7 +1301,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
 
     # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
     edge = f"{first}->{added}"
-    page.locator("[data-action=waits-for]").click()
+    item_action(page, "waits-for")
     tap_middle(page, view, first)
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
     page.wait_for_function(
@@ -921,7 +1319,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         name,
     )
     # Unlinked from the inspector: gone from the Map and the tracker.
-    page.locator("[data-testid=waits-for] .unlink").click()
+    unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
@@ -936,6 +1334,40 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
+    # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
+    notice = page.get_by_test_id("notice")
+    notice.get_by_role("button", name="Undo").click()
+    wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
+    if "again" not in notice.inner_text():
+        failures.append(f"{name}: undoing the unlink said {notice.inner_text()!r}")
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [first],
+        f"{added} waiting for {first} again, undone",
+        failures,
+        name,
+    )
+    unlink(page, "waits-for")
+    wait_inspector(page, "[data-testid=waits-for]", state="detached")
+    notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
+    run(env, "--as-user", "link", "add", added, "waits-for", first)
+    # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
+    sent = []
+    listen = lambda request: (
+        request.url.endswith("/api/command")
+        and (request.post_data or "").startswith('{"link"')
+        and sent.append(request.post_data)
+    )
+    page.on("request", listen)
+    notice.get_by_role("button", name="Undo").click()
+    page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
+    page.remove_listener("request", listen)
+    if sent:
+        failures.append(f"{name}: a refused undo sent {sent}")
+    # Unlinked once more, as the journeys after expect: a new wait in an approved thread needs the user.
+    unlink(page, "waits-for")
+    wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
@@ -986,7 +1418,7 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
             )
-        if page.locator("details.menu").evaluate("d => d.open"):
+        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             failures.append(
                 f"{name}: Enter on the autonomy list wrote, but left the menu open"
             )
@@ -1003,7 +1435,7 @@ def level_keys_journey(page, name, failures):
         # Only an act closes the menu: Enter on the list with nothing chosen isn't one.
         levels.focus()
         page.keyboard.press("Enter")
-        if not page.locator("details.menu").evaluate("d => d.open"):
+        if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             failures.append(
                 f"{name}: Enter on the autonomy list, unchanged, closed the menu"
             )
@@ -1025,7 +1457,7 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
             )
-        if page.locator("details.menu").evaluate("d => d.open"):
+        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             page.get_by_test_id("menu").click()
         print(
             f"{name}: arrow keys on the autonomy list wrote once, on Enter, and a pick at once"
@@ -1315,6 +1747,8 @@ def form_journey(page, view, env, remote, id, name, failures):
     )
     form.locator("button[type=submit]").click()
     inspector.get_by_role("heading", name="Edited in the app").wait_for(timeout=10_000)
+    # Drawn at once, the edit is saved only once the app is no longer busy.
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     if not in_open_view(page, id):
         failures.append(f"{name}: after saving, {id} is off the Map or under the sheet")
     check_tracker(
@@ -1375,7 +1809,7 @@ def form_journey(page, view, env, remote, id, name, failures):
     # Reopen: finished elsewhere, reopened here.
     run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
     refresh(page)
-    page.locator("[data-action=reopen]").click()
+    item_action(page, "reopen")
     page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
     check_tracker(
         env, id, lambda row: row["state"] != "done", f"{id} reopened", failures, name
@@ -1474,6 +1908,9 @@ def needs_journey(page, env, plan, thread, name, failures):
     """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows. Opened
     from over the phases' sheet, the list shows in its place."""
     count = page.get_by_test_id("needs-count")
+    # The queue's count shows beside its name, on a phone as anywhere.
+    if not count.is_visible():
+        failures.append(f"{name}: the needs-you count isn't shown beside its name")
     page.get_by_test_id("phases-button").click()
     page.get_by_test_id("phases").wait_for()
     page.get_by_test_id("needs-button").click()
@@ -1484,6 +1921,28 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Needs you opened over the phases' sheet left its list hidden")
         return
+    # A view chosen with the list open changes under it, the list staying on top.
+    page.locator("[data-view=threads]").click()
+    page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+    if not needs.is_visible() or page.locator("[data-view=threads]").get_attribute("aria-current") != "page":
+        failures.append(f"{name}: choosing Threads with Needs you open didn't keep the list over the Threads view")
+    page.locator("[data-view=map]").click()
+    page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+    # With an item open over the list, Needs you brings the list back rather than closing what's out of sight.
+    row = needs.locator("button.row[data-select]").first
+    if row.count():
+        row.click()
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        page.get_by_test_id("needs-button").click()
+        try:
+            page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+            needs.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Needs you under an item closed the list, or left the item over it")
+        if page.get_by_test_id("needs-button").get_attribute("aria-pressed") != "true":
+            failures.append(f"{name}: Needs you isn't pressed with its list on top")
+    else:
+        failures.append(f"{name}: no needs-you entry selects an item, so bringing the list back went unchecked")
     # The queue has the name its push notification gives it, apart from the in-review stage.
     named = (page.get_by_test_id("needs-button").get_attribute("aria-label"), needs.locator("h2").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":
@@ -1495,9 +1954,9 @@ def needs_journey(page, env, plan, thread, name, failures):
     )
     run(env, "item", "edit", outside, "--thread", thread)
     before = int(count.inner_text())
-    # The signal is a "!", never a number a thread's badge could have.
-    if page.get_by_test_id("needs-badge").inner_text() != "!":
-        failures.append(f"{name}: the needs-you badge doesn't read !")
+    # The count alone says something waits, as an inbox's does: no "!" beside it.
+    if page.get_by_test_id("needs-badge").count() or not count.is_visible():
+        failures.append(f"{name}: Needs you shows a badge, or no count")
     refresh(page)
     page.wait_for_function(
         "n => Number(document.querySelector('[data-testid=needs-count]').textContent) === n",
@@ -1533,6 +1992,17 @@ def needs_journey(page, env, plan, thread, name, failures):
     needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
         state="detached", timeout=10_000
     )
+    # The keyboard stays in the list, on what took the entry's place, and the approval is said.
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    kept = page.evaluate(
+        "() => document.querySelector('[data-testid=needs]').contains(document.activeElement)"
+    )
+    said = page.locator("p[role=status]").inner_text()
+    if not kept or not said.startswith("Approved "):
+        failures.append(
+            f"{name}: approving from the list left focus at {page.evaluate('document.activeElement.tagName')}"
+            f" and said {said!r}"
+        )
     if int(count.inner_text()) >= before:
         failures.append(
             f"{name}: the needs count stayed at {count.inner_text()} after two were met"
@@ -1645,9 +2115,24 @@ def push_journey(context, page, env, origin, name, failures):
     expected = {**message, "tag": "needs"}
     if shown != [expected]:
         failures.append(f"{name}: the push recorded {shown}, not {expected}")
-    # Opening the notification goes to what it names: the needs-you list.
-    page.goto(origin + message["url"])
+    # Opening the notification shows what it names, the needs-you list, in the app already open, without reloading it:
+    # the worker asks the page as its click handler does, and the page answers.
+    page.keyboard.press("Escape")
+    page.get_by_test_id("needs").wait_for(state="detached", timeout=5_000)
+    page.evaluate("() => { window.stayed = true; }")
+    answered = worker.evaluate(
+        """async (search) => {
+            const [client] = await self.clients.matchAll({ type: "window" });
+            const channel = new MessageChannel();
+            const answer = new Promise((resolve) => { channel.port1.onmessage = () => resolve(true); });
+            client.postMessage({ kind: "open", search }, [channel.port2]);
+            return Promise.race([answer, new Promise((resolve) => setTimeout(() => resolve(false), 5000))]);
+        }""",
+        "?needs",
+    )
     page.get_by_test_id("needs").wait_for(timeout=10_000)
+    if not answered or not page.evaluate("() => window.stayed === true"):
+        failures.append(f"{name}: a notification's link reloaded the open app, or it didn't answer ({answered})")
     page.evaluate(
         """(endpoint) => fetch("/api/push/unsubscribe", {
             method: "POST",
@@ -1719,19 +2204,24 @@ def main():
                         f"{name}: the page lists {count} items, expected {len(plan.items)}"
                     )
                 installable(context, page, origin, name, failures)
+                overview_journey(page, view, name, failures)
+                to_map(page)
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
                 threads_journey(page, view, env, name, failures)
+                deep_link_journey(context, origin, view, plan, name, failures)
+                command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
+                    keys_journey(page, plan, name, failures)
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.
                     leaf = min(
                         id for id in plan.children(hint) if not plan.children(id)
                     )
+                    # Read by the reload edit_journey starts with.
                     run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
-                    refresh(page)
                     edit_journey(page, view, env, plan, hint, name, failures)
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures
@@ -1763,6 +2253,7 @@ def main():
             context, page, _, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )
+            to_map(page)
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
             # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
@@ -1773,7 +2264,7 @@ def main():
             page.get_by_test_id("menu").click()
             tap_middle(page, VIEWS["phone"], target)
             if (
-                page.locator("details.menu").evaluate("d => d.open")
+                page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open")
                 or page.get_by_test_id("inspector").count()
                 or drawn.get_attribute("data-state") != "drawn"
                 or drawn.get_attribute("data-nodes") != before
@@ -1789,7 +2280,11 @@ def main():
             # WebKit draws the Threads view's arrows where Chromium does, clear of the cards.
             link = fresh()
             context, page, _, errors = open_app(
-                webkit, VIEWS["desktop"], link, failures, "webkit desktop"
+                webkit,
+                {**VIEWS["desktop"], "color_scheme": "light"},
+                link,
+                failures,
+                "webkit desktop",
             )
             listed = json.loads(run(env, "thread", "list"))["data"]
             want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
@@ -1807,6 +2302,7 @@ def main():
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )
+            to_map(page)
             start = time.monotonic()
             wait_drawn(page, len(large.default()), timeout=LARGE_LIMIT_MS)
             print(

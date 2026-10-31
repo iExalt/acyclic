@@ -1,0 +1,78 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { contrast, inkOn, lineColour } from "./lines";
+import { PALETTES, type Palette } from "./palette";
+
+const linesOf = (palette: Palette) => Array.from({ length: 108 }, (_, at) => lineColour(at, palette));
+/** Every surface something is drawn on, the stages' tints among them. */
+const surfaces = (p: Palette) => [p.ground, p.chrome, p.sheet, p.tile, p.box, ...Object.values(p.tints)];
+
+describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
+  const p = PALETTES[scheme];
+  const LINES = linesOf(p);
+
+  it("is the one app.css declares for its scheme", () => {
+    const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
+    const marker = css.indexOf(`/* palette ${scheme} */`);
+    const block = css.slice(marker, css.indexOf("}", marker));
+    const declared = Object.fromEntries(
+      [...block.matchAll(/--([a-z-]+):\s*(#[0-9A-Fa-f]{6});/g)].map((m) => [m[1], m[2]]),
+    );
+    const named = { ...p, "accent-ink": p.accentInk } as Record<string, unknown>;
+    expect(Object.keys(declared).sort()).toEqual(
+      [
+        "ground",
+        "chrome",
+        "box",
+        "tile",
+        "sheet",
+        "rule",
+        "edge",
+        "field",
+        "ink",
+        "muted",
+        "link",
+        "signal",
+        "danger",
+        "accent",
+        "accent-ink",
+      ].sort(),
+    );
+    for (const [name, value] of Object.entries(declared)) expect(value, name).toBe(named[name]);
+    expect(block).toContain(`color-scheme: ${scheme}`);
+    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    expect(html, "the bar's colour").toContain(
+      `<meta name="theme-color" content="${p.chrome}" media="(prefers-color-scheme: ${scheme})" />`,
+    );
+  });
+
+  it("reads: text at 4.5:1 on every surface, the signal and danger as text too, and badges in their ink", () => {
+    for (const surface of surfaces(p)) {
+      for (const text of [p.ink, p.muted, p.signal, p.danger]) {
+        expect(contrast(text, surface), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    expect(contrast(p.accentInk, p.accent), "a primary button's label").toBeGreaterThanOrEqual(4.5);
+    for (const colour of LINES) {
+      expect(contrast(colour, inkOn(colour, p)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("draws a field's edge at 3:1 on the surfaces fields sit on and the ground they are filled with", () => {
+    for (const surface of [p.ground, p.chrome, p.tile, p.sheet])
+      expect(contrast(p.field, surface), surface).toBeGreaterThanOrEqual(3);
+  });
+
+  it("draws a link at 3:1 on the ground and the boxes it crosses", () => {
+    for (const surface of [p.ground, p.box]) expect(contrast(p.link, surface), surface).toBeGreaterThanOrEqual(3);
+  });
+
+  it("draws a lit border, a crossing link and the selection at 3:1 against every surface beside them", () => {
+    for (const surface of surfaces(p)) {
+      for (const colour of [...LINES, p.signal, p.ink, p.accent]) {
+        expect(contrast(colour, surface), `${colour} on ${surface}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+});

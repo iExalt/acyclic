@@ -6,39 +6,11 @@
 // threads apart by colour alone.
 
 import type { Thread } from "./api";
+import type { Palette } from "./palette";
 
 /** What a line is drawn from: a thread's id and title. */
 type Named = Pick<Thread, "id" | "title">;
 
-/** The app's colours, which app.css repeats as custom properties and the Map's stylesheet reads from here. */
-export const TOKENS = {
-  /** The Map's surface. */
-  ground: "#141a1f",
-  /** The bar and the thread list. */
-  chrome: "#1b2228",
-  /** A box on the Map. */
-  box: "#1b2329",
-  /** An item on the Map. */
-  tile: "#26313a",
-  /** A sheet or pane over the Map. */
-  sheet: "#222b33",
-  rule: "#34404a",
-  ink: "#e6ebef",
-  muted: "#95a3ae",
-  /**
-   * What needs the user, conflicts, and links that cross boxes. Lines may share its hue, so it is never a cue by colour
-   * alone: crossing links are dashed, conflicts have a dashed border, and the needs-you badge reads "!", which no
-   * thread's badge does. So never draw it as a solid border or a badge with a number.
-   */
-  signal: "#f2b33d",
-} as const;
-
-/**
- * How light lines are, in OKLCH: never darker than a border at 3:1 on the tile and a badge at 4.5:1 in dark ink allow,
- * nor so light that the colour washes out.
- */
-const DARKEST = 0.7;
-const LIGHTEST = 0.86;
 /** Threads to a lap of the hue wheel. */
 const LAP = 27;
 /** Laps from the darkest to the lightest, after which the spiral starts again from the darkest. */
@@ -51,16 +23,16 @@ const START = 110;
 /**
  * The line colour of position `at`: a spiral round the hue wheel that grows lighter as it goes, so a line that comes
  * round to an earlier one's hue differs from it in lightness. After four laps, 108 threads, it starts again from the
- * darkest: those are the only lines that share a colour.
+ * darkest: those are the only lines that share a colour. The scheme's band sets how light: never darker than a border
+ * at 3:1 on its surfaces and a badge at 4.5:1 in either ink allow, nor so light that the colour washes out. A thread
+ * keeps its hue between schemes, not its lightness.
  */
-export function lineColour(at: number): string {
+export function lineColour(at: number, palette: Palette): string {
+  const [darkest, lightest] = palette.band;
   const along = at % (LAP * LAPS);
   const hue = (START + (along * 360) / LAP) % 360;
-  return oklch(DARKEST + ((LIGHTEST - DARKEST) * along) / (LAP * LAPS), CHROMA, hue);
+  return oklch(darkest + ((lightest - darkest) * along) / (LAP * LAPS), CHROMA, hue);
 }
-
-/** The badge's text colours: the ground's dark for light lines, white for dark ones. */
-const INKS = [TOKENS.ground, "#ffffff"] as const;
 
 export interface Line {
   /**
@@ -98,29 +70,29 @@ function parts(id: string): { number: number; clone: string | null } | null {
  * and go, else coloured by its id and badged with a dot. A title that starts with that same number has it taken off
  * its name, so the number shows once.
  */
-export function lineOf(thread: Named, clone = ""): Line {
+export function lineOf(thread: Named, palette: Palette, clone = ""): Line {
   const own = parts(thread.id);
   const numbered = NUMBERED.exec(thread.title);
   const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
   const name = own !== null && rest !== "" && Number(numbered?.[1]) === own.number ? rest : thread.title;
-  const colour = lineColour(own === null ? hash(thread.id) : own.number);
-  return { number: own === null ? null : `${own.number}${clone}`, name, colour, ink: inkOn(colour) };
+  const colour = lineColour(own === null ? hash(thread.id) : own.number, palette);
+  return { number: own === null ? null : `${own.number}${clone}`, name, colour, ink: inkOn(colour, palette) };
 }
 
 /**
  * Each thread's line, by id. Threads whose numbers clash are told apart by their clones' initials, or by their whole
  * clone ids when two initials match; an older id, with no clone, keeps its bare number.
  */
-export function linesOf(threads: Named[]): Map<string, Line> {
+export function linesOf(threads: Named[], palette: Palette): Map<string, Line> {
   const owned = threads.map((thread) => ({ thread, own: parts(thread.id) }));
   const sharing = (number: number) => owned.filter(({ own }) => own?.number === number);
   return new Map(
     owned.map(({ thread, own }) => {
       const others = own === null ? [] : sharing(own.number);
-      if (own?.clone == null || others.length < 2) return [thread.id, lineOf(thread)];
+      if (own?.clone == null || others.length < 2) return [thread.id, lineOf(thread, palette)];
       const initial = own.clone.slice(0, 1);
       const alike = others.filter((one) => one.own?.clone?.slice(0, 1) === initial).length;
-      return [thread.id, lineOf(thread, alike > 1 ? own.clone : initial)];
+      return [thread.id, lineOf(thread, palette, alike > 1 ? own.clone : initial)];
     }),
   );
 }
@@ -132,9 +104,9 @@ export function byNumber(a: Named, b: Named): number {
   return a.title.localeCompare(b.title, undefined, { numeric: true });
 }
 
-/** The ink with the higher contrast on `colour`. */
-export function inkOn(colour: string): string {
-  const [dark, light] = INKS;
+/** The badge ink with the higher contrast on `colour`. */
+export function inkOn(colour: string, palette: Palette): string {
+  const [dark, light] = palette.badgeInks;
   return contrast(colour, dark) >= contrast(colour, light) ? dark : light;
 }
 
