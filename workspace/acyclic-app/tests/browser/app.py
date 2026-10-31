@@ -16,6 +16,8 @@ to target/browser/.
 Usage: app.py <acyclic binary> <acyclic-fixtures binary>
 """
 
+import functools
+import inspect
 import json
 import os
 import re
@@ -50,6 +52,29 @@ VIEWS = {
 READABLE = 0.85
 # How long the 3,500-item Map may take to draw: a loose bound against hanging, not a timing.
 LARGE_LIMIT_MS = 60_000
+# How long the whole run may take on CI: past the first it warns, past the second it fails, so the journeys can't grow
+# unnoticed. Shared runners took from 58 to 81 s over runs of the same code, so the limit leaves room for a slow one.
+BUDGET_S, LIMIT_S = 60, 120
+# Each timed step's name and seconds, for the run's summary.
+TIMES = []
+
+
+def timed(step):
+    """Records how long each call of `step` takes, under its name and the view it ran in."""
+    signature = inspect.signature(step)
+
+    @functools.wraps(step)
+    def timing(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs).arguments
+        view = bound.get("name", bound.get("items"))
+        label = step.__name__ + ("" if view is None else f" ({view})")
+        start = time.monotonic()
+        try:
+            return step(*args, **kwargs)
+        finally:
+            TIMES.append((label, time.monotonic() - start))
+
+    return timing
 
 
 def run(env, *args):
@@ -109,6 +134,7 @@ class Plan:
         return len(drawn)
 
 
+@timed
 def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
@@ -358,6 +384,7 @@ def scheme_switch(page, name, failures):
     print(f"{name}: switched the scheme to light and back, the Map restyled in place")
 
 
+@timed
 def open_app(browser, view, link, failures, name):
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
@@ -397,6 +424,7 @@ def to_map(page):
     page.get_by_test_id("overview").wait_for(state="detached", timeout=5_000)
 
 
+@timed
 def overview_journey(page, view, name, failures):
     """The app opens on the Overview: its four lists, a thread's row taking the user to the Map with its panel open, a
     needs row opening the list at its entry, the open list marked less than the view shown, and on a phone Back from the
@@ -451,6 +479,7 @@ def overview_journey(page, view, name, failures):
     print(f"{name}: the Overview listed {headings}, and its rows opened what they name")
 
 
+@timed
 def deep_link_journey(context, origin, view, plan, name, failures):
     """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
     again; quick Escapes leave the address saying what's open; and a stale link says so rather than opening nothing."""
@@ -528,6 +557,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
     print(f"{name}: a link opened {id}, {kept}, and a stale link said so")
 
+@timed
 def command_journey(page, view, origin, plan, name, failures):
     """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
     dismissed; on a phone, from the Map, Back then closes the item and comes home."""
@@ -581,6 +611,7 @@ def command_journey(page, view, origin, plan, name, failures):
     print(f"{name}: the command menu found {id} by its title and opened it")
 
 
+@timed
 def keys_journey(page, plan, name, failures):
     """Single keys go to views and edit the item shown, a key typed in a field is the field's, and the menu's switch
     turns them all off."""
@@ -645,6 +676,7 @@ def keys_journey(page, plan, name, failures):
     print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off; ⌘Z undid once")
 
 
+@timed
 def installable(context, page, origin, name, failures):
     cdp = context.new_cdp_session(page)
     if errors := cdp.send("Page.getInstallabilityErrors")["installabilityErrors"]:
@@ -658,6 +690,7 @@ def installable(context, page, origin, name, failures):
             failures.append(f"{name}: icon {icon['src']} answered {status}")
 
 
+@timed
 def pairing_journey(context, page, origin, env, name, failures):
     """The paired browser's cookie is the app's alone: page script can't read it, and a page on another port of the
     same host, which the browser sends it to, can neither write with it nor frame the app.
@@ -700,7 +733,8 @@ def pairing_journey(context, page, origin, env, name, failures):
     # browser sends the cookie with its requests. A page from nowhere, such as one a route fulfils, isn't local, and
     # Chromium would refuse its loads from loopback before the server's own refusals were tried.
     server = ThreadingHTTPServer(("127.0.0.1", 0), Attacker)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # Polled often, so shutting it down is quick.
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     attacker = f"http://127.0.0.1:{server.server_address[1]}"
     other = context.new_page()
     other.route(
@@ -778,6 +812,7 @@ def stages_drawn(page, plan, name, failures):
         failures.append(f"{name}: tasks drawn with the wrong stage: {wrong}")
 
 
+@timed
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
     expected = len(plan.default())
@@ -852,6 +887,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
             )
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
+    # The pan that holds it still knows nothing of the screen's size or of touch, so the phone, which finds the box
+    # first, only taps; the desktop, starting from the box it found, measures that it held still.
+    still = not view.get("has_touch")
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
     moved, box, checked = 0, None, False
     for box in sorted(
@@ -861,19 +899,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
         centre(page, box)
         placed = page.get_by_test_id("map").evaluate(corner, box)
         # Where it settles after expanding is where it starts collapsing.
-        before = settled_corner(page, box)
+        before = settled_corner(page, box) if still else None
         for action, nodes in [
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
         ]:
             tap_box(page, view, box)
             wait_drawn(page, nodes)
-            after = settled_corner(page, box)
             if action == "expanding":
                 relaid = page.get_by_test_id("map").evaluate(corner, box) != placed
                 if not checked:
                     stages_drawn(page, plan, name, failures)
                     checked = True
+            if not still:
+                continue
+            after = settled_corner(page, box)
             shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
             moved = max(moved, shift)
             if shift > 2:
@@ -1016,7 +1056,8 @@ def map_journey(page, view, plan, name, failures, hint=None):
             pick_thread(page, plan, thread)
         panel.wait_for()
     print(
-        f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
+        f"{name}: drew {expected} nodes, expanded and collapsed {box}"
+        + (f" held within {moved:.1f} px" if still else "")
     )
     return box
 
@@ -1025,6 +1066,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
 HOSTILE = '<img src=x onerror="window.pwned = true">'
 
 
+@timed
 def outline_journey(page, view, plan, name, failures):
     """Selecting an item marks its phase and its thread's row there, opening the phase. On a phone the phases come as a
     sheet over the item's, and Back closes the sheet first, staying in the app."""
@@ -1082,6 +1124,7 @@ def outline_journey(page, view, plan, name, failures):
     print(f"{name}: selecting {picked} marked its phase and its thread's row, and its thread opened from it")
 
 
+@timed
 def threads_journey(page, view, env, name, failures):
     """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
     and none on a phone; picking a card opens its thread's panel, and the Map comes back as it was."""
@@ -1251,6 +1294,7 @@ def held(page, id, before, what, name, failures):
         failures.append(f"{name}: {what} moved {id} by {shift:.0f} px on screen")
 
 
+@timed
 def edit_journey(page, view, env, plan, box, name, failures):
     """Adds, moves, links and unlinks on the Map, as the phone would, checking the Map and then the tracker after each.
 
@@ -1460,6 +1504,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
 
 
+@timed
 def level_keys_journey(page, name, failures):
     """Arrow keys on the closed autonomy list move a draft, written once on Enter and dropped on Escape, while a pick
     from the open list, opened from the keyboard too, writes at once. Where a browser's arrow keys open the list, as on
@@ -1552,6 +1597,7 @@ def level_keys_journey(page, name, failures):
         page.remove_listener("request", sent)
 
 
+@timed
 def failed_add_journey(page, errors, name, failures):
     """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
     is lost after the server saved it stays drawn, with the form closed."""
@@ -1773,6 +1819,7 @@ def in_open_view(page, id):
     )
 
 
+@timed
 def form_journey(page, view, env, remote, id, name, failures):
     """Edits the selected item's fields, settles a conflict two clones wrote, and reopens it, as the phone would."""
     inspector = page.get_by_test_id("inspector")
@@ -1916,6 +1963,7 @@ def settled_control(page, selector, prop, value):
     )
 
 
+@timed
 def thread_journey(page, env, plan, thread, name, failures):
     """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level, its
     project-management flag and the global level, checking the panel and then the tracker."""
@@ -1990,6 +2038,7 @@ def thread_journey(page, env, plan, thread, name, failures):
     )
 
 
+@timed
 def needs_journey(page, env, plan, thread, name, failures):
     """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows. Opened
     from over the phases' sheet, the list shows in its place."""
@@ -2122,6 +2171,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
 
+@timed
 def push_journey(context, page, env, origin, name, failures):
     """Subscribes a device as the browser would, delivers a push through the service worker, and opens what it names.
 
@@ -2235,9 +2285,29 @@ def push_journey(context, page, env, origin, name, failures):
     )
 
 
+def report(took, failures):
+    """Prints the run's slowest steps, adds them all to CI's summary, and holds the run to its budget."""
+    steps = Counter()
+    for label, seconds in TIMES:
+        steps[label] += seconds
+    rows = steps.most_common()
+    print(f"took {took:.1f} s; slowest: " + ", ".join(f"{label} {s:.1f} s" for label, s in rows[:5]))
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as out:
+            out.write(f"### The app's journeys: {took:.1f} s (budget {BUDGET_S} s, limit {LIMIT_S} s)\n\n")
+            out.write("| Step | Seconds |\n|---|---|\n")
+            out.writelines(f"| {label} | {s:.1f} |\n" for label, s in rows)
+            out.write(f"| everything else | {took - sum(steps.values()):.1f} |\n")
+    if took > LIMIT_S:
+        failures.append(f"the journeys took {took:.1f} s, past their {LIMIT_S} s limit")
+    elif took > BUDGET_S:
+        print(f"::warning title=The app's journeys::took {took:.1f} s, over their {BUDGET_S} s budget")
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
+    began = time.monotonic()
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as playwright:
         directory = Path(temp)
         servers = []
@@ -2408,6 +2478,7 @@ def main():
             for server in servers:
                 server.terminate()
                 server.wait(timeout=10)
+    report(time.monotonic() - began, failures)
     if failures:
         sys.exit("\n".join(failures))
 
