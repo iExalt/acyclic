@@ -61,22 +61,15 @@ export function AddForm({
       data-dirty={title !== "" || id !== null}
       onSubmit={submit}
     >
-      <h2>Add {parent === null ? "at the top level" : <>inside {parentTitle}</>}</h2>
+      <div className="form-head">
+        <h2>New item</h2>
+        <p className="muted">{parent === null ? "At the top level" : <>Inside {parentTitle}</>}</p>
+      </div>
       {notice}
       <label>
         Title
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}
         <input name="title" value={title} autoFocus onChange={(event) => setTitle(event.target.value)} />
-      </label>
-      <label>
-        Id
-        <input
-          name="id"
-          ref={idField}
-          value={shownId}
-          aria-invalid={idRefused}
-          onChange={(event) => setId(event.target.value)}
-        />
       </label>
       <label>
         Thread
@@ -93,9 +86,24 @@ export function AddForm({
           ))}
         </select>
       </label>
+      <label>
+        Id
+        <span className="hint">
+          {idRefused
+            ? "Not accepted: see why above, and choose another."
+            : "Made from the title; change it if you like."}
+        </span>
+        <input
+          name="id"
+          ref={idField}
+          value={shownId}
+          aria-invalid={idRefused}
+          onChange={(event) => setId(event.target.value)}
+        />
+      </label>
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || title.trim() === ""}>
-          Add
+          Add item
         </button>
         <button type="button" className="quiet" onClick={onCancel}>
           Cancel

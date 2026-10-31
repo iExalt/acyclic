@@ -2,22 +2,26 @@
 // selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
 
 import { type ReactNode, useRef, useState } from "react";
-import type { Command, Item, Thread } from "./api";
+import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
-import { Icon, X } from "./icons";
+import { ArrowUpLeft, FolderInput, Icon, Link2, Pencil, Plus, RotateCcw, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
-import { StageCounts, StageLabel } from "./Stage";
+import { StageCounts, StageIcon, StageLabel } from "./Stage";
 import { stateWords } from "./stages";
 
 export interface InspectorProps {
   item: Item;
   titleOf: (id: string) => string;
+  /** A linked item's stage, to show beside it. */
+  stageOf: (id: string) => Stage | undefined;
   onSelect: (id: string) => void;
+  /** Picks the item's thread, which closes the item to show the thread's panel. */
+  onPickThread: (id: string) => void;
   onUnlink: (from: string, kind: LinkKind, to: string) => void;
   onMove: () => void;
   onLink: (kind: LinkKind) => void;
@@ -42,7 +46,9 @@ export interface InspectorProps {
 export function Inspector({
   item,
   titleOf,
+  stageOf,
   onSelect,
+  onPickThread,
   onUnlink,
   onMove,
   onLink,
@@ -60,11 +66,15 @@ export function Inspector({
   const [editing, setEditing] = useState(reopened !== null);
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
-  const chip = (id: string) => (
-    <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
-      <Prose text={titleOf(id)} />
-    </button>
-  );
+  const chip = (id: string) => {
+    const stage = stageOf(id);
+    return (
+      <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
+        {stage === undefined ? null : <StageIcon stage={stage} />}
+        <Prose text={titleOf(id)} />
+      </button>
+    );
+  };
   /** A list of links, each removable from the item that holds it. */
   const links = (label: string, ids: string[], unlink: (id: string) => void, testid: string) =>
     ids.length === 0 ? null : (
@@ -106,23 +116,33 @@ export function Inspector({
       </header>
       {notice}
       <dl className="facts">
-        <dt>Id</dt>
-        <dd>{item.id}</dd>
         <dt>Status</dt>
         <dd data-testid="state" className="status-value">
           <ItemStatus item={item} />
         </dd>
-        {item.thread === null ? null : (
-          <>
-            <dt>Thread</dt>
-            <dd className="line" style={lineStyle(lines.get(item.thread))}>
+        <dt>Thread</dt>
+        <dd>
+          {item.thread === null ? (
+            <span className="muted">None</span>
+          ) : (
+            <button
+              type="button"
+              className="chip line"
+              style={lineStyle(lines.get(item.thread))}
+              data-pick-thread={item.thread}
+              onClick={() => item.thread !== null && onPickThread(item.thread)}
+            >
               <Badge line={lines.get(item.thread)} />
-              {lines.get(item.thread)?.name ?? item.thread}
-            </dd>
-          </>
-        )}
-        <dt>In</dt>
-        <dd>{item.parent === null ? "the top level" : chip(item.parent)}</dd>
+              <Prose text={lines.get(item.thread)?.name ?? item.thread} />
+            </button>
+          )}
+        </dd>
+        <dt>Parent</dt>
+        <dd>{item.parent === null ? <span className="muted">Top level</span> : chip(item.parent)}</dd>
+        <dt>Id</dt>
+        <dd>
+          <code className="id">{item.id}</code>
+        </dd>
       </dl>
       <Conflicts item={item} titleOf={titleOf} busy={busy} onCommand={onCommand} />
       {editing ? (
@@ -142,25 +162,31 @@ export function Inspector({
           }}
         />
       ) : null}
-      <div className="actions">
+      <div className="actions toolbar">
         <button type="button" onClick={() => setEditing(true)} data-action="edit" disabled={editing || busy}>
+          <Icon of={Pencil} size={16} />
           Edit
         </button>
         {item.state === "done" ? (
           <button type="button" onClick={() => onCommand(reopenCommand(item.id))} data-action="reopen" disabled={busy}>
+            <Icon of={RotateCcw} size={16} />
             Reopen
           </button>
         ) : null}
         <button type="button" onClick={onAdd} data-action="add-child" disabled={busy}>
+          <Icon of={Plus} size={16} />
           Add inside
         </button>
         <button type="button" onClick={onMove} data-action="move" disabled={busy}>
+          <Icon of={FolderInput} size={16} />
           Move
         </button>
         <button type="button" onClick={() => onLink("waits-for")} data-action="waits-for" disabled={busy}>
+          <Icon of={ArrowUpLeft} size={16} />
           Waits for…
         </button>
         <button type="button" onClick={() => onLink("relates-to")} data-action="relates-to" disabled={busy}>
+          <Icon of={Link2} size={16} />
           Relates to…
         </button>
       </div>
@@ -169,9 +195,12 @@ export function Inspector({
       {links("Relates to", item.links.relates_to, (id) => onUnlink(item.id, "relates-to", id), "relates-to")}
       {links("Related from", item.links.related_from, (id) => onUnlink(id, "relates-to", item.id), "related-from")}
       {item.notes === null ? null : (
-        <p className="notes" data-testid="notes">
-          <Prose text={item.notes} />
-        </p>
+        <div className="notes-block">
+          <h3>Notes</h3>
+          <p className="notes" data-testid="notes">
+            <Prose text={item.notes} />
+          </p>
+        </div>
       )}
     </aside>
   );

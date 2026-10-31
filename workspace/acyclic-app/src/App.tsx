@@ -35,7 +35,7 @@ import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type U
 import { Shell, type View } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
-import { wavesView } from "./waves";
+import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -162,6 +162,7 @@ export function App() {
           ),
     [model, sorted, showArchived],
   );
+  const counts = useMemo(() => threadCounts(shown), [shown]);
   const waves = useMemo(
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
     [loaded, shown, outline],
@@ -528,7 +529,14 @@ export function App() {
             item={chosen}
             reopened={reopened?.id === chosen.id ? reopened.edited : null}
             titleOf={titleOf}
+            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             onSelect={(id) => select(id, selected)}
+            // The item closes so its thread's panel, the bottom layer, shows; Back from the panel doesn't bring the item
+            // back, as each layer has its one history entry.
+            onPickThread={(id) => {
+              setSelected(null);
+              setThread(id);
+            }}
             onUnlink={unlink}
             onMove={() => setMode({ kind: "move", item: chosen.id })}
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
@@ -584,7 +592,9 @@ export function App() {
             id={thread}
             globalLevel={load.level}
             line={lines.get(thread)}
+            counts={counts.get(thread)}
             titleOf={titleOf}
+            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             version={version}
             busy={busy}
             onCommand={(edit) => send(edit, { select: null, pin: null })}

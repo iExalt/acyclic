@@ -62,7 +62,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
           ))}
         </fieldset>
       )}
-      {views.length === 0 ? <p className="facts">Nothing to review.</p> : null}
+      {views.length === 0 ? <p className="empty">Nothing needs you. New approvals and blockers show here.</p> : null}
       <ul className="needs">
         {views.map((view) => (
           <li key={view.key} data-need={view.key}>
@@ -89,7 +89,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
                   <button
                     type="button"
                     key={action.label}
-                    className={PRIMARY.has(action.action) ? "primary" : undefined}
+                    className={PRIMARY.has(action.action) ? "primary" : "quiet"}
                     data-action={action.action}
                     disabled={busy}
                     onClick={() => onCommand(action.command)}

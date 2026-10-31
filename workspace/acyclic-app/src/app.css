@@ -144,6 +144,10 @@ h3,
 p {
   margin: 0;
 }
+/* A panel takes focus as it opens so keys reach it; the panel itself is no control to ring. */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -186,6 +190,11 @@ button.quiet,
 button.close {
   border-color: transparent;
   color: var(--muted);
+}
+/* Reversing what the user did, such as an approval: plain text in the danger colour, placed last. */
+button.danger-quiet {
+  border-color: transparent;
+  color: var(--danger);
 }
 button.close,
 button.icon {
@@ -966,6 +975,12 @@ dl.facts dt {
   color: var(--muted);
   font-size: 13px;
 }
+/* A fingertip's 44 px apart for the chips in rows above one another. */
+@media (pointer: coarse) {
+  dl.facts {
+    row-gap: 14px;
+  }
+}
 dl.facts dd {
   min-width: 0;
   margin: 0;
@@ -1202,6 +1217,81 @@ button.row {
   font-weight: 500;
   text-align: left;
 }
+/* A panel's parts. */
+.toolbar button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0 10px;
+  font-weight: 500;
+}
+code.id {
+  color: var(--muted);
+  font-size: 13px;
+}
+.thread-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0 6px;
+  color: var(--muted);
+}
+.thread-status.waiting {
+  color: var(--signal);
+  font-weight: 600;
+}
+.progress {
+  margin: 4px 0 8px;
+}
+.settings,
+.notes-block {
+  margin-top: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--rule);
+}
+.notes-block .notes {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.form-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+input[aria-invalid="true"] + .hint,
+.hint:has(+ input[aria-invalid="true"]) {
+  color: var(--danger);
+}
+.empty {
+  padding: 16px 0;
+  color: var(--muted);
+}
+/* A write in flight: a thin bar along the top of the views, as the panels' buttons wait. */
+.stage[data-busy="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 3;
+  height: 2px;
+  background: var(--accent);
+  animation: working 900ms ease-in-out infinite alternate;
+}
+@keyframes working {
+  from {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage[data-busy="true"]::before {
+    animation: none;
+  }
+}
+
 @media (min-width: 900px) {
   .inspector,
   .sheet.add {

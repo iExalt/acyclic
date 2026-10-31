@@ -719,8 +719,18 @@ def outline_journey(page, view, plan, name, failures):
             inspector.wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the phases' sheet closed {picked}'s too")
+    # The item's thread, picked from its panel, closes the item and opens the thread's panel, focus going to it.
+    inspector.locator(f"[data-pick-thread='{thread}']").click()
+    panel = page.get_by_test_id("thread-panel")
+    try:
+        inspector.wait_for(state="detached", timeout=5_000)
+        panel.wait_for(timeout=5_000)
+        if not panel.evaluate("p => p.contains(document.activeElement)"):
+            failures.append(f"{name}: picking {thread} from {picked}'s panel left focus outside the thread's")
+    except PlaywrightTimeout:
+        failures.append(f"{name}: picking {thread} from {picked}'s panel didn't swap it for the thread's")
     page.keyboard.press("Escape")
-    print(f"{name}: selecting {picked} marked its phase and its thread's row")
+    print(f"{name}: selecting {picked} marked its phase and its thread's row, and its thread opened from it")
 
 
 def threads_journey(page, view, env, name, failures):

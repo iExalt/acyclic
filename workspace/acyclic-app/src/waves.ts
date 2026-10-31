@@ -32,8 +32,8 @@ const NONE: Counts = {
   unthreaded: 0,
 };
 
-/** The cards for `listed`'s waves, counted from `items` and placed in `outline`'s phases. */
-export function wavesView(listed: Threads, items: readonly Item[], outline: Outline): WavesView {
+/** Each thread's leaves by stage, counted from `items`; parents and archived leaves have no stage, so none count. */
+export function threadCounts(items: readonly Item[]): Map<string, Counts> {
   const counts = new Map<string, Counts>();
   for (const item of items) {
     if (item.thread === null || item.stage === undefined) continue;
@@ -45,6 +45,12 @@ export function wavesView(listed: Threads, items: readonly Item[], outline: Outl
     else if (item.stage !== "done") was[item.stage] += 1;
     counts.set(item.thread, was);
   }
+  return counts;
+}
+
+/** The cards for `listed`'s waves, counted from `items` and placed in `outline`'s phases. */
+export function wavesView(listed: Threads, items: readonly Item[], outline: Outline): WavesView {
+  const counts = threadCounts(items);
   const wave = new Map<string, number>();
   listed.waves.forEach((ids, at) => {
     for (const id of ids) wave.set(id, at);

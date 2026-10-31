@@ -4,12 +4,19 @@
 import type { LucideIcon } from "lucide-react";
 
 export {
+  ArrowUpLeft,
+  Check,
   ChevronRight,
+  CircleAlert,
+  FolderInput,
   Inbox,
+  Link2,
   ListTree,
   Map as MapIcon,
   MoreHorizontal,
+  Pencil,
   Plus,
+  RotateCcw,
   Waypoints,
   X,
 } from "lucide-react";
