@@ -24,7 +24,7 @@ import tempfile
 import time
 from collections import Counter
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
@@ -496,6 +496,61 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         failures.append(f"{name}: links threw {errors}")
     page.close()
     print(f"{name}: a link opened {id}, Back and a reload kept to it, and a stale link said so")
+
+def command_journey(page, view, origin, plan, name, failures):
+    """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
+    dismissed; on a phone, from the Map, Back then closes the item and comes home."""
+    id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
+    title = plan.items[id]["title"]
+    to_map(page)
+    menu = page.get_by_test_id("command-menu")
+    if view.get("has_touch"):
+        page.locator("[data-action=search]").tap()
+    else:
+        page.keyboard.press("ControlOrMeta+k")
+    menu.wait_for(timeout=5_000)
+    page.keyboard.type(title)
+    row = page.locator(f".command-row[data-command='item:{id}']")
+    row.wait_for(timeout=5_000)
+    if view.get("has_touch"):
+        row.tap()
+    else:
+        # The first found is chosen; ↓ and ↑ come back to it.
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("ArrowUp")
+        if row.get_attribute("aria-selected") != "true":
+            failures.append(f"{name}: the command menu didn't choose {id} first for its own title")
+        page.keyboard.press("Enter")
+    heading = page.locator("[data-testid=inspector] h2")
+    heading.wait_for(timeout=5_000)
+    menu.wait_for(state="detached", timeout=5_000)
+    # Over whatever else is open, such as a thread's panel the journeys before left.
+    if heading.inner_text() != title or parse_qs(urlsplit(page.url).query).get("item") != [id]:
+        failures.append(f"{name}: the command menu opened {heading.inner_text()!r} at {page.url}, not {id}")
+    if view.get("has_touch"):
+        page.go_back()
+        heading.wait_for(state="detached", timeout=5_000)
+        page.go_back()
+        page.get_by_test_id("overview").wait_for(timeout=5_000)
+        if page.url != f"{origin}/":
+            failures.append(f"{name}: Back after the command menu's item didn't come home: {page.url}")
+        # The Map again, for the journeys after.
+        to_map(page)
+    else:
+        # Dismissed, the focus goes back to where it was: the item's panel, still open under it.
+        if not page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')"):
+            failures.append(f"{name}: the item the command menu opened didn't take the focus")
+        page.keyboard.press("ControlOrMeta+k")
+        menu.wait_for(timeout=5_000)
+        page.keyboard.press("Escape")
+        menu.wait_for(state="detached", timeout=5_000)
+        back = page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')")
+        if not back or not heading.count():
+            failures.append(f"{name}: Escape from the command menu didn't leave the item open, focused")
+        page.keyboard.press("Escape")
+        heading.wait_for(state="detached", timeout=5_000)
+    print(f"{name}: the command menu found {id} by its title and opened it")
+
 
 def installable(context, page, origin, name, failures):
     cdp = context.new_cdp_session(page)
@@ -2005,6 +2060,7 @@ def main():
                 outline_journey(page, view, plan, name, failures)
                 threads_journey(page, view, env, name, failures)
                 deep_link_journey(context, origin, view, plan, name, failures)
+                command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:

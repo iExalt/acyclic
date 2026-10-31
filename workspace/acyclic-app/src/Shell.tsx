@@ -2,11 +2,14 @@
 // and the views along the bottom; a wider screen has a quiet sidebar.
 
 import type { ReactNode } from "react";
-import { Icon, Inbox, LayoutDashboard, ListTree, MapIcon, Plus, Waypoints } from "./icons";
+import { isMac } from "./commands";
+import { Icon, Inbox, LayoutDashboard, ListTree, MapIcon, Plus, Search, Waypoints } from "./icons";
 import { Menu } from "./Menu";
 import { countText } from "./needs";
 
 export type View = "overview" | "map" | "threads";
+
+const MAC = isMac(navigator.platform);
 
 /** The view the app opens on, and Back on a phone returns to before it leaves the app. */
 export const HOME: View = "overview";
@@ -36,6 +39,8 @@ export interface ShellProps {
   /** On a phone, the outline is a sheet: whether it is open, and what opens or closes it. */
   outlineOpen: boolean;
   onOutline: () => void;
+  /** Opens the command menu. */
+  onSearch: () => void;
   /** The views and what opens over them. */
   children: ReactNode;
 }
@@ -127,6 +132,20 @@ function SidebarShell(props: ShellProps) {
         <div className="workspace">
           <Wordmark />
         </div>
+        <button
+          type="button"
+          className="search"
+          onClick={props.onSearch}
+          data-action="search"
+          aria-keyshortcuts={MAC ? "Meta+K" : "Control+K"}
+        >
+          <Icon of={Search} />
+          <span className="grow">Search or jump to…</span>
+          {/* The shortcut, for the eye; assistive technology has it from aria-keyshortcuts. */}
+          <span className="kbd" aria-hidden="true">
+            {MAC ? "⌘K" : "Ctrl K"}
+          </span>
+        </button>
         <nav className="views" aria-label="Views">
           <ViewLinks view={props.view} onView={props.onView} />
           <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
@@ -163,6 +182,9 @@ function PhoneShell(props: ShellProps) {
             <Count count={props.count} />, autonomy {props.autonomy}
           </p>
         </div>
+        <button type="button" className="icon" aria-label="Search" onClick={props.onSearch} data-action="search">
+          <Icon of={Search} size={22} />
+        </button>
         <button
           type="button"
           className="icon phases-button"

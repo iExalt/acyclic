@@ -72,6 +72,7 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Needs-you mark:** a "!" on the amber fill.
 - **Notices:** a refusal, a failure or something to copy, with its own Dismiss; in the panel on top, under its heading,
   else over the Map.
+- **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
 ## Interaction conventions
@@ -86,6 +87,11 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived
   item shows archived items, with Hide archived. An item's and a thread's panels carry Copy link, which ticks in
   place. A device not yet paired loses the address through pairing.
+- **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
+  Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
+  thread, phase and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
+  the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the focus back
+  where it was.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused

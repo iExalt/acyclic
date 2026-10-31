@@ -467,6 +467,30 @@ button.icon[aria-pressed="true"] {
   display: grid;
   gap: 1px;
 }
+/* Search, the command menu's way in: a quiet field-like button, its shortcut at its end. */
+.sidebar button.search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  margin: 4px 0 8px;
+  padding: 0 8px 0 10px;
+  border-color: var(--rule);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+  text-align: start;
+}
+.kbd {
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .sidebar button.view,
 .sidebar button.new {
   width: 100%;
@@ -1375,5 +1399,112 @@ button.more {
   .wave.anytime {
     padding-left: 32px;
     border-left: 1px dashed var(--edge);
+  }
+}
+
+/* The command menu: a dialog over everything, a field over the list it finds. Wide, a panel high in the middle of the
+   screen; on a phone, the whole screen, the field at the top where the keyboard leaves it in view. */
+.command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgb(0 0 0 / 0.4);
+}
+.command {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(480px, calc(100dvh - 96px));
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.35);
+}
+.command-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+}
+.command-field input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  /* 16 px, so a phone doesn't zoom in on the field. */
+  font-size: 16px;
+  outline: none;
+}
+.command-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 6px 8px;
+}
+.command-group {
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.command-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--hit);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+/* The option chosen: a fill, and a bar at its start, so it reads without colour. */
+.command-row[aria-selected="true"] {
+  background: var(--tile);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.command-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  color: var(--muted);
+}
+.command-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.command-title,
+.command-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-detail {
+  color: var(--muted);
+  font-size: 13px;
+}
+.command-none {
+  margin: 0;
+  padding: 16px;
+}
+@media (max-width: 899px) {
+  .command-backdrop {
+    padding: 0;
+  }
+  .command {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
   }
 }

@@ -1,0 +1,236 @@
+// The command menu's contents: what it can do and go to, and which of those a query finds, best first. Pure, so the
+// ranking is tested without a browser.
+
+import type { Model } from "./map/model";
+import { inArchived } from "./map/model";
+import { natural } from "./natural";
+import type { View } from "./Shell";
+
+export type Run =
+  | { kind: "view"; view: View }
+  | { kind: "needs" }
+  | { kind: "add" }
+  | { kind: "archived" }
+  | { kind: "refresh" }
+  | { kind: "item"; id: string }
+  | { kind: "thread"; id: string }
+  | { kind: "phase"; id: string }
+  /** The target of a move or link waiting for one: an item, or the top level for a move. */
+  | { kind: "target"; id: string | null };
+
+export type Group = "Actions" | "Threads" | "Phases" | "Items";
+/** The order groups list in, and break ties in. */
+export const GROUP_ORDER: readonly Group[] = ["Actions", "Threads", "Phases", "Items"];
+
+export interface Entry {
+  /** Unique among entries, for the list's keys and the active option. */
+  key: string;
+  group: Group;
+  title: string;
+  /** A second, quieter line: an item's id and phase, a thread's number. */
+  detail: string | null;
+  /** Searched beside the title: an item's or phase's id, a thread's number. */
+  also: string;
+  run: Run;
+  /** The title and `also`, folded once when listed rather than on every key typed. */
+  folded: { title: string; also: string };
+}
+
+/** An entry, folded for matching. */
+export function entry(fields: Omit<Entry, "folded">): Entry {
+  return { ...fields, folded: { title: fold(fields.title), also: fold(fields.also) } };
+}
+
+/** At most this many found, which is more than a screen holds. */
+export const MOST = 50;
+
+export interface Plan {
+  model: Model;
+  /** Threads by number, each with its badge's number and its name. */
+  threads: readonly { id: string; number: string | null; name: string }[];
+  /** The threads at work, listed before a query is typed. */
+  working: ReadonlySet<string>;
+  showArchived: boolean;
+}
+
+/** Every entry the menu can find in `plan`: actions, threads, phases, then items, archived ones only while shown. */
+export function entries(plan: Plan): Entry[] {
+  const actions: Entry[] = [
+    ...(["overview", "map", "threads"] as const).map((view) =>
+      entry({
+        key: `view:${view}`,
+        group: "Actions",
+        title: `Go to ${view === "overview" ? "Overview" : view === "map" ? "Map" : "Threads"}`,
+        detail: null,
+        also: "",
+        run: { kind: "view", view },
+      }),
+    ),
+    entry({ key: "needs", group: "Actions", title: "Open Needs you", detail: null, also: "", run: { kind: "needs" } }),
+    entry({ key: "add", group: "Actions", title: "New item", detail: null, also: "add", run: { kind: "add" } }),
+    entry({
+      key: "archived",
+      group: "Actions",
+      title: plan.showArchived ? "Hide archived items" : "Show archived items",
+      detail: null,
+      also: "",
+      run: { kind: "archived" },
+    }),
+    entry({
+      key: "refresh",
+      group: "Actions",
+      title: "Refresh",
+      detail: null,
+      also: "reload",
+      run: { kind: "refresh" },
+    }),
+  ];
+  const threads = plan.threads.map((thread) =>
+    entry({
+      key: `thread:${thread.id}`,
+      group: "Threads",
+      title: thread.name,
+      detail: thread.number === null ? null : `Thread ${thread.number}`,
+      also: thread.number ?? thread.id,
+      run: { kind: "thread", id: thread.id },
+    }),
+  );
+  const phases: Entry[] = [];
+  const items: Entry[] = [];
+  for (const { id, title, phase, isPhase } of listed(plan))
+    if (isPhase)
+      phases.push(
+        entry({ key: `phase:${id}`, group: "Phases", title, detail: id, also: id, run: { kind: "phase", id } }),
+      );
+    else
+      items.push(
+        entry({
+          key: `item:${id}`,
+          group: "Items",
+          title,
+          detail: detail(id, phase),
+          also: id,
+          run: { kind: "item", id },
+        }),
+      );
+  return [...actions, ...threads, ...phases, ...items];
+}
+
+/**
+ * What a move or a link waiting for its target can be pointed at from the menu: any item shown, phases among them, and
+ * for a move the top level first.
+ */
+export function targets(plan: Plan, pick: "move" | "link"): Entry[] {
+  const top =
+    pick === "move"
+      ? [
+          entry({
+            key: "target:top",
+            group: "Actions",
+            title: "Top level",
+            detail: null,
+            also: "",
+            run: { kind: "target", id: null },
+          }),
+        ]
+      : [];
+  return [
+    ...top,
+    ...listed(plan).map(({ id, title, phase }) =>
+      entry({
+        key: `target:${id}`,
+        group: "Items",
+        title,
+        detail: detail(id, phase),
+        also: id,
+        run: { kind: "target", id },
+      }),
+    ),
+  ];
+}
+
+const detail = (id: string, phase: string | null) => (phase === null ? id : `${id} in ${phase}`);
+
+/** Every item shown, with the title of the phase it is in, and whether it is a phase: a top-level item with children. */
+function listed({ model, showArchived }: Plan) {
+  const shown = (id: string) => showArchived || !inArchived(model, id);
+  /** The title of the phase an item is in, from its top-level ancestor; parents that loop end the walk. */
+  const phaseOf = (id: string) => {
+    const seen = new Set([id]);
+    let top = id;
+    for (let up = model.items.get(id)?.parent ?? null; up !== null && model.items.has(up) && !seen.has(up); ) {
+      seen.add(up);
+      top = up;
+      up = model.items.get(up)?.parent ?? null;
+    }
+    return top === id ? null : (model.items.get(top)?.title ?? null);
+  };
+  const roots = new Set(model.roots);
+  return [...model.items.values()]
+    .filter((item) => shown(item.id))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      phase: phaseOf(item.id),
+      isPhase: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
+    }));
+}
+
+/** Folded for matching: case and accents set aside, so "resume" finds "Résumé". */
+export const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * The entries `query` finds, best first, at most `MOST`: every word of it must be in the title or the id. A title
+ * starting with the whole query comes first, then one where every word starts a word, then any match in the title,
+ * then one in the id alone; ties go by group, then title. Then grouped, the group of the best first. With nothing
+ * typed, the actions and the threads at work.
+ */
+export function rank(query: string, all: readonly Entry[], working: ReadonlySet<string>): Entry[] {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const byGroup = (a: Entry, b: Entry) =>
+    GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || natural(a.title, b.title);
+  if (words.length === 0)
+    return all
+      .filter((entry) => entry.group === "Actions" || (entry.run.kind === "thread" && working.has(entry.run.id)))
+      .slice(0, MOST);
+  const whole = words.join(" ");
+  const starts = words.map((word) => new RegExp(`(^|[^\\p{L}\\p{N}])${escaped(word)}`, "u"));
+  const found: { entry: Entry; score: number }[] = [];
+  for (const entry of all) {
+    const { title, also } = entry.folded;
+    if (!words.every((word) => title.includes(word) || also.includes(word))) continue;
+    const score = title.startsWith(whole)
+      ? 0
+      : starts.every((start) => start.test(title))
+        ? 1
+        : words.every((word) => title.includes(word))
+          ? 2
+          : 3;
+    found.push({ entry, score });
+  }
+  const best = found
+    .sort((a, b) => a.score - b.score || byGroup(a.entry, b.entry))
+    .slice(0, MOST)
+    .map(({ entry }) => entry);
+  // Listed by group, the group of the best first, each in its own order: what ↑ and ↓ move through is what shows.
+  const groups = [...new Set(best.map((one) => one.group))];
+  return groups.flatMap((group) => best.filter((one) => one.group === group));
+}
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Whether the platform's command key is ⌘ rather than Ctrl. */
+export const isMac = (platform: string) => /mac|iphone|ipad|ipod/i.test(platform);
+
+/**
+ * Whether a key press opens (or closes) the command menu: ⌘K on a Mac, Ctrl+K elsewhere, with no other modifier, and
+ * never a key an input method is composing with, which would take a character from the user's typing.
+ */
+export function opensMenu(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">,
+  mac: boolean,
+): boolean {
+  if (event.isComposing || event.keyCode === 229) return false;
+  if (event.key.toLowerCase() !== "k" || event.altKey || event.shiftKey) return false;
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}

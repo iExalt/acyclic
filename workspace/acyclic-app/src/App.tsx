@@ -3,6 +3,8 @@ import { AddForm } from "./AddForm";
 import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
+import { CommandMenu } from "./CommandMenu";
+import { entries as commandEntries, isMac, opensMenu, type Run, targets } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -35,6 +37,7 @@ import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type U
 import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
+import { threadLists } from "./threadLists";
 import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
@@ -87,6 +90,8 @@ export function App() {
   const [thread, setThread] = useState<string | null>(null);
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
+  /** The command menu, over everything. */
+  const [showCommand, setShowCommand] = useState(false);
   /** The Map, or the threads in waves over it. */
   const [view, setView] = useState<View>(HOME);
   const wide = useWide();
@@ -304,6 +309,7 @@ export function App() {
     [model, mode, send],
   );
   const open: Open = {
+    command: showCommand,
     mode: mode.kind !== "idle",
     adding: adding !== null,
     item: chosen !== undefined,
@@ -312,7 +318,11 @@ export function App() {
     thread: thread !== null,
     away: !wide && view !== HOME,
   };
-  const top = topLayer(open);
+  /**
+   * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
+   * a form under it keeps what the user typed.
+   */
+  const panel = topLayer({ ...open, command: false });
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
@@ -320,23 +330,25 @@ export function App() {
     setFormsClosed((was) => was + 1);
   }, []);
   // What's on top changing takes the add form, or the item's editor, with it.
-  useEffect(formClosed, [top]);
+  useEffect(formClosed, [panel]);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
    */
   const closeTop = useRef<(count: number) => number>(() => 0);
   closeTop.current = (count) => {
-    if (document.querySelector("form[data-dirty='true']") !== null) {
+    const closing = openLayers(open).slice(0, count);
+    // The command menu closes over a form without touching it.
+    if (closing.some((layer) => layer !== "command") && document.querySelector("form[data-dirty='true']") !== null) {
       // A link waiting for the form says so already, and dismissing that drops it.
       setNotice((was) =>
         was?.held ? was : { text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true },
       );
       return 0;
     }
-    const closing = openLayers(open).slice(0, count);
     for (const layer of closing) {
-      if (layer === "mode") setMode({ kind: "idle" });
+      if (layer === "command") setShowCommand(false);
+      else if (layer === "mode") setMode({ kind: "idle" });
       else if (layer === "add") setAdding(null);
       else if (layer === "item") setSelected(null);
       else if (layer === "needs") setShowNeeds(false);
@@ -347,8 +359,15 @@ export function App() {
     return closing.length;
   };
   useEffect(() => {
+    const mac = isMac(navigator.platform);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
+      // Taken from the browser only when it opens or closes the menu: the listener is the app's page's, so only while
+      // the app has the focus.
+      else if (opensMenu(event, mac)) {
+        event.preventDefault();
+        setShowCommand((was) => !was);
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -532,6 +551,56 @@ export function App() {
     setAdding({ parent, idRefused: false, draft: null });
   };
   const add = (item: NewItem) => send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
+  /**
+   * Runs what the command menu chose, once it has closed. Going somewhere never closes a form holding what the user
+   * typed: that says how to leave it instead, as Escape does.
+   */
+  const runCommand = (run: Run) => {
+    setShowCommand(false);
+    if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
+    if (run.kind === "archived") return setShowArchived((was) => !was);
+    if (run.kind === "refresh") return refresh();
+    if (document.querySelector("form[data-dirty='true']") !== null)
+      return setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+    if (run.kind === "view") setView(run.view);
+    else if (run.kind === "needs") openNeeds();
+    else if (run.kind === "add") startAdd(null);
+    else if (run.kind === "thread") {
+      setSelected(null);
+      setThread(run.id);
+    } else select(run.id, null);
+  };
+  const picking = mode.kind === "idle" ? null : mode;
+  const commandMenu = showCommand ? (
+    <CommandMenu
+      entries={
+        picking === null
+          ? commandEntries({
+              model: model ?? buildModel([]),
+              threads: sorted.map((one) => ({
+                id: one.id,
+                number: lines.get(one.id)?.number ?? null,
+                name: lines.get(one.id)?.name ?? one.id,
+              })),
+              working: new Set(threadLists(counts, waves).working),
+              showArchived,
+            })
+          : targets({ model: model ?? buildModel([]), threads: [], working: new Set(), showArchived }, picking.kind)
+      }
+      placeholder={
+        picking === null
+          ? "Search the plan, or type a command"
+          : picking.kind === "move"
+            ? `Find where to put ${titleOf(picking.item)}`
+            : `Find what ${titleOf(picking.item)} ${picking.link === "waits-for" ? "waits for" : "relates to"}`
+      }
+      working={new Set(threadLists(counts, waves).working)}
+      lines={lines}
+      stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
+      onRun={runCommand}
+      onDismiss={() => closeTop.current(1)}
+    />
+  ) : null;
   const unlink = (from: string, kind: LinkKind, to: string) =>
     send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
@@ -678,6 +747,7 @@ export function App() {
       }
       outlineOpen={showPhases}
       onOutline={() => setShowPhases((was) => !was)}
+      onSearch={() => setShowCommand(true)}
     >
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
@@ -729,8 +799,9 @@ export function App() {
             </button>
           </div>
         ) : null}
-        {top === "add" || top === "item" || top === "thread" || top === "needs" ? null : noticeView}
-        {top === "mode" ? (
+        {commandMenu}
+        {panel === "add" || panel === "item" || panel === "thread" || panel === "needs" ? null : noticeView}
+        {panel === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">
             <span className="grow">{prompt}</span>
             {mode.kind === "move" ? (
@@ -742,7 +813,7 @@ export function App() {
               Cancel
             </button>
           </div>
-        ) : top === "add" && adding !== null ? (
+        ) : panel === "add" && adding !== null ? (
           <AddForm
             key={adding.parent ?? ""}
             parent={adding.parent}
@@ -757,7 +828,7 @@ export function App() {
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
-        ) : top !== "item" || chosen === undefined ? null : (
+        ) : panel !== "item" || chosen === undefined ? null : (
           <Inspector
             key={`${chosen.id}:${reopened?.id === chosen.id ? reopened.n : 0}`}
             item={chosen}
@@ -788,7 +859,7 @@ export function App() {
             busy={busy}
           />
         )}
-        {top === "needs" ? (
+        {panel === "needs" ? (
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
@@ -805,7 +876,7 @@ export function App() {
             at={needsAt}
           />
         ) : null}
-        {top === "phases" && outline !== null ? (
+        {panel === "phases" && outline !== null ? (
           <PhasesSheet onClose={() => setShowPhases(false)}>
             <Phases
               outline={outline}
@@ -823,7 +894,7 @@ export function App() {
             />
           </PhasesSheet>
         ) : null}
-        {top === "thread" && thread !== null ? (
+        {panel === "thread" && thread !== null ? (
           <ThreadPanel
             key={thread}
             id={thread}
