@@ -37,18 +37,16 @@ const ENTER = 12;
 const SPACING = 6;
 /** The room between a column's last card and the first row below it. */
 const BELOW = 12;
-/** A gap's width after the last wave, when nothing stands beyond it. */
-const OPEN = 56;
 /** How near two level runs from different threads may come before they read as one. */
 const APART = 3;
 /** How near a card's corner a point on its edge may come. */
 const INSET = 4;
 
 /**
- * The routes of `waits` between `columns`, the waves in order. `beyond` is where whatever stands right of the last
- * wave begins, or null when nothing does. A wait between cards not drawn, or against the waves' order, has none.
+ * The routes of `waits` between `columns`, the waves in order. `beyond` is where the gap after the last wave ends,
+ * as wide as `gapWidths` says. A wait between cards not drawn, or against the waves' order, has none.
  */
-export function routes(columns: readonly Column[], waits: readonly Wait[], beyond: number | null): Route[] {
+export function routes(columns: readonly Column[], waits: readonly Wait[], beyond: number): Route[] {
   const where = new Map<string, { wave: number; box: Box }>();
   columns.forEach((column, wave) => {
     for (const card of column.cards) where.set(card.id, { wave, box: card.box });
@@ -79,7 +77,7 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
     const using = sources.filter((source) => passing[gap]?.has(source));
     if (using.length === 0) return;
     const left = here.right + LEAVE;
-    const right = (extent[gap + 1]?.left ?? beyond ?? here.right + OPEN) - ENTER;
+    const right = (extent[gap + 1]?.left ?? beyond) - ENTER;
     const spacing = Math.min(SPACING, Math.max(0, right - left) / (using.length + 1));
     const start = (left + right) / 2 - (spacing * (using.length - 1)) / 2;
     using.forEach((source, at) => {
@@ -134,7 +132,7 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
         y <= box.bottom - INSET &&
         clear(wave - 1, y, x, source, false) &&
         [...ports.entries()].every(([key, other]) => !key.startsWith(`in ${id} `) || Math.abs(other - y) >= APART);
-      const y = nudged(slot(box, at, entering.length), fits);
+      const y = nudged(slot(box, at, entering.length), box.bottom - box.top, fits);
       ports.set(`in ${id} ${source}`, y);
       run(wave - 1, y, x, source, false);
     });
@@ -234,9 +232,9 @@ function gapUsers(wave: ReadonlyMap<string, number>, waits: readonly Wait[]): Se
   return users;
 }
 
-/** `y`, or the nearest height a few pixels at a time either side of it that `fits`; `y` when none within reach. */
-function nudged(y: number, fits: (y: number) => boolean): number {
-  for (let step = 0; step <= 40; step += 2) {
+/** `y`, or the nearest height a pixel at a time either side of it, up to `reach`, that `fits`; `y` when none does. */
+function nudged(y: number, reach: number, fits: (y: number) => boolean): number {
+  for (let step = 0; step <= reach; step += 1) {
     if (fits(y + step)) return y + step;
     if (fits(y - step)) return y - step;
   }

@@ -171,7 +171,7 @@ function Arrows({
         };
       });
       const last = host.querySelector(`[data-wave="${view.waves.length}"]`);
-      const beyond = last === null ? null : box(last).right + (widths[view.waves.length - 1] ?? 0);
+      const beyond = (last === null ? 0 : box(last).right) + (widths[view.waves.length - 1] ?? GAP);
       const routed = routes(columns, waits, beyond);
       const bounds = boundsOf(routed);
       setFound(routed);
