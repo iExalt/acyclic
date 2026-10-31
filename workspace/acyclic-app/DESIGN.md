@@ -38,12 +38,14 @@ and a unit test keeps the two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
   Map's items and boxes).
-- **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls.
+- **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
+  around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
 - **Signal:** amber, as the "!" badge's fill; as text, a dark brown in the light scheme that reads at 4.5:1. What
   needs the user, conflicts, and links that cross boxes.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
-  a lit thread, falls below that on purpose: it is there to recede.
+  a lit thread, falls below that on purpose: it is there to recede. A dimmed task fades its fill and marks but keeps its
+  title muted at full strength, since it can still be picked.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an OKLCH lightness band per scheme, so every line's badge takes a readable ink.
 
@@ -89,9 +91,9 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
   (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
-  muted rows, then its decision, compact, after what it acts on. An approval lists every item it covers, so its count
-  and its list agree; an entry the app can only show says what failed and what fixes it. A hairline between entries;
-  the filters are tabs, the one shown filled.
+  muted rows, then its decision, compact, after what it acts on. An approval lists the first five items it covers and
+  says how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes
+  it. A hairline between entries; the filters are tabs, the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
@@ -128,6 +130,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
   what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands). The notice stays until
   dismissed or the next write.
+- **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
+  its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
+  the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
+  screen reader politely.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
