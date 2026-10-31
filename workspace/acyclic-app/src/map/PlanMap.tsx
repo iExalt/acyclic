@@ -30,7 +30,7 @@ const HOVERABLE = "node.leaf, node.collapsed";
 const fontLoaded: Promise<unknown> =
   typeof document === "undefined" || !("fonts" in document)
     ? Promise.resolve()
-    : Promise.all([document.fonts.load("500 13px Overpass"), document.fonts.load("700 13px Overpass")]).catch(
+    : Promise.all([document.fonts.load("500 13px Inter"), document.fonts.load("700 13px Inter")]).catch(
         () => undefined,
       );
 
@@ -290,7 +290,7 @@ export default function PlanMap({
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
     element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
-    element.dataset.font = String(document.fonts?.check("500 13px Overpass") ?? false);
+    element.dataset.font = String(document.fonts?.check("500 13px Inter") ?? false);
     // Drawn once the browser has painted the frame after this one's changes.
     const drawing = performance.now();
     requestAnimationFrame(() =>

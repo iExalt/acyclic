@@ -8,7 +8,7 @@ import { STRIP } from "./chevron";
 import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
-export const FONT = "Overpass, system-ui, sans-serif";
+export const FONT = "Inter, system-ui, sans-serif";
 
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>

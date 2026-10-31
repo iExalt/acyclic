@@ -38,12 +38,12 @@ function fontNotice(): Plugin {
     name: "acyclic-font-notice",
     apply: "build",
     writeBundle() {
-      const font = "node_modules/@fontsource-variable/overpass";
+      const font = "node_modules/@fontsource-variable/inter";
       const { version } = JSON.parse(readFileSync(`${font}/package.json`, "utf8")) as { version: string };
       const text = readFileSync(`${font}/LICENSE`, "utf8");
       appendFileSync(
         "dist/licenses.txt",
-        `\n\n---\n\nName: @fontsource-variable/overpass\nVersion: ${version}\nLicense: OFL-1.1\nLicense Text:\n===\n\n${text}`,
+        `\n\n---\n\nName: @fontsource-variable/inter\nVersion: ${version}\nLicense: OFL-1.1\nLicense Text:\n===\n\n${text}`,
       );
     },
   };
