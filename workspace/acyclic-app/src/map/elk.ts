@@ -26,6 +26,9 @@ const LAYERED = {
   // port, which splits on the way. Shared on both ends, an outgoing trunk and an incoming one could run as one line, and
   // a link would seem to join two items it doesn't.
   "elk.layered.mergeEdges": "false",
+  // Of the placements Brandes and Köpf's method makes, their balance: a task waiting on two sits centred under them,
+  // as each pulls it equally, not under whichever the first placement favoured.
+  "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   // Room at the top for the box's title strip.
   "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
