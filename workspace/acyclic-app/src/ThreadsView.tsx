@@ -2,12 +2,16 @@
 // start any time apart. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
 // hovered thread's stand out. A card always says what it comes after, so the arrows are never the only telling.
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { countsText } from "./api";
+import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
 import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 import type { Card, WavesView } from "./waves";
+
+/** The room between columns when wide, as app.css sets it. */
+const GAP = 64;
 
 export interface ThreadsViewProps {
   view: WavesView;
@@ -58,13 +62,48 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
     );
   };
   const empty = view.waves.length === 0 && view.anytime.length === 0;
+  const waits = useMemo(
+    () =>
+      view.waves
+        .flat()
+        .flatMap((card) => [
+          ...card.after.map((from) => ({ from, to: card.id, looped: false })),
+          ...card.looped.map((from) => ({ from, to: card.id, looped: true })),
+        ]),
+    [view],
+  );
+  // Each gap as wide as its lanes need: the columns stand GAP apart, and a crowded gap takes the rest as a margin.
+  const widths = useMemo(
+    () =>
+      gapWidths(
+        view.waves.map((cards) => cards.map((card) => card.id)),
+        waits,
+        GAP,
+      ),
+    [view, waits],
+  );
   return (
     <section className="waves" data-testid="threads-view" aria-label="Threads in waves">
       {empty ? <p className="status">No thread has work left.</p> : null}
       <div className="columns" ref={setColumns}>
-        {wide ? <Arrows view={view} lines={lines} lit={hovered ?? picked} within={columns} /> : null}
+        {wide ? (
+          <Arrows view={view} waits={waits} widths={widths} lines={lines} lit={hovered ?? picked} within={columns} />
+        ) : null}
         {view.waves.map((cards, at) => (
-          <section key={at} className="wave" data-wave={at + 1} aria-label={`Wave ${at + 1}`}>
+          <section
+            key={at}
+            className="wave"
+            data-wave={at + 1}
+            aria-label={`Wave ${at + 1}`}
+            style={
+              wide
+                ? {
+                    marginRight:
+                      (widths[at] ?? GAP) - (at + 1 < view.waves.length || view.anytime.length > 0 ? GAP : 0),
+                  }
+                : undefined
+            }
+          >
             <h2>
               Wave {at + 1} <small>{at === 0 ? "start here" : `after wave ${at}`}</small>
             </h2>
@@ -84,109 +123,89 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
   );
 }
 
-interface Arrow {
-  key: string;
-  from: string;
-  to: string;
-  path: string;
-  /** Its head, a small triangle at its end, pointing the way it goes in. */
-  head: string;
-  looped: boolean;
-}
-
-/** A head at (x, y), pointing right, or left when `back`. */
-const head = (x: number, y: number, back: boolean) => {
-  const tail = back ? x + 7 : x - 7;
-  return `M ${x} ${y} L ${tail} ${y - 4} L ${tail} ${y + 4} z`;
-};
-
 /**
- * An arrow from each thread to each thread after it that waits on it, from the one's right edge to the other's left,
- * and between two in one wave, which wait on each other, along their right edges. Measured from the cards as drawn,
- * again whenever the columns change size.
+ * An arrow from each thread to each thread after it that waits on it, and between two in one wave, which wait on each
+ * other, routed through the gaps so none crosses a card. Measured from the cards as drawn, again whenever the
+ * columns change size.
  */
 function Arrows({
   view,
+  waits,
+  widths,
   lines,
   lit,
   within,
 }: {
   view: WavesView;
+  waits: Wait[];
+  widths: number[];
   lines: ReadonlyMap<string, Line>;
   lit: string | null;
   within: HTMLDivElement | null;
 }) {
-  const [arrows, setArrows] = useState<Arrow[]>([]);
+  const [found, setFound] = useState<Route[]>([]);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useLayoutEffect(() => {
     const host = within;
     if (host === null) return;
     const measure = () => {
       const origin = host.getBoundingClientRect();
-      const box = (id: string) => {
-        const at = host.querySelector(`[data-card="${CSS.escape(id)}"]`)?.getBoundingClientRect();
-        return at === undefined
-          ? null
-          : {
-              left: at.left - origin.left + host.scrollLeft,
-              right: at.right - origin.left + host.scrollLeft,
-              middle: (at.top + at.bottom) / 2 - origin.top + host.scrollTop,
-            };
+      const box = (element: Element): Box => {
+        const at = element.getBoundingClientRect();
+        return {
+          left: at.left - origin.left,
+          top: at.top - origin.top,
+          right: at.right - origin.left,
+          bottom: at.bottom - origin.top,
+        };
       };
-      const found: Arrow[] = [];
-      for (const card of view.waves.flat()) {
-        const to = box(card.id);
-        if (to === null) continue;
-        for (const [first, looped] of [
-          ...card.after.map((id) => [id, false] as const),
-          ...card.looped.map((id) => [id, true] as const),
-        ]) {
-          const from = box(first);
-          if (from === null) continue;
-          const path = looped
-            ? `M ${from.right} ${from.middle} C ${from.right + 28} ${from.middle}, ${to.right + 28} ${to.middle}, ${to.right} ${to.middle}`
-            : `M ${from.right} ${from.middle} C ${from.right + 40} ${from.middle}, ${to.left - 40} ${to.middle}, ${to.left} ${to.middle}`;
-          const end = looped ? head(to.right, to.middle, true) : head(to.left, to.middle, false);
-          found.push({ key: `${first}->${card.id}`, from: first, to: card.id, path, head: end, looped });
-        }
-      }
-      setArrows(found);
-      setSize({ width: host.scrollWidth, height: host.scrollHeight });
+      const columns: Column[] = view.waves.map((cards, at) => {
+        const wave = host.querySelector(`[data-wave="${at + 1}"]`);
+        const heading = wave?.querySelector("h2");
+        return {
+          heading: heading ? box(heading) : { left: 0, top: 0, right: 0, bottom: 0 },
+          cards: cards.flatMap((card) => {
+            const drawn = wave?.querySelector(`[data-card="${CSS.escape(card.id)}"]`);
+            return drawn ? [{ id: card.id, box: box(drawn) }] : [];
+          }),
+        };
+      });
+      const last = host.querySelector(`[data-wave="${view.waves.length}"]`);
+      const beyond = last === null ? null : box(last).right + (widths[view.waves.length - 1] ?? 0);
+      const routed = routes(columns, waits, beyond);
+      const bounds = boundsOf(routed);
+      setFound(routed);
+      // Room for routes that run below the columns or past them, which the scroll then reaches.
+      setSize({
+        width: Math.max(host.offsetWidth, (bounds?.right ?? 0) + 12),
+        height: Math.max(host.offsetHeight, (bounds?.bottom ?? 0) + 12),
+      });
     };
     measure();
     const watch = new ResizeObserver(measure);
     watch.observe(host);
     return () => watch.disconnect();
-  }, [view, within]);
+  }, [view, waits, widths, within]);
+  const on = (route: Route) => lit !== null && (route.from === lit || route.to === lit);
+  // The lit arrows last, so they cross over the rest.
+  const ordered = [...found.filter((route) => !on(route)), ...found.filter(on)];
   return (
-    <>
-      {[false, true].map((over) => (
-        // The lit arrows are drawn over the cards: under them, one that skips a wave would seem to end at the card
-        // it passes beneath.
-        <svg
-          key={String(over)}
-          className={over ? "arrows over" : "arrows"}
-          aria-hidden="true"
-          width={size.width}
-          height={size.height}
-        >
-          {arrows.map((arrow) => {
-            const on = lit !== null && (arrow.from === lit || arrow.to === lit);
-            if (on !== over) return null;
-            const colour = on ? lines.get(lit)?.colour : undefined;
-            return (
-              <g
-                key={arrow.key}
-                className={[arrow.looped ? "looped" : "", on ? "lit" : lit === null ? "" : "dim"].join(" ")}
-                style={colour === undefined ? undefined : { color: colour }}
-              >
-                <path d={arrow.path} />
-                <path className="head" d={arrow.head} />
-              </g>
-            );
-          })}
-        </svg>
-      ))}
-    </>
+    <svg className="arrows" aria-hidden="true" width={size.width} height={size.height}>
+      {ordered.map((route) => {
+        const colour = on(route) && lit !== null ? lines.get(lit)?.colour : undefined;
+        return (
+          <g
+            key={`${route.from}->${route.to}`}
+            data-from={route.from}
+            data-to={route.to}
+            className={[route.looped ? "looped" : "", on(route) ? "lit" : lit === null ? "" : "dim"].join(" ")}
+            style={colour === undefined ? undefined : { color: colour }}
+          >
+            <path d={pathOf(route.points)} />
+            <path className="head" d={headOf(route.points)} />
+          </g>
+        );
+      })}
+    </svg>
   );
 }
