@@ -173,6 +173,50 @@ fn threads_that_wait_on_each_other_are_named_and_a_link_on_a_group_counts_for_it
 }
 
 #[test]
+fn threads_wait_only_on_open_leaves_as_the_waves_count_them() {
+    let mut r = group(0);
+    for (leaf, thread) in [("x", "t"), ("y", "u")] {
+        add(&mut r, leaf, Some("g1"));
+        set_thread(&mut r, leaf, thread);
+    }
+    link(&mut r, "x", "y", LinkKind::Blocks, USER).unwrap();
+    add(&mut r, "old", None);
+    add(&mut r, "box", Some("old"));
+    add(&mut r, "z", Some("box"));
+    set_thread(&mut r, "z", "u");
+    link(&mut r, "y", "box", LinkKind::Blocks, USER).unwrap();
+    let cycle = vec![BTreeSet::from(["t".to_owned(), "u".to_owned()])];
+    assert_eq!(
+        thread_cycles(&model(&r)),
+        Vec::<BTreeSet<String>>::new(),
+        "z is in u, the thread waiting"
+    );
+    set_thread(&mut r, "z", "t");
+    assert_eq!(thread_cycles(&model(&r)), cycle);
+    write(&mut r, &item_key("old").unwrap(), field::ARCHIVED, json!(true));
+    assert_eq!(
+        thread_cycles(&model(&r)),
+        Vec::<BTreeSet<String>>::new(),
+        "work under an archived ancestor of the linked group holds nothing back"
+    );
+    write(&mut r, &item_key("old").unwrap(), field::ARCHIVED, json!(false));
+    write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(true));
+    assert_eq!(
+        thread_cycles(&model(&r)),
+        Vec::<BTreeSet<String>>::new(),
+        "nor does archived work itself"
+    );
+    write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(false));
+    set_thread(&mut r, "z", "u");
+    set_thread(&mut r, "box", "t");
+    assert_eq!(
+        thread_cycles(&model(&r)),
+        Vec::<BTreeSet<String>>::new(),
+        "a group's own thread holds no work"
+    );
+}
+
+#[test]
 fn concurrent_threads_agree_when_equal_and_conflict_when_not() {
     let mut a = group(1);
     let mut b = replica_named("pi");

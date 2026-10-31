@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::model::{By, LinkKind, Model, Value};
+use crate::model::{By, Item, LinkKind, Model, Value};
 use crate::scope::{self, ScopeEdit, ScopeError};
 use crate::state::Replica;
 
@@ -119,7 +119,8 @@ pub fn thread_cycles(model: &Model) -> Vec<BTreeSet<String>> {
         .collect()
 }
 
-/// The threads that hold open items under `id`, it included.
+/// The threads that hold open leaves under `id`, it included, as the waves count work left: a parent's own thread
+/// holds no work, and archived work none.
 fn threads_under<'m>(
     model: &'m Model,
     id: &'m str,
@@ -130,17 +131,21 @@ fn threads_under<'m>(
     }
     let mut found = BTreeSet::new();
     let mut seen = BTreeSet::new();
-    let mut stack = vec![id];
+    let mut stack = if model.is_archived(id) { vec![] } else { vec![id] };
     while let Some(node) = stack.pop() {
-        if !seen.insert(node) {
+        // A link's end or a parent may have been deleted and have no item.
+        let item = model.items.get(node);
+        if !seen.insert(node) || item.is_some_and(Item::is_archived_root) {
             continue;
         }
-        if let Some(thread) = model.thread_of(node)
-            && !model.items[node].is_done()
+        let children = model.children(node);
+        if children.is_empty()
+            && let Some(thread) = model.thread_of(node)
+            && item.is_some_and(|item| !item.is_done())
         {
             found.insert(thread);
         }
-        stack.extend(model.children(node));
+        stack.extend(children);
     }
     memo.insert(id, found.clone());
     found
