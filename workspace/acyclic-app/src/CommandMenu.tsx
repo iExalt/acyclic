@@ -230,8 +230,9 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, stageOf: (id: stri
   }
   if (run.kind === "phase" || (run.kind === "target" && run.id === null)) return <Icon of={ListTree} size={16} />;
   if (run.kind === "target") {
+    // A box, which has no stage of its own, as the phases are shown.
     const stage = stageOf(run.id ?? "");
-    return stage === undefined ? null : <StageIcon stage={stage} />;
+    return stage === undefined ? <Icon of={ListTree} size={16} /> : <StageIcon stage={stage} />;
   }
   if (run.kind === "view")
     return <Icon of={run.view === "overview" ? LayoutDashboard : run.view === "map" ? MapIcon : Waypoints} size={16} />;
