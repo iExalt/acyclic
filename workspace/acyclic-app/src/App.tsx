@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
+import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import {
@@ -22,7 +23,7 @@ import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
-import { buildModel } from "./map/model";
+import { buildModel, inArchived } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
@@ -56,10 +57,14 @@ interface After {
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
 interface Notice {
   text: string;
-  offer: "retry" | "refresh" | null;
+  offer: "retry" | "refresh" | "hide-archived" | null;
   retry: { body: Command; after: After } | null;
   /** Said of a form Escape left open, so it goes when the form does. */
   unsaved?: true;
+  /** Said of a link waiting for a form to close: dismissing it drops the link. */
+  held?: true;
+  /** A link to copy by hand, where the browser offers no clipboard. */
+  link?: string;
 }
 
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
@@ -96,10 +101,19 @@ export function App() {
   /** A write drawn before the server answers, until the plan read after it holds it. */
   const [pending, setPending] = useState<Pending | null>(null);
   const [reopened, setReopened] = useState<Reopened | null>(null);
-  // A notification opens the app on `/?needs`, to the list it is about.
-  const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
+  const [showNeeds, setShowNeeds] = useState(false);
   /** The entry Needs you opens at, when the Overview opened it from one. */
   const [needsAt, setNeedsAt] = useState<string | null>(null);
+  /**
+   * An address to open: the one the app was opened at, or one a notification sent the app already open. It waits for
+   * the plan to load, and for a form holding what the user typed to close.
+   */
+  const [wanted, setWanted] = useState<Wanted | null>(() => {
+    const asked = parse(window.location.search);
+    return addressOf(asked) === "/" ? null : asked;
+  });
+  /** Counts forms closed, so a link waiting on one opens once it has. */
+  const [formsClosed, setFormsClosed] = useState(0);
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
@@ -299,7 +313,10 @@ export function App() {
   const top = topLayer(open);
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
-  const formClosed = useCallback(() => setNotice((was) => (was?.unsaved ? null : was)), []);
+  const formClosed = useCallback(() => {
+    setNotice((was) => (was?.unsaved ? null : was));
+    setFormsClosed((was) => was + 1);
+  }, []);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [top]);
   /**
@@ -355,6 +372,131 @@ export function App() {
     return () => window.removeEventListener("popstate", onMove);
   }, [act]);
 
+  // The address always says what's open, on the entry shown: written over it as what's open changes, never while the
+  // app's own move back is on its way (it would land on the entry being left), nor before a link asked for is open.
+  const here: Wanted = {
+    view,
+    item: chosen?.id ?? null,
+    thread,
+    needs: showNeeds,
+    needsAt: showNeeds ? needsAt : null,
+  };
+  const hereNow = useRef(here);
+  hereNow.current = here;
+  const waitingLink = useRef(wanted !== null);
+  waitingLink.current = wanted !== null;
+  const writeAddress = useCallback(() => {
+    if (entries.current.waiting || waitingLink.current) return;
+    const next = addressOf(hereNow.current, window.location.search);
+    if (next !== window.location.pathname + window.location.search)
+      window.history.replaceState(window.history.state, "", next);
+  }, []);
+  const address = addressOf(here);
+  // Written again whenever what's open changes, and once a link has opened.
+  useEffect(writeAddress, [writeAddress, address, wanted, layers]);
+  useEffect(() => {
+    window.addEventListener("popstate", writeAddress);
+    return () => window.removeEventListener("popstate", writeAddress);
+  }, [writeAddress]);
+
+  // A notification's link, sent to the app already open rather than reloading it: answered at once, so the service
+  // worker knows not to, then opened as any link is.
+  useEffect(() => {
+    const container = navigator.serviceWorker;
+    if (container === undefined) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.kind !== "open" || typeof event.data.search !== "string") return;
+      event.ports[0]?.postMessage("opened");
+      // A newer link replaces one still waiting. One naming no view, such as Needs you's, opens over the view shown, so
+      // closing it goes back to where the user was.
+      const asked = parse(event.data.search);
+      const query = new URLSearchParams(event.data.search);
+      setWanted(query.has("view") || query.has("item") ? asked : { ...asked, view: hereNow.current.view });
+    };
+    container.addEventListener("message", onMessage);
+    container.startMessages();
+    return () => container.removeEventListener("message", onMessage);
+  }, []);
+
+  // A link opens once the plan is loaded, over home, with each layer it opens its own entry above, so Back closes them
+  // one by one as if the user had opened them. A form holding what the user typed is never closed for it: the link
+  // waits, said so, until the form is saved or cancelled.
+  const wantedOpens = useRef<(link: Wanted) => void>(() => undefined);
+  wantedOpens.current = (link) => {
+    if (model === null) return;
+    const name =
+      link.item !== null
+        ? (model.items.get(link.item)?.title ?? link.item)
+        : link.thread !== null
+          ? (lines.get(link.thread)?.name ?? link.thread)
+          : link.needs
+            ? "Needs you"
+            : link.view === "map"
+              ? "the Map"
+              : link.view === "threads"
+                ? "Threads"
+                : "the Overview";
+    if (document.querySelector("form[data-dirty='true']") !== null) {
+      setNotice({
+        text: `Unsaved changes: save or cancel, then ${name} opens`,
+        offer: null,
+        retry: null,
+        unsaved: true,
+        held: true,
+      });
+      return;
+    }
+    const found = landing(link, {
+      item: (id) => (!model.items.has(id) ? null : inArchived(model, id) ? "archived" : "shown"),
+      thread: (id) => sorted.some((one) => one.id === id),
+    });
+    setWanted(null);
+    // Landing from outside, nothing open has an entry yet: the one landed on becomes home.
+    if (entries.current.pushed === 0)
+      window.history.replaceState(window.history.state, "", addressOf(NOTHING, window.location.search));
+    const to = found.wanted;
+    setMode({ kind: "idle" });
+    setAdding(null);
+    setShowPhases(false);
+    setView(to.view);
+    setSelected(null);
+    if (to.item !== null) {
+      if (found.archived) setShowArchived(true);
+      select(to.item, null);
+    }
+    setThread(to.thread);
+    setNeedsAt(to.needsAt);
+    setShowNeeds(to.needs);
+    setNotice(
+      found.missing === "item"
+        ? { text: "That item isn't in the plan any more", offer: null, retry: null }
+        : found.missing === "thread"
+          ? { text: "That thread isn't in the plan any more", offer: null, retry: null }
+          : found.archived
+            ? { text: "That item is archived, so archived items are showing", offer: "hide-archived", retry: null }
+            : null,
+    );
+  };
+  // Tried again as the plan loads and as each form closes.
+  useEffect(() => {
+    if (wanted !== null) wantedOpens.current(wanted);
+  }, [wanted, model, formsClosed]);
+
+  /**
+   * Copies the address of what `link` names, or, where there's no clipboard (a plain-http address away from this
+   * machine), shows it selected to copy by hand. Whether it copied.
+   */
+  const copyLink = async (link: Wanted) => {
+    const url = window.location.origin + addressOf(link);
+    try {
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      setNotice({ text: "Copy this link:", offer: null, retry: null, link: url });
+      return false;
+    }
+  };
+
   if (load.state === "loading")
     return (
       <div className="status-page" aria-busy="true">
@@ -389,7 +531,7 @@ export function App() {
   const noticeView =
     notice === null ? null : (
       <div className="notice" role="alert" data-testid="notice">
-        <span className="grow">{notice.text}</span>
+        <span className={notice.link === undefined ? "grow" : undefined}>{notice.text}</span>
         {notice.retry === null ? null : (
           <button
             type="button"
@@ -399,6 +541,29 @@ export function App() {
             Try again
           </button>
         )}
+        {notice.link === undefined ? null : (
+          <input
+            className="grow"
+            readOnly
+            value={notice.link}
+            aria-label="Link"
+            data-testid="link-to-copy"
+            // Selected, so a long press or ⌘C copies it.
+            ref={(field) => field?.select()}
+            onFocus={(event) => event.target.select()}
+          />
+        )}
+        {notice.offer === "hide-archived" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              setShowArchived(false);
+            }}
+          >
+            Hide archived
+          </button>
+        ) : null}
         {notice.offer === "refresh" ? (
           <button
             type="button"
@@ -410,7 +575,14 @@ export function App() {
             Refresh
           </button>
         ) : null}
-        <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={() => {
+            if (notice.held) setWanted(null);
+            setNotice(null);
+          }}
+        >
           <Icon of={X} />
         </button>
       </div>
@@ -549,7 +721,7 @@ export function App() {
             </button>
           </div>
         ) : null}
-        {top === "add" || top === "item" ? null : noticeView}
+        {top === "add" || top === "item" || top === "thread" || top === "needs" ? null : noticeView}
         {top === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">
             <span className="grow">{prompt}</span>
@@ -596,6 +768,7 @@ export function App() {
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
+            onCopyLink={() => copyLink({ ...NOTHING, view: "map", item: chosen.id })}
             onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
             onSave={(edit, edited) =>
@@ -620,6 +793,7 @@ export function App() {
               setThread(id);
             }}
             onClose={() => setShowNeeds(false)}
+            notice={noticeView}
             at={needsAt}
           />
         ) : null}
@@ -655,6 +829,8 @@ export function App() {
             onCommand={(edit) => send(edit, { select: null, pin: null })}
             onSelect={(id) => select(id, null)}
             onClose={() => setThread(null)}
+            onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
+            notice={noticeView}
           />
         ) : null}
       </main>

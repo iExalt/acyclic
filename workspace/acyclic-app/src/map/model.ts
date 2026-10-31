@@ -88,6 +88,21 @@ export function buildModel(items: Item[]): Model {
   return { items: byId, children, roots, depth };
 }
 
+/** Whether an item is archived or under one that is, so hidden while archived items are. */
+export function inArchived(model: Model, id: string): boolean {
+  // Parents that loop, as a plan written apart by two replicas can hold, end the walk where it began again.
+  const seen = new Set<string>();
+  for (
+    let item = model.items.get(id);
+    item !== undefined && !seen.has(item.id);
+    item = model.items.get(item.parent ?? "")
+  ) {
+    if (item.archived) return true;
+    seen.add(item.id);
+  }
+  return false;
+}
+
 /** What the user has chosen to see: which boxes are collapsed, and whether archived subtrees show. */
 export interface ViewState {
   collapsed: ReadonlySet<string>;

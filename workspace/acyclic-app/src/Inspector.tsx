@@ -4,6 +4,7 @@
 import { type ReactNode, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
+import { CopyLink } from "./CopyLink";
 import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
@@ -27,6 +28,8 @@ export interface InspectorProps {
   onLink: (kind: LinkKind) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** Copies the address that opens this again. */
+  onCopyLink: () => Promise<boolean>;
   /** Its editor closed, saved or not. */
   onEditorClosed: () => void;
   /** Sends an edit of this item, such as a conflict settled. */
@@ -54,6 +57,7 @@ export function Inspector({
   onLink,
   onAdd,
   onClose,
+  onCopyLink,
   onEditorClosed,
   onCommand,
   onSave,
@@ -110,6 +114,7 @@ export function Inspector({
         <h2>
           <Prose text={item.title} />
         </h2>
+        <CopyLink onCopy={onCopyLink} />
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>

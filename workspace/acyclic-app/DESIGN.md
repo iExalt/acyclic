@@ -35,6 +35,7 @@ the accent, so colour is left to the threads' lines and the signal. The scheme f
 
 `PALETTES` in `src/palette.ts` is the source; `app.css` repeats it as custom properties under `/* palette <scheme> */`,
 and a unit test keeps the two in step.
+
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
   Map's items and boxes).
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls.
@@ -69,6 +70,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons.
 - **Thread badges:** the thread's number on its line's colour.
 - **Needs-you mark:** a "!" on the amber fill.
+- **Notices:** a refusal, a failure or something to copy, with its own Dismiss; in the panel on top, under its heading,
+  else over the Map.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
 ## Interaction conventions
@@ -78,6 +81,13 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
+- **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
+  `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
+  entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived
+  item shows archived items, with Hide archived. An item's and a thread's panels carry Copy link, which ticks in
+  place. A device not yet paired loses the address through pairing.
+- **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
+  waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
   and none of its actions.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
@@ -100,8 +110,8 @@ you. Errors say what to check before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **No link hidden without cause.** A link is left out only when a longer way through items in the same box already implies it;
-  selecting an item, or lighting its thread, shows every link it has.
+- **No link hidden without cause.** A link is left out only when a longer way through items in the same box already
+  implies it; selecting an item, or lighting its thread, shows every link it has.
 - **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that

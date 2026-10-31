@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, impliedWithin, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, visible } from "./model";
 
 // garden
 //   beds: dig, edge
@@ -81,6 +81,17 @@ describe("visible", () => {
   it("treats an item whose parent is missing as a root", () => {
     const orphan = buildModel([item("a", "gone")]);
     expect(orphan.roots).toEqual(["a"]);
+  });
+});
+
+describe("inArchived", () => {
+  it("holds for an archived item and what is under it, and ends on parents that loop", () => {
+    expect([inArchived(model, "shed"), inArchived(model, "paint"), inArchived(model, "sow")]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(inArchived(buildModel([item("a", "b"), item("b", "a")]), "a")).toBe(false);
   });
 });
 

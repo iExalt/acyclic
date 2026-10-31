@@ -1,6 +1,6 @@
 // The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
@@ -22,6 +22,8 @@ export interface NeedsListProps {
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   onClose: () => void;
+  /** A refusal or failure of what this panel sent, shown in it. */
+  notice?: ReactNode;
   /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
    *  so a stray Enter decides nothing. */
   at?: string | null;
@@ -36,6 +38,7 @@ export function NeedsList({
   onSelect,
   onPickThread,
   onClose,
+  notice,
   at = null,
 }: NeedsListProps) {
   const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines) }));
@@ -64,6 +67,7 @@ export function NeedsList({
           <Icon of={X} />
         </button>
       </header>
+      {notice}
       <Notify />
       {groups.length < 2 ? null : (
         <fieldset className="filters" aria-label="Show">

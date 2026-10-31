@@ -24,7 +24,7 @@ import tempfile
 import time
 from collections import Counter
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
@@ -442,6 +442,61 @@ def overview_journey(page, view, name, failures):
     print(f"{name}: the Overview listed {headings}, and its rows opened what they name")
 
 
+def deep_link_journey(context, origin, view, plan, name, failures):
+    """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
+    again; quick Escapes leave the address saying what's open; and a stale link says so rather than opening nothing."""
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda err: errors.append(str(err)))
+    page.goto("about:blank")
+    id = min(one for one in plan.default() if plan.depth(one) == 1)
+    link = f"{origin}/?item={quote(id)}"
+    page.goto(link)
+    title = page.locator("[data-testid=inspector] h2")
+    try:
+        title.wait_for(timeout=10_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: a link to {id} opened no item")
+        page.close()
+        return
+    if title.inner_text() != plan.items[id]["title"] or page.url != link:
+        failures.append(f"{name}: a link to {id} opened {title.inner_text()!r} at {page.url}")
+    page.go_back()
+    title.wait_for(state="detached", timeout=5_000)
+    # The Map stays shown; on a phone it is away from home, one more Back.
+    want = [f"{origin}/?view=map"] + ([f"{origin}/"] if view.get("has_touch") else [])
+    for url in want:
+        page.wait_for_function("u => location.href === u", arg=url, timeout=5_000)
+        if url != want[-1]:
+            page.go_back()
+    page.go_back()
+    if page.url != "about:blank":
+        failures.append(f"{name}: Back from a link's last layer landed on {page.url}, not the page before the app")
+    page.goto(link)
+    title.wait_for(timeout=10_000)
+    page.reload()
+    title.wait_for(timeout=10_000)
+    if title.inner_text() != plan.items[id]["title"]:
+        failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
+    # A link to an item gone says so, and opens the rest it names: two layers, closed quicker than the history moves,
+    # leave the address saying what's open.
+    page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
+    notice = page.get_by_test_id("notice")
+    notice.wait_for(timeout=10_000)
+    if "isn't in the plan" not in notice.inner_text():
+        failures.append(f"{name}: a link to a missing item said {notice.inner_text()!r}")
+    page.get_by_test_id("needs").wait_for(timeout=5_000)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    page.locator("[data-testid=thread-panel]").wait_for(state="detached", timeout=5_000)
+    page.wait_for_timeout(300)
+    if page.url != f"{origin}/?view=map":
+        failures.append(f"{name}: after two quick Escapes the address is {page.url}")
+    if errors:
+        failures.append(f"{name}: links threw {errors}")
+    page.close()
+    print(f"{name}: a link opened {id}, Back and a reload kept to it, and a stale link said so")
+
 def installable(context, page, origin, name, failures):
     cdp = context.new_cdp_session(page)
     if errors := cdp.send("Page.getInstallabilityErrors")["installabilityErrors"]:
@@ -678,7 +733,6 @@ def map_journey(page, view, plan, name, failures, hint=None):
         needs = page.get_by_test_id("needs")
         page.get_by_test_id("needs-button").click()
         needs.wait_for()
-        url = page.url
         page.go_back()
         needs.wait_for(state="detached")
         try:
@@ -691,9 +745,10 @@ def map_journey(page, view, plan, name, failures, hint=None):
             panel.wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             stayed = False
-        if not stayed or page.url != url:
+        # In the app, on the Map, the address saying so.
+        if not stayed or urlsplit(page.url).query != "view=map":
             failures.append(
-                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app"
+                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app: at {page.url}"
             )
         if not panel.count():
             pick_thread(page, plan, thread)
@@ -1849,9 +1904,24 @@ def push_journey(context, page, env, origin, name, failures):
     expected = {**message, "tag": "needs"}
     if shown != [expected]:
         failures.append(f"{name}: the push recorded {shown}, not {expected}")
-    # Opening the notification goes to what it names: the needs-you list.
-    page.goto(origin + message["url"])
+    # Opening the notification shows what it names, the needs-you list, in the app already open, without reloading it:
+    # the worker asks the page as its click handler does, and the page answers.
+    page.keyboard.press("Escape")
+    page.get_by_test_id("needs").wait_for(state="detached", timeout=5_000)
+    page.evaluate("() => { window.stayed = true; }")
+    answered = worker.evaluate(
+        """async (search) => {
+            const [client] = await self.clients.matchAll({ type: "window" });
+            const channel = new MessageChannel();
+            const answer = new Promise((resolve) => { channel.port1.onmessage = () => resolve(true); });
+            client.postMessage({ kind: "open", search }, [channel.port2]);
+            return Promise.race([answer, new Promise((resolve) => setTimeout(() => resolve(false), 5000))]);
+        }""",
+        "?needs",
+    )
     page.get_by_test_id("needs").wait_for(timeout=10_000)
+    if not answered or not page.evaluate("() => window.stayed === true"):
+        failures.append(f"{name}: a notification's link reloaded the open app, or it didn't answer ({answered})")
     page.evaluate(
         """(endpoint) => fetch("/api/push/unsubscribe", {
             method: "POST",
@@ -1929,6 +1999,7 @@ def main():
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
                 threads_journey(page, view, env, name, failures)
+                deep_link_journey(context, origin, view, plan, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:

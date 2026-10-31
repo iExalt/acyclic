@@ -14,6 +14,7 @@ import {
 } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { Choice } from "./Choice";
+import { CopyLink } from "./CopyLink";
 import { useFocusIn } from "./focus";
 import {
   approveCommand,
@@ -46,6 +47,10 @@ export interface ThreadPanelProps {
   onCommand: (command: Command) => void;
   onSelect: (id: string) => void;
   onClose: () => void;
+  /** A refusal or failure of what this panel sent, shown in it. */
+  notice?: ReactNode;
+  /** Copies the address that opens this again. */
+  onCopyLink: () => Promise<boolean>;
 }
 
 type Loaded = { detail: ThreadDetail; open: Proposal[] } | { failed: string } | null;
@@ -62,6 +67,8 @@ export function ThreadPanel({
   onCommand,
   onSelect,
   onClose,
+  notice,
+  onCopyLink,
 }: ThreadPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
   // A new version, after any edit, reads the thread again.
@@ -105,10 +112,12 @@ export function ThreadPanel({
           <Badge line={line} />
           <Prose text={line?.name ?? detail.title} />
         </h2>
+        <CopyLink onCopy={onCopyLink} />
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>
       </header>
+      {notice}
       <p className={detail.approved ? "thread-status" : "thread-status waiting"} data-testid="thread-status">
         <Icon of={detail.approved ? Check : CircleAlert} size={16} />
         {/* No total beside it: the counts below are of the tasks drawn, which a total of every member would not add

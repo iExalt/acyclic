@@ -1105,6 +1105,16 @@ dl.facts .chip {
   border-left: 3px dashed var(--signal);
   border-radius: var(--radius);
 }
+/* In a panel, under its heading, where it covers neither the heading nor the panel's way out. */
+.inspector > .notice,
+.sheet > .notice {
+  position: static;
+  margin: 0 0 8px;
+}
+.notice input {
+  min-width: 0;
+  font: inherit;
+}
 .status {
   padding: 16px;
   color: var(--muted);
