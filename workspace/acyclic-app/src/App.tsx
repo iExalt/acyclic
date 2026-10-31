@@ -1128,7 +1128,7 @@ export function App() {
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             version={version}
             busy={busy}
-            onCommand={(edit) => send(edit, { select: null, pin: null })}
+            onCommand={(edit, done) => send(edit, { select: null, pin: null, ...(done === undefined ? {} : { done }) })}
             onSelect={(id) => select(id, null)}
             onClose={() => setThread(null)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}

@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
+import { useHeld } from "./held";
 import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
@@ -58,23 +59,14 @@ export function NeedsList({
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
-  // Where an action was pressed, to keep the keyboard there once it is done: on the entry if it stayed, else on the
-  // one that took its place, so settling the list is pressing Enter down it.
-  const acted = useRef<{ key: string; index: number } | null>(null);
-  const keys = views.map((view) => view.key).join("\n");
-  useEffect(() => {
-    const was = acted.current;
-    if (busy || was === null) return;
-    acted.current = null;
-    const list = panel.current;
-    // Only from where the action left it: a click elsewhere since has moved on.
-    if (list === null || !(list.contains(document.activeElement) || document.activeElement === document.body)) return;
-    const entries = [...list.querySelectorAll<HTMLElement>("[data-need]")];
-    const entry =
-      entries.find((one) => one.dataset.need === was.key) ?? entries[Math.min(was.index, entries.length - 1)];
-    // With nothing left to settle, the panel's Close.
-    (entry?.querySelector<HTMLElement>(".need-actions button") ?? list.querySelector<HTMLElement>(".close"))?.focus();
-  }, [busy, keys]);
+  // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
+  // down it; with nothing left to settle, to the panel's Close.
+  const held = useHeld(busy, views.map((view) => view.key).join("\n"));
+  const after = (index: number) => () => {
+    const entries = panel.current?.querySelectorAll<HTMLElement>("[data-need]") ?? [];
+    const entry = entries[Math.min(index, entries.length - 1)];
+    return (entry ?? panel.current)?.querySelector<HTMLElement>(entry ? ".need-actions button" : ".close");
+  };
   useEffect(() => {
     if (at === null) return;
     const entry = panel.current?.querySelector<HTMLElement>(`[data-need="${CSS.escape(at)}"]`);
@@ -186,13 +178,7 @@ export function NeedsList({
                     key={action.label}
                     className={PRIMARY.has(action.action) ? "primary" : "quiet"}
                     data-action={action.action}
-                    // Held, not disabled, while a write is out: a disabled button loses the focus it had.
-                    aria-disabled={busy || undefined}
-                    onClick={() => {
-                      if (busy) return;
-                      acted.current = { key: view.key, index };
-                      onCommand(action.command, action.done);
-                    }}
+                    {...held(() => onCommand(action.command, action.done), after(index))}
                   >
                     {action.label}
                   </button>

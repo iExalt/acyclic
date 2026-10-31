@@ -27,6 +27,7 @@ import {
   revokeCommand,
   threadLevelCommand,
 } from "./forms";
+import { useHeld } from "./held";
 import { Check, CircleAlert, Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
@@ -44,7 +45,8 @@ export interface ThreadPanelProps {
   /** Changes after every edit sent, so the panel reads the thread again. */
   version: number;
   busy: boolean;
-  onCommand: (command: Command) => void;
+  /** Sends an edit, with what to say once it is saved when that is all that shows it was. */
+  onCommand: (command: Command, done?: string) => void;
   onSelect: (id: string) => void;
   onClose: () => void;
   /** A refusal or failure of what this panel sent, shown in it. */
@@ -89,6 +91,9 @@ export function ThreadPanel({
   // One panel throughout, so focus put in it as it opens stays as it loads.
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
+  // A decision takes its button away once the thread is read again: the keyboard stays in the panel.
+  const held = useHeld(busy, loaded);
+  const toPanel = () => panel.current;
   const shell = (body: ReactNode) => (
     <aside
       ref={panel}
@@ -105,6 +110,11 @@ export function ThreadPanel({
   if ("failed" in loaded) return shell(<p role="alert">{loaded.failed}</p>);
   const { detail, open } = loaded;
   const members = detail.members.length;
+  const name = line?.name ?? detail.title;
+  const items = `${members} ${members === 1 ? "item" : "items"}`;
+  /** After a proposal is settled, the next one's Keep, else the panel. */
+  const nextProposal = (index: number) => () =>
+    panel.current?.querySelectorAll<HTMLElement>("[data-proposal] [data-action=keep]")[index] ?? panel.current;
   return shell(
     <>
       <header>
@@ -137,10 +147,9 @@ export function ThreadPanel({
             type="button"
             className="primary"
             data-action="approve"
-            disabled={busy}
-            onClick={() => onCommand(approveCommand(id))}
+            {...held(() => onCommand(approveCommand(id), `Approved ${name}: ${items}`), toPanel)}
           >
-            Approve {members} {members === 1 ? "item" : "items"}
+            Approve {items}
           </button>
         </div>
       )}
@@ -166,14 +175,13 @@ export function ThreadPanel({
         <div className="proposals" data-testid="proposals">
           <h3>Proposals</h3>
           <ul>
-            {open.map((proposal) => (
+            {open.map((proposal, index) => (
               <li key={proposal.id} data-proposal={proposal.id}>
                 <span className="grow">{describe(proposal, titleOf)}</span>
                 <button
                   type="button"
                   data-action="keep"
-                  disabled={busy}
-                  onClick={() => onCommand(keepCommand(proposal.id))}
+                  {...held(() => onCommand(keepCommand(proposal.id), "Kept the proposal"), nextProposal(index))}
                 >
                   Keep
                 </button>
@@ -181,8 +189,7 @@ export function ThreadPanel({
                   type="button"
                   className="quiet"
                   data-action="drop"
-                  disabled={busy}
-                  onClick={() => onCommand(dropCommand(proposal.id))}
+                  {...held(() => onCommand(dropCommand(proposal.id), "Dropped the proposal"), nextProposal(index))}
                 >
                   Drop
                 </button>
@@ -235,8 +242,7 @@ export function ThreadPanel({
             type="button"
             className="danger-quiet"
             data-action="revoke"
-            disabled={busy}
-            onClick={() => onCommand(revokeCommand(id))}
+            {...held(() => onCommand(revokeCommand(id), `Revoked ${name}'s approval`), toPanel)}
           >
             Revoke approval
           </button>
