@@ -933,12 +933,22 @@ button.phase-title {
 .facts {
   margin: 2px 0;
 }
+/* Each label and the first line of its value centred on a chip's height: a baseline would be an icon's foot where a
+   value starts with an icon, as Status and Thread do, and sit the text above the label. */
 dl.facts {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 16px;
-  align-items: baseline;
+  align-items: start;
   margin: 6px 0 0;
+}
+dl.facts dt,
+dl.facts dd:not(.status-value),
+dl.facts .status-value > :first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 30px;
 }
 dl.facts dt {
   color: var(--muted);
@@ -1618,7 +1628,6 @@ button.more {
 /* The item panel, quiet as Linear's: its properties as text, Edit, Copy link and the menu beside its title, and its
    links as rows. Last, as each refines a rule above. */
 .inspector h3 .count {
-  margin-left: 4px;
   font-weight: 500;
 }
 .inspector header .menu summary {
@@ -1635,9 +1644,6 @@ dl.facts .chip.line {
 }
 dl.facts .chip:hover:not(:disabled) {
   background: var(--hover);
-}
-dl.facts dt {
-  padding: 5px 0;
 }
 .links {
   margin-top: 14px;
