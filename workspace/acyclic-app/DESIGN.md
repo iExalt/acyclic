@@ -98,6 +98,11 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No single key
   approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the menu's
   Single-key shortcuts switch, per device, turns them off.
+- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the autonomy offer
+  Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (an approval,
+  a proposal kept or dropped, a thread changed: agents act on them). Undo reads the plan first and takes back nothing
+  changed since, saying so; it then says what it did ("Autonomy set back to Blockers", not "Undone": agents' work
+  meanwhile stands). The notice stays until dismissed or the next write.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
@@ -133,7 +138,8 @@ you. Errors say what to check before what went wrong.
 
 ## Open decisions
 
-None.
+- Undo checks what a write left against a plan read just before it, in the app: a write landing between that read
+  and the undo isn't caught. A compare-and-set on the server would close that window.
 
 ## Decision log
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entries, entry, isMac, MOST, opensMenu, type Plan, rank, targets } from "./commands";
+import { entries, entry, isMac, MOST, opensMenu, type Plan, rank, targets, undoes } from "./commands";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
@@ -133,5 +133,25 @@ describe("the command menu's key", () => {
   it("never takes a key an input method is composing with", () => {
     expect(opensMenu(press({ metaKey: true, isComposing: true }), true)).toBe(false);
     expect(opensMenu(press({ metaKey: true, keyCode: 229 }), true)).toBe(false);
+  });
+});
+
+describe("the undo key", () => {
+  const press = (fields: Partial<KeyboardEvent>) => ({
+    key: "z",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    isComposing: false,
+    keyCode: 90,
+    ...fields,
+  });
+
+  it("is ⌘Z on a Mac and Ctrl+Z elsewhere, never with Shift, which redoes, nor while composing", () => {
+    expect([undoes(press({ metaKey: true }), true), undoes(press({ ctrlKey: true }), false)]).toEqual([true, true]);
+    expect(undoes(press({ metaKey: true, shiftKey: true }), true)).toBe(false);
+    expect(undoes(press({ ctrlKey: true }), true)).toBe(false);
+    expect(undoes(press({ metaKey: true, isComposing: true }), true)).toBe(false);
   });
 });

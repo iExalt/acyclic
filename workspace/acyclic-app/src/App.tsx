@@ -4,7 +4,7 @@ import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import { CommandMenu } from "./CommandMenu";
-import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets } from "./commands";
+import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets, undoes } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -39,6 +39,7 @@ import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { threadLists } from "./threadLists";
+import { type Undo, undoOf } from "./undo";
 import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
@@ -59,12 +60,16 @@ interface After {
   /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
   select: string | null;
   pin: string | null;
+  /** Offer to undo it, once saved: for the user's own moves, links, field edits and autonomy, never a decision. */
+  undo?: true;
+  /** Said once saved, for an undo: what it did. */
+  undone?: string;
 }
 
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
 interface Notice {
   text: string;
-  offer: "retry" | "refresh" | "hide-archived" | null;
+  offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
   retry: { body: Command; after: After } | null;
   /** Said of a form Escape left open, so it goes when the form does. */
   unsaved?: true;
@@ -72,6 +77,8 @@ interface Notice {
   held?: true;
   /** A link to copy by hand, where the browser offers no clipboard. */
   link?: string;
+  /** What Undo takes back, with the offer "undo". */
+  undo?: Undo;
 }
 
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
@@ -171,6 +178,10 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
+  /** The plan as the server last gave it, without writes still on their way: what an undo sets back to. */
+  const serverPlan = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
+  serverPlan.current =
+    loaded === null ? null : { items: new Map(loaded.items.map((one) => [one.id, one])), level: loaded.level };
   const shown = useMemo(
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
@@ -238,6 +249,7 @@ export function App() {
       sending.current = true;
       setBusy(true);
       setNotice(null);
+      const before = serverPlan.current;
       const bringIn = () => {
         const select = after.select;
         if (select === null) return;
@@ -296,13 +308,45 @@ export function App() {
         }
       }
       const { text, offer, fixId } = told(sent);
-      setNotice(text === null ? null : { text, offer, retry: offer === "retry" ? { body, after } : null });
+      const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
+      const undo = saved && after.undo && before !== null ? undoOf(body, before, levelLabel) : null;
+      if (text !== null) setNotice({ text, offer, retry: offer === "retry" ? { body, after } : null });
+      else if (undo !== null) setNotice({ text: undo.text, offer: "undo", retry: null, undo });
+      else if (saved && after.undone !== undefined) setNotice({ text: after.undone, offer: null, retry: null });
+      else setNotice(null);
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
       sending.current = false;
       setBusy(false);
     },
     [fetchAll],
+  );
+
+  /**
+   * Takes back the write `undo` came from: reads the plan first, so the guard is checked against the server's latest,
+   * and sends nothing when what the write left has changed since. Once at a time.
+   */
+  const undoing = useRef(false);
+  const runUndo = useCallback(
+    async (undo: Undo) => {
+      if (undoing.current || sending.current) return;
+      undoing.current = true;
+      setNotice(null);
+      try {
+        const next = await fetchAll().catch(() => null);
+        const plan =
+          next === null
+            ? serverPlan.current
+            : { items: new Map(next.items.map((one) => [one.id, one])), level: next.level };
+        if (next !== null) setLoad(next);
+        if (plan === null || !undo.holds(plan))
+          setNotice({ text: "Changed since, so it can't be undone", offer: null, retry: null });
+        else await send(undo.command, { select: null, pin: null, undone: undo.undone });
+      } finally {
+        undoing.current = false;
+      }
+    },
+    [fetchAll, send],
   );
 
   const choose = useCallback(
@@ -314,7 +358,7 @@ export function App() {
       if (step.command === null || mode.kind === "idle") return;
       // A move pins the new parent, or the item itself when it goes to the top level; a link, the item linked from.
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
-      send(step.command, { select: mode.item, pin });
+      send(step.command, { select: mode.item, pin, undo: true });
     },
     [model, mode, send],
   );
@@ -384,6 +428,11 @@ export function App() {
   /** What the keys read of the app as it is: kept current at each render, for the one listener. */
   const keysSee = useRef({ shortcuts, panel, menu: showCommand });
   keysSee.current = { shortcuts, panel, menu: showCommand };
+  /** The undo on offer, while its notice shows and nothing is being sent: what ⌘Z takes back. */
+  const undoNow = useRef<Undo | null>(null);
+  undoNow.current = notice?.offer === "undo" && !busy ? (notice.undo ?? null) : null;
+  const runUndoNow = useRef(runUndo);
+  runUndoNow.current = runUndo;
   /** What a single-key shortcut does; set once the plan has loaded. */
   const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
@@ -393,7 +442,19 @@ export function App() {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
       // Taken from the browser only when it opens or closes the menu: the listener is the app's page's, so only while
       // the app has the focus.
-      else if (opensMenu(event, mac)) {
+      else if (undoes(event, mac)) {
+        // Only an undo the user can see, and never over typing, the menu or a changed form, where ⌘Z is the field's.
+        const undo = undoNow.current;
+        const blocked =
+          undo === null ||
+          keysSee.current.menu ||
+          typingIn(event.target) ||
+          document.querySelector("form[data-dirty='true']") !== null;
+        if (!blocked) {
+          event.preventDefault();
+          runUndoNow.current(undo);
+        }
+      } else if (opensMenu(event, mac)) {
         event.preventDefault();
         setShortcutsOnly(false);
         setShowCommand((was) => !was);
@@ -671,7 +732,7 @@ export function App() {
     />
   ) : null;
   const unlink = (from: string, kind: LinkKind, to: string) =>
-    send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
+    send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected, undo: true });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
 
   const noticeView =
@@ -699,6 +760,16 @@ export function App() {
             onFocus={(event) => event.target.select()}
           />
         )}
+        {notice.offer === "undo" && notice.undo !== undefined ? (
+          <button
+            type="button"
+            disabled={busy}
+            aria-keyshortcuts={isMac(navigator.platform) ? "Meta+Z" : "Control+Z"}
+            onClick={() => notice.undo && runUndo(notice.undo)}
+          >
+            Undo
+          </button>
+        ) : null}
         {notice.offer === "hide-archived" ? (
           <button
             type="button"
@@ -767,7 +838,7 @@ export function App() {
         testid="global-level"
         value={load.level}
         disabled={busy}
-        onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null })}
+        onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null, undo: true })}
       >
         {LEVELS.map((level) => (
           <option key={level} value={level}>
@@ -938,7 +1009,7 @@ export function App() {
             onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
             onSave={(edit, edited) =>
-              send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, edited })
+              send(edit, { select: chosen.id, pin: chosen.id, undo: true }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
             notice={noticeView}

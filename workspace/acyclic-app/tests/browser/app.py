@@ -591,7 +591,30 @@ def keys_journey(page, plan, name, failures):
     if view.get_attribute("data-view") != "map":
         failures.append(f"{name}: with single-key shortcuts off, G then T still went to {view.get_attribute('data-view')}")
     from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
-    print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off")
+    # ⌘Z takes back the autonomy just set, once, however often it is pressed.
+    level = page.get_by_test_id("global-level")
+    page.get_by_test_id("menu").click()
+    was = level.input_value()
+    to = next(one for one in level.locator("option").evaluate_all("os => os.map(o => o.value)") if one != was)
+    level.select_option(to)
+    page.get_by_test_id("notice").get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.evaluate("() => document.activeElement?.blur()")
+    writes = []
+    page.on(
+        "request",
+        lambda request: (
+            writes.append(request.post_data)
+            if request.url.endswith("/api/command") and (request.post_data or "").startswith('{"level":{"level"')
+            else None
+        ),
+    )
+    page.keyboard.press("ControlOrMeta+z")
+    page.keyboard.press("ControlOrMeta+z")
+    page.get_by_text("Autonomy set back to").wait_for(timeout=10_000)
+    page.wait_for_timeout(300)
+    if level.input_value() != was or len(writes) != 1:
+        failures.append(f"{name}: ⌘Z twice set the autonomy to {level.input_value()}, in {len(writes)} writes")
+    print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off; ⌘Z undid once")
 
 
 def installable(context, page, origin, name, failures):
@@ -1272,6 +1295,37 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
+    # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
+    notice = page.get_by_test_id("notice")
+    notice.get_by_role("button", name="Undo").click()
+    wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
+    if "again" not in notice.inner_text():
+        failures.append(f"{name}: undoing the unlink said {notice.inner_text()!r}")
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [first],
+        f"{added} waiting for {first} again, undone",
+        failures,
+        name,
+    )
+    page.locator("[data-testid=waits-for] .unlink").click()
+    wait_inspector(page, "[data-testid=waits-for]", state="detached")
+    notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
+    run(env, "--as-user", "link", "add", added, "waits-for", first)
+    notice.get_by_role("button", name="Undo").click()
+    page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [first],
+        f"{added} linked once, by the CLI, after a refused undo",
+        failures,
+        name,
+    )
+    # Unlinked once more, as the journeys after expect: a new wait in an approved thread needs the user.
+    page.locator("[data-testid=waits-for] .unlink").click()
+    wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"

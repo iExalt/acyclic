@@ -262,3 +262,13 @@ export function opensMenu(
   if (event.key.toLowerCase() !== "k" || event.altKey || event.shiftKey) return false;
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
+
+/** Whether a key press asks to undo: ⌘Z on a Mac, Ctrl+Z elsewhere, without Shift (which redoes) or composing. */
+export function undoes(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">,
+  mac: boolean,
+): boolean {
+  if (event.isComposing || event.keyCode === 229) return false;
+  if (event.key.toLowerCase() !== "z" || event.altKey || event.shiftKey) return false;
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
