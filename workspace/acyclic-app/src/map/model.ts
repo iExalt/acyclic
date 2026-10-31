@@ -139,6 +139,12 @@ export interface VisibleNode {
 export interface VisibleEdge {
   source: string;
   target: string;
+  /**
+   * Every link it stands for is implied: its item can be reached from the item it waits for by a longer way through
+   * items inside the lowest box holding both ends, which that box draws. So the Map can leave it out and still show the
+   * order truly.
+   */
+  implied?: boolean;
 }
 
 export interface View {
@@ -148,6 +154,43 @@ export interface View {
   edges: VisibleEdge[];
   /** Each thread's visible stand-ins: the members themselves, or the collapsed boxes that hide them. */
   threads: Map<string, string[]>;
+}
+
+/** The lowest node holding both `a` and `b`, or null for the top level. */
+function lowest(parentOf: ReadonlyMap<string, string | null>, a: string, b: string): string | null {
+  const above = new Set<string>();
+  for (let p = parentOf.get(a) ?? null; p !== null; p = parentOf.get(p) ?? null) above.add(p);
+  for (let p = parentOf.get(b) ?? null; p !== null; p = parentOf.get(p) ?? null) if (above.has(p)) return p;
+  return null;
+}
+
+/**
+ * Whether the link from `first` to `item`, which waits for it, is implied inside `box` (null for the whole plan): a
+ * longer way reaches `item` from `first` through items inside `box` that `shown` allows. A way through items elsewhere
+ * doesn't count, since the box wouldn't draw it.
+ */
+export function impliedWithin(model: Model, shown: (id: string) => boolean) {
+  const after = new Map<string, string[]>();
+  for (const item of model.items.values())
+    for (const first of item.waitsFor) after.set(first, [...(after.get(first) ?? []), item.id]);
+  const inside = (id: string, box: string | null) => {
+    if (box === null) return true;
+    for (let p = model.items.get(id)?.parent ?? null; p !== null; p = model.items.get(p)?.parent ?? null)
+      if (p === box) return true;
+    return false;
+  };
+  return (first: string, item: string, box: string | null): boolean => {
+    const seen = new Set<string>([first]);
+    const stack = (after.get(first) ?? []).filter((next) => next !== item);
+    while (stack.length > 0) {
+      const at = stack.pop() ?? "";
+      if (at === item) return true;
+      if (seen.has(at) || !shown(at) || !inside(at, box)) continue;
+      seen.add(at);
+      stack.push(...(after.get(at) ?? []));
+    }
+    return false;
+  };
 }
 
 /**
@@ -197,19 +240,22 @@ export function visible(model: Model, state: ViewState): View {
     for (let p = parentOf.get(inner) ?? null; p !== null; p = parentOf.get(p) ?? null) if (p === outer) return true;
     return false;
   };
-  const keys = new Set<string>();
+  // Each edge with whether every link it stands for is implied so far.
+  const keys = new Map<string, boolean>();
+  const implied = impliedWithin(model, (id) => stand.has(id));
   for (const item of model.items.values()) {
     const target = stand.get(item.id);
     for (const first of item.waitsFor) {
       const source = stand.get(first);
       if (source === undefined || target === undefined || source === target) continue;
       if (contains(source, target) || contains(target, source)) continue;
-      keys.add(`${source}\u0000${target}`);
+      const key = `${source}\u0000${target}`;
+      keys.set(key, (keys.get(key) ?? true) && implied(first, item.id, lowest(parentOf, source, target)));
     }
   }
-  const edges = [...keys].sort().map((key) => {
+  const edges = [...keys.keys()].sort().map((key) => {
     const [source = "", target = ""] = key.split("\u0000");
-    return { source, target };
+    return keys.get(key) ? { source, target, implied: true } : { source, target };
   });
 
   const threads = new Map<string, string[]>();

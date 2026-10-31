@@ -160,11 +160,11 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     {
       selector: "edge",
       style: {
-        width: 1.5,
+        width: 1.25,
         "curve-style": "straight",
-        "line-color": p.muted,
+        "line-color": p.link,
         "target-arrow-shape": "triangle",
-        "target-arrow-color": p.muted,
+        "target-arrow-color": p.link,
         "arrow-scale": 0.9,
         // Drawn over the nodes, so a tap must pass through to the node beneath.
         events: "no",
@@ -193,5 +193,25 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
     { selector: "edge.lit", style: { width: 3, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
     { selector: "edge.dim", style: { opacity: 0.35 } },
+    // Where a trunk splits: a dot in the links' colour, over them, told from two links crossing.
+    {
+      selector: "node.junction",
+      style: {
+        shape: "ellipse",
+        width: 5,
+        height: 5,
+        label: "",
+        "background-color": p.link,
+        "background-image": "none",
+        "border-width": 0,
+        events: "no",
+        "z-index-compare": "manual",
+        "z-index": 999,
+      },
+    },
+    {
+      selector: "node.junction-lit",
+      style: { width: 7, height: 7, "background-color": "data(line)", "border-width": 0 },
+    },
   ];
 }

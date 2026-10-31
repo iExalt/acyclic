@@ -278,7 +278,7 @@ READ_SCHEME = """m => {
     const plain = m.cy.edges().not('.lit, .crossing').first();
     const badge = document.querySelector('[data-testid=thread-panel] .badge');
     return {
-        css: { ground: v('--ground'), tile: v('--tile'), box: v('--box'), rule: v('--rule'), muted: v('--muted'), ink: v('--ink') },
+        css: { ground: v('--ground'), tile: v('--tile'), box: v('--box'), rule: v('--rule'), muted: v('--muted'), link: v('--link'), ink: v('--ink') },
         leaf: leaf.nonempty() ? hex(leaf.style('background-color')) : null,
         closed: closed.nonempty() ? [hex(closed.style('background-color')), hex(closed.style('border-color'))] : null,
         open: open.nonempty() ? [hex(open.style('background-color')), hex(open.style('border-color'))] : null,
@@ -319,7 +319,7 @@ def scheme_switch(page, name, failures):
             wrong.append(f"a closed box {now['closed']}")
         if now["open"] not in (None, [css["box"], css["rule"]]):
             wrong.append(f"an open box {now['open']}")
-        if now["edge"] not in (None, css["muted"]):
+        if now["edge"] not in (None, css["link"]):
             wrong.append(f"a link {now['edge']}")
         if now["lit"] != [now["badge"]] or contrast(now["badge"], css["ground"]) < 3:
             wrong.append(f"the lit route {now['lit']} against its badge {now['badge']}")
@@ -331,10 +331,10 @@ def scheme_switch(page, name, failures):
     follows("dark", before)
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
-        # Restyled once a plain link is drawn in the scheme's muted colour, which the page declares at once.
+        # Restyled once a plain link is drawn in the scheme's link colour, which the page declares at once.
         page.wait_for_function(
-            f"m => {{ const now = ({READ_SCHEME})(m); return now.edge === now.css.muted"
-            f" && (now.css.muted === {before['css']['muted']!r}) === {'false' if scheme == 'light' else 'true'}; }}",
+            f"m => {{ const now = ({READ_SCHEME})(m); return now.edge === now.css.link"
+            f" && (now.css.link === {before['css']['link']!r}) === {'false' if scheme == 'light' else 'true'}; }}",
             arg=drawn.element_handle(),
             timeout=5_000,
         )
@@ -459,7 +459,7 @@ def first_view_readable(page, name, failures):
     """The Map opens at a zoom its titles can be read at, with an item, not a box, wholly in view, title and all."""
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
-        " shown: m.cy.nodes().not('.box').some(n => { const b = n.renderedBoundingBox();"
+        " shown: m.cy.nodes().not('.box, .junction').some(n => { const b = n.renderedBoundingBox();"
         " return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= w && b.y2 <= h; }) }; }"
     )
     if view["zoom"] < READABLE or not view["shown"]:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstOf, firstView, nearest, READABLE, reveal, uncovered } from "./reveal";
+import { firstOf, firstView, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -57,6 +57,27 @@ describe("firstView", () => {
       pan: { x: 16 - 200 * READABLE, y: 16 - 400 * READABLE },
     });
     expect(firstOf([])).toBeUndefined();
+  });
+});
+
+describe("startOf", () => {
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height, box: true, top: true });
+  const item = (x: number, y: number, width = 200) => ({ x, y, width, height: 48, box: false, top: false });
+  // 400 wide, 16 aside, at zoom 1: 368 of the plan's width shows.
+  const start = (...nodes: Parameters<typeof startOf>[0]) => startOf(nodes, 400, 16, 1);
+
+  it("starts at the first box's corner, with its title, while its first item shows whole there", () => {
+    expect(start(box(0, 0, 1000, 800), item(12, 40), box(1100, 0, 400, 400), item(1110, 20))).toEqual({ x: 0, y: 0 });
+  });
+
+  it("moves right only as far as shows the first item whole, or to the item when it is wider than the screen", () => {
+    expect(start(box(0, 0, 1000, 800), item(500, 40))).toEqual({ x: 332, y: 0 });
+    expect(start(box(0, 0, 1200, 800), item(500, 40, 600))).toEqual({ x: 500, y: 0 });
+  });
+
+  it("starts at a top-level task's own corner, and nowhere without nodes", () => {
+    expect(start({ ...item(0, 0), top: true })).toEqual({ x: 0, y: 0 });
+    expect(start()).toBeUndefined();
   });
 });
 

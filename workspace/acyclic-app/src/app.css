@@ -35,6 +35,7 @@
   --edge: #4a535e;
   --ink: #e8eaed;
   --muted: #a2aab4;
+  --link: #6c7580;
   --signal: #f2b33d;
   --signal-fill: #f2b33d;
   --signal-ink: #121417;
@@ -55,6 +56,7 @@
     --edge: #aab0b9;
     --ink: #1a1c20;
     --muted: #5b626c;
+    --link: #878e98;
     --signal: #8f5100;
     --signal-fill: #f2b33d;
     --signal-ink: #121417;
@@ -419,11 +421,11 @@ button.icon[aria-pressed="true"] {
 .tabbar button.view[aria-current="page"]::before {
   content: "";
   position: absolute;
-  top: 4px;
+  top: 3px;
   left: calc(50% - 28px);
   width: 56px;
-  height: 28px;
-  border-radius: 14px;
+  height: 26px;
+  border-radius: 13px;
   z-index: -1;
   background: color-mix(in srgb, var(--ink) 12%, transparent);
 }

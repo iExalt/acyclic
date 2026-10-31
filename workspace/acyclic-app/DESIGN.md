@@ -39,7 +39,10 @@ and a unit test keeps the two in step.
   Map's items and boxes).
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
-- **Signal:** amber. What needs the user, conflicts, and links that cross boxes.
+- **Signal:** amber, as the "!" badge's fill; as text, a dark brown in the light scheme that reads at 4.5:1. What
+  needs the user, conflicts, and links that cross boxes.
+- **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
+  a lit thread, falls below that on purpose: it is there to recede.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an OKLCH lightness band per scheme, so every line's badge takes a readable ink.
 
@@ -94,9 +97,20 @@ you. Errors say what to check before what went wrong.
 - **The Text Rule.** Stage counts are always written out; icons only accompany them.
 - **The List Rule.** The Overview is lists to scan, never tiles or charts.
 
+## The Map
+
+- **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
+- **Every link drawn.** A link is left out only when a longer way through items in the same box already implies it;
+  selecting an item, or lighting its thread, shows every link it has.
+- **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each
+  arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
+  run as one line, and a link would seem to join items it doesn't.
+- **Opening view.** The whole plan when it fits at a readable zoom (`READABLE`); otherwise the first box's corner, its
+  title and first item whole, at that zoom.
+
 ## Open decisions
 
-- The Map's opening view, its links' weight in the light scheme and its edge routing (provisional: as they are).
+None.
 
 ## Decision log
 
@@ -104,3 +118,5 @@ you. Errors say what to check before what went wrong.
 - 2026-10-31: the Overview as home over the Map; the user preferred it.
 - 2026-10-31: Needs you open is marked lighter than the view shown, so only one place reads as current.
 - 2026-10-31: the scheme follows the system's.
+- 2026-10-31: the Map's links bundled on the way out, in one column per chain; the user found it cleanest and liked it
+  vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.

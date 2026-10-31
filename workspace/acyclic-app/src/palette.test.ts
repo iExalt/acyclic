@@ -34,6 +34,7 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
         "edge",
         "ink",
         "muted",
+        "link",
         "signal",
         "signal-fill",
         "signal-ink",
@@ -61,6 +62,10 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
     for (const colour of LINES) {
       expect(contrast(colour, inkOn(colour, p)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  it("draws a link at 3:1 on the ground and the boxes it crosses", () => {
+    for (const surface of [p.ground, p.box]) expect(contrast(p.link, surface), surface).toBeGreaterThanOrEqual(3);
   });
 
   it("draws a lit border, a crossing link and the selection at 3:1 against every surface beside them", () => {

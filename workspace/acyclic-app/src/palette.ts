@@ -24,6 +24,8 @@ export interface Palette {
   edge: string;
   ink: string;
   muted: string;
+  /** A link on the Map: quieter than text, so the items lead, but at 3:1 on the ground and boxes it is drawn over. */
+  link: string;
   /**
    * What needs the user, conflicts, and links that cross boxes. Lines may share its hue, so it is never a cue by colour
    * alone: crossing links are dashed, conflicts have a dashed border, and the needs-you badge reads "!", which no
@@ -61,6 +63,7 @@ export const PALETTES: Record<Scheme, Palette> = {
     edge: "#4a535e",
     ink: "#e8eaed",
     muted: "#a2aab4",
+    link: "#6c7580",
     signal: "#f2b33d",
     signalFill: "#f2b33d",
     signalInk: DARK_GROUND,
@@ -90,6 +93,7 @@ export const PALETTES: Record<Scheme, Palette> = {
     edge: "#aab0b9",
     ink: "#1a1c20",
     muted: "#5b626c",
+    link: "#878e98",
     signal: "#8f5100",
     signalFill: "#f2b33d",
     signalInk: DARK_GROUND,

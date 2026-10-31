@@ -46,6 +46,14 @@ export function elementsOf(
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",
       ].join(" "),
     })),
+    // Over the links, under what they join.
+    ...scene.junctions.map((junction) => ({
+      group: "nodes" as const,
+      data: { id: junction.id, line },
+      position: { x: junction.x, y: junction.y },
+      // Not "lit": that names the thread's items, which a dot isn't.
+      classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
+    })),
     ...scene.edges.map((edge) => ({
       group: "edges" as const,
       data: {

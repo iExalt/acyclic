@@ -59,8 +59,8 @@ export interface SceneEdge {
   /** An edge that crosses boxes, drawn only because its end is selected or it joins the lit thread. */
   crossing: boolean;
   /**
-   * A link inside one box that a longer way through its tasks already implies, drawn, straight, only for the same
-   * reasons as one that crosses boxes.
+   * A link inside one box that a longer way through items in the box already implies, drawn, straight, only for the
+   * same reasons as one that crosses boxes.
    */
   implied: boolean;
   /** Its way around the box's other nodes, as the layout routed it; null to draw it straight. */
@@ -71,9 +71,19 @@ export interface SceneEdge {
   dim: boolean;
 }
 
+/** A dot where a trunk of links leaving one node splits, lit or dimmed with a link that splits there. */
+export interface SceneJunction {
+  id: string;
+  x: number;
+  y: number;
+  lit: boolean;
+  dim: boolean;
+}
+
 export interface Scene {
   nodes: SceneNode[];
   edges: SceneEdge[];
+  junctions: SceneJunction[];
   /** The thread lit up, if any. */
   thread: string | null;
 }
@@ -142,7 +152,21 @@ export function scene(
       dim: thread !== null && !joins && !touches,
     });
   }
-  return { nodes, edges, thread };
+  // A dot drawn once where several links split, lit if any of them is.
+  const junctions = new Map<string, SceneJunction>();
+  for (const edge of edges)
+    for (const at of edge.route === null ? [] : (placed.junctions.get(edge.id) ?? [])) {
+      const id = `junction ${Math.round(at.x)},${Math.round(at.y)}`;
+      const was = junctions.get(id);
+      junctions.set(id, {
+        id,
+        x: at.x,
+        y: at.y,
+        lit: edge.lit || (was?.lit ?? false),
+        dim: edge.dim && (was?.dim ?? true),
+      });
+    }
+  return { nodes, edges, junctions: [...junctions.values()], thread };
 }
 
 /**

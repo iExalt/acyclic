@@ -16,7 +16,7 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
+import { firstView, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor } from "./style";
 import { wheelZoom } from "./wheel";
@@ -236,11 +236,19 @@ export default function PlanMap({
     held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette));
     zoomOutTo(core, element, placed);
     if (first) {
-      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: its first item.
-      const start = firstOf(
-        drawn.nodes.flatMap((node) => (node.kind === "box" ? [] : (placed.nodes.get(node.id) ?? []))),
-      );
+      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: the first box's
+      // corner, and its first item.
+      const least = Math.min(...drawn.nodes.map((node) => node.layer));
       const screen = { width: element.clientWidth, height: element.clientHeight };
+      const start = startOf(
+        drawn.nodes.flatMap((node) => {
+          const at = placed.nodes.get(node.id);
+          return at === undefined ? [] : [{ ...at, box: node.kind === "box", top: node.layer === least }];
+        }),
+        screen.width,
+        16,
+        READABLE,
+      );
       const view = firstView(placed, screen, 16, MAX_ZOOM, start);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
@@ -259,7 +267,7 @@ export default function PlanMap({
     }
     drawnModel.current = model;
     // What the renderer holds, for the journeys to compare with the plan.
-    element.dataset.nodes = String(core.nodes().length);
+    element.dataset.nodes = String(core.nodes().not(".junction").length);
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
     element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
