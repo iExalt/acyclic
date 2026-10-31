@@ -55,6 +55,7 @@ export function Overview({
         <button
           type="button"
           className="row overview-row"
+          data-row
           style={lineStyle(line)}
           data-overview-thread={id}
           onClick={() => onPickThread(id)}
@@ -109,6 +110,7 @@ export function Overview({
                   <button
                     type="button"
                     className="row overview-row"
+                    data-row
                     style={lineStyle(view.line)}
                     onClick={() => onNeeds(view.key)}
                   >
@@ -187,6 +189,7 @@ export function Overview({
                   <button
                     type="button"
                     className="row overview-row"
+                    data-row
                     data-overview-phase={phase.id}
                     onClick={() => onSelectPhase(phase.id)}
                   >

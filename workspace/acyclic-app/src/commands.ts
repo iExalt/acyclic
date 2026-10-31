@@ -15,8 +15,12 @@ export type Run =
   | { kind: "item"; id: string }
   | { kind: "thread"; id: string }
   | { kind: "phase"; id: string }
+  /** Something to do to the item whose panel shows. */
+  | { kind: "on-item"; action: OnItem }
   /** The target of a move or link waiting for one: an item, or the top level for a move. */
   | { kind: "target"; id: string | null };
+
+export type OnItem = "edit" | "move" | "waits-for" | "relates-to" | "add-inside";
 
 export type Group = "Actions" | "Threads" | "Phases" | "Items";
 /** The order groups list in, and break ties in. */
@@ -51,6 +55,8 @@ export interface Plan {
   /** The threads at work, listed before a query is typed. */
   working: ReadonlySet<string>;
   showArchived: boolean;
+  /** The item whose panel shows, which the menu offers to act on. */
+  item?: { id: string; title: string } | null;
 }
 
 /** Every entry the menu can find in `plan`: actions, threads, phases, then items, archived ones only while shown. */
@@ -85,6 +91,28 @@ export function entries(plan: Plan): Entry[] {
       run: { kind: "refresh" },
     }),
   ];
+  const item = plan.item ?? null;
+  const onItem: Entry[] =
+    item === null
+      ? []
+      : (
+          [
+            ["edit", `Edit ${item.title}`],
+            ["move", `Move ${item.title}…`],
+            ["waits-for", `${item.title} waits for…`],
+            ["relates-to", `${item.title} relates to…`],
+            ["add-inside", `Add inside ${item.title}`],
+          ] as const
+        ).map(([action, title]) =>
+          entry({
+            key: `on-item:${action}`,
+            group: "Actions",
+            title,
+            detail: null,
+            also: "",
+            run: { kind: "on-item", action },
+          }),
+        );
   const threads = plan.threads.map((thread) =>
     entry({
       key: `thread:${thread.id}`,
@@ -113,7 +141,7 @@ export function entries(plan: Plan): Entry[] {
           run: { kind: "item", id },
         }),
       );
-  return [...actions, ...threads, ...phases, ...items];
+  return [...onItem, ...actions, ...threads, ...phases, ...items];
 }
 
 /**

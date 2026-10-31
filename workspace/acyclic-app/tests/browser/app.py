@@ -366,13 +366,14 @@ def open_app(browser, view, link, failures, name):
     )
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
-    # A blocked load, such as one the content policy refuses, shows only as a console error. WebKit on Linux says it
-    # ignores the viewport's keyboard setting, which only Chromium and Firefox read.
+    # A blocked load, such as one the content policy refuses, shows only as a console error, and a style the Map's
+    # renderer can't use only as a warning. WebKit on Linux says it ignores the viewport's keyboard setting, which only
+    # Chromium and Firefox read.
     page.on(
         "console",
         lambda message: (
             errors.append(message.text)
-            if message.type == "error" and '"interactive-widget"' not in message.text
+            if message.type in ("error", "warning") and '"interactive-widget"' not in message.text
             else None
         ),
     )
@@ -550,6 +551,47 @@ def command_journey(page, view, origin, plan, name, failures):
         page.keyboard.press("Escape")
         heading.wait_for(state="detached", timeout=5_000)
     print(f"{name}: the command menu found {id} by its title and opened it")
+
+
+def keys_journey(page, plan, name, failures):
+    """Single keys go to views and edit the item shown, a key typed in a field is the field's, and the menu's switch
+    turns them all off."""
+    view = page.locator("[data-view][aria-current=page]")
+    page.keyboard.press("g")
+    page.keyboard.press("t")
+    page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+    page.keyboard.press("g")
+    page.keyboard.press("m")
+    page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+    id = min(one for one in plan.default() if plan.depth(one) == 1)
+    page.keyboard.press("ControlOrMeta+k")
+    page.keyboard.type(plan.items[id]["title"])
+    page.keyboard.press("Enter")
+    page.locator("[data-testid=inspector] h2").wait_for(timeout=5_000)
+    page.keyboard.press("e")
+    form = page.get_by_test_id("item-form")
+    form.wait_for(timeout=5_000)
+    title = form.locator("input").first
+    title.focus()
+    before = title.input_value()
+    page.keyboard.press("End")
+    page.keyboard.press("e")
+    if title.input_value() != before + "e" or page.get_by_test_id("item-form").count() != 1:
+        failures.append(f"{name}: E typed in the title field wasn't the field's: {title.input_value()!r}")
+    form.get_by_role("button", name="Cancel").click()
+    form.wait_for(state="detached", timeout=5_000)
+    page.keyboard.press("Escape")
+    page.locator("[data-testid=inspector]").wait_for(state="detached", timeout=5_000)
+    from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
+    # Off the switch, which as a field would take the keys for itself.
+    page.evaluate("() => document.activeElement?.blur()")
+    page.keyboard.press("g")
+    page.keyboard.press("t")
+    page.wait_for_timeout(200)
+    if view.get_attribute("data-view") != "map":
+        failures.append(f"{name}: with single-key shortcuts off, G then T still went to {view.get_attribute('data-view')}")
+    from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
+    print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off")
 
 
 def installable(context, page, origin, name, failures):
@@ -2062,6 +2104,7 @@ def main():
                 deep_link_journey(context, origin, view, plan, name, failures)
                 command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
+                    keys_journey(page, plan, name, failures)
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.

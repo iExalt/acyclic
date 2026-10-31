@@ -11,11 +11,15 @@ import { Badge, lineStyle } from "./Badge";
 import { type Entry, type Run, rank } from "./commands";
 import {
   Archive,
+  ArrowUpLeft,
+  FolderInput,
   Icon,
   Inbox,
   LayoutDashboard,
+  Link2,
   ListTree,
   MapIcon,
+  Pencil,
   Plus,
   RotateCw,
   Search,
@@ -29,6 +33,10 @@ interface Props {
   entries: readonly Entry[];
   /** What the field asks for. */
   placeholder: string;
+  /** Each entry's single-key shortcut, by key, or null while they're switched off. */
+  keys: Readonly<Record<string, string>> | null;
+  /** Lists only what has a shortcut, as ? asks. */
+  shortcutsOnly: boolean;
   /** The threads at work, listed before anything is typed. */
   working: ReadonlySet<string>;
   lines: ReadonlyMap<string, Line>;
@@ -38,10 +46,24 @@ interface Props {
   onDismiss: () => void;
 }
 
-export function CommandMenu({ entries, placeholder, working, lines, stageOf, onRun, onDismiss }: Props) {
+export function CommandMenu({
+  entries,
+  placeholder,
+  keys,
+  shortcutsOnly,
+  working,
+  lines,
+  stageOf,
+  onRun,
+  onDismiss,
+}: Props) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const found = useMemo(() => rank(query, entries, working), [query, entries, working]);
+  const pool = useMemo(
+    () => (shortcutsOnly ? entries.filter((entry) => keys?.[entry.key] !== undefined) : entries),
+    [entries, keys, shortcutsOnly],
+  );
+  const found = useMemo(() => rank(query, pool, working), [query, pool, working]);
   const list = useId();
   const field = useRef<HTMLInputElement>(null);
   /** What had the focus before the menu opened. */
@@ -118,6 +140,12 @@ export function CommandMenu({ entries, placeholder, working, lines, stageOf, onR
           <span className="command-title">{entry.title}</span>
           {entry.detail === null ? null : <span className="command-detail">{entry.detail}</span>}
         </span>
+        {/* For the eye: the buttons the keys stand for carry them for assistive technology. */}
+        {keys?.[entry.key] === undefined ? null : (
+          <span className="kbd command-key" aria-hidden="true">
+            {keys[entry.key]}
+          </span>
+        )}
       </div>,
     );
   });
@@ -170,11 +198,15 @@ export function CommandMenu({ entries, placeholder, working, lines, stageOf, onR
             </div>
           ))}
         </div>
-        {found.length === 0 ? (
+        {found.length > 0 ? null : shortcutsOnly && keys === null ? (
+          <p className="command-none muted" role="status">
+            Single-key shortcuts are off: turn them on in the menu.
+          </p>
+        ) : (
           <p className="command-none muted" role="status">
             No matches for “{query.trim()}”
           </p>
-        ) : null}
+        )}
       </div>
     </div>,
     document.body,
@@ -203,6 +235,10 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, stageOf: (id: stri
   }
   if (run.kind === "view")
     return <Icon of={run.view === "overview" ? LayoutDashboard : run.view === "map" ? MapIcon : Waypoints} size={16} />;
+  if (run.kind === "on-item") {
+    const of = { edit: Pencil, move: FolderInput, "waits-for": ArrowUpLeft, "relates-to": Link2, "add-inside": Plus };
+    return <Icon of={of[run.action]} size={16} />;
+  }
   if (run.kind === "needs") return <Icon of={Inbox} size={16} />;
   if (run.kind === "add") return <Icon of={Plus} size={16} />;
   if (run.kind === "archived") return <Icon of={Archive} size={16} />;

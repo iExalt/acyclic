@@ -1,7 +1,7 @@
 // The selected item: its fields, its conflicts with a way to settle each, and its links both ways, each a button that
 // selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
 
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { CopyLink } from "./CopyLink";
@@ -21,6 +21,10 @@ export interface InspectorProps {
   /** A linked item's stage, to show beside it. */
   stageOf: (id: string) => Stage | undefined;
   onSelect: (id: string) => void;
+  /** Counts the keyboard's asks to edit: each new count opens the editor, as Edit does. */
+  editAsked: number;
+  /** Whether single-key shortcuts are on, so the buttons say their keys. */
+  shortcuts: boolean;
   /** Picks the item's thread, which closes the item to show the thread's panel. */
   onPickThread: (id: string) => void;
   onUnlink: (from: string, kind: LinkKind, to: string) => void;
@@ -51,6 +55,8 @@ export function Inspector({
   titleOf,
   stageOf,
   onSelect,
+  editAsked,
+  shortcuts,
   onPickThread,
   onUnlink,
   onMove,
@@ -68,6 +74,16 @@ export function Inspector({
   busy,
 }: InspectorProps) {
   const [editing, setEditing] = useState(reopened !== null);
+  // An ask from the keyboard, made after the panel opened; one made before belongs to an earlier panel.
+  const asked = useRef(editAsked);
+  useEffect(() => {
+    if (editAsked === asked.current) return;
+    asked.current = editAsked;
+    if (!busy) setEditing(true);
+  }, [editAsked, busy]);
+  /** A button's key, for the eye and for assistive technology, while shortcuts are on. */
+  const key = (label: string, letter: string) =>
+    shortcuts ? { title: `${label} (${letter})`, "aria-keyshortcuts": letter } : {};
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
   const chip = (id: string) => {
@@ -168,7 +184,13 @@ export function Inspector({
         />
       ) : null}
       <div className="actions toolbar">
-        <button type="button" onClick={() => setEditing(true)} data-action="edit" disabled={editing || busy}>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          data-action="edit"
+          {...key("Edit", "E")}
+          disabled={editing || busy}
+        >
           <Icon of={Pencil} size={16} />
           Edit
         </button>
@@ -178,19 +200,31 @@ export function Inspector({
             Reopen
           </button>
         ) : null}
-        <button type="button" onClick={onAdd} data-action="add-child" disabled={busy}>
+        <button type="button" onClick={onAdd} data-action="add-child" {...key("Add inside", "A")} disabled={busy}>
           <Icon of={Plus} size={16} />
           Add inside
         </button>
-        <button type="button" onClick={onMove} data-action="move" disabled={busy}>
+        <button type="button" onClick={onMove} data-action="move" {...key("Move", "M")} disabled={busy}>
           <Icon of={FolderInput} size={16} />
           Move
         </button>
-        <button type="button" onClick={() => onLink("waits-for")} data-action="waits-for" disabled={busy}>
+        <button
+          type="button"
+          onClick={() => onLink("waits-for")}
+          data-action="waits-for"
+          {...key("Waits for…", "W")}
+          disabled={busy}
+        >
           <Icon of={ArrowUpLeft} size={16} />
           Waits for…
         </button>
-        <button type="button" onClick={() => onLink("relates-to")} data-action="relates-to" disabled={busy}>
+        <button
+          type="button"
+          onClick={() => onLink("relates-to")}
+          data-action="relates-to"
+          {...key("Relates to…", "R")}
+          disabled={busy}
+        >
           <Icon of={Link2} size={16} />
           Relates to…
         </button>

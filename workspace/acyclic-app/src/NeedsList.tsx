@@ -92,7 +92,10 @@ export function NeedsList({
             key={view.key}
             data-need={view.key}
             data-at={view.key === at || undefined}
-            tabIndex={view.key === at ? -1 : undefined}
+            // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
+            // nothing; Tab reaches its actions.
+            data-row
+            tabIndex={-1}
           >
             {view.thread === null ? (
               <p className="facts line" style={lineStyle(view.line)}>

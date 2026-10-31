@@ -14,10 +14,10 @@ const MAC = isMac(navigator.platform);
 /** The view the app opens on, and Back on a phone returns to before it leaves the app. */
 export const HOME: View = "overview";
 
-const VIEWS: { view: View; label: string; icon: typeof MapIcon }[] = [
-  { view: "overview", label: "Overview", icon: LayoutDashboard },
-  { view: "map", label: "Map", icon: MapIcon },
-  { view: "threads", label: "Threads", icon: Waypoints },
+const VIEWS: { view: View; label: string; icon: typeof MapIcon; key: string }[] = [
+  { view: "overview", label: "Overview", icon: LayoutDashboard, key: "O" },
+  { view: "map", label: "Map", icon: MapIcon, key: "M" },
+  { view: "threads", label: "Threads", icon: Waypoints, key: "T" },
 ];
 
 export interface ShellProps {
@@ -41,6 +41,8 @@ export interface ShellProps {
   onOutline: () => void;
   /** Opens the command menu. */
   onSearch: () => void;
+  /** Whether single-key shortcuts are on, so the controls they stand for say their keys. */
+  shortcuts: boolean;
   /** The views and what opens over them. */
   children: ReactNode;
 }
@@ -51,7 +53,12 @@ export function Shell(props: ShellProps) {
 }
 
 /** The views, each a destination: the one shown is the current page. */
-function ViewLinks({ view, onView, short }: Pick<ShellProps, "view" | "onView"> & { short?: boolean }) {
+function ViewLinks({
+  view,
+  onView,
+  short,
+  shortcuts,
+}: Pick<ShellProps, "view" | "onView" | "shortcuts"> & { short?: boolean }) {
   return VIEWS.map((one) => (
     <button
       key={one.view}
@@ -59,6 +66,8 @@ function ViewLinks({ view, onView, short }: Pick<ShellProps, "view" | "onView"> 
       className="view"
       data-view={one.view}
       aria-current={view === one.view ? "page" : undefined}
+      // A sequence, which aria-keyshortcuts can't say: the title names it.
+      title={shortcuts ? `${one.label} (G then ${one.key})` : undefined}
       onClick={() => onView(one.view)}
     >
       {short ? null : <Icon of={one.icon} />}
@@ -137,7 +146,7 @@ function SidebarShell(props: ShellProps) {
           className="search"
           onClick={props.onSearch}
           data-action="search"
-          aria-keyshortcuts={MAC ? "Meta+K" : "Control+K"}
+          aria-keyshortcuts={`${MAC ? "Meta+K" : "Control+K"}${props.shortcuts ? " /" : ""}`}
         >
           <Icon of={Search} />
           <span className="grow">Search or jump to…</span>
@@ -147,10 +156,17 @@ function SidebarShell(props: ShellProps) {
           </span>
         </button>
         <nav className="views" aria-label="Views">
-          <ViewLinks view={props.view} onView={props.onView} />
+          <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
           <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
         </nav>
-        <button type="button" className="new" onClick={props.onAdd} data-action="add-top">
+        <button
+          type="button"
+          className="new"
+          onClick={props.onAdd}
+          data-action="add-top"
+          aria-keyshortcuts={props.shortcuts ? "C" : undefined}
+          title={props.shortcuts ? "New item (C)" : undefined}
+        >
           <Icon of={Plus} />
           New item
         </button>
@@ -202,7 +218,7 @@ function PhoneShell(props: ShellProps) {
       </header>
       {props.children}
       <nav className="tabbar" aria-label="Views">
-        <ViewLinks view={props.view} onView={props.onView} />
+        <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
         <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
       </nav>
     </div>

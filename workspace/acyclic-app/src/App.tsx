@@ -4,7 +4,7 @@ import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import { CommandMenu } from "./CommandMenu";
-import { entries as commandEntries, isMac, opensMenu, type Run, targets } from "./commands";
+import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -23,6 +23,7 @@ import {
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
+import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
@@ -49,6 +50,9 @@ type Load =
   | { state: "loading" }
   | { state: "loaded"; items: Item[]; threads: Threads; level: string; needs: Need[]; unread: Unread[] }
   | { state: "failed"; message: string };
+
+/** Where this device keeps whether single-key shortcuts are on. */
+const SHORTCUTS_KEY = "acyclic.shortcuts";
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
 interface After {
@@ -90,8 +94,13 @@ export function App() {
   const [thread, setThread] = useState<string | null>(null);
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
-  /** The command menu, over everything. */
+  /** The command menu, over everything; listing only what has a key, as ? asks. */
   const [showCommand, setShowCommand] = useState(false);
+  const [shortcutsOnly, setShortcutsOnly] = useState(false);
+  /** Single-key shortcuts, on unless switched off on this device. */
+  const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
+  /** Counts the keyboard's asks to edit the item shown, which its panel answers. */
+  const [editAsked, setEditAsked] = useState(0);
   /** The Map, or the threads in waves over it. */
   const [view, setView] = useState<View>(HOME);
   const wide = useWide();
@@ -188,6 +197,7 @@ export function App() {
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
     [loaded, shown, outline],
   );
+  const working = useMemo(() => new Set(threadLists(counts, waves).working), [counts, waves]);
   const current = useMemo(
     () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
     [model, outline, selected],
@@ -323,6 +333,19 @@ export function App() {
    * a form under it keeps what the user typed.
    */
   const panel = topLayer({ ...open, command: false });
+  // What the command menu finds, built once as it opens rather than at every render while it shows.
+  const picks = mode.kind === "idle" ? null : mode.kind;
+  const menuEntries = useMemo(() => {
+    if (!showCommand || model === null) return [];
+    const threads = sorted.map((one) => ({
+      id: one.id,
+      number: lines.get(one.id)?.number ?? null,
+      name: lines.get(one.id)?.name ?? one.id,
+    }));
+    const item = panel === "item" && selected !== null ? model.items.get(selected) : undefined;
+    const plan = { model, threads, working, showArchived, item: item === undefined ? null : item };
+    return picks === null ? commandEntries(plan) : targets(plan, picks);
+  }, [showCommand, model, sorted, lines, working, showArchived, picks, panel, selected]);
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
@@ -358,15 +381,34 @@ export function App() {
     }
     return closing.length;
   };
+  /** What the keys read of the app as it is: kept current at each render, for the one listener. */
+  const keysSee = useRef({ shortcuts, panel, menu: showCommand });
+  keysSee.current = { shortcuts, panel, menu: showCommand };
+  /** What a single-key shortcut does; set once the plan has loaded. */
+  const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
     const mac = isMac(navigator.platform);
+    let pending: Waiting = null;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
       // Taken from the browser only when it opens or closes the menu: the listener is the app's page's, so only while
       // the app has the focus.
       else if (opensMenu(event, mac)) {
         event.preventDefault();
+        setShortcutsOnly(false);
         setShowCommand((was) => !was);
+      } else {
+        const seen = keysSee.current;
+        const next = step(pending, event, {
+          enabled: seen.shortcuts,
+          panel: seen.panel,
+          menu: seen.menu,
+          dirty: document.querySelector("form[data-dirty='true']") !== null,
+          typing: typingIn(event.target),
+        });
+        if (next.action !== null || next.pending !== null) event.preventDefault();
+        pending = next.pending;
+        if (next.action !== null) onKeyAction.current(next.action);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -479,6 +521,7 @@ export function App() {
     if (entries.current.pushed === 0)
       window.history.replaceState(window.history.state, "", addressOf(NOTHING, window.location.search));
     const to = found.wanted;
+    setShowCommand(false);
     setMode({ kind: "idle" });
     setAdding(null);
     setShowPhases(false);
@@ -565,36 +608,62 @@ export function App() {
     if (run.kind === "view") setView(run.view);
     else if (run.kind === "needs") openNeeds();
     else if (run.kind === "add") startAdd(null);
+    else if (run.kind === "on-item") onItem(run.action);
     else if (run.kind === "thread") {
       setSelected(null);
       setThread(run.id);
     } else select(run.id, null);
   };
+  /**
+   * Acts on the item whose panel shows, as its buttons do, while they would be enabled; a move or link, asked for
+   * from the keyboard or the menu, finds its target in the menu, as the keyboard has no Map to tap.
+   */
+  const onItem = (action: OnItem) => {
+    if (chosen === undefined || busy) return;
+    if (action === "edit") setEditAsked((was) => was + 1);
+    else if (action === "add-inside") startAdd(chosen.id);
+    else {
+      setMode(action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id, link: action });
+      setShortcutsOnly(false);
+      setShowCommand(true);
+    }
+  };
+  /** Moves the focus to the next or previous row of the list in view: Needs you's entries, else the Overview's rows. */
+  const moveRow = (by: 1 | -1) => {
+    const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
+    const rows = [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+    const here = document.activeElement instanceof HTMLElement ? document.activeElement.closest("[data-row]") : null;
+    rows[nextRow(rows.length, here === null ? -1 : rows.indexOf(here as HTMLElement), by)]?.focus();
+  };
+  onKeyAction.current = (action) => {
+    if (action.kind === "go") setView(action.view);
+    else if (action.kind === "needs") openNeeds();
+    else if (action.kind === "add") startAdd(null);
+    else if (action.kind === "search" || action.kind === "help") {
+      setShortcutsOnly(action.kind === "help");
+      setShowCommand(true);
+    } else if (action.kind === "edit") onItem("edit");
+    else if (action.kind === "move") onItem("move");
+    else if (action.kind === "link") onItem(action.link);
+    else if (action.kind === "addInside") onItem("add-inside");
+    else moveRow(action.by);
+  };
   const picking = mode.kind === "idle" ? null : mode;
   const commandMenu = showCommand ? (
     <CommandMenu
-      entries={
-        picking === null
-          ? commandEntries({
-              model: model ?? buildModel([]),
-              threads: sorted.map((one) => ({
-                id: one.id,
-                number: lines.get(one.id)?.number ?? null,
-                name: lines.get(one.id)?.name ?? one.id,
-              })),
-              working: new Set(threadLists(counts, waves).working),
-              showArchived,
-            })
-          : targets({ model: model ?? buildModel([]), threads: [], working: new Set(), showArchived }, picking.kind)
-      }
+      entries={menuEntries}
+      keys={shortcuts ? SHORTCUTS : null}
+      shortcutsOnly={shortcutsOnly && picking === null}
       placeholder={
-        picking === null
-          ? "Search the plan, or type a command"
-          : picking.kind === "move"
-            ? `Find where to put ${titleOf(picking.item)}`
-            : `Find what ${titleOf(picking.item)} ${picking.link === "waits-for" ? "waits for" : "relates to"}`
+        shortcutsOnly && picking === null
+          ? "Keyboard shortcuts"
+          : picking === null
+            ? "Search the plan, or type a command"
+            : picking.kind === "move"
+              ? `Find where to put ${titleOf(picking.item)}`
+              : `Find what ${titleOf(picking.item)} ${picking.link === "waits-for" ? "waits for" : "relates to"}`
       }
-      working={new Set(threadLists(counts, waves).working)}
+      working={working}
       lines={lines}
       stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
       onRun={runCommand}
@@ -681,6 +750,18 @@ export function App() {
         />
         Show archived items
       </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={shortcuts}
+          onChange={(event) => {
+            setShortcuts(event.target.checked);
+            localStorage.setItem(SHORTCUTS_KEY, event.target.checked ? "on" : "off");
+          }}
+          data-testid="shortcuts"
+        />
+        Single-key shortcuts
+      </label>
       <Choice
         label="Autonomy for every thread without its own"
         testid="global-level"
@@ -747,7 +828,11 @@ export function App() {
       }
       outlineOpen={showPhases}
       onOutline={() => setShowPhases((was) => !was)}
-      onSearch={() => setShowCommand(true)}
+      onSearch={() => {
+        setShortcutsOnly(false);
+        setShowCommand(true);
+      }}
+      shortcuts={shortcuts}
     >
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
@@ -836,6 +921,8 @@ export function App() {
             titleOf={titleOf}
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             onSelect={(id) => select(id, selected)}
+            editAsked={editAsked}
+            shortcuts={shortcuts}
             // The item closes so its thread's panel, the bottom layer, shows; Back from the panel doesn't bring the item
             // back, as each layer has its one history entry.
             onPickThread={(id) => {

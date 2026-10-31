@@ -92,6 +92,12 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   thread, phase and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
   the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the focus back
   where it was.
+- **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
+  ⌘K search; ? lists the keys in the command menu, each runnable. With an item's panel shown, E edits, M moves, W and R
+  link, A adds inside; a move or link from the keyboard finds its target in the menu. J and K move through the
+  Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No single key
+  approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the menu's
+  Single-key shortcuts switch, per device, turns them off.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused

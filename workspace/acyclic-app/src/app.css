@@ -105,6 +105,11 @@ p {
 [tabindex="-1"]:focus-visible {
   outline: none;
 }
+/* A Needs you entry J and K move to is no control either, but where the keys are has to show: the ring, inside it. */
+li[data-row]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1491,6 +1496,10 @@ button.more {
 .command-detail {
   color: var(--muted);
   font-size: 13px;
+}
+.command-key {
+  flex: none;
+  margin-left: auto;
 }
 .command-none {
   margin: 0;

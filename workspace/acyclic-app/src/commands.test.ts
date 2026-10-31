@@ -89,6 +89,20 @@ describe("the command menu", () => {
   });
 });
 
+describe("the open item's actions", () => {
+  it("come first while its panel shows, and not at all without one", () => {
+    const shown = rank("", entries({ ...plan, item: { id: "dig", title: "Dig the beds" } }), plan.working);
+    expect(shown.slice(0, 5).map((one) => one.run)).toEqual([
+      { kind: "on-item", action: "edit" },
+      { kind: "on-item", action: "move" },
+      { kind: "on-item", action: "waits-for" },
+      { kind: "on-item", action: "relates-to" },
+      { kind: "on-item", action: "add-inside" },
+    ]);
+    expect(entries(plan).some((one) => one.run.kind === "on-item")).toBe(false);
+  });
+});
+
 describe("the command menu's key", () => {
   const press = (fields: Partial<KeyboardEvent>) => ({
     key: "k",
