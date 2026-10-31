@@ -14,6 +14,9 @@ import {
 } from "./forms";
 import type { Line } from "./lines";
 
+/** The most items an approval lists before it says how many more. */
+export const LISTED = 5;
+
 /** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
 const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see how";
 
@@ -35,6 +38,8 @@ export interface NeedView {
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
+  /** How many more items it covers than it lists, as an approval of a large thread lists only its first few. */
+  more: number;
   threads: { id: string; title: string }[];
   /** The thread the badge-led text names, which the text picks: its row would only repeat it. */
   thread: string | null;
@@ -129,6 +134,7 @@ function viewOf(
   };
   const base = {
     line,
+    more: 0,
     items: item === null ? [] : [item.id],
     threads: threads.map((one) => ({ id: one.id, title: titled(one) })),
     actions: [] as Action[],
@@ -165,16 +171,19 @@ function viewOf(
     case "awaiting-approval": {
       const id = thread?.id ?? "";
       // All its members, as the thread's panel counts them: approval covers the thread's whole scope, so the entry
-      // lists every item it covers, as the plan holds them, and only where the plan has none, the heads it names.
+      // lists the items it covers, as the plan holds them (only where the plan has none, the heads it names), the
+      // first few, and says how many more.
       const count = Number((need.thread as { counts?: { members?: number } } | undefined)?.counts?.members ?? 0);
       const heads = Array.isArray((need.thread as { heads?: unknown })?.heads)
         ? ((need.thread as { heads: string[] }).heads ?? [])
         : [];
-      const listed = members(id);
+      const known = members(id);
+      const listed = (known.length > 0 ? known : heads).slice(0, LISTED);
       return {
         ...base,
         key: `awaiting-approval:${id}`,
-        items: listed.length > 0 ? listed : heads,
+        items: listed,
+        more: Math.max(0, count - listed.length),
         text: `${thread === null ? id : lineName(thread)} waits for your approval`,
         actions: [
           {

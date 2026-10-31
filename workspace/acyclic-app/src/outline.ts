@@ -69,11 +69,13 @@ export function currentRows(
 }
 
 /**
- * A thread's items, every one the plan puts in it, archived too, as an approval covers them: each after those in the
- * thread it waits for, ties by id.
+ * A thread's items not archived, which can be selected, each after those in the thread it waits for, ties by id. An
+ * approval covers the archived too, which the count of what it covers says.
  */
 export function membersOf(model: Model, thread: string): string[] {
-  const ids = [...model.items.values()].filter((item) => item.thread === thread).map((item) => item.id);
+  const ids = [...model.items.values()]
+    .filter((item) => item.thread === thread && !item.archived)
+    .map((item) => item.id);
   const inThread = new Set(ids);
   const edges = ids.flatMap((id) =>
     (model.items.get(id)?.waitsFor ?? [])

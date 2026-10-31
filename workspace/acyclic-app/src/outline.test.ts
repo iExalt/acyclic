@@ -95,14 +95,14 @@ describe("currentRows", () => {
 });
 
 describe("membersOf", () => {
-  it("lists every item in a thread, archived too, each after those in the thread it waits for", () => {
+  it("lists a thread's items not archived, each after those in the thread it waits for", () => {
     const plan = buildModel([
       item("a", null, ["b"], { thread: "t" }),
       item("b", null, [], { thread: "t" }),
       item("c", null, ["x"], { thread: "t", archived: true }),
       item("x", null, [], { thread: "u" }),
     ]);
-    expect(membersOf(plan, "t")).toEqual(["b", "a", "c"]);
+    expect(membersOf(plan, "t")).toEqual(["b", "a"]);
     expect(membersOf(plan, "none")).toEqual([]);
   });
 });

@@ -143,6 +143,22 @@ export function NeedsList({
                   </button>
                 </li>
               ))}
+              {view.more === 0 ? null : (
+                <li>
+                  {view.thread === null ? (
+                    <span className="row more">and {view.more} more</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="row more"
+                      data-pick-thread={view.thread}
+                      onClick={() => view.thread !== null && onPickThread(view.thread)}
+                    >
+                      and {view.more} more
+                    </button>
+                  )}
+                </li>
+              )}
             </ul>
             {view.actions.length === 0 ? null : (
               <div className="actions need-actions">

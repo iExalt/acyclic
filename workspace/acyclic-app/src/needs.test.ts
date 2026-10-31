@@ -46,14 +46,16 @@ describe("needView", () => {
     );
     expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
     expect(waiting.items).toEqual(["z"]);
-    // Where the plan holds its items, it lists them all, so the count and the list agree.
-    const twelve = Array.from({ length: 12 }, (_, n) => `i${n}`);
+    expect(waiting.more).toBe(11);
+    // Where the plan holds its items, it lists them, the first few, and says how many more the count covers.
+    const ten = Array.from({ length: 10 }, (_, n) => `i${n}`);
     const all = needView(
       { kind: "awaiting-approval", thread: { ...thread("u", ["z"]), counts: { members: 12 } } },
       none,
-      (id) => (id === "u" ? twelve : []),
+      (id) => (id === "u" ? ten : []),
     );
-    expect(all.items).toEqual(twelve);
+    expect(all.items).toEqual(ten.slice(0, 5));
+    expect(all.more).toBe(7);
   });
 
   it("says which merge it can't confirm, and what to do about it", () => {
