@@ -116,7 +116,13 @@ export default function PlanMap({
   // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
     const core = cy.current;
-    if (focus === null || core === null) return;
+    if (focus === null) return;
+    if (core === null) {
+      // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
+      shown.current = focus.id;
+      setToggles((was) => expandTo(model, focus.id, was));
+      return;
+    }
     const drawn =
       focus.pin === null ? undefined : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
     if (drawn !== undefined) {
