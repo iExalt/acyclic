@@ -24,6 +24,9 @@ pub struct Waves {
     pub waits_for: BTreeMap<String, Vec<String>>,
 }
 
+/// The threads with work left, and each wait between two of them, as (waited on, waiting).
+type ThreadWaits<'m> = (BTreeSet<&'m str>, Vec<(&'m str, &'m str)>);
+
 impl Readiness<'_> {
     /// The threads with work left, in waves.
     ///
@@ -31,6 +34,42 @@ impl Readiness<'_> {
     ///
     /// Fails when a claim can't be read.
     pub fn waves(&self) -> Result<Waves, Error> {
+        let (left, edges) = self.thread_waits()?;
+        let mut nodes: Vec<&str> = left.iter().copied().collect();
+        nodes.sort_by(|a, b| natural::cmp(a, b));
+        let mut waits_for: BTreeMap<String, Vec<String>> =
+            nodes.iter().map(|&thread| (thread.to_owned(), Vec::new())).collect();
+        for &(from, to) in &edges {
+            waits_for.entry(to.to_owned()).or_default().push(from.to_owned());
+        }
+        for list in waits_for.values_mut() {
+            list.sort_by(|a, b| natural::cmp(a, b));
+        }
+        let (waves, anytime) = graph::waves(&nodes, &edges);
+        let owned = |ids: Vec<&str>| ids.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        Ok(Waves {
+            waves: waves.into_iter().map(owned).collect(),
+            anytime: owned(anytime),
+            waits_for,
+        })
+    }
+
+    /// The threads that wait on each other, one set per cycle, as the waves read waits: work in them can't all finish
+    /// until a link or a member moves. Such threads share a wave.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn thread_cycles(&self) -> Result<Vec<BTreeSet<String>>, Error> {
+        let (_, edges) = self.thread_waits()?;
+        Ok(graph::cycles(&edges)
+            .into_iter()
+            .map(|cycle| cycle.into_iter().map(str::to_owned).collect())
+            .collect())
+    }
+
+    /// The threads with work left, and each wait between two of them.
+    fn thread_waits(&self) -> Result<ThreadWaits<'_>, Error> {
         let model = self.model;
         let mut left: BTreeSet<&str> = BTreeSet::new();
         let mut edges: BTreeSet<(&str, &str)> = BTreeSet::new();
@@ -58,28 +97,12 @@ impl Readiness<'_> {
                 }
             }
         }
-        let mut nodes: Vec<&str> = left.iter().copied().collect();
-        nodes.sort_by(|a, b| natural::cmp(a, b));
         // Work waited on in a thread with none left of its own can't hold anything back.
-        let edges: Vec<(&str, &str)> = edges
+        let edges = edges
             .into_iter()
             .filter(|(from, to)| left.contains(from) && left.contains(to))
             .collect();
-        let mut waits_for: BTreeMap<String, Vec<String>> =
-            nodes.iter().map(|&thread| (thread.to_owned(), Vec::new())).collect();
-        for &(from, to) in &edges {
-            waits_for.entry(to.to_owned()).or_default().push(from.to_owned());
-        }
-        for list in waits_for.values_mut() {
-            list.sort_by(|a, b| natural::cmp(a, b));
-        }
-        let (waves, anytime) = graph::waves(&nodes, &edges);
-        let owned = |ids: Vec<&str>| ids.into_iter().map(str::to_owned).collect::<Vec<_>>();
-        Ok(Waves {
-            waves: waves.into_iter().map(owned).collect(),
-            anytime: owned(anytime),
-            waits_for,
-        })
+        Ok((left, edges))
     }
 
     /// An item's thread, when the plan has a record of it.

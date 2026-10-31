@@ -1,13 +1,10 @@
 //! Placing new or moved work in threads. Grouping work into threads is the user's or their agents' judgement; acyclic
 //! only follows the grouping they made: work under a parent joins the thread its parent, or else its siblings, hold,
-//! through the scope rules, so an agent only proposes it into approved scope. And the threads that wait on each other
-//! in a cycle, which no run can finish as they stand.
-
-use std::collections::{BTreeMap, BTreeSet};
+//! through the scope rules, so an agent only proposes it into approved scope.
 
 use serde::Serialize;
 
-use crate::model::{By, Item, LinkKind, Model, Value};
+use crate::model::{By, Model, Value};
 use crate::scope::{self, ScopeEdit, ScopeError};
 use crate::state::Replica;
 
@@ -98,57 +95,6 @@ pub fn place(
         }
     }
     Ok(placed)
-}
-
-/// The threads that `blocks` links make wait on each other, one set per cycle: work in them can't all finish until a
-/// link or a member moves. A link on a group counts for the open work under it.
-#[must_use]
-pub fn thread_cycles(model: &Model) -> Vec<BTreeSet<String>> {
-    let mut memo = BTreeMap::new();
-    let mut edges = Vec::new();
-    for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
-        let to = threads_under(model, &link.to, &mut memo);
-        let from = threads_under(model, &link.from, &mut memo);
-        for to in &to {
-            edges.extend(from.iter().filter(|from| *from != to).map(|from| (*to, *from)));
-        }
-    }
-    crate::graph::cycles(&edges)
-        .into_iter()
-        .map(|cycle| cycle.into_iter().map(str::to_owned).collect())
-        .collect()
-}
-
-/// The threads that hold open leaves under `id`, it included, as the waves count work left: a parent's own thread
-/// holds no work, and archived work none.
-fn threads_under<'m>(
-    model: &'m Model,
-    id: &'m str,
-    memo: &mut BTreeMap<&'m str, BTreeSet<&'m str>>,
-) -> BTreeSet<&'m str> {
-    if let Some(known) = memo.get(id) {
-        return known.clone();
-    }
-    let mut found = BTreeSet::new();
-    let mut seen = BTreeSet::new();
-    let mut stack = if model.is_archived(id) { vec![] } else { vec![id] };
-    while let Some(node) = stack.pop() {
-        // A link's end or a parent may have been deleted and have no item.
-        let item = model.items.get(node);
-        if !seen.insert(node) || item.is_some_and(Item::is_archived_root) {
-            continue;
-        }
-        let children = model.children(node);
-        if children.is_empty()
-            && let Some(thread) = model.thread_of(node)
-            && item.is_some_and(|item| !item.is_done())
-        {
-            found.insert(thread);
-        }
-        stack.extend(children);
-    }
-    memo.insert(id, found.clone());
-    found
 }
 
 #[cfg(test)]
