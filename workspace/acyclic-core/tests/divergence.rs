@@ -280,8 +280,12 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     // Every walk up the tree ends: inheritance, readiness, the graph and placing new work under the cycle.
     let model = Model::read(&state).unwrap();
     assert_eq!(place::inherited_thread(&model, "c"), None);
-    assert_eq!(place::thread_cycles(&model), Vec::<std::collections::BTreeSet<String>>::new());
-    Readiness::new(&state, &model, NOW, &Unmapped).ready(false, "session/mac").unwrap();
+    let readiness = Readiness::new(&state, &model, NOW, &Unmapped);
+    assert_eq!(
+        readiness.thread_cycles().unwrap(),
+        Vec::<std::collections::BTreeSet<String>>::new()
+    );
+    readiness.ready(false, "session/mac").unwrap();
     let view = export::view(&model, &Scope::default()).unwrap();
     assert!(!export::dot(&model, &view).is_empty());
     Pair::edit(&pair.mac, "session/mac", NOW, &|r, by| {

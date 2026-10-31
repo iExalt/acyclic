@@ -744,6 +744,36 @@ fn work_in_review_holds_its_waiters_back_and_a_cycle_shares_a_wave() {
 }
 
 #[test]
+fn threads_wait_on_each_other_in_a_cycle_while_work_in_review_holds_one_back() {
+    let mut r = replica("a");
+    waits(&mut r, ("x", "t1"), ("y", "t2"));
+    waits(&mut r, ("y2", "t2"), ("x2", "t1"));
+    let cycles = |r: &Replica, ancestry: &dyn Ancestry| {
+        let model = Model::read(&r.state).unwrap();
+        Readiness::new(&r.state, &model, NOW, ancestry).thread_cycles().unwrap()
+    };
+    let both = vec![BTreeSet::from(["t1".to_owned(), "t2".to_owned()])];
+    assert_eq!(cycles(&r, &Fake::default()), both);
+    done_with(&mut r, "x2", Some("open"));
+    assert_eq!(
+        cycles(&r, &Fake::with(&[("open", Ok(false))])),
+        both,
+        "unmerged, x2 still holds y2 back"
+    );
+    assert!(cycles(&r, &Fake::with(&[("open", Ok(true))])).is_empty(), "merged, it holds nothing");
+    let mut r = replica("a");
+    items(&mut r, &["x", "x2", "z", "z2"]);
+    thread(&mut r, "x", "t1");
+    thread(&mut r, "x2", "t1");
+    for id in ["z", "z2"] {
+        model::put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"loose"), by(3)).unwrap();
+    }
+    link(&mut r, "x", "z", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut r, "z2", "x2", LinkKind::Blocks, by(3)).unwrap();
+    assert!(cycles(&r, &Fake::default()).is_empty(), "a thread with no record is in no cycle");
+}
+
+#[test]
 fn parked_work_holds_its_waiters_back_but_waits_on_nothing() {
     let mut r = replica("a");
     waits(&mut r, ("b", "t2"), ("a", "t1"));
@@ -816,6 +846,10 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
         }
         false
     };
+    for cycle in readiness.thread_cycles().unwrap() {
+        let shared: BTreeSet<usize> = cycle.iter().map(|thread| wave[thread.as_str()]).collect();
+        assert_eq!(shared.len(), 1, "{cycle:?} share a wave: {found:?}");
+    }
     for (thread, on) in &found.waits_for {
         for first in on {
             let (a, b) = (wave[first.as_str()], wave[thread.as_str()]);

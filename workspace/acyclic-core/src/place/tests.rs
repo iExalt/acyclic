@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::model::{ItemState, add_item, item_key, link, set_parent, set_state};
+use crate::model::{ItemState, add_item, item_key, set_parent, set_state};
 use crate::schema::{item as field, kind, thread};
 use crate::state::{Key, ReplicaId, State};
 
@@ -148,72 +148,6 @@ fn an_agents_sibling_join_into_approved_scope_is_a_proposal() {
     let placed = place(&mut r, &["late".to_owned()], agent).unwrap();
     let [joined] = placed.as_slice() else { panic!("{placed:?}") };
     assert_eq!((joined.thread.as_str(), joined.proposal.is_some()), ("ok", true));
-}
-
-#[test]
-fn threads_that_wait_on_each_other_are_named_and_a_link_on_a_group_counts_for_its_work() {
-    let mut r = group(0);
-    for (leaf, thread) in [("x", "t"), ("x2", "t"), ("y", "u"), ("y2", "u")] {
-        add(&mut r, leaf, Some("g1"));
-        set_thread(&mut r, leaf, thread);
-    }
-    link(&mut r, "x", "y", LinkKind::Blocks, USER).unwrap();
-    assert_eq!(thread_cycles(&model(&r)), Vec::<BTreeSet<String>>::new());
-    add(&mut r, "box", None);
-    set_parent(&mut r, "x2", Some("box"), USER).unwrap();
-    link(&mut r, "y2", "box", LinkKind::Blocks, USER).unwrap();
-    let cycle = BTreeSet::from(["t".to_owned(), "u".to_owned()]);
-    assert_eq!(thread_cycles(&model(&r)), vec![cycle]);
-    set_state(&mut r, "x2", ItemState::Done, USER).unwrap();
-    assert_eq!(
-        thread_cycles(&model(&r)),
-        Vec::<BTreeSet<String>>::new(),
-        "done work waits on nothing"
-    );
-}
-
-#[test]
-fn threads_wait_only_on_open_leaves_as_the_waves_count_them() {
-    let mut r = group(0);
-    for (leaf, thread) in [("x", "t"), ("y", "u")] {
-        add(&mut r, leaf, Some("g1"));
-        set_thread(&mut r, leaf, thread);
-    }
-    link(&mut r, "x", "y", LinkKind::Blocks, USER).unwrap();
-    add(&mut r, "old", None);
-    add(&mut r, "box", Some("old"));
-    add(&mut r, "z", Some("box"));
-    set_thread(&mut r, "z", "u");
-    link(&mut r, "y", "box", LinkKind::Blocks, USER).unwrap();
-    let cycle = vec![BTreeSet::from(["t".to_owned(), "u".to_owned()])];
-    assert_eq!(
-        thread_cycles(&model(&r)),
-        Vec::<BTreeSet<String>>::new(),
-        "z is in u, the thread waiting"
-    );
-    set_thread(&mut r, "z", "t");
-    assert_eq!(thread_cycles(&model(&r)), cycle);
-    write(&mut r, &item_key("old").unwrap(), field::ARCHIVED, json!(true));
-    assert_eq!(
-        thread_cycles(&model(&r)),
-        Vec::<BTreeSet<String>>::new(),
-        "work under an archived ancestor of the linked group holds nothing back"
-    );
-    write(&mut r, &item_key("old").unwrap(), field::ARCHIVED, json!(false));
-    write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(true));
-    assert_eq!(
-        thread_cycles(&model(&r)),
-        Vec::<BTreeSet<String>>::new(),
-        "nor does archived work itself"
-    );
-    write(&mut r, &item_key("z").unwrap(), field::ARCHIVED, json!(false));
-    set_thread(&mut r, "z", "u");
-    set_thread(&mut r, "box", "t");
-    assert_eq!(
-        thread_cycles(&model(&r)),
-        Vec::<BTreeSet<String>>::new(),
-        "a group's own thread holds no work"
-    );
 }
 
 #[test]

@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::claim;
 use crate::model::{self, Level, Model, Value};
-use crate::place;
 use crate::ready::{Readiness, Status, Wait};
 use crate::renumber;
 use crate::schema::{kind, question, set};
@@ -286,7 +285,7 @@ pub fn needs_you(
         });
     }
     new_blockers(state, model, readiness, &mut entries)?;
-    awaiting_approval(model, &mut entries);
+    awaiting_approval(model, readiness, &mut entries)?;
     reopened_and_early(model, &mut entries);
     dangling(model, &mut entries);
     for clash in renumber::clashes(state, model, now)? {
@@ -335,7 +334,11 @@ fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) 
 
 /// Unapproved threads with open work, each with the threads it would deadlock with. Finished or archived members
 /// need no decision, since no run will take them.
-fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
+fn awaiting_approval(
+    model: &Model,
+    readiness: &Readiness<'_>,
+    entries: &mut BTreeSet<Entry>,
+) -> Result<(), Error> {
     let mut members: BTreeMap<&str, usize> = BTreeMap::new();
     for item in model
         .items
@@ -346,7 +349,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             *members.entry(thread).or_default() += 1;
         }
     }
-    let cycles = place::thread_cycles(model);
+    let cycles = readiness.thread_cycles()?;
     let heads = model.heads_index();
     for (id, thread) in &model.threads {
         let Some(&count) = members.get(id.as_str()) else { continue };
@@ -366,6 +369,7 @@ fn awaiting_approval(model: &Model, entries: &mut BTreeSet<Entry>) {
             heads: heads.of(id).into_iter().map(str::to_owned).collect(),
         });
     }
+    Ok(())
 }
 
 /// Fields with differing values, except claims (contests) and set elements (always `true`).
