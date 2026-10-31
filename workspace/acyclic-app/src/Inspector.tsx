@@ -2,7 +2,7 @@
 // selects the item it names. Notes are agents' text, so they are shown as text and never as markup.
 
 import { type ReactNode, useRef, useState } from "react";
-import { type Command, type Item, stateText, type Thread } from "./api";
+import type { Command, Item, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
@@ -11,6 +11,8 @@ import { ItemEditor } from "./ItemEditor";
 import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
+import { StageCounts, StageLabel } from "./Stage";
+import { stateWords } from "./stages";
 
 export interface InspectorProps {
   item: Item;
@@ -106,8 +108,10 @@ export function Inspector({
       <dl className="facts">
         <dt>Id</dt>
         <dd>{item.id}</dd>
-        <dt>State</dt>
-        <dd data-testid="state">{stateText(item)}</dd>
+        <dt>Status</dt>
+        <dd data-testid="state" className="status-value">
+          <ItemStatus item={item} />
+        </dd>
         {item.thread === null ? null : (
           <>
             <dt>Thread</dt>
@@ -215,5 +219,27 @@ function Conflicts({
         </div>
       ))}
     </div>
+  );
+}
+
+/** Where an item stands: a leaf's stage, or a parent's state from the work under it with its leaves by stage. */
+function ItemStatus({ item }: { item: Item }) {
+  const archived = item.archived ? <span className="muted">, archived</span> : null;
+  if (item.progress !== undefined)
+    return (
+      <>
+        <span>
+          {stateWords(item.progress.state)}
+          {item.progress.counts.leaves === 0 ? " (all archived)" : null}
+          {archived}
+        </span>
+        {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
+      </>
+    );
+  return (
+    <span>
+      {item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}
+      {archived}
+    </span>
   );
 }

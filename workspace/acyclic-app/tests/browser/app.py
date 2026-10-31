@@ -1568,6 +1568,9 @@ def needs_journey(page, env, plan, thread, name, failures):
     """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows. Opened
     from over the phases' sheet, the list shows in its place."""
     count = page.get_by_test_id("needs-count")
+    # The queue's count shows beside its name, on a phone as anywhere.
+    if not count.is_visible():
+        failures.append(f"{name}: the needs-you count isn't shown beside its name")
     page.get_by_test_id("phases-button").click()
     page.get_by_test_id("phases").wait_for()
     page.get_by_test_id("needs-button").click()

@@ -273,6 +273,34 @@ label:has(> input[type="checkbox"]) {
 .count {
   font-variant-numeric: tabular-nums;
 }
+/* A stage: the Map's icon beside its word, quieter for work finished or set aside. */
+.stage-mark {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.stage-icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--ink);
+}
+.stage-icon[data-quiet="true"] {
+  color: var(--muted);
+}
+.stage-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.muted {
+  color: var(--muted);
+}
+.status-value {
+  display: grid;
+  gap: 4px;
+}
 
 /* The frame. A phone: one bar on top, the views along the bottom. Wider, look A has a sidebar beside the views and
    look B a header over tabs, with the outline at the left. */
@@ -329,6 +357,12 @@ button.view[aria-pressed="true"] {
 .needs-mark {
   --line: var(--signal-fill);
   --line-ink: var(--signal-ink);
+}
+.needs-button .label {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
 }
 .needs-n {
   margin-left: auto;
@@ -421,8 +455,11 @@ button.icon[aria-pressed="true"] {
   left: calc(50% + 6px);
   font-size: 10px;
 }
+.tabbar .needs-button .label {
+  gap: 4px;
+}
 .tabbar .needs-n {
-  display: none;
+  margin-left: 0;
 }
 /* A form takes the whole height, the keyboard below it, which the views' bar would only ride up on. Hidden while the
    form is open, not while a field has focus: focus moving from a field to Save would bring the bar back and move Save

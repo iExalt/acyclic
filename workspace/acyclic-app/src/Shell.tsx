@@ -88,12 +88,14 @@ function NeedsButton({
           !
         </span>
       )}
-      <span className={compact ? "label short" : "label"}>Needs you</span>
-      {needs > 0 && (
-        <span className="count needs-n" data-testid="needs-count">
-          {countText(needs)}
-        </span>
-      )}
+      <span className={compact ? "label short" : "label"}>
+        Needs you
+        {needs > 0 && (
+          <span className="count needs-n" data-testid="needs-count">
+            {countText(needs)}
+          </span>
+        )}
+      </span>
     </button>
   );
 }

@@ -3,6 +3,10 @@
 // renderer gives a node a single label. Pure, so every stage's mark is tested without a canvas.
 
 import type { Stage } from "../api";
+import { STAGE_ICONS as ICONS, QUIET } from "../stages";
+
+export { QUIET };
+
 import type { Palette } from "../palette";
 
 /** How wide the stripe is, and where the icon and the badge sit, in the Map's units. */
@@ -13,20 +17,6 @@ const BADGE = 20;
 /** The room the marks take from a task's title: the stripe and icon at its left, the badge at its right. */
 export const MARKS_LEFT = ICON_AT + ICON + 6;
 export const MARKS_RIGHT = BADGE + 14;
-
-/** Each stage's icon, drawn in a 16-unit square. */
-const ICONS: Record<Stage, string> = {
-  done: '<path d="M3 8.5l3.2 3.2L13 5"/>',
-  "in-review": '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
-  "in-progress": '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/>',
-  ready: '<circle cx="8" cy="8" r="6"/>',
-  blocked: '<circle cx="8" cy="8" r="6"/><path d="M4.5 8h7"/>',
-  parked: '<path d="M6 3.5v9M10 3.5v9"/>',
-  unthreaded: '<path d="M2 8h4M10 8h4"/>',
-};
-
-/** The stages whose work is finished or set aside, drawn quieter: muted icon and title. */
-export const QUIET: ReadonlySet<Stage> = new Set(["done", "blocked", "parked", "unthreaded"]);
 
 /** A task's thread as its marks show it: the line's colour, its badge's text (a number, or none for a dot) and ink. */
 export interface Thread {
