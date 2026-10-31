@@ -10,6 +10,7 @@ import { countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
+import { threadLists } from "./threadLists";
 import type { WavesView } from "./waves";
 
 /** How many rows each section shows before it says how many more. */
@@ -25,7 +26,8 @@ export interface OverviewProps {
   outline: Outline | null;
   /** The plan's items by id, for each phase's own progress. */
   items: ReadonlyMap<string, Pick<Item, "progress">>;
-  onNeeds: () => void;
+  /** Opens Needs you, at the entry `key` names if given. */
+  onNeeds: (key?: string) => void;
   onPickThread: (id: string) => void;
   onSelectPhase: (id: string) => void;
   /** The view to see everything a section stands for. */
@@ -44,12 +46,7 @@ export function Overview({
   onSelectPhase,
   onView,
 }: OverviewProps) {
-  const working = [...counts.entries()]
-    .filter(([, one]) => one.in_progress + one.in_review > 0)
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([id]) => id);
-  // The first wave's threads not already at work, which In progress lists.
-  const next = (waves?.waves[0]?.map((card) => card.id) ?? []).filter((id) => !working.includes(id));
+  const { working, next, wave } = threadLists(counts, waves);
   const thread = (id: string) => {
     const line = lines.get(id);
     const tally = counts.get(id);
@@ -96,7 +93,7 @@ export function Overview({
           <span className="count muted">{countText(needs.length)}</span>
           <span className="grow" />
           {needs.length === 0 ? null : (
-            <button type="button" className="quiet" onClick={onNeeds}>
+            <button type="button" className="quiet" onClick={() => onNeeds()}>
               Open the list
             </button>
           )}
@@ -109,7 +106,12 @@ export function Overview({
               const view = needView(need, lines);
               return (
                 <li key={view.key}>
-                  <button type="button" className="row overview-row" style={lineStyle(view.line)} onClick={onNeeds}>
+                  <button
+                    type="button"
+                    className="row overview-row"
+                    style={lineStyle(view.line)}
+                    onClick={() => onNeeds(view.key)}
+                  >
                     {view.line === undefined ? (
                       <span className="badge needs-mark" aria-hidden="true">
                         !
@@ -129,7 +131,7 @@ export function Overview({
             })}
           </ul>
         )}
-        {more(NEEDS_SHOWN, needs.length, "in Needs you", onNeeds)}
+        {more(NEEDS_SHOWN, needs.length, "in Needs you", () => onNeeds())}
       </section>
 
       <div className="overview-pair">
@@ -150,6 +152,7 @@ export function Overview({
           <header>
             <h2 id="overview-next">Up next</h2>
             <span className="count muted">{next.length}</span>
+            {wave === null ? null : <span className="muted">wave {wave + 1}</span>}
             <span className="grow" />
             <button type="button" className="quiet" onClick={() => onView("threads")}>
               All waves
@@ -160,7 +163,7 @@ export function Overview({
           ) : (
             <ul className="rows">{next.slice(0, THREADS_SHOWN).map(thread)}</ul>
           )}
-          {more(THREADS_SHOWN, next.length, "in the first wave", () => onView("threads"))}
+          {more(THREADS_SHOWN, next.length, "in this wave", () => onView("threads"))}
         </section>
       </div>
 

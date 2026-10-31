@@ -101,6 +101,8 @@ export function App() {
   const [reopened, setReopened] = useState<Reopened | null>(null);
   // A notification opens the app on `/?needs`, to the list it is about.
   const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
+  /** The entry Needs you opens at, when the Overview opened it from one. */
+  const [needsAt, setNeedsAt] = useState<string | null>(null);
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
@@ -295,6 +297,7 @@ export function App() {
     needs: showNeeds,
     phases: showPhases && !wide,
     thread: thread !== null,
+    away: !wide && view !== DESIGN.home,
   };
   const top = topLayer(open);
   const layers = depth(open);
@@ -319,6 +322,7 @@ export function App() {
       else if (layer === "item") setSelected(null);
       else if (layer === "needs") setShowNeeds(false);
       else if (layer === "phases") setShowPhases(false);
+      else if (layer === "away") setView(DESIGN.home);
       else setThread(null);
     }
     return closing.length;
@@ -366,6 +370,9 @@ export function App() {
       <div className="status-page" role="alert">
         <Wordmark />
         <h1>Couldn't load the plan</h1>
+        <p>
+          Check that <code>acyclic up</code> is still running where you paired this app, then try again.
+        </p>
         <p className="muted">{load.message}</p>
         <button type="button" className="primary" onClick={refresh}>
           Try again
@@ -461,7 +468,9 @@ export function App() {
     setShowPhases(false);
     setShowNeeds((was) => !was);
   };
-  const openNeeds = () => {
+  /** Opens Needs you, at the entry `key` names if given. */
+  const openNeeds = (key?: string) => {
+    setNeedsAt(key ?? null);
     if (!showNeeds || topLayer(open) !== "needs") toggleNeeds();
   };
   return (
@@ -474,7 +483,10 @@ export function App() {
       onView={setView}
       needs={load.needs.length}
       needsOpen={showNeeds}
-      onNeeds={toggleNeeds}
+      onNeeds={() => {
+        setNeedsAt(null);
+        toggleNeeds();
+      }}
       onAdd={() => startAdd(null)}
       menu={menu}
       outline={
@@ -493,7 +505,7 @@ export function App() {
       onOutline={() => setShowPhases((was) => !was)}
     >
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
-      <main className="stage" data-busy={busy} data-reads={reads.current.shown}>
+      <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
           <PlanMap
             items={shown}
@@ -535,7 +547,7 @@ export function App() {
           <div className="empty-plan" data-testid="empty-plan">
             <h2>No items yet</h2>
             <p className="muted">
-              Add a project at the top level, then the work inside it. Agents' imports show here too.
+              Add an item at the top level, then the work inside it. What agents import shows here too.
             </p>
             <button type="button" className="primary" onClick={() => startAdd(null)}>
               New item
@@ -543,7 +555,7 @@ export function App() {
           </div>
         ) : null}
         {view === "map" && DESIGN.home === "map" && !showNeeds ? (
-          <NeedsStrip needs={load.needs} onOpen={openNeeds} />
+          <NeedsStrip needs={load.needs} onOpen={() => openNeeds()} />
         ) : null}
         {top === "add" || top === "item" ? null : noticeView}
         {top === "mode" ? (
@@ -616,6 +628,7 @@ export function App() {
               setThread(id);
             }}
             onClose={() => setShowNeeds(false)}
+            at={needsAt}
           />
         ) : null}
         {top === "phases" && outline !== null ? (

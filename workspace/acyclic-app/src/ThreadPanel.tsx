@@ -117,7 +117,7 @@ export function ThreadPanel({
       </p>
       <div className="progress">
         {counts === undefined || counts.leaves === 0 ? (
-          <span className="muted">No tasks drawn</span>
+          <span className="muted">No tasks shown</span>
         ) : (
           <StageCounts counts={counts} />
         )}

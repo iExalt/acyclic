@@ -1,6 +1,6 @@
 // The needs-you list: each entry in a line, with what it names to select and the actions the app can take on it.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
@@ -22,9 +22,22 @@ export interface NeedsListProps {
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   onClose: () => void;
+  /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
+   *  so a stray Enter decides nothing. */
+  at?: string | null;
 }
 
-export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, onPickThread, onClose }: NeedsListProps) {
+export function NeedsList({
+  needs,
+  titleOf,
+  lines,
+  busy,
+  onCommand,
+  onSelect,
+  onPickThread,
+  onClose,
+  at = null,
+}: NeedsListProps) {
   const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines) }));
   // Filters for the groups present, only when there are two or more to choose between.
   const groups = GROUPS.map((one) => ({
@@ -37,6 +50,12 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
+  useEffect(() => {
+    if (at === null) return;
+    const entry = panel.current?.querySelector<HTMLElement>(`[data-need="${CSS.escape(at)}"]`);
+    entry?.scrollIntoView({ block: "start" });
+    entry?.focus({ preventScroll: true });
+  }, [at]);
   return (
     <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Needs you">
       <header>
@@ -65,7 +84,12 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
       {views.length === 0 ? <p className="empty">Nothing needs you. New approvals and blockers show here.</p> : null}
       <ul className="needs">
         {views.map((view) => (
-          <li key={view.key} data-need={view.key}>
+          <li
+            key={view.key}
+            data-need={view.key}
+            data-at={view.key === at || undefined}
+            tabIndex={view.key === at ? -1 : undefined}
+          >
             {view.thread === null ? (
               <p className="facts line" style={lineStyle(view.line)}>
                 <Badge line={view.line} />

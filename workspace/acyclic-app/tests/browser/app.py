@@ -793,6 +793,21 @@ def threads_journey(page, view, env, name, failures):
             failures.append(f"{name}: choosing {task} didn't switch to the Map")
         page.keyboard.press("Escape")
     page.get_by_test_id("threads-view").wait_for(state="detached")
+    # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; the
+    # thread's panel, still picked, over the view, closes first.
+    if view.get("has_touch"):
+        page.locator("[data-view=threads]").click()
+        page.get_by_test_id("threads-view").wait_for()
+        if page.get_by_test_id("thread-panel").count():
+            page.go_back()
+            page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
+            if not page.get_by_test_id("threads-view").is_visible():
+                failures.append(f"{name}: Back from a thread's panel over the Threads view left the view too")
+        page.go_back()
+        try:
+            page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from the Threads view didn't go home to the Map")
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 

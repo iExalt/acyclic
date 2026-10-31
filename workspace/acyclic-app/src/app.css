@@ -1192,6 +1192,11 @@ dl.facts .chip {
   padding: 12px 0 8px;
   border-top: 2px solid var(--rule);
 }
+/* The entry the Overview opened the list at, marked until the list closes. */
+.needs > li[data-at="true"] {
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-left: 10px;
+}
 .notify {
   margin: 0 0 4px;
 }
@@ -1388,6 +1393,31 @@ button.more {
   border-color: transparent;
   font-weight: 400;
   text-align: left;
+}
+/* A phone gives the strip a row of its own under the bar, the Map below it rather than under it, and keeps it to one
+   line: the count, with its breakdown a tap away. */
+.phone-shell .needs-strip {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 48px;
+  max-width: none;
+  padding: 0 4px 0 12px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+.phone-shell .stage:has(> .needs-strip) .map {
+  top: 48px;
+}
+.phone-shell .needs-strip .muted {
+  display: none;
+}
+.phone-shell .needs-strip button.strip-open {
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
 }
 .needs-strip button.close {
   width: 32px;
