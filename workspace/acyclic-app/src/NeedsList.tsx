@@ -65,7 +65,9 @@ export function NeedsList({
   const after = (index: number) => () => {
     const entries = panel.current?.querySelectorAll<HTMLElement>("[data-need]") ?? [];
     const entry = entries[Math.min(index, entries.length - 1)];
-    return (entry ?? panel.current)?.querySelector<HTMLElement>(entry ? ".need-actions button" : ".close");
+    // An entry settled only in a terminal has no action: its first row, or the entry itself.
+    const into = entry?.querySelector<HTMLElement>(".need-actions button") ?? entry?.querySelector("button") ?? entry;
+    return into ?? panel.current?.querySelector<HTMLElement>(".close");
   };
   useEffect(() => {
     if (at === null) return;

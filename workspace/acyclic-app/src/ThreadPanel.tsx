@@ -181,7 +181,7 @@ export function ThreadPanel({
                 <button
                   type="button"
                   data-action="keep"
-                  {...held(() => onCommand(keepCommand(proposal.id), "Kept the proposal"), nextProposal(index))}
+                  {...held(() => onCommand(keepCommand(proposal.id), `Kept ${change(proposal)}`), nextProposal(index))}
                 >
                   Keep
                 </button>
@@ -189,7 +189,10 @@ export function ThreadPanel({
                   type="button"
                   className="quiet"
                   data-action="drop"
-                  {...held(() => onCommand(dropCommand(proposal.id), "Dropped the proposal"), nextProposal(index))}
+                  {...held(
+                    () => onCommand(dropCommand(proposal.id), `Dropped ${change(proposal)}`),
+                    nextProposal(index),
+                  )}
                 >
                   Drop
                 </button>
@@ -251,6 +254,9 @@ export function ThreadPanel({
     </>,
   );
 }
+
+/** A proposal as settling it says, as the needs-you list does: whose change of what. */
+const change = (proposal: Proposal) => `${proposal.actor}'s ${proposal.edit.field} change`;
 
 /** A proposal in a line: who proposed what, for which item. */
 function describe(proposal: Proposal, titleOf: (id: string) => string): string {

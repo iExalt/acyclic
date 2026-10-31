@@ -1991,6 +1991,17 @@ def needs_journey(page, env, plan, thread, name, failures):
     needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
         state="detached", timeout=10_000
     )
+    # The keyboard stays in the list, on what took the entry's place, and the approval is said.
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    kept = page.evaluate(
+        "() => document.querySelector('[data-testid=needs]').contains(document.activeElement)"
+    )
+    said = page.locator("p[role=status]").inner_text()
+    if not kept or not said.startswith("Approved "):
+        failures.append(
+            f"{name}: approving from the list left focus at {page.evaluate('document.activeElement.tagName')}"
+            f" and said {said!r}"
+        )
     if int(count.inner_text()) >= before:
         failures.append(
             f"{name}: the needs count stayed at {count.inner_text()} after two were met"

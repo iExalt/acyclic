@@ -12,10 +12,16 @@ type Next = () => HTMLElement | null | undefined;
  * its subject again does.
  */
 export function useHeld(busy: boolean, settled: unknown) {
-  const pending = useRef<{ next: Next; settled: unknown } | null>(null);
+  const pending = useRef<{ next: Next; settled: unknown; landed: boolean } | null>(null);
   useEffect(() => {
     const was = pending.current;
-    if (busy || was === null) return;
+    if (was === null) return;
+    // A write after this one's has landed is another's: what this one pressed no longer stands to go.
+    if (busy) {
+      if (was.landed) pending.current = null;
+      return;
+    }
+    was.landed = true;
     const active = document.activeElement;
     if (active === null || active === document.body) {
       pending.current = null;
@@ -26,7 +32,7 @@ export function useHeld(busy: boolean, settled: unknown) {
     "aria-disabled": busy || undefined,
     onClick: () => {
       if (busy) return;
-      pending.current = { next, settled };
+      pending.current = { next, settled, landed: false };
       act();
     },
   });
