@@ -1,5 +1,5 @@
 /* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
-   The colours are lines.ts's TOKENS, which a unit test holds these to. */
+   The colours are palette.ts's, which a unit test holds these to. */
 /* Overpass leaves out the backtick, U+0060: its font classes it as a mark, so browsers stacked it on the letter beside
    it as an accent. It falls back to the system face, on the Map's canvas too. */
 @font-face {
@@ -23,27 +23,46 @@
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 :root {
-  --ground: #141a1f;
-  --chrome: #1b2228;
-  --box: #1b2329;
-  --tile: #26313a;
-  --sheet: #222b33;
-  --rule: #34404a;
-  --ink: #e6ebef;
-  --muted: #95a3ae;
-  --signal: #f2b33d;
+  --ground: #121417;
+  --chrome: #16191d;
+  --box: #181b1f;
+  --tile: #23282e;
+  --sheet: #1c2025;
+  --rule: #2b3138;
   /* A control's edge: stronger than a rule, so an outlined button reads as one. */
-  --edge: #4e5d69;
+  --edge: #4a535e;
+  --ink: #e8eaed;
+  --muted: #a2aab4;
+  --signal: #f2b33d;
+  --signal-ink: #121417;
   --danger: #ff8a80;
+  color-scheme: dark;
   /* At least 44 px to a fingertip; a mouse makes do with less. */
   --hit: 44px;
-  color-scheme: dark;
   font-family: Overpass, system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.4;
   background: var(--ground);
   color: var(--ink);
   -webkit-tap-highlight-color: transparent;
+}
+/* The light scheme: palette.ts's light palette, which a unit test holds these to. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f3f4f6;
+    --chrome: #eceef1;
+    --box: #f9fafb;
+    --tile: #ffffff;
+    --sheet: #ffffff;
+    --rule: #d0d5db;
+    --edge: #aab0b9;
+    --ink: #1a1c20;
+    --muted: #5b626c;
+    --signal: #8f5100;
+    --signal-ink: #ffffff;
+    --danger: #b3261e;
+    color-scheme: light;
+  }
 }
 @media (pointer: fine) {
   :root {
@@ -100,7 +119,7 @@ button.primary {
   color: var(--ground);
 }
 button.primary:hover:not(:disabled) {
-  background: #ffffff;
+  background: color-mix(in srgb, var(--ink) 85%, var(--ground));
 }
 button.quiet,
 button.close {
@@ -241,7 +260,7 @@ button.icon {
 }
 .needs-button .badge {
   --line: var(--signal);
-  --line-ink: var(--ground);
+  --line-ink: var(--signal-ink);
 }
 .needs-button[data-none="true"] {
   color: var(--muted);

@@ -3,7 +3,7 @@
 // renderer gives a node a single label. Pure, so every stage's mark is tested without a canvas.
 
 import type { Stage } from "../api";
-import { TOKENS } from "../lines";
+import type { Palette } from "../palette";
 
 /** How wide the stripe is, and where the icon and the badge sit, in the Map's units. */
 const STRIPE = 6;
@@ -28,17 +28,6 @@ const ICONS: Record<Stage, string> = {
 /** The stages whose work is finished or set aside, drawn quieter: muted icon and title. */
 export const QUIET: ReadonlySet<Stage> = new Set(["done", "blocked", "parked", "unthreaded"]);
 
-/** Each stage's tint, behind the title. */
-export const TINTS: Record<Stage, string> = {
-  done: "#1d262c",
-  "in-review": "#2c3446",
-  "in-progress": "#364855",
-  ready: TOKENS.tile,
-  blocked: "#181f24",
-  parked: "#2a2a2c",
-  unthreaded: TOKENS.tile,
-};
-
 /** A task's thread as its marks show it: the line's colour, its badge's text (a number, or none for a dot) and ink. */
 export interface Thread {
   colour: string;
@@ -49,12 +38,18 @@ export interface Thread {
 const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** The marks' image for a task `width` by `height`, as SVG markup. */
-export function markSvg(stage: Stage | null, thread: Thread | null, width: number, height: number): string {
+export function markSvg(
+  stage: Stage | null,
+  thread: Thread | null,
+  width: number,
+  height: number,
+  palette: Palette,
+): string {
   const middle = height / 2;
   const parts: string[] = [];
   if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${height}" fill="${thread.colour}"/>`);
   if (stage !== null) {
-    const colour = QUIET.has(stage) ? TOKENS.muted : TOKENS.ink;
+    const colour = QUIET.has(stage) ? palette.muted : palette.ink;
     parts.push(
       `<g transform="translate(${ICON_AT} ${middle - ICON / 2})" fill="none" stroke="${colour}" color="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[stage]}</g>`,
     );
@@ -63,7 +58,7 @@ export function markSvg(stage: Stage | null, thread: Thread | null, width: numbe
   if (thread === null) {
     // No thread: an empty ring where its badge would be.
     parts.push(
-      `<circle cx="${right - BADGE / 2}" cy="${middle}" r="${BADGE / 2 - 1}" fill="none" stroke="${TOKENS.muted}" stroke-width="1.5" stroke-dasharray="3 2.4"/>`,
+      `<circle cx="${right - BADGE / 2}" cy="${middle}" r="${BADGE / 2 - 1}" fill="none" stroke="${palette.muted}" stroke-width="1.5" stroke-dasharray="3 2.4"/>`,
     );
   } else if (thread.number === null) {
     parts.push(`<circle cx="${right - BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
@@ -78,15 +73,26 @@ export function markSvg(stage: Stage | null, thread: Thread | null, width: numbe
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }
 
-const made = new Map<string, string>();
+const made = new WeakMap<Palette, Map<string, string>>();
 
-/** The marks' image as the renderer takes it, made once for each stage, thread and size. */
-export function markOf(stage: Stage | null, thread: Thread | null, width: number, height: number): string {
+/** The marks' image as the renderer takes it, made once for each palette, stage, thread and size. */
+export function markOf(
+  stage: Stage | null,
+  thread: Thread | null,
+  width: number,
+  height: number,
+  palette: Palette,
+): string {
+  let mine = made.get(palette);
+  if (mine === undefined) {
+    mine = new Map();
+    made.set(palette, mine);
+  }
   const key = JSON.stringify([stage, thread, width, height]);
-  let uri = made.get(key);
+  let uri = mine.get(key);
   if (uri === undefined) {
-    uri = `data:image/svg+xml;utf8,${encodeURIComponent(markSvg(stage, thread, width, height))}`;
-    made.set(key, uri);
+    uri = `data:image/svg+xml;utf8,${encodeURIComponent(markSvg(stage, thread, width, height, palette))}`;
+    mine.set(key, uri);
   }
   return uri;
 }

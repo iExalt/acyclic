@@ -17,6 +17,7 @@ Usage: app.py <acyclic binary> <acyclic-fixtures binary>
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -37,8 +38,10 @@ VIEWS = {
         "device_scale_factor": 2.8125,
         "is_mobile": True,
         "has_touch": True,
+        # The phone in daylight, the laptop at the desk: each scheme has journeys drawn in it.
+        "color_scheme": "light",
     },
-    "desktop": {"viewport": {"width": 1440, "height": 900}},
+    "desktop": {"viewport": {"width": 1440, "height": 900}, "color_scheme": "dark"},
 }
 # The furthest the Map's first view zooms out, as reveal.ts has it.
 READABLE = 0.85
@@ -261,6 +264,94 @@ def settled_corner(page, id):
         })""",
         id,
     )
+
+
+# The Map's colours as drawn and as the page declares them, as #rrggbb, with what must hold still across a restyle.
+READ_SCHEME = """m => {
+    const hex = (c) => '#' + c.match(/[\\d.]+/g).slice(0, 3).map((x) => Math.round(Number(x)).toString(16).padStart(2, '0')).join('');
+    // A custom property as the browser resolves it, since the build may write a colour shorter.
+    const probe = document.body.appendChild(document.createElement('i'));
+    const v = (n) => { probe.style.color = `var(${n})`; return hex(getComputedStyle(probe).color); };
+    const leaf = m.cy.nodes('.leaf.stage-ready, .leaf.stage-unthreaded').first();
+    const closed = m.cy.nodes('.collapsed').not('.lit, .selected').first();
+    const open = m.cy.nodes('.box').not('.lit, .selected').first();
+    const plain = m.cy.edges().not('.lit, .crossing').first();
+    const badge = document.querySelector('[data-testid=thread-panel] .badge');
+    return {
+        css: { ground: v('--ground'), tile: v('--tile'), box: v('--box'), rule: v('--rule'), muted: v('--muted'), ink: v('--ink') },
+        leaf: leaf.nonempty() ? hex(leaf.style('background-color')) : null,
+        closed: closed.nonempty() ? [hex(closed.style('background-color')), hex(closed.style('border-color'))] : null,
+        open: open.nonempty() ? [hex(open.style('background-color')), hex(open.style('border-color'))] : null,
+        edge: plain.nonempty() ? hex(plain.style('line-color')) : null,
+        lit: [...new Set(m.cy.edges('.lit').map((e) => hex(e.style('line-color'))))],
+        badge: badge && hex(getComputedStyle(badge).backgroundColor),
+        _: probe.remove(),
+        marks: m.cy.nodes('.leaf').map((n) => decodeURIComponent(n.data('mark') || '')).join(''),
+        still: { zoom: m.cy.zoom(), pan: m.cy.pan(), n: m.cy.elements().length, layouts: m.dataset.layouts,
+                 lit: m.cy.nodes('.lit').length, selected: m.cy.nodes('.selected').length },
+    };
+}"""
+
+
+def luminance(colour):
+    channels = [int(colour[at : at + 2], 16) / 255 for at in (1, 3, 5)]
+    r, g, b = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    x, y = sorted([luminance(a), luminance(b)], reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+def scheme_switch(page, name, failures):
+    """The system's scheme changed under an open Map, with a thread lit: the Map is restyled in place, every colour the
+    page's own for the new scheme, the lit route its badge's, and nothing else moves; and back again."""
+    drawn = page.get_by_test_id("map")
+    before = drawn.evaluate(READ_SCHEME)
+
+    def follows(scheme, now):
+        css = now["css"]
+        wrong = []
+        if now["leaf"] not in (None, css["tile"]):
+            wrong.append(f"a task {now['leaf']}, not the tile {css['tile']}")
+        if now["closed"] not in (None, [css["tile"], css["muted"]]):
+            wrong.append(f"a closed box {now['closed']}")
+        if now["open"] not in (None, [css["box"], css["rule"]]):
+            wrong.append(f"an open box {now['open']}")
+        if now["edge"] not in (None, css["muted"]):
+            wrong.append(f"a link {now['edge']}")
+        if now["lit"] != [now["badge"]] or contrast(now["badge"], css["ground"]) < 3:
+            wrong.append(f"the lit route {now['lit']} against its badge {now['badge']}")
+        if now["still"] != before["still"]:
+            wrong.append(f"the view moved: {before['still']} to {now['still']}")
+        if wrong:
+            failures.append(f"{name}: in the {scheme} scheme the Map drew " + "; ".join(wrong))
+
+    follows("dark", before)
+    for scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=scheme)
+        # Restyled once a plain link is drawn in the scheme's muted colour, which the page declares at once.
+        page.wait_for_function(
+            f"m => {{ const now = ({READ_SCHEME})(m); return now.edge === now.css.muted"
+            f" && (now.css.muted === {before['css']['muted']!r}) === {'false' if scheme == 'light' else 'true'}; }}",
+            arg=drawn.element_handle(),
+            timeout=5_000,
+        )
+        now = drawn.evaluate(READ_SCHEME)
+        follows(scheme, now)
+        if scheme == "light":
+            if now["css"] == before["css"]:
+                failures.append(f"{name}: the page kept its dark colours in the light scheme")
+            left = {before["css"][key] for key in ("ink", "muted")} & {
+                c.lower() for c in re.findall(r"#[0-9a-fA-F]{6}", now["marks"])
+            }
+            if left:
+                failures.append(f"{name}: tasks' marks kept dark colours {left} in the light scheme")
+            page.screenshot(path=SHOTS / f"app-{name}-light.png")
+        elif now["css"] != before["css"]:
+            failures.append(f"{name}: switching back left {now['css']}, not {before['css']}")
+    print(f"{name}: switched the scheme to light and back, the Map restyled in place")
 
 
 def open_app(browser, view, link, failures, name):
@@ -506,6 +597,8 @@ def map_journey(page, view, plan, name, failures, hint=None):
         failures.append(
             f"{name}: {thread}'s links aren't drawn in its line's colour: {route}"
         )
+    if name == "desktop":
+        scheme_switch(page, name, failures)
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     panel.wait_for()
     if panel.locator("[role=alert]").count():
@@ -1789,7 +1882,11 @@ def main():
             # WebKit draws the Threads view's arrows where Chromium does, clear of the cards.
             link = fresh()
             context, page, _, errors = open_app(
-                webkit, VIEWS["desktop"], link, failures, "webkit desktop"
+                webkit,
+                {**VIEWS["desktop"], "color_scheme": "light"},
+                link,
+                failures,
+                "webkit desktop",
             )
             listed = json.loads(run(env, "thread", "list"))["data"]
             want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}

@@ -28,6 +28,7 @@ import { NeedsList } from "./NeedsList";
 import { countText, type Need } from "./needs";
 import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
+import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
@@ -143,7 +144,8 @@ export function App() {
     [loaded, pending],
   );
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
-  const lines = useMemo(() => linesOf(sorted), [sorted]);
+  const palette = PALETTES[useScheme()];
+  const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
   const outline = useMemo(
@@ -516,6 +518,7 @@ export function App() {
             showArchived={showArchived}
             thread={thread}
             lines={lines}
+            palette={palette}
             selected={selected}
             onSelect={setSelected}
             focus={focus}

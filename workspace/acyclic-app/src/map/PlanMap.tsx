@@ -8,6 +8,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../api";
 import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
+import type { Palette } from "../palette";
 import { useWide } from "../wide";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
@@ -17,7 +18,7 @@ import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstOf, firstView, nearest, reveal, uncovered } from "./reveal";
 import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
-import { FONT, STYLE } from "./style";
+import { FONT, styleFor } from "./style";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -60,6 +61,8 @@ export interface PlanMapProps {
   thread: string | null;
   /** Each thread's line, whose colour lights its items. */
   lines: ReadonlyMap<string, Line>;
+  /** The colours to draw in, which change with the system's scheme. */
+  palette: Palette;
   selected: string | null;
   onSelect: (item: string | null) => void;
   /**
@@ -82,6 +85,7 @@ export default function PlanMap({
   showArchived,
   thread,
   lines,
+  palette,
   selected,
   onSelect,
   focus,
@@ -156,7 +160,7 @@ export default function PlanMap({
     if (host.current === null) return;
     const core = cytoscape({
       container: host.current,
-      style: STYLE,
+      style: styleFor(palette),
       autoungrabify: true,
       boxSelectionEnabled: false,
       maxZoom: MAX_ZOOM,
@@ -187,6 +191,16 @@ export default function PlanMap({
       held.current = new Map();
     };
   }, []);
+
+  // A scheme changed restyles what is drawn in place, keeping the view, the selection and the boxes open; the elements'
+  // own colours, their marks and lines, follow with the scene below.
+  const styled = useRef(palette);
+  useEffect(() => {
+    const core = cy.current;
+    if (core === null || styled.current === palette) return;
+    styled.current = palette;
+    core.style(styleFor(palette));
+  }, [palette]);
 
   // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows.
   const placedNow = useRef<Placed | null>(null);
@@ -219,7 +233,7 @@ export default function PlanMap({
     if (core === null || element === null || drawn === null || placed === null) return;
     const first = core.elements().length === 0;
     // Only what changed: on a large plan, a write changes a few elements of thousands.
-    held.current = apply(core, held.current, elementsOf(drawn, colour, lines));
+    held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette));
     zoomOutTo(core, element, placed);
     if (first) {
       // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: its first item.
@@ -258,7 +272,7 @@ export default function PlanMap({
         element.dataset.state = "drawn";
       }),
     );
-  }, [drawn, placed, colour, lines]);
+  }, [drawn, placed, colour, lines, palette]);
 
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens.
   const sought = useRef<string | null>(null);

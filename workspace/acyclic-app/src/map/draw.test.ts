@@ -2,6 +2,7 @@ import cytoscape from "cytoscape";
 import { describe, expect, it } from "vitest";
 import type { Item } from "../api";
 import { linesOf } from "../lines";
+import { PALETTES } from "../palette";
 import { apply, type Drawn, diff, elementsOf } from "./draw";
 import { item } from "./fixture";
 import type { Placed } from "./layout";
@@ -44,7 +45,8 @@ function elements({ items, collapsed = [], archived = false, selection, colour }
   return elementsOf(
     scene(view, placed, picked, (id) => model.items.get(id)?.thread ?? null),
     colour,
-    linesOf([{ id: "t", title: "Tools" }]),
+    linesOf([{ id: "t", title: "Tools" }], PALETTES.dark),
+    PALETTES.dark,
   );
 }
 
