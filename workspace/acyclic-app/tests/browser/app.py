@@ -652,6 +652,13 @@ def threads_journey(page, view, env, name, failures):
     except PlaywrightTimeout:
         drawn = page.locator(".arrows g").count()
         failures.append(f"{name}: the Threads view drew {drawn} arrows, expected {arrows}")
+    if arrows:
+        page.screenshot(path=SHOTS / f"app-{name}-threads.png")
+        if skips := arrows_clear(page, want, name, failures):
+            # Lit, an arrow that skips a wave, for a look at how it passes the cards.
+            page.locator(f"[data-card='{skips[0][0]}']").hover()
+            page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
+            page.mouse.move(0, 0)
     # A thread with work to start, whose panel offers it; picked already, a click would unpick it, so it is unpicked.
     ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
     picked = ready[0] if ready else next(iter(want))
@@ -686,6 +693,55 @@ def threads_journey(page, view, env, name, failures):
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
+def arrows_clear(page, want, name, failures):
+    """Checks every arrow as drawn, a point each 4 px along it, against the cards' boxes as drawn: none crosses a card,
+    other than its own two at its ends, and the view scrolls to all of it. One must skip a wave, or the check proves
+    little."""
+    found = page.evaluate(
+        """() => {
+            const view = document.querySelector('.waves');
+            const origin = view.getBoundingClientRect();
+            const cards = [...document.querySelectorAll('.wave [data-card]')].map(card => [card.dataset.card,
+                card.getBoundingClientRect()]);
+            const crossed = [];
+            let outside = 0;
+            for (const arrow of document.querySelectorAll('.arrows g')) {
+                const line = arrow.querySelector('path:not(.head)');
+                const matrix = line.getScreenCTM();
+                const length = line.getTotalLength();
+                for (let along = 0; along <= length; along += 4) {
+                    const local = line.getPointAtLength(along);
+                    const x = matrix.a * local.x + matrix.c * local.y + matrix.e;
+                    const y = matrix.b * local.x + matrix.d * local.y + matrix.f;
+                    const scrolledX = x - origin.left + view.scrollLeft;
+                    const scrolledY = y - origin.top + view.scrollTop;
+                    if (scrolledX < 0 || scrolledY < 0 || scrolledX > view.scrollWidth || scrolledY > view.scrollHeight) outside++;
+                    for (const [id, box] of cards) {
+                        const own = (id === arrow.dataset.from && along < 10) || (id === arrow.dataset.to && along > length - 10);
+                        if (!own && x > box.left + 1 && x < box.right - 1 && y > box.top + 1 && y < box.bottom - 1) {
+                            crossed.push(`${arrow.dataset.from}->${arrow.dataset.to} over ${id}`);
+                        }
+                    }
+                }
+            }
+            const pairs = [...document.querySelectorAll('.arrows g')].map(g => [g.dataset.from, g.dataset.to]);
+            return { crossed: [...new Set(crossed)], outside, pairs };
+        }"""
+    )
+    if found["crossed"]:
+        failures.append(f"{name}: arrows cross cards: {found['crossed'][:5]}")
+    if found["outside"]:
+        failures.append(f"{name}: {found['outside']} points of the arrows lie where the view doesn't scroll")
+    skips = [
+        (a, b)
+        for a, b in found["pairs"]
+        if want.get(a, "").isdigit() and want.get(b, "").isdigit() and int(want[b]) - int(want[a]) > 1
+    ]
+    if not skips:
+        failures.append(f"{name}: no arrow skips a wave, so none was checked crossing one")
+    return skips
+
+
 def item(env, id):
     """The item as the tracker shows it, or None while there is no such item."""
     out = subprocess.run(
@@ -718,7 +774,10 @@ def edit_journey(page, view, env, plan, box, name, failures):
     """Adds, moves, links and unlinks on the Map, as the phone would, checking the Map and then the tracker after each.
 
     Works in `box`, a box map_journey has seen laid out: it is opened, and two of its leaves are used. Expects the
-    first leaf's notes to be HOSTILE."""
+    first leaf's notes to be HOSTILE. Starts from a fresh page, so whatever the journeys before it opened on the Map
+    is closed again."""
+    page.reload()
+    wait_drawn(page, len(plan.default()))
     leaves = sorted(id for id in plan.children(box) if not plan.children(id))[:2]
     if len(leaves) < 2:
         failures.append(f"{name}: {box} has fewer than two leaves to edit around")
@@ -1663,6 +1722,7 @@ def main():
                 # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                 hint = map_journey(page, view, plan, name, failures, hint)
                 outline_journey(page, view, plan, name, failures)
+                threads_journey(page, view, env, name, failures)
                 if name == "desktop":
                     level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
@@ -1680,9 +1740,6 @@ def main():
                     thread_journey(page, env, plan, "thread-0", name, failures)
                     needs_journey(page, env, plan, "thread-0", name, failures)
                     plan = Plan(env)
-                # Last, since a task chosen from a thread opens the boxes it sits in, which the journeys before it
-                # count on being closed.
-                threads_journey(page, view, env, name, failures)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:
                     failures.append(
@@ -1727,6 +1784,21 @@ def main():
             if errors:
                 failures.append(
                     f"webkit phone: the page threw or logged errors: {errors}"
+                )
+            context.close()
+            # WebKit draws the Threads view's arrows where Chromium does, clear of the cards.
+            link = fresh()
+            context, page, _, errors = open_app(
+                webkit, VIEWS["desktop"], link, failures, "webkit desktop"
+            )
+            listed = json.loads(run(env, "thread", "list"))["data"]
+            want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
+            page.locator("[data-view=threads]").click()
+            page.locator(".arrows g").first.wait_for(timeout=10_000)
+            arrows_clear(page, want, "webkit desktop", failures)
+            if errors:
+                failures.append(
+                    f"webkit desktop: the page threw or logged errors: {errors}"
                 )
             context.close()
             webkit.close()
