@@ -132,10 +132,12 @@ button {
   font-weight: 600;
   cursor: pointer;
 }
-button:hover:not(:disabled) {
+button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--tile);
 }
-button:disabled {
+/* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. */
+button:disabled,
+button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }
@@ -144,7 +146,7 @@ button.primary {
   border-color: var(--accent);
   color: var(--accent-ink);
 }
-button.primary:hover:not(:disabled) {
+button.primary:hover:not(:disabled, [aria-disabled="true"]) {
   background: color-mix(in srgb, var(--accent) 85%, var(--ground));
 }
 button.quiet,
@@ -894,6 +896,10 @@ button.phase-title {
 }
 /* A panel's own heading stays in view as it scrolls, with its close button: on a phone without a Back button, the
    way out. */
+/* Its buttons keep their size beside a long title; held weak, so a button's own rules still apply. */
+:where(.inspector, .sheet) header > :where(button, .menu) {
+  flex: none;
+}
 .inspector > header,
 .sheet > header {
   position: sticky;
@@ -903,9 +909,12 @@ button.phase-title {
   margin-top: -18px;
   background: var(--sheet);
 }
+/* The title takes what the header's buttons leave and wraps within it, even a long link, so they stay in view. */
 .inspector h2,
 .sheet h2 {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding-top: 8px;
   font-size: 20px;
   font-weight: 700;
@@ -1721,7 +1730,7 @@ dl.facts dt {
   }
 }
 
-/* A panel's type, wide: one size for what it says, 13 px, as a list's detail is; the title a step up, at 600 rather
+/* A panel's type, wide: one size for what it says, 14 px, as a list's detail is; the title a step up, at 600 rather
    than bold; section headings small and muted, so the content leads. A phone keeps the base size, which reads at arm's
    length. */
 .inspector > header,
