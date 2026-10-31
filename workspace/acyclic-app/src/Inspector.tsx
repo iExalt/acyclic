@@ -8,6 +8,7 @@ import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
+import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 
@@ -78,7 +79,7 @@ export function Inspector({
                 disabled={busy}
                 onClick={() => unlink(id)}
               >
-                ×
+                <Icon of={X} />
               </button>
             </li>
           ))}
@@ -98,7 +99,7 @@ export function Inspector({
           <Prose text={item.title} />
         </h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
-          ×
+          <Icon of={X} />
         </button>
       </header>
       {notice}

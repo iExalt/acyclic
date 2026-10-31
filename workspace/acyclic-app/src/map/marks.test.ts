@@ -6,7 +6,7 @@ import { markOf, markSvg } from "./marks";
 import { buildModel, fallbackStage, visible } from "./model";
 
 const thread = { colour: "#4ec695", number: "31", ink: "#141a1f" };
-const DARK = PALETTES.dark;
+const DARK = PALETTES.a.dark;
 const STAGES: Stage[] = ["done", "in-review", "in-progress", "ready", "blocked", "parked", "unthreaded"];
 
 describe("markSvg", () => {
@@ -31,7 +31,7 @@ describe("markSvg", () => {
   it("makes each image once for each palette", () => {
     expect(markOf("done", thread, 200, 48, DARK)).toBe(markOf("done", { ...thread }, 200, 48, DARK));
     expect(markOf("done", thread, 200, 48, DARK)).not.toBe(markOf("ready", thread, 200, 48, DARK));
-    expect(markOf("done", thread, 200, 48, DARK)).not.toBe(markOf("done", thread, 200, 48, PALETTES.light));
+    expect(markOf("done", thread, 200, 48, DARK)).not.toBe(markOf("done", thread, 200, 48, PALETTES.a.light));
   });
 });
 

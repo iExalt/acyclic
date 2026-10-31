@@ -4,6 +4,7 @@
 // next tap reaches what it lands on.
 
 import { type ReactNode, useEffect, useRef } from "react";
+import { Icon, MoreHorizontal } from "./icons";
 
 /** Closes the menu, keeping focus where it was unless closing would hide it. */
 function close(menu: HTMLDetailsElement | null) {
@@ -14,7 +15,8 @@ function close(menu: HTMLDetailsElement | null) {
   if (hidden) menu.querySelector("summary")?.focus();
 }
 
-export function Menu({ children }: { children: ReactNode }) {
+/** `up` opens the menu above its button, as at the foot of a sidebar. */
+export function Menu({ children, up = false }: { children: ReactNode; up?: boolean }) {
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     // Once, and asking the element whether it's open, so a key pressed as it opens is never missed; in the capture
@@ -28,9 +30,9 @@ export function Menu({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
   return (
-    <details className="menu" ref={details}>
+    <details className={up ? "menu up" : "menu"} ref={details}>
       <summary aria-label="More" data-testid="menu">
-        <span aria-hidden="true">⋯</span>
+        <Icon of={MoreHorizontal} size={20} />
       </summary>
       {/* Its buttons close it on a click, its fields on a change, and its lists on Enter; keys reach each control. */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: listens for what its buttons, fields and lists already handle. */}

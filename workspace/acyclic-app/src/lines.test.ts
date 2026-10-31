@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { byNumber, lineColour, lineOf, linesOf } from "./lines";
 import { PALETTES } from "./palette";
 
-const DARK = PALETTES.dark;
+const DARK = PALETTES.a.dark;
 
 describe("lineOf", () => {
   it("numbers a thread by its id, and takes the same number off the front of its title", () => {
@@ -66,7 +66,7 @@ describe("byNumber", () => {
 });
 
 describe.each(["dark", "light"] as const)("lineColour in the %s scheme", (scheme) => {
-  const palette = PALETTES[scheme];
+  const palette = PALETTES.a[scheme];
   // Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has.
   const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at, palette));
   it("walks the hue wheel by number, so neighbouring threads look alike but never the same", () => {

@@ -779,7 +779,7 @@ def threads_journey(page, view, env, name, failures):
             page.get_by_test_id("inspector").wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: choosing {task} from {picked}'s panel left the Threads view over the Map")
-        if page.locator("[data-view=map]").get_attribute("aria-pressed") != "true":
+        if page.locator("[data-view=map]").get_attribute("aria-current") != "page":
             failures.append(f"{name}: choosing {task} didn't switch to the Map")
         page.keyboard.press("Escape")
     page.get_by_test_id("threads-view").wait_for(state="detached")
@@ -958,7 +958,8 @@ def edit_journey(page, view, env, plan, box, name, failures):
     menu = page.locator("details.menu")
     for close in (
         lambda: page.keyboard.press("Escape"),
-        lambda: tap_middle(page, view, second, rise=0.2),
+        # In the middle of the Map, below the open menu, which the backdrop must stop it reaching.
+        lambda: tap_middle(page, view, second),
     ):
         page.get_by_test_id("menu").click()
         close()
@@ -1577,6 +1578,28 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Needs you opened over the phases' sheet left its list hidden")
         return
+    # A view chosen with the list open changes under it, the list staying on top.
+    page.locator("[data-view=threads]").click()
+    page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+    if not needs.is_visible() or page.locator("[data-view=threads]").get_attribute("aria-current") != "page":
+        failures.append(f"{name}: choosing Threads with Needs you open didn't keep the list over the Threads view")
+    page.locator("[data-view=map]").click()
+    page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+    # With an item open over the list, Needs you brings the list back rather than closing what's out of sight.
+    row = needs.locator("button.row[data-select]").first
+    if row.count():
+        row.click()
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        page.get_by_test_id("needs-button").click()
+        try:
+            page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+            needs.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Needs you under an item closed the list, or left the item over it")
+        if page.get_by_test_id("needs-button").get_attribute("aria-pressed") != "true":
+            failures.append(f"{name}: Needs you isn't pressed with its list on top")
+    else:
+        failures.append(f"{name}: no needs-you entry selects an item, so bringing the list back went unchecked")
     # The queue has the name its push notification gives it, apart from the in-review stage.
     named = (page.get_by_test_id("needs-button").get_attribute("aria-label"), needs.locator("h2").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":

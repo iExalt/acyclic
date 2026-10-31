@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
+import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Notify } from "./Notify";
 import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
@@ -41,7 +42,7 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
       <header>
         <h2>Needs you</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
-          ×
+          <Icon of={X} />
         </button>
       </header>
       <Notify />

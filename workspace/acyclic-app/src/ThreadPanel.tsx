@@ -17,6 +17,7 @@ import {
   revokeCommand,
   threadLevelCommand,
 } from "./forms";
+import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 
@@ -90,7 +91,7 @@ export function ThreadPanel({
           <Prose text={line?.name ?? detail.title} />
         </h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
-          ×
+          <Icon of={X} />
         </button>
       </header>
       <p className="facts">

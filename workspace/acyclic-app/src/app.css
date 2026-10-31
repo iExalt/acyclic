@@ -22,6 +22,9 @@
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
+/* The palettes: palette.ts's, which a unit test holds these to. A control's edge is stronger than a rule, so an
+   outlined button reads as one. */
+/* palette a dark */
 :root {
   --ground: #121417;
   --chrome: #16191d;
@@ -29,25 +32,19 @@
   --tile: #23282e;
   --sheet: #1c2025;
   --rule: #2b3138;
-  /* A control's edge: stronger than a rule, so an outlined button reads as one. */
   --edge: #4a535e;
   --ink: #e8eaed;
   --muted: #a2aab4;
   --signal: #f2b33d;
+  --signal-fill: #f2b33d;
   --signal-ink: #121417;
   --danger: #ff8a80;
+  --accent: #e8eaed;
+  --accent-ink: #121417;
   color-scheme: dark;
-  /* At least 44 px to a fingertip; a mouse makes do with less. */
-  --hit: 44px;
-  font-family: Overpass, system-ui, sans-serif;
-  font-size: 15px;
-  line-height: 1.4;
-  background: var(--ground);
-  color: var(--ink);
-  -webkit-tap-highlight-color: transparent;
 }
-/* The light scheme: palette.ts's light palette, which a unit test holds these to. */
 @media (prefers-color-scheme: light) {
+  /* palette a light */
   :root {
     --ground: #f3f4f6;
     --chrome: #eceef1;
@@ -59,14 +56,78 @@
     --ink: #1a1c20;
     --muted: #5b626c;
     --signal: #8f5100;
-    --signal-ink: #ffffff;
+    --signal-fill: #f2b33d;
+    --signal-ink: #121417;
     --danger: #b3261e;
+    --accent: #1a1c20;
+    --accent-ink: #ffffff;
     color-scheme: light;
   }
+}
+/* palette b dark */
+:root[data-look="b"] {
+  --ground: #0f1318;
+  --chrome: #161b22;
+  --box: #13181e;
+  --tile: #1c2229;
+  --sheet: #161b22;
+  --rule: #2d343d;
+  --edge: #454e59;
+  --ink: #e6eaee;
+  --muted: #9aa3ad;
+  --signal: #e3a72f;
+  --signal-fill: #e3a72f;
+  --signal-ink: #0f1318;
+  --danger: #ff7b72;
+  --accent: #4c94f0;
+  --accent-ink: #0f1318;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  /* palette b light */
+  :root[data-look="b"] {
+    --ground: #f6f8fa;
+    --chrome: #ffffff;
+    --box: #ffffff;
+    --tile: #ffffff;
+    --sheet: #ffffff;
+    --rule: #d1d8df;
+    --edge: #b4bcc5;
+    --ink: #1f2329;
+    --muted: #57606a;
+    --signal: #8c5a00;
+    --signal-fill: #e3a72f;
+    --signal-ink: #0f1318;
+    --danger: #c62a2f;
+    --accent: #0a66d8;
+    --accent-ink: #ffffff;
+    color-scheme: light;
+  }
+}
+:root {
+  /* At least 44 px to a fingertip; a mouse makes do with less. */
+  --hit: 44px;
+  --radius: 8px;
+  font-family: Overpass, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  background: var(--ground);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
 }
 @media (pointer: fine) {
   :root {
     --hit: 34px;
+  }
+}
+/* Look B's type is the system's, as familiar tools set theirs; the Map's canvas keeps Overpass in both looks. */
+:root[data-look="b"] {
+  --radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+}
+@media (min-width: 900px) {
+  :root {
+    font-size: 14px;
   }
 }
 * {
@@ -84,7 +145,7 @@ p {
   margin: 0;
 }
 :focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -101,7 +162,7 @@ button {
   min-height: var(--hit);
   padding: 0 14px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   font-weight: 600;
   cursor: pointer;
@@ -114,12 +175,12 @@ button:disabled {
   cursor: default;
 }
 button.primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--ground);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 button.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 85%, var(--ground));
+  background: color-mix(in srgb, var(--accent) 85%, var(--ground));
 }
 button.quiet,
 button.close {
@@ -140,7 +201,7 @@ textarea {
   min-height: var(--hit);
   padding: 6px 10px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--ground);
   /* Under 16 px, a phone zooms in on the field. */
   font-size: 16px;
@@ -213,62 +274,272 @@ label:has(> input[type="checkbox"]) {
   font-variant-numeric: tabular-nums;
 }
 
-/* The shell: a bar on top, the lines beside the Map on a wide screen and above it on a phone. */
+/* The frame. A phone: one bar on top, the views along the bottom. Wider, look A has a sidebar beside the views and
+   look B a header over tabs, with the outline at the left. */
 .shell {
   display: grid;
-  grid-template-rows: auto auto 1fr;
   height: 100%;
+  min-height: 0;
 }
+.icon-svg {
+  flex: none;
+}
+.wordmark {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.wordmark svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  color: var(--ink);
+}
+.items,
+.autonomy {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+}
+
+/* A view, Needs you, or a tab: a quiet row that marks the current one. */
+button.view {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-color: transparent;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: left;
+}
+button.view:hover:not(:disabled) {
+  color: var(--ink);
+}
+button.view[aria-current="page"],
+button.view[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--tile);
+}
+.needs-mark {
+  --line: var(--signal-fill);
+  --line-ink: var(--signal-ink);
+}
+.needs-n {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+.needs-button:not([data-none="true"]) {
+  color: var(--ink);
+}
+
+/* The bar: a phone's only one, and look B's header. */
 .bar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
-  padding: 6px 6px 6px 12px;
+  min-width: 0;
+  padding: 6px 6px 6px 14px;
   padding-top: max(6px, env(safe-area-inset-top));
   background: var(--chrome);
   border-bottom: 1px solid var(--rule);
 }
+.bar > * {
+  flex: none;
+}
 .brand {
   flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
-}
-.bar > :not(.brand) {
-  flex: none;
 }
 .brand h1 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1.2;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 .brand p {
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
-button.icon {
-  font-size: 26px;
+.brand p .items {
+  font-size: inherit;
 }
-.needs-button {
+button.icon {
+  display: inline-grid;
+  place-items: center;
+  border-color: transparent;
+  color: var(--ink);
+}
+button.icon[aria-pressed="true"] {
+  background: var(--tile);
+}
+
+/* A phone: the bar, the views, and the views' bar along the bottom, clear of the home indicator. */
+.phone-shell {
+  grid-template-rows: auto 1fr auto;
+}
+.tabbar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 4px 4px max(4px, env(safe-area-inset-bottom));
+  background: var(--chrome);
+  border-top: 1px solid var(--rule);
+}
+.tabbar button.view {
+  position: relative;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  min-height: 52px;
+  padding: 4px;
+  font-size: 12px;
+  background: none;
+}
+.tabbar button.view[aria-current="page"],
+.tabbar button.view[aria-pressed="true"] {
+  background: none;
+}
+.tabbar button.view[aria-current="page"] .icon-svg,
+.tabbar button.view[aria-pressed="true"] .icon-svg {
+  stroke-width: 2.25;
+}
+/* Beside the icon, so the label stays put whether or not anything waits. */
+.tabbar .needs-mark {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 6px);
+  font-size: 10px;
+}
+.tabbar .needs-n {
+  display: none;
+}
+/* A form takes the whole height, the keyboard below it, which the views' bar would only ride up on. Hidden while the
+   form is open, not while a field has focus: focus moving from a field to Save would bring the bar back and move Save
+   from under the tap. */
+.phone-shell:has(form) .tabbar {
+  display: none;
+}
+
+/* Look A, wide: the sidebar, the views beside it. */
+.sidebar-shell {
+  grid-template-columns: 248px 1fr;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px 0;
+  background: var(--chrome);
+  border-right: 1px solid var(--rule);
+}
+.workspace {
+  padding: 6px 10px 12px;
+}
+.sidebar .views {
+  display: grid;
+  gap: 1px;
+}
+.sidebar button.view,
+.sidebar button.new {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+.sidebar button.new {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 6px;
+  border-color: var(--rule);
+  font-weight: 500;
+}
+.sidebar .threads {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0 8px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.sidebar-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 -8px;
+  padding: 8px 8px 8px 18px;
+  border-top: 1px solid var(--rule);
+}
+.sidebar-foot .about {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Look B, wide: the header over the tabs, the outline at the left of the views. */
+.header-shell {
+  grid-template-rows: auto auto 1fr;
+  grid-template-columns: 272px 1fr;
+}
+.header-shell .bar {
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: none;
+}
+.header-shell .bar .needs-button {
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: var(--edge);
+  font-size: 14px;
+}
+.header-shell button.new {
   display: inline-flex;
-  padding: 0 10px 0 6px;
   gap: 6px;
   align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 14px;
 }
-.needs-button .badge {
-  --line: var(--signal);
-  --line-ink: var(--signal-ink);
+.tabs {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 4px;
+  padding: 0 12px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--rule);
 }
-.needs-button[data-none="true"] {
-  color: var(--muted);
+.tabs button.view {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 0;
+  font-size: 14px;
+  background: none;
+  box-shadow: inset 0 -2px 0 transparent;
 }
-.needs-button[aria-pressed="true"],
-.thread[aria-pressed="true"] {
-  background: var(--tile);
-  border-color: var(--ink);
+.tabs button.view[aria-current="page"] {
+  background: none;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.header-shell .threads {
+  min-height: 0;
+  padding: 8px 8px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--ground);
+  border-right: 1px solid var(--rule);
 }
 
 /* The menu of what's changed rarely: archived items, autonomy, a refresh. */
@@ -282,7 +553,7 @@ button.icon {
   place-items: center;
   width: var(--hit);
   height: var(--hit);
-  border-radius: 8px;
+  border-radius: var(--radius);
   list-style: none;
   font-size: 22px;
   font-weight: 800;
@@ -321,43 +592,39 @@ button.icon {
   font-size: 13px;
   color: var(--muted);
 }
+.menu.up .menu-body {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+}
 .menu-body select {
   color: var(--ink);
 }
 
-/* The lines: a strip to scroll along on a phone, a list down the side when wide. */
-.threads {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 6px 8px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--rule);
-  scrollbar-width: none;
-}
+/* A thread's row in the outline: its badge and name, wrapping rather than cut off. */
 .thread {
   display: flex;
-  flex: none;
   gap: 8px;
-  align-items: center;
-  max-width: 17em;
-  padding: 0 12px 0 6px;
+  align-items: start;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px 6px 6px;
   border-color: transparent;
   font-weight: 500;
   text-align: left;
 }
+.thread .badge {
+  margin-top: 0.05em;
+}
 .thread .name {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  padding-top: 0.1em;
+  overflow-wrap: anywhere;
 }
 .thread[aria-pressed="true"] {
-  border-color: var(--line);
-}
-/* A phone's strip holds only the button that opens the phases' sheet. */
-.phases-button {
-  flex: none;
+  background: var(--tile);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 /* The outline: phases, each opening into its threads, then the threads in none. */
@@ -376,12 +643,10 @@ button.icon {
 .outline .heading {
   display: flex;
   justify-content: space-between;
-  padding: 10px 10px 4px;
+  padding: 14px 10px 4px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 .outline .count {
   color: var(--muted);
@@ -391,7 +656,7 @@ button.icon {
 .phase-row {
   display: flex;
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .phase[aria-current="true"] > .phase-row {
   background: var(--tile);
@@ -430,10 +695,8 @@ button.phase-title {
 .outline .subheading {
   padding: 4px 10px 2px 34px;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
 }
 .outline .thread {
   width: 100%;
@@ -448,36 +711,9 @@ button.phase-title {
 }
 .thread .also {
   display: block;
-  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* The switch between the Map and the Threads view: in the strip on a phone, in the bar when wide, where it covers
-   nothing of the Map. */
-.view-switch {
-  display: flex;
-  flex: none;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-}
-.view-switch button {
-  border-radius: 0;
-}
-.view-switch button:first-child {
-  border-radius: 8px 0 0 8px;
-}
-.view-switch button:last-child {
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-}
-.view-switch button[aria-pressed="true"] {
-  background: var(--tile);
-  border-color: var(--ink);
+  font-weight: 400;
 }
 
 /* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
@@ -887,7 +1123,7 @@ dl.facts .chip {
   background: var(--sheet);
   border: 1px solid var(--rule);
   border-left: 3px dashed var(--signal);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .status {
   padding: 16px;
@@ -930,29 +1166,6 @@ button.row {
   text-align: left;
 }
 @media (min-width: 900px) {
-  .shell {
-    grid-template-rows: auto 1fr;
-    grid-template-columns: 260px 1fr;
-  }
-  .bar {
-    grid-column: 1 / -1;
-  }
-  .threads {
-    display: block;
-    overflow-x: hidden;
-    overflow-y: auto;
-    border-bottom: none;
-    border-right: 1px solid var(--rule);
-  }
-  .thread {
-    max-width: none;
-    padding: 6px 10px 6px 6px;
-    align-items: start;
-  }
-  .thread .name {
-    white-space: normal;
-    padding-top: 0.15em;
-  }
   .inspector,
   .sheet.add {
     inset: 0 0 0 auto;

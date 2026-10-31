@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AddForm } from "./AddForm";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
+import { DesignChoice } from "./DesignChoice";
 import {
   addCommand,
   type Edited,
@@ -19,17 +20,19 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
+import { Icon, X } from "./icons";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
-import { Menu } from "./Menu";
+import { DESIGN } from "./look";
 import { buildModel } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
-import { countText, type Need } from "./needs";
+import type { Need } from "./needs";
 import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
+import { Shell, type View } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { wavesView } from "./waves";
@@ -81,7 +84,7 @@ export function App() {
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The Map, or the threads in waves over it. */
-  const [view, setView] = useState<"map" | "threads">("map");
+  const [view, setView] = useState<View>("map");
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -144,7 +147,7 @@ export function App() {
     [loaded, pending],
   );
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
-  const palette = PALETTES[useScheme()];
+  const palette = PALETTES[DESIGN.look][useScheme()];
   const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
@@ -363,15 +366,7 @@ export function App() {
   const unlink = (from: string, kind: LinkKind, to: string) =>
     send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
-  const viewSwitch = (
-    <fieldset className="view-switch" aria-label="View">
-      {(["map", "threads"] as const).map((one) => (
-        <button key={one} type="button" data-view={one} aria-pressed={view === one} onClick={() => setView(one)}>
-          {one === "map" ? "Map" : "Threads"}
-        </button>
-      ))}
-    </fieldset>
-  );
+
   const noticeView =
     notice === null ? null : (
       <div className="notice" role="alert" data-testid="notice">
@@ -397,7 +392,7 @@ export function App() {
           </button>
         ) : null}
         <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
-          ×
+          <Icon of={X} />
         </button>
       </div>
     );
@@ -407,86 +402,65 @@ export function App() {
       : mode.kind === "link"
         ? `Tap the item ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
         : null;
+  const menu = (
+    <>
+      <label>
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(event) => setShowArchived(event.target.checked)}
+          data-testid="show-archived"
+        />
+        Show archived items
+      </label>
+      <Choice
+        label="Autonomy for every thread without its own"
+        testid="global-level"
+        value={load.level}
+        disabled={busy}
+        onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null })}
+      >
+        {LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {levelLabel(level)}
+          </option>
+        ))}
+      </Choice>
+      <button type="button" onClick={refresh}>
+        Refresh
+      </button>
+      <DesignChoice />
+    </>
+  );
+  /**
+   * Needs you is a layer: pressed while another covers it, it comes back to the top, closing what was over it; on top,
+   * it closes. Opening it closes the item and the outline's sheet, which would cover it.
+   */
+  const toggleNeeds = () => {
+    const above = openLayers(open).indexOf("needs");
+    if (above > 0) {
+      closeTop.current(above);
+      return;
+    }
+    setSelected(null);
+    setShowPhases(false);
+    setShowNeeds((was) => !was);
+  };
   return (
-    <div className="shell">
-      <header className="bar">
-        <div className="brand">
-          <h1>
-            <span className="count" data-testid="item-count">
-              {shown.length}
-            </span>{" "}
-            items
-          </h1>
-          <p title={`Autonomy: ${levelLabel(load.level)}`}>Autonomy: {levelLabel(load.level)}</p>
-        </div>
-        {wide ? viewSwitch : null}
-        <button
-          type="button"
-          className="needs-button"
-          data-testid="needs-button"
-          data-none={load.needs.length === 0}
-          aria-pressed={showNeeds}
-          aria-label={`Needs you: ${load.needs.length} waiting`}
-          onClick={() => {
-            setSelected(null);
-            // The phases' sheet shows over the list, so the list it opens would be hidden under it.
-            setShowPhases(false);
-            setShowNeeds((was) => !was);
-          }}
-        >
-          {/* A "!" rather than the count, so the signal never looks like a thread's numbered badge; with nothing
-              waiting, neither shows. */}
-          {load.needs.length > 0 && (
-            <span className="badge" data-testid="needs-badge" aria-hidden="true">
-              !
-            </span>
-          )}
-          Needs you
-          {load.needs.length > 0 && (
-            <span className="count" data-testid="needs-count">
-              {countText(load.needs.length)}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          className="icon"
-          aria-label="Add at the top level"
-          onClick={() => startAdd(null)}
-          data-action="add-top"
-        >
-          +
-        </button>
-        <Menu>
-          <label>
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(event) => setShowArchived(event.target.checked)}
-              data-testid="show-archived"
-            />
-            Show archived items
-          </label>
-          <Choice
-            label="Autonomy for every thread without its own"
-            testid="global-level"
-            value={load.level}
-            disabled={busy}
-            onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null })}
-          >
-            {LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {levelLabel(level)}
-              </option>
-            ))}
-          </Choice>
-          <button type="button" onClick={refresh}>
-            Refresh
-          </button>
-        </Menu>
-      </header>
-      <nav className="threads" aria-label="Phases and threads">
-        {outline === null ? null : wide ? (
+    <Shell
+      look={DESIGN.look}
+      wide={wide}
+      count={shown.length}
+      autonomy={levelLabel(load.level)}
+      view={view}
+      onView={setView}
+      needs={load.needs.length}
+      needsOpen={showNeeds}
+      onNeeds={toggleNeeds}
+      onAdd={() => startAdd(null)}
+      menu={menu}
+      outline={
+        outline === null || !wide ? null : (
           <Phases
             outline={outline}
             lines={lines}
@@ -495,21 +469,11 @@ export function App() {
             onPickThread={pickThread}
             onSelectPhase={(id) => select(id, null)}
           />
-        ) : (
-          <>
-            <button
-              type="button"
-              className="phases-button"
-              data-testid="phases-button"
-              aria-pressed={showPhases}
-              onClick={() => setShowPhases((was) => !was)}
-            >
-              Phases
-            </button>
-            {viewSwitch}
-          </>
-        )}
-      </nav>
+        )
+      }
+      outlineOpen={showPhases}
+      onOutline={() => setShowPhases((was) => !was)}
+    >
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} data-reads={reads.current.shown}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
@@ -629,6 +593,6 @@ export function App() {
           />
         ) : null}
       </main>
-    </div>
+    </Shell>
   );
 }
