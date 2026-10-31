@@ -58,6 +58,12 @@ impl Token {
         hex(&hmac(self.0.as_bytes(), b"browser"))
     }
 
+    /// The secret first segment of every path `tailscale serve` sends to the Tailscale port, 128 bits as hex. Only the
+    /// user can read the session, so no container, run or other user can reach the app through that port.
+    pub(crate) fn tailscale(&self) -> String {
+        hex(&hmac(self.0.as_bytes(), b"tailscale")[..16])
+    }
+
     /// A pairing code made at `now`, in milliseconds, with the random `nonce`.
     pub(crate) fn code(&self, now: i64, nonce: [u8; 8]) -> String {
         let stamped = format!("{now}.{}", hex(&nonce));

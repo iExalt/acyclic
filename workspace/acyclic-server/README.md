@@ -25,12 +25,18 @@ credential derived from the session, so rotating the session unpairs it too. Eac
 port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a write it
 authenticates must come from the listener's own origin, and no page may frame the app.
 
-`up --tailscale --login <login> --host <name>.ts.net` also listens on a Unix socket only the user can open
-(`--socket`, `~/.config/acyclic/up/tailscale.sock` by default), checked as `serve` checks requests. Point Tailscale
-at it with `tailscale serve --bg unix:<socket>`, as `up` prints; no container can reach the socket. The phone then
-reaches the Mac while it is awake. Not yet checked against a real tailnet: that `tailscale serve` replaces any
-`Tailscale-User-Login` a client sends and passes the original `Host` on, and that the Tailscale daemon can open a
-socket under `~/.config`; if it can't, give `--socket` a path it can reach.
+`up --tailscale --login <login> --host <name>.ts.net` also serves requests through `tailscale serve`, checked as
+`serve` checks them: Tailscale replaces any `Tailscale-User-Login` a client sends with the user's, and passes the
+`.ts.net` name on as `Host`, without a port. It listens on port 7479 of `127.0.0.1` (`--tailscale-port`), since
+Tailscale's Mac apps run sandboxed and can't open a Unix socket. Every process and container on the machine, runs
+included, can reach that port and send any identity header, so the port answers only paths under a secret first
+segment, derived from the session, and takes it off; anything else gets an empty 404. `up` prints the command that
+points Tailscale at it, `tailscale serve --bg http://127.0.0.1:7479/<secret>`, and Tailscale prepends the secret to
+every path, so browsers never see it. Only what can read the session can learn it, which keeps out runs as long as
+none mounts `~/.config/acyclic`; whatever keeps `up`'s output, such as a service's log, must be the user's alone too.
+`--rotate` changes the secret, and the command must be run again. With the open-source `tailscaled`, which can open
+one, `--socket <path>` listens on a Unix socket only the user can open instead, with no secret, pointed at by
+`tailscale serve --bg unix:<path>`. The phone then reaches the Mac while it is awake.
 
 `up` doesn't sync on a timer unless given `--sync-every`, so the clone syncs when told to, as it does without a
 server. It shares the clone with the CLI, whose writes queue with its own.

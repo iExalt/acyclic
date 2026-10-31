@@ -974,40 +974,56 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
     let (token, path) = session::open(home.as_ref(), options.rotate)?;
     let tailscale = match (options.tailscale, &options.login, &options.host) {
         (true, Some(login), Some(host)) => {
-            let access = Access::tailscale(login, host, options.origin.as_deref())?;
-            let socket =
-                options.socket.clone().unwrap_or_else(|| path.with_file_name("tailscale.sock"));
-            Some((socket, access))
+            Some(Access::tailscale(login, host, options.origin.as_deref())?)
         },
         _ => None,
     };
+    let secret = token.tailscale();
     let mut extra = Vec::new();
-    if let Some((socket, access)) = tailscale.clone() {
-        extra.push(Extra::Unix(socket, access));
+    if let Some(access) = tailscale.clone() {
+        extra.push(match &options.socket {
+            Some(socket) => Extra::Unix(socket.clone(), access),
+            None => Extra::Tcp(
+                SocketAddr::from(([127, 0, 0, 1], options.tailscale_port)),
+                access,
+                Some(secret.clone()),
+            ),
+        });
     }
     if let Some(port) = options.runners {
         extra.push(Extra::Tcp(
             SocketAddr::from(([127, 0, 0, 1], port)),
             runners(home.as_ref(), env)?,
+            None,
         ));
     }
     let subject = match &tailscale {
-        Some((_, Access::Tailscale { origin, .. })) => Some(origin.clone()),
+        Some(Access::Tailscale { origin, .. }) => Some(origin.clone()),
         _ => None,
     };
     let push = push::Settings { subject, ..push::Settings::default() };
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone(), push };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
     let link = |port| link(port, &token, env);
-    let socket = tailscale.as_ref().map(|(socket, _)| socket.clone());
-    run(config, options.sync_every, bind, extra, |address, runners| {
+    let socket = options.socket.clone();
+    let runners = options.runners.is_some();
+    run(config, options.sync_every, bind, extra, |address, bound| {
         let mut started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
-        if let Some(socket) = socket {
-            let serve = format!("tailscale serve --bg unix:{}", socket.display());
-            started["tailscale"] = json!({"socket": socket, "serve": serve});
+        let mut bound = bound.into_iter();
+        if tailscale.is_some() {
+            started["tailscale"] = match (&socket, bound.next().flatten()) {
+                (Some(socket), _) => {
+                    json!({"socket": socket, "serve": format!("tailscale serve --bg unix:{}", socket.display())})
+                },
+                (None, Some(at)) => json!({
+                    "listening": at.to_string(),
+                    "serve": format!("tailscale serve --bg http://{at}/{secret}"),
+                }),
+                (None, None) => unreachable!("a TCP listener has an address"),
+            };
         }
-        if let Some(runners) = runners {
-            started["runners"] = json!(runners.to_string());
+        if let (true, Some(at)) = (runners, bound.next().flatten()) {
+            started["runners"] = json!(at.to_string());
         }
         Ok((Access::Session { port: address.port(), token: token.clone() }, started))
     })
@@ -1047,19 +1063,19 @@ fn runners(home: &std::path::Path, env: &Env) -> Result<Access, CliError> {
 enum Extra {
     /// A Unix socket.
     Unix(PathBuf, Access),
-    /// A TCP address.
-    Tcp(SocketAddr, Access),
+    /// A TCP address, serving only under the secret first path segment if one is given.
+    Tcp(SocketAddr, Access, Option<String>),
 }
 
-/// Binds `bind`, and each extra listener with its own access, gives the bound address, and the extra TCP listener's if
-/// there is one, to `access` for the main listener's access and the line to print, prints it, and serves until
-/// interrupted, syncing every `sync_every` seconds unless that is 0.
+/// Binds `bind`, and each extra listener with its own access, gives the bound address, and each extra listener's in
+/// order (none for a socket), to `access` for the main listener's access and the line to print, prints it, and serves
+/// until interrupted, syncing every `sync_every` seconds unless that is 0.
 fn run(
     config: Config,
     sync_every: u64,
     bind: SocketAddr,
     extra: Vec<Extra>,
-    access: impl FnOnce(SocketAddr, Option<SocketAddr>) -> Result<(Access, Value), CliError>,
+    access: impl FnOnce(SocketAddr, Vec<Option<SocketAddr>>) -> Result<(Access, Value), CliError>,
 ) -> Result<(), CliError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -1072,17 +1088,18 @@ fn run(
             .map_err(|err| failed(&format!("listening on {bind}"), err))?;
         let address = listener.local_addr().map_err(|err| failed("reading the address", err))?;
         let mut serving = tokio::task::JoinSet::new();
-        let mut extra_tcp = None;
+        let mut bound = Vec::new();
         for listener in extra {
             match listener {
                 Extra::Unix(path, access) => {
                     let unix = bind_socket(&path)?;
                     let routes = routes(server.clone(), access);
+                    bound.push(None);
                     serving.spawn(async move {
                         axum::serve(unix, routes).with_graceful_shutdown(stopped()).await
                     });
                 },
-                Extra::Tcp(at, access) => {
+                Extra::Tcp(at, access, secret) => {
                     if let (Access::Run { code: Some(code), .. }, true) = (&access, sync_every > 0)
                     {
                         tokio::spawn(refresh(Arc::clone(code), server.config.tracker.clone()));
@@ -1090,16 +1107,21 @@ fn run(
                     let tcp = tokio::net::TcpListener::bind(at)
                         .await
                         .map_err(|err| failed(&format!("listening on {at}"), err))?;
-                    extra_tcp =
-                        Some(tcp.local_addr().map_err(|err| failed("reading the address", err))?);
+                    bound.push(Some(
+                        tcp.local_addr().map_err(|err| failed("reading the address", err))?,
+                    ));
                     let routes = routes(server.clone(), access);
+                    let routes = match secret {
+                        Some(secret) => under(secret, routes),
+                        None => routes,
+                    };
                     serving.spawn(async move {
                         axum::serve(tcp, routes).with_graceful_shutdown(stopped()).await
                     });
                 },
             }
         }
-        let (access, started) = access(address, extra_tcp)?;
+        let (access, started) = access(address, bound)?;
         if sync_every > 0 {
             tokio::spawn(sync(server.clone(), Duration::from_secs(sync_every)));
         }
@@ -1118,6 +1140,45 @@ fn run(
         }
         Ok(())
     })
+}
+
+/// Serves `routes` only under the first path segment `secret`, which is taken off before they see the request; every
+/// other path is answered 404, empty. `tailscale serve`, pointed at `http://127.0.0.1:<port>/<secret>`, prepends it to
+/// every path, so browsers never see it, and only processes that can read the user's session can learn it: the Tailscale
+/// port is on loopback, which every process and container on the machine can reach, and Tailscale's identity header
+/// alone would let any of them act as the user.
+///
+/// It wraps the whole router, since a router's own layers run after it has routed the path they would rewrite.
+fn under(secret: String, routes: Router) -> Router {
+    Router::new().fallback_service(tower::service_fn(move |request: Request| {
+        let routes = routes.clone();
+        let inside = beneath(&secret, request);
+        async move {
+            match inside {
+                Some(request) => routes.oneshot(request).await,
+                None => Ok(StatusCode::NOT_FOUND.into_response()),
+            }
+        }
+    }))
+}
+
+/// `request` with the path's first segment taken off, if that segment is `secret`, compared as sent; `/<secret>` alone
+/// is `/`. Only the first segment is taken, once.
+fn beneath(secret: &str, mut request: Request) -> Option<Request> {
+    let rest = request.uri().path().strip_prefix('/')?;
+    let (first, after) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    if !session::equal(first.as_bytes(), secret.as_bytes()) {
+        return None;
+    }
+    let after = if after.is_empty() { "/" } else { after };
+    let path = match request.uri().query() {
+        Some(query) => format!("{after}?{query}"),
+        None => after.to_owned(),
+    };
+    let mut parts = request.uri().clone().into_parts();
+    parts.path_and_query = Some(path.parse().ok()?);
+    *request.uri_mut() = axum::http::Uri::from_parts(parts).ok()?;
+    Some(request)
 }
 
 /// The longest path a Unix socket can have on macOS, the shortest limit of the systems acyclic runs on.
