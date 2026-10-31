@@ -85,17 +85,28 @@ export function marked(text: string): Marked[] {
   return out;
 }
 
-/** Text as written, its backticked runs as code; with `notes`, its strong and emphasised runs too. */
+/**
+ * Text as written, its backticked runs as code; with `notes`, its strong and emphasised runs too. In one span, so a
+ * flex row it sits in takes it as one item rather than a column for each run.
+ */
 export function Prose({ text, notes = false }: { text: string; notes?: boolean }) {
   if (!notes)
-    return spans(text).map((span, at) =>
-      // A run's place in the text is its key: the runs change only with the text.
-      span.code ? <code key={at}>{span.text}</code> : span.text,
+    return (
+      <span className="prose">
+        {spans(text).map((span, at) =>
+          // A run's place in the text is its key: the runs change only with the text.
+          span.code ? <code key={at}>{span.text}</code> : span.text,
+        )}
+      </span>
     );
-  return marked(text).map((run, at) => {
-    let shown: ReactNode = run.code ? <code>{run.text}</code> : run.text;
-    if (run.em) shown = <em>{shown}</em>;
-    if (run.strong) shown = <strong>{shown}</strong>;
-    return <Fragment key={at}>{shown}</Fragment>;
-  });
+  return (
+    <span className="prose">
+      {marked(text).map((run, at) => {
+        let shown: ReactNode = run.code ? <code>{run.text}</code> : run.text;
+        if (run.em) shown = <em>{shown}</em>;
+        if (run.strong) shown = <strong>{shown}</strong>;
+        return <Fragment key={at}>{shown}</Fragment>;
+      })}
+    </span>
+  );
 }

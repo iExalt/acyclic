@@ -48,6 +48,19 @@ describe("style", () => {
 });
 
 describe("a scheme's drawing", () => {
+  it("doesn't darken where a press lands, on the background or on a node", () => {
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
+    const node = core.add({
+      group: "nodes",
+      data: { id: "a", label: "a", width: 200, height: 48, textWidth: 150, layer: 0 },
+    });
+    // Pressed, as a tap marks it; the parsed style too, which Cytoscape's types leave out.
+    (node as unknown as { activate(): void }).activate();
+    const style = core.style() as unknown as { core(name: string): { value: unknown } };
+    expect(style.core("active-bg-opacity").value).toBe(0);
+    expect((node as unknown as { pstyle(name: string): { value: unknown } }).pstyle("overlay-opacity").value).toBe(0);
+  });
+
   it("holds only its own palette's colours and lines, whichever scheme was drawn before it", () => {
     const stages = Object.keys(PALETTES.dark.tints) as Stage[];
     const drawing = (p: Palette) => {

@@ -48,6 +48,11 @@ export function styleFor(p: Palette): cytoscape.StylesheetJson {
 function sheetOf(p: Palette): cytoscape.StylesheetJson {
   const [OPEN, CLOSED, HATCH] = [openOf(p), closedOf(p), hatchOf(p)];
   return [
+    // Cytoscape darkens where a press lands, a grey disc on the background and a shade over a node; a press here
+    // selects, and the selection shows that.
+    // Cytoscape's types ask for every core property, where the stylesheet takes any of them.
+    { selector: "core", style: { "active-bg-opacity": 0 } as unknown as cytoscape.Css.Core },
+    { selector: "node:active, edge:active", style: { "overlay-opacity": 0 } },
     {
       selector: "node",
       style: {

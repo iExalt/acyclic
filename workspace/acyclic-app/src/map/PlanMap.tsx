@@ -168,6 +168,8 @@ export default function PlanMap({
       container: host.current,
       style: styleFor(palette),
       autoungrabify: true,
+      // The app marks the selected item itself; Cytoscape's own selection would only be a second, unstyled one.
+      autounselectify: true,
       boxSelectionEnabled: false,
       maxZoom: MAX_ZOOM,
     });

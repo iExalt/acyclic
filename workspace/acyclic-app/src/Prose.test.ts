@@ -1,5 +1,6 @@
+import { isValidElement } from "react";
 import { describe, expect, it } from "vitest";
-import { marked, spans } from "./Prose";
+import { marked, Prose, spans } from "./Prose";
 
 describe("spans", () => {
   it("sets backticked runs as code and leaves the rest as written", () => {
@@ -48,5 +49,14 @@ describe("marked", () => {
     expect(marked("snake_case_name and 2 * 3 * 4")).toEqual([run("snake_case_name and 2 * 3 * 4")]);
     expect(marked("<b>not</b> [a](link)")).toEqual([run("<b>not</b> [a](link)")]);
     expect(marked("`**` stays code")).toEqual([run("**", { code: true }), run(" stays code")]);
+  });
+});
+
+describe("Prose", () => {
+  it("renders its runs in one element, so a flex row takes the text as one item", () => {
+    for (const notes of [false, true]) {
+      const shown = Prose({ text: "Move `keep-me-in-the-loop` and **`assign`** onto acyclic", notes });
+      expect(isValidElement(shown) && shown.type).toBe("span");
+    }
   });
 });
