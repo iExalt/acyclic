@@ -13,9 +13,15 @@ const before = plan([
   item("dig", "garden", [], { title: "Dig", notes: "deep", gate: null }),
   item("sow", "beds", ["dig"], { title: "Sow" }),
 ]);
+/** `from` with one item changed as `change` says. */
+const changed = (from: Plan, id: string, change: Partial<Item>) =>
+  plan(
+    [...from.items.values()].map((one) => (one.id === id ? { ...one, ...change } : one)),
+    from.level,
+  );
 /** The plan after changing one item as `change` says. */
-const after = (id: string, change: Partial<Item>) =>
-  plan([...before.items.values()].map((one) => (one.id === id ? { ...one, ...change } : one)));
+const after = (id: string, change: Partial<Item>) => changed(before, id, change);
+const links = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
 
 describe("undo", () => {
   it("moves an item back where it was, while it is still where it went", () => {
@@ -82,5 +88,19 @@ describe("undo", () => {
     const unlinked = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
     expect(removed?.holds(after("sow", { links: unlinked, stage: "ready" }))).toBe(true);
     expect(removed?.holds(after("sow", { links: unlinked, stage: "in-progress" }))).toBe(false);
+  });
+
+  it("sets a state back only while nothing waiting on the item, or on a box above it, has started since", () => {
+    const done = undoOf({ item: { edit: { item: "dig", state: "done" } } }, before);
+    expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "backlog" } } });
+    const dug = after("dig", { state: "done" });
+    expect(done?.holds(dug)).toBe(true);
+    expect(done?.holds(changed(dug, "sow", { stage: "in-progress" }))).toBe(false);
+    // Here Sow waits on Dig's box, Garden, which Dig being done may complete.
+    const boxed = changed(before, "sow", { links: { ...links, waits_for: ["garden"] } });
+    const outer = undoOf({ item: { edit: { item: "dig", state: "done" } } }, boxed);
+    const boxDone = changed(boxed, "dig", { state: "done" });
+    expect(outer?.holds(boxDone)).toBe(true);
+    expect(outer?.holds(changed(boxDone, "sow", { stage: "in-progress" }))).toBe(false);
   });
 });

@@ -70,8 +70,9 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons.
 - **Thread badges:** the thread's number on its line's colour.
 - **Needs-you mark:** a "!" on the amber fill.
-- **Notices:** a refusal, a failure or something to copy, with its own Dismiss; in the panel on top, under its heading,
-  else over the Map.
+- **Notices:** a refusal, a failure, an offered Undo or something to copy, with its own Dismiss; in the panel on top,
+  under its heading, else over the Map. One shows at a time: the next replaces it, including one a link from a
+  notification brings, as the user has moved on.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
@@ -98,11 +99,13 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No single key
   approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the menu's
   Single-key shortcuts switch, per device, turns them off.
-- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the autonomy offer
-  Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (an approval,
-  a proposal kept or dropped, a thread changed: agents act on them). Undo reads the plan first and takes back nothing
-  changed since, saying so; it then says what it did ("Autonomy set back to Blockers", not "Undone": agents' work
-  meanwhile stands). The notice stays until dismissed or the next write.
+- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the global autonomy
+  level offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse
+  (an approval, a proposal kept or dropped, a thread's own level or flag, a thread changed: agents act on them).
+  Undo reads the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a
+  removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
+  what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands). The notice stays until
+  dismissed or the next write.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused

@@ -114,8 +114,22 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
     text: `Edited ${titleOf(id)}${thread ? ". Its thread can't be changed back from here" : ""}`,
     undone: `Undid the edit of ${titleOf(id)}${thread ? ", but its thread" : ""}`,
     command: { item: { edit: back } },
-    holds: (now) => [...set].every(([field, value]) => held(now.items.get(id), field) === value),
+    holds: (now) =>
+      [...set].every(([field, value]) => held(now.items.get(id), field) === value) &&
+      (!set.has("state") ||
+        waitersOf(before, id).every((one) => started(now.items.get(one)) <= started(before.items.get(one)))),
   };
+}
+
+/**
+ * What waits on an item, or on a box above it, so a state set to done could make it ready: an agent may start it, and
+ * setting the state back wouldn't stop that, so a state is only undone while none of it is further along.
+ */
+function waitersOf(plan: Plan, id: string): string[] {
+  const above = new Set<string>();
+  for (let at: string | null = id; at !== null && !above.has(at); at = plan.items.get(at)?.parent ?? null)
+    above.add(at);
+  return [...plan.items.values()].filter((one) => one.links.waits_for.some((on) => above.has(on))).map((one) => one.id);
 }
 
 const STARTED: ReadonlySet<Stage> = new Set(["in-progress", "in-review", "done"]);

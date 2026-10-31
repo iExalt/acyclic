@@ -142,6 +142,8 @@ export function App() {
 
   /** The plan's reads, so one overtaken by a later read is never shown, and the writes saved that none holds yet. */
   const reads = useRef<Reads>(NO_READS);
+  /** The latest read shown, as the server had it: what an undo's guard is checked against. */
+  const lastRead = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
   /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
     reads.current = start(reads.current);
@@ -150,6 +152,7 @@ export function App() {
     const next = show(reads.current, n, found);
     if (next === null) return null;
     reads.current = next;
+    lastRead.current = { items: new Map(found.map((one) => [one.id, one])), level };
     return { state: "loaded" as const, items: found, threads: listed, level, needs: needed, unread: next.unread };
   }, []);
   const refresh = useCallback(() => {
@@ -336,12 +339,23 @@ export function App() {
       // Said at once and until it is done: the plan is read again before the undo is sent.
       setNotice(UNDOING);
       try {
-        const next = await fetchAll().catch(() => null);
-        const plan =
-          next === null
-            ? serverPlan.current
-            : { items: new Map(next.items.map((one) => [one.id, one])), level: next.level };
+        // Never without a fresh read: one overtaken by a later read shown leaves that one, as fresh, to check against.
+        let next: Awaited<ReturnType<typeof fetchAll>>;
+        try {
+          next = await fetchAll();
+        } catch (err: unknown) {
+          // Still on offer: Undo tries again.
+          const { message } = failure(err);
+          setNotice({
+            text: `Couldn't check the plan, so nothing was undone: ${message}`,
+            offer: "undo",
+            retry: null,
+            undo,
+          });
+          return;
+        }
         if (next !== null) setLoad(next);
+        const plan = lastRead.current;
         if (plan === null || !undo.holds(plan))
           setNotice({ text: "Changed since, so it can't be undone", offer: null, retry: null });
         else await send(undo.command, { select: null, pin: null, undone: undo.undone });
