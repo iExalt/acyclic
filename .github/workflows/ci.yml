@@ -69,7 +69,6 @@ jobs:
     env:
       # Python and uv run Playwright here, and Node and pnpm build the app.
       MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
-      PLAYWRIGHT_DEPS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
@@ -88,6 +87,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.0-${{ runner.os }}
+      - run: mise run deps:browser
       - run: mise run check:browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
