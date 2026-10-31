@@ -23,6 +23,8 @@ import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
+/** What the pointer shows the links of: a task, or a collapsed box, which holds its tasks' links. */
+const HOVERABLE = "node.leaf, node.collapsed";
 
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
 const fontLoaded: Promise<unknown> =
@@ -105,6 +107,7 @@ export default function PlanMap({
   const model = useMemo(() => buildModel(items), [items]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const [hovered, setHovered] = useState<string | null>(null);
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
@@ -237,9 +240,9 @@ export default function PlanMap({
   const fonts = useMemo(measuring, []);
   const drawn = useMemo(() => {
     if (placed === null) return null;
-    const selection: Selection = { item: selected, thread };
+    const selection: Selection = { item: selected, thread, hovered };
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts);
-  }, [view, placed, selected, thread, model, fonts]);
+  }, [view, placed, selected, thread, hovered, model, fonts]);
 
   // Only the lit thread's colour, so a reload that leaves it alone doesn't redraw.
   const colour = drawn === null || drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
@@ -377,11 +380,22 @@ export default function PlanMap({
     const release = () => {
       from = null;
     };
+    // A pointer over an item shows its links; touch has no hover, and gives none of these.
+    const enter = (event: cytoscape.EventObject) => setHovered((event.target as cytoscape.NodeSingular).id());
+    const leave = () => setHovered(null);
     core.on("tap", tap);
     core.on("tapstart", "node", press);
     core.on("tapdrag", drag);
     core.on("tapend", release);
+    core.on("mouseover", HOVERABLE, enter);
+    core.on("mouseout", HOVERABLE, leave);
+    // Leaving the Map from over an item gives the renderer no move off it.
+    const element = host.current;
+    element?.addEventListener("mouseleave", leave);
     return () => {
+      element?.removeEventListener("mouseleave", leave);
+      core.off("mouseover", HOVERABLE, enter);
+      core.off("mouseout", HOVERABLE, leave);
       core.off("tap", tap);
       core.off("tapstart", "node", press);
       core.off("tapdrag", drag);

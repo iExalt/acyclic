@@ -98,6 +98,14 @@ describe("scene", () => {
     expect(scene(view, placed, { item: null, thread: null }, threadOf).edges.every((edge) => !edge.dim)).toBe(true);
   });
 
+  it("shows a hovered item's links, across boxes too, and dims the rest", () => {
+    const hovered = scene(view, placed, { item: null, thread: null, hovered: "c" }, threadOf);
+    expect(hovered.edges.map((edge) => [edge.id, edge.hovered, edge.dim])).toEqual([
+      ["a->b", false, true],
+      ["a->c", true, false],
+    ]);
+  });
+
   it("routes a thread through the collapsed box that hides a member", () => {
     const closed = visible(model, { collapsed: new Set(["top"]), showArchived: false });
     const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);

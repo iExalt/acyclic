@@ -9,6 +9,7 @@ import { STAGE_ICONS as ICONS, QUIET } from "../stages";
 export { QUIET };
 
 import type { Palette } from "../palette";
+import { STRIP, TITLE } from "./chevron";
 
 /** How wide the stripe is, and where the badge and the icon sit, in the Map's units. */
 const STRIPE = 6;
@@ -57,13 +58,42 @@ export function markSvg(
       `<text x="${left + wide / 2}" y="${middle}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="${thread.ink}">${xml(thread.number)}</text>`,
     );
   }
-  if (stage !== null) {
-    const colour = QUIET.has(stage) ? palette.muted : palette.ink;
-    parts.push(
-      `<g transform="translate(${width - 12 - ICON} ${middle - ICON / 2})" fill="none" stroke="${colour}" color="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[stage]}</g>`,
-    );
-  }
+  if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
+}
+
+/** A box's chevron, open (pointing down) or closed (right), drawn in a 12-unit square. */
+const CHEVRONS = { box: "M2 4l4 4 4-4", collapsed: "M4 2l4 4-4 4" };
+const CHEVRON = 12;
+
+/** Where a box's title starts: after its chevron and the icon of where its work stands. */
+export const BOX_TEXT_LEFT = TITLE - 4 + ICON + 6;
+
+/**
+ * A box's marks: its chevron at the left of its title strip, then the icon of where its work stands as a whole, so a
+ * done phase is told from one in progress or blocked at a glance, leading its title as a status leads a project's name.
+ * Drawn over the strip, or a collapsed box's whole height.
+ */
+export function boxMarkSvg(
+  kind: "box" | "collapsed",
+  stage: Stage | null,
+  width: number,
+  height: number,
+  palette: Palette,
+): string {
+  const tall = kind === "box" ? STRIP : height;
+  const middle = tall / 2;
+  const left = (TITLE - CHEVRON) / 2;
+  const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
+  if (stage !== null) parts.push(iconAt(stage, TITLE - 4, middle, palette));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${parts.join("")}</svg>`;
+}
+
+/** A stage's icon from `left`, centred on `middle`: ink for work moving, muted for the rest. */
+function iconAt(stage: Stage, left: number, middle: number, palette: Palette): string {
+  const colour = QUIET.has(stage) ? palette.muted : palette.ink;
+  return `<g transform="translate(${left} ${middle - ICON / 2})" fill="none" stroke="${colour}" color="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[stage]}</g>`;
 }
 
 const made = new WeakMap<Palette, Map<string, string>>();
@@ -81,10 +111,33 @@ export function markOf(
     mine = new Map();
     made.set(palette, mine);
   }
-  const key = JSON.stringify([stage, thread, width, height]);
+  return once(mine, JSON.stringify([stage, thread, width, height]), () =>
+    markSvg(stage, thread, width, height, palette),
+  );
+}
+
+/** A box's marks as the renderer takes them, made once for each palette, kind, stage and size. */
+export function boxMarkOf(
+  kind: "box" | "collapsed",
+  stage: Stage | null,
+  width: number,
+  height: number,
+  palette: Palette,
+): string {
+  let mine = made.get(palette);
+  if (mine === undefined) {
+    mine = new Map();
+    made.set(palette, mine);
+  }
+  // A box's strip is as tall whatever it holds, so its height doesn't key it.
+  const key = JSON.stringify([kind, stage, width, kind === "box" ? 0 : height]);
+  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette));
+}
+
+function once(mine: Map<string, string>, key: string, svg: () => string): string {
   let uri = mine.get(key);
   if (uri === undefined) {
-    uri = `data:image/svg+xml;utf8,${encodeURIComponent(markSvg(stage, thread, width, height, palette))}`;
+    uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg())}`;
     mine.set(key, uri);
   }
   return uri;

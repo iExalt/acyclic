@@ -45,6 +45,21 @@ export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
   return all.filter(([, count]) => count > 0).map(([stage, count]) => ({ stage, count }));
 }
 
+/**
+ * Where a parent's work stands as a whole, as one stage's icon tells it: in progress while any of it is moving, in
+ * review while any waits for review, done once all of it is, else ready while any can start, else blocked, else
+ * parked.
+ */
+export function overallStage(counts: Counts): Stage {
+  if (counts.in_progress > 0) return "in-progress";
+  if (counts.in_review > 0) return "in-review";
+  if (counts.done === counts.leaves) return "done";
+  if (counts.ready > 0) return "ready";
+  if (counts.blocked > 0) return "blocked";
+  if (counts.parked > 0) return "parked";
+  return "unthreaded";
+}
+
 /** A state as the tracker stores it, such as `in-progress`, in words: "In progress". */
 export function stateWords(state: string): string {
   const words = state.replaceAll("-", " ");

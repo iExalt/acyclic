@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Stage } from "../api";
 import { PALETTES } from "../palette";
 import { item } from "./fixture";
-import { markOf, markSvg } from "./marks";
+import { boxMarkSvg, markOf, markSvg } from "./marks";
 import { buildModel, fallbackStage, visible } from "./model";
 
 const thread = { colour: "#4ec695", number: "31", ink: "#141a1f" };
@@ -19,6 +19,17 @@ describe("markSvg", () => {
     // The badge leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the task.
     expect(mark.indexOf('<rect x="14"')).toBeGreaterThan(-1);
     expect(mark).toContain(`translate(${200 - 12 - 16} 16)`);
+  });
+
+  it("draws a box's chevron at its title strip's left and where its work stands at its right", () => {
+    const open = boxMarkSvg("box", "blocked", 300, 400, DARK);
+    // Over the strip alone, however tall the box.
+    expect(open).toContain('height="52"');
+    expect(open).toContain('d="M2 4l4 4 4-4"');
+    expect(open).toContain("translate(32 18)");
+    const closed = boxMarkSvg("collapsed", null, 300, 64, DARK);
+    expect(closed).toContain('d="M4 2l4 4-4 4"');
+    expect(closed).not.toContain("<g ");
   });
 
   it("widens the badge for a clone's initial, draws a dot for a thread with no number, and a ring for none", () => {

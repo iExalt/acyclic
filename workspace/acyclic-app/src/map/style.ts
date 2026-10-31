@@ -4,8 +4,8 @@
 import type cytoscape from "cytoscape";
 import type { Stage } from "../api";
 import type { Palette } from "../palette";
-import { STRIP, TITLE } from "./chevron";
-import { MARKS_LEFT, QUIET } from "./marks";
+import { STRIP } from "./chevron";
+import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
 export const FONT = "Overpass, system-ui, sans-serif";
@@ -13,17 +13,9 @@ export const FONT = "Overpass, system-ui, sans-serif";
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${body}</svg>`)}`;
-const stroke = (p: Palette) =>
-  `fill="none" stroke="${p.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
-/** An open box's chevron points down, at what it holds; a closed one's points right. Drawn, not set in the font. */
-export const openOf = (p: Palette) => svg(12, `<path d="M2 4l4 4 4-4" ${stroke(p)}/>`);
-export const closedOf = (p: Palette) => svg(12, `<path d="M4 2l4 4-4 4" ${stroke(p)}/>`);
 /** Lines across what is archived, crossing it out: a tile that repeats seamlessly, each line 8 px from the next. */
 export const hatchOf = (p: Palette) =>
   svg(8, `<path d="M-2 2l4-4M0 8l8-8M6 10l4-4" stroke="${p.muted}" stroke-width="1"/>`);
-/** Where a chevron is drawn: in the middle of the square at the left of the title strip. */
-const CHEVRON_AT = `${(TITLE - 12) / 2}px`;
-const CHEVRON_DOWN = `${(STRIP - 12) / 2}px`;
 
 /** Each stage's tint, and a quieter title for work finished or set aside. */
 const stagesOf = (p: Palette): cytoscape.StylesheetJson =>
@@ -46,7 +38,7 @@ export function styleFor(p: Palette): cytoscape.StylesheetJson {
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 function sheetOf(p: Palette): cytoscape.StylesheetJson {
-  const [OPEN, CLOSED, HATCH] = [openOf(p), closedOf(p), hatchOf(p)];
+  const HATCH = hatchOf(p);
   return [
     // Cytoscape darkens where a press lands, a grey disc on the background and a shade over a node; a press here
     // selects, and the selection shows that.
@@ -84,16 +76,25 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       style: {
         "background-color": p.box,
         "border-color": p.rule,
-        color: p.muted,
         "font-weight": 700,
         "text-valign": "top",
         // The label's foot sits on the box's top edge; this brings it down into the title strip.
         "text-margin-y": STRIP - 8,
-        "background-image": OPEN,
-        "background-position-x": CHEVRON_AT,
-        "background-position-y": CHEVRON_DOWN,
       },
     },
+    // A box's marks, its chevron and the icon of where its work stands, drawn over its title strip; its title in ink
+    // while its work moves or can, muted once done or held up, as a task's.
+    {
+      selector: "node.box, node.collapsed",
+      style: {
+        "background-image": "data(mark)",
+        "background-fit": "none",
+        "background-clip": "node",
+        "background-position-x": "0px",
+        "background-position-y": "0px",
+      },
+    },
+    { selector: "node.box.quiet, node.collapsed.quiet", style: { color: p.muted } },
     // A box's title alone, with no counts under it, sits half a line lower: in the middle of the strip.
     { selector: "node.box.one-line", style: { "text-margin-y": STRIP / 2 + 8 } },
     // A task's marks, its thread's stripe and badge and its stage's icon, with its title between them.
@@ -111,19 +112,16 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       },
     },
     ...stagesOf(p),
-    // A box's title starts at its left, after the chevron.
+    // A box's title starts at its left, after the chevron and the icon of where its work stands.
     {
       selector: "node.box, node.collapsed",
-      style: { "text-halign": "left-inside", "text-margin-x": TITLE - 4 },
+      style: { "text-halign": "left-inside", "text-margin-x": BOX_TEXT_LEFT },
     },
     {
       selector: "node.collapsed",
       style: {
         "border-color": p.muted,
         "font-weight": 700,
-        "background-image": CLOSED,
-        "background-position-x": CHEVRON_AT,
-        "background-position-y": "50%",
       },
     },
     // Archived items are crossed out with lines; an open archived box, which holds them, has a dashed edge instead.
@@ -140,11 +138,11 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     {
       selector: "node.collapsed.archived",
       style: {
-        "background-image": [HATCH, CLOSED],
+        "background-image": (node: cytoscape.NodeSingular) => [HATCH, node.data("mark")],
         "background-repeat": ["repeat", "no-repeat"],
         "background-image-opacity": [0.3, 1],
-        "background-position-x": ["0px", CHEVRON_AT],
-        "background-position-y": ["0px", "50%"],
+        "background-position-x": ["0px", "0px"],
+        "background-position-y": ["0px", "0px"],
       },
     },
     { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
@@ -205,6 +203,8 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
     { selector: "edge.lit", style: { width: 2.25, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
     { selector: "edge.dim", style: { opacity: 0.35 } },
+    // The hovered item's links, in ink over whatever else they are, as the Threads view lights a hovered card's.
+    { selector: "edge.hovered", style: { width: 2.25, "line-color": p.ink, "target-arrow-color": p.ink } },
     // Where a trunk splits: a dot in the links' colour, over them, told from two links crossing.
     {
       selector: "node.junction",

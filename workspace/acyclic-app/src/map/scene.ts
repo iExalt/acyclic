@@ -2,10 +2,10 @@
 // drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
 import { countsText, type Stage } from "../api";
-import { TITLE } from "./chevron";
+import { overallStage } from "../stages";
 import { cut, type Measure, wrap } from "./fit";
 import { type Placed, withinOneBox } from "./layout";
-import { MARKS_LEFT, MARKS_RIGHT } from "./marks";
+import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, View, VisibleNode } from "./model";
 import { type Segments, segmentsOf } from "./route";
 
@@ -13,6 +13,8 @@ import { type Segments, segmentsOf } from "./route";
 export interface Selection {
   item: string | null;
   thread: string | null;
+  /** The item under the pointer, whose links show, as the selection's do, while the rest recede. */
+  hovered?: string | null;
 }
 
 export interface SceneNode {
@@ -49,7 +51,7 @@ export const UNMEASURED: Fonts = { regular: () => 0, bold: () => 0 };
 
 /** How wide a node's label may be drawn: a task's between its marks, a box's after its chevron. */
 export function textWidthOf(kind: Kind, width: number): number {
-  return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : TITLE + 10));
+  return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : BOX_TEXT_LEFT + 10));
 }
 
 export interface SceneEdge {
@@ -67,8 +69,10 @@ export interface SceneEdge {
   route: Segments | null;
   /** Joins two of the lit thread's nodes, so the thread reads as a route in its line's colour. */
   lit: boolean;
-  /** Outside the lit thread while one is lit. */
+  /** Outside the lit thread while one is lit, or not the hovered item's while one is hovered. */
   dim: boolean;
+  /** One of the hovered item's links. */
+  hovered: boolean;
 }
 
 /** A dot where a trunk of links leaving one node splits, lit or dimmed with a link that splits there. */
@@ -114,7 +118,8 @@ export function scene(
       label: labelOf(node, textWidth, fonts),
       textWidth,
       kind: node.kind,
-      stage: node.kind === "leaf" ? node.stage : null,
+      // A box's, where its work stands as a whole.
+      stage: node.kind === "leaf" ? node.stage : node.progress === null ? null : overallStage(node.progress),
       thread: node.kind === "leaf" ? node.thread : null,
       x: at.x + at.width / 2,
       y: at.y + at.height / 2,
@@ -130,6 +135,7 @@ export function scene(
     });
   }
   const within = withinOneBox(view);
+  const hovered = selection.hovered ?? null;
   const edges: SceneEdge[] = [];
   const centre = new Map(nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   for (const edge of view.edges) {
@@ -138,7 +144,9 @@ export function scene(
     const implied = !crossing && placed.redundant.has(id);
     const touches = selection.item !== null && (edge.source === selection.item || edge.target === selection.item);
     const joins = lit.has(edge.source) && lit.has(edge.target);
-    if ((crossing || implied) && !touches && !joins) continue;
+    // Not one a drawn way already implies: drawn straight, it would cut across the items between.
+    const shows = hovered !== null && !implied && (edge.source === hovered || edge.target === hovered);
+    if ((crossing || implied) && !touches && !joins && !shows) continue;
     const way = crossing || implied ? undefined : placed.routes.get(id);
     const source = centre.get(edge.source);
     const target = centre.get(edge.target);
@@ -150,7 +158,8 @@ export function scene(
       implied,
       route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
-      dim: thread !== null && !joins && !touches,
+      dim: (thread !== null && !joins && !touches) || (hovered !== null && !shows),
+      hovered: shows,
     });
   }
   // A dot drawn once where several links split, lit if any of them is.

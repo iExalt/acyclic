@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { Stage } from "../api";
 import { linesOf } from "../lines";
 import { PALETTES, type Palette } from "../palette";
-import { markOf } from "./marks";
-import { closedOf, hatchOf, openOf, styleFor } from "./style";
+import { boxMarkOf, markOf } from "./marks";
+import { hatchOf, styleFor } from "./style";
 
 /** A hex colour as Cytoscape gives a parsed one back. */
 const rgb = (hex: string) => `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(",")})`;
-const [OPEN, CLOSED, HATCH] = [openOf, closedOf, hatchOf].map((of) => of(PALETTES.dark));
+const HATCH = hatchOf(PALETTES.dark);
 
 /** A task's marks, as an image its data carries. */
 const MARK = "data:image/svg+xml;utf8,%3Csvg%2F%3E";
@@ -39,10 +39,10 @@ describe("style", () => {
     const plain = { border: "solid", align: "left-inside", opacity: 1, fill: 1, colour: expect.any(String) };
     expect(drawn("leaf")).toEqual({ ...plain, images: [MARK] });
     expect(drawn("leaf archived")).toEqual({ ...plain, images: [HATCH, MARK] });
-    expect(drawn("box")).toEqual({ ...plain, images: [OPEN] });
-    expect(drawn("box archived")).toEqual({ ...plain, images: [OPEN], border: "dashed" });
-    expect(drawn("collapsed")).toEqual({ ...plain, images: [CLOSED] });
-    expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, CLOSED] });
+    expect(drawn("box")).toEqual({ ...plain, images: [MARK] });
+    expect(drawn("box archived")).toEqual({ ...plain, images: [MARK], border: "dashed" });
+    expect(drawn("collapsed")).toEqual({ ...plain, images: [MARK] });
+    expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, MARK] });
     // Lit or selected, an open archived box keeps its dash.
     expect(drawn("box archived lit selected").border).toBe("dashed");
     // Outside the thread lit, a task fades, but its title stays at full strength, muted.
@@ -79,11 +79,15 @@ describe("a scheme's drawing", () => {
       const marks = [null, ...threads].flatMap((thread) =>
         [null, ...stages].map((stage) => decodeURIComponent(markOf(stage, thread, 200, 48, p))),
       );
+      const boxes = (["box", "collapsed"] as const).flatMap((kind) =>
+        [null, ...stages].map((stage) => decodeURIComponent(boxMarkOf(kind, stage, 200, 120, p))),
+      );
       return {
         text:
           JSON.stringify(styleFor(p), (_, value) => (typeof value === "function" ? String(value) : value)) +
           marks.join("") +
-          [openOf(p), closedOf(p), hatchOf(p)].map(decodeURIComponent).join(""),
+          boxes.join("") +
+          decodeURIComponent(hatchOf(p)),
         lines,
       };
     };

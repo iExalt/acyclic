@@ -170,6 +170,14 @@ you. Errors say what to check before what went wrong.
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **A task reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
   stage's icon at the end.
+- **A phase tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
+  any of it moves, done once all of it is, else ready, else blocked), after its chevron, and is muted once done or
+  held up, as a task's title is.
+- **A join sits between what it waits on.** Inside a box, a task waiting on two sits centred under them, each pulling
+  it equally (the balanced placement), not under whichever came first.
+- **Hover shows a task's links**, as hovering a card on the Threads view does: its own, in ink, across boxes too, and
+  the rest recede; the links a drawn way already implies stay out, since drawn straight they would cut across items.
+  Touch has no hover; a tap selects, which shows them all.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
 - **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the

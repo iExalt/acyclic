@@ -7,7 +7,7 @@
 import type { Core, ElementDefinition } from "cytoscape";
 import type { Line } from "../lines";
 import type { Palette } from "../palette";
-import { markOf } from "./marks";
+import { boxMarkOf, markOf, QUIET } from "./marks";
 import type { Scene } from "./scene";
 
 /** An element as the renderer is given it; `data.id` is its id. */
@@ -31,9 +31,10 @@ export function elementsOf(
       data: {
         ...node,
         line,
-        ...(node.kind === "leaf"
-          ? { mark: markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette) }
-          : {}),
+        mark:
+          node.kind === "leaf"
+            ? markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette)
+            : boxMarkOf(node.kind, node.stage, node.width, node.height, palette),
       },
       position: { x: node.x, y: node.y },
       classes: [
@@ -43,6 +44,7 @@ export function elementsOf(
         node.selected ? "selected" : "",
         node.archived ? "archived" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
+        node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",
       ].join(" "),
     })),
@@ -72,6 +74,7 @@ export function elementsOf(
         edge.route === null ? "" : "routed",
         edge.lit ? "lit" : "",
         edge.dim ? "dim" : "",
+        edge.hovered ? "hovered" : "",
       ].join(" "),
     })),
   ];
