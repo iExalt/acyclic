@@ -177,7 +177,7 @@ describe("needView", () => {
   });
 });
 
-describe("the Review list's groups and count", () => {
+describe("the needs-you list's groups and count", () => {
   it("puts every kind in one group, a kind the app doesn't know among what to unblock", () => {
     expect(["proposal", "unapproved", "awaiting-approval", "new-blocker"].map(groupOf)).toEqual(
       Array(4).fill("approve"),

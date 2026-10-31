@@ -424,7 +424,7 @@ export function App() {
           data-testid="needs-button"
           data-none={load.needs.length === 0}
           aria-pressed={showNeeds}
-          aria-label={`Review: ${load.needs.length} waiting`}
+          aria-label={`Needs you: ${load.needs.length} waiting`}
           onClick={() => {
             setSelected(null);
             // The phases' sheet shows over the list, so the list it opens would be hidden under it.
@@ -439,7 +439,7 @@ export function App() {
               !
             </span>
           )}
-          Review
+          Needs you
           {load.needs.length > 0 && (
             <span className="count" data-testid="needs-count">
               {countText(load.needs.length)}

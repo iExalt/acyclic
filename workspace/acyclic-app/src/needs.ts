@@ -54,7 +54,7 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).f
 const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** What the user does about an entry, by which the Review list filters: say yes or no, answer, or unblock work. */
+/** What the user does about an entry, by which the needs-you list filters: say yes or no, answer, or unblock work. */
 export type NeedGroup = "approve" | "answer" | "unblock";
 
 export const GROUPS: { group: NeedGroup; label: string }[] = [
@@ -72,7 +72,7 @@ export function groupOf(kind: string): NeedGroup {
   return kind === "question" ? "answer" : "unblock";
 }
 
-/** A count as the Review button shows it: exact to 99, then 99+. */
+/** A count as the Needs you button shows it: exact to 99, then 99+. */
 export function countText(count: number): string {
   return count > 99 ? "99+" : String(count);
 }

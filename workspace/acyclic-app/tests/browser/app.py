@@ -1423,8 +1423,12 @@ def needs_journey(page, env, plan, thread, name, failures):
         needs.wait_for(timeout=10_000)
         page.get_by_test_id("phases").wait_for(state="detached", timeout=5_000)
     except PlaywrightTimeout:
-        failures.append(f"{name}: Review opened over the phases' sheet left its list hidden")
+        failures.append(f"{name}: Needs you opened over the phases' sheet left its list hidden")
         return
+    # The queue has the name its push notification gives it, apart from the in-review stage.
+    named = (page.get_by_test_id("needs-button").get_attribute("aria-label"), needs.locator("h2").inner_text())
+    if not named[0].startswith("Needs you:") or named[1] != "Needs you":
+        failures.append(f"{name}: the queue's button and heading read {named}, not Needs you")
     outside = next(
         id
         for id, row in sorted(plan.items.items())

@@ -37,9 +37,9 @@ export function NeedsList({ needs, titleOf, lines, busy, onCommand, onSelect, on
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
   return (
-    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Review">
+    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Needs you">
       <header>
-        <h2>Review</h2>
+        <h2>Needs you</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           ×
         </button>
