@@ -1,5 +1,5 @@
 import cytoscape from "cytoscape";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Item } from "../api";
 import { linesOf } from "../lines";
 import { PALETTES } from "../palette";
@@ -8,6 +8,7 @@ import { item } from "./fixture";
 import type { Placed } from "./layout";
 import { buildModel, visible } from "./model";
 import { type Selection, scene } from "./scene";
+import { styleFor } from "./style";
 
 // garden: beds (dig, sow waits for dig), plant (water); tools at the top level, waiting for dig; t holds dig and tools.
 const base = [
@@ -120,5 +121,42 @@ describe("draw", () => {
       remove: [],
       update: [{ id: "sow", data: { label: "Sow seeds" }, unset: [], position: null, classes: null }],
     });
+  });
+});
+
+describe("a junction's dot", () => {
+  it("carries the data every node's style reads, so the renderer warns of nothing", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const model = buildModel(base);
+    const view = visible(model, { collapsed: new Set(), showArchived: false });
+    const placed: Placed = {
+      width: 500,
+      height: 500,
+      laidOut: [],
+      routes: new Map([
+        [
+          "dig->sow",
+          [
+            { x: 0, y: 0 },
+            { x: 10, y: 10 },
+          ],
+        ],
+      ]),
+      junctions: new Map([["dig->sow", [{ x: 5, y: 5 }]]]),
+      redundant: new Set(),
+      nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: i * 7, width: 20 + i, height: 10 }])),
+    };
+    const drawn = elementsOf(
+      scene(view, placed, { item: null, thread: null }, () => null),
+      undefined,
+      linesOf([], PALETTES.dark),
+      PALETTES.dark,
+    );
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark), elements: drawn });
+    const dots = core.nodes(".junction");
+    for (const dot of dots) (dot as unknown as { pstyle(name: string): unknown }).pstyle("text-max-width");
+    expect(dots.length).toBeGreaterThan(0);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

@@ -49,7 +49,8 @@ export function elementsOf(
     // Over the links, under what they join.
     ...scene.junctions.map((junction) => ({
       group: "nodes" as const,
-      data: { id: junction.id, line },
+      // No label, but the width every node's label is wrapped to, so the style's mapper has a number to read.
+      data: { id: junction.id, line, textWidth: 0 },
       position: { x: junction.x, y: junction.y },
       // Not "lit": that names the thread's items, which a dot isn't.
       classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
