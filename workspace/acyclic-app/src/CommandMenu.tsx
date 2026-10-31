@@ -40,7 +40,8 @@ interface Props {
   /** The threads at work, listed before anything is typed. */
   working: ReadonlySet<string>;
   lines: ReadonlyMap<string, Line>;
-  stageOf: (id: string) => Stage | undefined;
+  /** An item's stage, "box" for a parent, or nothing for an archived item. */
+  kindOf: (id: string) => Stage | "box" | undefined;
   onRun: (run: Run) => void;
   /** Closes the menu, as Escape does. */
   onDismiss: () => void;
@@ -53,7 +54,7 @@ export function CommandMenu({
   shortcutsOnly,
   working,
   lines,
-  stageOf,
+  kindOf,
   onRun,
   onDismiss,
 }: Props) {
@@ -135,7 +136,7 @@ export function CommandMenu({
         onPointerMove={() => setActive(n)}
         onClick={() => run(entry)}
       >
-        <span className="command-icon">{icon(entry, lines, stageOf)}</span>
+        <span className="command-icon">{icon(entry, lines, kindOf)}</span>
         <span className="command-text">
           <span className="command-title">{entry.title}</span>
           {entry.detail === null ? null : <span className="command-detail">{entry.detail}</span>}
@@ -213,8 +214,8 @@ export function CommandMenu({
   );
 }
 
-/** What each entry is, at a glance: a thread's badge, an item's stage, an action's own icon. */
-function icon(entry: Entry, lines: ReadonlyMap<string, Line>, stageOf: (id: string) => Stage | undefined) {
+/** What each entry is, at a glance: a thread's badge, an item's stage or a box's icon, an action's own icon. */
+function icon(entry: Entry, lines: ReadonlyMap<string, Line>, kindOf: (id: string) => Stage | "box" | undefined) {
   const { run } = entry;
   if (run.kind === "thread") {
     const line = lines.get(run.id);
@@ -224,15 +225,11 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, stageOf: (id: stri
       </span>
     );
   }
-  if (run.kind === "item") {
-    const stage = stageOf(run.id);
-    return stage === undefined ? null : <StageIcon stage={stage} />;
-  }
   if (run.kind === "phase" || (run.kind === "target" && run.id === null)) return <Icon of={ListTree} size={16} />;
-  if (run.kind === "target") {
-    // A box, which has no stage of its own, as the phases are shown.
-    const stage = stageOf(run.id ?? "");
-    return stage === undefined ? <Icon of={ListTree} size={16} /> : <StageIcon stage={stage} />;
+  if (run.kind === "item" || run.kind === "target") {
+    const kind = run.id === null ? undefined : kindOf(run.id);
+    if (kind === "box") return <Icon of={ListTree} size={16} />;
+    return kind === undefined ? null : <StageIcon stage={kind} />;
   }
   if (run.kind === "view")
     return <Icon of={run.view === "overview" ? LayoutDashboard : run.view === "map" ? MapIcon : Waypoints} size={16} />;

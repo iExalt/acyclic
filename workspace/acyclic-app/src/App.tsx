@@ -743,7 +743,10 @@ export function App() {
       }
       working={working}
       lines={lines}
-      stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
+      kindOf={(id) => {
+        const found = model?.items.get(id);
+        return found?.progress != null ? "box" : (found?.stage ?? undefined);
+      }}
       onRun={runCommand}
       onDismiss={() => closeTop.current(1)}
     />
