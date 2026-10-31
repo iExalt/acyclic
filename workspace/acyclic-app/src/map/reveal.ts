@@ -137,8 +137,8 @@ export function frame(
     // a plan smaller than the open part stays centred on the thread.
     const along = (centred: number, near: number, far: number, from: number, to: number) => {
       const least = to - padding - far * zoom;
-      const most = from + padding - near * zoom;
-      return least > most ? centred : Math.min(most, Math.max(least, centred));
+      const upper = from + padding - near * zoom;
+      return least > upper ? centred : Math.min(upper, Math.max(least, centred));
     };
     return {
       zoom,
