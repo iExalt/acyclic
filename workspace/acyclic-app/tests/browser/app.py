@@ -666,8 +666,13 @@ def map_journey(page, view, plan, name, failures, hint=None):
         centre(page, archived)
         page.wait_for_timeout(200)
         page.screenshot(path=SHOTS / f"app-{name}-archived.png")
+        # Selected, then hidden with the rest: what's selected is drawn, so its panel and its address go with it.
+        tap_middle(page, view, archived)
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
     from_menu(page, lambda: page.get_by_test_id("show-archived").click())
     wait_drawn(page, expected)
+    if archived is not None and (page.get_by_test_id("inspector").count() or "item=" in page.url):
+        failures.append(f"{name}: hiding archived items left {archived} open, at {page.url}")
     # A thread lights up its members as drawn.
     thread, _ = Counter(
         row["thread"] for row in plan.items.values() if row["thread"]

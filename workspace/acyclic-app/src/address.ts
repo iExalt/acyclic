@@ -59,7 +59,7 @@ export type Found = "shown" | "archived" | null;
 export function landing(
   wanted: Wanted,
   has: { item: (id: string) => Found; thread: (id: string) => boolean },
-): { wanted: Wanted; archived: boolean; missing: "item" | "thread" | null } {
+): { wanted: Wanted; archived: boolean; missing: ("item" | "thread")[] } {
   const item = wanted.item === null ? null : has.item(wanted.item);
   const threadGone = wanted.thread !== null && !has.thread(wanted.thread);
   return {
@@ -69,6 +69,9 @@ export function landing(
       thread: threadGone ? null : wanted.thread,
     },
     archived: item === "archived",
-    missing: wanted.item !== null && item === null ? "item" : threadGone ? "thread" : null,
+    missing: [
+      ...(wanted.item !== null && item === null ? ["item" as const] : []),
+      ...(threadGone ? ["thread" as const] : []),
+    ],
   };
 }

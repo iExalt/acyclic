@@ -40,19 +40,20 @@ describe("landing", () => {
 
   it("opens what the plan holds as named, and an archived item with archived items shown", () => {
     const wanted = { ...NOTHING, view: "map" as const, item: "here", thread: "t-1" };
-    expect(landing(wanted, plan)).toEqual({ wanted, archived: false, missing: null });
-    expect(landing({ ...wanted, item: "old" }, plan)).toMatchObject({ archived: true, missing: null });
+    expect(landing(wanted, plan)).toEqual({ wanted, archived: false, missing: [] });
+    expect(landing({ ...wanted, item: "old" }, plan)).toMatchObject({ archived: true, missing: [] });
   });
 
   it("drops an item or thread the plan no longer holds, and says which, keeping the rest", () => {
     expect(landing({ ...NOTHING, view: "map", item: "gone", needs: true }, plan)).toEqual({
       wanted: { ...NOTHING, view: "map", needs: true },
       archived: false,
-      missing: "item",
+      missing: ["item"],
     });
     expect(landing({ ...NOTHING, view: "threads", thread: "t-9" }, plan)).toMatchObject({
       wanted: { ...NOTHING, view: "threads" },
-      missing: "thread",
+      missing: ["thread"],
     });
+    expect(landing({ ...NOTHING, view: "map", item: "gone", thread: "t-9" }, plan).missing).toEqual(["item", "thread"]);
   });
 });

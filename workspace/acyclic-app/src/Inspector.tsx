@@ -264,8 +264,8 @@ function ItemStatus({ item }: { item: Item }) {
       <>
         <span>
           {stateWords(item.progress.state)}
-          {item.progress.counts.leaves === 0 ? " (all archived)" : null}
-          {archived}
+          {/* Everything under it archived says so; it being archived too goes without saying. */}
+          {item.progress.counts.leaves === 0 ? " (all archived)" : archived}
         </span>
         {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
       </>

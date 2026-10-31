@@ -187,10 +187,12 @@ export function App() {
     () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
     [model, outline, selected],
   );
-  // An item that went away, deleted or moved out of reach elsewhere, is no longer selected.
+  // An item that went away, deleted or moved out of reach elsewhere, or hidden with archived items, is no longer
+  // selected: what's selected is drawn, so the panel and the address never name an item the Map doesn't show.
   useEffect(() => {
-    if (model !== null && selected !== null && !model.items.has(selected)) setSelected(null);
-  }, [model, selected]);
+    if (model === null || selected === null) return;
+    if (!model.items.has(selected) || (!showArchived && inArchived(model, selected))) setSelected(null);
+  }, [model, selected, showArchived]);
 
   // An editor opened again for one item stays closed on any other.
   useEffect(() => {
@@ -326,7 +328,10 @@ export function App() {
   const closeTop = useRef<(count: number) => number>(() => 0);
   closeTop.current = (count) => {
     if (document.querySelector("form[data-dirty='true']") !== null) {
-      setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+      // A link waiting for the form says so already, and dismissing that drops it.
+      setNotice((was) =>
+        was?.held ? was : { text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true },
+      );
       return 0;
     }
     const closing = openLayers(open).slice(0, count);
@@ -467,14 +472,17 @@ export function App() {
     setThread(to.thread);
     setNeedsAt(to.needsAt);
     setShowNeeds(to.needs);
+    const gone = found.missing.join(" and ");
     setNotice(
-      found.missing === "item"
-        ? { text: "That item isn't in the plan any more", offer: null, retry: null }
-        : found.missing === "thread"
-          ? { text: "That thread isn't in the plan any more", offer: null, retry: null }
-          : found.archived
-            ? { text: "That item is archived, so archived items are showing", offer: "hide-archived", retry: null }
-            : null,
+      found.missing.length > 0
+        ? {
+            text: `That ${gone} ${found.missing.length > 1 ? "aren't" : "isn't"} in the plan any more`,
+            offer: null,
+            retry: null,
+          }
+        : found.archived
+          ? { text: "That item is archived, so archived items are showing", offer: "hide-archived", retry: null }
+          : null,
     );
   };
   // Tried again as the plan loads and as each form closes.
