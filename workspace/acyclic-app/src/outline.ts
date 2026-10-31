@@ -1,7 +1,7 @@
 // The sidebar's outline: the plan's phases, the top-level items the Map draws as zones, each opening into the threads
 // at work in it, and the threads in none. Pure, so the rules are tested without a browser.
 
-import { topOrder } from "./map/elk";
+import { dependencyOrder, topOrder } from "./map/elk";
 import type { Model } from "./map/model";
 
 export interface PhaseRow {
@@ -66,4 +66,19 @@ export function currentRows(
   }
   const phase = outline.phases.some((one) => one.id === root) ? root : null;
   return { phase, thread: model.items.get(selected)?.thread ?? null };
+}
+
+/**
+ * A thread's items, every one the plan puts in it, archived too, as an approval covers them: each after those in the
+ * thread it waits for, ties by id.
+ */
+export function membersOf(model: Model, thread: string): string[] {
+  const ids = [...model.items.values()].filter((item) => item.thread === thread).map((item) => item.id);
+  const inThread = new Set(ids);
+  const edges = ids.flatMap((id) =>
+    (model.items.get(id)?.waitsFor ?? [])
+      .filter((first) => inThread.has(first))
+      .map((first) => ({ source: first, target: id })),
+  );
+  return dependencyOrder(ids, edges);
 }

@@ -46,6 +46,26 @@ describe("needView", () => {
     );
     expect(waiting.actions).toEqual([{ label: "Approve 12 items", command: approveCommand("u"), action: "approve" }]);
     expect(waiting.items).toEqual(["z"]);
+    // Where the plan holds its items, it lists them all, so the count and the list agree.
+    const twelve = Array.from({ length: 12 }, (_, n) => `i${n}`);
+    const all = needView(
+      { kind: "awaiting-approval", thread: { ...thread("u", ["z"]), counts: { members: 12 } } },
+      none,
+      (id) => (id === "u" ? twelve : []),
+    );
+    expect(all.items).toEqual(twelve);
+  });
+
+  it("says which merge it can't confirm, and what to do about it", () => {
+    const unverified = (reason: string) =>
+      needView({ kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "app", reason }, none);
+    expect(unverified("no clone of the repository is mapped")).toMatchObject({
+      text: "Can't confirm Move in merged into app",
+      note: "This machine has no clone of app to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml",
+    });
+    expect(unverified("the clone has no main branch").note).toBe(
+      "Looking for its commit in this machine's clone of app failed: the clone has no main branch",
+    );
   });
 
   it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {

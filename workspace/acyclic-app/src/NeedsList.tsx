@@ -18,6 +18,8 @@ export interface NeedsListProps {
   needs: Need[];
   titleOf: (id: string) => string;
   lines: ReadonlyMap<string, Line>;
+  /** A thread's items, as an approval covers them. */
+  membersOf?: (thread: string) => string[];
   busy: boolean;
   onCommand: (command: Command) => void;
   onSelect: (id: string) => void;
@@ -34,6 +36,7 @@ export function NeedsList({
   needs,
   titleOf,
   lines,
+  membersOf,
   busy,
   onCommand,
   onSelect,
@@ -42,7 +45,7 @@ export function NeedsList({
   notice,
   at = null,
 }: NeedsListProps) {
-  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines) }));
+  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf) }));
   // Filters for the groups present, only when there are two or more to choose between.
   const groups = GROUPS.map((one) => ({
     ...one,

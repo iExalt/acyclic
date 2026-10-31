@@ -49,12 +49,13 @@ and a unit test keeps the two in step.
 
 ## Typography
 
-Overpass, variable, for the app and the Map's canvas. 15 px base, 14 px from 900 px wide. Sentence case. Tabular
-figures where counts are compared. Monospace only for ids.
+Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
+Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
-Panels, wide, set everything in one size, 13 px, labels and values alike, their fields too; the title is 17 px at 600,
-not bold; section headings 12 px at 500, muted, so the content leads. A phone's panels keep the base size. (Mixed
-sizes and weights, a 20 px bold title over 13 px labels and 14 px values, read as awkward.)
+Panels, wide, set what they say in one size, 14 px, labels and values alike, their fields too; notes and briefs, the
+reading, at 15 px; the title 19 px at 600, not bold; section headings 13 px at 500, muted, so the content leads.
+(Mixed sizes and weights read as awkward; then 13 px read a smidge small beside Linear at the same window size, as
+Overpass sets smaller than Inter at a size.)
 
 ## Layout
 
@@ -88,7 +89,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
   (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
-  muted rows, then its decision, compact, after what it acts on. A hairline between entries; the filters are tabs,
+  muted rows, then its decision, compact, after what it acts on. An approval lists every item it covers, so its
+  count and its list agree; an entry the app can only show says what failed and what fixes it. A hairline between entries; the filters are tabs,
   the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
@@ -130,10 +132,12 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
   and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview, or a link to a thread on the Map, goes to the Map
-  with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no further out
-  than readable, else from its first item). A thread picked while on the Map leaves the view alone, unless none of
-  it shows.
+- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the
+  Map, goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than
+  1:1, no further out than readable, else from its first item). The picked thread's row in the sidebar, on the Map,
+  unpicks it. A card picked in the Threads view opens the thread's panel there.
+- **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
+  a phase and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
   page of their own.
 
@@ -157,6 +161,8 @@ you. Errors say what to check before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
+- **A task reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
+  stage's icon at the end.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
 - **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the

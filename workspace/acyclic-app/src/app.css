@@ -80,8 +80,9 @@
     --hit: 34px;
   }
 }
+/* Wide, the chrome (the sidebar) a step smaller than what it frames. */
 @media (min-width: 900px) {
-  :root {
+  .sidebar {
     font-size: 14px;
   }
 }
@@ -951,7 +952,7 @@ dl.facts dd {
 }
 .why {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 /* What was backticked: an id or a command, set apart in the system's monospace face. */
 code {
@@ -1082,7 +1083,7 @@ code {
   display: grid;
   gap: 4px;
   margin: 10px 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--muted);
 }
@@ -1220,7 +1221,7 @@ button.row {
 .need-actions button {
   min-height: 28px;
   padding: 0 10px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 /* A column of the same filled button shouts: with a pointer, an entry's decision is outlined until the entry is under
@@ -1251,7 +1252,7 @@ code.id {
   padding: 0;
   background: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .thread-status {
   display: flex;
@@ -1398,7 +1399,7 @@ input[aria-invalid="true"] + .hint,
 }
 .overview-row .detail {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
 }
 .overview-row .go {
@@ -1571,7 +1572,7 @@ button.more {
 }
 .command-detail {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .command-key {
   flex: none;
@@ -1726,7 +1727,7 @@ dl.facts dt {
 }
 .inspector h3 {
   margin: 18px 0 4px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
@@ -1747,11 +1748,14 @@ dl.facts .chip.line {
 @media (min-width: 900px) {
   .inspector,
   .sheet {
-    font-size: 13px;
+    font-size: 14px;
   }
   .inspector h2,
   .sheet h2 {
-    font-size: 17px;
+    font-size: 19px;
+  }
+  .inspector .notes {
+    font-size: 15px;
   }
   .inspector .muted,
   .inspector .why {
@@ -1761,6 +1765,6 @@ dl.facts .chip.line {
   .inspector select,
   .inspector input:not([type="checkbox"]),
   .inspector textarea {
-    font-size: 13px;
+    font-size: 14px;
   }
 }

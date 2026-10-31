@@ -31,7 +31,7 @@ import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
 import { Overview } from "./Overview";
-import { currentRows, outlineOf } from "./outline";
+import { currentRows, membersOf, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
@@ -249,8 +249,22 @@ export function App() {
     setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
   /**
-   * Picks a thread from the outline, or unpicks the one picked, leaving the Map's view alone unless nothing of the
-   * thread is in it.
+   * A thread's row in the outline: on the Map, the thread picked already is unpicked; any other goes to the Map for
+   * it, framed, as the Overview's rows do.
+   */
+  const pickFromOutline = (id: string) => {
+    if (thread === id && view === "map") setThread(null);
+    else toThread(id);
+  };
+  // One thing in focus: an item selected outside the picked thread unpicks it, so the outline never marks a phase and
+  // a thread the selection isn't in at once. One in the thread keeps it, its panel over the thread's.
+  useEffect(() => {
+    if (selected === null || thread === null || model === null) return;
+    if (model.items.get(selected)?.thread !== thread) setThread(null);
+  }, [selected, thread, model]);
+  /**
+   * Picks a thread, as a card in the Threads view does, or unpicks the one picked, leaving the Map's view alone
+   * unless nothing of the thread is in it.
    */
   const pickThread = useCallback((id: string) => {
     setSelected(null);
@@ -927,7 +941,7 @@ export function App() {
             lines={lines}
             picked={thread}
             current={current}
-            onPickThread={pickThread}
+            onPickThread={pickFromOutline}
             onSelectPhase={(id) => select(id, null)}
           />
         )
@@ -1055,6 +1069,7 @@ export function App() {
             needs={load.needs}
             titleOf={titleOf}
             lines={lines}
+            membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
             onCommand={(edit) => send(edit, { select: null, pin: null })}
             onSelect={(id) => select(id, null)}
@@ -1076,7 +1091,7 @@ export function App() {
               current={current}
               onPickThread={(id) => {
                 setShowPhases(false);
-                pickThread(id);
+                pickFromOutline(id);
               }}
               onSelectPhase={(id) => {
                 setShowPhases(false);

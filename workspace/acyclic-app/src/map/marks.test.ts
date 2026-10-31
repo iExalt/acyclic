@@ -16,6 +16,9 @@ describe("markSvg", () => {
     const mark = markSvg("ready", thread, 200, 48, DARK);
     expect(mark).toContain('<rect width="6" height="48" fill="#4ec695"/>');
     expect(mark).toContain(">31</text>");
+    // The badge leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the task.
+    expect(mark.indexOf('<rect x="14"')).toBeGreaterThan(-1);
+    expect(mark).toContain(`translate(${200 - 12 - 16} 16)`);
   });
 
   it("widens the badge for a clone's initial, draws a dot for a thread with no number, and a ring for none", () => {

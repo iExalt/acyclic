@@ -4,7 +4,7 @@ import { elkLayBox } from "./map/elk";
 import { item } from "./map/fixture";
 import { LayoutCache, place } from "./map/layout";
 import { buildModel, defaultView, visible } from "./map/model";
-import { currentRows, outlineOf } from "./outline";
+import { currentRows, membersOf, outlineOf } from "./outline";
 
 // Two phases and a task at the top level: t works in both phases, u only in the second, v only in the lone task, and
 // w nowhere; the first phase's archived part holds x.
@@ -91,5 +91,18 @@ describe("currentRows", () => {
     expect(currentRows(model, outline, "p2")).toEqual({ phase: "p2", thread: "u" });
     expect(currentRows(model, outline, "lone")).toEqual({ phase: null, thread: "v" });
     expect(currentRows(model, outline, null)).toEqual({ phase: null, thread: null });
+  });
+});
+
+describe("membersOf", () => {
+  it("lists every item in a thread, archived too, each after those in the thread it waits for", () => {
+    const plan = buildModel([
+      item("a", null, ["b"], { thread: "t" }),
+      item("b", null, [], { thread: "t" }),
+      item("c", null, ["x"], { thread: "t", archived: true }),
+      item("x", null, [], { thread: "u" }),
+    ]);
+    expect(membersOf(plan, "t")).toEqual(["b", "a", "c"]);
+    expect(membersOf(plan, "none")).toEqual([]);
   });
 });
