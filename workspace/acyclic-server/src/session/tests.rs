@@ -112,3 +112,14 @@ fn a_code_is_spent_once_and_forgotten_once_expired() {
     assert!(spent.spend("b", CODE_LIFE, CODE_LIFE + 1));
     assert_eq!(spent.0.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn the_tailscale_secret_is_128_bits_of_its_own_session() {
+    let one = Token::parse(&"1".repeat(64)).unwrap();
+    let two = Token::parse(&"2".repeat(64)).unwrap();
+    assert_eq!(one.tailscale().len(), 32);
+    assert!(one.tailscale().bytes().all(|b| b.is_ascii_hexdigit()));
+    assert_eq!(one.tailscale(), one.tailscale());
+    assert_ne!(one.tailscale(), two.tailscale());
+    assert_ne!(one.tailscale(), one.browser()[..32]);
+}

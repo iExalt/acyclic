@@ -354,21 +354,30 @@ pub struct Up {
     /// Give the same --port as the server, if it has one.
     #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale", "runners"])]
     pub link: bool,
-    /// Also serve through `tailscale serve`, pointed at a Unix socket that only the user can open, to requests carrying
-    /// the user's Tailscale identity. Run `tailscale serve --bg unix:<socket>` as the output says.
+    /// Also serve through `tailscale serve`, to requests carrying the user's Tailscale identity: on a port of 127.0.0.1,
+    /// under a secret first path segment derived from the session, or on a Unix socket with --socket. Run the
+    /// `tailscale serve --bg` command the output gives. Tailscale's Mac apps can't open a Unix socket, and every process
+    /// and container on the machine can reach the port, so the port answers only paths under the secret, which
+    /// `tailscale serve` adds; --rotate changes it, and the command must be run again.
     #[arg(long, requires_all = ["login", "host"])]
     pub tailscale: bool,
-    /// The user's Tailscale login, which every request through the socket must carry in `Tailscale-User-Login`.
+    /// The user's Tailscale login, which every request through Tailscale must carry in `Tailscale-User-Login`.
     #[arg(long, requires = "tailscale")]
     pub login: Option<String>,
-    /// The machine's `.ts.net` name, which every request through the socket must carry in `Host`.
+    /// The machine's `.ts.net` name, without a port, which every request through Tailscale must carry in `Host`.
     #[arg(long, requires = "tailscale")]
     pub host: Option<String>,
-    /// The origin a browser's request through the socket must come from; `https://<host>` by default.
+    /// The origin a browser's request through Tailscale must come from; `https://<host>` by default.
     #[arg(long, requires = "tailscale")]
     pub origin: Option<String>,
-    /// The socket; ~/.config/acyclic/up/tailscale.sock by default. Its directory should be open to the user alone.
-    #[arg(long, requires = "tailscale")]
+    /// The port of 127.0.0.1 that `tailscale serve` sends requests to; 0 picks a free one. Kept from run to run, since
+    /// `tailscale serve --bg` remembers it.
+    #[arg(long, requires = "tailscale", default_value_t = 7479)]
+    pub tailscale_port: u16,
+    /// A Unix socket for `tailscale serve` in place of the port, for the open-source tailscaled, which can open one.
+    /// Its directory should be open to the user alone; only the user's processes can then reach it, so it needs no
+    /// secret.
+    #[arg(long, requires = "tailscale", conflicts_with = "tailscale_port")]
     pub socket: Option<PathBuf>,
     /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
     /// the writes of their own work, applied as the run, and fetch and push their thread's code through mirrors in

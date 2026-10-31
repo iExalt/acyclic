@@ -46,23 +46,28 @@ impl Drop for Server {
 
 /// Sends one HTTP/1.1 request and returns the status and the body.
 fn request(address: &str, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
-    exchange(TcpStream::connect(address).unwrap(), headers, body)
+    exchange(TcpStream::connect(address).unwrap(), "/api/command", headers, body)
 }
 
 /// Sends one HTTP/1.1 request through a Unix socket, as `tailscale serve` does.
 fn request_unix(socket: &Path, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
-    exchange(std::os::unix::net::UnixStream::connect(socket).unwrap(), headers, body)
+    exchange(
+        std::os::unix::net::UnixStream::connect(socket).unwrap(),
+        "/api/command",
+        headers,
+        body,
+    )
 }
 
+/// Sends a command to `path` and returns the status and the body, null if empty.
 fn exchange(
     mut stream: impl std::io::Read + std::io::Write,
+    path: &str,
     headers: &[(&str, &str)],
     body: &str,
 ) -> (u16, Value) {
-    let mut head = format!(
-        "POST /api/command HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
-        body.len()
-    );
+    let mut head =
+        format!("POST {path} HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n", body.len());
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -73,7 +78,7 @@ fn exchange(
     let _ = stream.read_to_string(&mut response);
     let status = response[9..12].parse().unwrap();
     let (_, body) = response.split_once("\r\n\r\n").unwrap();
-    (status, serde_json::from_str(body).unwrap())
+    (status, if body.is_empty() { Value::Null } else { serde_json::from_str(body).unwrap() })
 }
 
 /// Opens `path` as a browser would and returns the response's head.
@@ -100,9 +105,9 @@ fn serve(tracker: &Path, extra: &[&str]) -> (Server, String) {
     (server, started["data"]["listening"].as_str().unwrap().to_owned())
 }
 
-/// Starts `acyclic up` on `tracker` with `home` as the home directory, and returns it with the address it listens on
-/// and the session's file.
-fn up(tracker: &Path, home: &Path, extra: &[&str]) -> (Server, String, PathBuf) {
+/// Starts `acyclic up` on `tracker` with `home` as the home directory, and returns it with the address it listens on,
+/// the session's file and the line it printed.
+fn up(tracker: &Path, home: &Path, extra: &[&str]) -> (Server, String, PathBuf, Value) {
     let mut child = acyclic(tracker)
         .env("HOME", home)
         .args(["up", "--port", "0"])
@@ -115,7 +120,8 @@ fn up(tracker: &Path, home: &Path, extra: &[&str]) -> (Server, String, PathBuf) 
     let server = Server(child);
     let started: Value = serde_json::from_str(&line).unwrap();
     let address = started["data"]["listening"].as_str().unwrap().to_owned();
-    (server, address, PathBuf::from(started["data"]["session"].as_str().unwrap()))
+    let session = PathBuf::from(started["data"]["session"].as_str().unwrap());
+    (server, address, session, started)
 }
 
 /// Sends a command as the user.
@@ -163,7 +169,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     cli(&tracker, "item add a --title A --as-user");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
-    let (server, address, session) = up(&tracker, &home, &[]);
+    let (server, address, session, _) = up(&tracker, &home, &[]);
     let token = std::fs::read_to_string(&session).unwrap();
     let bearer = format!("Bearer {}", token.trim_end());
     let show = r#"{"show": {"items": ["a"]}}"#;
@@ -211,7 +217,11 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let socket = short.path().join("ts.sock");
     let socket_arg = socket.to_str().unwrap();
     let tailscale = ["--tailscale", "--login", LOGIN, "--host", HOST, "--socket", socket_arg];
-    let (_server, address, _) = up(&tracker, &home, &tailscale);
+    let (server, address, _, started) = up(&tracker, &home, &tailscale);
+    assert_eq!(
+        started["data"]["tailscale"]["serve"],
+        format!("tailscale serve --bg unix:{socket_arg}")
+    );
     assert_eq!(std::fs::read_to_string(&session).unwrap(), token);
     let (status, shown) =
         request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
@@ -227,6 +237,28 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let (status, refused) =
         request(&address, &[("Host", &address), ("Tailscale-User-Login", LOGIN), json], show);
     assert_eq!((status, &refused["error"]["code"]), (401, &Value::from("no-session")));
+
+    // Without --socket, Tailscale reaches a port that every process and container can, so it answers only under the
+    // secret path `tailscale serve` is told to prepend.
+    drop(server);
+    let tailscale = ["--tailscale", "--login", LOGIN, "--host", HOST, "--tailscale-port", "0"];
+    let (_server, _, _, started) = up(&tracker, &home, &tailscale);
+    let serve = started["data"]["tailscale"]["serve"].as_str().unwrap();
+    let target = serve.strip_prefix("tailscale serve --bg http://").unwrap();
+    let (port, secret) = target.split_once('/').unwrap();
+    assert_eq!(port, started["data"]["tailscale"]["listening"]);
+    let through = |path: &str, headers: &[(&str, &str)]| {
+        exchange(TcpStream::connect(port).unwrap(), path, headers, show)
+    };
+    let (status, shown) = through(&format!("/{secret}/api/command"), &identity);
+    assert_eq!(status, 200, "{shown}");
+    assert_eq!(shown, cli(&tracker, "show a"));
+    assert_eq!(through("/api/command", &identity), (404, Value::Null));
+    let (status, refused) = through(
+        &format!("/{secret}/api/command"),
+        &[("Host", HOST), ("Authorization", &bearer), json],
+    );
+    assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
 }
 
 #[test]

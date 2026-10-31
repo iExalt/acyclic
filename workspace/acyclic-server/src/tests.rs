@@ -563,6 +563,67 @@ fn a_socket_replaces_only_one_no_server_listens_on() {
 }
 
 #[test]
+fn the_tailscale_port_answers_only_under_its_secret_taken_off_once() {
+    let secret = Token::parse(TOKEN).unwrap().tailscale();
+    let echo = Router::new().fallback(|uri: axum::http::Uri| async move { uri.to_string() });
+    let under = under(secret.clone(), echo);
+    let reach = |path: &str| send(&under, Method::GET, path, &[], "");
+    let found = |path: &str| (StatusCode::OK, path.to_owned());
+    let missing = (StatusCode::NOT_FOUND, String::new());
+    assert_eq!(reach(&format!("/{secret}/x/y")), found("/x/y"));
+    assert_eq!(reach(&format!("/{secret}/api/command?q=1")), found("/api/command?q=1"));
+    assert_eq!(reach(&format!("/{secret}/?q")), found("/?q"));
+    assert_eq!(reach(&format!("/{secret}")), found("/"));
+    // Once: a second copy is an ordinary path beneath it.
+    assert_eq!(reach(&format!("/{secret}/{secret}/x")), found(&format!("/{secret}/x")));
+    for path in [
+        "/".to_owned(),
+        "/api/command".to_owned(),
+        format!("/{secret}x"),
+        format!("/{}", &secret[..31]),
+        format!("/{secret}0"),
+        format!("/{}/x", secret.to_uppercase()),
+        // Its first character percent-encoded: compared as sent, not decoded.
+        format!("/%{:02X}{}/x", secret.as_bytes()[0], &secret[1..]),
+        format!("/x/{secret}/y"),
+    ] {
+        assert_eq!(reach(&path), missing, "{path}");
+    }
+    // Beneath it is the whole server, routed on the path left, and checked as Tailscale's listener is.
+    let routes = super::under(secret.clone(), router(config(None), tailscale()));
+    let json = ("content-type", "application/json");
+    let (status, body) = send(
+        &routes,
+        Method::POST,
+        &format!("/{secret}/api/command"),
+        &[(IDENTITY, LOGIN), ("host", HOST_NAME), json],
+        r#""list""#,
+    );
+    assert!(
+        serde_json::from_str::<Value>(&body).is_ok_and(|v| v.get("ok").is_some()),
+        "{status} {body}"
+    );
+    let (status, body) = send(
+        &routes,
+        Method::POST,
+        &format!("/{secret}/api/command"),
+        &[("host", HOST_NAME), json],
+        r#""list""#,
+    );
+    assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "no-identity".to_owned()));
+}
+
+#[test]
+fn tailscales_forwarding_headers_change_nothing() {
+    let access = tailscale();
+    let user = (IDENTITY, LOGIN);
+    let forged = [("x-forwarded-host", "other.example.ts.net"), ("x-forwarded-proto", "http")];
+    let check = |pairs: &[(&str, &str)]| access.check(&headers(&[pairs, &forged].concat()), 0);
+    assert_eq!(check(&[user, ("host", HOST_NAME)]), Ok(Credential::Identity));
+    assert_eq!(check(&[user, ("host", "other.example.ts.net")]), Err(Refusal::WrongHost));
+}
+
+#[test]
 fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = dir.path().join("tracker");
