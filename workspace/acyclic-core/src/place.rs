@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::model::{By, LinkKind, Model, Value};
+use crate::model::{By, Item, LinkKind, Model, Value};
 use crate::scope::{self, ScopeEdit, ScopeError};
 use crate::state::Replica;
 
@@ -133,13 +133,15 @@ fn threads_under<'m>(
     let mut seen = BTreeSet::new();
     let mut stack = if model.is_archived(id) { vec![] } else { vec![id] };
     while let Some(node) = stack.pop() {
-        if !seen.insert(node) || model.items[node].is_archived_root() {
+        // A dangling child has no item of its own.
+        let item = model.items.get(node);
+        if !seen.insert(node) || item.is_some_and(Item::is_archived_root) {
             continue;
         }
         let children = model.children(node);
         if children.is_empty()
             && let Some(thread) = model.thread_of(node)
-            && !model.items[node].is_done()
+            && item.is_some_and(|item| !item.is_done())
         {
             found.insert(thread);
         }
