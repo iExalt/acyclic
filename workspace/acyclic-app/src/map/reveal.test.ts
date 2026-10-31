@@ -137,6 +137,14 @@ describe("frame", () => {
       zoom: READABLE,
       pan: { x: 24 - 400 * READABLE, y: 24 - 904 * READABLE },
     });
+    // Starting at a first item near the plan's right edge, it moves only as far as the plan goes, the item in view.
+    const edge = [
+      { x1: 1900, y1: 100, x2: 2000, y2: 148 },
+      { x1: 100, y1: 2900, x2: 300, y2: 2948 },
+    ];
+    const view = frame(edge, { x1: 0, y1: 0, x2: 2000, y2: 3000 }, laptop, 1);
+    expect(view?.pan.x).toBeCloseTo(880 - 24 - 2000 * READABLE);
+    expect(1900 * READABLE + (view?.pan.x ?? 0)).toBeGreaterThan(0);
   });
 
   it("frames in the part above a phone's sheet, and frames nothing when the thread has nothing drawn", () => {

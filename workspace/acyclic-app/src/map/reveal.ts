@@ -108,9 +108,9 @@ export function nearest(nodes: Box[], open: Box): Box | null {
 
 /**
  * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them
- * at the closest zoom up to `most` that fits them, when that is readable, centred but moved, if need be, so no edge of
- * the `plan` stands inside `open` with blank canvas beyond it; else at a readable zoom from the first of them in
- * reading order, at the top-left of `open`.
+ * at the closest zoom up to `most` that fits them, when that is readable, centred; else at a readable zoom from the
+ * first of them in reading order, at the top-left of `open`. Either way moved, if need be, so no edge of the `plan`
+ * stands inside `open` with blank canvas beyond it.
  */
 export function frame(
   boxes: readonly Box[],
@@ -131,26 +131,29 @@ export function frame(
     (width - 2 * padding) / Math.max(1, all.x2 - all.x1),
     (height - 2 * padding) / Math.max(1, all.y2 - all.y1),
   );
-  if (fit >= READABLE) {
-    const zoom = Math.min(most, fit);
-    // Centred, then held between the plan's far edge at the open part's far side and its near edge at the near side;
-    // a plan smaller than the open part stays centred on the thread.
-    const along = (centred: number, near: number, far: number, from: number, to: number) => {
+  // Held between the plan's far edge at the open part's far side and its near edge at the near side, so no blank canvas
+  // shows beyond the plan; a plan smaller than the open part stays where it was put.
+  const held = (zoom: number, pan: { x: number; y: number }) => {
+    const along = (at: number, near: number, far: number, from: number, to: number) => {
       const least = to - padding - far * zoom;
       const upper = from + padding - near * zoom;
-      return least > upper ? centred : Math.min(upper, Math.max(least, centred));
+      return least > upper ? at : Math.min(upper, Math.max(least, at));
     };
     return {
       zoom,
       pan: {
-        x: along(open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom, plan.x1, plan.x2, open.x1, open.x2),
-        y: along(open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom, plan.y1, plan.y2, open.y1, open.y2),
+        x: along(pan.x, plan.x1, plan.x2, open.x1, open.x2),
+        y: along(pan.y, plan.y1, plan.y2, open.y1, open.y2),
       },
     };
+  };
+  if (fit >= READABLE) {
+    const zoom = Math.min(most, fit);
+    return held(zoom, {
+      x: open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom,
+      y: open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom,
+    });
   }
   const first = firstOf(boxes.map((b) => ({ x: b.x1, y: b.y1 }))) ?? { x: all.x1, y: all.y1 };
-  return {
-    zoom: READABLE,
-    pan: { x: open.x1 + padding - first.x * READABLE, y: open.y1 + padding - first.y * READABLE },
-  };
+  return held(READABLE, { x: open.x1 + padding - first.x * READABLE, y: open.y1 + padding - first.y * READABLE });
 }
