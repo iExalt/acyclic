@@ -98,11 +98,14 @@ depends = ["vendor:graph", "build:app"]
 env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
 run = [
   "cargo build --quiet --locked -p acyclic -p acyclic-fixtures",
-  # CI sets PLAYWRIGHT_DEPS=--with-deps for the browsers' system libraries.
-  "uv run --no-project --with playwright==1.64.0 python -m playwright install ${PLAYWRIGHT_DEPS:-} chromium webkit",
+  "uv run --no-project --with playwright==1.64.0 python -m playwright install chromium webkit",
   "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/debug/acyclic target/debug/acyclic-fixtures",
   "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/debug/acyclic target/debug/acyclic-fixtures",
 ]
+
+[tasks."deps:browser"]
+description = "Install the browsers' system libraries with apt, for check:browser on Linux; CI runs it as its own step, so check:browser's time is the tests'"
+run = "uv run --no-project --with playwright==1.64.0 python -m playwright install-deps chromium webkit"
 
 [tasks."vendor:graph"]
 description = "Fetch the graph page's renderers, pinned by SHA-256, into the CLI's git-ignored assets"
