@@ -22,8 +22,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -671,8 +673,6 @@ def pairing_journey(context, page, origin, env, name, failures):
         failures.append(f"{name}: the paired browser holds the cookies {held}")
     if "acyclic-up" in page.evaluate("document.cookie"):
         failures.append(f"{name}: the page's script can read the session's cookie")
-    # Another port of the same host: the same site, so the browser sends the cookie with its requests.
-    attacker = f"http://127.0.0.1:{port + 1 if port < 65535 else port - 1}"
     form, fetched = f"cross-port-{name.replace(' ', '-')}", f"cross-port-fetch-{name.replace(' ', '-')}"
     # A text/plain form's body is its field's name, '=' and its value: together, a command that would add an item.
     body = json.dumps({"item": {"add": {"item": form, "title": "Cross-port", "notes": "="}}})
@@ -683,14 +683,31 @@ def pairing_journey(context, page, origin, env, name, failures):
             <input type=hidden name='{field}' value='{value}'></form>""",
         "/frame": f'<iframe src="{origin}/"></iframe>',
     }
+
+    class Attacker(BaseHTTPRequestHandler):
+        def do_GET(self):
+            page = pages[self.path].encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+
+        def log_message(self, *_):
+            pass
+
+    # Another port of the same host, served from loopback as a local server's page would be: the same site, so the
+    # browser sends the cookie with its requests. A page from nowhere, such as one a route fulfils, isn't local, and
+    # Chromium would refuse its loads from loopback before the server's own refusals were tried.
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Attacker)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    attacker = f"http://127.0.0.1:{server.server_address[1]}"
     other = context.new_page()
     other.route(
         "**/*",
         lambda route: (
-            route.fulfill(content_type="text/html", body=pages[urlsplit(route.request.url).path])
-            if route.request.url.startswith(attacker + "/")
-            else route.continue_()
-            if route.request.url.startswith(origin + "/")
+            route.continue_()
+            if route.request.url.startswith((attacker + "/", origin + "/"))
             else route.abort()
         ),
     )
@@ -714,11 +731,11 @@ def pairing_journey(context, page, origin, env, name, failures):
     frames = other.frames
     framed = len(frames) != 2 or frames[1].evaluate("!!document.getElementById('root')")
     other.close()
-    out = subprocess.run(
-        [ACYCLIC, "show", form, fetched], env=env, capture_output=True, text=True, check=False
-    )
-    if out.returncode != 3:
-        failures.append(f"{name}: another port's write reached the tracker: {out.stdout}{out.stderr}")
+    server.shutdown()
+    server.server_close()
+    listed = {row["id"] for row in json.loads(run(env, "list"))["data"]["items"]}
+    if landed := listed & {form, fetched}:
+        failures.append(f"{name}: another port's writes reached the tracker: {sorted(landed)}")
     if framed:
         failures.append(f"{name}: a page on another port framed the app, or no frame was drawn")
     print(f"{name}: the cookie stayed the app's, and another port could neither write with it nor frame the app")
