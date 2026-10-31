@@ -1,22 +1,23 @@
 /* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
    The colours are palette.ts's, which a unit test holds these to. */
-/* Inter, as Linear sets its text: tall lowercase and open shapes that read at a panel's size. Self-hosted. */
+/* Overpass leaves out the backtick, U+0060: its font classes it as a mark, so browsers stacked it on the letter beside
+   it as an accent. It falls back to the system face, on the Map's canvas too. */
 @font-face {
-  font-family: "Inter";
+  font-family: "Overpass";
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("@fontsource-variable/overpass/files/overpass-latin-wght-normal.woff2") format("woff2-variations");
   unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
-    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    U+0000-005F, U+0061-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Inter";
+  font-family: "Overpass";
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url("@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2") format("woff2-variations");
+  src: url("@fontsource-variable/overpass/files/overpass-latin-ext-wght-normal.woff2") format("woff2-variations");
   unicode-range:
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
@@ -69,7 +70,10 @@
   /* What a row or quiet control under the pointer is filled with: seen on any surface, white ones too. */
   --hover: color-mix(in srgb, var(--ink) 7%, transparent);
   --radius: 8px;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: Overpass, system-ui, sans-serif;
+  /* A step heavier than the face's regular: Overpass's strokes are thin for a screen, and at 500 it sets as dark as
+     Inter does at 450. Every weight here sits a step up to keep its distance from the text. */
+  font-weight: 500;
   font-size: 15px;
   line-height: 1.4;
   background: var(--ground);
@@ -130,7 +134,7 @@ button {
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   background: transparent;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
 }
 button:hover:not(:disabled, [aria-disabled="true"]) {
@@ -165,7 +169,7 @@ button.icon {
   width: var(--hit);
   padding: 0;
   font-size: 24px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
 }
 select,
@@ -233,6 +237,8 @@ label:has(> input[type="checkbox"]) {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  /* Overpass sits high in its line box; this centres the figures. */
+  padding-top: 0.12em;
 }
 .badge.plain {
   background: none;
@@ -290,7 +296,7 @@ label:has(> input[type="checkbox"]) {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  font-weight: 700;
+  font-weight: 750;
   font-size: 15px;
   letter-spacing: -0.01em;
 }
@@ -316,7 +322,7 @@ button.view {
   gap: 10px;
   align-items: center;
   border-color: transparent;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--muted);
   text-align: left;
 }
@@ -341,7 +347,7 @@ button.view[aria-pressed="true"] {
   margin-left: auto;
   color: var(--ink);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .needs-button:not([data-none="true"]) {
   color: var(--ink);
@@ -368,7 +374,7 @@ button.view[aria-pressed="true"] {
 .brand h1 {
   margin: 0;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 750;
   line-height: 1.25;
   letter-spacing: -0.01em;
 }
@@ -481,7 +487,7 @@ button.icon[aria-pressed="true"] {
   border-color: var(--rule);
   color: var(--muted);
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   text-align: start;
 }
 .kbd {
@@ -506,7 +512,7 @@ button.icon[aria-pressed="true"] {
   align-items: center;
   margin: 10px 0 6px;
   border-color: var(--rule);
-  font-weight: 500;
+  font-weight: 600;
 }
 .sidebar .threads {
   flex: 1;
@@ -603,7 +609,7 @@ button.icon[aria-pressed="true"] {
   min-height: 32px;
   padding: 6px 8px 6px 6px;
   border-color: transparent;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 .thread .badge {
@@ -638,12 +644,12 @@ button.icon[aria-pressed="true"] {
   padding: 14px 10px 4px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .outline .count {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .phase-row {
   display: flex;
@@ -688,7 +694,7 @@ button.phase-title {
   padding: 4px 10px 2px 34px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .outline .thread {
   width: 100%;
@@ -705,7 +711,7 @@ button.phase-title {
   display: block;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 400;
+  font-weight: 500;
 }
 
 /* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
@@ -728,12 +734,13 @@ button.phase-title {
 .wave h2 {
   margin: 0 0 8px;
   font-size: 0.95rem;
+  font-weight: 750;
 }
 .wave h2 small {
   margin-left: 6px;
   color: var(--muted);
   font-size: 0.8rem;
-  font-weight: 500;
+  font-weight: 600;
 }
 .wave ul {
   display: grid;
@@ -752,7 +759,7 @@ button.phase-title {
   border-color: var(--rule);
   border-left: 4px solid var(--line, var(--rule));
   background: var(--tile);
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 .card[aria-pressed="true"] {
@@ -916,14 +923,14 @@ button.phase-title {
   overflow-wrap: anywhere;
   padding-top: 8px;
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 750;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
 .inspector h3 {
   margin: 14px 0 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--muted);
 }
 
@@ -1011,7 +1018,7 @@ code {
   background: var(--tile);
   border-color: var(--rule);
   border-radius: 6px;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 /* The needs-you list's filters, as tabs: text, the one shown filled while its group shows. */
@@ -1031,7 +1038,7 @@ code {
   border-color: transparent;
   background: none;
   color: var(--muted);
-  font-weight: 500;
+  font-weight: 600;
 }
 .filters .chip[aria-pressed="true"] {
   background: var(--hover);
@@ -1065,7 +1072,7 @@ code {
   margin-top: 8px;
 }
 .conflict .field {
-  font-weight: 600;
+  font-weight: 650;
 }
 .conflicts li {
   display: flex;
@@ -1102,13 +1109,13 @@ code {
   gap: 4px;
   margin: 10px 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--muted);
 }
 .fields :is(input, select, textarea),
 .sheet.add :is(input, select) {
   color: var(--ink);
-  font-weight: 400;
+  font-weight: 500;
 }
 /* A form's Save and Cancel stay in reach however long the form, above a phone's keyboard as well. */
 .fields > .actions,
@@ -1197,7 +1204,7 @@ button.row {
   padding: 0 4px;
   border: none;
   border-radius: 0;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 /* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
@@ -1208,7 +1215,7 @@ button.row {
   gap: 10px;
   min-height: 0;
   padding: 2px 0;
-  font-weight: 500;
+  font-weight: 600;
 }
 @media (pointer: coarse) {
   button.need-head {
@@ -1233,7 +1240,7 @@ button.row {
   min-height: 24px;
   padding: 2px 0;
   color: var(--muted);
-  font-weight: 400;
+  font-weight: 500;
 }
 .need-items button.row:hover:not(:disabled) {
   background: none;
@@ -1255,7 +1262,7 @@ button.row {
   min-height: 28px;
   padding: 0 10px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
 }
 /* A column of the same filled button shouts: with a pointer, an entry's decision is outlined until the entry is under
    it or holds the focus, then filled, so one entry at a time shows its main action as main. */
@@ -1279,7 +1286,7 @@ button.row {
   gap: 6px;
   align-items: center;
   padding: 0 10px;
-  font-weight: 500;
+  font-weight: 600;
 }
 code.id {
   padding: 0;
@@ -1296,7 +1303,7 @@ code.id {
 }
 .thread-status.waiting {
   color: var(--signal);
-  font-weight: 600;
+  font-weight: 650;
 }
 .progress {
   margin: 4px 0 8px;
@@ -1363,7 +1370,7 @@ input[aria-invalid="true"] + .hint,
 .view-title {
   margin: 0 0 12px;
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: -0.01em;
 }
 /* A phone's bar names the view already. */
@@ -1385,7 +1392,7 @@ input[aria-invalid="true"] + .hint,
 }
 .overview-section h2 {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .overview-section header button {
   min-height: 28px;
@@ -1433,7 +1440,7 @@ input[aria-invalid="true"] + .hint,
 .overview-row .detail {
   color: var(--muted);
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
 }
 .overview-row .go {
   color: var(--muted);
@@ -1569,7 +1576,7 @@ button.more {
   padding: 10px 8px 4px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .command-row {
   display: flex;
@@ -1631,7 +1638,7 @@ button.more {
 /* The item panel, quiet as Linear's: its properties as text, Edit, Copy link and the menu beside its title, and its
    links as rows. Last, as each refines a rule above. */
 .inspector h3 .count {
-  font-weight: 500;
+  font-weight: 600;
 }
 .inspector header .menu summary {
   color: var(--muted);
@@ -1674,7 +1681,7 @@ dl.facts .chip:hover:not(:disabled) {
   min-height: 32px;
   padding: 0 8px;
   border: none;
-  font-weight: 400;
+  font-weight: 500;
   text-align: left;
 }
 .link-row:hover:not(:disabled) {
@@ -1725,7 +1732,7 @@ dl.facts .chip:hover:not(:disabled) {
   border: none;
   border-radius: 6px;
   color: var(--muted);
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
 .menu-list .menu-action .grow {
@@ -1741,7 +1748,7 @@ dl.facts .chip:hover:not(:disabled) {
   }
 }
 
-/* A panel's type, wide: one size for what it says, 14 px, as a list's detail is; the title a step up, at 600 rather
+/* A panel's type, wide: one size for what it says, 14 px, as a list's detail is; the title a step up, at 650 rather
    than bold; section headings small and muted, so the content leads. A phone keeps the base size, which reads at arm's
    length. */
 .inspector > header,
@@ -1751,13 +1758,13 @@ dl.facts .chip:hover:not(:disabled) {
 .inspector h2,
 .sheet h2 {
   margin-right: 6px;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1.3;
 }
 .inspector h3 {
   margin: 18px 0 4px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 .inspector .notes {
@@ -1772,7 +1779,7 @@ dl.facts dt {
 }
 dl.facts .chip,
 dl.facts .chip.line {
-  font-weight: 450;
+  font-weight: 550;
 }
 @media (min-width: 900px) {
   .inspector,

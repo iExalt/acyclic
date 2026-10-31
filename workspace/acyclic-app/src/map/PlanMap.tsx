@@ -18,7 +18,7 @@ import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
-import { FONT, styleFor } from "./style";
+import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -30,9 +30,10 @@ const HOVERABLE = "node.leaf, node.collapsed";
 const fontLoaded: Promise<unknown> =
   typeof document === "undefined" || !("fonts" in document)
     ? Promise.resolve()
-    : Promise.all([document.fonts.load("500 13px Inter"), document.fonts.load("700 13px Inter")]).catch(
-        () => undefined,
-      );
+    : Promise.all([
+        document.fonts.load(`${WEIGHT.regular} 13px Overpass`),
+        document.fonts.load(`${WEIGHT.bold} 13px Overpass`),
+      ]).catch(() => undefined);
 
 /**
  * Measures labels as the renderer draws them, once the face is loaded, which the layout waits for before anything is
@@ -53,7 +54,7 @@ function measuring(): Fonts {
       return width;
     };
   };
-  return { regular: face(500), bold: face(700) };
+  return { regular: face(WEIGHT.regular), bold: face(WEIGHT.bold) };
 }
 
 export interface PlanMapProps {
@@ -290,7 +291,7 @@ export default function PlanMap({
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
     element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
-    element.dataset.font = String(document.fonts?.check("500 13px Inter") ?? false);
+    element.dataset.font = String(document.fonts?.check(`${WEIGHT.regular} 13px Overpass`) ?? false);
     // Drawn once the browser has painted the frame after this one's changes.
     const drawing = performance.now();
     requestAnimationFrame(() =>

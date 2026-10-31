@@ -8,7 +8,10 @@ import { STRIP } from "./chevron";
 import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
-export const FONT = "Inter, system-ui, sans-serif";
+export const FONT = "Overpass, system-ui, sans-serif";
+/** Its weights, a task's title and a box's: a step above the face's regular, as the app's text; in hundreds, as the
+ *  renderer takes no other. */
+export const WEIGHT = { regular: 600, bold: 700 } as const;
 
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>
@@ -55,7 +58,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         color: p.ink,
         "font-family": FONT,
         "font-size": 13,
-        "font-weight": 500,
+        "font-weight": WEIGHT.regular,
         // Labels come cut to fit, a line at a time; the slack keeps the renderer from wrapping a line again.
         "text-wrap": "wrap",
         "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth") + 4}px`,
@@ -76,7 +79,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       style: {
         "background-color": p.box,
         "border-color": p.rule,
-        "font-weight": 700,
+        "font-weight": WEIGHT.bold,
         "text-valign": "top",
         // The label's foot sits on the box's top edge; this brings it down into the title strip.
         "text-margin-y": STRIP - 8,
@@ -121,7 +124,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       selector: "node.collapsed",
       style: {
         "border-color": p.muted,
-        "font-weight": 700,
+        "font-weight": WEIGHT.bold,
       },
     },
     // Archived items are crossed out with lines; an open archived box, which holds them, has a dashed edge instead.

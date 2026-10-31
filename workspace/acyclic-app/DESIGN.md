@@ -52,15 +52,18 @@ and a unit test keeps the two in step.
 
 ## Typography
 
-Inter, variable, self-hosted, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
+Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
+Text sets at 500, not the face's 400, and every heavier weight a step up with it: the Map's titles 600 and its boxes'
+700, as its renderer takes only hundreds. Overpass's regular strokes are thin on a screen, and the text strained to read
+beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
+cold; Overpass, heavier, keeps the app's voice.
+
 Panels, wide, set what they say in one size, 14 px, labels and values alike, their fields too; notes and briefs, the
-reading, at 15 px; the title 19 px at 600, not bold; section headings 13 px at 500, muted, so the content leads.
-(Mixed sizes and weights read as awkward; then 13 px read a smidge small beside Linear at the same window size.) Inter
-replaced Overpass, the user's choice from a side-by-side: Overpass's lowercase is 51 % of its size against Inter's
-55 %, so it read a size smaller and narrower however large it was set; contrast was never short, at 14:1 for text and
-7.4:1 for labels.
+reading, at 15 px; the title 19 px at 650, not bold; section headings 13 px at 600, muted, so the content leads.
+(Mixed sizes and weights read as awkward; then 13 px read a smidge small beside Linear at the same window size, as
+Overpass sets smaller than Inter at a size.)
 
 ## Layout
 
