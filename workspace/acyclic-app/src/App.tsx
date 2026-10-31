@@ -81,6 +81,8 @@ interface Notice {
   undo?: Undo;
 }
 
+const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null };
+
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
 interface Adding {
   parent: string | null;
@@ -248,7 +250,7 @@ export function App() {
       if (sending.current) return;
       sending.current = true;
       setBusy(true);
-      setNotice(null);
+      setNotice(after.undone === undefined ? null : UNDOING);
       const before = serverPlan.current;
       const bringIn = () => {
         const select = after.select;
@@ -331,7 +333,8 @@ export function App() {
     async (undo: Undo) => {
       if (undoing.current || sending.current) return;
       undoing.current = true;
-      setNotice(null);
+      // Said at once and until it is done: the plan is read again before the undo is sent.
+      setNotice(UNDOING);
       try {
         const next = await fetchAll().catch(() => null);
         const plan =
