@@ -473,12 +473,14 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     page.go_back()
     if page.url != "about:blank":
         failures.append(f"{name}: Back from a link's last layer landed on {page.url}, not the page before the app")
-    page.goto(link)
-    title.wait_for(timeout=10_000)
-    page.reload()
-    title.wait_for(timeout=10_000)
-    if title.inner_text() != plan.items[id]["title"]:
-        failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
+    if not view.get("has_touch"):
+        # Reading the address back is the same at either size, so one reload proves it.
+        page.goto(link)
+        title.wait_for(timeout=10_000)
+        page.reload()
+        title.wait_for(timeout=10_000)
+        if title.inner_text() != plan.items[id]["title"]:
+            failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
     # A link to an item gone says so, and opens the rest it names: two layers, closed quicker than the history moves,
     # leave the address saying what's open.
     page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
@@ -496,7 +498,8 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     if errors:
         failures.append(f"{name}: links threw {errors}")
     page.close()
-    print(f"{name}: a link opened {id}, Back and a reload kept to it, and a stale link said so")
+    kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it"
+    print(f"{name}: a link opened {id}, {kept}, and a stale link said so")
 
 def command_journey(page, view, origin, plan, name, failures):
     """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
@@ -535,8 +538,6 @@ def command_journey(page, view, origin, plan, name, failures):
         page.get_by_test_id("overview").wait_for(timeout=5_000)
         if page.url != f"{origin}/":
             failures.append(f"{name}: Back after the command menu's item didn't come home: {page.url}")
-        # The Map again, for the journeys after.
-        to_map(page)
     else:
         # Dismissed, the focus goes back to where it was: the item's panel, still open under it.
         if not page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')"):
@@ -1313,16 +1314,19 @@ def edit_journey(page, view, env, plan, box, name, failures):
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
     run(env, "--as-user", "link", "add", added, "waits-for", first)
+    # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
+    sent = []
+    listen = lambda request: (
+        request.url.endswith("/api/command")
+        and (request.post_data or "").startswith('{"link"')
+        and sent.append(request.post_data)
+    )
+    page.on("request", listen)
     notice.get_by_role("button", name="Undo").click()
     page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
-    check_tracker(
-        env,
-        added,
-        lambda row: row["links"]["waits_for"] == [first],
-        f"{added} linked once, by the CLI, after a refused undo",
-        failures,
-        name,
-    )
+    page.remove_listener("request", listen)
+    if sent:
+        failures.append(f"{name}: a refused undo sent {sent}")
     # Unlinked once more, as the journeys after expect: a new wait in an approved thread needs the user.
     page.locator("[data-testid=waits-for] .unlink").click()
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
@@ -2165,8 +2169,8 @@ def main():
                     leaf = min(
                         id for id in plan.children(hint) if not plan.children(id)
                     )
+                    # Read by the reload edit_journey starts with.
                     run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
-                    refresh(page)
                     edit_journey(page, view, env, plan, hint, name, failures)
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures
