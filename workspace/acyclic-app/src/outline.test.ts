@@ -4,7 +4,7 @@ import { elkLayBox } from "./map/elk";
 import { item } from "./map/fixture";
 import { LayoutCache, place } from "./map/layout";
 import { buildModel, defaultView, visible } from "./map/model";
-import { currentRows, membersOf, outlineOf } from "./outline";
+import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 
 // Two phases and a task at the top level: t works in both phases, u only in the second, v only in the lone task, and
 // w nowhere; the first phase's archived part holds x.
@@ -104,5 +104,14 @@ describe("membersOf", () => {
     ]);
     expect(membersOf(plan, "t")).toEqual(["b", "a", "c"]);
     expect(membersOf(plan, "none")).toEqual([]);
+  });
+});
+
+describe("pickedAfter", () => {
+  it("keeps the picked thread for an item in it, and unpicks it for any other, the phase above it included", () => {
+    expect(pickedAfter(model, "t", "c")).toBe("t");
+    expect(pickedAfter(model, "t", "p2")).toBeNull();
+    expect(pickedAfter(model, "t", "lone")).toBeNull();
+    expect(pickedAfter(model, null, "c")).toBeNull();
   });
 });

@@ -82,3 +82,11 @@ export function membersOf(model: Model, thread: string): string[] {
   );
   return dependencyOrder(ids, edges);
 }
+
+/**
+ * The thread still picked once `id` is selected: one thing in focus, so selecting an item outside the picked thread
+ * unpicks it, and one in it keeps it.
+ */
+export function pickedAfter(model: Model | null, picked: string | null, id: string): string | null {
+  return picked !== null && model?.items.get(id)?.thread === picked ? picked : null;
+}

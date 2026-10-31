@@ -89,9 +89,9 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
   (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
-  muted rows, then its decision, compact, after what it acts on. An approval lists every item it covers, so its
-  count and its list agree; an entry the app can only show says what failed and what fixes it. A hairline between entries; the filters are tabs,
-  the one shown filled.
+  muted rows, then its decision, compact, after what it acts on. An approval lists every item it covers, so its count
+  and its list agree; an entry the app can only show says what failed and what fixes it. A hairline between entries;
+  the filters are tabs, the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.

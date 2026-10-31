@@ -31,7 +31,7 @@ import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
 import { Overview } from "./Overview";
-import { currentRows, membersOf, outlineOf } from "./outline";
+import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
@@ -231,13 +231,25 @@ export function App() {
     setReopened((was) => (was === null || was.id === selected ? was : null));
   }, [selected]);
 
-  const select = useCallback((id: string | null, pin: string | null = null) => {
+  // One thing in focus: an item selected outside the picked thread unpicks it, in the same update, so the outline never
+  // marks a phase and a thread the selection isn't in at once, and the layers swap without a step through the history.
+  // One in the thread keeps it, its panel over the thread's.
+  const modelNow = useRef(model);
+  modelNow.current = model;
+  const selectOnly = useCallback((id: string | null) => {
     setSelected(id);
-    if (id === null) return;
-    setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
-    // An item is shown on the Map, so selecting one from a panel over the Threads view goes back to it.
-    setView("map");
+    if (id !== null) setThread((was) => pickedAfter(modelNow.current, was, id));
   }, []);
+  const select = useCallback(
+    (id: string | null, pin: string | null = null) => {
+      selectOnly(id);
+      if (id === null) return;
+      setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
+      // An item is shown on the Map, so selecting one from a panel over the Threads view goes back to it.
+      setView("map");
+    },
+    [selectOnly],
+  );
   /**
    * Takes the user to the Map for a thread: picked, its panel open, and its items framed in the part of the Map the
    * panel leaves, unlike `pickThread`.
@@ -256,12 +268,6 @@ export function App() {
     if (thread === id && view === "map") setThread(null);
     else toThread(id);
   };
-  // One thing in focus: an item selected outside the picked thread unpicks it, so the outline never marks a phase and
-  // a thread the selection isn't in at once. One in the thread keeps it, its panel over the thread's.
-  useEffect(() => {
-    if (selected === null || thread === null || model === null) return;
-    if (model.items.get(selected)?.thread !== thread) setThread(null);
-  }, [selected, thread, model]);
   /**
    * Picks a thread, as a card in the Threads view does, or unpicks the one picked, leaving the Map's view alone
    * unless nothing of the thread is in it.
@@ -964,7 +970,7 @@ export function App() {
             lines={lines}
             palette={palette}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={selectOnly}
             focus={focus}
             framed={framed}
             onPick={
