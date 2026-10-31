@@ -1202,12 +1202,18 @@ button.row {
 }
 /* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
    from the badge so the badges make a column to scan; a hairline between entries, as between any rows. */
-.need-head {
+/* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. A fingertip keeps it. */
+:is(p, button).need-head {
   align-items: flex-start;
   gap: 10px;
   min-height: 0;
   padding: 2px 0;
   font-weight: 500;
+}
+@media (pointer: coarse) {
+  button.need-head {
+    min-height: var(--hit);
+  }
 }
 .need-head .badge {
   margin-top: 1px;
