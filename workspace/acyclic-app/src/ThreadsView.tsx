@@ -94,7 +94,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         {view.anytime.length === 0 ? null : (
           <section className="wave anytime" data-wave="anytime" aria-label="Any time">
             <h2>
-              Any time <small>waits on no thread, and none on it</small>
+              Any time <small>no waits either way</small>
             </h2>
             <ul>{view.anytime.map(card)}</ul>
           </section>

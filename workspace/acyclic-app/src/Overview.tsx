@@ -169,7 +169,7 @@ export function Overview({
         </section>
       </div>
 
-      <section className="overview-section" aria-labelledby="overview-phases">
+      <section className="overview-section overview-phases" aria-labelledby="overview-phases">
         <header>
           <h2 id="overview-phases">Phases</h2>
           <span className="count muted">{outline?.phases.length ?? 0}</span>

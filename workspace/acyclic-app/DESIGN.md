@@ -58,6 +58,9 @@ figures where counts are compared. Monospace only for ids.
   in a tab bar along the bottom, panels as sheets rising from the bottom.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of phases and threads, the menu at its foot); panels
   open on the right.
+- **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
+  320 px), the phases across the page below them in columns of rows; an open panel keeps its width clear. (A single
+  960 px column left most of a desktop empty.)
 
 ## Shapes
 
@@ -120,6 +123,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
   and none of its actions.
+- **Going to a thread frames it.** A thread's row on the Overview, or a link to a thread on the Map, goes to the Map
+  with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no further out
+  than readable, else from its first item). A thread picked while on the Map leaves the view alone, unless none of
+  it shows.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
   page of their own.
 

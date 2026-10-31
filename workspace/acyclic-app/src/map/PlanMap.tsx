@@ -16,7 +16,7 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeOf } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstView, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
+import { firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor } from "./style";
 import { wheelZoom } from "./wheel";
@@ -70,8 +70,15 @@ export interface PlanMapProps {
    * on screen. A new `n` asks again.
    */
   focus: Focus | null;
+  /** A thread to frame, its items fitted in the part of the Map nothing covers. A new `n` asks again. */
+  framed?: Framed | null;
   /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
   onPick: ((item: string | null) => void) | null;
+}
+
+export interface Framed {
+  thread: string;
+  n: number;
 }
 
 export interface Focus {
@@ -89,6 +96,7 @@ export default function PlanMap({
   selected,
   onSelect,
   focus,
+  framed = null,
   onPick,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -290,8 +298,24 @@ export default function PlanMap({
     );
   }, [drawn, placed, colour, lines, palette]);
 
-  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens.
+  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
+  // user came to the Map for is framed instead.
   const sought = useRef<string | null>(null);
+  const framedDone = useRef(0);
+  useEffect(() => {
+    const core = cy.current;
+    const element = host.current;
+    if (framed === null || framed.n === framedDone.current || framed.thread !== thread) return;
+    if (core === null || element === null || drawn === null) return;
+    framedDone.current = framed.n;
+    sought.current = thread;
+    const boxes = drawn.nodes.flatMap((node) => {
+      const drawnNode = core.getElementById(node.id);
+      return node.lit && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
+    });
+    const view = frame(boxes, openPart(element), 1);
+    if (view !== null) core.viewport(view);
+  }, [framed, thread, drawn]);
   useEffect(() => {
     const core = cy.current;
     const element = host.current;

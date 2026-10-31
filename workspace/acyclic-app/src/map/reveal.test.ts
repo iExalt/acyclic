@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstOf, firstView, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
+import { firstOf, firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -96,5 +96,41 @@ describe("nearest", () => {
 
   it("else brings in the one nearest the middle of what shows, which moves the Map least", () => {
     expect(nearest([at(-900, 180), at(500, 180), at(180, 2000)], open)).toEqual(at(500, 180));
+  });
+});
+
+describe("frame", () => {
+  const laptop = { x1: 0, y1: 0, x2: 880, y2: 800 };
+
+  it("centres a thread that fits in the part left open, zooming in no closer than the most", () => {
+    const boxes = [
+      { x1: 100, y1: 100, x2: 300, y2: 148 },
+      { x1: 500, y1: 300, x2: 700, y2: 348 },
+    ];
+    // 600 by 248 fits 880 by 800 at more than 1, so it stays at 1, centred in the part left of the pane.
+    expect(frame(boxes, laptop, 1)).toEqual({ zoom: 1, pan: { x: 140 - 100, y: 276 - 100 } });
+    // Wider than the open part at 1: zoomed out to fit, still readable.
+    const wide = [{ x1: 0, y1: 0, x2: 920, y2: 48 }];
+    expect(frame(wide, laptop, 1)?.zoom).toBeCloseTo((880 - 48) / 920);
+  });
+
+  it("starts at the first in reading order, at a readable zoom, when the thread is too spread out to fit", () => {
+    const boxes = [
+      { x1: 3000, y1: 900, x2: 3200, y2: 948 },
+      { x1: 400, y1: 904, x2: 600, y2: 952 },
+      { x1: 100, y1: 2000, x2: 300, y2: 2048 },
+    ];
+    // The tops at 900 and 904 read as one row, so the one at 400, its leftmost, comes first.
+    expect(frame(boxes, laptop, 1)).toEqual({
+      zoom: READABLE,
+      pan: { x: 24 - 400 * READABLE, y: 24 - 904 * READABLE },
+    });
+  });
+
+  it("frames in the part above a phone's sheet, and frames nothing when the thread has nothing drawn", () => {
+    const phone = uncovered(384, 700, { x1: 0, y1: 400, x2: 384, y2: 700 });
+    const view = frame([{ x1: 0, y1: 0, x2: 200, y2: 48 }], phone, 1);
+    expect(view).toEqual({ zoom: 1, pan: { x: 92, y: 176 } });
+    expect(frame([], phone, 1)).toBeNull();
   });
 });

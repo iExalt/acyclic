@@ -27,7 +27,7 @@ import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
-import type { Focus } from "./map/PlanMap";
+import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import type { Need } from "./needs";
 import { Overview } from "./Overview";
@@ -115,6 +115,7 @@ export function App() {
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
+  const [framed, setFramed] = useState<Framed | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
   const [adding, setAdding] = useState<Adding | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -236,6 +237,16 @@ export function App() {
     setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
     // An item is shown on the Map, so selecting one from a panel over the Threads view goes back to it.
     setView("map");
+  }, []);
+  /**
+   * Takes the user to the Map for a thread: picked, its panel open, and its items framed in the part of the Map the
+   * panel leaves. A pick on the Map itself leaves the view alone, unless nothing of the thread is in view.
+   */
+  const toThread = useCallback((id: string) => {
+    setSelected(null);
+    setThread(id);
+    setView("map");
+    setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
   /** Picks a thread from the outline, or unpicks the one picked. */
   const pickThread = useCallback((id: string) => {
@@ -609,7 +620,8 @@ export function App() {
       if (found.archived) setShowArchived(true);
       select(to.item, null);
     }
-    setThread(to.thread);
+    if (to.view === "map" && to.item === null && to.thread !== null) toThread(to.thread);
+    else setThread(to.thread);
     setNeedsAt(to.needsAt);
     setShowNeeds(to.needs);
     const gone = found.missing.join(" and ");
@@ -937,6 +949,7 @@ export function App() {
             selected={selected}
             onSelect={setSelected}
             focus={focus}
+            framed={framed}
             onPick={
               prompt === null ? null : (id) => choose(id === null ? { kind: "background" } : { kind: "item", id })
             }
@@ -956,10 +969,7 @@ export function App() {
             outline={outline}
             items={itemsById}
             onNeeds={openNeeds}
-            onPickThread={(id) => {
-              setSelected(null);
-              setThread(id);
-            }}
+            onPickThread={toThread}
             onSelectPhase={(id) => select(id, null)}
             onView={setView}
           />

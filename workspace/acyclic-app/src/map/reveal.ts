@@ -105,3 +105,43 @@ export function nearest(nodes: Box[], open: Box): Box | null {
   const away = (b: Box) => Math.hypot((b.x1 + b.x2) / 2 - cx, (b.y1 + b.y2) / 2 - cy);
   return nodes.reduce((best, b) => (away(b) < away(best) ? b : best));
 }
+
+/**
+ * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them,
+ * centred, at the closest zoom up to `most` that fits them, when that is readable; else at a readable zoom from the
+ * first of them in reading order, at the top-left of `open`.
+ */
+export function frame(
+  boxes: readonly Box[],
+  open: Box,
+  most: number,
+  padding = 24,
+): { zoom: number; pan: { x: number; y: number } } | null {
+  if (boxes.length === 0) return null;
+  const all = {
+    x1: Math.min(...boxes.map((b) => b.x1)),
+    y1: Math.min(...boxes.map((b) => b.y1)),
+    x2: Math.max(...boxes.map((b) => b.x2)),
+    y2: Math.max(...boxes.map((b) => b.y2)),
+  };
+  const [width, height] = [open.x2 - open.x1, open.y2 - open.y1];
+  const fit = Math.min(
+    (width - 2 * padding) / Math.max(1, all.x2 - all.x1),
+    (height - 2 * padding) / Math.max(1, all.y2 - all.y1),
+  );
+  if (fit >= READABLE) {
+    const zoom = Math.min(most, fit);
+    return {
+      zoom,
+      pan: {
+        x: open.x1 + (width - (all.x2 - all.x1) * zoom) / 2 - all.x1 * zoom,
+        y: open.y1 + (height - (all.y2 - all.y1) * zoom) / 2 - all.y1 * zoom,
+      },
+    };
+  }
+  const first = firstOf(boxes.map((b) => ({ x: b.x1, y: b.y1 }))) ?? { x: all.x1, y: all.y1 };
+  return {
+    zoom: READABLE,
+    pan: { x: open.x1 + padding - first.x * READABLE, y: open.y1 + padding - first.y * READABLE },
+  };
+}

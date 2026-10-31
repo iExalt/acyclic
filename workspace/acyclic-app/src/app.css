@@ -1269,13 +1269,15 @@ input[aria-invalid="true"] + .hint,
   display: none;
 }
 .overview-section {
-  max-width: 960px;
+  min-width: 0;
   margin-bottom: 20px;
 }
 .overview-section > header {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
+  /* As tall as a header with a button, so headers side by side line up. */
+  min-height: 34px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--rule);
 }
@@ -1286,18 +1288,38 @@ input[aria-invalid="true"] + .hint,
 .overview-section header button {
   min-height: 28px;
 }
-.overview-pair {
-  display: grid;
-  gap: 0 32px;
-  max-width: 960px;
-}
+/* Wide, the sections stand side by side as the width allows, Needs you first, and the phases span the page below
+   them, their rows in columns; an open panel keeps its width clear. */
 @media (min-width: 900px) {
+  .overview {
+    display: grid;
+    /* At least 320 px a list, and no more than three across: the three lists, not an empty fourth. */
+    grid-template-columns: repeat(auto-fit, minmax(max(320px, calc((100% - 80px) / 3)), 1fr));
+    column-gap: 40px;
+    align-content: start;
+  }
+  .overview > .view-title,
+  .overview > .overview-phases {
+    grid-column: 1 / -1;
+  }
   .overview-pair {
-    grid-template-columns: 1fr 1fr;
+    display: contents;
+  }
+  .overview-phases > .rows {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    column-gap: 40px;
+  }
+  .stage:has(> .inspector, > .sheet.add) > .overview {
+    padding-right: calc(360px + 24px);
   }
 }
 .overview-row {
   border-bottom: 1px solid var(--rule);
+}
+/* Each row rules itself off below, so the list's own rule between rows would double it. */
+.overview .rows li + li {
+  border-top: none;
 }
 .overview-row .what {
   display: grid;
@@ -1384,8 +1406,10 @@ button.more {
     flex: none;
     width: 220px;
   }
+  /* The divider halfway between Any time and wave 1. */
   .wave.anytime {
     padding-right: 32px;
+    margin-right: -32px;
     border-right: 1px dashed var(--edge);
     box-sizing: content-box;
   }

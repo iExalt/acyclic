@@ -394,8 +394,9 @@ def to_map(page):
 
 
 def overview_journey(page, view, name, failures):
-    """The app opens on the Overview: its four lists, a thread's row opening its panel, a needs row opening the list at
-    its entry, the open list marked less than the view shown, and on a phone Back from the Map coming home."""
+    """The app opens on the Overview: its four lists, a thread's row taking the user to the Map with its panel open, a
+    needs row opening the list at its entry, the open list marked less than the view shown, and on a phone Back from the
+    Map coming home."""
     overview = page.get_by_test_id("overview")
     overview.wait_for(timeout=5_000)
     headings = overview.locator(".overview-section h2").all_inner_texts()
@@ -409,8 +410,11 @@ def overview_journey(page, view, name, failures):
         panel.wait_for(timeout=10_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: {thread}'s row on the Overview opened no panel")
+    if page.locator("[data-view=map][aria-current=page]").count() != 1:
+        failures.append(f"{name}: {thread}'s row on the Overview didn't go to the Map")
     page.keyboard.press("Escape")
     panel.wait_for(state="detached", timeout=5_000)
+    page.locator("[data-view=overview]").click()
     entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
     entry.click()
     needs = page.get_by_test_id("needs")
