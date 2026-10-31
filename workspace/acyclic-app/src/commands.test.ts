@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entries, entry, isMac, MOST, opensMenu, type Plan, rank, targets, undoes } from "./commands";
+import { entries, entry, fold, isMac, MOST, opensMenu, type Plan, rank, targets, undoes } from "./commands";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
@@ -68,21 +68,37 @@ describe("the command menu", () => {
 
   it("finds a thread by its number, and stops at the most a list should hold, quickly in a large plan", () => {
     expect(titles("2")).toContain("Autumn");
-    // A plan the size of the largest the app is timed with: a key typed ranks it well inside a frame.
+    // A plan the size of the largest the app is timed with: a key typed ranks it in a few passes over its titles.
     const many = buildModel(
       Array.from({ length: 3500 }, (_, n) => item(`task-${n}`, null, [], { title: `Task ${n} of the résumé batch` })),
     );
     const listed = entries({ ...plan, model: many });
-    // The best of a few rounds: a busy machine (a CI runner with every test file at once) only ever slows a round
-    // down, while ranking that grew slower in itself slows every round.
-    const rounds = Array.from({ length: 5 }, () => {
+    // Timed against folding every title once, in the same rounds: a slow or busy machine (a CI runner with every test
+    // file at once) slows both, while ranking that grew slower in itself slows only the one. Each the best of a few
+    // rounds, as load only ever slows a round down.
+    const time = (work: () => void) => {
       const started = performance.now();
-      for (const query of ["t", "ta", "tas", "task", "task 1", "resume batch"]) rank(query, listed, plan.working);
-      return (performance.now() - started) / 6;
-    });
-    const each = Math.min(...rounds);
+      work();
+      return performance.now() - started;
+    };
+    const pass: number[] = [];
+    const each: number[] = [];
+    for (let round = 0; round < 7; round++) {
+      pass.push(
+        time(() => {
+          for (const one of listed) fold(one.title);
+        }),
+      );
+      each.push(
+        time(() => {
+          for (const query of ["t", "ta", "tas", "task", "task 1", "resume batch"]) rank(query, listed, plan.working);
+        }) / 6,
+      );
+    }
     expect(rank("task", listed, plan.working)).toHaveLength(MOST);
-    expect(each).toBeLessThan(16);
+    // About three passes on a laptop, and under five with the whole suite running; a dozen, the most allowed, is there
+    // about a frame.
+    expect(Math.min(...each) / Math.min(...pass)).toBeLessThan(12);
   });
 
   it("offers a waiting move any item shown or the top level, and a link any item shown", () => {
