@@ -733,7 +733,8 @@ def pairing_journey(context, page, origin, env, name, failures):
     # browser sends the cookie with its requests. A page from nowhere, such as one a route fulfils, isn't local, and
     # Chromium would refuse its loads from loopback before the server's own refusals were tried.
     server = ThreadingHTTPServer(("127.0.0.1", 0), Attacker)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # Polled often, so shutting it down is quick.
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     attacker = f"http://127.0.0.1:{server.server_address[1]}"
     other = context.new_page()
     other.route(
@@ -886,6 +887,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
             )
     # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
     # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
+    # The pan that holds it still knows nothing of the screen's size or of touch, so the phone, which finds the box
+    # first, only taps; the desktop, starting from the box it found, measures that it held still.
+    still = not view.get("has_touch")
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
     moved, box, checked = 0, None, False
     for box in sorted(
@@ -895,19 +899,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
         centre(page, box)
         placed = page.get_by_test_id("map").evaluate(corner, box)
         # Where it settles after expanding is where it starts collapsing.
-        before = settled_corner(page, box)
+        before = settled_corner(page, box) if still else None
         for action, nodes in [
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
         ]:
             tap_box(page, view, box)
             wait_drawn(page, nodes)
-            after = settled_corner(page, box)
             if action == "expanding":
                 relaid = page.get_by_test_id("map").evaluate(corner, box) != placed
                 if not checked:
                     stages_drawn(page, plan, name, failures)
                     checked = True
+            if not still:
+                continue
+            after = settled_corner(page, box)
             shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
             moved = max(moved, shift)
             if shift > 2:
@@ -1050,7 +1056,8 @@ def map_journey(page, view, plan, name, failures, hint=None):
             pick_thread(page, plan, thread)
         panel.wait_for()
     print(
-        f"{name}: drew {expected} nodes, expanded and collapsed {box} held within {moved:.1f} px"
+        f"{name}: drew {expected} nodes, expanded and collapsed {box}"
+        + (f" held within {moved:.1f} px" if still else "")
     )
     return box
 
