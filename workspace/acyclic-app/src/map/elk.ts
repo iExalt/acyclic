@@ -21,7 +21,9 @@ const LAYERED = {
   "elk.direction": "DOWN",
   "elk.layered.spacing.nodeNodeBetweenLayers": "40",
   "elk.spacing.nodeNode": String(GAP),
-  // Each link gets its own way out of its node, so links leaving one node can be told apart.
+  // Each link arrives at its own point, with its own arrowhead; the links leaving a node leave as one trunk, from one
+  // port, which splits on the way. Shared on both ends, an outgoing trunk and an incoming one could run as one line, and
+  // a link would seem to join two items it doesn't.
   "elk.layered.mergeEdges": "false",
   // Room at the top for the box's title strip.
   "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
@@ -128,8 +130,18 @@ export function elkLayBox(engine: Engine): LayBox {
             await engine.layout({
               id: input.id,
               layoutOptions: LAYERED,
-              children: [...size.values()].filter((child) => linked.has(child.id)),
-              edges: input.edges.map((edge, i) => ({ id: `e${i}`, sources: [edge.source], targets: [edge.target] })),
+              children: [...size.values()]
+                .filter((child) => linked.has(child.id))
+                .map((child) => ({
+                  ...child,
+                  layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+                  ports: [{ id: out(child.id), width: 0, height: 0, layoutOptions: { "elk.port.side": "SOUTH" } }],
+                })),
+              edges: input.edges.map((edge, i) => ({
+                id: `e${i}`,
+                sources: [out(edge.source)],
+                targets: [edge.target],
+              })),
             }),
             input.edges,
           );
@@ -140,15 +152,24 @@ export function elkLayBox(engine: Engine): LayBox {
   };
 }
 
+/** A node's one way out, which every link leaving it shares. */
+const out = (id: string) => `${id}\u0000out`;
+
 function laid(out: ElkNode, edges: readonly { source: string; target: string }[] = []): BoxLayout {
   const at: Record<string, { x: number; y: number }> = {};
   for (const child of out.children ?? []) at[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
   const routes: Record<string, Point[]> = {};
+  const junctions: Record<string, Point[]> = {};
   for (const edge of out.edges ?? []) {
     const section = edge.sections?.[0];
     const link = edges[Number(edge.id.slice(1))];
     if (section === undefined || link === undefined || edge.sections?.length !== 1) continue;
-    routes[`${link.source}->${link.target}`] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
+    const key = `${link.source}->${link.target}`;
+    routes[key] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
+    // Where a trunk splits, on one of the links that split there.
+    const at = (edge as { junctionPoints?: Point[] }).junctionPoints;
+    if (at !== undefined && at.length > 0) junctions[key] = at.map(({ x, y }) => ({ x, y }));
   }
-  return { width: out.width ?? 0, height: out.height ?? 0, at, ...(edges.length === 0 ? {} : { routes }) };
+  if (edges.length === 0) return { width: out.width ?? 0, height: out.height ?? 0, at };
+  return { width: out.width ?? 0, height: out.height ?? 0, at, routes, junctions };
 }

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { STRIP } from "./chevron";
 import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
 import { item } from "./fixture";
-import { impliedOf, type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
+import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
 
 /**
@@ -116,6 +116,18 @@ describe("place", () => {
     // The edge from l1 to r2 runs between boxes, so ELK lays it out between left and right in top.
     expect(scopes(view).edges.get("top")).toEqual([{ source: "left", target: "right" }]);
     expect(one.width).toBeGreaterThan(0);
+  });
+
+  it("bundles a node's links on the way out, with a dot where they split, and never on the way in", async () => {
+    // In p: a and b, then c waiting for both, and d for a alone.
+    const items = [item("p"), item("a", "p"), item("b", "p"), item("c", "p", ["a", "b"]), item("d", "p", ["a"])];
+    const placed = await place(visible(buildModel(items), open), new LayoutCache(), elkLayBox(new ELK()), PORTRAIT);
+    const route = (key: string) => placed.routes.get(key) ?? [];
+    // a's two links leave from one point, and split where a dot is drawn.
+    expect(route("a->c")[0]).toEqual(route("a->d")[0]);
+    expect([...placed.junctions.values()].flat().length).toBeGreaterThan(0);
+    // a's and b's links into c arrive apart, each with its own arrowhead.
+    expect(route("a->c").at(-1)).not.toEqual(route("b->c").at(-1));
   });
 
   it("routes the links inside a box, with real ELK, from the source's border to the target's where they are drawn", async () => {
@@ -263,24 +275,6 @@ describe("beside", () => {
     ]);
     expect(out.at.a).toEqual({ x: 12 + 500 + 24, y: STRIP });
     expect(out.width).toBe(12 + 500 + 24 + 200 + 12);
-  });
-});
-
-describe("impliedOf", () => {
-  const edges = (...pairs: string[]) => pairs.map((pair) => ({ source: pair[0] ?? "", target: pair[1] ?? "" }));
-  const leaf = (id: string) => id !== id.toUpperCase();
-
-  it("finds a link a longer way through tasks implies, and none a way through a box does", () => {
-    expect([...impliedOf(edges("ab", "bc", "ac", "cd", "ad"), leaf)].sort()).toEqual(["a->c", "a->d"]);
-    // a to B and B to c may join different items inside B, so a to c stands.
-    expect([...impliedOf(edges("aB", "Bc", "ac"), leaf)]).toEqual([]);
-    // Nor does a way imply a link to or from a box.
-    expect([...impliedOf(edges("ab", "bC", "aC"), leaf)]).toEqual([]);
-  });
-
-  it("ends on a cycle, and finds a link implied around it", () => {
-    expect([...impliedOf(edges("ab", "ba"), leaf)]).toEqual([]);
-    expect([...impliedOf(edges("ab", "bc", "ca", "ac"), leaf)]).toEqual(["a->c"]);
   });
 });
 

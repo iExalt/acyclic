@@ -55,6 +55,35 @@ export function firstView(
   return { zoom, pan: { x: (screen.width - plan.width * zoom) / 2, y: (screen.height - plan.height * zoom) / 2 } };
 }
 
+type Placed = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where the first view starts when the plan is too big to show whole, of `nodes` (top-left corners, `box` for those
+ * holding others, `top` for those at the top level): the first top-level node's corner, where a box's title is, moved
+ * right only as far as shows its first item whole on a screen `width` wide at `zoom`. Starting at the item itself
+ * would cut off whatever of its box lies left of it.
+ */
+export function startOf(
+  nodes: readonly (Placed & { box: boolean; top: boolean })[],
+  width: number,
+  padding: number,
+  zoom: number,
+): { x: number; y: number } | undefined {
+  const top = firstOf(nodes.filter((node) => node.top));
+  const box = nodes.find((node) => node.top && node.x === top?.x && node.y === top?.y);
+  if (box === undefined) return undefined;
+  const within = (node: Placed) =>
+    node.x >= box.x &&
+    node.y >= box.y &&
+    node.x + node.width <= box.x + box.width &&
+    node.y + node.height <= box.y + box.height;
+  const corner = firstOf(nodes.filter((node) => !node.box && within(node)));
+  const item = nodes.find((node) => !node.box && node.x === corner?.x && node.y === corner?.y);
+  if (item === undefined) return { x: box.x, y: box.y };
+  const seen = (width - 2 * padding) / zoom;
+  return { x: Math.min(item.x, Math.max(box.x, item.x + item.width - seen)), y: box.y };
+}
+
 /** How far apart two tops can be and still read as one row. */
 const ROW = 8;
 

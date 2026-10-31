@@ -3,6 +3,7 @@ import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
 import { countText, groupOf, needView, threadLabel } from "./needs";
+import { PALETTES } from "./palette";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
 const item = (id: string) => ({ id, title: id.toUpperCase() });
@@ -48,10 +49,13 @@ describe("needView", () => {
   });
 
   it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {
-    const lines = linesOf([
-      { id: "thread-3", title: "3. Ship it now" },
-      { id: "thread-7", title: "7. Build it" },
-    ]);
+    const lines = linesOf(
+      [
+        { id: "thread-3", title: "3. Ship it now" },
+        { id: "thread-7", title: "7. Build it" },
+      ],
+      PALETTES.dark,
+    );
     const waiting = (id: string, title: string) =>
       needView({ kind: "awaiting-approval", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.

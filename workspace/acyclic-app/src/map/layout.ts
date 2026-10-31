@@ -32,6 +32,8 @@ export interface BoxLayout extends Size {
   at: Record<string, { x: number; y: number }>;
   /** By `source->target`, from the source's border to the target's; none for a link the engine didn't route. */
   routes?: Record<string, Point[]>;
+  /** Where a trunk of links leaving one node splits, by the `source->target` of a link that splits there. */
+  junctions?: Record<string, Point[]>;
 }
 
 export type LayBox = (input: BoxInput) => Promise<BoxLayout>;
@@ -41,7 +43,7 @@ export interface Scopes {
   kids: Map<string, string[]>;
   edges: Map<string, { source: string; target: string }[]>;
   kind: Map<string, Kind>;
-  /** Links between two tasks that a longer way through tasks in the same box already implies, by `source->target`. */
+  /** Links whose every item-level link a longer way inside the box implies, by `source->target`: drawn when asked for. */
   redundant: Set<string>;
 }
 
@@ -62,58 +64,29 @@ export function scopes(view: View): Scopes {
     for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.push(p);
     return out;
   };
-  const sets = new Map<string, Set<string>>();
+  // Each box's edges, with whether every edge lifted to each is implied.
+  const sets = new Map<string, Map<string, boolean>>();
   for (const edge of view.edges) {
     const { box, source, target } = lift(chain(edge.source), chain(edge.target));
     if (source === target) continue;
-    const set = sets.get(box) ?? new Set<string>();
-    set.add(`${source}\u0000${target}`);
+    const set = sets.get(box) ?? new Map<string, boolean>();
+    const key = `${source}\u0000${target}`;
+    set.set(key, (set.get(key) ?? true) && edge.implied === true);
     sets.set(box, set);
   }
   const edges = new Map<string, { source: string; target: string }[]>();
   const redundant = new Set<string>();
   for (const [box, set] of sets) {
-    const all = [...set].sort().map((key) => {
+    const kept: { source: string; target: string }[] = [];
+    for (const key of [...set.keys()].sort()) {
       const [source = "", target = ""] = key.split("\u0000");
-      return { source, target };
-    });
-    const implied = impliedOf(all, (id) => kind.get(id) === "leaf");
-    for (const key of implied) redundant.add(key);
-    edges.set(
-      box,
-      all.filter((edge) => !implied.has(`${edge.source}->${edge.target}`)),
-    );
+      if (set.get(key)) redundant.add(`${source}->${target}`);
+      else kept.push({ source, target });
+    }
+    edges.set(box, kept);
   }
   for (const list of kids.values()) list.sort(natural);
   return { kids, edges, kind, redundant };
-}
-
-/**
- * The links among one box's children that another way implies: a link between two tasks is implied when the target
- * can be reached from the source by a longer way through tasks alone. A way through a box or a collapsed box implies
- * nothing, since a link to it and one from it may join different items inside. By `source->target`.
- */
-export function impliedOf(edges: readonly { source: string; target: string }[], leaf: (id: string) => boolean) {
-  const next = new Map<string, string[]>();
-  for (const edge of edges)
-    if (leaf(edge.source) && leaf(edge.target)) next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
-  const implied = new Set<string>();
-  for (const [source, targets] of next)
-    for (const target of targets) {
-      const seen = new Set<string>([source]);
-      const stack = targets.filter((one) => one !== target);
-      let found = false;
-      while (!found && stack.length > 0) {
-        const at = stack.pop() ?? "";
-        if (at === target) found = true;
-        else if (!seen.has(at)) {
-          seen.add(at);
-          stack.push(...(next.get(at) ?? []));
-        }
-      }
-      if (found) implied.add(`${source}->${target}`);
-    }
-  return implied;
 }
 
 /** The lowest box holding both ends of an edge, and the children of that box that hold each end. */
@@ -171,7 +144,9 @@ export interface Placed extends Size {
   nodes: Map<string, { x: number; y: number } & Size>;
   /** Each routed link's way, by `source->target`, in the same coordinates. */
   routes: Map<string, Point[]>;
-  /** The links between tasks in one box that a longer way through them implies, drawn only when asked for. */
+  /** Where trunks split, by the `source->target` of a link that splits there, in the same coordinates. */
+  junctions: Map<string, Point[]>;
+  /** The links a longer way inside their box implies, drawn only when asked for. */
   redundant: ReadonlySet<string>;
   /** The boxes laid out afresh for this view, rather than found in the cache. */
   laidOut: string[];
@@ -231,14 +206,13 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
   const root = boxes.get(ROOT) ?? { width: 0, height: 0, at: {} };
   const nodes = new Map<string, { x: number; y: number } & Size>();
   const routes = new Map<string, Point[]>();
+  const junctions = new Map<string, Point[]>();
   const absolute = (id: string, ox: number, oy: number) => {
     const box = boxes.get(id);
     if (box === undefined) return;
-    for (const [key, way] of Object.entries(box.routes ?? {}))
-      routes.set(
-        key,
-        way.map((point) => ({ x: ox + point.x, y: oy + point.y })),
-      );
+    const moved = (points: Point[]) => points.map((point) => ({ x: ox + point.x, y: oy + point.y }));
+    for (const [key, way] of Object.entries(box.routes ?? {})) routes.set(key, moved(way));
+    for (const [key, at] of Object.entries(box.junctions ?? {})) junctions.set(key, moved(at));
     for (const child of scope.kids.get(id) ?? []) {
       const at = box.at[child] ?? { x: 0, y: 0 };
       const x = ox + at.x;
@@ -248,5 +222,5 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
     }
   };
   absolute(ROOT, 0, 0);
-  return { width: root.width, height: root.height, nodes, routes, redundant: scope.redundant, laidOut };
+  return { width: root.width, height: root.height, nodes, routes, junctions, redundant: scope.redundant, laidOut };
 }

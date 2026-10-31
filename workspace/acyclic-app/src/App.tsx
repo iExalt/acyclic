@@ -1,7 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
+import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
+import { CommandMenu } from "./CommandMenu";
+import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets, undoes } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -19,19 +22,25 @@ import {
 } from "./edits";
 import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
+import { Icon, X } from "./icons";
+import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
 import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
 import { byNumber, linesOf } from "./lines";
-import { Menu } from "./Menu";
-import { buildModel } from "./map/model";
+import { buildModel, inArchived } from "./map/model";
 import type { Focus } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
-import { countText, type Need } from "./needs";
+import type { Need } from "./needs";
+import { Overview } from "./Overview";
 import { currentRows, outlineOf } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
+import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
+import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
-import { wavesView } from "./waves";
+import { threadLists } from "./threadLists";
+import { type Undo, undoOf } from "./undo";
+import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -43,21 +52,36 @@ type Load =
   | { state: "loaded"; items: Item[]; threads: Threads; level: string; needs: Need[]; unread: Unread[] }
   | { state: "failed"; message: string };
 
+/** Where this device keeps whether single-key shortcuts are on. */
+const SHORTCUTS_KEY = "acyclic.shortcuts";
+
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
 interface After {
   /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
   select: string | null;
   pin: string | null;
+  /** Offer to undo it, once saved: for the user's own moves, links, field edits and autonomy, never a decision. */
+  undo?: true;
+  /** Said once saved, for an undo: what it did. */
+  undone?: string;
 }
 
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
 interface Notice {
   text: string;
-  offer: "retry" | "refresh" | null;
+  offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
   retry: { body: Command; after: After } | null;
   /** Said of a form Escape left open, so it goes when the form does. */
   unsaved?: true;
+  /** Said of a link waiting for a form to close: dismissing it drops the link. */
+  held?: true;
+  /** A link to copy by hand, where the browser offers no clipboard. */
+  link?: string;
+  /** What Undo takes back, with the offer "undo". */
+  undo?: Undo;
 }
+
+const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null };
 
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
 interface Adding {
@@ -79,8 +103,15 @@ export function App() {
   const [thread, setThread] = useState<string | null>(null);
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
+  /** The command menu, over everything; listing only what has a key, as ? asks. */
+  const [showCommand, setShowCommand] = useState(false);
+  const [shortcutsOnly, setShortcutsOnly] = useState(false);
+  /** Single-key shortcuts, on unless switched off on this device. */
+  const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
+  /** Counts the keyboard's asks to edit the item shown, which its panel answers. */
+  const [editAsked, setEditAsked] = useState(0);
   /** The Map, or the threads in waves over it. */
-  const [view, setView] = useState<"map" | "threads">("map");
+  const [view, setView] = useState<View>(HOME);
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -93,13 +124,26 @@ export function App() {
   /** A write drawn before the server answers, until the plan read after it holds it. */
   const [pending, setPending] = useState<Pending | null>(null);
   const [reopened, setReopened] = useState<Reopened | null>(null);
-  // A notification opens the app on `/?needs`, to the list it is about.
-  const [showNeeds, setShowNeeds] = useState(() => new URLSearchParams(window.location.search).has("needs"));
+  const [showNeeds, setShowNeeds] = useState(false);
+  /** The entry Needs you opens at, when the Overview opened it from one. */
+  const [needsAt, setNeedsAt] = useState<string | null>(null);
+  /**
+   * An address to open: the one the app was opened at, or one a notification sent the app already open. It waits for
+   * the plan to load, and for a form holding what the user typed to close.
+   */
+  const [wanted, setWanted] = useState<Wanted | null>(() => {
+    const asked = parse(window.location.search);
+    return addressOf(asked) === "/" ? null : asked;
+  });
+  /** Counts forms closed, so a link waiting on one opens once it has. */
+  const [formsClosed, setFormsClosed] = useState(0);
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
 
   /** The plan's reads, so one overtaken by a later read is never shown, and the writes saved that none holds yet. */
   const reads = useRef<Reads>(NO_READS);
+  /** The latest read shown, as the server had it: what an undo's guard is checked against. */
+  const lastRead = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
   /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
     reads.current = start(reads.current);
@@ -108,6 +152,7 @@ export function App() {
     const next = show(reads.current, n, found);
     if (next === null) return null;
     reads.current = next;
+    lastRead.current = { items: new Map(found.map((one) => [one.id, one])), level };
     return { state: "loaded" as const, items: found, threads: listed, level, needs: needed, unread: next.unread };
   }, []);
   const refresh = useCallback(() => {
@@ -138,12 +183,17 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
+  /** The plan as the server last gave it, without writes still on their way: what an undo sets back to. */
+  const serverPlan = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
+  serverPlan.current =
+    loaded === null ? null : { items: new Map(loaded.items.map((one) => [one.id, one])), level: loaded.level };
   const shown = useMemo(
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
   );
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
-  const lines = useMemo(() => linesOf(sorted), [sorted]);
+  const palette = PALETTES[useScheme()];
+  const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
   const outline = useMemo(
@@ -157,18 +207,23 @@ export function App() {
           ),
     [model, sorted, showArchived],
   );
+  const counts = useMemo(() => threadCounts(shown), [shown]);
+  const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
     [loaded, shown, outline],
   );
+  const working = useMemo(() => new Set(threadLists(counts, waves).working), [counts, waves]);
   const current = useMemo(
     () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
     [model, outline, selected],
   );
-  // An item that went away, deleted or moved out of reach elsewhere, is no longer selected.
+  // An item that went away, deleted or moved out of reach elsewhere, or hidden with archived items, is no longer
+  // selected: what's selected is drawn, so the panel and the address never name an item the Map doesn't show.
   useEffect(() => {
-    if (model !== null && selected !== null && !model.items.has(selected)) setSelected(null);
-  }, [model, selected]);
+    if (model === null || selected === null) return;
+    if (!model.items.has(selected) || (!showArchived && inArchived(model, selected))) setSelected(null);
+  }, [model, selected, showArchived]);
 
   // An editor opened again for one item stays closed on any other.
   useEffect(() => {
@@ -198,7 +253,8 @@ export function App() {
       if (sending.current) return;
       sending.current = true;
       setBusy(true);
-      setNotice(null);
+      setNotice(after.undone === undefined ? null : UNDOING);
+      const before = serverPlan.current;
       const bringIn = () => {
         const select = after.select;
         if (select === null) return;
@@ -257,13 +313,57 @@ export function App() {
         }
       }
       const { text, offer, fixId } = told(sent);
-      setNotice(text === null ? null : { text, offer, retry: offer === "retry" ? { body, after } : null });
+      const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
+      const undo = saved && after.undo && before !== null ? undoOf(body, before, levelLabel) : null;
+      if (text !== null) setNotice({ text, offer, retry: offer === "retry" ? { body, after } : null });
+      else if (undo !== null) setNotice({ text: undo.text, offer: "undo", retry: null, undo });
+      else if (saved && after.undone !== undefined) setNotice({ text: after.undone, offer: null, retry: null });
+      else setNotice(null);
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
       sending.current = false;
       setBusy(false);
     },
     [fetchAll],
+  );
+
+  /**
+   * Takes back the write `undo` came from: reads the plan first, so the guard is checked against the server's latest,
+   * and sends nothing when what the write left has changed since. Once at a time.
+   */
+  const undoing = useRef(false);
+  const runUndo = useCallback(
+    async (undo: Undo) => {
+      if (undoing.current || sending.current) return;
+      undoing.current = true;
+      // Said at once and until it is done: the plan is read again before the undo is sent.
+      setNotice(UNDOING);
+      try {
+        // Never without a fresh read: one overtaken by a later read shown leaves that one, as fresh, to check against.
+        let next: Awaited<ReturnType<typeof fetchAll>>;
+        try {
+          next = await fetchAll();
+        } catch (err: unknown) {
+          // Still on offer: Undo tries again.
+          const { message } = failure(err);
+          setNotice({
+            text: `Couldn't check the plan, so nothing was undone: ${message}`,
+            offer: "undo",
+            retry: null,
+            undo,
+          });
+          return;
+        }
+        if (next !== null) setLoad(next);
+        const plan = lastRead.current;
+        if (plan === null || !undo.holds(plan))
+          setNotice({ text: "Changed since, so it can't be undone", offer: null, retry: null });
+        else await send(undo.command, { select: null, pin: null, undone: undo.undone });
+      } finally {
+        undoing.current = false;
+      }
+    },
+    [fetchAll, send],
   );
 
   const choose = useCallback(
@@ -275,48 +375,119 @@ export function App() {
       if (step.command === null || mode.kind === "idle") return;
       // A move pins the new parent, or the item itself when it goes to the top level; a link, the item linked from.
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
-      send(step.command, { select: mode.item, pin });
+      send(step.command, { select: mode.item, pin, undo: true });
     },
     [model, mode, send],
   );
   const open: Open = {
+    command: showCommand,
     mode: mode.kind !== "idle",
     adding: adding !== null,
     item: chosen !== undefined,
     needs: showNeeds,
     phases: showPhases && !wide,
     thread: thread !== null,
+    away: !wide && view !== HOME,
   };
-  const top = topLayer(open);
+  /**
+   * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
+   * a form under it keeps what the user typed.
+   */
+  const panel = topLayer({ ...open, command: false });
+  // What the command menu finds, built once as it opens rather than at every render while it shows.
+  const picks = mode.kind === "idle" ? null : mode.kind;
+  const menuEntries = useMemo(() => {
+    if (!showCommand || model === null) return [];
+    const threads = sorted.map((one) => ({
+      id: one.id,
+      number: lines.get(one.id)?.number ?? null,
+      name: lines.get(one.id)?.name ?? one.id,
+    }));
+    const item = panel === "item" && selected !== null ? model.items.get(selected) : undefined;
+    const plan = { model, threads, working, showArchived, item: item === undefined ? null : item };
+    return picks === null ? commandEntries(plan) : targets(plan, picks);
+  }, [showCommand, model, sorted, lines, working, showArchived, picks, panel, selected]);
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
-  const formClosed = useCallback(() => setNotice((was) => (was?.unsaved ? null : was)), []);
+  const formClosed = useCallback(() => {
+    setNotice((was) => (was?.unsaved ? null : was));
+    setFormsClosed((was) => was + 1);
+  }, []);
   // What's on top changing takes the add form, or the item's editor, with it.
-  useEffect(formClosed, [top]);
+  useEffect(formClosed, [panel]);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
    */
   const closeTop = useRef<(count: number) => number>(() => 0);
   closeTop.current = (count) => {
-    if (document.querySelector("form[data-dirty='true']") !== null) {
-      setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+    const closing = openLayers(open).slice(0, count);
+    // The command menu closes over a form without touching it.
+    if (closing.some((layer) => layer !== "command") && document.querySelector("form[data-dirty='true']") !== null) {
+      // A link waiting for the form says so already, and dismissing that drops it.
+      setNotice((was) =>
+        was?.held ? was : { text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true },
+      );
       return 0;
     }
-    const closing = openLayers(open).slice(0, count);
     for (const layer of closing) {
-      if (layer === "mode") setMode({ kind: "idle" });
+      if (layer === "command") setShowCommand(false);
+      else if (layer === "mode") setMode({ kind: "idle" });
       else if (layer === "add") setAdding(null);
       else if (layer === "item") setSelected(null);
       else if (layer === "needs") setShowNeeds(false);
       else if (layer === "phases") setShowPhases(false);
+      else if (layer === "away") setView(HOME);
       else setThread(null);
     }
     return closing.length;
   };
+  /** What the keys read of the app as it is: kept current at each render, for the one listener. */
+  const keysSee = useRef({ shortcuts, panel, menu: showCommand });
+  keysSee.current = { shortcuts, panel, menu: showCommand };
+  /** The undo on offer, while its notice shows and nothing is being sent: what ⌘Z takes back. */
+  const undoNow = useRef<Undo | null>(null);
+  undoNow.current = notice?.offer === "undo" && !busy ? (notice.undo ?? null) : null;
+  const runUndoNow = useRef(runUndo);
+  runUndoNow.current = runUndo;
+  /** What a single-key shortcut does; set once the plan has loaded. */
+  const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
+    const mac = isMac(navigator.platform);
+    let pending: Waiting = null;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
+      // Taken from the browser only when it opens or closes the menu: the listener is the app's page's, so only while
+      // the app has the focus.
+      else if (undoes(event, mac)) {
+        // Only an undo the user can see, and never over typing, the menu or a changed form, where ⌘Z is the field's.
+        const undo = undoNow.current;
+        const blocked =
+          undo === null ||
+          keysSee.current.menu ||
+          typingIn(event.target) ||
+          document.querySelector("form[data-dirty='true']") !== null;
+        if (!blocked) {
+          event.preventDefault();
+          runUndoNow.current(undo);
+        }
+      } else if (opensMenu(event, mac)) {
+        event.preventDefault();
+        setShortcutsOnly(false);
+        setShowCommand((was) => !was);
+      } else {
+        const seen = keysSee.current;
+        const next = step(pending, event, {
+          enabled: seen.shortcuts,
+          panel: seen.panel,
+          menu: seen.menu,
+          dirty: document.querySelector("form[data-dirty='true']") !== null,
+          typing: typingIn(event.target),
+        });
+        if (next.action !== null || next.pending !== null) event.preventDefault();
+        pending = next.pending;
+        if (next.action !== null) onKeyAction.current(next.action);
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -345,12 +516,155 @@ export function App() {
     return () => window.removeEventListener("popstate", onMove);
   }, [act]);
 
-  if (load.state === "loading") return <p className="status">Loading…</p>;
+  // The address always says what's open, on the entry shown: written over it as what's open changes, never while the
+  // app's own move back is on its way (it would land on the entry being left), nor before a link asked for is open.
+  const here: Wanted = {
+    view,
+    item: chosen?.id ?? null,
+    thread,
+    needs: showNeeds,
+    needsAt: showNeeds ? needsAt : null,
+  };
+  const hereNow = useRef(here);
+  hereNow.current = here;
+  const waitingLink = useRef(wanted !== null);
+  waitingLink.current = wanted !== null;
+  const writeAddress = useCallback(() => {
+    if (entries.current.waiting || waitingLink.current) return;
+    const next = addressOf(hereNow.current, window.location.search);
+    if (next !== window.location.pathname + window.location.search)
+      window.history.replaceState(window.history.state, "", next);
+  }, []);
+  const address = addressOf(here);
+  // Written again whenever what's open changes, and once a link has opened.
+  useEffect(writeAddress, [writeAddress, address, wanted, layers]);
+  useEffect(() => {
+    window.addEventListener("popstate", writeAddress);
+    return () => window.removeEventListener("popstate", writeAddress);
+  }, [writeAddress]);
+
+  // A notification's link, sent to the app already open rather than reloading it: answered at once, so the service
+  // worker knows not to, then opened as any link is.
+  useEffect(() => {
+    const container = navigator.serviceWorker;
+    if (container === undefined) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.kind !== "open" || typeof event.data.search !== "string") return;
+      event.ports[0]?.postMessage("opened");
+      // A newer link replaces one still waiting. One naming no view, such as Needs you's, opens over the view shown, so
+      // closing it goes back to where the user was.
+      const asked = parse(event.data.search);
+      const query = new URLSearchParams(event.data.search);
+      setWanted(query.has("view") || query.has("item") ? asked : { ...asked, view: hereNow.current.view });
+    };
+    container.addEventListener("message", onMessage);
+    container.startMessages();
+    return () => container.removeEventListener("message", onMessage);
+  }, []);
+
+  // A link opens once the plan is loaded, over home, with each layer it opens its own entry above, so Back closes them
+  // one by one as if the user had opened them. A form holding what the user typed is never closed for it: the link
+  // waits, said so, until the form is saved or cancelled.
+  const wantedOpens = useRef<(link: Wanted) => void>(() => undefined);
+  wantedOpens.current = (link) => {
+    if (model === null) return;
+    const name =
+      link.item !== null
+        ? (model.items.get(link.item)?.title ?? link.item)
+        : link.thread !== null
+          ? (lines.get(link.thread)?.name ?? link.thread)
+          : link.needs
+            ? "Needs you"
+            : link.view === "map"
+              ? "the Map"
+              : link.view === "threads"
+                ? "Threads"
+                : "the Overview";
+    if (document.querySelector("form[data-dirty='true']") !== null) {
+      setNotice({
+        text: `Unsaved changes: save or cancel, then ${name} opens`,
+        offer: null,
+        retry: null,
+        unsaved: true,
+        held: true,
+      });
+      return;
+    }
+    const found = landing(link, {
+      item: (id) => (!model.items.has(id) ? null : inArchived(model, id) ? "archived" : "shown"),
+      thread: (id) => sorted.some((one) => one.id === id),
+    });
+    setWanted(null);
+    // Landing from outside, nothing open has an entry yet: the one landed on becomes home.
+    if (entries.current.pushed === 0)
+      window.history.replaceState(window.history.state, "", addressOf(NOTHING, window.location.search));
+    const to = found.wanted;
+    setShowCommand(false);
+    setMode({ kind: "idle" });
+    setAdding(null);
+    setShowPhases(false);
+    setView(to.view);
+    setSelected(null);
+    if (to.item !== null) {
+      if (found.archived) setShowArchived(true);
+      select(to.item, null);
+    }
+    setThread(to.thread);
+    setNeedsAt(to.needsAt);
+    setShowNeeds(to.needs);
+    const gone = found.missing.join(" and ");
+    setNotice(
+      found.missing.length > 0
+        ? {
+            text: `That ${gone} ${found.missing.length > 1 ? "aren't" : "isn't"} in the plan any more`,
+            offer: null,
+            retry: null,
+          }
+        : found.archived
+          ? { text: "That item is archived, so archived items are showing", offer: "hide-archived", retry: null }
+          : null,
+    );
+  };
+  // Tried again as the plan loads and as each form closes.
+  useEffect(() => {
+    if (wanted !== null) wantedOpens.current(wanted);
+  }, [wanted, model, formsClosed]);
+
+  /**
+   * Copies the address of what `link` names, or, where there's no clipboard (a plain-http address away from this
+   * machine), shows it selected to copy by hand. Whether it copied.
+   */
+  const copyLink = async (link: Wanted) => {
+    const url = window.location.origin + addressOf(link);
+    try {
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      setNotice({ text: "Copy this link:", offer: null, retry: null, link: url });
+      return false;
+    }
+  };
+
+  if (load.state === "loading")
+    return (
+      <div className="status-page" aria-busy="true">
+        <Wordmark />
+        <p className="muted">Loading the plan…</p>
+      </div>
+    );
   if (load.state === "failed")
     return (
-      <p className="status" role="alert">
-        {load.message}
-      </p>
+      <div className="status-page" role="alert">
+        <Wordmark />
+        <h1>Couldn't load the plan</h1>
+        <p>
+          Check that <code>acyclic up</code> is still running where you paired this app, then try again.
+        </p>
+        <p className="muted">{load.message}</p>
+        <button type="button" className="primary" onClick={refresh}>
+          Try again
+        </button>
+      </div>
     );
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;
   const startAdd = (parent: string | null) => {
@@ -358,22 +672,93 @@ export function App() {
     setAdding({ parent, idRefused: false, draft: null });
   };
   const add = (item: NewItem) => send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
+  /**
+   * Runs what the command menu chose, once it has closed. Going somewhere never closes a form holding what the user
+   * typed: that says how to leave it instead, as Escape does.
+   */
+  const runCommand = (run: Run) => {
+    setShowCommand(false);
+    if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
+    if (run.kind === "archived") return setShowArchived((was) => !was);
+    if (run.kind === "refresh") return refresh();
+    if (document.querySelector("form[data-dirty='true']") !== null)
+      return setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+    if (run.kind === "view") setView(run.view);
+    else if (run.kind === "needs") openNeeds();
+    else if (run.kind === "add") startAdd(null);
+    else if (run.kind === "on-item") onItem(run.action);
+    else if (run.kind === "thread") {
+      setSelected(null);
+      setThread(run.id);
+    } else select(run.id, null);
+  };
+  /**
+   * Acts on the item whose panel shows, as its buttons do, while they would be enabled; a move or link, asked for
+   * from the keyboard or the menu, finds its target in the menu, as the keyboard has no Map to tap.
+   */
+  const onItem = (action: OnItem) => {
+    if (chosen === undefined || busy) return;
+    if (action === "edit") setEditAsked((was) => was + 1);
+    else if (action === "add-inside") startAdd(chosen.id);
+    else {
+      setMode(action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id, link: action });
+      setShortcutsOnly(false);
+      setShowCommand(true);
+    }
+  };
+  /** Moves the focus to the next or previous row of the list in view: Needs you's entries, else the Overview's rows. */
+  const moveRow = (by: 1 | -1) => {
+    const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
+    const rows = [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+    const here = document.activeElement instanceof HTMLElement ? document.activeElement.closest("[data-row]") : null;
+    rows[nextRow(rows.length, here === null ? -1 : rows.indexOf(here as HTMLElement), by)]?.focus();
+  };
+  onKeyAction.current = (action) => {
+    if (action.kind === "go") setView(action.view);
+    else if (action.kind === "needs") openNeeds();
+    else if (action.kind === "add") startAdd(null);
+    else if (action.kind === "search" || action.kind === "help") {
+      setShortcutsOnly(action.kind === "help");
+      setShowCommand(true);
+    } else if (action.kind === "edit") onItem("edit");
+    else if (action.kind === "move") onItem("move");
+    else if (action.kind === "link") onItem(action.link);
+    else if (action.kind === "addInside") onItem("add-inside");
+    else moveRow(action.by);
+  };
+  const picking = mode.kind === "idle" ? null : mode;
+  const commandMenu = showCommand ? (
+    <CommandMenu
+      entries={menuEntries}
+      keys={shortcuts ? SHORTCUTS : null}
+      shortcutsOnly={shortcutsOnly && picking === null}
+      placeholder={
+        shortcutsOnly && picking === null
+          ? "Keyboard shortcuts"
+          : picking === null
+            ? "Search the plan, or type a command"
+            : picking.kind === "move"
+              ? `Find where to put ${titleOf(picking.item)}`
+              : `Find what ${titleOf(picking.item)} ${picking.link === "waits-for" ? "waits for" : "relates to"}`
+      }
+      working={working}
+      lines={lines}
+      kindOf={(id) => {
+        const found = model?.items.get(id);
+        return found?.progress != null ? "box" : (found?.stage ?? undefined);
+      }}
+      onRun={runCommand}
+      onDismiss={() => closeTop.current(1)}
+    />
+  ) : null;
   const unlink = (from: string, kind: LinkKind, to: string) =>
-    send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected });
+    send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected, undo: true });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
-  const viewSwitch = (
-    <fieldset className="view-switch" aria-label="View">
-      {(["map", "threads"] as const).map((one) => (
-        <button key={one} type="button" data-view={one} aria-pressed={view === one} onClick={() => setView(one)}>
-          {one === "map" ? "Map" : "Threads"}
-        </button>
-      ))}
-    </fieldset>
-  );
+
   const noticeView =
     notice === null ? null : (
       <div className="notice" role="alert" data-testid="notice">
-        <span className="grow">{notice.text}</span>
+        <span className={notice.link === undefined ? "grow" : undefined}>{notice.text}</span>
         {notice.retry === null ? null : (
           <button
             type="button"
@@ -383,6 +768,39 @@ export function App() {
             Try again
           </button>
         )}
+        {notice.link === undefined ? null : (
+          <input
+            className="grow"
+            readOnly
+            value={notice.link}
+            aria-label="Link"
+            data-testid="link-to-copy"
+            // Selected, so a long press or ⌘C copies it.
+            ref={(field) => field?.select()}
+            onFocus={(event) => event.target.select()}
+          />
+        )}
+        {notice.offer === "undo" && notice.undo !== undefined ? (
+          <button
+            type="button"
+            disabled={busy}
+            aria-keyshortcuts={isMac(navigator.platform) ? "Meta+Z" : "Control+Z"}
+            onClick={() => notice.undo && runUndo(notice.undo)}
+          >
+            Undo
+          </button>
+        ) : null}
+        {notice.offer === "hide-archived" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              setShowArchived(false);
+            }}
+          >
+            Hide archived
+          </button>
+        ) : null}
         {notice.offer === "refresh" ? (
           <button
             type="button"
@@ -394,8 +812,15 @@ export function App() {
             Refresh
           </button>
         ) : null}
-        <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
-          ×
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={() => {
+            if (notice.held) setWanted(null);
+            setNotice(null);
+          }}
+        >
+          <Icon of={X} />
         </button>
       </div>
     );
@@ -405,86 +830,83 @@ export function App() {
       : mode.kind === "link"
         ? `Tap the item ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
         : null;
-  return (
-    <div className="shell">
-      <header className="bar">
-        <div className="brand">
-          <h1>
-            <span className="count" data-testid="item-count">
-              {shown.length}
-            </span>{" "}
-            items
-          </h1>
-          <p title={`Autonomy: ${levelLabel(load.level)}`}>Autonomy: {levelLabel(load.level)}</p>
-        </div>
-        {wide ? viewSwitch : null}
-        <button
-          type="button"
-          className="needs-button"
-          data-testid="needs-button"
-          data-none={load.needs.length === 0}
-          aria-pressed={showNeeds}
-          aria-label={`Needs you: ${load.needs.length} waiting`}
-          onClick={() => {
-            setSelected(null);
-            // The phases' sheet shows over the list, so the list it opens would be hidden under it.
-            setShowPhases(false);
-            setShowNeeds((was) => !was);
+  const menu = (
+    <>
+      <label>
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(event) => setShowArchived(event.target.checked)}
+          data-testid="show-archived"
+        />
+        Show archived items
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={shortcuts}
+          onChange={(event) => {
+            setShortcuts(event.target.checked);
+            localStorage.setItem(SHORTCUTS_KEY, event.target.checked ? "on" : "off");
           }}
-        >
-          {/* A "!" rather than the count, so the signal never looks like a thread's numbered badge; with nothing
-              waiting, neither shows. */}
-          {load.needs.length > 0 && (
-            <span className="badge" data-testid="needs-badge" aria-hidden="true">
-              !
-            </span>
-          )}
-          Needs you
-          {load.needs.length > 0 && (
-            <span className="count" data-testid="needs-count">
-              {countText(load.needs.length)}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          className="icon"
-          aria-label="Add at the top level"
-          onClick={() => startAdd(null)}
-          data-action="add-top"
-        >
-          +
-        </button>
-        <Menu>
-          <label>
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(event) => setShowArchived(event.target.checked)}
-              data-testid="show-archived"
-            />
-            Show archived items
-          </label>
-          <Choice
-            label="Autonomy for every thread without its own"
-            testid="global-level"
-            value={load.level}
-            disabled={busy}
-            onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null })}
-          >
-            {LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {levelLabel(level)}
-              </option>
-            ))}
-          </Choice>
-          <button type="button" onClick={refresh}>
-            Refresh
-          </button>
-        </Menu>
-      </header>
-      <nav className="threads" aria-label="Phases and threads">
-        {outline === null ? null : wide ? (
+          data-testid="shortcuts"
+        />
+        Single-key shortcuts
+      </label>
+      <Choice
+        label="Autonomy for every thread without its own"
+        testid="global-level"
+        value={load.level}
+        disabled={busy}
+        onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null, undo: true })}
+      >
+        {LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {levelLabel(level)}
+          </option>
+        ))}
+      </Choice>
+      <button type="button" onClick={refresh}>
+        Refresh
+      </button>
+    </>
+  );
+  /**
+   * Needs you is a layer: pressed while another covers it, it comes back to the top, closing what was over it; on top,
+   * it closes. Opening it closes the item and the outline's sheet, which would cover it.
+   */
+  const toggleNeeds = () => {
+    const above = openLayers(open).indexOf("needs");
+    if (above > 0) {
+      closeTop.current(above);
+      return;
+    }
+    setSelected(null);
+    setShowPhases(false);
+    setShowNeeds((was) => !was);
+  };
+  /** Opens Needs you, at the entry `key` names if given. */
+  const openNeeds = (key?: string) => {
+    setNeedsAt(key ?? null);
+    if (!showNeeds || topLayer(open) !== "needs") toggleNeeds();
+  };
+  return (
+    <Shell
+      wide={wide}
+      count={shown.length}
+      autonomy={levelLabel(load.level)}
+      view={view}
+      onView={setView}
+      needs={load.needs.length}
+      needsOpen={showNeeds}
+      onNeeds={() => {
+        setNeedsAt(null);
+        toggleNeeds();
+      }}
+      onAdd={() => startAdd(null)}
+      menu={menu}
+      outline={
+        outline === null || !wide ? null : (
           <Phases
             outline={outline}
             lines={lines}
@@ -493,29 +915,25 @@ export function App() {
             onPickThread={pickThread}
             onSelectPhase={(id) => select(id, null)}
           />
-        ) : (
-          <>
-            <button
-              type="button"
-              className="phases-button"
-              data-testid="phases-button"
-              aria-pressed={showPhases}
-              onClick={() => setShowPhases((was) => !was)}
-            >
-              Phases
-            </button>
-            {viewSwitch}
-          </>
-        )}
-      </nav>
+        )
+      }
+      outlineOpen={showPhases}
+      onOutline={() => setShowPhases((was) => !was)}
+      onSearch={() => {
+        setShortcutsOnly(false);
+        setShowCommand(true);
+      }}
+      shortcuts={shortcuts}
+    >
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
-      <main className="stage" data-busy={busy} data-reads={reads.current.shown}>
+      <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
           <PlanMap
             items={shown}
             showArchived={showArchived}
             thread={thread}
             lines={lines}
+            palette={palette}
             selected={selected}
             onSelect={setSelected}
             focus={focus}
@@ -524,11 +942,42 @@ export function App() {
             }
           />
         </Suspense>
+        {/* Wider, the sidebar or tabs show the view's name; it heads the page for assistive technology all the same. */}
+        {wide && view !== "overview" ? <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1> : null}
         {view === "threads" && waves !== null ? (
           <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
         ) : null}
-        {top === "add" || top === "item" ? null : noticeView}
-        {top === "mode" ? (
+        {view === "overview" ? (
+          <Overview
+            needs={load.needs}
+            lines={lines}
+            counts={counts}
+            waves={waves}
+            outline={outline}
+            items={itemsById}
+            onNeeds={openNeeds}
+            onPickThread={(id) => {
+              setSelected(null);
+              setThread(id);
+            }}
+            onSelectPhase={(id) => select(id, null)}
+            onView={setView}
+          />
+        ) : null}
+        {view === "map" && shown.length === 0 ? (
+          <div className="empty-plan" data-testid="empty-plan">
+            <h2>No items yet</h2>
+            <p className="muted">
+              Add an item at the top level, then the work inside it. What agents import shows here too.
+            </p>
+            <button type="button" className="primary" onClick={() => startAdd(null)}>
+              New item
+            </button>
+          </div>
+        ) : null}
+        {commandMenu}
+        {panel === "add" || panel === "item" || panel === "thread" || panel === "needs" ? null : noticeView}
+        {panel === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">
             <span className="grow">{prompt}</span>
             {mode.kind === "move" ? (
@@ -540,7 +989,7 @@ export function App() {
               Cancel
             </button>
           </div>
-        ) : top === "add" && adding !== null ? (
+        ) : panel === "add" && adding !== null ? (
           <AddForm
             key={adding.parent ?? ""}
             parent={adding.parent}
@@ -555,22 +1004,32 @@ export function App() {
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
-        ) : top !== "item" || chosen === undefined ? null : (
+        ) : panel !== "item" || chosen === undefined ? null : (
           <Inspector
             key={`${chosen.id}:${reopened?.id === chosen.id ? reopened.n : 0}`}
             item={chosen}
             reopened={reopened?.id === chosen.id ? reopened.edited : null}
             titleOf={titleOf}
+            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             onSelect={(id) => select(id, selected)}
+            editAsked={editAsked}
+            shortcuts={shortcuts}
+            // The item closes so its thread's panel, the bottom layer, shows; Back from the panel doesn't bring the item
+            // back, as each layer has its one history entry.
+            onPickThread={(id) => {
+              setSelected(null);
+              setThread(id);
+            }}
             onUnlink={unlink}
             onMove={() => setMode({ kind: "move", item: chosen.id })}
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
+            onCopyLink={() => copyLink({ ...NOTHING, view: "map", item: chosen.id })}
             onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
             onSave={(edit, edited) =>
-              send(edit, { select: chosen.id, pin: chosen.id }, { kind: "edit", id: chosen.id, edited })
+              send(edit, { select: chosen.id, pin: chosen.id, undo: true }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
             notice={noticeView}
@@ -578,7 +1037,7 @@ export function App() {
             busy={busy}
           />
         )}
-        {top === "needs" ? (
+        {panel === "needs" ? (
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
@@ -591,9 +1050,11 @@ export function App() {
               setThread(id);
             }}
             onClose={() => setShowNeeds(false)}
+            notice={noticeView}
+            at={needsAt}
           />
         ) : null}
-        {top === "phases" && outline !== null ? (
+        {panel === "phases" && outline !== null ? (
           <PhasesSheet onClose={() => setShowPhases(false)}>
             <Phases
               outline={outline}
@@ -611,21 +1072,25 @@ export function App() {
             />
           </PhasesSheet>
         ) : null}
-        {top === "thread" && thread !== null ? (
+        {panel === "thread" && thread !== null ? (
           <ThreadPanel
             key={thread}
             id={thread}
             globalLevel={load.level}
             line={lines.get(thread)}
+            counts={counts.get(thread)}
             titleOf={titleOf}
+            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             version={version}
             busy={busy}
             onCommand={(edit) => send(edit, { select: null, pin: null })}
             onSelect={(id) => select(id, null)}
             onClose={() => setThread(null)}
+            onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
+            notice={noticeView}
           />
         ) : null}
       </main>
-    </div>
+    </Shell>
   );
 }

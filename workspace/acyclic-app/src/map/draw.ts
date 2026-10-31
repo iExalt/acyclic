@@ -5,17 +5,26 @@
 // change in place.
 
 import type { Core, ElementDefinition } from "cytoscape";
-import { type Line, TOKENS } from "../lines";
+import type { Line } from "../lines";
+import type { Palette } from "../palette";
 import { markOf } from "./marks";
 import type { Scene } from "./scene";
 
 /** An element as the renderer is given it; `data.id` is its id. */
 export type Drawn = ElementDefinition & { data: { id: string } & Record<string, unknown>; classes: string };
 
-/** The elements for a scene, with the lit thread's colour, if any, and each task's marks from its thread's line. */
-export function elementsOf(scene: Scene, colour: string | undefined, lines: ReadonlyMap<string, Line>): Drawn[] {
+/**
+ * The elements for a scene, with the lit thread's colour, if any, and each task's marks from its thread's line, drawn
+ * in `palette`.
+ */
+export function elementsOf(
+  scene: Scene,
+  colour: string | undefined,
+  lines: ReadonlyMap<string, Line>,
+  palette: Palette,
+): Drawn[] {
   const layers = new Map(scene.nodes.map((node) => [node.id, node.layer]));
-  const line = colour ?? TOKENS.ink;
+  const line = colour ?? palette.ink;
   return [
     ...scene.nodes.map((node) => ({
       group: "nodes" as const,
@@ -23,7 +32,7 @@ export function elementsOf(scene: Scene, colour: string | undefined, lines: Read
         ...node,
         line,
         ...(node.kind === "leaf"
-          ? { mark: markOf(node.stage, threadOf(node.thread, lines), node.width, node.height) }
+          ? { mark: markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette) }
           : {}),
       },
       position: { x: node.x, y: node.y },
@@ -36,6 +45,15 @@ export function elementsOf(scene: Scene, colour: string | undefined, lines: Read
         node.stage === null ? "" : `stage-${node.stage}`,
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",
       ].join(" "),
+    })),
+    // Over the links, under what they join.
+    ...scene.junctions.map((junction) => ({
+      group: "nodes" as const,
+      // No label, but the width every node's label is wrapped to, so the style's mapper has a number to read.
+      data: { id: junction.id, line, textWidth: 0 },
+      position: { x: junction.x, y: junction.y },
+      // Not "lit": that names the thread's items, which a dot isn't.
+      classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
     })),
     ...scene.edges.map((edge) => ({
       group: "edges" as const,

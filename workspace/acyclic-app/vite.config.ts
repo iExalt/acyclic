@@ -1,4 +1,5 @@
 import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import type { ClientRequest } from "node:http";
 import { join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import react from "@vitejs/plugin-react";
@@ -57,4 +58,22 @@ export default defineConfig({
     precompress(),
   ],
   build: { sourcemap: false },
+  server: { proxy: upstream(process.env.ACYCLIC_UP) },
 });
+
+/**
+ * In development (`mise run app:dev`), passes the API and the pairing link to `acyclic up` at `origin`, as that server's
+ * own origin: it refuses a request from any other.
+ */
+function upstream(origin: string | undefined) {
+  if (origin === undefined) return undefined;
+  const route = {
+    target: origin,
+    changeOrigin: true,
+    configure: (proxy: { on: (event: "proxyReq", listener: (request: ClientRequest) => void) => void }) =>
+      proxy.on("proxyReq", (request) => {
+        if (request.hasHeader("origin")) request.setHeader("origin", origin);
+      }),
+  };
+  return { "/api": route, "/login": route };
+}

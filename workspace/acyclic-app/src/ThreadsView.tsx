@@ -3,11 +3,11 @@
 // hovered thread's stand out. A card always says what it comes after, so the arrows are never the only telling.
 
 import { useLayoutEffect, useMemo, useState } from "react";
-import { countsText } from "./api";
 import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
 import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
+import { StageCounts } from "./Stage";
 import type { Card, WavesView } from "./waves";
 
 /** The room between columns when wide, as app.css sets it. */
@@ -54,7 +54,9 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
           <span className="name">
             <Prose text={line?.name ?? one.id} />
           </span>
-          <span className="counts">{countsText(one.counts) || "no tasks shown"}</span>
+          <span className="counts">
+            <StageCounts counts={one.counts} none="No tasks shown" />
+          </span>
           {one.after.length === 0 ? null : <span className="after">after {badges(one.after)}</span>}
           {one.looped.length === 0 ? null : <span className="looped">waits in a cycle with {badges(one.looped)}</span>}
         </button>

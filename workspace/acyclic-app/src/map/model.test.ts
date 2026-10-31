@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, visible } from "./model";
 
 // garden
 //   beds: dig, edge
@@ -84,6 +84,17 @@ describe("visible", () => {
   });
 });
 
+describe("inArchived", () => {
+  it("holds for an archived item and what is under it, and ends on parents that loop", () => {
+    expect([inArchived(model, "shed"), inArchived(model, "paint"), inArchived(model, "sow")]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(inArchived(buildModel([item("a", "b"), item("b", "a")]), "a")).toBe(false);
+  });
+});
+
 describe("collapsedWith", () => {
   it("keeps the user's toggles across a refresh, and collapses a box new since the last one by default", () => {
     const toggles = new Map([
@@ -94,5 +105,44 @@ describe("collapsedWith", () => {
     // weeds is new, holding pull: collapsed, while beds stays open as the user left it.
     const refreshed = buildModel([...plan, item("weeds", "garden"), item("pull", "weeds")]);
     expect([...collapsedWith(refreshed, toggles)].sort()).toEqual(["garden", "plant", "weeds"]);
+  });
+});
+
+describe("implied links", () => {
+  const implied = (items: Parameters<typeof buildModel>[0], box: string | null, first: string, then: string) =>
+    impliedWithin(buildModel(items), () => true)(first, then, box);
+
+  it("finds a link a longer way through items inside the box implies, and none a way outside it does", () => {
+    const chain = [item("p"), item("a", "p"), item("b", "p", ["a"]), item("c", "p", ["a", "b"]), item("x")];
+    expect(implied(chain, "p", "a", "c")).toBe(true);
+    expect(implied(chain, "p", "a", "b")).toBe(false);
+    // Through x, outside p, the way isn't drawn in p.
+    const around = [item("p"), item("a", "p"), item("x", null, ["a"]), item("c", "p", ["a", "x"])];
+    expect(implied(around, "p", "a", "c")).toBe(false);
+    expect(implied(around, null, "a", "c")).toBe(true);
+  });
+
+  it("leaves a link between boxes drawn unless every link it stands for is implied", () => {
+    // A to B from a1 to b1, B to C from b2 to c1, and A to C from a2 to c2: nothing in A reaches C through B.
+    const boxes = [
+      item("p"),
+      ...["A", "B", "C"].map((box) => item(box, "p")),
+      item("a1", "A"),
+      item("a2", "A"),
+      item("b1", "B", ["a1"]),
+      item("b2", "B"),
+      item("c1", "C", ["b2"]),
+      item("c2", "C", ["a2"]),
+    ];
+    const open = { collapsed: new Set(["A", "B", "C"]), showArchived: false };
+    expect(visible(buildModel(boxes), open).edges).toEqual([
+      { source: "A", target: "B" },
+      { source: "A", target: "C" },
+      { source: "B", target: "C" },
+    ]);
+    // With a2 reaching c2 through b1, b2 and c1, every link A to C stands for is implied.
+    const changed: Record<string, string[]> = { b1: ["a1", "a2"], b2: ["b1"], c1: ["b2"], c2: ["a2", "c1"] };
+    const linked = boxes.map((one) => (one.id in changed ? item(one.id, one.parent, changed[one.id]) : one));
+    expect(visible(buildModel(linked), open).edges).toContainEqual({ source: "A", target: "C", implied: true });
   });
 });

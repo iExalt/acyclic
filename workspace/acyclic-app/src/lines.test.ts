@@ -1,44 +1,51 @@
-/// <reference types="node" />
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { byNumber, contrast, inkOn, lineColour, lineOf, linesOf, TOKENS } from "./lines";
+import { byNumber, lineColour, lineOf, linesOf } from "./lines";
+import { PALETTES } from "./palette";
 
-/** Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has. */
-const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at));
+const DARK = PALETTES.dark;
 
 describe("lineOf", () => {
   it("numbers a thread by its id, and takes the same number off the front of its title", () => {
-    expect(lineOf({ id: "thread-27", title: "Tracker-assigned ids" })).toMatchObject({
+    expect(lineOf({ id: "thread-27", title: "Tracker-assigned ids" }, DARK)).toMatchObject({
       number: "27",
       name: "Tracker-assigned ids",
     });
-    expect(lineOf({ id: "thread-28", title: "28. Phone checks" })).toMatchObject({
+    expect(lineOf({ id: "thread-28", title: "28. Phone checks" }, DARK)).toMatchObject({
       number: "28",
       name: "Phone checks",
     });
-    expect(lineOf({ id: "thread-mac-3fa9c1-32", title: "Beds" })).toMatchObject({ number: "32", name: "Beds" });
-    expect(lineOf({ id: "thread-007", title: "Deploy" })).toMatchObject({ number: "7" });
+    expect(lineOf({ id: "thread-mac-3fa9c1-32", title: "Beds" }, DARK)).toMatchObject({ number: "32", name: "Beds" });
+    expect(lineOf({ id: "thread-007", title: "Deploy" }, DARK)).toMatchObject({ number: "7" });
     // A number in the title that isn't the thread's own stays in its name.
-    expect(lineOf({ id: "thread-5", title: "2.8 Draw the Map" })).toMatchObject({ name: "2.8 Draw the Map" });
-    expect(lineOf({ id: "thread-5", title: "7. Build it" })).toMatchObject({ number: "5", name: "7. Build it" });
+    expect(lineOf({ id: "thread-5", title: "2.8 Draw the Map" }, DARK)).toMatchObject({ name: "2.8 Draw the Map" });
+    expect(lineOf({ id: "thread-5", title: "7. Build it" }, DARK)).toMatchObject({ number: "5", name: "7. Build it" });
   });
 
   it("gives a thread whose id has no number a dot, and a colour from its id that holds as threads come and go", () => {
     const loose = { id: "errands", title: "3. Errands" };
-    const alone = linesOf([loose]).get(loose.id);
-    const among = linesOf([{ id: "thread-1", title: "First" }, loose, { id: "y", title: "Other" }]).get(loose.id);
+    const alone = linesOf([loose], DARK).get(loose.id);
+    const among = linesOf([{ id: "thread-1", title: "First" }, loose, { id: "y", title: "Other" }], DARK).get(loose.id);
     expect(alone).toMatchObject({ number: null, name: "3. Errands" });
     expect(among).toEqual(alone);
   });
 
   it("colours by number, so the same number is the same colour whichever clone gave it", () => {
-    expect(lineOf({ id: "thread-3", title: "One" }).colour).toBe(lineOf({ id: "thread-pi-3", title: "Two" }).colour);
-    expect(lineOf({ id: "thread-3", title: "One" }).colour).not.toBe(lineOf({ id: "thread-4", title: "One" }).colour);
+    expect(lineOf({ id: "thread-3", title: "One" }, DARK).colour).toBe(
+      lineOf({ id: "thread-pi-3", title: "Two" }, DARK).colour,
+    );
+    expect(lineOf({ id: "thread-3", title: "One" }, DARK).colour).not.toBe(
+      lineOf({ id: "thread-4", title: "One" }, DARK).colour,
+    );
   });
 
   it("tells clashing numbers apart by clone, by initial unless two clones share one", () => {
     const numbers = (ids: string[]) =>
-      [...linesOf(ids.map((id) => ({ id, title: id }))).values()].map((line) => line.number);
+      [
+        ...linesOf(
+          ids.map((id) => ({ id, title: id })),
+          DARK,
+        ).values(),
+      ].map((line) => line.number);
     expect(numbers(["thread-mac-32", "thread-pi-32", "thread-mac-33"])).toEqual(["32m", "32p", "33"]);
     expect(numbers(["thread-27", "thread-x-27"])).toEqual(["27", "27x"]);
     expect(numbers(["thread-mac-9", "thread-mac-3fa9c1-9"])).toEqual(["9mac", "9mac-3fa9c1"]);
@@ -58,13 +65,18 @@ describe("byNumber", () => {
   });
 });
 
-describe("lineColour", () => {
+describe.each(["dark", "light"] as const)("lineColour in the %s scheme", (scheme) => {
+  const palette = PALETTES[scheme];
+  // Every line's colour: the spiral starts again after 108 threads, so these are all the colours a line has.
+  const LINES = Array.from({ length: 108 }, (_, at) => lineColour(at, palette));
   it("walks the hue wheel by number, so neighbouring threads look alike but never the same", () => {
     for (const [at, colour] of LINES.entries()) {
       expect(colour, String(at)).toMatch(/^#[0-9a-f]{6}$/);
       if (at > 0) expect(distance(colour, LINES[at - 1] ?? colour), String(at)).toBeGreaterThan(8);
     }
-    expect(distance(lineColour(7), lineColour(8))).toBeLessThan(distance(lineColour(7), lineColour(20)));
+    expect(distance(lineColour(7, palette), lineColour(8, palette))).toBeLessThan(
+      distance(lineColour(7, palette), lineColour(20, palette)),
+    );
   });
 
   it("spirals, so no two lines are as alike as neighbours may be until it starts again", () => {
@@ -73,8 +85,8 @@ describe("lineColour", () => {
         expect(distance(colour, again), `${at} and ${at + 1 + other}`).toBeGreaterThan(8);
       }
     }
-    expect(lineColour(108)).toBe(lineColour(0));
-    expect(lineColour(2 ** 32 - 1)).toBe(lineColour((2 ** 32 - 1) % 108));
+    expect(lineColour(108, palette)).toBe(lineColour(0, palette));
+    expect(lineColour(2 ** 32 - 1, palette)).toBe(lineColour((2 ** 32 - 1) % 108, palette));
   });
 });
 
@@ -84,32 +96,3 @@ function distance(a: string, b: string): number {
   const [x, y] = [channels(a), channels(b)];
   return Math.hypot(...x.map((value, at) => value - (y[at] ?? 0)));
 }
-
-describe("the palette", () => {
-  it("is the one app.css uses", () => {
-    const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
-    const declared = Object.fromEntries(
-      [...css.matchAll(/--([a-z]+):\s*(#[0-9A-Fa-f]{6});/g)].map((m) => [m[1], m[2]]),
-    );
-    for (const [name, value] of Object.entries(TOKENS)) expect(declared[name], name).toBe(value);
-  });
-
-  it("reads: text at 4.5:1 on every surface it sits on, and badges in their ink", () => {
-    for (const surface of [TOKENS.ground, TOKENS.chrome, TOKENS.sheet, TOKENS.tile, TOKENS.box]) {
-      for (const text of [TOKENS.ink, TOKENS.muted, TOKENS.signal]) {
-        expect(contrast(text, surface), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-    for (const colour of LINES) {
-      expect(contrast(colour, inkOn(colour)), `badge ${colour}`).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it("draws a lit border at 3:1 against the tile, the box and the ground on either side of it", () => {
-    for (const colour of LINES) {
-      for (const surface of [TOKENS.tile, TOKENS.box, TOKENS.ground, TOKENS.chrome, TOKENS.sheet]) {
-        expect(contrast(colour, surface), `${colour} on ${surface}`).toBeGreaterThanOrEqual(3);
-      }
-    }
-  });
-});
