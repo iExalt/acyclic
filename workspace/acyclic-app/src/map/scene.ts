@@ -135,7 +135,10 @@ export function scene(
     });
   }
   const within = withinOneBox(view);
-  const hovered = selection.hovered ?? null;
+  // Only an item still drawn as one: a box opened under the pointer no longer shows links of its own.
+  const hovered = nodes.some((node) => node.id === selection.hovered && node.kind !== "box")
+    ? (selection.hovered ?? null)
+    : null;
   const edges: SceneEdge[] = [];
   const centre = new Map(nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   for (const edge of view.edges) {
@@ -158,7 +161,8 @@ export function scene(
       implied,
       route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
-      dim: (thread !== null && !joins && !touches) || (hovered !== null && !shows),
+      // The lit thread's route stays lit while the pointer crosses other items.
+      dim: (thread !== null && !joins && !touches) || (hovered !== null && !shows && !joins),
       hovered: shows,
     });
   }

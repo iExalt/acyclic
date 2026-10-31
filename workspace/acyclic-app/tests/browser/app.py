@@ -126,7 +126,8 @@ def tracker(directory, env, items, remote=None):
 
 
 def wait_drawn(page, nodes, timeout=20_000):
-    """Waits until the Map has drawn exactly `nodes` nodes, and returns its element's data."""
+    """Waits until the Map has drawn exactly `nodes` nodes, and returns its element's data. Its edge count includes
+    the links of an item under the pointer, so a check of it moves the pointer off the Map first."""
     page.wait_for_function(
         "n => { const m = document.querySelector('[data-testid=map]');"
         " return m && m.dataset.state === 'drawn' && Number(m.dataset.nodes) === n; }",

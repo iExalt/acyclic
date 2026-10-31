@@ -104,6 +104,12 @@ describe("scene", () => {
       ["a->b", false, true],
       ["a->c", true, false],
     ]);
+    // The lit thread's route stays lit while another item is hovered.
+    const lit = scene(view, placed, { item: null, thread: "t", hovered: "b" }, threadOf);
+    expect(lit.edges.find((edge) => edge.id === "a->c")).toMatchObject({ lit: true, dim: false });
+    // A box opened under the pointer shows nothing of its own, and dims nothing.
+    const opened = scene(view, placed, { item: null, thread: null, hovered: "top" }, threadOf);
+    expect(opened.edges.every((edge) => !edge.dim && !edge.hovered)).toBe(true);
   });
 
   it("routes a thread through the collapsed box that hides a member", () => {

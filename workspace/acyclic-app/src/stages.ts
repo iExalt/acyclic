@@ -53,7 +53,7 @@ export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
 export function overallStage(counts: Counts): Stage {
   if (counts.in_progress > 0) return "in-progress";
   if (counts.in_review > 0) return "in-review";
-  if (counts.done === counts.leaves) return "done";
+  if (counts.leaves > 0 && counts.done === counts.leaves) return "done";
   if (counts.ready > 0) return "ready";
   if (counts.blocked > 0) return "blocked";
   if (counts.parked > 0) return "parked";
