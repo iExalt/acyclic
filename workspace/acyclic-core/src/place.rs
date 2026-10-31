@@ -119,7 +119,8 @@ pub fn thread_cycles(model: &Model) -> Vec<BTreeSet<String>> {
         .collect()
 }
 
-/// The threads that hold open items under `id`, it included.
+/// The threads that hold open leaves under `id`, it included, as the waves count work left: a parent's own thread
+/// holds no work, and archived work none.
 fn threads_under<'m>(
     model: &'m Model,
     id: &'m str,
@@ -130,17 +131,19 @@ fn threads_under<'m>(
     }
     let mut found = BTreeSet::new();
     let mut seen = BTreeSet::new();
-    let mut stack = vec![id];
+    let mut stack = if model.is_archived(id) { vec![] } else { vec![id] };
     while let Some(node) = stack.pop() {
-        if !seen.insert(node) {
+        if !seen.insert(node) || model.items[node].is_archived_root() {
             continue;
         }
-        if let Some(thread) = model.thread_of(node)
+        let children = model.children(node);
+        if children.is_empty()
+            && let Some(thread) = model.thread_of(node)
             && !model.items[node].is_done()
         {
             found.insert(thread);
         }
-        stack.extend(model.children(node));
+        stack.extend(children);
     }
     memo.insert(id, found.clone());
     found
