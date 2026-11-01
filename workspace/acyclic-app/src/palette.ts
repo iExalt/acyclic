@@ -38,7 +38,7 @@ export interface Palette {
   /** The primary action's fill, the current view and the focus ring; and the text on that fill. */
   accent: string;
   accentInk: string;
-  /** Each stage's tint behind a task's title on the Map. */
+  /** Each stage's tint behind an item's title on the Map. */
   tints: Record<Stage, string>;
   /** How light threads' lines are, in OKLCH, darkest and lightest: each scheme's ground needs its own. */
   band: readonly [number, number];

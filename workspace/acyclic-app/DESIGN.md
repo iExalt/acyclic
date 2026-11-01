@@ -44,7 +44,7 @@ and a unit test keeps the two in step.
 - **Signal:** amber, as the "!" badge's fill; as text, a dark brown in the light scheme that reads at 4.5:1. What
   needs the user, conflicts, and links that cross boxes.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
-  a lit thread, falls below that on purpose: it is there to recede. A dimmed task fades its fill and marks but keeps its
+  a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
   title muted at full strength, since it can still be picked; its badge and stage icon fade with it, below 3:1, on
   purpose, as the title carries it.
 - **Danger:** red, as text only.
@@ -55,9 +55,9 @@ and a unit test keeps the two in step.
 Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
-Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's task titles stay at 500,
+Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's item titles stay at 500,
 as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a phase's title barely led its
-tasks. Overpass's regular strokes are thin on a screen, and the text strained to read
+items. Overpass's regular strokes are thin on a screen, and the text strained to read
 beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
 cold; Overpass, heavier, keeps the app's voice.
 
@@ -68,8 +68,8 @@ Overpass sets smaller than Inter at a size.)
 
 ## Layout
 
-- **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, the outline, New item, the menu),
-  the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
+- **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, Search, the outline, New item, the
+  menu), the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
   button and sheet are both called Outline; its phases carry no count, as opening one shows its threads.
 - **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
   bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
@@ -86,7 +86,7 @@ Overpass sets smaller than Inter at a size.)
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
   320 px), the phases across the page below them in columns of rows; an open panel keeps its width clear. (A single
   960 px column left most of a desktop empty.)
-- **Up next** lists the threads that can start now: not at work, approved, with a task ready; Any time first, then by
+- **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
 
@@ -99,7 +99,7 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Buttons, by tier:** `.primary` filled with the accent; secondary outlined; `.quiet` text-only; `.danger-quiet`
   red text, last in its group.
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons. An item
-  in no thread is never ready, so its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring a task
+  in no thread is never ready, so its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item
   with no thread carries in its badge's place; on the Map the ring says it once, with no icon at the end. The editor
   says a state in words ("Backlog", "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a
   finished item's state as the panel's stage, as text: finishing sets it, not the form.
@@ -199,9 +199,12 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 
 ## Voice & copy
 
-Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose"
-its target, as a tap or a click both do. Names follow `GLOSSARY.md`: item, thread, phase, wave, Needs
-you. Errors say what to check before what went wrong.
+Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose" its
+target, as a tap or a click both do. Names follow `GLOSSARY.md`: item, thread, project, the needs-you list (written
+Needs you), and its other words. Three more are the app's own, which the glossary doesn't define: a phase is the
+glossary's project, in the outline and on the Map, a wave is a group of threads that can start once the earlier waves'
+threads are done (the tracker's `waves`), and a stage is where an item stands. A card, in the Threads view, is one
+thread's tile, not the glossary's Card. Errors say what to check before what went wrong.
 
 ## Do's and Don'ts
 
@@ -218,14 +221,14 @@ you. Errors say what to check before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **A task reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
+- **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
   stage's icon at the end.
 - **A phase tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
   any of it moves, done once all of it is, else ready, else blocked), after its chevron, and is muted once done or
-  held up, as a task's title is.
-- **A join sits between what it waits on.** Inside a box, a task waiting on two sits centred under them, each pulling
+  held up, as an item's title is.
+- **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
-- **Hover shows a task's links**, as hovering a card on the Threads view does: its own, in ink, across boxes too, and
+- **Hover shows an item's links**, as hovering a card on the Threads view does: its own, in ink, across boxes too, and
   the rest recede; the links a drawn way already implies stay out, since drawn straight they would cut across items.
   Touch has no hover; a tap selects, which shows them all.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as

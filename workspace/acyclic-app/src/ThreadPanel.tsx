@@ -140,7 +140,7 @@ export function ThreadPanel({
       </header>
       {notice}
       {/* Waiting only as Needs you says it is: an unapproved thread with nothing open asks nothing of the user. No
-          total beside it: the counts below are of the tasks drawn, which a total of every member would not add up to. */}
+          total beside it: the counts below are of the items drawn, which a total of every member would not add up to. */}
       <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
         {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={CircleAlert} size={16} /> : null}
         {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved, with nothing open"}

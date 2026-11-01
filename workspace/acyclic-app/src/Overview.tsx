@@ -20,7 +20,7 @@ const THREADS_SHOWN = 8;
 export interface OverviewProps {
   needs: Need[];
   lines: ReadonlyMap<string, Line>;
-  /** Each thread's tasks by stage. */
+  /** Each thread's items by stage. */
   counts: ReadonlyMap<string, Counts>;
   waves: WavesView | null;
   outline: Outline | null;
