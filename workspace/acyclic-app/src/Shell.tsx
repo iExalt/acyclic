@@ -2,7 +2,7 @@
 // and the views along the bottom; a wider screen has a quiet sidebar.
 
 import { type ReactNode, useState } from "react";
-import { isMac } from "./commands";
+import { onMac } from "./commands";
 import {
   Icon,
   Inbox,
@@ -20,7 +20,7 @@ import { countText } from "./needs";
 
 export type View = "overview" | "map" | "threads";
 
-const MAC = isMac(navigator.platform);
+const MAC = onMac();
 /** Where this device remembers the sidebar folded. */
 const FOLDED_KEY = "acyclic.sidebar";
 

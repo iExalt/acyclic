@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrived, depth, follow, openLayers, topLayer } from "./layers";
+import { arrived, depth, follow, openLayers, restored, topLayer } from "./layers";
 
 const none = {
   command: false,
@@ -66,7 +66,7 @@ describe("the history of layers", () => {
     expect(arrived(waiting, 1, 1)).toEqual({ entries: at(1), action: null });
   });
 
-  it("closes the layer on top on Back, and ignores a move that lands on no fewer layers, such as forward", () => {
+  it("closes the layer on top on Back, and ignores a move that lands on as many layers", () => {
     expect(arrived(at(2), 1, 2)).toEqual({ entries: at(1), action: { kind: "close", by: 1 } });
     // A jump over several entries, as a long press on Back makes, or Chrome skipping one pushed without a tap.
     expect(arrived(at(3), 1, 3)).toEqual({ entries: at(1), action: { kind: "close", by: 2 } });
@@ -76,5 +76,23 @@ describe("the history of layers", () => {
       entries: at(2),
       action: { kind: "push", from: 1, to: 2 },
     });
+  });
+
+  it("opens again on Forward what the entry's address names, then says how many layers that was, never moving", () => {
+    const forward = arrived(at(1), 2, 1);
+    expect(forward).toEqual({ entries: { pushed: 2, waiting: false, restoring: true }, action: { kind: "restore" } });
+    // Over two entries at once, as a long press on Forward makes.
+    expect(arrived(at(0), 2, 0).entries).toEqual({ pushed: 2, waiting: false, restoring: true });
+    // All of it opened again: nothing to do.
+    expect(follow(forward.entries, 2)).toEqual({ entries: at(2), action: null });
+    // Fewer, as the command menu has no address, or a link's item is gone: the entry says so, and Back goes on from it.
+    expect(follow(forward.entries, 1)).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
+    expect(follow(forward.entries, 0)).toEqual({ entries: at(0), action: { kind: "relabel", layers: 0 } });
+    // More, as Needs you named with a thread opens a layer each: the one more takes its own entry.
+    expect(follow(forward.entries, 3)).toEqual({ entries: at(3), action: { kind: "push", from: 2, to: 3 } });
+    // Held behind a form holding typing: the entry stands for what is open meanwhile, so no later move goes back.
+    const held = restored(forward.entries, 1);
+    expect(held).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
+    expect(follow(held.entries, 2)).toEqual({ entries: at(2), action: { kind: "push", from: 1, to: 2 } });
   });
 });

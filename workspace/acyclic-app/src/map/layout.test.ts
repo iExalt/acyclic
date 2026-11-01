@@ -56,20 +56,50 @@ describe("place", () => {
     expect(await relaid(plan, grown)).toEqual(["right", "top"]);
     // A fifth opens a third row: right outgrows left, so top grows, and the top level is laid out again.
     expect(await relaid(grown, [...grown, item("r4", "right"), item("r5", "right")])).toEqual([ROOT, "right", "top"]);
-    // A move changes both boxes; left loses its second row, so top shrinks, and the top level follows.
+    // A move changes both boxes; left loses its second row, so top shrinks, and the top level keeps where it was.
     const moved = plan.map((one) => (one.id === "l3" ? item("l3", "right") : one));
-    expect(await relaid(plan, moved)).toEqual([ROOT, "left", "right", "top"]);
+    expect(await relaid(plan, moved)).toEqual(["left", "right", "top"]);
     // A link between siblings changes only the box that holds both.
     const linked = plan.map((one) => (one.id === "l2" ? item("l2", "left", ["l1"]) : one));
     expect(await relaid(plan, linked)).toEqual(["left"]);
     // A link between items in different boxes lifts to the box holding both.
     const across = plan.map((one) => (one.id === "r1" ? item("r1", "right", ["l1"]) : one));
     expect(await relaid(plan, across)).toEqual(["top"]);
-    // Collapsing a box changes its parent and everything above.
-    expect(await relaid(plan, plan, open, { collapsed: new Set(["left"]), showArchived: false })).toEqual([
-      ROOT,
-      "top",
-    ]);
+    // Collapsing a box changes its parent and everything above, but the top level, which only shrank.
+    expect(await relaid(plan, plan, open, { collapsed: new Set(["left"]), showArchived: false })).toEqual(["top"]);
+  });
+
+  it("keeps the top level where it was when a box in it only shrank, and packs it again for anything else", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const model = buildModel(plan);
+    const first = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    // Collapsing the top-level box leaves its sibling where it was, and the box at its own corner.
+    const folded = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    expect(folded.laidOut).toEqual([]);
+    for (const id of ["top", "far"])
+      expect([folded.nodes.get(id)?.x, folded.nodes.get(id)?.y]).toEqual([
+        first.nodes.get(id)?.x,
+        first.nodes.get(id)?.y,
+      ]);
+    expect(folded.nodes.get("top")?.height).toBeLessThan(first.nodes.get("top")?.height ?? 0);
+    // Folded again elsewhere, it still holds; expanding again finds the layout from before.
+    expect((await place(visible(model, open), cache, engine.layBox, PORTRAIT)).nodes).toEqual(first.nodes);
+    // A new top-level box, or one that grew, packs the top level again; a fresh cache, as a reload has, does too.
+    const added = await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
+    expect(added.laidOut).toContain(ROOT);
+    const fresh = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      new LayoutCache(),
+      engine.layBox,
+      PORTRAIT,
+    );
+    expect(fresh.laidOut).toContain(ROOT);
   });
 
   it("finds every layout in the cache on returning to a view", async () => {

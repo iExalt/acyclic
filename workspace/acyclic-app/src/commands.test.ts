@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entries, entry, fold, isMac, MOST, opensMenu, type Plan, rank, targets, undoes } from "./commands";
+import { entries, entry, fold, isMac, MOST, opensMenu, type Plan, platformOf, rank, targets, undoes } from "./commands";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
@@ -166,6 +166,12 @@ describe("the command menu's key", () => {
       false,
       false,
     ]);
+    // Client hints first, where the browser has them; the deprecated platform otherwise.
+    expect(platformOf({ platform: "Win32", userAgentData: { platform: "macOS" } })).toBe("macOS");
+    expect([
+      platformOf({ platform: "iPhone" }),
+      platformOf({ platform: "MacIntel", userAgentData: { platform: "" } }),
+    ]).toEqual(["iPhone", "MacIntel"]);
   });
 
   it("never takes a key an input method is composing with", () => {

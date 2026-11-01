@@ -111,6 +111,8 @@ export function withinOneBox(view: View): (edge: { source: string; target: strin
 /** A bounded cache of box layouts by signature, evicting the least recently used. */
 export class LayoutCache {
   private readonly entries = new Map<string, BoxLayout>();
+  /** The top level as last placed, which a top level that only shrank keeps where it was. */
+  root: { input: BoxInput; layout: BoxLayout } | null = null;
 
   constructor(private readonly limit = 4096) {}
 
@@ -194,11 +196,17 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
         const signature = JSON.stringify([input.children, input.edges, input.aspect]);
         let layout = cache.get(signature);
+        // A top level that only shrank, as a box collapsing makes it, keeps every box where it was, rather than
+        // packing them again around the smaller one and moving the rest of the plan out of view. Kept out of the
+        // cache, so a reload packs afresh; expanding again finds the layout from before in it.
+        const kept = id === ROOT && layout === undefined ? held(cache.root, input) : undefined;
+        if (kept !== undefined) layout = kept;
         if (layout === undefined) {
           layout = await layBox(input);
           cache.set(signature, layout);
           laidOut.push(id);
         }
+        if (id === ROOT) cache.root = { input, layout };
         boxes.set(id, layout);
       }),
     );
@@ -223,4 +231,20 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
   };
   absolute(ROOT, 0, 0);
   return { width: root.width, height: root.height, nodes, routes, junctions, redundant: scope.redundant, laidOut };
+}
+
+/**
+ * The top level's last layout, for a top level `now` that only shrank from it: the same boxes in the same order, the
+ * same links and shape, and no box larger. Undefined for any other change, which packs it again.
+ */
+export function held(last: { input: BoxInput; layout: BoxLayout } | null, now: BoxInput): BoxLayout | undefined {
+  if (last === null) return undefined;
+  const was = last.input;
+  if (was.aspect !== now.aspect || was.children.length !== now.children.length) return undefined;
+  if (JSON.stringify(was.edges) !== JSON.stringify(now.edges)) return undefined;
+  const shrank = now.children.every((child, n) => {
+    const before = was.children[n];
+    return before?.id === child.id && child.width <= before.width && child.height <= before.height;
+  });
+  return shrank ? last.layout : undefined;
 }

@@ -41,6 +41,8 @@ export interface KeyContext {
   dirty: boolean;
   /** The key went to a field, or anything else that takes typing. */
   typing: boolean;
+  /** The rows J and K step through in the list in view: with none, they are left to the page. */
+  rows: number;
 }
 
 /** The letter a key is, from the layout's character, or from where it sits, for layouts without Latin letters. */
@@ -85,8 +87,8 @@ export function step(
     return { pending: null, action: GO[letter] ?? null };
   if (letter === "g") return { pending: press.timeStamp, action: null };
   if (letter === "c") return { pending: null, action: { kind: "add" } };
-  if (letter === "j") return { pending: null, action: { kind: "row", by: 1 } };
-  if (letter === "k") return { pending: null, action: { kind: "row", by: -1 } };
+  if (letter === "j" || letter === "k")
+    return context.rows === 0 ? none : { pending: null, action: { kind: "row", by: letter === "j" ? 1 : -1 } };
   if (context.panel === "item") return { pending: null, action: ON_ITEM[letter] ?? null };
   return none;
 }
@@ -101,7 +103,18 @@ export function nextRow(count: number, at: number, by: 1 | -1): number {
 /** Whether a key went to something that takes typing. */
 export function typingIn(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.matches("input, textarea, select") || target.closest(".command") !== null;
+  const type = target instanceof HTMLInputElement ? target.type : null;
+  return target.isContentEditable || takesTyping(target.tagName, type) || target.closest(".command") !== null;
+}
+
+/** The inputs a key press only presses, such as a checkbox: a single key there is still a shortcut. */
+const PRESSED = new Set(["checkbox", "radio", "button", "submit", "reset", "image", "range", "color", "file"]);
+
+/** Whether an element, by its tag and an input's type, takes typing: a text field or a list to pick from. */
+export function takesTyping(tag: string, type: string | null): boolean {
+  const name = tag.toLowerCase();
+  if (name === "textarea" || name === "select") return true;
+  return name === "input" && !PRESSED.has((type ?? "text").toLowerCase());
 }
 
 /** The shortcut for each command menu entry that has one, as it shows; G sequences read "G then M". */

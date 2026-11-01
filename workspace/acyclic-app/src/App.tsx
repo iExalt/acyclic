@@ -4,7 +4,7 @@ import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import { CommandMenu } from "./CommandMenu";
-import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets, undoes } from "./commands";
+import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -24,7 +24,17 @@ import { globalLevelCommand, LEVELS, type Level, levelHint, levelLabel } from ".
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
-import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
+import {
+  arrived,
+  depth,
+  type Entries,
+  follow,
+  type HistoryAction,
+  type Open,
+  openLayers,
+  restored,
+  topLayer,
+} from "./layers";
 import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
@@ -108,6 +118,12 @@ interface Reopened {
   id: string;
   edited: Edited;
   n: number;
+}
+
+/** The rows J and K step through: Needs you's entries, else the rows of the view in the page's main area. */
+function rowsInView(): HTMLElement[] {
+  const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
+  return [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
 }
 
 export function App() {
@@ -592,7 +608,7 @@ export function App() {
   /** What a single-key shortcut does; set once the plan has loaded. */
   const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
-    const mac = isMac(navigator.platform);
+    const mac = onMac();
     let pending: Waiting = null;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
@@ -622,6 +638,7 @@ export function App() {
           menu: seen.menu,
           dirty: document.querySelector("form[data-dirty='true']") !== null,
           typing: typingIn(event.target),
+          rows: rowsInView().length,
         });
         if (next.action !== null || next.pending !== null) event.preventDefault();
         pending = next.pending;
@@ -639,13 +656,28 @@ export function App() {
     entries.current = step.entries;
     const { action } = step;
     if (action === null) return;
-    if (action.kind === "push")
-      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "");
-    else if (action.kind === "back") window.history.go(-action.by);
+    if (action.kind === "push") {
+      // Each with the address of what is open, so Forward onto any of them opens it again; while a link waits, the
+      // address it was opened at stays. The entry under them, unless it is the app's first, takes it too: what it
+      // stood for may have closed as these opened, as the command menu does choosing an item, and its address with it.
+      const url = waitingLink.current ? undefined : addressOf(hereNow.current, window.location.search);
+      if (url !== undefined && action.from > 0) window.history.replaceState(window.history.state, "", url);
+      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "", url);
+    } else if (action.kind === "back") window.history.go(-action.by);
+    else if (action.kind === "relabel")
+      window.history.replaceState({ ...window.history.state, layers: action.layers }, "");
+    else if (action.kind === "restore") {
+      // Read now, before the address is written over with what was open: Forward opens it as a link does.
+      waitingLink.current = true;
+      setWanted(parse(window.location.search));
+    }
     // A form left open by Back takes its entries again.
     else if (closeTop.current(action.by) === 0) act(follow(entries.current, layersNow.current));
   }, []);
-  useEffect(() => act(follow(entries.current, layers)), [act, layers]);
+  // What Forward restores settles once it has opened: until then the layers open are the ones before it.
+  useEffect(() => {
+    if (!(entries.current.restoring && wanted !== null)) act(follow(entries.current, layers));
+  }, [act, layers, wanted]);
   useEffect(() => {
     const onMove = (event: PopStateEvent) => {
       const at = typeof event.state?.layers === "number" ? event.state.layers : 0;
@@ -720,6 +752,8 @@ export function App() {
                 ? "Threads"
                 : "the Overview";
     if (document.querySelector("form[data-dirty='true']") !== null) {
+      // An entry Forward landed on stands for what is open meanwhile, so no later move goes back over it unasked.
+      if (entries.current.restoring) act(restored(entries.current, layersNow.current));
       setNotice({
         text: `Unsaved changes: save or cancel, then ${name} opens`,
         offer: null,
@@ -845,9 +879,11 @@ export function App() {
     else if (run.kind === "add") startAdd(null);
     else if (run.kind === "on-item") onItem(run.action);
     else if (run.kind === "thread") {
+      // Over Needs you, where the user is looking; else to the Map, framed, as the Overview's and the outline's rows go.
+      setThreadOver(showNeeds ? run.id : null);
+      if (!showNeeds) return toThread(run.id);
       setSelected(null);
       setThread(run.id);
-      setThreadOver(showNeeds ? run.id : null);
     } else select(run.id, null);
   };
   /**
@@ -866,8 +902,7 @@ export function App() {
   };
   /** Moves the focus to the next or previous row of the list in view: Needs you's entries, else the Overview's rows. */
   const moveRow = (by: 1 | -1) => {
-    const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
-    const rows = [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+    const rows = rowsInView();
     const here = document.activeElement instanceof HTMLElement ? document.activeElement.closest("[data-row]") : null;
     rows[nextRow(rows.length, here === null ? -1 : rows.indexOf(here as HTMLElement), by)]?.focus();
   };
@@ -945,7 +980,7 @@ export function App() {
           <button
             type="button"
             disabled={busy}
-            aria-keyshortcuts={isMac(navigator.platform) ? "Meta+Z" : "Control+Z"}
+            aria-keyshortcuts={onMac() ? "Meta+Z" : "Control+Z"}
             onClick={() => notice.undo && runUndo(notice.undo)}
           >
             Undo

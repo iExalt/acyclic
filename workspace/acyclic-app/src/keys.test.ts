@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { type KeyContext, type KeyPress, keyReference, nextRow, SEQUENCE_MS, SHORTCUTS, step } from "./keys";
+import {
+  type KeyContext,
+  type KeyPress,
+  keyReference,
+  nextRow,
+  SEQUENCE_MS,
+  SHORTCUTS,
+  step,
+  takesTyping,
+} from "./keys";
 
 const press = (key: string, fields: Partial<KeyPress> = {}): KeyPress => ({
   key,
@@ -14,7 +23,7 @@ const press = (key: string, fields: Partial<KeyPress> = {}): KeyPress => ({
   timeStamp: 0,
   ...fields,
 });
-const free: KeyContext = { enabled: true, panel: null, menu: false, dirty: false, typing: false };
+const free: KeyContext = { enabled: true, panel: null, menu: false, dirty: false, typing: false, rows: 3 };
 const act = (key: string, fields: Partial<KeyPress> = {}, context = free) =>
   step(null, press(key, fields), context).action;
 
@@ -37,6 +46,27 @@ describe("single-key shortcuts", () => {
       { kind: "row", by: 1 },
       { kind: "row", by: -1 },
     ]);
+    // With no rows in view, J and K are the page's.
+    expect([act("j", {}, { ...free, rows: 0 }), act("k", {}, { ...free, rows: 0 })]).toEqual([null, null]);
+  });
+
+  it("counts a field or a list to pick from as typing, never a box to tick or a button", () => {
+    const typing: [string, string | null][] = [
+      ["textarea", null],
+      ["select", null],
+      ["input", null],
+      ["INPUT", "search"],
+      ["input", "text"],
+    ];
+    expect(typing.map(([tag, type]) => takesTyping(tag, type))).toEqual([true, true, true, true, true]);
+    const pressed: [string, string | null][] = [
+      ["input", "checkbox"],
+      ["input", "radio"],
+      ["input", "range"],
+      ["button", null],
+      ["div", null],
+    ];
+    expect(pressed.map(([tag, type]) => takesTyping(tag, type))).toEqual([false, false, false, false, false]);
   });
 
   it("act on an item only while its panel shows, and never approve, keep or drop anything", () => {
