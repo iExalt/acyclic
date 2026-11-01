@@ -1,10 +1,10 @@
-// The Threads view's cards: each thread with work left, in the wave the tracker puts it in, with the projects it works
+// The Threads view's tiles: each thread with work left, in the wave the tracker puts it in, with the projects it works
 // in, its leaves by stage, and the threads it waits on. Pure, so the rules are tested without a browser.
 
 import type { Counts, Item, Threads } from "./api";
 import type { Outline } from "./outline";
 
-export interface Card {
+export interface ThreadTile {
   id: string;
   /** The titles of the projects it has work in. */
   projects: string[];
@@ -17,8 +17,8 @@ export interface Card {
 }
 
 export interface WavesView {
-  waves: Card[][];
-  anytime: Card[];
+  waves: ThreadTile[][];
+  anytime: ThreadTile[];
 }
 
 const NONE: Counts = {
@@ -48,7 +48,7 @@ export function threadCounts(items: readonly Item[]): Map<string, Counts> {
   return counts;
 }
 
-/** The cards for `listed`'s waves, counted from `items` and placed in `outline`'s projects. */
+/** The tiles for `listed`'s waves, counted from `items` and placed in `outline`'s projects. */
 export function wavesView(listed: Threads, items: readonly Item[], outline: Outline): WavesView {
   const counts = threadCounts(items);
   const wave = new Map<string, number>();
@@ -56,7 +56,7 @@ export function wavesView(listed: Threads, items: readonly Item[], outline: Outl
     for (const id of ids) wave.set(id, at);
   });
   const waits = new Map(listed.threads.map((thread) => [thread.id, thread.waitsFor]));
-  const card = (id: string): Card => {
+  const tile = (id: string): ThreadTile => {
     const on = waits.get(id) ?? [];
     return {
       id,
@@ -68,5 +68,5 @@ export function wavesView(listed: Threads, items: readonly Item[], outline: Outl
       looped: on.filter((other) => wave.get(other) === wave.get(id)),
     };
   };
-  return { waves: listed.waves.map((ids) => ids.map(card)), anytime: listed.anytime.map(card) };
+  return { waves: listed.waves.map((ids) => ids.map(tile)), anytime: listed.anytime.map(tile) };
 }

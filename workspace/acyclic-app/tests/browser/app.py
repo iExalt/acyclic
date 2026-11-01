@@ -1259,14 +1259,14 @@ def outline_journey(page, view, plan, name, failures):
 @timed
 def threads_journey(page, view, env, name, failures):
     """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
-    and none on a phone; picking a card opens its thread's panel, and the Map comes back as it was."""
+    and none on a phone; picking a tile opens its thread's panel, and the Map comes back as it was."""
     listed = json.loads(run(env, "thread", "list"))["data"]
     want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
     want |= {id: "anytime" for id in listed["anytime"]}
     page.locator("[data-view=threads]").click()
     page.get_by_test_id("threads-view").wait_for()
-    got = page.locator(".wave [data-card]").evaluate_all(
-        "cards => cards.map(card => [card.dataset.card, card.closest('.wave').dataset.wave])"
+    got = page.locator(".wave [data-thread-tile]").evaluate_all(
+        "tiles => tiles.map(tile => [tile.dataset.threadTile, tile.closest('.wave').dataset.wave])"
     )
     if dict(got) != want or len(got) != len(want):
         failures.append(f"{name}: the Threads view's waves {got} aren't the tracker's {want}")
@@ -1282,23 +1282,23 @@ def threads_journey(page, view, env, name, failures):
     if arrows:
         page.screenshot(path=SHOTS / f"app-{name}-threads.png")
         if skips := arrows_clear(page, want, name, failures):
-            # Lit, an arrow that skips a wave, for a look at how it passes the cards.
-            page.locator(f"[data-card='{skips[0][0]}']").hover()
+            # Lit, an arrow that skips a wave, for a look at how it passes the tiles.
+            page.locator(f"[data-thread-tile='{skips[0][0]}']").hover()
             page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
             page.mouse.move(0, 0)
     # A thread with work to start, whose panel offers it; picked already, a click would unpick it, so it is unpicked.
     ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
     picked = ready[0] if ready else next(iter(want))
-    card = page.locator(f"[data-card='{picked}']")
-    if card.get_attribute("aria-pressed") == "true":
-        card.click()
-    card.click()
+    tile = page.locator(f"[data-thread-tile='{picked}']")
+    if tile.get_attribute("aria-pressed") == "true":
+        tile.click()
+    tile.click()
     try:
         page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
     except PlaywrightTimeout:
-        failures.append(f"{name}: picking {picked}'s card opened no panel")
-    if card.get_attribute("aria-pressed") != "true":
-        failures.append(f"{name}: picking {picked}'s card didn't mark it")
+        failures.append(f"{name}: picking {picked}'s tile opened no panel")
+    if tile.get_attribute("aria-pressed") != "true":
+        failures.append(f"{name}: picking {picked}'s tile didn't mark it")
     # An item chosen from a thread's panel is shown on the Map: the view goes back to it, the item selected.
     row = page.locator("[data-testid=thread-panel] [data-select]").first
     if row.count() == 0:
@@ -1343,15 +1343,15 @@ def threads_journey(page, view, env, name, failures):
 
 
 def arrows_clear(page, want, name, failures):
-    """Checks every arrow as drawn, a point each 4 px along it, against the cards' boxes as drawn: none crosses a card,
+    """Checks every arrow as drawn, a point each 4 px along it, against the tiles' boxes as drawn: none crosses a tile,
     other than its own two at its ends, and the view scrolls to all of it. One must skip a wave, or the check proves
     little."""
     found = page.evaluate(
         """() => {
             const view = document.querySelector('.waves');
             const origin = view.getBoundingClientRect();
-            const cards = [...document.querySelectorAll('.wave [data-card]')].map(card => [card.dataset.card,
-                card.getBoundingClientRect()]);
+            const tiles = [...document.querySelectorAll('.wave [data-thread-tile]')].map(tile => [tile.dataset.threadTile,
+                tile.getBoundingClientRect()]);
             const crossed = [];
             let outside = 0;
             for (const arrow of document.querySelectorAll('.arrows g')) {
@@ -1365,7 +1365,7 @@ def arrows_clear(page, want, name, failures):
                     const scrolledX = x - origin.left + view.scrollLeft;
                     const scrolledY = y - origin.top + view.scrollTop;
                     if (scrolledX < 0 || scrolledY < 0 || scrolledX > view.scrollWidth || scrolledY > view.scrollHeight) outside++;
-                    for (const [id, box] of cards) {
+                    for (const [id, box] of tiles) {
                         const own = (id === arrow.dataset.from && along < 10) || (id === arrow.dataset.to && along > length - 10);
                         if (!own && x > box.left + 1 && x < box.right - 1 && y > box.top + 1 && y < box.bottom - 1) {
                             crossed.push(`${arrow.dataset.from}->${arrow.dataset.to} over ${id}`);
@@ -1378,7 +1378,7 @@ def arrows_clear(page, want, name, failures):
         }"""
     )
     if found["crossed"]:
-        failures.append(f"{name}: arrows cross cards: {found['crossed'][:5]}")
+        failures.append(f"{name}: arrows cross tiles: {found['crossed'][:5]}")
     if found["outside"]:
         failures.append(f"{name}: {found['outside']} points of the arrows lie where the view doesn't scroll")
     skips = [
@@ -2593,7 +2593,7 @@ def main():
                     f"webkit phone: the page threw or logged errors: {errors}"
                 )
             context.close()
-            # WebKit draws the Threads view's arrows where Chromium does, clear of the cards.
+            # WebKit draws the Threads view's arrows where Chromium does, clear of the tiles.
             link = fresh()
             context, page, _, errors = open_app(
                 webkit,

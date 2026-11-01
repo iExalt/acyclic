@@ -31,11 +31,11 @@ const listed = {
 describe("wavesView", () => {
   const view = wavesView(listed, items, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"], false));
 
-  it("cards each wave's threads, with the projects they work in and what they wait on, earlier or in a cycle", () => {
-    expect(view.waves.map((wave) => wave.map((card) => card.id))).toEqual([["b", "d"], ["c"]]);
+  it("lays out each wave's threads as tiles, with the projects they work in and what they wait on, earlier or in a cycle", () => {
+    expect(view.waves.map((wave) => wave.map((tile) => tile.id))).toEqual([["b", "d"], ["c"]]);
     expect(view.waves[0]?.[0]).toMatchObject({ projects: ["P", "Q"], after: [], looped: ["d"] });
     expect(view.waves[1]?.[0]).toMatchObject({ projects: ["Q"], after: ["b", "d"], looped: [] });
-    expect(view.anytime.map((card) => card.id)).toEqual(["a", "e"]);
+    expect(view.anytime.map((tile) => tile.id)).toEqual(["a", "e"]);
   });
 
   it("counts a thread's leaves by stage, done counting those in review, and none archived", () => {

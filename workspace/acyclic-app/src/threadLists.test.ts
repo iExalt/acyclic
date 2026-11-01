@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Counts } from "./api";
 import { threadLists } from "./threadLists";
-import type { Card } from "./waves";
+import type { ThreadTile } from "./waves";
 
 const NONE: Counts = {
   done: 0,
@@ -13,9 +13,9 @@ const NONE: Counts = {
   parked: 0,
   unthreaded: 0,
 };
-const card = (id: string): Card => ({ id, projects: [], counts: NONE, after: [], looped: [] });
+const tile = (id: string): ThreadTile => ({ id, projects: [], counts: NONE, after: [], looped: [] });
 
-const lists = (...ids: string[][]) => ({ waves: ids.map((one) => one.map(card)), anytime: [] as Card[] });
+const lists = (...ids: string[][]) => ({ waves: ids.map((one) => one.map(tile)), anytime: [] as ThreadTile[] });
 
 describe("the Overview's threads", () => {
   it("lists threads at work, and to start the approved ones with an item ready, Any time first, then by wave", () => {
@@ -32,7 +32,7 @@ describe("the Overview's threads", () => {
     // Wave 1 is at work (in progress, or in review with an item ready) or blocked, so nothing in it is to start;
     // thread-6 waits for approval, so it is in Needs you instead; thread-7, any time, comes first.
     const view = { ...lists(["thread-2", "thread-8", "thread-4"], ["thread-10", "thread-6", "thread-3", "thread-5"]) };
-    view.anytime = [card("thread-7")];
+    view.anytime = [tile("thread-7")];
     expect(threadLists(counts, view, new Set(["thread-6"]))).toEqual({
       working: ["thread-2", "thread-8", "thread-10"],
       next: ["thread-7", "thread-3", "thread-5"],

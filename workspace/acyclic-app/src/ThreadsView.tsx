@@ -1,6 +1,6 @@
 // The Threads view: the threads with work left in waves of what to start first, a column a wave, and those that can
 // start any time apart, first, on the left. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
-// hovered thread's stand out. A card always says what it comes after, so the arrows are never the only telling.
+// hovered thread's stand out. A tile always says what it comes after, so the arrows are never the only telling.
 
 import { useLayoutEffect, useMemo, useState } from "react";
 import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
@@ -8,7 +8,7 @@ import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
-import type { Card, WavesView } from "./waves";
+import type { ThreadTile, WavesView } from "./waves";
 
 /** The room between columns when wide, as app.css sets it. */
 const GAP = 64;
@@ -32,14 +32,14 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         <Badge line={lines.get(id)} />
       </span>
     ));
-  const card = (one: Card) => {
+  const tile = (one: ThreadTile) => {
     const line = lines.get(one.id);
     return (
       <li key={one.id}>
         <button
           type="button"
-          className="card"
-          data-card={one.id}
+          className="thread-tile"
+          data-thread-tile={one.id}
           data-thread={one.id}
           aria-pressed={one.id === picked}
           style={lineStyle(line)}
@@ -68,9 +68,9 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
     () =>
       view.waves
         .flat()
-        .flatMap((card) => [
-          ...card.after.map((from) => ({ from, to: card.id, looped: false })),
-          ...card.looped.map((from) => ({ from, to: card.id, looped: true })),
+        .flatMap((tile) => [
+          ...tile.after.map((from) => ({ from, to: tile.id, looped: false })),
+          ...tile.looped.map((from) => ({ from, to: tile.id, looped: true })),
         ]),
     [view],
   );
@@ -78,7 +78,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
   const widths = useMemo(
     () =>
       gapWidths(
-        view.waves.map((cards) => cards.map((card) => card.id)),
+        view.waves.map((tiles) => tiles.map((tile) => tile.id)),
         waits,
         GAP,
       ),
@@ -96,10 +96,10 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             <h2>
               Any time <small>no waits either way</small>
             </h2>
-            <ul>{view.anytime.map(card)}</ul>
+            <ul>{view.anytime.map(tile)}</ul>
           </section>
         )}
-        {view.waves.map((cards, at) => (
+        {view.waves.map((tiles, at) => (
           <section
             key={at}
             className="wave"
@@ -116,7 +116,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             <h2>
               Wave {at + 1} <small>{at === 0 ? "start here" : `after wave ${at}`}</small>
             </h2>
-            <ul>{cards.map(card)}</ul>
+            <ul>{tiles.map(tile)}</ul>
           </section>
         ))}
       </div>
@@ -126,7 +126,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
 
 /**
  * An arrow from each thread to each thread after it that waits on it, and between two in one wave, which wait on each
- * other, routed through the gaps so none crosses a card. Measured from the cards as drawn, again whenever the
+ * other, routed through the gaps so none crosses a tile. Measured from the tiles as drawn, again whenever the
  * columns change size.
  */
 function Arrows({
@@ -160,14 +160,14 @@ function Arrows({
           bottom: at.bottom - origin.top,
         };
       };
-      const columns: Column[] = view.waves.map((cards, at) => {
+      const columns: Column[] = view.waves.map((tiles, at) => {
         const wave = host.querySelector(`[data-wave="${at + 1}"]`);
         const heading = wave?.querySelector("h2");
         return {
           heading: heading ? box(heading) : { left: 0, top: 0, right: 0, bottom: 0 },
-          cards: cards.flatMap((card) => {
-            const drawn = wave?.querySelector(`[data-card="${CSS.escape(card.id)}"]`);
-            return drawn ? [{ id: card.id, box: box(drawn) }] : [];
+          tiles: tiles.flatMap((tile) => {
+            const drawn = wave?.querySelector(`[data-thread-tile="${CSS.escape(tile.id)}"]`);
+            return drawn ? [{ id: tile.id, box: box(drawn) }] : [];
           }),
         };
       });
