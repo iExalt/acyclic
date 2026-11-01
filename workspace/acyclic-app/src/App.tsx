@@ -52,7 +52,7 @@ const PlanMap = lazy(() => mapModule);
 type Load =
   | { state: "loading" }
   | { state: "loaded"; items: Item[]; threads: Threads; level: string; needs: Need[]; unread: Unread[] }
-  | { state: "failed"; message: string };
+  | { state: "failed"; code: string; message: string };
 
 /** Where this device keeps whether single-key shortcuts are on. */
 const SHORTCUTS_KEY = "acyclic.shortcuts";
@@ -192,11 +192,15 @@ export function App() {
         if (!sending.current) setPending(null);
       },
       (err: unknown) => {
-        const { message } = failure(err);
-        // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another.
-        if (reads.current.shown === 0) setLoad({ state: "failed", message });
-        else
-          setNotice({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
+        const { code, message } = failure(err);
+        // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another, unless
+        // the browser must pair first: coming back to the app after pairing reads again by itself.
+        if (reads.current.shown === 0) setLoad({ state: "failed", code, message });
+        else {
+          const unpaired = code === "no-session";
+          const text = unpaired ? message : `Couldn't refresh: ${message}`;
+          setNotice({ text, offer: unpaired ? null : "refresh", retry: null, lasts: "stale", at: null });
+        }
       },
     );
   }, [fetchAll]);
@@ -804,13 +808,20 @@ export function App() {
       <div className="status-page" role="alert">
         <Wordmark />
         <h1>Couldn't load the plan</h1>
-        <p>
-          Check that <code>acyclic up</code> is still running where you paired this app, then try again.
-        </p>
-        <p className="muted">{load.message}</p>
-        <button type="button" className="primary" onClick={refresh}>
-          Try again
-        </button>
+        {load.code === "no-session" ? (
+          // Nothing to try again until the browser is paired; coming back to the app after that reads again.
+          <p>{load.message}.</p>
+        ) : (
+          <>
+            <p>
+              Check that <code>acyclic up</code> is still running where you paired this app, then try again.
+            </p>
+            <p className="muted">{load.message}</p>
+            <button type="button" className="primary" onClick={refresh}>
+              Try again
+            </button>
+          </>
+        )}
       </div>
     );
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;

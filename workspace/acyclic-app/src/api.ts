@@ -116,10 +116,21 @@ export class CommandError extends Error {
   }
 }
 
-/** A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. */
-export function failure(err: unknown): { code: string; message: string } {
-  if (err instanceof CommandError) return { code: err.code, message: err.message };
+/**
+ * A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. A browser
+ * the server no longer knows, since `acyclic up --rotate` replaced the session it paired with, is told how to pair
+ * again, with the server's `port`.
+ */
+export function failure(err: unknown, port = globalThis.location?.port ?? ""): { code: string; message: string } {
+  if (err instanceof CommandError)
+    return { code: err.code, message: err.code === "no-session" ? pairAgain(port) : err.message };
   return { code: "network", message: err instanceof Error ? err.message : String(err) };
+}
+
+/** What a browser that isn't paired with the server on `port` (empty for the scheme's own) should do. */
+export function pairAgain(port: string): string {
+  const flag = port === "" ? "" : ` --port ${port}`;
+  return `This browser isn't paired with acyclic up any more. Run acyclic up --link${flag} where it runs, and open the link it prints within five minutes`;
 }
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
