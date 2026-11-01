@@ -24,6 +24,8 @@ const NEEDS_SHOWN_STACKED = 5;
 export interface OverviewProps {
   needs: Need[];
   lines: ReadonlyMap<string, Line>;
+  /** An item's title, for an entry in Needs you that names it by id. */
+  titleOf: (id: string) => string;
   /** Each thread's items by stage. */
   counts: ReadonlyMap<string, Counts>;
   waves: WavesView | null;
@@ -43,6 +45,7 @@ export interface OverviewProps {
 export function Overview({
   needs,
   lines,
+  titleOf,
   counts,
   waves,
   outline,
@@ -112,7 +115,7 @@ export function Overview({
         ) : (
           <ul className="rows">
             {needs.slice(0, needsShown).map((need) => {
-              const view = needView(need, lines);
+              const view = needView(need, lines, undefined, titleOf);
               return (
                 <li key={view.key}>
                   <button

@@ -50,7 +50,7 @@ export function NeedsList({
   notice,
   at = null,
 }: NeedsListProps) {
-  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf) }));
+  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
   // Filters for the groups present, only when there are two or more to choose between.
   const groups = GROUPS.map((one) => ({
     ...one,

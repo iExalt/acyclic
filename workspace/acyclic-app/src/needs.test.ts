@@ -20,7 +20,30 @@ describe("needView", () => {
       },
       none,
     );
-    expect(proposal.text).toBe("session/x proposes thread none → t for B");
+    expect(proposal.text).toBe("session/x proposes thread: no thread → t, for B");
+    // Threads by their names, and repositories as a list, for the item or the thread it changes.
+    const lines = linesOf([{ id: "t", title: "Tend" }], PALETTES.light);
+    const moved = needView(
+      {
+        kind: "proposal",
+        item: item("b"),
+        proposal: { id: "mac-8", actor: "session/x", edit: { field: "thread", before: "t", after: null } },
+      },
+      lines,
+    );
+    expect(moved.text).toBe(`session/x proposes thread: ${lines.get("t")?.name} → no thread, for B`);
+    const repositories = needView(
+      {
+        kind: "proposal",
+        proposal: {
+          id: "mac-7",
+          actor: "session/x",
+          edit: { kind: "thread-repository", thread: "t", field: "repositories", before: [], after: ["app", "cli"] },
+        },
+      },
+      lines,
+    );
+    expect(repositories.text).toBe(`session/x proposes repositories: none → app, cli, for ${lines.get("t")?.name}`);
     expect(proposal.actions.map((one) => one.command)).toEqual([
       keepCommand("mac-9"),
       { proposal: { drop: { proposal: "mac-9" } } },
@@ -148,6 +171,26 @@ describe("needView", () => {
     expect(conflict.actions.map((one) => one.label)).toEqual(["Use parked"]);
     expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic done/);
     expect(conflict.key).toBe("conflict:item:a:state");
+    // Named, and its values too where they are ids, while the command keeps the id.
+    const titles = (id: string) => id.toUpperCase();
+    const moved = needView(
+      { kind: "conflict", entity: "item", id: "a", field: "parent", values: ["p", null] },
+      none,
+      undefined,
+      titles,
+    );
+    expect(moved.text).toBe("A: its parent was written differently on two machines");
+    expect(moved.actions.map((one) => [one.label, one.command])).toEqual([
+      ["Use P", { item: { edit: { item: "a", parent: "p" } } }],
+      ["Use the top level", { item: { edit: { item: "a", "no-parent": true } } }],
+    ]);
+    const gone = needView(
+      { kind: "dangling", entity: "item", id: "a", field: "parent", target: "q" },
+      none,
+      undefined,
+      titles,
+    );
+    expect(gone.text).toBe("A: its parent names q, which doesn't exist");
   });
 
   it("shows a kind it has no command for with what it names and the CLI's hint", () => {
@@ -172,6 +215,10 @@ describe("needView", () => {
   it("names a new blocker and the threads a resource clash holds, to select", () => {
     const blocked = needView({ kind: "new-blocker", item: item("a"), thread: thread("t"), blocker: item("b") }, none);
     expect(blocked).toMatchObject({ items: ["a", "b"], text: "A gained a new blocker since its approval: B" });
+    // Approving the thread again acknowledges it.
+    expect(blocked.actions).toEqual([
+      { label: "Approve again", command: approveCommand("t"), action: "approve", done: "Approved T again" },
+    ]);
     const clash = needView(
       {
         kind: "resource-clash",

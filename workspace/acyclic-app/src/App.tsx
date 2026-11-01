@@ -1126,6 +1126,7 @@ export function App() {
           <Overview
             needs={load.needs}
             lines={lines}
+            titleOf={titleOf}
             counts={counts}
             waves={waves}
             outline={outline}

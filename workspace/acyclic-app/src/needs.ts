@@ -112,10 +112,11 @@ export function needView(
   need: Need,
   lines: ReadonlyMap<string, Line>,
   members: (thread: string) => string[] = () => [],
+  titleOf: (id: string) => string = (id) => id,
 ): NeedView {
   // A badge only where the text names its thread, and then the text picks the thread in place of its row.
   let named = false;
-  const view = viewOf(need, lines, members, () => {
+  const view = viewOf(need, lines, members, titleOf, () => {
     named = true;
   });
   if (!named) return { ...view, line: undefined, thread: null };
@@ -123,11 +124,15 @@ export function needView(
   return { ...view, thread, threads: view.threads.filter((one) => one.id !== thread) };
 }
 
-/** The entry, calling `named` when its text names the badge's thread by its line. */
+/**
+ * The entry, calling `named` when its text names the badge's thread by its line. Ids the entry gives bare, such as a
+ * proposal's threads or a conflict's values, are named by the thread's line or `titleOf` the item.
+ */
 function viewOf(
   need: Need,
   lines: ReadonlyMap<string, Line>,
   members: (thread: string) => string[],
+  titleOf: (id: string) => string,
   named: () => void,
 ): Omit<NeedView, "thread"> {
   const item = row(need.item);
@@ -148,6 +153,10 @@ function viewOf(
     named();
     return line.name;
   };
+  const threadName = (id: string) => lines.get(id)?.name ?? id;
+  /** An entity the entry names by id, by its name. */
+  const nameOf = (entity: string, id: string) =>
+    entity === "item" ? titleOf(id) : entity === "thread" ? threadName(id) : entity === "settings" ? "Settings" : id;
   const base = {
     line,
     more: 0,
@@ -163,10 +172,27 @@ function viewOf(
       const id = proposal?.id ?? "";
       const edit = proposal?.edit ?? {};
       const change = `${proposal?.actor ?? "an agent"}'s ${str(edit.field)} change`;
+      // A member's thread by its name, or no thread; a repository list joined, or none.
+      const value = (one: unknown) =>
+        edit.field === "thread"
+          ? typeof one === "string"
+            ? threadName(one)
+            : "no thread"
+          : Array.isArray(one)
+            ? one.map(shown).join(", ") || "none"
+            : shown(one);
+      const subject =
+        item !== null
+          ? titled(item)
+          : thread !== null
+            ? lineName(thread)
+            : typeof edit.thread === "string"
+              ? threadName(edit.thread)
+              : null;
       return {
         ...base,
         key: `proposal:${id}`,
-        text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)} ${shown(edit.before)} → ${shown(edit.after)}${item === null ? "" : ` for ${titled(item)}`}`,
+        text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)}: ${value(edit.before)} → ${value(edit.after)}${subject === null ? "" : `, for ${subject}`}`,
         actions: [
           { label: "Keep", command: keepCommand(id), action: "keep", done: `Kept ${change}` },
           { label: "Drop", command: dropCommand(id), action: "drop", done: `Dropped ${change}` },
@@ -227,24 +253,35 @@ function viewOf(
       const known = entity === "item" || entity === "thread" || entity === "settings";
       const actions: Action[] = [];
       const why: string[] = [];
+      // A value naming an item or a thread by its name, as the command still sends the id.
+      const said = (value: unknown) =>
+        typeof value !== "string"
+          ? field === "parent" && value === null
+            ? "the top level"
+            : field === "thread" && value === null
+              ? "no thread"
+              : shown(value)
+          : field === "parent"
+            ? titleOf(value)
+            : field === "thread"
+              ? threadName(value)
+              : value;
       for (const value of values) {
         const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
         if (command !== null)
           actions.push({
-            label: `Use ${shown(value)}`,
+            label: `Use ${said(value)}`,
             command,
             action: "use",
-            done: `Used ${shown(value)} for ${field}`,
+            done: `Used ${said(value)} for ${field}`,
           });
         else
-          why.push(
-            `${shown(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`,
-          );
+          why.push(`${said(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`);
       }
       return {
         ...base,
         key: `conflict:${entity}:${id}:${field}`,
-        text: `${entity} ${id}: ${field} was written differently on two machines`,
+        text: `${nameOf(entity, id)}: its ${field} was written differently on two machines`,
         actions,
         note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
       };
@@ -260,11 +297,25 @@ function viewOf(
     }
     case "new-blocker": {
       const blocker = row(need.blocker);
+      // Approving the thread again acknowledges what its approval didn't see.
+      const name = thread === null ? null : lineName(thread);
       return {
         ...base,
         items: [...base.items, ...(blocker === null ? [] : [blocker.id])],
         key: `new-blocker:${item?.id ?? ""}:${blocker?.id ?? ""}`,
         text: `${item === null ? "An item" : titled(item)} gained a new blocker since its approval: ${blocker === null ? "?" : titled(blocker)}`,
+        actions:
+          thread === null
+            ? []
+            : [
+                {
+                  label: "Approve again",
+                  command: approveCommand(thread.id),
+                  action: "approve",
+                  done: `Approved ${name} again`,
+                },
+              ],
+        note: thread === null ? IN_A_TERMINAL : null,
       };
     }
     case "resource-clash": {
@@ -286,7 +337,7 @@ function viewOf(
       return {
         ...base,
         key: `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`,
-        text: `${str(need.entity)} ${str(need.id)}: ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
+        text: `${nameOf(str(need.entity), str(need.id))}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
         note: IN_A_TERMINAL,
       };
     case "unverified": {

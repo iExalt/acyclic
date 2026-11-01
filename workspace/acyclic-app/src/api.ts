@@ -122,9 +122,31 @@ export class CommandError extends Error {
  * again, with the server's `port`.
  */
 export function failure(err: unknown, port = globalThis.location?.port ?? ""): { code: string; message: string } {
-  if (err instanceof CommandError)
-    return { code: err.code, message: err.code === "no-session" ? pairAgain(port) : err.message };
+  if (err instanceof CommandError) {
+    const said = err.code === "no-session" ? pairAgain(port) : REFUSALS[err.code];
+    return { code: err.code, message: said ?? sentence(err.message) };
+  }
   return { code: "network", message: err instanceof Error ? err.message : String(err) };
+}
+
+/**
+ * The refusals a write from the app can meet, in its words, as the server's name records by id. Any other is the
+ * server's own message, as a sentence.
+ */
+const REFUSALS: Record<string, string> = {
+  "parent-cycle": "An item can't go inside itself, or inside anything under it",
+  "link-cycle": "That link would close a loop: the items would wait on each other",
+  "self-link": "An item can't link to itself",
+  deleted: "That id was a deleted item's, and isn't used again: choose another",
+  "not-found": "It isn't in the plan any more: someone deleted or moved it meanwhile",
+  decided: "That was already decided, here or on another machine",
+  locked: "The tracker is busy with another write: try again in a moment",
+  timeout: "The tracker is busy with another write: try again in a moment",
+};
+
+/** A message as a sentence: its first letter capitalised, as the server's start in lower case. */
+function sentence(message: string): string {
+  return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
 /** What a browser that isn't paired with the server on `port` (empty for the scheme's own) should do. */
