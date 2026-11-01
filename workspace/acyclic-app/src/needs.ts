@@ -71,10 +71,11 @@ const str = (value: unknown) => (typeof value === "string" ? value : "");
 /** What the user does about an entry, by which the needs-you list filters: say yes or no, answer, or resolve. */
 export type NeedGroup = "approve" | "answer" | "resolve";
 
+/** Each group's filter, named as a noun: "Approve 20" over a list of Approve buttons read as one more of them. */
 export const GROUPS: { group: NeedGroup; label: string }[] = [
-  { group: "approve", label: "Approve" },
-  { group: "answer", label: "Answer" },
-  { group: "resolve", label: "Resolve" },
+  { group: "approve", label: "Approvals" },
+  { group: "answer", label: "Questions" },
+  { group: "resolve", label: "Problems" },
 ];
 
 /**

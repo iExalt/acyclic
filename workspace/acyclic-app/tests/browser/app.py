@@ -2232,6 +2232,21 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Needs you opened over the projects' sheet left its list hidden")
         return
+    # A thread picked from the list goes to the Map, as any thread does, over the list; closing it comes back to both.
+    viewed = "() => new URLSearchParams(location.search).get('view')"
+    before = page.evaluate(viewed)
+    needs.locator("[data-pick-thread]").first.click()
+    try:
+        page.get_by_test_id("thread-panel").wait_for(timeout=5_000)
+        if page.evaluate(viewed) != "map":
+            failures.append(f"{name}: a thread picked from Needs you stayed off the Map, at {page.url}")
+        page.keyboard.press("Escape")
+        page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
+        needs.wait_for(timeout=5_000)
+        if page.evaluate(viewed) != before:
+            failures.append(f"{name}: closing a thread from Needs you left the view at {page.url}")
+    except PlaywrightTimeout:
+        failures.append(f"{name}: a thread picked from Needs you didn't open, or close back to the list")
     # On a phone, where the list covers the view, a view chosen from the tabs closes it, so the choice shows.
     page.locator("[data-view=threads]").click()
     page.get_by_test_id("threads-view").wait_for(timeout=5_000)

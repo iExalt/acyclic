@@ -900,6 +900,13 @@ button.project-title {
   padding: 0;
   list-style: none;
 }
+/* Stacked on an upright tablet, a wave's tiles stand in columns, as the Overview's lists do there, rather than each
+   stretch across a page their text fills a third of. */
+@media (min-width: 700px) and (max-width: 899.98px) {
+  .wave ul {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
 .thread-tile {
   position: relative;
   z-index: 1;
@@ -1092,7 +1099,8 @@ button.project-title {
   animation: none;
 }
 .inspector.tall::before,
-.sheet.add::before {
+.sheet.add::before,
+.inspector.tall .sheet-handle {
   display: none;
 }
 /* An upright tablet's keyboard leaves most of its height, so the new item's form takes only what its fields need, from
@@ -1703,6 +1711,16 @@ input[aria-invalid="true"] + .hint,
   }
   .stage:not(:has(> .inspector, > .sheet.add)) > .overview > .overview-pair {
     display: contents;
+  }
+  /* A short Up next goes under In progress, and the projects take the third column, one row under another. */
+  .stage:not(:has(> .inspector, > .sheet.add)) > .overview[data-short-next] > .overview-pair {
+    display: block;
+  }
+  .stage:not(:has(> .inspector, > .sheet.add)) > .overview[data-short-next] > .overview-projects {
+    grid-column: auto;
+  }
+  .stage:not(:has(> .inspector, > .sheet.add)) > .overview[data-short-next] > .overview-projects > .rows {
+    display: block;
   }
 }
 /* Wide, an open panel keeps its width clear. */

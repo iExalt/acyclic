@@ -1,9 +1,8 @@
 // Threads drawn as the lines of a transit map: each has a colour, and a badge with its number wherever the thread is
 // named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of 27
-// threads is lighter than the last: thread 7 and thread 34 share a hue but not a lightness. After 108 threads the
-// spiral starts again, and colours that differ only in lightness are hard to tell apart for some eyes, which is safe
-// only because the Map lights one thread at a time and every list names the thread: never ask anyone to tell two
-// threads apart by colour alone.
+// threads is a quarter of the band lighter than the last: thread 7 and thread 34 share a hue and differ only a little
+// in lightness, nearly alike. After 108 threads the spiral starts again. That is safe only because the Map lights one
+// thread at a time and every list names the thread: never ask anyone to tell two threads apart by colour alone.
 
 import type { Thread } from "./api";
 import { okhsl } from "./okhsl";

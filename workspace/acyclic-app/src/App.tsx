@@ -953,11 +953,9 @@ export function App() {
     else if (run.kind === "add") startAdd(null);
     else if (run.kind === "on-item") onItem(run.action);
     else if (run.kind === "thread") {
-      // Over Needs you, where the user is looking; else to the Map, framed, as the Overview's and the outline's rows go.
+      // To the Map, framed, as every thread goes; over Needs you if it shows, so closing the thread comes back to it.
       setThreadOver(showNeeds ? run.id : null);
-      if (!showNeeds) return toThread(run.id);
-      setSelected(null);
-      setThread(run.id);
+      toThread(run.id);
     } else select(run.id, null);
   };
   /**
@@ -1347,9 +1345,9 @@ export function App() {
               select(id, null);
             }}
             onPickThread={(id) => {
-              // Over the list, as an item picked from it shows, so closing the thread comes back to the list.
+              // To the Map, framed, as an item picked from the list goes, over the list, so closing it comes back.
               setThreadOver(id);
-              setThread(id);
+              toThread(id);
             }}
             onClose={() => setShowNeeds(false)}
             onDismiss={() => closeTop.current(1)}
