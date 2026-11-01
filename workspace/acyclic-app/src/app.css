@@ -1217,6 +1217,14 @@ code {
 .sheet > .notice {
   margin: 0 0 8px;
 }
+/* In the slot, a notice is one line, so it takes the least of the view's height; it names an item in full only in
+   its panel, and to a screen reader. */
+.slot .notice > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* The last column: the views' column wide, the only one on a phone. */
 .slot {
   grid-column: -2 / -1;
