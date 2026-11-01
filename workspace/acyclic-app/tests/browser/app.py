@@ -31,10 +31,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from playwright.sync_api import Locator, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
-from playwright.sync_api import sync_playwright
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
+
+# A locator's wait checks again at 0, 20, 50, 100 and 100 ms, then every 500 ms, so a change that lands just after
+# 270 ms is seen at 770: each write the journeys wait on lost about half a second. Waits of 150 ms at most, one after
+# another, look again within 80 ms however long the change takes.
+_wait_for = Locator.wait_for
+
+
+def _wait_for_promptly(self, state="visible", timeout=None):
+    # No limit, as Playwright reads a timeout of 0, has no deadline to slice up to.
+    if timeout == 0:
+        return _wait_for(self, state=state, timeout=0)
+    limit = 30_000 if timeout is None else timeout
+    deadline = time.monotonic() + limit / 1000
+    while True:
+        left = (deadline - time.monotonic()) * 1000
+        try:
+            return _wait_for(self, state=state, timeout=max(1, min(150, left)))
+        except PlaywrightTimeout as err:
+            if time.monotonic() >= deadline:
+                raise PlaywrightTimeout(f"{self} wasn't {state} within {limit} ms") from err
+
+
+Locator.wait_for = _wait_for_promptly
 SHOTS = Path("target/browser").resolve()
 # A large Android phone at its default resolution, the kind the app is checked on by hand, and a laptop's window.
 VIEWS = {

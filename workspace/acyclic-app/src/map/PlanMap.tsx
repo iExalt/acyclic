@@ -367,10 +367,14 @@ export default function PlanMap({
       }
       onSelect(id);
       // The panel a tap opens may cover what was tapped: once it is drawn, the Map pans the least that shows it,
-      // unless another tap came since, which the Map now answers to.
+      // unless another tap came since, which the Map now answers to, or the Map has moved since, which leaves it
+      // where it was moved to.
+      const pan = core.pan();
+      const zoom = core.zoom();
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          if (taps.current === now && cy.current !== null && host.current !== null)
+          const still = cy.current?.zoom() === zoom && cy.current.pan().x === pan.x && cy.current.pan().y === pan.y;
+          if (taps.current === now && still && cy.current !== null && host.current !== null)
             revealIn(cy.current, host.current, id);
         }),
       );
