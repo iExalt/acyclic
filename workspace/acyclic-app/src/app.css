@@ -143,7 +143,7 @@ button {
 }
 /* A view's row has hover of its own, below, which leaves Needs you open and the view shown as they are. */
 button:hover:not(:disabled, [aria-disabled="true"], .view) {
-  background: var(--tile);
+  background: var(--hover);
 }
 /* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. The
    others held with it stay as they were, but inert, as a dimmed column of them said they were all at work. */
@@ -323,6 +323,39 @@ label:has(> input[type="checkbox"]) {
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
+}
+/* The level reads as the line it is, and opens its setting when pressed. */
+button.autonomy {
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  background: none;
+  font-weight: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+.brand button.autonomy {
+  max-width: 100%;
+  font-size: inherit;
+}
+/* On a touch screen its line is too short to hit: it takes in the view's name above it, which does nothing pressed. */
+@media (pointer: coarse) {
+  .brand {
+    position: relative;
+  }
+  .brand button.autonomy::after {
+    position: absolute;
+    /* Into the bar's padding, to a finger's height. */
+    inset: -3px 0;
+    content: "";
+  }
+}
+button.autonomy:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+  text-decoration: underline;
 }
 .grow {
   flex: 1;
@@ -688,6 +721,12 @@ button.icon[aria-pressed="true"] {
 .menu-body select {
   color: var(--ink);
 }
+/* Away from a touch screen, where no phone zooms in on a small field, a menu's select is set as its other rows are. */
+@media not (pointer: coarse) {
+  .menu-body select {
+    font-size: 14px;
+  }
+}
 
 /* A thread's row in the outline: its badge and name, wrapping rather than cut off. */
 .thread {
@@ -794,8 +833,11 @@ button.project-title {
 }
 @media (pointer: coarse) {
   .outline .thread,
-  button.phase-title {
+  button.project-title {
     min-height: var(--hit);
+  }
+  button.chevron {
+    width: var(--hit);
   }
 }
 /* A project's threads sit under its title, inside the list's width. */
@@ -1622,6 +1664,12 @@ input[aria-invalid="true"] + .hint,
 .overview-section header button {
   min-height: 28px;
 }
+@media (pointer: coarse) {
+  .overview-section > header,
+  .overview-section header button {
+    min-height: var(--hit);
+  }
+}
 /* From an upright tablet up, Needs you stands beside In progress, with Up next under it: a short list then leaves no
    column empty beside a long one. The projects span the page below them, their rows in columns. */
 @media (min-width: 700px) {
@@ -1646,6 +1694,15 @@ input[aria-invalid="true"] + .hint,
      rather than leave it empty. */
   .overview-section[hidden] + .overview-pair {
     grid-column: 1 / -1;
+  }
+}
+/* On a wide screen with no panel open, Needs you, In progress and Up next stand in three columns. */
+@media (min-width: 1280px) {
+  .stage:not(:has(> .inspector, > .sheet.add)) > .overview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .stage:not(:has(> .inspector, > .sheet.add)) > .overview > .overview-pair {
+    display: contents;
   }
 }
 /* Wide, an open panel keeps its width clear. */

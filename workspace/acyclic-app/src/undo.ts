@@ -169,3 +169,25 @@ function started(item: Item | undefined): number {
   }
   return item.stage !== undefined && STARTED.has(item.stage) ? 1 : 0;
 }
+
+/**
+ * An offered Undo as it is kept over a reload, which would otherwise drop it before the next write or Dismiss: the
+ * write it takes back, the plan that write was sent over, and what its notice said.
+ */
+export interface Kept {
+  command: Command;
+  items: Item[];
+  level: string;
+  text: string;
+  undone: string;
+}
+
+export function keep(command: Command, before: Plan, text: string, undone: string): Kept {
+  return { command, items: [...before.items.values()], level: before.level, text, undone };
+}
+
+/** The Undo a kept one offers again, saying what it said, or null when it no longer has one. */
+export function unkeep(kept: Kept): Undo | null {
+  const undo = undoOf(kept.command, { items: new Map(kept.items.map((item) => [item.id, item])), level: kept.level });
+  return undo === null ? null : { ...undo, text: kept.text, undone: kept.undone };
+}

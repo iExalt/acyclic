@@ -45,7 +45,8 @@ export function StageCounts({ counts, none = "No items" }: { counts: Counts; non
         <span key={stage} className="stage-mark" data-stage={stage}>
           <StageIcon stage={stage} />
           <span className="count">{count}</span> {stageCountWords(stage, count)}
-          {at < shown.length - 1 ? "," : ""}
+          {/* Read aloud as a list; seen, each count's icon already sets it apart. */}
+          {at < shown.length - 1 ? <span className="visually-hidden">,</span> : null}
         </span>
       ))}
     </span>

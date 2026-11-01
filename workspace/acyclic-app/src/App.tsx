@@ -51,7 +51,7 @@ import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
-import { type Undo, undoOf } from "./undo";
+import { type Kept, keep, type Undo, undoOf, unkeep } from "./undo";
 import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
@@ -66,6 +66,8 @@ type Load =
 
 /** Where this device keeps whether single-key shortcuts are on. */
 const SHORTCUTS_KEY = "acyclic.shortcuts";
+/** The Undo on offer, kept in this tab over a reload. */
+const UNDO_KEY = "acyclic.undo";
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
 interface After {
@@ -95,6 +97,8 @@ interface Notice extends Raised {
   link?: string;
   /** What Undo takes back, with the offer "undo". */
   undo?: Undo;
+  /** That Undo as it is kept over a reload. */
+  kept?: Kept;
   /** News, not a failure: told politely, as a status. */
   polite?: true;
 }
@@ -127,6 +131,19 @@ interface Reopened {
 function rowsInView(): HTMLElement[] {
   const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
   return [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+}
+
+/** The Undo a reload left on offer in this tab, offered again; or none. */
+function kept(): Notice | null {
+  try {
+    const raw = sessionStorage.getItem(UNDO_KEY);
+    const was: Kept | null = raw === null ? null : JSON.parse(raw);
+    const undo = was === null ? null : unkeep(was);
+    if (was === null || undo === null) return null;
+    return { text: was.text, offer: "undo", retry: null, undo, kept: was, lasts: "offer", at: null };
+  } catch {
+    return null;
+  }
 }
 
 export function App() {
@@ -167,8 +184,23 @@ export function App() {
   const [framed, setFramed] = useState<Framed | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
   const [adding, setAdding] = useState<Adding | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(kept);
   const [busy, setBusy] = useState(false);
+  // Kept while it is on offer, and dropped once anything else takes its place; "Undoing…" passes it on to what follows.
+  // Written once each, not as the notice moves with the user, as a large plan takes a while to write.
+  const keptNow = useRef<Kept | undefined>(notice?.kept);
+  useEffect(() => {
+    const next = notice?.kept;
+    if (next === keptNow.current || (next === undefined && notice === UNDOING)) return;
+    keptNow.current = next;
+    try {
+      if (next !== undefined) sessionStorage.setItem(UNDO_KEY, JSON.stringify(next));
+      else sessionStorage.removeItem(UNDO_KEY);
+    } catch {
+      // Too big a plan for the tab's storage: the Undo is offered until a reload, as without it.
+      sessionStorage.removeItem(UNDO_KEY);
+    }
+  }, [notice]);
   /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */
   const sending = useRef(false);
   /** A write drawn before the server answers, until the plan read after it holds it. */
@@ -465,6 +497,7 @@ export function App() {
           offer: "undo",
           retry: null,
           undo,
+          ...(before === null ? {} : { kept: keep(body, before, after.done ?? undo.text, undo.undone) }),
           // A decision's outcome is said politely, as it is without an Undo.
           ...(after.done === undefined ? {} : { polite: true }),
           lasts: "offer",
@@ -819,7 +852,8 @@ export function App() {
     setNeedsAt(to.needsAt);
     setShowNeeds(to.needs);
     const gone = found.missing.join(" and ");
-    setNotice(
+    // An offered Undo waits wherever the user goes, a link included, and one a reload kept is offered again.
+    setNotice((was) =>
       found.missing.length > 0
         ? {
             text: `That ${gone} ${found.missing.length > 1 ? "aren't" : "isn't"} in the plan any more`,
@@ -836,7 +870,9 @@ export function App() {
               lasts: "news",
               at: null,
             }
-          : null,
+          : was?.lasts === "offer"
+            ? was
+            : null,
     );
   };
   // Tried again as the plan loads and as each form closes.

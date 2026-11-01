@@ -22,9 +22,10 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 
 ## Accessibility & inclusion
 
-WCAG 2.2 AA in both schemes: text at 4.5:1 on every surface it sits on, which `palette.test.ts` holds the palettes
-to. Touch targets are 44 px on a coarse pointer and 34 px on a fine one (`--hit`). Everything is reachable by keyboard;
-focus is always visible. Reduced motion turns the sheets' rise off.
+WCAG 2.2 AA in both schemes: text at 4.5:1 on every surface it sits on, which `palette.test.ts` holds the palettes to.
+Touch targets are 44 px on a coarse pointer. With a fine one, `--hit` gives default buttons and fields 34 px, and
+compact rows and controls inside lists go down to 28 px (a Needs you item row to 24 px), as Linear's do. Everything is
+reachable by keyboard; focus is always visible. Reduced motion turns the sheets' rise off.
 
 ## Overview
 
@@ -41,8 +42,8 @@ and a unit test keeps the two in step.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
-- **Signal:** amber, as the "!" badge's fill; as text, a dark brown in the light scheme that reads at 4.5:1. What
-  needs the user, conflicts, and links that cross boxes.
+- **Signal:** amber in the dark scheme, a dark brown that reads at 4.5:1 in the light; text and dashes only. What
+  needs the user, conflicts, threads that wait on each other, and links that cross boxes.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
   a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
   title muted at full strength, since it can still be picked; its badge and stage icon fade with it, below 3:1, on
@@ -76,41 +77,49 @@ Overpass sets smaller than Inter at a size.)
 - **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
   bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
   them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would push every panel down or lie over
-  its buttons. A drag on it or on the header's free space follows the finger and lands by distance or by a flick,
-  read from its last 100 ms, and down from half it closes the sheet as
-  Escape does, so a form holding typing stays, saying how to leave it. Needs you opens full, a list of decisions;
-  the other panels open at half. A tap on the Map that opens a panel over what it tapped pans the least that shows
-  it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at all.)
+  its buttons. A drag on it or on the header's free space follows the finger and lands by distance or by a flick, read
+  from its last 100 ms, and down from half it closes the sheet as Escape does, so a form holding typing stays, saying
+  how to leave it. Needs you opens full, a list of decisions; the other panels open at half; a form (New item, an item's
+  editor) takes the whole height, with no handle. A tap on the Map that opens a panel over what it tapped pans the least
+  that shows it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at
+  all.)
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about 210
-  px beside a panel), with the Overview's lists in two columns from 700 px, and the projects in two columns; New item
-  opens from the top as tall as its fields, clear of the keyboard, the Map in view below it.
+  px beside a panel), with the Overview's lists in two columns once it is 680 px wide (a 728 px screen), and the
+  projects in two columns; New item opens from the top as tall as its fields, clear of the keyboard, the Map in view
+  below it.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of projects and threads, the menu at its foot);
-  panels open on the right. All but the foot scrolls as one, and each outline row is a line, cut short with its full
-  name on hover, as Linear's. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs you's
-  count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in a
-  scroll area of their own, read as clutter.)
-- **The Overview, wide:** Needs you beside In progress, with Up next under it, from 700 px (each at least 320 px, each
-  up to eight rows; five for Needs you on a phone, where they stack), the projects across the page below them in columns
-  of rows; an open panel keeps its width clear. (A single 960 px column left most of a desktop empty, and Up next in a
-  column of its own stood one row tall beside eight.) With more in Needs you than it shows, the link under its rows
-  opens it, and the header has none.
+  panels open on the right. All between the wordmark and the foot scrolls as one, and each outline row is a line, cut
+  short with its full name on hover, as Linear's; a thread in more than one project adds a second line saying where
+  else, which its hover says too. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs
+  you's count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in
+  a scroll area of their own, read as clutter.)
+- **The Overview, wide:** Needs you beside In progress, with Up next under it, once the Overview is 680 px wide, a 976
+  px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
+  stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px
+  with no panel open, Up next takes a third column of its own, the user's call: "allow three columns for the overview on
+  wide screens". (A single 960 px column left most of a desktop empty.) With more in Needs you than it shows, the link
+  under its rows opens it ("19 more in Needs you"), and the header has none; the threads' say where theirs go too ("9
+  more in Threads").
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
 
 ## Shapes
 
-One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone round their top corners, by 14 px.
+One radius, 8 px (`--radius`), for controls, tiles and panels. Smaller things take smaller ones: chips, link rows, the
+remove-link button and the command menu's rows 6 px, key caps and code 4 px; the ⋯ menu's popover 12 px; panels beside
+the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 
 ## Components
 
 - **Buttons, by tier:** `.primary` filled with the accent; secondary outlined; `.quiet` text-only; `.danger-quiet`
   red text, last in its group.
-- **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons. An item
-  in no thread is never ready, so its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item
-  with no thread carries in its badge's place; on the Map the ring says it once, with no icon at the end. The editor
-  says a state in words ("Backlog", "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a
-  finished item's state as the panel's stage, as text: finishing sets it, not the form.
+- **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons, each count
+  set apart by its icon rather than a comma, which only a screen reader reads. An item in no thread is never ready, so
+  its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item with no thread carries in its
+  badge's place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Backlog",
+  "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
+  stage, as text: finishing sets it, not the form.
 - **A thread's status** follows Needs you: "Waiting for your approval", beside the inbox icon Needs you has, and a
   filled Approve only when Needs you asks for it; until the thread is read again after a decision, it says what it said
   as it was read, not what the list says by then. Unapproved with nothing open reads "Not approved, with nothing open",
@@ -127,22 +136,24 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
-  Dismiss. Every notice shows in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a
-  sheet rises above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet ✕.
-  A notice of news or an Undo is edged with a rule; the signal's dash is for a refusal, a failure or a form's warning,
-  as news needs nothing of the user. One shows at a time: the next replaces it, including one a link from a notification
-  brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as noise.)
-- **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover. Edit (a
-  pencil), the ⋯ menu and Close beside the title, which keeps most of the header's width; Move, Reopen, Add inside,
-  Waits for, Relates to and Copy link in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on
-  hover, a section only when it holds one; a row's remove button shows on hover or with focus in the row, and always
-  where there may be no hover. (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the
-  calmest.) While it edits, the form's State and Thread stand in for the Status and Thread rows, which would only repeat
-  them; Parent and Id stay. The form's thread picker says each thread as "4. CLI features", as text names a thread
-  without a badge.
-- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"), and under each list that sets it, what
-  it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding
-  "as set for every thread".
+  Dismiss; the Undo stays on offer over a reload of the tab, its guard checked against the plan as it is when pressed.
+  Every notice shows in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a sheet rises
+  above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet ✕. A notice of
+  news or an Undo is edged with a rule; the signal's dash is for a refusal, a failure or a form's warning, as news needs
+  nothing of the user. One shows at a time: the next replaces it, including one a link from a notification brings.
+  (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as noise.)
+- **Item panel:** quiet, as Linear's. Properties as text beside muted labels: Thread and Parent are buttons that fill on
+  hover, Status and Id text. Edit (a pencil), the ⋯ menu and Close beside the title, which keeps most of the header's
+  width; Move, Reopen, Add inside, Waits for, Relates to and Copy link in the ⋯ menu, each but Reopen and Copy link with
+  its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove button
+  shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over one row of
+  quiet buttons and over today's layout unboxed, as the calmest.) While it edits, the form's State and Thread stand in
+  for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker says each
+  thread as "4. CLI features", as text names a thread without a badge.
+- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"); under the view's name on a phone and at
+  the sidebar's foot, pressing it opens the menu at the setting, so the word is never left unexplained. Under each list
+  that sets it, what it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its
+  own level adding "as set for every thread".
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as rows
   in ink, lighter than the head, which says they open (muted, they read as inert notes; a stage's icon beside each read
   as a mark without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
@@ -151,8 +162,9 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
   words, never a command to type, and names its item once, as its row. A hairline between entries; the filters are tabs,
   the one shown filled.
-- **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too. A view's row
-  fills so too, lighter than the view shown, which keeps its fill under the pointer.
+- **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
+  little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
+  the pointer.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
@@ -160,7 +172,9 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   is in, not its id, which finds it but would only be plumbing under its title. A waiting move or link offers its
   targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
   where it is already or anything inside it.
-- **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
+- **Lists:** the Overview's rows a finger's height, ruled apart, each opening what it names, a chevron at its end. Rows
+  inside a panel, such as Needs you's items and a thread's Starts with, are text that opens what it names, with no
+  chevron.
 
 ## Interaction conventions
 
@@ -269,27 +283,33 @@ before what went wrong.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
   stage's icon at the end.
 - **A project tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
-  any of it moves, done once all of it is, else ready, else blocked), after its chevron, and is muted once done or
-  held up, as an item's title is.
+  any of it moves, else in review, done once all of it is, else ready, else blocked, else parked, else needs a thread),
+  after its chevron, and is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
-  the rest recede; the links a drawn way already implies stay out, since drawn straight they would cut across items.
-  Touch has no hover; a tap selects, which shows them all.
+  the other links recede, the tiles staying as they are; a folded box shows its items' links; the links a drawn way
+  already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
+  shows them all.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
 - **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the
   Overview's projects come in that same order (`topOrder`), so a list and the Map never disagree.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
-- **No link hidden without cause.** A link is left out only when a longer way through items in the same box already
-  implies it; selecting an item, or lighting its thread, shows every link it has.
+- **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
+  box already implies it. A link across boxes shows only for the item selected or hovered, or a lit thread's, as all of
+  them at once crossed the Map; selecting an item, or lighting its thread, shows every link it has.
 - **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
   cross have none.
-- **Opening view.** The whole plan when it fits at 1:1, on every screen, a phone's too (at 0.85, a phone's titles
-  read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
+- **Opening view.** The whole plan when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at
+  0.85, a phone's titles read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
+- **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
+  and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
+  and a fold survives the plan being read again.
+- **The wheel zooms 12 % a notch**, with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
 - **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.
@@ -316,3 +336,5 @@ before what went wrong.
 - 2026-11-01: threads' lines in Okhsl, at saturation 0.9, with neighbouring numbers still alike; every notice in the
   slot, over notices under the panel on top; Undo for a first approval while no agent has started its work; the user
   chose them.
+- 2026-11-01: the phone's view tabs close Needs you, and the Overview stands in three columns on a wide screen; the
+  user chose them. Needs you open is marked by ink alone, after the lighter fill read as a second current place.

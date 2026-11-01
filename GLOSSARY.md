@@ -38,7 +38,12 @@ _Avoid_: recon, research task
 
 **Readiness**:
 Whether an item or thread can start now, given its dependencies, claims and resources.
-_Avoid_: status (for this), unblocked
+_Avoid_: status (for readiness alone), unblocked
+
+**Blocker**:
+Something that stops approved work going ahead, which the user must clear; at the most autonomous level, agents ask
+about nothing else.
+_Avoid_: blocking issue
 
 **Placement**:
 Choosing where a new item belongs: its parent, its links and its thread.
@@ -61,6 +66,10 @@ _Avoid_: round, tier
 **Provisional thread**:
 A thread an agent or an import created that the user has not yet approved.
 _Avoid_: draft thread, suggested thread
+
+**Proposal**:
+An agent's change to an approved thread's scope, waiting for the user to keep or drop it; a proposed member is one.
+_Avoid_: suggestion, pending change
 
 **Proposed member**:
 An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes and
@@ -116,9 +125,52 @@ _Avoid_: closed, deleted
 The state of finished code work whose commit is not yet on its repository's default branch.
 
 **Needs-you list**:
-Everything waiting on the user: approvals, agents' questions and permission prompts (nothing records either yet),
-conflicts nobody resolved, and new blockers on approved work.
+Everything waiting on the user: approvals, proposals and late members, agents' questions and permission prompts
+(nothing records either yet), conflicts nobody resolved, new blockers on approved work, resources or numbers two
+holders clash over, references to what doesn't exist, merges that can't be confirmed, and items in no thread. The app
+calls it Needs you.
 _Avoid_: inbox, notifications
+
+## The app
+
+**Overview**:
+The app's home: lists of what needs the user, the threads in progress and up next, and the projects.
+_Avoid_: dashboard, home page
+
+**Map**:
+The app's drawing of the plan: each item a tile in its project's boxes, with its links.
+_Avoid_: graph view, canvas, board
+
+**Threads view**:
+The app's view of the threads in waves, each a tile with its items' stages.
+_Avoid_: lanes
+
+**Outline**:
+The projects and their threads as a tree, in the sidebar or a phone's sheet.
+_Avoid_: tree view, navigator
+
+**Up next**:
+The threads with work ready to start, by wave.
+_Avoid_: queue, backlog
+
+**Tile**:
+How the Map draws an item with no children, and the Threads view draws a thread.
+_Avoid_: card, node (in the app's words)
+
+**Box**:
+How the Map draws an item with children, holding their tiles and boxes; folded, it is drawn as a tile.
+_Avoid_: group (for this), container, lane
+
+**Stage**:
+Where an item's work stands, said one way everywhere with its icon: in progress, in review, done, ready, blocked,
+parked, or needs a thread; a parent's is its leaves'. The code's word: the app shows a stage as an item's Status.
+_Avoid_: phase, step
+
+**Status**:
+What a panel says of where something stands: an item's stage, or a thread's approval.
+
+**Any time**:
+The threads in no wave: they wait on no thread and none waits on them.
 
 ## Relationships between items
 
