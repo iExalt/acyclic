@@ -97,8 +97,9 @@ describe("keyReference", () => {
     const runnable = new Set(["view:overview", "view:map", "view:threads", "needs", "add"]);
     const rows = keyReference(runnable, true);
     const said = rows.map((row) => row.keys).join(" | ");
-    for (const key of Object.keys(SHORTCUTS))
-      expect(runnable.has(key) || said.includes(SHORTCUTS[key] ?? "?")).toBe(true);
+    const keys = rows.flatMap((row) => row.keys.split(", "));
+    for (const [key, chord] of Object.entries(SHORTCUTS))
+      expect(runnable.has(key) || keys.some((one) => one === chord || one.startsWith(`${chord} `))).toBe(true);
     expect(rows[0]).toEqual({
       what: "With an item open",
       keys: "E edit, M move, W waits for, R relates to, A add inside",

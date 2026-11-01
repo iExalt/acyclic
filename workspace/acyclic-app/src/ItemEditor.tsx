@@ -58,14 +58,23 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
       ) : (
         <label>
           State
-          <select name="state" value={draft.state} onChange={set("state")}>
+          <select
+            name="state"
+            value={draft.state}
+            onChange={set("state")}
+            aria-describedby={hint === null ? undefined : "state-hint"}
+          >
             {STATES.map((state) => (
               <option key={state} value={state}>
                 {stateWords(state)}
               </option>
             ))}
           </select>
-          {hint === null ? null : <span className="hint">{hint}</span>}
+          {hint === null ? null : (
+            <span className="hint" id="state-hint">
+              {hint}
+            </span>
+          )}
         </label>
       )}
       <label>

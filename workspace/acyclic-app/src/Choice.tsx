@@ -1,6 +1,6 @@
 // A setting picked from a list, written as choosing.ts decides: a pick at once, arrow keys as a draft until Enter.
 
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { type ChoiceEvent, choose, draftOf, UNCHOSEN } from "./choosing";
 
 /** The keys that open a closed list rather than step through it. */
@@ -23,6 +23,7 @@ export interface ChoiceProps {
 
 export function Choice({ label, className, value, disabled, onWrite, name, testid, hint, children }: ChoiceProps) {
   const [state, setState] = useState(UNCHOSEN);
+  const hintId = useId();
   /** Set while a key's own task runs: a change then is an arrow key's on the closed list, not a pick. */
   const keying = useRef(false);
   const step = (event: ChoiceEvent) => {
@@ -37,6 +38,7 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
       <select
         name={name}
         data-testid={testid}
+        aria-describedby={hint ? hintId : undefined}
         value={draftOf(state, value) ?? value}
         disabled={disabled}
         onKeyDown={(event) => {
@@ -68,7 +70,11 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
       >
         {children}
       </select>
-      {hint ? <span className="hint">{hint}</span> : null}
+      {hint ? (
+        <span className="hint" id={hintId}>
+          {hint}
+        </span>
+      ) : null}
     </label>
   );
 }
