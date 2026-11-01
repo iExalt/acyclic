@@ -210,11 +210,12 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
   and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the
-  Map, goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than
-  1:1, no further out than readable, else from its first item), with the titles of the boxes they are in when those
-  fit too. The picked thread's row in the sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the
-  thread's panel there.
+- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the Map,
+  goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
+  further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
+  known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,
+  and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
+  sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the thread's panel there.
 - **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
   comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it; a tapped
   one moves the least that shows it. A strip taken from the Map, such as the slot, or a window turned, shows the
