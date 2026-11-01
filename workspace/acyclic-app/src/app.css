@@ -118,6 +118,10 @@ li[data-row]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* A field's ring lies over its border, one ring rather than a border with a ring around it. */
+:is(input, textarea, select):focus-visible {
+  outline-offset: -1px;
+}
 
 /* Controls in three tiers: primary says what the panel is for, the outlined rest are options, quiet ones step away. */
 button,
@@ -137,7 +141,8 @@ button {
   font-weight: 650;
   cursor: pointer;
 }
-button:hover:not(:disabled, [aria-disabled="true"]) {
+/* A view's row has hover of its own, below, which leaves Needs you open and the view shown as they are. */
+button:hover:not(:disabled, [aria-disabled="true"], .view) {
   background: var(--tile);
 }
 /* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. The
@@ -950,6 +955,8 @@ button.project-title {
   z-index: 2;
   max-height: 45%;
   overflow-y: auto;
+  /* Room kept for a scrollbar, so the header's buttons don't shift as one comes and goes, as an editor brings one. */
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   /* A field scrolled to, as one focused under a keyboard is, clears a form's Save and Cancel, which stick below. */
   scroll-padding-bottom: calc(var(--hit) + 48px);
@@ -977,7 +984,9 @@ button.project-title {
    to the full height of the views, and a drag follows the finger. A panel still loading takes the most room it will,
    so what the Map brings into view above it stays there. */
 @media (max-width: 899px) {
+  /* At least 320 px however little it holds, as a new item's panel holds little. */
   .inspector {
+    min-height: min(100%, 320px);
     max-height: min(100%, max(320px, 50%));
     transition: max-height 150ms ease-out;
   }
@@ -986,6 +995,7 @@ button.project-title {
     height: 100%;
   }
   .inspector[data-dragging="true"] {
+    min-height: 0;
     max-height: none;
     height: var(--dragged);
     transition: none;
@@ -1323,6 +1333,10 @@ code {
   border-left: 3px dashed var(--signal);
   border-radius: var(--radius);
 }
+/* News and Undo need nothing of the user: the signal's dash is for what went wrong or waits on them. */
+.notice:is([data-lasts="news"], [data-lasts="offer"]) {
+  border-left: 3px solid var(--rule);
+}
 /* An Undo in the slot takes two lines at most, its button saying what it offers, so the slot takes little of the
    view's height and still says what was done; its whole text is in the title and read out. Anything else there wraps:
    it is the only place its reason shows. */
@@ -1350,6 +1364,15 @@ code {
 .status {
   padding: 16px;
   color: var(--muted);
+}
+/* Over the Map until it is first drawn. */
+.map-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  pointer-events: none;
 }
 
 /* The needs-you list: one entry after another, ruled apart. */
@@ -1423,15 +1446,16 @@ button.row {
 .need-items li + li {
   border-top: none;
 }
+/* In ink, as what opens: muted, they read as inert notes under the head. Lighter than the head, which they follow. */
 .need-items button.row {
   min-height: 24px;
   padding: 2px 0;
-  color: var(--muted);
+  color: var(--ink);
   font-weight: 500;
 }
 .need-items button.row:hover:not(:disabled) {
   background: none;
-  color: var(--ink);
+  text-decoration: underline;
 }
 /* How many more an approval covers than it lists: muted, as a count is, opening the thread's panel where it can. */
 .need-items .more {
@@ -1513,8 +1537,13 @@ code.id {
 }
 .form-head {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px;
+  align-items: center;
   margin-bottom: 8px;
+}
+.form-head > p {
+  grid-column: 1 / -1;
 }
 .hint {
   color: var(--muted);
@@ -1607,10 +1636,16 @@ input[aria-invalid="true"] + .hint,
   .overview > .overview-projects {
     grid-column: 1 / -1;
   }
-  .overview-projects > .rows {
+  .overview-projects > .rows,
+  .overview-section[hidden] + .overview-pair .rows {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     column-gap: 40px;
+  }
+  /* With Needs you open beside it, its section steps aside, and the threads take its column too, in columns of rows,
+     rather than leave it empty. */
+  .overview-section[hidden] + .overview-pair {
+    grid-column: 1 / -1;
   }
 }
 /* Wide, an open panel keeps its width clear. */
@@ -1926,6 +1961,8 @@ dl.facts .chip:hover:not(:disabled) {
 }
 @media (hover: none), (any-pointer: coarse) {
   .links .unlink {
+    min-width: var(--hit);
+    min-height: var(--hit);
     visibility: visible;
   }
   .link-row {

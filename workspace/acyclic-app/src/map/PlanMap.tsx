@@ -16,7 +16,18 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstView, frame, framesAll, headed, nearest, newlyCovered, reveal, startOf, uncovered } from "./reveal";
+import {
+  firstView,
+  frame,
+  framesAll,
+  headed,
+  nearest,
+  newlyCovered,
+  READABLE,
+  reveal,
+  startOf,
+  uncovered,
+} from "./reveal";
 import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
@@ -111,6 +122,7 @@ export default function PlanMap({
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
+  const [drawnOnce, setDrawnOnce] = useState(false);
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
@@ -312,6 +324,7 @@ export default function PlanMap({
       requestAnimationFrame(() => {
         element.dataset.drawMs = String(Math.round(performance.now() - drawing));
         element.dataset.state = "drawn";
+        setDrawnOnce(true);
       }),
     );
   }, [drawn, placed, colour, lines, palette]);
@@ -447,7 +460,17 @@ export default function PlanMap({
     };
   }, []);
 
-  return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+  return (
+    <>
+      <div ref={host} className="map" data-testid="map" data-state="laying-out" />
+      {/* Until the plan is first drawn, which on a phone takes a second or two, a blank canvas would read as no plan. */}
+      {drawnOnce || items.length === 0 ? null : (
+        <p className="status map-status" role="status">
+          Laying out the Map…
+        </p>
+      )}
+    </>
+  );
 }
 
 /**
@@ -487,7 +510,17 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
 function revealIn(core: Core, element: HTMLElement, id: string, centred = false) {
   const node = core.getElementById(id);
   if (node.empty()) return;
-  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element), 8, centred));
+  const open = openPart(element);
+  const pan = reveal(node.renderedBoundingBox({ includeLabels: false }), open, 8, centred);
+  if (pan.x === 0 && pan.y === 0) return;
+  // Brought in from elsewhere with the Map zoomed out past reading, it comes in at a zoom its title reads at.
+  if (centred && core.zoom() < READABLE) {
+    const at = node.renderedPosition();
+    core.zoom({ level: READABLE, renderedPosition: at });
+    core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), open, 8, true));
+    return;
+  }
+  core.panBy(pan);
 }
 
 /** Whether the user is typing, as a phone's keyboard, which takes from the Map's height, is up for. */

@@ -37,7 +37,12 @@ const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
 /** The undo of `command`, sent over `before`, or null when it has no exact inverse. */
-export function undoOf(command: Command, before: Plan, levelLabel = (level: string) => level): Undo | null {
+export function undoOf(
+  command: Command,
+  before: Plan,
+  levelLabel = (level: string) => level,
+  threadName = (thread: string) => thread,
+): Undo | null {
   const body = record(command);
   if (body === null) return null;
   const titleOf = (id: string) => before.items.get(id)?.title ?? id;
@@ -60,8 +65,8 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
     const thread = approve.thread;
     const members = [...before.items.values()].filter((one) => one.thread === thread);
     return {
-      text: "Approved the thread",
-      undone: "Took the approval back",
+      text: `Approved ${threadName(thread)}`,
+      undone: `Took back the approval of ${threadName(thread)}`,
       command: { thread: { revoke: { thread } } },
       holds: (now) => members.every((one) => started(now.items.get(one.id)) <= started(one)),
     };

@@ -2232,13 +2232,17 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Needs you opened over the projects' sheet left its list hidden")
         return
-    # A view chosen with the list open changes under it, the list staying on top.
+    # On a phone, where the list covers the view, a view chosen from the tabs closes it, so the choice shows.
     page.locator("[data-view=threads]").click()
     page.get_by_test_id("threads-view").wait_for(timeout=5_000)
-    if not needs.is_visible() or page.locator("[data-view=threads]").get_attribute("aria-current") != "page":
-        failures.append(f"{name}: choosing Threads with Needs you open didn't keep the list over the Threads view")
+    try:
+        needs.wait_for(state="detached", timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: choosing Threads with Needs you open left the list over the Threads view")
     page.locator("[data-view=map]").click()
     page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+    page.get_by_test_id("needs-button").click()
+    needs.wait_for(timeout=5_000)
     # With an item open over the list, Needs you brings the list back rather than closing what's out of sight.
     row = needs.locator("button.row[data-select]").first
     if row.count():
@@ -2344,6 +2348,11 @@ def needs_journey(page, env, plan, thread, name, failures):
         if sheet.count():
             page.get_by_test_id("projects").get_by_role("button", name="Close", exact=True).click()
         panel.get_by_role("button", name="Close").click()
+        # Picked from the list, the thread showed over it: closing it comes back to the list.
+        try:
+            needs.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: closing a thread picked from the needs-you list didn't come back to it")
     print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
 
 

@@ -150,6 +150,9 @@ export function App() {
   viewNow.current = view;
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
+  /** The selection now, for a write's callback: an undo brings it back into view, as the Map may move it. */
+  const selectedNow = useRef(selected);
+  selectedNow.current = selected;
   /**
    * The view an item or a thread was opened from, which closing the one opened from it returns to: both are shown on
    * the Map, but the user came from there. An item chosen from a thread's panel leaves the thread's, for the thread's
@@ -247,6 +250,8 @@ export function App() {
   const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
   const palette = PALETTES[useScheme()];
   const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
+  const linesNow = useRef(lines);
+  linesNow.current = lines;
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
   const outline = useMemo(
@@ -437,7 +442,10 @@ export function App() {
       }
       const { text, offer, fixId } = told(sent);
       const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
-      const undo = saved && after.undo && before !== null ? undoOf(body, before, levelLabel) : null;
+      const undo =
+        saved && after.undo && before !== null
+          ? undoOf(body, before, levelLabel, (id) => linesNow.current.get(id)?.name ?? id)
+          : null;
       if (text !== null)
         setNotice({
           text,
@@ -510,7 +518,7 @@ export function App() {
             lasts: "offer",
             at: null,
           });
-        else await send(undo.command, { select: undo.shows ?? null, pin: null, undone: undo.undone });
+        else await send(undo.command, { select: undo.shows ?? selectedNow.current, pin: null, undone: undo.undone });
       } finally {
         undoing.current = false;
       }
@@ -1042,7 +1050,7 @@ export function App() {
     mode.kind === "move"
       ? `Choose the box to put ${titleOf(mode.item)} in`
       : mode.kind === "link"
-        ? `Choose the item ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
+        ? `Choose the item that ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
         : null;
   const menu = (
     <>
@@ -1114,7 +1122,14 @@ export function App() {
       count={shown.length}
       autonomy={levelLabel(load.level)}
       view={view}
-      onView={setView}
+      onView={(to) => {
+        // On a phone, Needs you fills the screen, so a view picked from the tabs would change nothing in sight.
+        if (!wide) setShowNeeds(false);
+        // An item is shown on the Map: going to another view leaves it, rather than its panel standing over a view
+        // that doesn't show it.
+        if (to !== "map") setSelected(null);
+        setView(to);
+      }}
       needs={load.needs.length}
       needsOpen={showNeeds}
       onNeeds={() => {
@@ -1272,7 +1287,6 @@ export function App() {
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
-            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             lines={lines}
             membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
@@ -1283,7 +1297,8 @@ export function App() {
               select(id, null);
             }}
             onPickThread={(id) => {
-              setShowNeeds(false);
+              // Over the list, as an item picked from it shows, so closing the thread comes back to the list.
+              setThreadOver(id);
               setThread(id);
             }}
             onClose={() => setShowNeeds(false)}

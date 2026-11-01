@@ -29,7 +29,7 @@ import {
   threadLevelCommand,
 } from "./forms";
 import { useHeld } from "./held";
-import { Check, CircleAlert, Icon, X } from "./icons";
+import { Check, Icon, Inbox, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
@@ -59,12 +59,16 @@ export interface ThreadPanelProps {
   onCopyLink: () => Promise<boolean>;
 }
 
-type Loaded = { detail: ThreadDetail; open: Proposal[] } | { failed: string } | null;
+/**
+ * The thread as read, with whether Needs you asked for its approval when it was: the list is read again before the
+ * thread is, so between the two the list would say a thread just approved waits for nothing, and it isn't approved.
+ */
+type Loaded = { detail: ThreadDetail; open: Proposal[]; awaiting: boolean } | { failed: string } | null;
 
 export function ThreadPanel({
   id,
   globalLevel,
-  awaiting,
+  awaiting: awaitingNow,
   line,
   counts,
   titleOf,
@@ -78,12 +82,19 @@ export function ThreadPanel({
   onCopyLink,
 }: ThreadPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
+  const awaitingRef = useRef(awaitingNow);
+  awaitingRef.current = awaitingNow;
   // A new version, after any edit, reads the thread again.
   useEffect(() => {
     let live = true;
     Promise.all([thread(id), proposals()]).then(
       ([detail, all]) => {
-        if (live) setLoaded({ detail, open: all.filter((one) => one.decision === null && one.threads.includes(id)) });
+        if (live)
+          setLoaded({
+            detail,
+            open: all.filter((one) => one.decision === null && one.threads.includes(id)),
+            awaiting: awaitingRef.current,
+          });
       },
       (err: unknown) => {
         if (live) setLoaded({ failed: failure(err).message });
@@ -115,7 +126,7 @@ export function ThreadPanel({
   );
   if (loaded === null) return shell(null);
   if ("failed" in loaded) return shell(<p role="alert">{loaded.failed}</p>);
-  const { detail, open } = loaded;
+  const { detail, open, awaiting } = loaded;
   const members = detail.members.length;
   const name = line?.name ?? detail.title;
   const items = `${members} ${members === 1 ? "item" : "items"}`;
@@ -138,7 +149,7 @@ export function ThreadPanel({
       {/* Waiting only as Needs you says it is: an unapproved thread with nothing open asks nothing of the user. No
           total beside it: the counts below are of the items drawn, which a total of every member would not add up to. */}
       <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
-        {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={CircleAlert} size={16} /> : null}
+        {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={Inbox} size={16} /> : null}
         {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved, with nothing open"}
       </p>
       <div className="progress">

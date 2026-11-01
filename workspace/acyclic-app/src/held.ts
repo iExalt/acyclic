@@ -30,7 +30,10 @@ export function useHeld(busy: boolean, settled: unknown) {
     const active = document.activeElement;
     if (active === null || active === document.body) {
       pending.current = null;
-      was.next()?.focus();
+      // Without the jump focus would make to put it mid-list: the list stays where it was, scrolled only if need be.
+      const next = was.next();
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView({ block: "nearest" });
     } else if (settled !== was.settled) pending.current = null;
   }, [busy, settled]);
   return (key: string, act: () => void, next: Next) => ({

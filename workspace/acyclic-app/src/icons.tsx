@@ -8,7 +8,6 @@ export {
   ArrowUpLeft,
   Check,
   ChevronRight,
-  CircleAlert,
   FolderInput,
   Inbox,
   LayoutDashboard,

@@ -111,9 +111,10 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   with no thread carries in its badge's place; on the Map the ring says it once, with no icon at the end. The editor
   says a state in words ("Backlog", "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a
   finished item's state as the panel's stage, as text: finishing sets it, not the form.
-- **A thread's status** follows Needs you: "Waiting for your approval" and a filled Approve only when Needs you asks
-  for it. Unapproved with nothing open reads "Not approved, with nothing open", quiet, with an outlined Approve, as
-  approval still covers what joins it later.
+- **A thread's status** follows Needs you: "Waiting for your approval", beside the inbox icon Needs you has, and a
+  filled Approve only when Needs you asks for it; until the thread is read again after a decision, it says what it said
+  as it was read, not what the list says by then. Unapproved with nothing open reads "Not approved, with nothing open",
+  quiet, with an outlined Approve, as approval still covers what joins it later.
 - **Thread badges:** the thread's number on its line's colour.
 - **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
   of Needs you, where every visit passed it.
@@ -127,10 +128,10 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
   Dismiss. Every notice shows in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a
-  sheet rises above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet
-  ✕. One shows at a time: the next replaces it, including one a link from a
-  notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as
-  noise.)
+  sheet rises above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet ✕.
+  A notice of news or an Undo is edged with a rule; the signal's dash is for a refusal, a failure or a form's warning,
+  as news needs nothing of the user. One shows at a time: the next replaces it, including one a link from a notification
+  brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as noise.)
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover. Edit (a
   pencil), the ⋯ menu and Close beside the title, which keeps most of the header's width; Move, Reopen, Add inside,
   Waits for, Relates to and Copy link in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on
@@ -142,13 +143,14 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 - **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"), and under each list that sets it, what
   it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding
   "as set for every thread".
-- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as muted
-  rows, each with its stage's icon, as a link in an item's panel, which says it opens, then its decision, compact, after
-  what it acts on. An approval names its thread alone, as its button and the list's filter say what it asks; the
-  Overview, which shows no buttons, adds "4 items to approve". (Each row ending "waits for your approval" read as
-  noise.) An approval lists the first five items it covers and says how many more, so its count and its list agree; an
-  entry the app can only show says what failed and what fixes it. A hairline between entries; the filters are tabs, the
-  one shown filled.
+- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as rows
+  in ink, lighter than the head, which says they open (muted, they read as inert notes; a stage's icon beside each read
+  as a mark without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
+  its button and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
+  (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
+  how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
+  words, never a command to type, and names its item once, as its row. A hairline between entries; the filters are tabs,
+  the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too. A view's row
   fills so too, lighter than the view shown, which keeps its fill under the pointer.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
@@ -164,13 +166,16 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 
 - **Views are places, Needs you is a layer.** Overview, Map and Threads are views; the one shown carries
   `aria-current="page"` and is filled. Needs you opens over any view as a toggle (`aria-pressed`), marked by ink alone.
+  On a phone and an upright tablet, where Needs you covers the view, picking a view from the tabs closes it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
-- **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
-  A thread the command menu opens while Needs you shows goes over it, where the user is looking.
-- **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows
-  on the Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on
-  the Map or going to another view makes that where the user is; what a link opened closes onto the Map. While Needs
-  you is open over the Overview, the Overview's own Needs you section steps aside rather than repeat it.
+- **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one. A
+  thread the command menu opens while Needs you shows goes over it, where the user is looking, as one picked from the
+  list does, so closing it comes back to the list.
+- **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows on
+  the Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on the
+  Map or going to another view makes that where the user is, and going to another view closes the item, which it doesn't
+  show; what a link opened closes onto the Map. While Needs you is open over the Overview, the Overview's own Needs you
+  section steps aside rather than repeat it.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
   `?needs=<entry>`), so a reload, a copied link or a notification opens it again; an item implies the Map, and one left
@@ -226,9 +231,11 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   says Saving… until the server has placed it, rather than its state first; its editor opens on Title.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
-- **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
-  page of their own. A browser the server no longer knows, after `acyclic up --rotate`, is told how to pair again, with
-  the server's port, and offered no Try again or Refresh: coming back to the app once paired reads the plan again.
+- **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page
+  of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out, rather
+  than show a blank canvas that reads as no plan. A browser the server no longer knows, after `acyclic up --rotate`, is
+  told how to pair again, with the server's port, and offered no Try again or Refresh: coming back to the app once
+  paired reads the plan again.
 
 ## Voice & copy
 
@@ -247,8 +254,9 @@ before what went wrong.
   decisions, with a pointer, an entry's main action is outlined until the entry is under the pointer or holds the
   focus: a column of identical filled buttons read as clutter. Without hover, they stay filled.
 - **The Shape Rule.** Selection is drawn by shape (an ink edge with a soft halo, a fill, a pill), never by hue alone.
-  One ring, not two: a double ring of ink read as heavy in both schemes. A selected tile's edge is heavier than a lit
-  one's, as a dark thread's line came close to ink.
+  One ring, not two: a double ring of ink read as heavy in both schemes. A selected tile's edge is twice a lit one's, as
+  a dark thread's line came close to ink, and its halo faint: a stronger one read as a second ring. A field's focus ring
+  lies over its border, for the same reason.
 - **The Signal Rule.** The signal is text and dashes. Never a solid border, a fill, or a badge with a number, which
   a thread's badge could be mistaken for.
 - **The Text Rule.** Stage counts are always written out; icons only accompany them.
