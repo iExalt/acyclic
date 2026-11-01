@@ -1,15 +1,28 @@
 // The frame around the views: where the views, Needs you, adding and the menu are reached. A phone has one bar on top
 // and the views along the bottom; a wider screen has a quiet sidebar.
 
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { isMac } from "./commands";
-import { Icon, Inbox, LayoutDashboard, ListTree, MapIcon, Plus, Search, Waypoints } from "./icons";
+import {
+  Icon,
+  Inbox,
+  LayoutDashboard,
+  ListTree,
+  MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Waypoints,
+} from "./icons";
 import { Menu } from "./Menu";
 import { countText } from "./needs";
 
 export type View = "overview" | "map" | "threads";
 
 const MAC = isMac(navigator.platform);
+/** Where this device remembers the sidebar folded. */
+const FOLDED_KEY = "acyclic.sidebar";
 
 /** The view the app opens on, and Back on a phone returns to before it leaves the app. */
 export const HOME: View = "overview";
@@ -71,7 +84,7 @@ function ViewLinks({
       onClick={() => onView(one.view)}
     >
       {short ? null : <Icon of={one.icon} />}
-      <span>{one.label}</span>
+      <span className="text">{one.label}</span>
     </button>
   ));
 }
@@ -91,7 +104,7 @@ function NeedsButton({ needs, needsOpen, onNeeds }: Pick<ShellProps, "needs" | "
       <Icon of={Inbox} />
       {/* The count alone says something waits, as an inbox's does; with nothing waiting, none shows. */}
       <span className="label">
-        Needs you
+        <span className="text">Needs you</span>
         {needs > 0 && (
           <span className="count needs-n" data-testid="needs-count">
             {countText(needs)}
@@ -122,51 +135,75 @@ export function Wordmark() {
         <circle cx="362" cy="170" r="56" />
         <circle cx="256" cy="340" r="56" />
       </svg>
-      acyclic
+      <span className="text">acyclic</span>
     </span>
   );
 }
 
-/** A quiet sidebar holding the views, Needs you, adding and the outline, the menu at its foot. */
+/**
+ * A quiet sidebar holding the views, Needs you, adding and the outline, the menu at its foot; all but the foot scroll
+ * as one. Folded, a rail of the controls' icons, Needs you's count kept, its fold remembered on this device.
+ */
 function SidebarShell(props: ShellProps) {
+  const [folded, setFolded] = useState(() => localStorage.getItem(FOLDED_KEY) === "folded");
+  const fold = () => {
+    localStorage.setItem(FOLDED_KEY, folded ? "open" : "folded");
+    setFolded(!folded);
+  };
   return (
-    <div className="shell sidebar-shell">
+    <div className="shell sidebar-shell" data-folded={folded}>
       <aside className="sidebar">
         <div className="workspace">
           <Wordmark />
+          {/* In the same place folded or not, so a second press undoes the first. */}
+          <button
+            type="button"
+            className="icon fold"
+            aria-label={folded ? "Unfold the sidebar" : "Fold the sidebar"}
+            title={folded ? "Unfold the sidebar" : "Fold the sidebar"}
+            aria-expanded={!folded}
+            data-action="fold"
+            onClick={fold}
+          >
+            <Icon of={folded ? PanelLeftOpen : PanelLeftClose} />
+          </button>
         </div>
-        <button
-          type="button"
-          className="search"
-          onClick={props.onSearch}
-          data-action="search"
-          aria-keyshortcuts={`${MAC ? "Meta+K" : "Control+K"}${props.shortcuts ? " /" : ""}`}
-        >
-          <Icon of={Search} />
-          <span className="grow">Search or jump to…</span>
-          {/* The shortcut, for the eye; assistive technology has it from aria-keyshortcuts. */}
-          <span className="kbd" aria-hidden="true">
-            {MAC ? "⌘K" : "Ctrl K"}
-          </span>
-        </button>
-        <nav className="views" aria-label="Views">
-          <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
-          <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
-        </nav>
-        <button
-          type="button"
-          className="new"
-          onClick={props.onAdd}
-          data-action="add-top"
-          aria-keyshortcuts={props.shortcuts ? "C" : undefined}
-          title={props.shortcuts ? "New item (C)" : undefined}
-        >
-          <Icon of={Plus} />
-          New item
-        </button>
-        <nav className="threads" aria-label="Phases and threads">
-          {props.outline}
-        </nav>
+        <div className="sidebar-body">
+          <button
+            type="button"
+            className="search"
+            onClick={props.onSearch}
+            data-action="search"
+            aria-keyshortcuts={`${MAC ? "Meta+K" : "Control+K"}${props.shortcuts ? " /" : ""}`}
+          >
+            <Icon of={Search} />
+            <span className="grow text">Search or jump to…</span>
+            {/* The shortcut, for the eye; assistive technology has it from aria-keyshortcuts. */}
+            <span className="kbd" aria-hidden="true">
+              {MAC ? "⌘K" : "Ctrl K"}
+            </span>
+          </button>
+          <nav className="views" aria-label="Views">
+            <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
+            <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
+          </nav>
+          <button
+            type="button"
+            className="new"
+            onClick={props.onAdd}
+            data-action="add-top"
+            aria-keyshortcuts={props.shortcuts ? "C" : undefined}
+            title={props.shortcuts ? "New item (C)" : undefined}
+          >
+            <Icon of={Plus} />
+            <span className="text">New item</span>
+          </button>
+          {folded ? null : (
+            <nav className="threads" aria-label="Phases and threads">
+              {props.outline}
+            </nav>
+          )}
+        </div>
         <footer className="sidebar-foot">
           <div className="about">
             <Count count={props.count} />

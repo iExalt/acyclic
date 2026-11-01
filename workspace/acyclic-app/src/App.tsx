@@ -905,8 +905,10 @@ export function App() {
   const noticeView =
     notice === null ? null : (
       // News is told by the status line below, always there, as a live region must be to be heard.
-      <div className="notice" role={notice.polite ? undefined : "alert"} data-testid="notice">
-        <span className={notice.link === undefined ? "grow" : undefined}>{notice.text}</span>
+      <div className="notice" role={notice.polite ? undefined : "alert"} data-testid="notice" data-lasts={notice.lasts}>
+        <span className={notice.link === undefined ? "grow" : undefined} title={notice.text}>
+          {notice.text}
+        </span>
         {notice.retry === null ? null : (
           <button
             type="button"

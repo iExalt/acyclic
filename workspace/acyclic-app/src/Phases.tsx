@@ -90,6 +90,7 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
                 <button
                   type="button"
                   className="phase-title"
+                  title={phase.title}
                   data-select-phase={phase.id}
                   onClick={() => onSelectPhase(phase.id)}
                 >
