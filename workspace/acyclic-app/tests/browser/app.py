@@ -1557,9 +1557,15 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
-    # Unlinked from the inspector: gone from the Map and the tracker.
+    # Unlinked from the inspector: gone from the Map and the tracker. Its Undo waits in the slot at the stage's foot,
+    # which takes its height from the Map without moving what the Map shows.
+    page.locator(".slot [aria-label=Dismiss]").click()
+    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+    before = settled_corner(page, added)
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
+    page.locator(".slot [data-testid=notice]").wait_for(timeout=5_000)
+    held(page, added, before, "Undo's slot appearing", name, failures)
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
         arg=edge,

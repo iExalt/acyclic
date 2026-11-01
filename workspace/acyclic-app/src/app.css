@@ -401,7 +401,7 @@ button.icon[aria-pressed="true"] {
 
 /* A phone: the bar, the views, and the views' bar along the bottom, clear of the home indicator. */
 .phone-shell {
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
 }
 .tabbar {
   display: grid;
@@ -459,9 +459,11 @@ button.icon[aria-pressed="true"] {
 
 /* Wide: the sidebar, the views beside it. */
 .sidebar-shell {
+  grid-template-rows: 1fr auto;
   grid-template-columns: 248px 1fr;
 }
 .sidebar {
+  grid-row: 1 / -1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1200,10 +1202,8 @@ code {
   display: none;
 }
 
+/* A notice: under a panel's heading, or in the slot at the stage's foot, in the flow, so it covers nothing. */
 .notice {
-  position: absolute;
-  inset: 8px 8px auto 8px;
-  z-index: 3;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -1213,11 +1213,16 @@ code {
   border-left: 3px dashed var(--signal);
   border-radius: var(--radius);
 }
-/* In a panel, under its heading, where it covers neither the heading nor the panel's way out. */
 .inspector > .notice,
 .sheet > .notice {
-  position: static;
   margin: 0 0 8px;
+}
+/* The last column: the views' column wide, the only one on a phone. */
+.slot {
+  grid-column: -2 / -1;
+  padding: 8px;
+  background: var(--chrome);
+  border-top: 1px solid var(--rule);
 }
 .notice input {
   min-width: 0;

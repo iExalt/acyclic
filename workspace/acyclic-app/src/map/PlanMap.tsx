@@ -13,7 +13,7 @@ import { useWide } from "../wide";
 import { onChevron } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
-import { PORTRAIT, shapeOf } from "./elk";
+import { PORTRAIT, shapeAfter } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import { firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
@@ -434,7 +434,9 @@ function useAspect(host: RefObject<HTMLDivElement | null>): number | null {
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
-    const observer = new ResizeObserver(() => setShape(shapeOf(element.clientWidth, element.clientHeight)));
+    const observer = new ResizeObserver(() =>
+      setShape((was) => shapeAfter(was, element.clientWidth, element.clientHeight)),
+    );
     observer.observe(element);
     return () => observer.disconnect();
   }, [host]);

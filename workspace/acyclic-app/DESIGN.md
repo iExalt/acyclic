@@ -114,9 +114,15 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)
-- **Notices:** a refusal, a failure, an offered Undo or something to copy, with its own Dismiss; in the panel on top,
-  under its heading, else over the Map. One shows at a time: the next replaces it, including one a link from a
-  notification brings, as the user has moved on.
+- **Notices stay with what they are about** (`src/notices.ts`). News of what just happened (saved, undone, a link
+  opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
+  refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
+  form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
+  Dismiss. A notice shows under the heading of the panel on top; an offer, a stale plan, and anything with no panel to
+  hold it show in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a sheet rises above
+  it. Dismiss is the panels' quiet ✕. One shows at a time: the next replaces it, including one a link from a
+  notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as
+  noise.)
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
   Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
   to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it
@@ -178,8 +184,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   Undo reads the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a
   removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
   what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it
-  reads ("Sow now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", fields "Set X back". The
-  notice stays until dismissed or the next write.
+  reads ("Sow now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", fields "Set X back". Undo
+  sits in the slot, one place to look that doesn't move as its panel closes.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a

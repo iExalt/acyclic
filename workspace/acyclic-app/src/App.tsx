@@ -31,6 +31,7 @@ import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import { Notify } from "./Notify";
 import { awaitingApproval, type Need } from "./needs";
+import { noticeAfter, type Place, placed, type Raised } from "./notices";
 import { Overview } from "./Overview";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
@@ -70,12 +71,11 @@ interface After {
 }
 
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
-interface Notice {
+/** What the app tells the user, which `notices.ts` says how long to keep and where to show. */
+interface Notice extends Raised {
   text: string;
   offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
   retry: { body: Command; after: After } | null;
-  /** Said of a form Escape left open, so it goes when the form does. */
-  unsaved?: true;
   /** Said of a link waiting for a form to close: dismissing it drops the link. */
   held?: true;
   /** A link to copy by hand, where the browser offers no clipboard. */
@@ -86,7 +86,15 @@ interface Notice {
   polite?: true;
 }
 
-const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null };
+const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null, lasts: "offer", at: null };
+/** What a form holding typing says when the user tries to leave it. */
+const UNSAVED: Notice = {
+  text: "Unsaved changes: save them, or cancel",
+  offer: null,
+  retry: null,
+  lasts: "form",
+  at: null,
+};
 
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
 interface Adding {
@@ -179,6 +187,7 @@ export function App() {
       (next) => {
         if (next === null) return;
         setLoad(next);
+        setNotice((was) => noticeAfter(was, { kind: "read" }));
         // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
         if (!sending.current) setPending(null);
       },
@@ -186,7 +195,8 @@ export function App() {
         const { message } = failure(err);
         // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another.
         if (reads.current.shown === 0) setLoad({ state: "failed", message });
-        else setNotice({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null });
+        else
+          setNotice({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
       },
     );
   }, [fetchAll]);
@@ -340,7 +350,7 @@ export function App() {
       if (sending.current) return;
       sending.current = true;
       setBusy(true);
-      setNotice(after.undone === undefined ? null : UNDOING);
+      setNotice((was) => (after.undone === undefined ? noticeAfter(was, { kind: "write" }) : UNDOING));
       const before = serverPlan.current;
       const bringIn = () => {
         const select = after.select;
@@ -402,12 +412,22 @@ export function App() {
       const { text, offer, fixId } = told(sent);
       const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
       const undo = saved && after.undo && before !== null ? undoOf(body, before, levelLabel) : null;
-      if (text !== null) setNotice({ text, offer, retry: offer === "retry" ? { body, after } : null });
-      else if (undo !== null) setNotice({ text: undo.text, offer: "undo", retry: null, undo });
-      else if (saved && after.undone !== undefined) setNotice({ text: after.undone, offer: null, retry: null });
+      if (text !== null)
+        setNotice({
+          text,
+          offer,
+          retry: offer === "retry" ? { body, after } : null,
+          // A plan saved but not read again is out of date wherever the user goes; a refusal is the surface's.
+          lasts: offer === "refresh" ? "stale" : "refusal",
+          at: null,
+        });
+      else if (undo !== null)
+        setNotice({ text: undo.text, offer: "undo", retry: null, undo, lasts: "offer", at: null });
+      else if (saved && after.undone !== undefined)
+        setNotice({ text: after.undone, offer: null, retry: null, lasts: "news", at: null });
       else if (saved && after.done !== undefined)
-        setNotice({ text: after.done, offer: null, retry: null, polite: true });
-      else setNotice(null);
+        setNotice({ text: after.done, offer: null, retry: null, polite: true, lasts: "news", at: null });
+      else setNotice((was) => noticeAfter(was, { kind: "write" }));
       if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
       sending.current = false;
@@ -440,13 +460,21 @@ export function App() {
             offer: "undo",
             retry: null,
             undo,
+            lasts: "offer",
+            at: null,
           });
           return;
         }
         if (next !== null) setLoad(next);
         const plan = lastRead.current;
         if (plan === null || !undo.holds(plan))
-          setNotice({ text: "Changed since, so it can't be undone", offer: null, retry: null });
+          setNotice({
+            text: "Changed since, so it can't be undone",
+            offer: null,
+            retry: null,
+            lasts: "offer",
+            at: null,
+          });
         else await send(undo.command, { select: null, pin: null, undone: undo.undone });
       } finally {
         undoing.current = false;
@@ -460,7 +488,15 @@ export function App() {
       if (model === null) return;
       const step = pick(model, mode, target);
       setMode(step.mode);
-      setNotice(step.refusal === null ? null : { text: step.refusal, offer: null, retry: null });
+      const refusal = step.refusal;
+      // A target refused says why where the user chose it; one taken drops what an earlier choice was refused.
+      setNotice((was) =>
+        refusal !== null
+          ? { text: refusal, offer: null, retry: null, lasts: "refusal", at: null }
+          : was?.lasts === "refusal"
+            ? null
+            : was,
+      );
       if (step.command === null || mode.kind === "idle") return;
       // A move pins the new parent, or the item itself when it goes to the top level; a link, the item linked from.
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
@@ -499,11 +535,23 @@ export function App() {
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
-    setNotice((was) => (was?.unsaved ? null : was));
+    setNotice((was) => noticeAfter(was, { kind: "form-closed" }));
     setFormsClosed((was) => was + 1);
   }, []);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [panel]);
+  /** Where the user is, which says how long a notice stays and where it shows. */
+  const shownItem = chosen?.id ?? null;
+  const place: Place = useMemo(
+    () => ({ layer: panel, item: shownItem, thread, view }),
+    [panel, shownItem, thread, view],
+  );
+  // A notice is first shown where the user is, and kept or dropped as they move. As an update of the notice as it
+  // is by then, so it never brings back one another effect of the same move cleared, such as a closed form's.
+  useEffect(() => {
+    if (notice !== null) setNotice((was) => noticeAfter(was, { kind: "moved", to: place }));
+  }, [notice, place]);
+  const noticeAt = notice === null ? null : placed(notice, place);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
@@ -514,9 +562,7 @@ export function App() {
     // The command menu closes over a form without touching it.
     if (closing.some((layer) => layer !== "command") && document.querySelector("form[data-dirty='true']") !== null) {
       // A link waiting for the form says so already, and dismissing that drops it.
-      setNotice((was) =>
-        was?.held ? was : { text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true },
-      );
+      setNotice((was) => (was?.held ? was : UNSAVED));
       return 0;
     }
     for (const layer of closing) {
@@ -674,8 +720,9 @@ export function App() {
         text: `Unsaved changes: save or cancel, then ${name} opens`,
         offer: null,
         retry: null,
-        unsaved: true,
         held: true,
+        lasts: "form",
+        at: null,
       });
       return;
     }
@@ -711,9 +758,17 @@ export function App() {
             text: `That ${gone} ${found.missing.length > 1 ? "aren't" : "isn't"} in the plan any more`,
             offer: null,
             retry: null,
+            lasts: "news",
+            at: null,
           }
         : found.archived
-          ? { text: "That item is archived, so archived items are showing", offer: "hide-archived", retry: null }
+          ? {
+              text: "That item is archived, so archived items are showing",
+              offer: "hide-archived",
+              retry: null,
+              lasts: "news",
+              at: null,
+            }
           : null,
     );
   };
@@ -732,7 +787,7 @@ export function App() {
       await navigator.clipboard.writeText(url);
       return true;
     } catch {
-      setNotice({ text: "Copy this link:", offer: null, retry: null, link: url });
+      setNotice({ text: "Copy this link:", offer: null, retry: null, link: url, lasts: "refusal", at: null });
       return false;
     }
   };
@@ -773,8 +828,7 @@ export function App() {
     if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
     if (run.kind === "archived") return setShowArchived((was) => !was);
     if (run.kind === "refresh") return refresh();
-    if (document.querySelector("form[data-dirty='true']") !== null)
-      return setNotice({ text: "Unsaved changes: save them, or cancel", offer: null, retry: null, unsaved: true });
+    if (document.querySelector("form[data-dirty='true']") !== null) return setNotice(UNSAVED);
     if (run.kind === "view") setView(run.view);
     else if (run.kind === "needs") openNeeds();
     else if (run.kind === "add") startAdd(null);
@@ -908,6 +962,7 @@ export function App() {
         ) : null}
         <button
           type="button"
+          className="close"
           aria-label="Dismiss"
           onClick={() => {
             if (notice.held) setWanted(null);
@@ -918,6 +973,8 @@ export function App() {
         </button>
       </div>
     );
+  /** The notice for the panel on top to show under its heading, if it is the panel's. */
+  const panelNotice = noticeAt === "panel" ? noticeView : null;
   const prompt =
     mode.kind === "move"
       ? `Choose the box to put ${titleOf(mode.item)} in`
@@ -1079,7 +1136,6 @@ export function App() {
           </div>
         ) : null}
         {commandMenu}
-        {panel === "add" || panel === "item" || panel === "thread" || panel === "needs" ? null : noticeView}
         {panel === "mode" ? (
           <div className="sheet prompt" data-testid="prompt">
             <span className="grow">{prompt}</span>
@@ -1103,7 +1159,7 @@ export function App() {
             idRefused={adding.idRefused}
             draft={adding.draft}
             busy={busy}
-            notice={noticeView}
+            notice={panelNotice}
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
@@ -1136,7 +1192,7 @@ export function App() {
               send(edit, { select: chosen.id, pin: chosen.id, undo: true }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
-            notice={noticeView}
+            notice={panelNotice}
             lines={lines}
             busy={busy}
           />
@@ -1156,7 +1212,7 @@ export function App() {
             }}
             onClose={() => setShowNeeds(false)}
             onDismiss={() => closeTop.current(1)}
-            notice={noticeView}
+            notice={panelNotice}
             at={needsAt}
           />
         ) : null}
@@ -1195,10 +1251,12 @@ export function App() {
             onClose={closeThread}
             onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
-            notice={noticeView}
+            notice={panelNotice}
           />
         ) : null}
       </main>
+      {/* The slot: at the stage's foot, in its flow, so it covers nothing and a sheet rises above it. */}
+      {noticeAt === "slot" ? <div className="slot">{noticeView}</div> : null}
     </Shell>
   );
 }
