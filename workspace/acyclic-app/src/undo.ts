@@ -2,9 +2,9 @@
 // safe. A move, an item's fields but its thread, a link added or removed, the global autonomy level, and a thread's
 // first approval while no agent has started its work undo; nothing else does: an add (the app has no delete), a
 // reopen, an approval again or a revoking (agents act on them), a proposal kept or dropped, a conflict settled, a
-// thread changed (back in an approved thread, an item is a late member waiting for approval again). The guard is checked against a plan read just before the undo is sent; the server has no
-// compare-and-set, so a write landing between that read and the undo isn't caught. Pure, so tested without a browser.
-
+// thread changed (back in an approved thread, an item is a late member waiting for approval again). The guard is
+// checked against a plan read just before the undo is sent; the server has no compare-and-set, so a write landing
+// between that read and the undo isn't caught. Pure, so tested without a browser.
 import type { Command, Item, Stage } from "./api";
 import type { LinkKind } from "./edits";
 

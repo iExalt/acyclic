@@ -186,17 +186,17 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   through the Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No
   single key approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the
   menu's Single-key shortcuts switch, per device, turns them off.
-- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, the global autonomy
-  level, and a thread's first approval offer Undo in their notice, and ⌘Z while it shows; nothing else does, as
-  nothing else has an exact inverse (an approval again, a revoking, a proposal kept or dropped, a thread's own level or
-  flag, a thread changed: agents act on them). An approval is taken back, by a revoke, only while no agent has started
-  on the work it approved. Undo reads
-  the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a removed wait or a
-  state once the work it released has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set
-  back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig",
-  "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits
-  in the slot, its text two lines at most there, so it says what was done, as its button says what it offers;
-  anything else in the slot wraps, as it is the only place its reason shows.
+- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, the global autonomy level,
+  and a thread's first approval offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else
+  has an exact inverse (an approval again, a revoking, a proposal kept or dropped, a thread's own level or flag, a
+  thread changed: agents act on them). An approval is taken back, by a revoke, only while no agent has started on the
+  work it approved, as a claim shows on any of its items that could start. Undo reads the plan first, and without that
+  read it undoes nothing; it takes back nothing changed since, nor a removed wait or a state once the work it released
+  has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set back to Blockers", not
+  "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig", "Sow no longer waits for
+  Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits in the slot, its text two
+  lines at most there, so it says what was done, as its button says what it offers; anything else in the slot wraps, as
+  it is the only place its reason shows.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
