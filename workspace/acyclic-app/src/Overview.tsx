@@ -15,8 +15,9 @@ import type { WavesView } from "./waves";
 import { COLUMNS, useWide } from "./wide";
 
 /**
- * How many rows each section shows before it says how many more: in columns, as many in Needs you as beside it, so the
- * columns end nearer level; on a phone, where the sections stack, fewer, so the rest is reached sooner.
+ * How many rows each section shows before it says how many more: from 700 px, as many in Needs you as In progress
+ * shows, so the three columns of a wide screen end level; on a phone, where the sections stack, fewer, so the rest is
+ * reached sooner.
  */
 const THREADS_SHOWN = 8;
 const NEEDS_SHOWN_STACKED = 5;
@@ -160,7 +161,7 @@ export function Overview({
           ) : (
             <ul className="rows">{working.slice(0, THREADS_SHOWN).map(thread)}</ul>
           )}
-          {more(THREADS_SHOWN, working.length, "threads", () => onView("threads"))}
+          {more(THREADS_SHOWN, working.length, "in Threads", () => onView("threads"))}
         </section>
 
         <section className="overview-section" aria-labelledby="overview-next">
@@ -177,7 +178,7 @@ export function Overview({
           ) : (
             <ul className="rows">{next.slice(0, THREADS_SHOWN).map(thread)}</ul>
           )}
-          {more(THREADS_SHOWN, next.length, "ready", () => onView("threads"))}
+          {more(THREADS_SHOWN, next.length, "in Threads", () => onView("threads"))}
         </section>
       </div>
 

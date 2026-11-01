@@ -21,8 +21,10 @@ describe("wheelZoom", () => {
     // A short two-finger swipe and a pinch out, as Chrome on a Mac sent them.
     expect(run([1, 2, 1, 4, 6, 6, 6, 8, 8, 13, 5, 12, 14, 10, 11])).toBeCloseTo(10 ** (-107 / 250));
     expect(run([-1.04, -0.89, -1.78, -1.78, -2.44], true)).toBeCloseTo(10 ** (7.93 / 250));
-    // A pinch is never a notch, however far it moves at once.
-    expect(run([-80], true)).toBeCloseTo(10 ** (80 / 250));
+    // Ctrl held over a mouse wheel's notch zooms a notch's 12%, not a pinch's sixty.
+    expect(run([-80], true)).toBeCloseTo(1.12);
+    // A notch is told by its size: a pinch's large step, fractional, still zooms smoothly.
+    expect(run([-80.5], true)).toBeCloseTo(10 ** (80.5 / 250));
   });
 
   it("stays within the Map's zoom limits", () => {

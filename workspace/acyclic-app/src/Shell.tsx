@@ -210,13 +210,37 @@ function SidebarShell(props: ShellProps) {
         <footer className="sidebar-foot">
           <div className="about">
             <Count count={props.count} />
-            <span className="autonomy">Autonomy: {props.autonomy}</span>
+            <Autonomy level={props.autonomy} />
           </div>
           <Menu up>{props.menu}</Menu>
         </footer>
       </aside>
       {props.children}
     </div>
+  );
+}
+
+/**
+ * The level, which a word alone leaves unexplained: pressed, it opens the menu at the setting, which says in words what
+ * the level lets reach the user.
+ */
+function Autonomy({ level }: { level: string }) {
+  const open = (from: HTMLElement) => {
+    const menu = from.closest(".shell")?.querySelector("summary[data-testid=menu]")?.parentElement;
+    if (!(menu instanceof HTMLDetailsElement)) return;
+    menu.open = true;
+    requestAnimationFrame(() => menu.querySelector<HTMLElement>("[data-testid=global-level]")?.focus());
+  };
+  return (
+    <button
+      type="button"
+      className="autonomy"
+      title="What agents ask you about: change it in the menu"
+      aria-haspopup="true"
+      onClick={(event) => open(event.currentTarget)}
+    >
+      Autonomy: {level}
+    </button>
   );
 }
 
@@ -229,7 +253,9 @@ function PhoneShell(props: ShellProps) {
         <div className="brand">
           <h1>{title}</h1>
           {/* The level, safety-relevant, in view as the sidebar's foot says it; the count is the sidebar's alone. */}
-          <p>Autonomy: {props.autonomy}</p>
+          <p>
+            <Autonomy level={props.autonomy} />
+          </p>
         </div>
         <button type="button" className="icon" aria-label="Search" onClick={props.onSearch} data-action="search">
           <Icon of={Search} size={22} />

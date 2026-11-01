@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Item } from "./api";
 import { item } from "./map/fixture";
-import { type Plan, undoOf } from "./undo";
+import { keep, type Plan, undoOf, unkeep } from "./undo";
 
 const plan = (items: Item[], level = "blockers"): Plan => ({
   items: new Map(items.map((one) => [one.id, one])),
@@ -121,5 +121,25 @@ describe("undo", () => {
     const boxDone = changed(boxed, "dig", { state: "done" });
     expect(outer?.holds(boxDone)).toBe(true);
     expect(outer?.holds(changed(boxDone, "sow", { stage: "in-progress" }))).toBe(false);
+  });
+
+  it("offers the same Undo after a reload, saying what it said, with its guard against the plan as it is then", () => {
+    const command = { item: { edit: { item: "dig", parent: "beds" } } };
+    const kept = unkeep(JSON.parse(JSON.stringify(keep(command, before, "Moved Dig into Beds", "Moved Dig back"))));
+    expect([kept?.text, kept?.undone, kept?.command]).toEqual([
+      "Moved Dig into Beds",
+      "Moved Dig back",
+      { item: { edit: { item: "dig", parent: "garden" } } },
+    ]);
+    expect([kept?.holds(after("dig", { parent: "beds" })), kept?.holds(before)]).toEqual([true, false]);
+    // Only what an undo of an edit reads is kept, not the whole plan: the item, its boxes, what waits on them.
+    expect(keep(command, before, "", "").items.map((one) => one.id)).toEqual(["beds", "dig", "garden", "sow"]);
+  });
+
+  it("keeps what a state's guard reads over a reload: what waits on the item or a box above it", () => {
+    const command = { item: { edit: { item: "dig", state: "done" } } };
+    const kept = unkeep(JSON.parse(JSON.stringify(keep(command, before, "Edited Dig", "Set Dig back"))));
+    expect(kept?.holds(after("dig", { state: "done" }))).toBe(true);
+    expect(kept?.holds(changed(after("dig", { state: "done" }), "sow", { stage: "in-progress" }))).toBe(false);
   });
 });

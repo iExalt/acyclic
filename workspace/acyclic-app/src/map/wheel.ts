@@ -1,13 +1,13 @@
 // The Map's own wheel zoom. Cytoscape's zooms about 3% per notch of a mouse wheel, which crawls on a laptop; this one
-// zooms 12% per notch. A trackpad's two-finger scroll and its pinch, which browsers send as a wheel with ctrlKey held,
-// zoom as Cytoscape's always did.
+// zooms 12% per notch, with Ctrl held or not. A trackpad's two-finger scroll and its pinch, which browsers send as a
+// wheel with ctrlKey held, a few fractional pixels at a time, zoom as Cytoscape's always did.
 
 /** What zooming needs of a wheel event. */
 export interface Wheel {
   deltaY: number;
   /** 0 for pixels, 1 for lines, 2 for pages, as WheelEvent has it. */
   deltaMode: number;
-  /** Held for a trackpad's pinch. */
+  /** Held for a trackpad's pinch, or by the user turning a mouse wheel. */
   ctrlKey: boolean;
 }
 
@@ -26,7 +26,8 @@ const SMOOTH_GAIN = Math.log(10) / 250;
 /** The zoom after `wheel`: scrolling down or pinching in zooms out, within `min` and `max`. */
 export function wheelZoom(zoom: number, wheel: Wheel, min: number, max: number, page: number): number {
   const pixels = wheel.deltaY * (wheel.deltaMode === 1 ? LINE : wheel.deltaMode === 2 ? page : 1);
-  const notched = !wheel.ctrlKey && (wheel.deltaMode !== 0 || (Number.isInteger(pixels) && Math.abs(pixels) >= NOTCH));
+  // Ctrl and a mouse wheel's notch zoomed 60% at a time as a pinch: a notch is told by its size, not by the key.
+  const notched = wheel.deltaMode !== 0 || (Number.isInteger(pixels) && Math.abs(pixels) >= NOTCH);
   const next = zoom * Math.exp(-pixels * (notched ? NOTCH_GAIN : SMOOTH_GAIN));
   return Math.min(max, Math.max(min, next));
 }

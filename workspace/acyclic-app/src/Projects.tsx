@@ -48,7 +48,7 @@ export function Projects({ outline, lines, picked, current, onPickThread, onSele
           aria-current={thread === current.thread && project === current.project ? "true" : undefined}
           data-thread={thread}
           data-project={project ?? ""}
-          title={line?.name}
+          title={also.length === 0 ? line?.name : `${line?.name ?? thread}, also in ${also.map(title).join(", ")}`}
           onClick={() => onPickThread(thread)}
         >
           <Badge line={line} />
