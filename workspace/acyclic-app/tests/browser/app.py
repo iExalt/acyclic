@@ -455,7 +455,7 @@ def overview_journey(page, view, name, failures):
     overview = page.get_by_test_id("overview")
     overview.wait_for(timeout=5_000)
     headings = overview.locator(".overview-section h2").all_inner_texts()
-    if headings != ["Needs you", "In progress", "Up next", "Phases"]:
+    if headings != ["Needs you", "In progress", "Up next", "Projects"]:
         failures.append(f"{name}: the Overview's lists are {headings}")
     row = overview.locator("[data-overview-thread]").first
     thread = row.get_attribute("data-overview-thread")

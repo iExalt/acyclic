@@ -64,7 +64,7 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
   return (
     <div className="outline">
       <h2 className="heading">
-        Phases <span className="count">{outline.phases.length}</span>
+        Projects <span className="count">{outline.phases.length}</span>
       </h2>
       <ul>
         {outline.phases.map((phase) => {
@@ -99,7 +99,7 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
               </div>
               {expanded ? (
                 <>
-                  <h3 className="subheading">Threads in this phase</h3>
+                  <h3 className="subheading">Threads in this project</h3>
                   <ul>{phase.threads.map((one) => row(one.id, phase.id, one.also))}</ul>
                 </>
               ) : null}

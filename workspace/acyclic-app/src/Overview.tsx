@@ -182,7 +182,7 @@ export function Overview({
 
       <section className="overview-section overview-phases" aria-labelledby="overview-phases">
         <header>
-          <h2 id="overview-phases">Phases</h2>
+          <h2 id="overview-phases">Projects</h2>
           <span className="count muted">{outline?.phases.length ?? 0}</span>
           <span className="grow" />
           <button type="button" className="quiet" onClick={() => onView("map")}>
@@ -190,7 +190,7 @@ export function Overview({
           </button>
         </header>
         {outline === null || outline.phases.length === 0 ? (
-          <p className="empty">No phases yet: add an item at the top level, and work inside it.</p>
+          <p className="empty">No projects yet: add an item at the top level, and work inside it.</p>
         ) : (
           <ul className="rows">
             {outline.phases.map((phase) => {

@@ -199,7 +199,7 @@ function SidebarShell(props: ShellProps) {
             <span className="text">New item</span>
           </button>
           {folded ? null : (
-            <nav className="threads" aria-label="Phases and threads">
+            <nav className="threads" aria-label="Projects and threads">
               {props.outline}
             </nav>
           )}

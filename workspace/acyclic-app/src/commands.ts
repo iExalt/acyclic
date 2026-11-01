@@ -22,9 +22,9 @@ export type Run =
 
 export type OnItem = "edit" | "move" | "waits-for" | "relates-to" | "add-inside";
 
-export type Group = "Actions" | "Threads" | "Phases" | "Items";
+export type Group = "Actions" | "Threads" | "Projects" | "Items";
 /** The order groups list in, and break ties in. */
-export const GROUP_ORDER: readonly Group[] = ["Actions", "Threads", "Phases", "Items"];
+export const GROUP_ORDER: readonly Group[] = ["Actions", "Threads", "Projects", "Items"];
 
 export interface Entry {
   /** Unique among entries, for the list's keys and the active option. */
@@ -129,7 +129,7 @@ export function entries(plan: Plan): Entry[] {
   for (const { id, title, phase, isPhase } of listed(plan))
     if (isPhase)
       phases.push(
-        entry({ key: `phase:${id}`, group: "Phases", title, detail: id, also: id, run: { kind: "phase", id } }),
+        entry({ key: `phase:${id}`, group: "Projects", title, detail: id, also: id, run: { kind: "phase", id } }),
       );
     else
       items.push(
@@ -182,7 +182,7 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
       .map(({ id, title, phase, isPhase }) =>
         entry({
           key: `target:${id}`,
-          group: isPhase ? "Phases" : "Items",
+          group: isPhase ? "Projects" : "Items",
           title,
           detail: detail(id, phase),
           also: id,
@@ -239,7 +239,7 @@ export function rank(query: string, all: readonly Entry[], working: ReadonlySet<
           entry.group === "Actions" ||
           (entry.run.kind === "thread" && working.has(entry.run.id)) ||
           // A move's or link's targets offer the phases, the places most moves go, before anything is typed.
-          (entry.run.kind === "target" && entry.group === "Phases"),
+          (entry.run.kind === "target" && entry.group === "Projects"),
       )
       .slice(0, MOST);
   const whole = words.join(" ");

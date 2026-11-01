@@ -147,7 +147,7 @@ export function ThreadPanel({
       </p>
       <div className="progress">
         {counts === undefined || counts.leaves === 0 ? (
-          <span className="muted">No tasks shown</span>
+          <span className="muted">No items shown</span>
         ) : (
           <StageCounts counts={counts} />
         )}
@@ -172,7 +172,7 @@ export function ThreadPanel({
       )}
       {detail.heads.length === 0 ? null : (
         <div className="heads">
-          <h3>Unblocked</h3>
+          <h3>Starts with</h3>
           <ul className="rows">
             {detail.heads.map((head) => {
               const stage = stageOf(head);

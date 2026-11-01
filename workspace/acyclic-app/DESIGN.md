@@ -11,7 +11,7 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 ## Primary tasks
 
 1. Settle what needs them: approve a thread, keep or drop an agent's proposal, unblock an item.
-2. See where work stands: which threads are at work, which to start next, how each phase is doing.
+2. See where work stands: which threads are at work, which to start next, how each project is doing.
 3. Reshape the plan: add, move, link and edit items on the Map.
 
 ## Product principles
@@ -56,7 +56,7 @@ Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the side
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
 Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's leaves' titles stay at 500,
-as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a phase's title barely led its
+as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a project's title barely led its
 items. Overpass's regular strokes are thin on a screen, and the text strained to read
 beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
 cold; Overpass, heavier, keeps the app's voice.
@@ -70,7 +70,7 @@ Overpass sets smaller than Inter at a size.)
 
 - **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, Search, the outline, New item, the
   menu), the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
-  button and sheet are both called Outline; its phases carry no count, as opening one shows its threads.
+  button and sheet are both called Outline; its projects carry no count, as opening one shows its threads.
 - **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
   bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
   them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would push every panel down or lie over
@@ -80,15 +80,15 @@ Overpass sets smaller than Inter at a size.)
   the other panels open at half. A tap on the Map that opens a panel over what it tapped pans the least that shows
   it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at all.)
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about
-  210 px beside a panel), with In progress and Up next side by side from 700 px, and the phases in two columns.
-- **Wide:** a sidebar (the views, Needs you, New item, the outline of phases and threads, the menu at its foot); panels
-  open on the right. All but the foot scrolls as one, and each outline row is a line, cut short with its full name on
-  hover, as Linear's. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs you's count on
-  its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in a scroll area
-  of their own, read as clutter.)
+  210 px beside a panel), with In progress and Up next side by side from 700 px, and the projects in two columns.
+- **Wide:** a sidebar (the views, Needs you, New item, the outline of projects and threads, the menu at its foot);
+  panels open on the right. All but the foot scrolls as one, and each outline row is a line, cut short with its full
+  name on hover, as Linear's. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs you's
+  count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in a
+  scroll area of their own, read as clutter.)
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
   320 px, each up to eight rows, so the columns end level; five for Needs you on a phone, where they stack), the
-  phases across the page below them in columns of rows; an open panel keeps its width clear. (A single 960 px column
+  projects across the page below them in columns of rows; an open panel keeps its width clear. (A single 960 px column
   left most of a desktop empty.)
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
@@ -96,7 +96,7 @@ Overpass sets smaller than Inter at a size.)
 
 ## Shapes
 
-One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone round their top corners, by 14 px.
+One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone round their top corners, by 14 px.
 
 ## Components
 
@@ -149,7 +149,7 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end. A
   thread's row is its badge and name; the number is the badge's. A waiting move or link offers its targets with the
-  phases in their own group, first before anything is typed, never the item itself, nor, for a move, where it is
+  projects in their own group, first before anything is typed, never the item itself, nor, for a move, where it is
   already or anything inside it.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
@@ -172,7 +172,7 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   place. A device not yet paired loses the address through pairing.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
-  thread, phase and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
+  thread, project and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
   the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the focus back
   where it was.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
@@ -202,21 +202,22 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the
   Map, goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than
   1:1, no further out than readable, else from its first item). The picked thread's row in the sidebar, on the Map,
-  unpicks it. A card picked in the Threads view opens the thread's panel there.
+  unpicks it. A tile picked in the Threads view opens the thread's panel there.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
-  a phase and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
+  a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
   page of their own.
 
 ## Voice & copy
 
 Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose" its
-target, as a tap or a click both do. Names follow `GLOSSARY.md`: item, thread, project, the needs-you list (written
-Needs you), and its other words. Three more are the app's own, which the glossary doesn't define: a phase is the
-glossary's project, in the outline and on the Map, a wave is a step in the order threads can start: each thread comes
-one wave after the latest thread it waits on, and waits until that work is merged (the tracker's `waves`); threads that
-wait on nothing, and that nothing waits on, are Any time, and a stage is where an item stands. A card, in the Threads
-view, is one thread's tile, not the glossary's Card. Errors say what to check before what went wrong.
+target, as a tap or a click both do. Names follow `GLOSSARY.md`, the source of truth for every word the app shows:
+item, project, thread, wave, the needs-you list (written Needs you), and its other words. Where the app needs a word
+the glossary lacks, the glossary gains it first; the app never has words of its own for the tracker's ideas. Threads
+that wait on nothing, and that nothing waits on, are Any time. Two words are the code's alone and never shown: an
+item's stage is where it stands (its readiness, or its state once it is done), and `Card` is a thread's tile in the
+Threads view, which these notes call a tile, since the glossary's Card means something else. Errors say what to check
+before what went wrong.
 
 ## Do's and Don'ts
 
@@ -235,18 +236,18 @@ view, is one thread's tile, not the glossary's Card. Errors say what to check be
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
   stage's icon at the end.
-- **A phase tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
+- **A project tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
   any of it moves, done once all of it is, else ready, else blocked), after its chevron, and is muted once done or
   held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
-- **Hover shows an item's links**, as hovering a card on the Threads view does: its own, in ink, across boxes too, and
+- **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
   the rest recede; the links a drawn way already implies stay out, since drawn straight they would cut across items.
   Touch has no hover; a tap selects, which shows them all.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
 - **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the
-  Overview's phases come in that same order (`topOrder`), so a list and the Map never disagree.
+  Overview's projects come in that same order (`topOrder`), so a list and the Map never disagree.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** A link is left out only when a longer way through items in the same box already
@@ -271,7 +272,7 @@ view, is one thread's tile, not the glossary's Card. Errors say what to check be
 - 2026-10-31: the scheme follows the system's.
 - 2026-10-31: the Map's links bundled on the way out, in one column per chain; the user found it cleanest and liked it
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
-- 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
+- 2026-11-01: Up next lists the approved threads with an item ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
   over opening items in place. A thread opened from another view does the same, by extension (proposed).

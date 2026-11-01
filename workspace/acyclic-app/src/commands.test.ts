@@ -106,7 +106,7 @@ describe("the command menu", () => {
     expect(move[0]?.run).toEqual({ kind: "target", id: null });
     expect(rank("garden", move, new Set()).map((one) => one.run)).toEqual([{ kind: "target", id: "garden" }]);
     // Phases in their own group, offered before anything is typed.
-    expect(move.find((one) => one.title === "Garden")?.group).toBe("Phases");
+    expect(move.find((one) => one.title === "Garden")?.group).toBe("Projects");
     expect(rank("", move, new Set()).map((one) => one.title)).toEqual(["Top level", "Garden"]);
     expect(targets(plan, "link").some((one) => one.run.kind === "target" && one.run.id === null)).toBe(false);
     expect(rank("paint", targets(plan, "link"), new Set())).toEqual([]);

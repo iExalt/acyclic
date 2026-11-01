@@ -36,7 +36,7 @@ export function StageLabel({ stage }: { stage: Stage }) {
 }
 
 /** A parent's leaves by stage, in words, each beside its icon; `none` when there are none to count. */
-export function StageCounts({ counts, none = "No tasks" }: { counts: Counts; none?: string }) {
+export function StageCounts({ counts, none = "No items" }: { counts: Counts; none?: string }) {
   const shown = stageCounts(counts);
   if (shown.length === 0) return <span className="stage-counts">{none}</span>;
   return (
