@@ -796,7 +796,9 @@ export function App() {
     setSelected(null);
     if (to.item !== null) {
       if (found.archived) setShowArchived(true);
-      select(to.item, null);
+      // On the Map, brought into view; over another view, left open there, as it was when the address was written.
+      if (to.view === "map") select(to.item, null);
+      else selectOnly(to.item);
     }
     if (to.view === "map" && to.item === null && to.thread !== null) toThread(to.thread);
     else setThread(to.thread);

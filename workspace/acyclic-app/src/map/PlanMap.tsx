@@ -16,24 +16,15 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import {
-  firstView,
-  frame,
-  framesAll,
-  headed,
-  nearest,
-  newlyCovered,
-  READABLE,
-  reveal,
-  startOf,
-  uncovered,
-} from "./reveal";
+import { firstView, frame, framesAll, headed, nearest, newlyCovered, reveal, startOf, uncovered } from "./reveal";
 import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
+/** The first view's furthest zoom, on every screen: 1:1, titles at their 13 px, as a phone reads them too. */
+const FIRST_ZOOM = 1;
 /** What the pointer shows the links of: a tile, or a collapsed box, which holds its tiles' links. */
 const HOVERABLE = "node.leaf, node.collapsed";
 
@@ -123,9 +114,6 @@ export default function PlanMap({
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
-  // The first view's furthest zoom: 1:1 on a wide screen, which has the room to show titles at full size; on a phone,
-  // as far out as titles can still be read.
-  const firstZoom = useWide() ? 1 : READABLE;
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
@@ -159,7 +147,7 @@ export default function PlanMap({
     if (next === toggles && model === drawnModel.current) {
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
-      if (host.current !== null) revealIn(core, host.current, focus.id);
+      if (host.current !== null) revealIn(core, host.current, focus.id, true);
       return;
     }
     shown.current = focus.id;
@@ -293,9 +281,9 @@ export default function PlanMap({
         }),
         screen.width,
         16,
-        firstZoom,
+        FIRST_ZOOM,
       );
-      const view = firstView(placed, screen, 16, MAX_ZOOM, start, firstZoom);
+      const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
       // Pan so the toggled box's corner is where it was before the layout changed.
@@ -308,7 +296,7 @@ export default function PlanMap({
     }
     if (shown.current !== null) {
       // The pin holds still unless that leaves the item hidden.
-      revealIn(core, element, shown.current);
+      revealIn(core, element, shown.current, true);
       shown.current = null;
     }
     drawnModel.current = model;
@@ -492,11 +480,14 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
   core.minZoom(Math.min(1, fit * 0.9));
 }
 
-/** Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it. */
-function revealIn(core: Core, element: HTMLElement, id: string) {
+/**
+ * Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it; `centred`, to the
+ * middle of what is left, for one brought in from elsewhere.
+ */
+function revealIn(core: Core, element: HTMLElement, id: string, centred = false) {
   const node = core.getElementById(id);
   if (node.empty()) return;
-  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element)));
+  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element), 8, centred));
 }
 
 /** Whether the user is typing, as a phone's keyboard, which takes from the Map's height, is up for. */

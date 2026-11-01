@@ -20,13 +20,15 @@ const OWNED = ["view", "item", "thread", "needs"];
 
 /**
  * The address for what is open, from `/` on: bare at home with nothing open. Only the parameters the app's state owns
- * change; others in `search`, such as a switch a test run set, stay. An item is on the Map, so says so.
+ * change; others in `search`, such as a switch a test run set, stay. An item is on the Map, so says so, unless the
+ * user went to another view with it open.
  */
 export function addressOf(wanted: Wanted, search = ""): string {
   const query = new URLSearchParams(search);
   for (const key of OWNED) query.delete(key);
+  // An item implies the Map; one left open over another view, which the user went to with it open, names that view.
+  if (wanted.item === null ? wanted.view !== HOME : wanted.view !== "map") query.set("view", wanted.view);
   if (wanted.item !== null) query.set("item", wanted.item);
-  else if (wanted.view !== HOME) query.set("view", wanted.view);
   if (wanted.thread !== null) query.set("thread", wanted.thread);
   if (wanted.needs) query.set("needs", wanted.needsAt ?? "");
   // A bare `needs`, as notifications send it, rather than `needs=`.
@@ -39,7 +41,7 @@ export function parse(search: string): Wanted {
   const query = new URLSearchParams(search);
   const named = query.get("view");
   const item = query.get("item") || null;
-  const view = item !== null ? "map" : (VIEWS.find((one) => one === named) ?? HOME);
+  const view = VIEWS.find((one) => one === named) ?? (item !== null ? "map" : HOME);
   return {
     view,
     item,

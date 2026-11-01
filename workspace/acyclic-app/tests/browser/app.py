@@ -72,8 +72,8 @@ VIEWS = {
     },
     "desktop": {"viewport": {"width": 1440, "height": 900}, "color_scheme": "dark"},
 }
-# The furthest the Map's first view zooms out, as reveal.ts has it.
-READABLE = 0.85
+# The furthest the Map's first view zooms out, on every screen, as PlanMap.tsx has it.
+FIRST_ZOOM = 1
 # How long the 3,500-item Map may take to draw: a loose bound against hanging, not a timing.
 LARGE_LIMIT_MS = 60_000
 # How long the whole run may take on CI: past the first it warns, past the second it fails, so the journeys can't grow
@@ -556,6 +556,11 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         title.wait_for(timeout=10_000)
         if title.inner_text() != plan.items[id]["title"]:
             failures.append(f"{name}: reloading a link to {id} opened {title.inner_text()!r}")
+        # An item left open over another view opens there again, not on the Map.
+        page.goto(f"{origin}/?view=threads&item={quote(id)}")
+        title.wait_for(timeout=10_000)
+        if page.get_by_test_id("threads-view").count() != 1:
+            failures.append(f"{name}: an item open over Threads reopened on {page.url}, not over Threads")
         # A link to the tile drawn furthest right, where the panel will open, brings it out from under the panel.
         drawn = "() => document.querySelector('[data-testid=map]')?.dataset.state === 'drawn'"
         page.goto(f"{origin}/?view=map")
@@ -894,13 +899,13 @@ def pairing_journey(context, page, origin, env, name, failures):
 
 
 def first_view_readable(page, name, failures):
-    """The Map opens at a zoom its titles can be read at, with an item, not a box, wholly in view, title and all."""
+    """The Map opens at 1:1 or closer, with an item, not a box, wholly in view, title and all."""
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
         " shown: m.cy.nodes().not('.box, .junction').some(n => { const b = n.renderedBoundingBox();"
         " return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= w && b.y2 <= h; }) }; }"
     )
-    if view["zoom"] < READABLE or not view["shown"]:
+    if view["zoom"] < FIRST_ZOOM or not view["shown"]:
         failures.append(
             f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
         )
