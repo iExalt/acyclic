@@ -10,6 +10,7 @@ const none = {
   phases: false,
   thread: false,
   away: false,
+  threadOverNeeds: false,
 };
 
 describe("topLayer", () => {
@@ -23,6 +24,7 @@ describe("topLayer", () => {
       phases: true,
       thread: true,
       away: true,
+      threadOverNeeds: false,
     };
     expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
@@ -36,6 +38,13 @@ describe("topLayer", () => {
     // Away from home, on a phone, is under everything: Back closes what's over the view before it goes home.
     expect(openLayers({ ...none, away: true, item: true, thread: true })).toEqual(["item", "thread", "away"]);
     expect(topLayer({ ...none, away: true })).toBe("away");
+  });
+
+  it("puts a thread over Needs you when it was opened there, without counting the order as a layer", () => {
+    const both = { ...none, needs: true, thread: true, threadOverNeeds: true };
+    expect(openLayers({ ...both, item: true })).toEqual(["item", "thread", "needs"]);
+    expect(depth(both)).toBe(2);
+    expect(depth({ ...none, threadOverNeeds: true })).toBe(0);
   });
 });
 

@@ -133,7 +133,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and
   says how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes
   it. A hairline between entries; the filters are tabs, the one shown filled.
-- **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
+- **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too. A view's row
+  fills so too, lighter than the view shown, which keeps its fill under the pointer.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end. A
@@ -148,6 +149,11 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   `aria-current="page"` and is filled. Needs you opens over any view as a toggle (`aria-pressed`), marked by ink alone.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
+  A thread the command menu opens while Needs you shows goes over it, where the user is looking.
+- **An item opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you shows on the
+  Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on the
+  Map makes the Map where the user is; an item a link opened closes onto the Map. While Needs you is open over the
+  Overview, the Overview's own Needs you section steps aside rather than repeat it.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
   `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
@@ -252,3 +258,5 @@ you. Errors say what to check before what went wrong.
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
 - 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
+- 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
+  over opening items in place.

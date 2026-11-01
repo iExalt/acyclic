@@ -28,6 +28,8 @@ export interface OverviewProps {
   items: ReadonlyMap<string, Pick<Item, "progress">>;
   /** Opens Needs you, at the entry `key` names if given. */
   onNeeds: (key?: string) => void;
+  /** Needs you is open over the Overview, so its section here would only repeat it. */
+  needsOpen: boolean;
   onPickThread: (id: string) => void;
   onSelectPhase: (id: string) => void;
   /** The view to see everything a section stands for. */
@@ -42,6 +44,7 @@ export function Overview({
   outline,
   items,
   onNeeds,
+  needsOpen,
   onPickThread,
   onSelectPhase,
   onView,
@@ -88,7 +91,7 @@ export function Overview({
         Overview
       </h1>
 
-      <section className="overview-section" aria-labelledby="overview-needs">
+      <section className="overview-section" aria-labelledby="overview-needs" hidden={needsOpen}>
         <header>
           <h2 id="overview-needs">Needs you</h2>
           <span className="count muted">{countText(needs.length)}</span>
