@@ -173,11 +173,12 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   you is open over the Overview, the Overview's own Needs you section steps aside rather than repeat it.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
-  `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
-  entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item
-  shows archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a
-  thread's panel carries it beside the title, ticking in place. A device not yet paired keeps the address through
-  pairing, so the link it opened shows once it is.
+  `?needs=<entry>`), so a reload, a copied link or a notification opens it again; an item implies the Map, and one left
+  open over another view names that view too. A link opens over home, one history entry per layer, so Back closes what
+  it opened, then leaves. A link to something gone says so; one to an archived item shows archived items, with Hide
+  archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's panel carries it beside
+  the title, ticking in place. A device not yet paired keeps the address through pairing, so the link it opened shows
+  once it is.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
   thread, project and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
@@ -209,14 +210,17 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
   and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the
-  Map, goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than
-  1:1, no further out than readable, else from its first item), with the titles of the boxes they are in when those
-  fit too. The picked thread's row in the sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the
-  thread's panel there.
-- **The selection stays in view.** A strip taken from the Map, such as the slot, or a window turned, shows the selected
-  item again if it hid it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user
-  types.
+- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the Map,
+  goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
+  further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
+  known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,
+  and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
+  sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the thread's panel there.
+- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
+  comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it; a tapped
+  one moves the least that shows it. A strip taken from the Map, such as the slot, or a window turned, shows the
+  selected item again if it hid it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the
+  user types.
 - **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is made
   from the title and asked for only once the server refuses it. Added, the item's panel takes the focus, and its Status
   says Saving… until the server has placed it, rather than its state first; its editor opens on Title.
@@ -243,7 +247,8 @@ before what went wrong.
   decisions, with a pointer, an entry's main action is outlined until the entry is under the pointer or holds the
   focus: a column of identical filled buttons read as clutter. Without hover, they stay filled.
 - **The Shape Rule.** Selection is drawn by shape (an ink edge with a soft halo, a fill, a pill), never by hue alone.
-  One ring, not two: a double ring of ink read as heavy in both schemes.
+  One ring, not two: a double ring of ink read as heavy in both schemes. A selected tile's edge is heavier than a lit
+  one's, as a dark thread's line came close to ink.
 - **The Signal Rule.** The signal is text and dashes. Never a solid border, a fill, or a badge with a number, which
   a thread's badge could be mistaken for.
 - **The Text Rule.** Stage counts are always written out; icons only accompany them.
@@ -274,8 +279,8 @@ before what went wrong.
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
   cross have none.
-- **Opening view.** The whole plan when it fits at 1:1 on a wide screen, or at a readable zoom (`READABLE`) on a
-  phone; otherwise the first box's corner, its title and first item whole, at that zoom.
+- **Opening view.** The whole plan when it fits at 1:1, on every screen, a phone's too (at 0.85, a phone's titles
+  read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
 - **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.
@@ -296,7 +301,7 @@ before what went wrong.
 - 2026-11-01: Up next lists the approved threads with an item ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
 - 2026-11-01: tiles three lines tall over wider ones or today's two, and a first view at 1:1 on a wide screen; the
-  user chose them.
+  user chose them. Later the same day, 1:1 on a phone too, 13 px text as on desktop; the user chose it.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
   over opening items in place. A thread opened from another view does the same, by extension (proposed).
 - 2026-11-01: threads' lines in Okhsl, at saturation 0.9, with neighbouring numbers still alike; every notice in the

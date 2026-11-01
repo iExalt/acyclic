@@ -180,15 +180,15 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     })),
     { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
-    // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
-    // soft halo around it that widens the node, as a focused tile's.
+    // The selection is told by its shape as well as its colour, since a lit border may be any hue, a dark one close to
+    // ink: an ink edge heavier than a lit one's, and a halo around it that widens the node, as a focused tile's.
     {
       selector: "node.selected",
       style: {
         "border-color": p.ink,
-        "border-width": 2,
+        "border-width": 3,
         "underlay-color": p.ink,
-        "underlay-opacity": 0.14,
+        "underlay-opacity": 0.22,
         "underlay-padding": 5,
         "underlay-shape": "round-rectangle",
       },

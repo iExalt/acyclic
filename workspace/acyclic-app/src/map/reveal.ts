@@ -9,16 +9,26 @@ export interface Box {
   y2: number;
 }
 
-/** The pan, in screen pixels, that brings `node` inside `open` with `margin` to spare: none if it is already in. */
-export function reveal(node: Box, open: Box, margin = 8): { x: number; y: number } {
+/**
+ * The pan, in screen pixels, that brings `node` inside `open` with `margin` to spare: none if it is already in. The
+ * least that shows it, for a node tapped, which the eye is already on; or, `centred`, to the middle of `open`, for one
+ * brought in from elsewhere, which would otherwise land at an edge with its links beyond it.
+ */
+export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: number; y: number } {
+  const big = (start: number, end: number, from: number, to: number) => end - start > to - from - 2 * margin;
   const along = (start: number, end: number, from: number, to: number) => {
     // Too big to fit: show its start, where its title is.
-    if (end - start > to - from - 2 * margin) return from + margin - start;
+    if (big(start, end, from, to)) return from + margin - start;
     if (start < from + margin) return from + margin - start;
     if (end > to - margin) return to - margin - end;
     return 0;
   };
-  return { x: along(node.x1, node.x2, open.x1, open.x2), y: along(node.y1, node.y2, open.y1, open.y2) };
+  const least = { x: along(node.x1, node.x2, open.x1, open.x2), y: along(node.y1, node.y2, open.y1, open.y2) };
+  if (!centred || (least.x === 0 && least.y === 0)) return least;
+  // Once it moves at all, to the middle both ways, rather than along one to an edge.
+  const middle = (start: number, end: number, from: number, to: number) =>
+    big(start, end, from, to) ? from + margin - start : (from + to) / 2 - (start + end) / 2;
+  return { x: middle(node.x1, node.x2, open.x1, open.x2), y: middle(node.y1, node.y2, open.y1, open.y2) };
 }
 
 /** The part of a map `width` by `height` that a sheet or pane at `cover` (relative to the map) leaves open. */

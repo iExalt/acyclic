@@ -9,6 +9,9 @@ describe("the address", () => {
       { ...NOTHING, view: "map", item: "a b/c&d" },
       { ...NOTHING, needs: true, needsAt: "unapproved:t-3:ready" },
       { ...NOTHING, view: "map", needs: true },
+      // An item left open over another view, as going there with it open leaves it.
+      { ...NOTHING, view: "threads", item: "x" },
+      { ...NOTHING, view: "overview", item: "x" },
     ];
     for (const wanted of open) expect(parse(addressOf(wanted).slice(1))).toEqual(wanted);
   });
@@ -22,6 +25,9 @@ describe("the address", () => {
   it("keeps what else the address says, such as a test run's switch, and changes only what is open", () => {
     expect(addressOf({ ...NOTHING, view: "map", item: "y" }, "?engine=inline&item=x&view=threads")).toBe(
       "/?engine=inline&item=y",
+    );
+    expect(addressOf({ ...NOTHING, view: "threads", item: "y" }, "?engine=inline")).toBe(
+      "/?engine=inline&view=threads&item=y",
     );
     expect(addressOf(NOTHING, "?needs&engine=inline")).toBe("/?engine=inline");
   });
