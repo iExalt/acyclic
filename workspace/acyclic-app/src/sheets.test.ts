@@ -12,6 +12,8 @@ describe("velocity", () => {
     ];
     expect(velocity(samples)).toBeCloseTo(70 / 100);
     expect(velocity([{ t: 5, y: 10 }])).toBe(0);
+    // Fast, then held still for 300 ms before the release: it had stopped.
+    expect(velocity([...samples, { t: 1300, y: 580 }])).toBe(0);
     expect(velocity([])).toBe(0);
   });
 });

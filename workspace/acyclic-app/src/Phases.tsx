@@ -141,8 +141,8 @@ export function PhasesSheet({
       aria-label="Outline"
       data-detent={sheet.detent}
     >
-      {sheet.handle}
       <header {...sheet.header}>
+        {sheet.handle}
         <h2>Outline</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />

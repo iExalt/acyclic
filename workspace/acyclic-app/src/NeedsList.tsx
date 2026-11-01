@@ -89,8 +89,8 @@ export function NeedsList({
       aria-label="Needs you"
       data-detent={sheet.detent}
     >
-      {sheet.handle}
       <header {...sheet.header}>
+        {sheet.handle}
         <h2>Needs you</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />

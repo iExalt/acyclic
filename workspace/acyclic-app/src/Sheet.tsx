@@ -26,7 +26,11 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
 
   const start = (event: PointerEvent<HTMLElement>) => {
     const sheet = panel.current;
-    if (sheet === null || event.button !== 0 || !phone()) return;
+    // One press at a time: a second finger while one drags is the first's to finish.
+    if (sheet === null || event.button !== 0 || !phone() || press.current !== null) return;
+    dragged.current = false;
+    /** Only a drag on the handle is followed by a click on it, which mustn't then switch the height. */
+    const onHandle = event.currentTarget.classList.contains("sheet-handle");
     press.current = {
       id: event.pointerId,
       y: event.clientY,
@@ -57,7 +61,9 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
       window.removeEventListener("pointercancel", end);
       press.current = null;
       if (!now.dragging) return;
-      dragged.current = true;
+      dragged.current = onHandle;
+      // The release is the last sample: a finger held still before it lifts has stopped, whatever it did before.
+      now.samples.push({ t: ended.timeStamp, y: ended.clientY });
       delete sheet.dataset.dragging;
       sheet.style.removeProperty("--dragged");
       if (ended.type === "pointercancel") return;
@@ -99,7 +105,7 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
   };
 }
 
-/** The half sheet's height in a stage `room` tall, as the stylesheet sets it: half, but at least 320 px. */
+/** The half sheet's height in a stage `room` tall, as the stylesheet sets it: half, at least 320 px, at most all. */
 function halfOf(room: number): number {
   return Math.min(room, Math.max(320, room / 2));
 }

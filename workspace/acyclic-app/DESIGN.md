@@ -72,8 +72,10 @@ Overpass sets smaller than Inter at a size.)
   the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
   button and sheet are both called Outline; its phases carry no count, as opening one shows its threads.
 - **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
-  bar. The handle, a button above the header, switches them; a drag on it or on the header's free space follows the
-  finger and lands by distance or by a flick, read from its last 100 ms, and down from half it closes the sheet as
+  bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
+  them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would push every panel down or lie over
+  its buttons. A drag on it or on the header's free space follows the finger and lands by distance or by a flick,
+  read from its last 100 ms, and down from half it closes the sheet as
   Escape does, so a form holding typing stays, saying how to leave it. Needs you opens full, a list of decisions;
   the other panels open at half. A tap on the Map that opens a panel over what it tapped pans the least that shows
   it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at all.)

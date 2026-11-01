@@ -113,7 +113,6 @@ export function ThreadPanel({
       aria-busy={loaded === null ? true : undefined}
       data-detent={sheet.detent}
     >
-      {sheet.handle}
       {body}
     </aside>
   );
@@ -129,6 +128,7 @@ export function ThreadPanel({
   return shell(
     <>
       <header {...sheet.header}>
+        {sheet.handle}
         <h2 className="line" style={lineStyle(line)}>
           <Badge line={line} />
           <Prose text={line?.name ?? detail.title} />

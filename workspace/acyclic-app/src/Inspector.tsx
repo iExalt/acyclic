@@ -176,8 +176,8 @@ export function Inspector({
       aria-label="Selected item"
       data-detent={sheet.detent}
     >
-      {sheet.handle}
       <header {...sheet.header}>
+        {sheet.handle}
         <h2>
           <Prose text={item.title} />
         </h2>

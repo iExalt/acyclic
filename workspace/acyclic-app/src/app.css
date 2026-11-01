@@ -877,7 +877,7 @@ button.phase-title {
    so what the Map brings into view above it stays there. */
 @media (max-width: 899px) {
   .inspector {
-    max-height: clamp(320px, 50%, 100%);
+    max-height: min(100%, max(320px, 50%));
     transition: max-height 150ms ease-out;
   }
   .inspector[data-detent="full"] {
@@ -890,16 +890,18 @@ button.phase-title {
     transition: none;
   }
   .inspector[aria-busy="true"]:not([data-detent="full"]) {
-    height: clamp(320px, 50%, 100%);
+    height: min(100%, max(320px, 50%));
   }
   /* The panel's own handle stands in for the drawn one. */
   .inspector::before {
     display: none;
   }
-  /* The handle takes the strip above the header, and only that: the header's own buttons sit right below it. A drag
-     from the header's free space moves the sheet too. */
-  .inspector {
-    padding-top: 24px;
+  /* The handle takes the strip at the top of the header, which stays in view as the sheet scrolls, and only that
+     strip: the header's own buttons sit right below it. 28 px tall, not the 44 px of other touch targets, as a taller
+     strip would push every panel's content down or lie over its buttons; a drag from the header's free space moves
+     the sheet too. */
+  .inspector > header:has(> .sheet-handle) {
+    padding-top: 28px;
   }
   .sheet-handle {
     position: absolute;
@@ -907,7 +909,7 @@ button.phase-title {
     left: calc(50% - 50px);
     z-index: 2;
     width: 100px;
-    height: 24px;
+    height: 28px;
     min-height: 0;
     padding: 0;
     border: none;
@@ -916,7 +918,7 @@ button.phase-title {
   }
   .sheet-handle::before {
     left: calc(50% - 18px);
-    top: 8px;
+    top: 10px;
   }
   .inspector > header {
     touch-action: none;
