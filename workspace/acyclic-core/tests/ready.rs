@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model};
-use acyclic_core::ready::{GitAncestry, Readiness, Status, Wait};
+use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status, Wait};
 use acyclic_core::schema::{item, kind, repository, thread as thread_field};
 use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Error, Key, ReplicaId};
@@ -78,8 +78,9 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
         })
         .unwrap();
 
-    let ancestry = GitAncestry::new(|_: &model::Repository| Some(code.clone()));
+    // A read looks the branch up afresh, as each command does.
     let check = |id: &str| {
+        let ancestry = GitAncestry::new(|_: &model::Repository| Some(code.clone()));
         let (_, state) = tracker.load().unwrap();
         let model = Model::read(&state).unwrap();
         Readiness::new(&state, &model, NOW, &ancestry).of(id).unwrap().unwrap()
@@ -103,6 +104,36 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
     assert_eq!(
         Readiness::new(&state, &model, NOW, &cloned).of("other").unwrap(),
         Some(Status::Ready)
+    );
+}
+
+#[test]
+fn a_commit_is_found_on_the_branch_by_a_prefix_and_one_git_doesnt_know_is_unverified() {
+    let dir = TempDir::new().unwrap();
+    let code = dir.path().join("code");
+    git(dir.path(), &["init", "-q", "-b", "main", code.to_str().unwrap()]);
+    git(&code, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    let merged = git(&code, &["rev-parse", "HEAD"]);
+
+    let record = |branch: &str| model::Repository {
+        id: "code".to_owned(),
+        owner: model::Value::None,
+        name: model::Value::None,
+        public: model::Value::None,
+        default_branch: model::Value::One(branch.to_owned()),
+        installation: model::Value::None,
+    };
+    let ancestry = GitAncestry::new(|_: &model::Repository| Some(code.clone()));
+    let main = record("main");
+    assert_eq!(
+        ancestry.merged(&main, &merged[..7].to_uppercase()),
+        Ok(true),
+        "a prefix, in either case"
+    );
+    assert!(ancestry.merged(&main, &"ab".repeat(20)).is_err(), "a commit git doesn't know");
+    assert_eq!(
+        ancestry.merged(&record("trunk"), &merged),
+        Err("the clone has no trunk branch".to_owned())
     );
 }
 
