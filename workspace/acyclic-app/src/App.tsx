@@ -122,8 +122,8 @@ export function App() {
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   /**
-   * The view an item was opened from, which closing it returns to: an item is shown on the Map, but the user came from
-   * there. Dropped once they select on the Map, which makes it where they are.
+   * The view an item or a thread was opened from, which closing it returns to: both are shown on the Map, but the user
+   * came from there. Dropped once they select on the Map or go to another view, which makes that where they are.
    */
   const [cameFrom, setCameFrom] = useState<View | null>(null);
   /** A thread the command menu opened while Needs you showed, so shown over it. */
@@ -241,15 +241,30 @@ export function App() {
     if (!model.items.has(selected) || (!showArchived && inArchived(model, selected))) setSelected(null);
   }, [model, selected, showArchived]);
 
-  // An item closed by any other way than its own close, such as a tap on the Map's background, leaves the user there.
+  // Closed by any other way than its own close, such as a tap on the Map's background, it leaves the user there.
   useEffect(() => {
-    if (selected === null) setCameFrom(null);
-  }, [selected]);
-  /** Closes the item, going back to the view it was opened from. */
-  const closeItem = () => {
-    setSelected(null);
+    if (selected === null && thread === null) setCameFrom(null);
+  }, [selected, thread]);
+  // A view the user goes to is where they are; opening an item or a thread goes to the Map, which keeps it.
+  useEffect(() => {
+    if (view !== "map") setCameFrom(null);
+  }, [view]);
+  // A thread the command menu put over Needs you, once closed, opens again as any other does.
+  useEffect(() => {
+    if (thread === null) setThreadOver(null);
+  }, [thread]);
+  /** Closes the item or the thread on top, going back to the view it was opened from. */
+  const goBack = () => {
     if (cameFrom !== null) setView(cameFrom);
     setCameFrom(null);
+  };
+  const closeItem = () => {
+    setSelected(null);
+    goBack();
+  };
+  const closeThread = () => {
+    setThread(null);
+    goBack();
   };
 
   // An editor opened again for one item stays closed on any other.
@@ -284,6 +299,7 @@ export function App() {
   const toThread = useCallback((id: string) => {
     setSelected(null);
     setThread(id);
+    setCameFrom(viewNow.current === "map" ? null : viewNow.current);
     setView("map");
     setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
@@ -501,7 +517,7 @@ export function App() {
       else if (layer === "needs") setShowNeeds(false);
       else if (layer === "phases") setShowPhases(false);
       else if (layer === "away") setView(HOME);
-      else setThread(null);
+      else closeThread();
     }
     return closing.length;
   };
@@ -671,11 +687,11 @@ export function App() {
     if (to.item !== null) {
       if (found.archived) setShowArchived(true);
       select(to.item, null);
-      // A link names the item on the Map, so the user came from nowhere else.
-      setCameFrom(null);
     }
     if (to.view === "map" && to.item === null && to.thread !== null) toThread(to.thread);
     else setThread(to.thread);
+    // A link names what it opens where it is, so the user came from nowhere else.
+    setCameFrom(null);
     setNeedsAt(to.needsAt);
     setShowNeeds(to.needs);
     const gone = found.missing.join(" and ");
@@ -1166,7 +1182,7 @@ export function App() {
             busy={busy}
             onCommand={(edit, done) => send(edit, { select: null, pin: null, ...(done === undefined ? {} : { done }) })}
             onSelect={(id) => select(id, null)}
-            onClose={() => setThread(null)}
+            onClose={closeThread}
             onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
             notice={noticeView}

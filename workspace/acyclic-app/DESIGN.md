@@ -150,10 +150,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
   A thread the command menu opens while Needs you shows goes over it, where the user is looking.
-- **An item opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you shows on the
-  Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on the
-  Map makes the Map where the user is; an item a link opened closes onto the Map. While Needs you is open over the
-  Overview, the Overview's own Needs you section steps aside rather than repeat it.
+- **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows
+  on the Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on
+  the Map or going to another view makes that where the user is; what a link opened closes onto the Map. While Needs
+  you is open over the Overview, the Overview's own Needs you section steps aside rather than repeat it.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
   `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
@@ -259,4 +259,4 @@ you. Errors say what to check before what went wrong.
 - 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
-  over opening items in place.
+  over opening items in place. A thread opened from another view does the same, by extension (proposed).

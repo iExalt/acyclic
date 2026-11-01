@@ -484,7 +484,7 @@ def overview_journey(page, view, name, failures):
 def deep_link_journey(context, origin, view, plan, name, failures):
     """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
     again; quick Escapes leave the address saying what's open; a stale link says so rather than opening nothing; and
-    Back from an item opened on the Overview or in Needs you goes back there, as the address says."""
+    Back from an item or a thread opened on the Overview or in Needs you goes back there, as the address says."""
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
@@ -553,45 +553,60 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     page.wait_for_timeout(300)
     if page.url != f"{origin}/?view=map":
         failures.append(f"{name}: after two quick Escapes the address is {page.url}")
-    # An item opened from the Overview shows on the Map, and Back comes back to a bare address; but not while its
-    # editor holds typing. One opened from Needs you over the Overview comes back to both.
-    page.goto(f"{origin}/")
+    # An item opened from the Overview shows on the Map, and Back comes back to a bare address. On a phone, where Back
+    # is the way out and the entries stack: not while its editor holds typing; one opened from Needs you over the
+    # Overview comes back to both; and a thread opened from the Overview comes back to it too.
     overview = page.get_by_test_id("overview")
+    page.locator("[data-view=overview]").click()
+    overview.wait_for(timeout=5_000)
     inspector = page.get_by_test_id("inspector")
+    phone = view.get("has_touch")
     page.locator("[data-overview-phase]").first.click()
     inspector.wait_for(timeout=5_000)
-    inspector.locator("[data-action=edit]").click()
-    inspector.locator("input[name=title]").fill("Typed, not saved")
-    page.go_back()
-    try:
-        page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
-    except PlaywrightTimeout:
-        failures.append(f"{name}: Back over an editor holding typing didn't say so")
-    if not inspector.is_visible() or overview.count():
-        failures.append(f"{name}: Back over an editor holding typing left the item")
-    inspector.get_by_role("button", name="Cancel", exact=True).click()
+    if phone:
+        inspector.locator("[data-action=edit]").click()
+        inspector.locator("input[name=title]").fill("Typed, not saved")
+        page.go_back()
+        try:
+            page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back over an editor holding typing didn't say so")
+        if not inspector.is_visible() or overview.count():
+            failures.append(f"{name}: Back over an editor holding typing left the item")
+        inspector.get_by_role("button", name="Cancel", exact=True).click()
     page.go_back()
     try:
         overview.wait_for(timeout=5_000)
         page.wait_for_function("() => location.search === ''", timeout=5_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: Back from an item opened on the Overview landed on {page.url}")
-    page.get_by_test_id("needs-button").click()
-    needs = page.get_by_test_id("needs")
-    needs.locator("[data-select]:visible").first.click()
-    title.wait_for(timeout=10_000)
-    page.go_back()
-    try:
-        needs.wait_for(timeout=5_000)
-        overview.wait_for(timeout=5_000)
-        page.wait_for_function("() => location.search === '?needs'", timeout=5_000)
-    except PlaywrightTimeout:
-        failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
+    if phone:
+        page.get_by_test_id("needs-button").click()
+        needs = page.get_by_test_id("needs")
+        needs.locator("[data-select]:visible").first.click()
+        title.wait_for(timeout=10_000)
+        page.go_back()
+        try:
+            needs.wait_for(timeout=5_000)
+            overview.wait_for(timeout=5_000)
+            page.wait_for_function("() => location.search === '?needs'", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
+        page.go_back()
+        needs.wait_for(state="detached", timeout=5_000)
+        page.locator("[data-overview-thread]").first.click()
+        page.get_by_test_id("thread-panel").wait_for(timeout=10_000)
+        page.go_back()
+        try:
+            overview.wait_for(timeout=5_000)
+            page.wait_for_function("() => location.search === ''", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
     if errors:
         failures.append(f"{name}: links threw {errors}")
     page.close()
     kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
-    print(f"{name}: a link opened {id}, {kept}, a stale link said so, and Back from an item went where it was opened")
+    print(f"{name}: a link opened {id}, {kept}, a stale link said so, and Back went where things were opened")
 
 @timed
 def command_journey(page, view, origin, plan, name, failures):
