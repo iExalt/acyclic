@@ -594,12 +594,15 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
         page.go_back()
         needs.wait_for(state="detached", timeout=5_000)
-        page.locator("[data-overview-thread]").first.click()
-        panel = page.get_by_test_id("thread-panel")
+        # Up next's threads have a task ready, which the panel lists.
+        page.locator("[aria-labelledby=overview-next] [data-overview-thread]").first.click()
+        panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
         panel.wait_for(timeout=10_000)
         # A task chosen from the thread's panel closes back to the thread, and the thread back to the Overview.
         task = panel.locator("[data-select]").first
-        if task.count():
+        if not task.count():
+            failures.append(f"{name}: Up next's first thread lists no task, so Back from one went unchecked")
+        else:
             task.click()
             title.wait_for(timeout=5_000)
             page.go_back()
