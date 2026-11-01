@@ -4,7 +4,7 @@ import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
 import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
 import { Choice } from "./Choice";
 import { CommandMenu } from "./CommandMenu";
-import { entries as commandEntries, isMac, type OnItem, opensMenu, type Run, targets, undoes } from "./commands";
+import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
 import {
   addCommand,
   type Edited,
@@ -108,6 +108,12 @@ interface Reopened {
   id: string;
   edited: Edited;
   n: number;
+}
+
+/** The rows J and K step through: Needs you's entries, else the rows of the view in the page's main area. */
+function rowsInView(): HTMLElement[] {
+  const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
+  return [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
 }
 
 export function App() {
@@ -592,7 +598,7 @@ export function App() {
   /** What a single-key shortcut does; set once the plan has loaded. */
   const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
-    const mac = isMac(navigator.platform);
+    const mac = onMac();
     let pending: Waiting = null;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
@@ -622,6 +628,7 @@ export function App() {
           menu: seen.menu,
           dirty: document.querySelector("form[data-dirty='true']") !== null,
           typing: typingIn(event.target),
+          rows: rowsInView().length,
         });
         if (next.action !== null || next.pending !== null) event.preventDefault();
         pending = next.pending;
@@ -866,8 +873,7 @@ export function App() {
   };
   /** Moves the focus to the next or previous row of the list in view: Needs you's entries, else the Overview's rows. */
   const moveRow = (by: 1 | -1) => {
-    const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
-    const rows = [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+    const rows = rowsInView();
     const here = document.activeElement instanceof HTMLElement ? document.activeElement.closest("[data-row]") : null;
     rows[nextRow(rows.length, here === null ? -1 : rows.indexOf(here as HTMLElement), by)]?.focus();
   };
@@ -945,7 +951,7 @@ export function App() {
           <button
             type="button"
             disabled={busy}
-            aria-keyshortcuts={isMac(navigator.platform) ? "Meta+Z" : "Control+Z"}
+            aria-keyshortcuts={onMac() ? "Meta+Z" : "Control+Z"}
             onClick={() => notice.undo && runUndo(notice.undo)}
           >
             Undo

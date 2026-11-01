@@ -271,6 +271,14 @@ const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** Whether the platform's command key is ⌘ rather than Ctrl. */
 export const isMac = (platform: string) => /mac|iphone|ipad|ipod/i.test(platform);
 
+/** The browser's platform: User-Agent Client Hints' where the browser has them, else the deprecated `platform`. */
+export function platformOf(nav: { platform: string; userAgentData?: { platform?: string } }): string {
+  return nav.userAgentData?.platform || nav.platform;
+}
+
+/** Whether this browser runs on a Mac, an iPhone or an iPad, whose command key is ⌘. */
+export const onMac = () => isMac(platformOf(navigator as Navigator & { userAgentData?: { platform?: string } }));
+
 /**
  * Whether a key press opens (or closes) the command menu: ⌘K on a Mac, Ctrl+K elsewhere, with no other modifier, and
  * never a key an input method is composing with, which would take a character from the user's typing.

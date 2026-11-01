@@ -8,7 +8,7 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import type { Stage } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import { type Entry, isMac, type Run, rank } from "./commands";
+import { type Entry, onMac, type Run, rank } from "./commands";
 import {
   Archive,
   ArrowUpLeft,
@@ -204,7 +204,7 @@ export function CommandMenu({
           <section className="key-reference" aria-label="Other keys">
             <div className="command-group">Other keys</div>
             <dl>
-              {keyReference(new Set(pool.map((entry) => entry.key)), isMac(navigator.platform)).map((row) => (
+              {keyReference(new Set(pool.map((entry) => entry.key)), onMac()).map((row) => (
                 <div key={row.what}>
                   <dt>{row.what}</dt>
                   <dd>{row.keys}</dd>
