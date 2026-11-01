@@ -21,12 +21,19 @@ export interface Open {
    * bottom layer, under everything shown over the view.
    */
   away: boolean;
+  /**
+   * Not a layer but an order: a thread opened from the command menu while Needs you shows goes over it, where the user
+   * is looking, rather than under it as a thread Needs you was opened over.
+   */
+  threadOverNeeds: boolean;
 }
 
 /** The layers open, the one shown first. */
 export function openLayers(open: Open): Layer[] {
   // The phases' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
-  const order: Layer[] = ["command", "mode", "add", "phases", "item", "needs", "thread", "away"];
+  const order: Layer[] = open.threadOverNeeds
+    ? ["command", "mode", "add", "phases", "item", "thread", "needs", "away"]
+    : ["command", "mode", "add", "phases", "item", "needs", "thread", "away"];
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 
@@ -34,7 +41,7 @@ export function openLayers(open: Open): Layer[] {
 export const topLayer = (open: Open): Layer | null => openLayers(open)[0] ?? null;
 
 /** How many layers are open, each with its own history entry. */
-export const depth = (open: Open): number => Object.values(open).filter(Boolean).length;
+export const depth = (open: Open): number => openLayers(open).length;
 
 /**
  * The app's entries in the history: one per layer open, each holding how many layers it stands for, so Back lands on

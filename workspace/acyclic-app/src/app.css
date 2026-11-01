@@ -326,8 +326,9 @@ button.view {
   color: var(--muted);
   text-align: left;
 }
-button.view:hover:not(:disabled) {
+button.view:hover:not(:disabled, [aria-current="page"]) {
   color: var(--ink);
+  background: var(--hover);
 }
 /* The view shown is filled; Needs you open over it is only inked, so one place reads as where the user is. */
 button.view[aria-current="page"] {

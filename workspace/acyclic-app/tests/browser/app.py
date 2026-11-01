@@ -462,6 +462,8 @@ def overview_journey(page, view, name, failures):
     )
     if marks[0] == marks[1]:
         failures.append(f"{name}: the open Needs you is marked as the view shown is: {marks}")
+    if overview.locator("[aria-labelledby=overview-needs]").is_visible():
+        failures.append(f"{name}: the Overview repeated Needs you under the open list")
     page.keyboard.press("Escape")
     needs.wait_for(state="detached", timeout=5_000)
     if view.get("has_touch"):
@@ -481,7 +483,8 @@ def overview_journey(page, view, name, failures):
 @timed
 def deep_link_journey(context, origin, view, plan, name, failures):
     """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
-    again; quick Escapes leave the address saying what's open; and a stale link says so rather than opening nothing."""
+    again; quick Escapes leave the address saying what's open; a stale link says so rather than opening nothing; and
+    Back from an item or a thread opened on the Overview or in Needs you goes back there, as the address says."""
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
@@ -550,11 +553,71 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     page.wait_for_timeout(300)
     if page.url != f"{origin}/?view=map":
         failures.append(f"{name}: after two quick Escapes the address is {page.url}")
+    # An item opened from the Overview shows on the Map, and Back comes back to a bare address. On a phone, where Back
+    # is the way out and the entries stack: not while its editor holds typing; one opened from Needs you over the
+    # Overview comes back to both; and a thread opened from the Overview comes back to it too.
+    overview = page.get_by_test_id("overview")
+    page.locator("[data-view=overview]").click()
+    overview.wait_for(timeout=5_000)
+    inspector = page.get_by_test_id("inspector")
+    phone = view.get("has_touch")
+    page.locator("[data-overview-phase]").first.click()
+    inspector.wait_for(timeout=5_000)
+    if phone:
+        inspector.locator("[data-action=edit]").click()
+        inspector.locator("input[name=title]").fill("Typed, not saved")
+        page.go_back()
+        try:
+            page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back over an editor holding typing didn't say so")
+        if not inspector.is_visible() or overview.count():
+            failures.append(f"{name}: Back over an editor holding typing left the item")
+        inspector.get_by_role("button", name="Cancel", exact=True).click()
+    page.go_back()
+    try:
+        overview.wait_for(timeout=5_000)
+        page.wait_for_function("() => location.search === ''", timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: Back from an item opened on the Overview landed on {page.url}")
+    if phone:
+        page.get_by_test_id("needs-button").click()
+        needs = page.get_by_test_id("needs")
+        needs.locator("[data-select]:visible").first.click()
+        title.wait_for(timeout=10_000)
+        page.go_back()
+        try:
+            needs.wait_for(timeout=5_000)
+            overview.wait_for(timeout=5_000)
+            page.wait_for_function("() => location.search === '?needs'", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
+        page.go_back()
+        needs.wait_for(state="detached", timeout=5_000)
+        # Up next's threads have a task ready, which the panel lists.
+        page.locator("[aria-labelledby=overview-next] [data-overview-thread]").first.click()
+        panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
+        panel.wait_for(timeout=10_000)
+        # A task chosen from the thread's panel closes back to the thread, and the thread back to the Overview.
+        task = panel.locator("[data-select]").first
+        if not task.count():
+            failures.append(f"{name}: Up next's first thread lists no task, so Back from one went unchecked")
+        else:
+            task.click()
+            title.wait_for(timeout=5_000)
+            page.go_back()
+            panel.wait_for(timeout=5_000)
+        page.go_back()
+        try:
+            overview.wait_for(timeout=5_000)
+            page.wait_for_function("() => location.search === ''", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
     if errors:
         failures.append(f"{name}: links threw {errors}")
     page.close()
     kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
-    print(f"{name}: a link opened {id}, {kept}, and a stale link said so")
+    print(f"{name}: a link opened {id}, {kept}, a stale link said so, and Back went where things were opened")
 
 @timed
 def command_journey(page, view, origin, plan, name, failures):
@@ -607,6 +670,23 @@ def command_journey(page, view, origin, plan, name, failures):
             failures.append(f"{name}: Escape from the command menu didn't leave the item open, focused")
         page.keyboard.press("Escape")
         heading.wait_for(state="detached", timeout=5_000)
+        # A thread chosen while Needs you shows opens over it, where the user is looking; closing it shows the list.
+        page.get_by_test_id("needs-button").click()
+        needs = page.get_by_test_id("needs")
+        needs.wait_for(timeout=5_000)
+        page.keyboard.press("ControlOrMeta+k")
+        menu.wait_for(timeout=5_000)
+        # A thread is found by its number too.
+        page.keyboard.type("1")
+        page.locator(".command-row[data-command^='thread:']").first.click()
+        try:
+            page.get_by_test_id("thread-panel").wait_for(timeout=5_000)
+            page.keyboard.press("Escape")
+            needs.wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: a thread the command menu chose didn't open over Needs you, then give it back")
+        page.keyboard.press("Escape")
+        needs.wait_for(state="detached", timeout=5_000)
     print(f"{name}: the command menu found {id} by its title and opened it")
 
 
@@ -1182,7 +1262,13 @@ def threads_journey(page, view, env, name, failures):
             failures.append(f"{name}: choosing {task} from {picked}'s panel left the Threads view over the Map")
         if page.locator("[data-view=map]").get_attribute("aria-current") != "page":
             failures.append(f"{name}: choosing {task} didn't switch to the Map")
+        # Closing the task goes back to where it was chosen.
         page.keyboard.press("Escape")
+        try:
+            page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: closing {task} didn't go back to the Threads view")
+        page.locator("[data-view=map]").click()
     page.get_by_test_id("threads-view").wait_for(state="detached")
     # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; the
     # thread's panel, still picked, over the view, closes first. The Map is chosen again for the journeys after.

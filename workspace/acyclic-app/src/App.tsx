@@ -106,6 +106,8 @@ export function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [showArchived, setShowArchived] = useState(false);
   const [thread, setThread] = useState<string | null>(null);
+  const threadNow = useRef(thread);
+  threadNow.current = thread;
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The command menu, over everything; listing only what has a key, as ? asks. */
@@ -117,8 +119,18 @@ export function App() {
   const [editAsked, setEditAsked] = useState(0);
   /** The Map, or the threads in waves over it. */
   const [view, setView] = useState<View>(HOME);
+  const viewNow = useRef(view);
+  viewNow.current = view;
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
+  /**
+   * The view an item or a thread was opened from, which closing the one opened from it returns to: both are shown on
+   * the Map, but the user came from there. An item chosen from a thread's panel leaves the thread's, for the thread's
+   * close. Dropped once the user selects on the Map or goes to another view, which makes that where they are.
+   */
+  const [cameFrom, setCameFrom] = useState<{ view: View; by: "item" | "thread" } | null>(null);
+  /** A thread the command menu opened while Needs you showed, so shown over it. */
+  const [threadOver, setThreadOver] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [framed, setFramed] = useState<Framed | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
@@ -232,6 +244,33 @@ export function App() {
     if (!model.items.has(selected) || (!showArchived && inArchived(model, selected))) setSelected(null);
   }, [model, selected, showArchived]);
 
+  // Closed by any other way than its own close, such as a tap on the Map's background, it leaves the user there.
+  useEffect(() => {
+    if (selected === null && thread === null) setCameFrom(null);
+  }, [selected, thread]);
+  // A view the user goes to is where they are; opening an item or a thread goes to the Map, which keeps it.
+  useEffect(() => {
+    if (view !== "map") setCameFrom(null);
+  }, [view]);
+  // A thread the command menu put over Needs you, once closed, opens again as any other does.
+  useEffect(() => {
+    if (thread === null) setThreadOver(null);
+  }, [thread]);
+  /** Goes back to the view what is closing was opened from. */
+  const goBack = () => {
+    if (cameFrom !== null) setView(cameFrom.view);
+    setCameFrom(null);
+  };
+  /** Closes the item: one chosen from a thread's panel goes back to the thread, whose own close goes back further. */
+  const closeItem = () => {
+    setSelected(null);
+    if (cameFrom?.by === "item") goBack();
+  };
+  const closeThread = () => {
+    setThread(null);
+    goBack();
+  };
+
   // An editor opened again for one item stays closed on any other.
   useEffect(() => {
     setReopened((was) => (was === null || was.id === selected ? was : null));
@@ -251,7 +290,14 @@ export function App() {
       selectOnly(id);
       if (id === null) return;
       setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
-      // An item is shown on the Map, so selecting one from a panel over the Threads view goes back to it.
+      // An item is shown on the Map, so selecting one from another view goes to it, and closing it goes back. One
+      // chosen from a thread's panel keeps where the thread came from, for the thread's close.
+      // Read now: the update runs at the next render, by when the view is the Map.
+      const from = viewNow.current;
+      const inThread = threadNow.current !== null;
+      setCameFrom((was) =>
+        from !== "map" ? { view: from, by: "item" } : inThread && was?.by === "thread" ? was : null,
+      );
       setView("map");
     },
     [selectOnly],
@@ -263,6 +309,7 @@ export function App() {
   const toThread = useCallback((id: string) => {
     setSelected(null);
     setThread(id);
+    setCameFrom(viewNow.current === "map" ? null : { view: viewNow.current, by: "thread" });
     setView("map");
     setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
@@ -430,6 +477,7 @@ export function App() {
     phases: showPhases && !wide,
     thread: thread !== null,
     away: !wide && view !== HOME,
+    threadOverNeeds: showNeeds && thread !== null && threadOver === thread,
   };
   /**
    * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
@@ -475,11 +523,11 @@ export function App() {
       if (layer === "command") setShowCommand(false);
       else if (layer === "mode") setMode({ kind: "idle" });
       else if (layer === "add") setAdding(null);
-      else if (layer === "item") setSelected(null);
+      else if (layer === "item") closeItem();
       else if (layer === "needs") setShowNeeds(false);
       else if (layer === "phases") setShowPhases(false);
       else if (layer === "away") setView(HOME);
-      else setThread(null);
+      else closeThread();
     }
     return closing.length;
   };
@@ -652,6 +700,8 @@ export function App() {
     }
     if (to.view === "map" && to.item === null && to.thread !== null) toThread(to.thread);
     else setThread(to.thread);
+    // A link names what it opens where it is, so the user came from nowhere else.
+    setCameFrom(null);
     setNeedsAt(to.needsAt);
     setShowNeeds(to.needs);
     const gone = found.missing.join(" and ");
@@ -732,6 +782,7 @@ export function App() {
     else if (run.kind === "thread") {
       setSelected(null);
       setThread(run.id);
+      setThreadOver(showNeeds ? run.id : null);
     } else select(run.id, null);
   };
   /**
@@ -928,6 +979,7 @@ export function App() {
     }
     setSelected(null);
     setShowPhases(false);
+    setThreadOver(null);
     setShowNeeds((was) => !was);
   };
   /** Opens Needs you, at the entry `key` names if given. */
@@ -984,7 +1036,10 @@ export function App() {
             lines={lines}
             palette={palette}
             selected={selected}
-            onSelect={selectOnly}
+            onSelect={(id) => {
+              setCameFrom(null);
+              selectOnly(id);
+            }}
             focus={focus}
             framed={framed}
             onPick={
@@ -1006,6 +1061,7 @@ export function App() {
             outline={outline}
             items={itemsById}
             onNeeds={openNeeds}
+            needsOpen={showNeeds}
             onPickThread={toThread}
             onSelectPhase={(id) => select(id, null)}
             onView={setView}
@@ -1071,7 +1127,7 @@ export function App() {
             onMove={() => setMode({ kind: "move", item: chosen.id })}
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
-            onClose={() => setSelected(null)}
+            onClose={closeItem}
             onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "map", item: chosen.id })}
             onEditorClosed={formClosed}
@@ -1136,7 +1192,7 @@ export function App() {
             busy={busy}
             onCommand={(edit, done) => send(edit, { select: null, pin: null, ...(done === undefined ? {} : { done }) })}
             onSelect={(id) => select(id, null)}
-            onClose={() => setThread(null)}
+            onClose={closeThread}
             onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
             notice={noticeView}
