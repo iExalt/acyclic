@@ -222,10 +222,11 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
   sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the thread's panel there.
 - **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
-  comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it; a tapped
-  one moves the least that shows it. A strip taken from the Map, such as the slot, or a window turned, shows the
-  selected item again if it hid it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the
-  user types.
+  comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it. On a Map
+  zoomed out past reading, one the user picked comes in at a zoom its title reads at, wherever it was, and one a write
+  moved does only if it must move, so a zoom the user chose survives their edits; a tapped one moves the least that
+  shows it. A strip taken from the Map, such as the slot, or a window turned, shows the selected item again if it hid
+  it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user types.
 - **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is made
   from the title and asked for only once the server refuses it. Added, the item's panel takes the focus, and its Status
   says Saving… until the server has placed it, rather than its state first; its editor opens on Title.

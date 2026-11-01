@@ -444,7 +444,11 @@ export function App() {
       const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
       const undo =
         saved && after.undo && before !== null
-          ? undoOf(body, before, levelLabel, (id) => linesNow.current.get(id)?.name ?? id)
+          ? undoOf(body, before, levelLabel, (id) => {
+              const line = linesNow.current.get(id);
+              // A thread titled only with its number is named by it.
+              return line?.name || (line?.number ? `thread ${line.number}` : id);
+            })
           : null;
       if (text !== null)
         setNotice({
