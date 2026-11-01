@@ -71,6 +71,14 @@ Overpass sets smaller than Inter at a size.)
 - **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, the outline, New item, the menu),
   the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
   button and sheet are both called Outline; its phases carry no count, as opening one shows its threads.
+- **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
+  bar. The handle, a button above the header, switches them; a drag on it or on the header's free space follows the
+  finger and lands by distance or by a flick, read from its last 100 ms, and down from half it closes the sheet as
+  Escape does, so a form holding typing stays, saying how to leave it. Needs you opens full, a list of decisions;
+  the other panels open at half. A tap on the Map that opens a panel over what it tapped pans the least that shows
+  it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at all.)
+- **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about
+  210 px beside a panel), with In progress and Up next side by side from 700 px, and the phases in two columns.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of phases and threads, the menu at its foot); panels
   open on the right.
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
@@ -97,6 +105,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   for it. Unapproved with nothing open reads "Not approved, with nothing open", quiet, with an outlined Approve, as
   approval still covers what joins it later.
 - **Thread badges:** the thread's number on its line's colour.
+- **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
+  of Needs you, where every visit passed it.
+- **Key hints** (the ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only with a fine
+  pointer or hover, where a keyboard is likely; the menu's switch for single-key shortcuts stays on every device.
 - **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)

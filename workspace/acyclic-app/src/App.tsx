@@ -29,6 +29,7 @@ import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
+import { Notify } from "./Notify";
 import { awaitingApproval, type Need } from "./needs";
 import { Overview } from "./Overview";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
@@ -883,6 +884,7 @@ export function App() {
         />
         Show archived items
       </label>
+      <Notify />
       <label>
         <input
           type="checkbox"
@@ -1070,6 +1072,7 @@ export function App() {
             onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
             onAdd={() => startAdd(chosen.id)}
             onClose={() => setSelected(null)}
+            onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "map", item: chosen.id })}
             onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
@@ -1096,12 +1099,13 @@ export function App() {
               setThread(id);
             }}
             onClose={() => setShowNeeds(false)}
+            onDismiss={() => closeTop.current(1)}
             notice={noticeView}
             at={needsAt}
           />
         ) : null}
         {panel === "phases" && outline !== null ? (
-          <PhasesSheet onClose={() => setShowPhases(false)}>
+          <PhasesSheet onClose={() => setShowPhases(false)} onDismiss={() => closeTop.current(1)}>
             <Phases
               outline={outline}
               lines={lines}
@@ -1133,6 +1137,7 @@ export function App() {
             onCommand={(edit, done) => send(edit, { select: null, pin: null, ...(done === undefined ? {} : { done }) })}
             onSelect={(id) => select(id, null)}
             onClose={() => setThread(null)}
+            onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
             notice={noticeView}
           />

@@ -8,9 +8,9 @@ import { useFocusIn } from "./focus";
 import { useHeld } from "./held";
 import { Icon, X } from "./icons";
 import type { Line } from "./lines";
-import { Notify } from "./Notify";
 import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
 import { Prose } from "./Prose";
+import { useSheet } from "./Sheet";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
 const PRIMARY = new Set(["keep", "approve"]);
@@ -27,6 +27,8 @@ export interface NeedsListProps {
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   onClose: () => void;
+  /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
+  onDismiss: () => void;
   /** A refusal or failure of what this panel sent, shown in it. */
   notice?: ReactNode;
   /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
@@ -44,6 +46,7 @@ export function NeedsList({
   onSelect,
   onPickThread,
   onClose,
+  onDismiss,
   notice,
   at = null,
 }: NeedsListProps) {
@@ -58,6 +61,8 @@ export function NeedsList({
   const shown = groups.some((one) => one.group === filter) ? filter : null;
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
+  // A task list: full height on a phone, where half would show a small phone no decision.
+  const sheet = useSheet(panel, "full", onDismiss);
   useFocusIn(panel);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
   // down it; with nothing left to settle, to the panel's Close.
@@ -76,15 +81,22 @@ export function NeedsList({
     entry?.focus({ preventScroll: true });
   }, [at]);
   return (
-    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="needs" aria-label="Needs you">
-      <header>
+    <aside
+      ref={panel}
+      tabIndex={-1}
+      className="inspector"
+      data-testid="needs"
+      aria-label="Needs you"
+      data-detent={sheet.detent}
+    >
+      {sheet.handle}
+      <header {...sheet.header}>
         <h2>Needs you</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>
       </header>
       {notice}
-      <Notify />
       {groups.length < 2 ? null : (
         <fieldset className="filters" aria-label="Show">
           {[{ group: null, label: "All", count: all.length }, ...groups].map((one) => (

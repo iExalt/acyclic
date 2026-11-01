@@ -15,6 +15,7 @@ import { ArrowUpLeft, FolderInput, Icon, Link2, Pencil, Plus, RotateCcw, X } fro
 import { type Line, lineLabel } from "./lines";
 import { Menu } from "./Menu";
 import { Prose } from "./Prose";
+import { useSheet } from "./Sheet";
 import { StageCounts, StageIcon, StageLabel } from "./Stage";
 import { stateWords } from "./stages";
 
@@ -35,6 +36,8 @@ export interface InspectorProps {
   onLink: (kind: LinkKind) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
+  onDismiss: () => void;
   /** Copies the address that opens this again. */
   onCopyLink: () => Promise<boolean>;
   /** Its editor closed, saved or not. */
@@ -66,6 +69,7 @@ export function Inspector({
   onLink,
   onAdd,
   onClose,
+  onDismiss,
   onCopyLink,
   onEditorClosed,
   onCommand,
@@ -113,6 +117,7 @@ export function Inspector({
     </button>
   );
   const panel = useRef<HTMLElement>(null);
+  const sheet = useSheet(panel, "half", onDismiss);
   useFocusIn(panel);
   const chip = (id: string) => {
     const stage = stageOf(id);
@@ -169,8 +174,10 @@ export function Inspector({
       className={editing ? "inspector tall" : "inspector"}
       data-testid="inspector"
       aria-label="Selected item"
+      data-detent={sheet.detent}
     >
-      <header>
+      {sheet.handle}
+      <header {...sheet.header}>
         <h2>
           <Prose text={item.title} />
         </h2>

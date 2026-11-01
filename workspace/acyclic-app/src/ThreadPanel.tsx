@@ -32,6 +32,7 @@ import { useHeld } from "./held";
 import { Check, CircleAlert, Icon, X } from "./icons";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
+import { useSheet } from "./Sheet";
 import { StageCounts, StageIcon } from "./Stage";
 
 export interface ThreadPanelProps {
@@ -52,6 +53,8 @@ export interface ThreadPanelProps {
   onCommand: (command: Command, done?: string) => void;
   onSelect: (id: string) => void;
   onClose: () => void;
+  /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
+  onDismiss: () => void;
   /** A refusal or failure of what this panel sent, shown in it. */
   notice?: ReactNode;
   /** Copies the address that opens this again. */
@@ -73,6 +76,7 @@ export function ThreadPanel({
   onCommand,
   onSelect,
   onClose,
+  onDismiss,
   notice,
   onCopyLink,
 }: ThreadPanelProps) {
@@ -94,6 +98,7 @@ export function ThreadPanel({
   }, [id, version]);
   // One panel throughout, so focus put in it as it opens stays as it loads.
   const panel = useRef<HTMLElement>(null);
+  const sheet = useSheet(panel, "half", onDismiss);
   useFocusIn(panel);
   // A decision takes its button away once the thread is read again: the keyboard stays in the panel.
   const held = useHeld(busy, loaded);
@@ -106,7 +111,9 @@ export function ThreadPanel({
       data-testid="thread-panel"
       aria-label="Picked thread"
       aria-busy={loaded === null ? true : undefined}
+      data-detent={sheet.detent}
     >
+      {sheet.handle}
       {body}
     </aside>
   );
@@ -121,7 +128,7 @@ export function ThreadPanel({
     panel.current?.querySelectorAll<HTMLElement>("[data-proposal] [data-action=keep]")[index] ?? panel.current;
   return shell(
     <>
-      <header>
+      <header {...sheet.header}>
         <h2 className="line" style={lineStyle(line)}>
           <Badge line={line} />
           <Prose text={line?.name ?? detail.title} />

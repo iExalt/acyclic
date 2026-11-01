@@ -8,6 +8,7 @@ import { Icon, X } from "./icons";
 import type { Line } from "./lines";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
+import { useSheet } from "./Sheet";
 
 export interface PhasesProps {
   outline: Outline;
@@ -118,12 +119,30 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
 }
 
 /** The outline as a sheet over the Map, as a phone shows it. */
-export function PhasesSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+export function PhasesSheet({
+  onClose,
+  onDismiss,
+  children,
+}: {
+  onClose: () => void;
+  /** Closes it as Escape does, for a drag down. */
+  onDismiss: () => void;
+  children: ReactNode;
+}) {
   const panel = useRef<HTMLElement>(null);
+  const sheet = useSheet(panel, "half", onDismiss);
   useFocusIn(panel);
   return (
-    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="phases" aria-label="Outline">
-      <header>
+    <aside
+      ref={panel}
+      tabIndex={-1}
+      className="inspector"
+      data-testid="phases"
+      aria-label="Outline"
+      data-detent={sheet.detent}
+    >
+      {sheet.handle}
+      <header {...sheet.header}>
         <h2>Outline</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
