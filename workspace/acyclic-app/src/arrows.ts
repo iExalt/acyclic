@@ -1,6 +1,6 @@
-// The Threads view's arrows, routed so none crosses a card: each runs along the gaps between the columns, crosses a
-// wave it skips through a gap between two of its cards or below them, and turns at right angles. Each thread an
-// arrow comes from keeps a lane of its own in every gap, and each meets a card at a point of its own, so two arrows
+// The Threads view's arrows, routed so none crosses a tile: each runs along the gaps between the columns, crosses a
+// wave it skips through a gap between two of its tiles or below them, and turns at right angles. Each thread an
+// arrow comes from keeps a lane of its own in every gap, and each meets a tile at a point of its own, so two arrows
 // from different threads never run along one line. Pure, so the rules are tested without a browser.
 
 export interface Box {
@@ -10,10 +10,10 @@ export interface Box {
   bottom: number;
 }
 
-/** A wave's column as drawn: its heading and its cards, top to bottom. */
+/** A wave's column as drawn: its heading and its tiles, top to bottom. */
 export interface Column {
   heading: Box;
-  cards: { id: string; box: Box }[];
+  tiles: { id: string; box: Box }[];
 }
 
 /** A thread `to` waiting on `from`: in a later wave, or in the same one when they wait on each other. */
@@ -33,23 +33,23 @@ export type Point = [number, number];
 /** A lane's clearance from the column it leaves, and from the one it enters, where a head and a corner go. */
 const LEAVE = 12;
 const ENTER = 12;
-/** The widest spacing between lanes in a gap, and between rows below a column's cards. */
+/** The widest spacing between lanes in a gap, and between rows below a column's tiles. */
 const SPACING = 6;
-/** The room between a column's last card and the first row below it. */
+/** The room between a column's last tile and the first row below it. */
 const BELOW = 12;
 /** How near two level runs from different threads may come before they read as one. */
 const APART = 3;
-/** How near a card's corner a point on its edge may come. */
+/** How near a tile's corner a point on its edge may come. */
 const INSET = 4;
 
 /**
  * The routes of `waits` between `columns`, the waves in order. `beyond` is where the gap after the last wave ends,
- * as wide as `gapWidths` says. A wait between cards not drawn, or against the waves' order, has none.
+ * as wide as `gapWidths` says. A wait between tiles not drawn, or against the waves' order, has none.
  */
 export function routes(columns: readonly Column[], waits: readonly Wait[], beyond: number): Route[] {
   const where = new Map<string, { wave: number; box: Box }>();
   columns.forEach((column, wave) => {
-    for (const card of column.cards) where.set(card.id, { wave, box: card.box });
+    for (const tile of column.tiles) where.set(tile.id, { wave, box: tile.box });
   });
   const spot = (id: string) => where.get(id) as { wave: number; box: Box };
   const known = waits.filter((wait) => {
@@ -59,9 +59,9 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
     return wait.looped ? from.wave === to.wave : from.wave < to.wave;
   });
   const extent = columns.map((column) => ({
-    left: Math.min(column.heading.left, ...column.cards.map((card) => card.box.left)),
-    right: Math.max(column.heading.right, ...column.cards.map((card) => card.box.right)),
-    bottom: Math.max(column.heading.bottom, ...column.cards.map((card) => card.box.bottom)),
+    left: Math.min(column.heading.left, ...column.tiles.map((tile) => tile.box.left)),
+    right: Math.max(column.heading.right, ...column.tiles.map((tile) => tile.box.right)),
+    bottom: Math.max(column.heading.bottom, ...column.tiles.map((tile) => tile.box.bottom)),
   }));
   // Sources in a stable order, top of the first wave first, so lanes and channels are handed out alike each time.
   const sources = [...new Set(known.map((wait) => wait.from))].sort((a, b) => {
@@ -102,7 +102,7 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
     runs.set(gap, [...(runs.get(gap) ?? []), { y, x, source, fromLeft }]);
   };
 
-  // Ports: on a card's right edge, one point for what leaves it and one for each source in its wave that enters it;
+  // Ports: on a tile's right edge, one point for what leaves it and one for each source in its wave that enters it;
   // on its left, one for each source from an earlier wave. Points on an edge are spread evenly down it, and those on
   // the left moved, if they must, off a run from the left side of the same gap.
   const ports = new Map<string, number>();
@@ -113,7 +113,7 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
       .sort((a, b) => spot(a).box.top - spot(b).box.top);
   const slot = (box: Box, at: number, count: number) => box.top + ((box.bottom - box.top) * (at + 1)) / (count + 1);
   for (const [id, { wave, box }] of where) {
-    // The way out, among the ways in from its own wave, in the order of the cards they come from.
+    // The way out, among the ways in from its own wave, in the order of the tiles they come from.
     const right = [...(sources.includes(id) ? [id] : []), ...into(id, true)].sort(
       (a, b) => spot(a).box.top - spot(b).box.top,
     );
@@ -138,18 +138,18 @@ export function routes(columns: readonly Column[], waits: readonly Wait[], beyon
     });
   }
 
-  // Channels across a skipped wave: a gap between two of its cards, or a row below it, clear of other sources' runs
+  // Channels across a skipped wave: a gap between two of its tiles, or a row below it, clear of other sources' runs
   // in the gaps either side.
   const channel = (wave: number, source: string, now: number, then: number) => {
     const before = lane(wave - 1, source);
     const after = lane(wave, source);
     const fits = (y: number) => clear(wave - 1, y, before, source, false) && clear(wave, y, after, source, true);
-    const cards = (columns[wave] as Column).cards;
+    const tiles = (columns[wave] as Column).tiles;
     const candidates: number[] = [];
-    for (const [at, card] of cards.entries()) {
-      const below = cards[at + 1];
+    for (const [at, tile] of tiles.entries()) {
+      const below = tiles[at + 1];
       if (below === undefined) break;
-      const top = card.box.bottom;
+      const top = tile.box.bottom;
       const bottom = below.box.top;
       const middle = (top + bottom) / 2;
       const room = (bottom - top) / 2 - INSET;

@@ -32,6 +32,6 @@ export function threadLists(
   const working = workingThreads(counts);
   if (waves === null) return { working, next: [] };
   const startable = (id: string) => !working.includes(id) && !awaiting.has(id) && (counts.get(id)?.ready ?? 0) > 0;
-  const next = [...waves.anytime, ...waves.waves.flat()].map((card) => card.id).filter(startable);
+  const next = [...waves.anytime, ...waves.waves.flat()].map((tile) => tile.id).filter(startable);
   return { working, next };
 }

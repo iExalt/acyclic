@@ -353,7 +353,7 @@ export function App() {
     else toThread(id);
   };
   /**
-   * Picks a thread, as a card in the Threads view does, or unpicks the one picked, leaving the Map's view alone
+   * Picks a thread, as a tile in the Threads view does, or unpicks the one picked, leaving the Map's view alone
    * unless nothing of the thread is in it.
    */
   const pickThread = useCallback((id: string) => {

@@ -181,7 +181,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
-    // soft halo around it that widens the node, as a focused card's.
+    // soft halo around it that widens the node, as a focused tile's.
     {
       selector: "node.selected",
       style: {
@@ -229,7 +229,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
     { selector: "edge.lit", style: { width: 2.25, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
     { selector: "edge.dim", style: { opacity: 0.35 } },
-    // The hovered item's links, in ink over whatever else they are, as the Threads view lights a hovered card's.
+    // The hovered item's links, in ink over whatever else they are, as the Threads view lights a hovered tile's.
     { selector: "edge.hovered", style: { width: 2.25, "line-color": p.ink, "target-arrow-color": p.ink } },
     // Where a trunk splits: a dot in the links' colour, over them, told from two links crossing.
     {

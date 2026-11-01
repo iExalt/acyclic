@@ -793,7 +793,7 @@ button.project-title {
 }
 
 /* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
-   on a phone and stand in columns when wide, with arrows between the cards drawn under them. */
+   on a phone and stand in columns when wide, with arrows between the tiles drawn under them. */
 .waves {
   position: absolute;
   inset: 0;
@@ -827,7 +827,7 @@ button.project-title {
   padding: 0;
   list-style: none;
 }
-.card {
+.thread-tile {
   position: relative;
   z-index: 1;
   display: grid;
@@ -840,36 +840,36 @@ button.project-title {
   font-weight: 600;
   text-align: left;
 }
-.card[aria-pressed="true"] {
+.thread-tile[aria-pressed="true"] {
   border-color: var(--ink);
   border-left-color: var(--line, var(--ink));
 }
-.card .head {
+.thread-tile .head {
   display: flex;
   gap: 8px;
   align-items: center;
   min-width: 0;
 }
-.card .projects,
-.card .counts,
-.card .after,
-.card .looped {
+.thread-tile .projects,
+.thread-tile .counts,
+.thread-tile .after,
+.thread-tile .looped {
   color: var(--muted);
   font-size: 0.8rem;
 }
-.card .projects {
+.thread-tile .projects {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card .after,
-.card .looped {
+.thread-tile .after,
+.thread-tile .looped {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 }
-.card .looped {
+.thread-tile .looped {
   color: var(--signal);
 }
 .arrows {

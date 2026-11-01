@@ -224,9 +224,9 @@ Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fi
 target, as a tap or a click both do. Names follow `GLOSSARY.md`, the source of truth for every word the app shows:
 item, project, thread, wave, the needs-you list (written Needs you), and its other words. Where the app needs a word
 the glossary lacks, the glossary gains it first; the app never has words of its own for the tracker's ideas. Threads
-that wait on nothing, and that nothing waits on, are Any time. Two words are the code's alone and never shown: an
-item's stage is where it stands (its readiness, or its state once it is done), and `Card` is a thread's tile in the
-Threads view, which these notes call a tile, since the glossary's Card means something else. Errors say what to check
+that wait on nothing, and that nothing waits on, are Any time. One word is the code's alone and never shown: an
+item's stage is where it stands (its readiness, or its state once it is done). A thread on the Threads view is a tile,
+`ThreadTile` in the code, as an item on the Map is; the glossary's Card is something else. Errors say what to check
 before what went wrong.
 
 ## Do's and Don'ts

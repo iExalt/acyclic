@@ -12,7 +12,7 @@ import {
   type Wait,
 } from "./arrows";
 
-/** Columns as the view lays them out when wide: 220 wide, `gaps` apart (64 by default), a heading, then cards 12
+/** Columns as the view lays them out when wide: 220 wide, `gaps` apart (64 by default), a heading, then tiles 12
  * apart. */
 function layout(heights: number[][], gaps: number[] = heights.map(() => 64)): Column[] {
   let left = 0;
@@ -20,12 +20,12 @@ function layout(heights: number[][], gaps: number[] = heights.map(() => 64)): Co
     if (wave > 0) left += 220 + nth(gaps, wave - 1);
     const heading = { left, top: 0, right: left + 180, bottom: 24 };
     let top = 32;
-    const cards = column.map((height, at) => {
+    const tiles = column.map((height, at) => {
       const box = { left, top, right: left + 220, bottom: top + height };
       top += height + 12;
       return { id: `w${wave}c${at}`, box };
     });
-    return { heading, cards };
+    return { heading, tiles };
   });
 }
 
@@ -33,7 +33,7 @@ const forward = (from: string, to: string): Wait => ({ from, to, looped: false }
 
 /** Where a gap `width` wide after the last of `columns` ends. */
 const beyondOf = (columns: Column[], width = 64) =>
-  Math.max(...nth(columns, -1).cards.map((card) => card.box.right)) + width;
+  Math.max(...nth(columns, -1).tiles.map((tile) => tile.box.right)) + width;
 
 /** The `at`th of `all`, which the test knows is there. */
 function nth<T>(all: readonly T[], at: number): T {
@@ -45,13 +45,13 @@ function nth<T>(all: readonly T[], at: number): T {
 const segmentsOf = (points: readonly Point[]): [Point, Point][] =>
   points.slice(1).map((point, at) => [nth(points, at), point]);
 
-/** Every way `found` could mislead: crossing a card or heading, two threads' arrows within 3 pixels along one line,
+/** Every way `found` could mislead: crossing a tile or heading, two threads' arrows within 3 pixels along one line,
  * a head with no room, a segment neither level nor upright, two segments one way in a row, or a point outside the
  * bounds the view makes room for. */
 function faults(columns: Column[], found: Route[]): string[] {
   const boxes = columns.flatMap((column, wave) => [
     { id: `heading ${wave}`, box: column.heading },
-    ...column.cards.map((card) => ({ id: card.id, box: card.box })),
+    ...column.tiles.map((tile) => ({ id: tile.id, box: tile.box })),
   ]);
   const problems: string[] = [];
   for (const route of found) {
@@ -130,11 +130,11 @@ describe("the Threads view's arrows", () => {
     const found = routes(columns, [forward("w0c0", "w1c0"), forward("w0c1", "w1c0")], beyondOf(columns));
     expect(faults(columns, found)).toEqual([]);
     expect(found.map(bends).every((count) => count <= 2)).toBe(true);
-    // Each source enters the card at a point of its own.
+    // Each source enters the tile at a point of its own.
     expect(new Set(found.map((route) => nth(route.points, -1)[1])).size).toBe(2);
   });
 
-  it("cross a wave they skip between its cards, or below them once that gap is taken", () => {
+  it("cross a wave they skip between its tiles, or below them once that gap is taken", () => {
     const columns = layout([
       [80, 80],
       [80, 80],
@@ -191,12 +191,12 @@ describe("the Threads view's arrows", () => {
     expect(gapWidths(waves, waits.slice(0, 2), 64)).toEqual([64, 64]);
   });
 
-  it("leave out waits between cards not drawn or against the waves' order", () => {
+  it("leave out waits between tiles not drawn or against the waves' order", () => {
     const columns = layout([[80], [80]]);
     expect(routes(columns, [forward("w1c0", "w0c0"), forward("w0c0", "gone")], beyondOf(columns))).toEqual([]);
   });
 
-  it("never cross a card, overlap another thread's or crowd a head, over many layouts", () => {
+  it("never cross a tile, overlap another thread's or crowd a head, over many layouts", () => {
     // ARROWS_SEED replays another run.
     const first = Number(process.env.ARROWS_SEED ?? 32);
     let seed = first;
@@ -209,13 +209,13 @@ describe("the Threads view's arrows", () => {
     };
     const pick = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1));
     for (let trial = 0; trial < 100; trial++) {
-      // One layout in four is crowded, with many cards a wave as short as a card is drawn, so slots and lanes run
+      // One layout in four is crowded, with many tiles a wave as short as a tile is drawn, so slots and lanes run
       // short of room.
       const crowded = trial % 4 === 0;
       const heights = Array.from({ length: pick(2, crowded ? 6 : 5) }, () =>
         Array.from({ length: pick(1, crowded ? 12 : 6) }, () => pick(crowded ? 90 : 60, crowded ? 110 : 140)),
       );
-      const ids = layout(heights).flatMap((column, wave) => column.cards.map((card) => ({ id: card.id, wave })));
+      const ids = layout(heights).flatMap((column, wave) => column.tiles.map((tile) => ({ id: tile.id, wave })));
       const waits: Wait[] = [];
       for (const to of ids) {
         for (const from of ids) {
@@ -236,7 +236,7 @@ describe("the Threads view's arrows", () => {
       expect(faults(columns, found), `seed ${first}, trial ${trial}`).toEqual([]);
       // Each gap's lanes stand their full spacing apart.
       for (let gap = 0; gap + 1 < columns.length; gap++) {
-        const [left, right] = [nth(nth(columns, gap).cards, 0).box.right, nth(nth(columns, gap + 1).cards, 0).box.left];
+        const [left, right] = [nth(nth(columns, gap).tiles, 0).box.right, nth(nth(columns, gap + 1).tiles, 0).box.left];
         const lanes = [
           ...new Set(found.flatMap((route) => route.points.filter(([x]) => x > left && x < right).map(([x]) => x))),
         ].sort((a, b) => a - b);
