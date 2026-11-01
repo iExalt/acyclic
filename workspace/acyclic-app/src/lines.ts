@@ -6,6 +6,7 @@
 // threads apart by colour alone.
 
 import type { Thread } from "./api";
+import { okhsl } from "./okhsl";
 import type { Palette } from "./palette";
 
 /** What a line is drawn from: a thread's id and title. */
@@ -15,8 +16,8 @@ type Named = Pick<Thread, "id" | "title">;
 const LAP = 27;
 /** Laps from the darkest to the lightest, after which the spiral starts again from the darkest. */
 const LAPS = 4;
-/** How colourful every line is, in OKLCH, where the sRGB gamut allows. */
-const CHROMA = 0.13;
+/** How colourful every line is: in Okhsl, a share of the most each hue holds at its lightness, so all are alike. */
+const SATURATION = 0.9;
 /** Where the walk starts: thread 0 a yellow green. */
 const START = 110;
 
@@ -31,7 +32,7 @@ export function lineColour(at: number, palette: Palette): string {
   const [darkest, lightest] = palette.band;
   const along = at % (LAP * LAPS);
   const hue = (START + (along * 360) / LAP) % 360;
-  return oklch(darkest + ((lightest - darkest) * along) / (LAP * LAPS), CHROMA, hue);
+  return okhsl(hue, SATURATION, darkest + ((lightest - darkest) * along) / (LAP * LAPS));
 }
 
 export interface Line {
@@ -114,45 +115,6 @@ export function byNumber(a: Named, b: Named): number {
 export function inkOn(colour: string, palette: Palette): string {
   const [dark, light] = palette.badgeInks;
   return contrast(colour, dark) >= contrast(colour, light) ? dark : light;
-}
-
-/**
- * An OKLCH colour as `#RRGGBB`, with its chroma lowered until it fits sRGB, so the hue and the lightness hold: at the lines'
- * lightness, a few cyans fit slightly less chroma than the rest.
- */
-export function oklch(lightness: number, chroma: number, hue: number): string {
-  const angle = (hue * Math.PI) / 180;
-  for (let c = chroma; ; c -= 0.002) {
-    const rgb = oklabToLinear(lightness, Math.max(0, c) * Math.cos(angle), Math.max(0, c) * Math.sin(angle));
-    if (c <= 0 || rgb.every((channel) => channel >= 0 && channel <= 1)) {
-      return `#${rgb
-        .map((channel) =>
-          Math.round(255 * encode(Math.min(1, Math.max(0, channel))))
-            .toString(16)
-            .padStart(2, "0"),
-        )
-        .join("")}`;
-    }
-  }
-}
-
-/** Linear sRGB from OKLab, as Björn Ottosson defines it. */
-function oklabToLinear(l: number, a: number, b: number): [number, number, number] {
-  const [x, y, z] = [
-    l + 0.3963377774 * a + 0.2158037573 * b,
-    l - 0.1055613458 * a - 0.0638541728 * b,
-    l - 0.0894841775 * a - 1.291485548 * b,
-  ].map((value) => value ** 3) as [number, number, number];
-  return [
-    4.0767416621 * x - 3.3077115913 * y + 0.2309699292 * z,
-    -1.2684380046 * x + 2.6097574011 * y - 0.3413193965 * z,
-    -0.0041960863 * x - 0.7034186147 * y + 1.707614701 * z,
-  ];
-}
-
-/** sRGB's transfer function, from a linear channel. */
-function encode(channel: number): number {
-  return channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
 }
 
 /** A small, stable hash of a string (FNV-1a). */

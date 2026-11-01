@@ -49,7 +49,7 @@ and a unit test keeps the two in step.
   purpose, as the title carries it. Its fill stays opaque, the colour it would show at 35 % over its box, so a link
   across boxes passes beneath it.
 - **Danger:** red, as text only.
-- **Lines:** each thread's colour, from an OKLCH lightness band per scheme, so every line's badge takes a readable ink.
+- **Lines:** each thread's colour, from an Okhsl lightness band per scheme, every hue at the same share of the colour it can hold, so every line's badge takes a readable ink.
 
 ## Typography
 

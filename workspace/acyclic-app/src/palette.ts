@@ -40,7 +40,7 @@ export interface Palette {
   accentInk: string;
   /** Each stage's tint behind an item's title on the Map. */
   tints: Record<Stage, string>;
-  /** How light threads' lines are, in OKLCH, darkest and lightest: each scheme's ground needs its own. */
+  /** How light threads' lines are, in Okhsl, darkest and lightest: each scheme's ground needs its own. */
   band: readonly [number, number];
   /** The two inks a line's badge may take, whichever reads better on the line. */
   badgeInks: readonly [string, string];
@@ -76,7 +76,7 @@ export const PALETTES: Record<Scheme, Palette> = {
       parked: "#25262a",
       unthreaded: "#23282e",
     },
-    band: [0.7, 0.86],
+    band: [0.65, 0.84],
     badgeInks: [DARK_GROUND, "#ffffff"],
   },
   light: {
@@ -105,7 +105,7 @@ export const PALETTES: Record<Scheme, Palette> = {
       parked: "#ececee",
       unthreaded: "#ffffff",
     },
-    band: [0.44, 0.56],
+    band: [0.35, 0.49],
     badgeInks: [DARK_GROUND, "#ffffff"],
   },
 };
