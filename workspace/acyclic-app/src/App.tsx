@@ -546,10 +546,10 @@ export function App() {
     () => ({ layer: panel, item: shownItem, thread, view }),
     [panel, shownItem, thread, view],
   );
-  // A notice is first shown where the user is, and kept or dropped as they move.
+  // A notice is first shown where the user is, and kept or dropped as they move. As an update of the notice as it
+  // is by then, so it never brings back one another effect of the same move cleared, such as a closed form's.
   useEffect(() => {
-    const next = noticeAfter(notice, { kind: "moved", to: place });
-    if (next !== notice) setNotice(next);
+    if (notice !== null) setNotice((was) => noticeAfter(was, { kind: "moved", to: place }));
   }, [notice, place]);
   const noticeAt = notice === null ? null : placed(notice, place);
   /**
