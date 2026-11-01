@@ -127,13 +127,14 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   it. Dismiss is the panels' quiet ✕. One shows at a time: the next replaces it, including one a link from a
   notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as
   noise.)
-- **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
-  Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
-  to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it
-  holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
-  (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.) While it edits,
-  the form's State and Thread stand in for the Status and Thread rows, which would only repeat them; Parent and Id
-  stay. The form's thread picker says each thread as "4. CLI features", as text names a thread without a badge.
+- **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover. Edit (a
+  pencil), the ⋯ menu and Close beside the title, which keeps most of the header's width; Move, Reopen, Add inside,
+  Waits for, Relates to and Copy link in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on
+  hover, a section only when it holds one; a row's remove button shows on hover or with focus in the row, and always
+  where there may be no hover. (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the
+  calmest.) While it edits, the form's State and Thread stand in for the Status and Thread rows, which would only repeat
+  them; Parent and Id stay. The form's thread picker says each thread as "4. CLI features", as text names a thread
+  without a badge.
 - **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"), and under each list that sets it, what
   it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding
   "as set for every thread".
@@ -167,9 +168,10 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
   `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
-  entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived
-  item shows archived items, with Hide archived. An item's and a thread's panels carry Copy link, which ticks in
-  place. A device not yet paired loses the address through pairing.
+  entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item
+  shows archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a
+  thread's panel carries it beside the title, ticking in place. A device not yet paired loses the address through
+  pairing.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
   thread, project and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
@@ -183,14 +185,14 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   single key approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the
   menu's Single-key shortcuts switch, per device, turns them off.
 - **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the global autonomy
-  level offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse
-  (an approval, a proposal kept or dropped, a thread's own level or flag, a thread changed: agents act on them).
-  Undo reads the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a
-  removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
-  what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it
-  reads ("Sow now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", fields "Set X back". Undo
-  sits in the slot, one place to look that doesn't move as its panel closes, its text a line there, as its button says
-  what it offers; anything else in the slot wraps, as it is the only place its reason shows.
+  level offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (an
+  approval, a proposal kept or dropped, a thread's own level or flag, a thread changed: agents act on them). Undo reads
+  the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a removed wait or a
+  state once the work it released has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set
+  back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig",
+  "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits
+  in the slot, one place to look that doesn't move as its panel closes, its text a line there, as its button says what
+  it offers; anything else in the slot wraps, as it is the only place its reason shows.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
@@ -201,8 +203,14 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   and none of its actions.
 - **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the
   Map, goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than
-  1:1, no further out than readable, else from its first item). The picked thread's row in the sidebar, on the Map,
-  unpicks it. A tile picked in the Threads view opens the thread's panel there.
+  1:1, no further out than readable, else from its first item), with the titles of the boxes they are in when those
+  fit too. The picked thread's row in the sidebar, on the Map, unpicks it. A tile picked in the Threads view opens the
+  thread's panel there.
+- **The selection stays in view.** A strip taken from the Map, such as the slot, or a window turned, shows the selected
+  item again if it hid it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user
+  types.
+- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is
+  made from the title and asked for only once the server refuses it.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a

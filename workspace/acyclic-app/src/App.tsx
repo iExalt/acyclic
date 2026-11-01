@@ -479,7 +479,7 @@ export function App() {
             lasts: "offer",
             at: null,
           });
-        else await send(undo.command, { select: null, pin: null, undone: undo.undone });
+        else await send(undo.command, { select: undo.shows ?? null, pin: null, undone: undo.undone });
       } finally {
         undoing.current = false;
       }
@@ -1168,6 +1168,8 @@ export function App() {
             parent={adding.parent}
             parentTitle={adding.parent === null ? null : titleOf(adding.parent)}
             thread={thread ?? (adding.parent === null ? null : (model?.items.get(adding.parent)?.thread ?? null))}
+            phases={outline?.phases ?? []}
+            phase={current.phase}
             threads={sorted}
             taken={new Set(model?.items.keys())}
             idRefused={adding.idRefused}
@@ -1199,7 +1201,12 @@ export function App() {
             onAdd={() => startAdd(chosen.id)}
             onClose={closeItem}
             onDismiss={() => closeTop.current(1)}
-            onCopyLink={() => copyLink({ ...NOTHING, view: "map", item: chosen.id })}
+            onCopyLink={() =>
+              copyLink({ ...NOTHING, view: "map", item: chosen.id }).then((copied) => {
+                if (copied)
+                  setNotice({ text: "Link copied", offer: null, retry: null, polite: true, lasts: "news", at: null });
+              })
+            }
             onEditorClosed={formClosed}
             onCommand={(edit) => send(edit, { select: chosen.id, pin: chosen.id })}
             onSave={(edit, edited) =>

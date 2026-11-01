@@ -79,8 +79,9 @@ function ViewLinks({
       className="view"
       data-view={one.view}
       aria-current={view === one.view ? "page" : undefined}
-      // A sequence, which aria-keyshortcuts can't say: the title names it.
-      title={shortcuts ? `${one.label} (G then ${one.key})` : undefined}
+      // A sequence, which aria-keyshortcuts can't say: the title names it. Without it, the title still names the icon,
+      // all a folded sidebar shows.
+      title={shortcuts ? `${one.label} (G then ${one.key})` : one.label}
       onClick={() => onView(one.view)}
     >
       {short ? null : <Icon of={one.icon} />}
@@ -99,6 +100,7 @@ function NeedsButton({ needs, needsOpen, onNeeds }: Pick<ShellProps, "needs" | "
       data-none={needs === 0}
       aria-pressed={needsOpen}
       aria-label={`Needs you: ${needs} waiting`}
+      title="Needs you"
       onClick={onNeeds}
     >
       <Icon of={Inbox} />
@@ -174,6 +176,7 @@ function SidebarShell(props: ShellProps) {
             className="search"
             onClick={props.onSearch}
             data-action="search"
+            title="Search or jump to…"
             aria-keyshortcuts={`${MAC ? "Meta+K" : "Control+K"}${props.shortcuts ? " /" : ""}`}
           >
             <Icon of={Search} />
@@ -193,7 +196,7 @@ function SidebarShell(props: ShellProps) {
             onClick={props.onAdd}
             data-action="add-top"
             aria-keyshortcuts={props.shortcuts ? "C" : undefined}
-            title={props.shortcuts ? "New item (C)" : undefined}
+            title={props.shortcuts ? "New item (C)" : "New item"}
           >
             <Icon of={Plus} />
             <span className="text">New item</span>

@@ -30,6 +30,30 @@ export function uncovered(width: number, height: number, cover: Box | null): Box
   return { ...all, x2: Math.max(0, cover.x1) };
 }
 
+/**
+ * Whether resizing the Map from `was` to `now` (each a width and height) covers `node`, clear of the sheet or pane at
+ * `cover` before: a strip taken from the Map's foot, or a window turned, can hide the selection, which is then shown
+ * again; one already hidden, or panned away by the user, is left where it is. The panels sit at the Map's foot or right
+ * edge, so before the resize the cover is taken to have sat as far from the top-left as the Map has shrunk: exact for a
+ * pane and for a sheet of fixed height. A half sheet, which shrinks with the Map, is put a little low, so a selection
+ * already partly under its edge counts as newly hidden and is shown, which errs the harmless way.
+ */
+export function newlyCovered(
+  node: Box,
+  was: { width: number; height: number },
+  now: { width: number; height: number },
+  cover: Box | null,
+): boolean {
+  const dx = was.width - now.width;
+  const dy = was.height - now.height;
+  const before = cover === null ? null : { x1: cover.x1 + dx, y1: cover.y1 + dy, x2: cover.x2 + dx, y2: cover.y2 + dy };
+  const still = (pan: { x: number; y: number }) => pan.x === 0 && pan.y === 0;
+  return (
+    still(reveal(node, uncovered(was.width, was.height, before))) &&
+    !still(reveal(node, uncovered(now.width, now.height, cover)))
+  );
+}
+
 /** The furthest the first view zooms out: 13 px titles drawn at 11 px, about the least a phone's reader can read. */
 export const READABLE = 0.85;
 
@@ -107,6 +131,47 @@ export function nearest(nodes: Box[], open: Box): Box | null {
 }
 
 /**
+ * `boxes` with, for each, the corner of the innermost of `holders` around it, down to the foot of its title strip,
+ * `strip` tall, so a frame of a thread's items starts at the titles of the boxes they are in rather than cutting them at
+ * the Map's edge.
+ */
+export function headed(boxes: readonly Box[], holders: readonly Box[], strip: number): Box[] {
+  const area = (b: Box) => (b.x2 - b.x1) * (b.y2 - b.y1);
+  const around = (inner: Box, outer: Box) =>
+    outer !== inner && outer.x1 <= inner.x1 && outer.y1 <= inner.y1 && outer.x2 >= inner.x2 && outer.y2 >= inner.y2;
+  const titles = boxes.flatMap((box) => {
+    const holder = holders
+      .filter((one) => around(box, one))
+      .reduce<Box | null>((best, one) => (best === null || area(one) < area(best) ? one : best), null);
+    return holder === null ? [] : [{ x1: holder.x1, y1: holder.y1, x2: holder.x1, y2: holder.y1 + strip }];
+  });
+  return [...boxes, ...titles];
+}
+
+/** Whether `frame` would show all of `boxes` together, at a zoom titles can be read at. */
+export function framesAll(boxes: readonly Box[], open: Box, padding = 24): boolean {
+  return boxes.length > 0 && fitOf(boxes, open, padding) >= READABLE;
+}
+
+/** The closest zoom that shows all of `boxes` in `open`, `padding` from its edges. */
+function fitOf(boxes: readonly Box[], open: Box, padding: number): number {
+  const all = spanOf(boxes);
+  return Math.min(
+    (open.x2 - open.x1 - 2 * padding) / Math.max(1, all.x2 - all.x1),
+    (open.y2 - open.y1 - 2 * padding) / Math.max(1, all.y2 - all.y1),
+  );
+}
+
+function spanOf(boxes: readonly Box[]): Box {
+  return {
+    x1: Math.min(...boxes.map((b) => b.x1)),
+    y1: Math.min(...boxes.map((b) => b.y1)),
+    x2: Math.max(...boxes.map((b) => b.x2)),
+    y2: Math.max(...boxes.map((b) => b.y2)),
+  };
+}
+
+/**
  * The view that frames `boxes`, in the Map's own units, in `open`, the part of the screen nothing covers: all of them
  * at the closest zoom up to `most` that fits them, when that is readable, centred; else at a readable zoom from the
  * first of them in reading order, at the top-left of `open`. Either way moved, if need be, so no edge of the `plan`
@@ -120,17 +185,9 @@ export function frame(
   padding = 24,
 ): { zoom: number; pan: { x: number; y: number } } | null {
   if (boxes.length === 0) return null;
-  const all = {
-    x1: Math.min(...boxes.map((b) => b.x1)),
-    y1: Math.min(...boxes.map((b) => b.y1)),
-    x2: Math.max(...boxes.map((b) => b.x2)),
-    y2: Math.max(...boxes.map((b) => b.y2)),
-  };
+  const all = spanOf(boxes);
   const [width, height] = [open.x2 - open.x1, open.y2 - open.y1];
-  const fit = Math.min(
-    (width - 2 * padding) / Math.max(1, all.x2 - all.x1),
-    (height - 2 * padding) / Math.max(1, all.y2 - all.y1),
-  );
+  const fit = fitOf(boxes, open, padding);
   // Held between the plan's far edge at the open part's far side and its near edge at the near side, so no blank canvas
   // shows beyond the plan; a plan smaller than the open part stays where it was put.
   const held = (zoom: number, pan: { x: number; y: number }) => {

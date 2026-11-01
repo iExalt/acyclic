@@ -6,12 +6,11 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import { CopyLink } from "./CopyLink";
 import type { Edited, LinkKind } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
-import { ArrowUpLeft, FolderInput, Icon, Link2, Pencil, Plus, RotateCcw, X } from "./icons";
+import { ArrowUpLeft, FolderInput, Icon, Link2, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
 import { type Line, lineLabel } from "./lines";
 import { Menu } from "./Menu";
 import { Prose } from "./Prose";
@@ -38,8 +37,8 @@ export interface InspectorProps {
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
   onDismiss: () => void;
-  /** Copies the address that opens this again. */
-  onCopyLink: () => Promise<boolean>;
+  /** Copies the address that opens this again, saying so. */
+  onCopyLink: () => void;
   /** Its editor closed, saved or not. */
   onEditorClosed: () => void;
   /** Sends an edit of this item, such as a conflict settled. */
@@ -201,8 +200,9 @@ export function Inspector({
           {action("add-child", "Add inside", Plus, onAdd, "A")}
           {action("waits-for", "Waits for…", ArrowUpLeft, () => onLink("waits-for"), "W")}
           {action("relates-to", "Relates to…", Link2, () => onLink("relates-to"), "R")}
+          {/* In the menu rather than beside it, so the title keeps the header's width. */}
+          {action("copy-link", "Copy link", LinkIcon, onCopyLink)}
         </Menu>
-        <CopyLink onCopy={onCopyLink} />
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>

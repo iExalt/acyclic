@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { firstOf, firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
+import {
+  firstOf,
+  firstView,
+  frame,
+  framesAll,
+  headed,
+  nearest,
+  newlyCovered,
+  READABLE,
+  reveal,
+  startOf,
+  uncovered,
+} from "./reveal";
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
@@ -12,6 +24,34 @@ describe("reveal", () => {
 
   it("shows the start of a node too big to fit, where its title is", () => {
     expect(reveal({ x1: 100, y1: 100, x2: 900, y2: 1200 }, open)).toEqual({ x: -92, y: -92 });
+  });
+});
+
+describe("newlyCovered", () => {
+  // A phone's Map 700 tall, its sheet from 400; a slot of 70 px takes the Map to 630 and the sheet up to 330.
+  const was = { width: 384, height: 700 };
+  const now = { width: 384, height: 630 };
+  const sheet = { x1: 0, y1: 330, x2: 384, y2: 630 };
+
+  it("is a selection the resize hides that was clear before", () => {
+    expect(newlyCovered({ x1: 20, y1: 340, x2: 200, y2: 380 }, was, now, sheet)).toBe(true);
+  });
+
+  it("isn't one still clear, nor one hidden already, nor one panned away", () => {
+    expect(newlyCovered({ x1: 20, y1: 100, x2: 200, y2: 140 }, was, now, sheet)).toBe(false);
+    expect(newlyCovered({ x1: 20, y1: 450, x2: 200, y2: 490 }, was, now, sheet)).toBe(false);
+    expect(newlyCovered({ x1: -400, y1: 100, x2: -200, y2: 140 }, was, now, sheet)).toBe(false);
+  });
+
+  it("is one a window turned hides, with no panel open", () => {
+    expect(
+      newlyCovered(
+        { x1: 500, y1: 100, x2: 600, y2: 140 },
+        { width: 900, height: 400 },
+        { width: 400, height: 900 },
+        null,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -152,5 +192,30 @@ describe("frame", () => {
     const view = frame([{ x1: 1000, y1: 1000, x2: 1200, y2: 1048 }], big, phone, 1);
     expect(view).toEqual({ zoom: 1, pan: { x: 92 - 1000, y: 176 - 1000 } });
     expect(frame([], big, phone, 1)).toBeNull();
+  });
+});
+
+describe("headed", () => {
+  const outer = { x1: 0, y1: 0, x2: 1000, y2: 800 };
+  const inner = { x1: 100, y1: 100, x2: 600, y2: 500 };
+  const item = { x1: 200, y1: 300, x2: 300, y2: 340 };
+
+  it("adds the title corner of the innermost box an item is in", () => {
+    expect(headed([item], [outer, inner], 52)).toEqual([item, { x1: 100, y1: 100, x2: 100, y2: 152 }]);
+  });
+
+  it("adds nothing for an item in no box, and doesn't take a box for its own holder", () => {
+    expect(headed([inner], [inner], 52)).toEqual([inner]);
+    expect(headed([{ x1: 2000, y1: 0, x2: 2100, y2: 40 }], [outer], 52)).toHaveLength(1);
+  });
+});
+
+describe("framesAll", () => {
+  const open = { x1: 0, y1: 0, x2: 400, y2: 600 };
+
+  it("holds when everything fits at a readable zoom, and not when it would need to zoom out further", () => {
+    expect(framesAll([{ x1: 0, y1: 0, x2: 300, y2: 300 }], open)).toBe(true);
+    expect(framesAll([{ x1: 0, y1: 0, x2: 1000, y2: 300 }], open)).toBe(false);
+    expect(framesAll([], open)).toBe(false);
   });
 });

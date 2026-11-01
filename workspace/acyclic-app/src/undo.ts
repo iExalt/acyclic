@@ -22,6 +22,8 @@ export interface Undo {
   command: Command;
   /** Whether the plan still holds what the write left, so the undo takes back that write and nothing done since. */
   holds: (now: Plan) => boolean;
+  /** An item the undo puts somewhere else, to select and bring into view where it lands, as the write did. */
+  shows?: string;
 }
 
 /** An item's fields an edit can set and an undo set back, with the value each holds; an empty one is null. */
@@ -88,6 +90,7 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
       undone: `Moved ${titleOf(id)} back`,
       command: { item: { edit: back === null ? { item: id, "no-parent": true } : { item: id, parent: back } } },
       holds: (now) => (now.items.get(id)?.parent ?? null) === to,
+      shows: id,
     };
   }
 

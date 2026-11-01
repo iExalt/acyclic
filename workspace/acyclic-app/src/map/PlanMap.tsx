@@ -10,14 +10,25 @@ import { chain, expandTo } from "../edits";
 import type { Line } from "../lines";
 import type { Palette } from "../palette";
 import { useWide } from "../wide";
-import { onChevron } from "./chevron";
+import { onChevron, STRIP } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstView, frame, nearest, READABLE, reveal, startOf, uncovered } from "./reveal";
-import { type Fonts, type Selection, scene, UNMEASURED } from "./scene";
+import {
+  firstView,
+  frame,
+  framesAll,
+  headed,
+  nearest,
+  newlyCovered,
+  READABLE,
+  reveal,
+  startOf,
+  uncovered,
+} from "./reveal";
+import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
 
@@ -222,17 +233,29 @@ export default function PlanMap({
     core.style(styleFor(palette));
   }, [palette]);
 
-  // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows.
+  // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows. A strip taken from
+  // the Map, such as the slot, or a window turned, shows the selection again if it hid it; a phone's keyboard, which
+  // resizes the Map too, leaves it, as the user is typing.
   const placedNow = useRef<Placed | null>(null);
   placedNow.current = placed;
+  const selectedNow = useRef(selected);
+  selectedNow.current = selected;
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
+    let size: { width: number; height: number } | null = null;
     const observer = new ResizeObserver(() => {
       const core = cy.current;
+      const was = size;
+      size = { width: element.clientWidth, height: element.clientHeight };
       if (core === null || placedNow.current === null) return;
       core.resize();
       zoomOutTo(core, element, placedNow.current);
+      const id = selectedNow.current;
+      const node = id === null ? null : core.getElementById(id);
+      if (was === null || id === null || node === null || node.empty() || typing()) return;
+      if (newlyCovered(node.renderedBoundingBox({ includeLabels: false }), was, size, coverOf(element)))
+        revealIn(core, element, id);
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -313,11 +336,25 @@ export default function PlanMap({
     if (core === null || element === null || drawn === null) return;
     framedDone.current = framed.n;
     sought.current = thread;
-    const boxes = drawn.nodes.flatMap((node) => {
-      const drawnNode = core.getElementById(node.id);
-      return node.lit && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
-    });
-    const view = frame(boxes, core.nodes().boundingBox({ includeLabels: false }), openPart(element), 1);
+    const boxOf = (kind: (node: SceneNode) => boolean) =>
+      drawn.nodes.flatMap((node) => {
+        const drawnNode = core.getElementById(node.id);
+        return kind(node) && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
+      });
+    const lit = boxOf((node) => node.lit);
+    const open = openPart(element);
+    // With the titles of the boxes they are in, when those fit too: else only the items, which matter more.
+    const titled = headed(
+      lit,
+      boxOf((node) => node.kind === "box"),
+      STRIP,
+    );
+    const view = frame(
+      framesAll(titled, open) ? titled : lit,
+      core.nodes().boundingBox({ includeLabels: false }),
+      open,
+      1,
+    );
     if (view !== null) core.viewport(view);
   }, [framed, thread, drawn]);
   useEffect(() => {
@@ -459,28 +496,43 @@ function revealIn(core: Core, element: HTMLElement, id: string) {
   core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element)));
 }
 
+/** Whether the user is typing, as a phone's keyboard, which takes from the Map's height, is up for. */
+function typing(): boolean {
+  const at = document.activeElement;
+  return at instanceof HTMLElement && (at.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(at.tagName));
+}
+
 /**
  * The part of the Map no sheet or pane covers, in its own pixels: of the panels open, the one covering most, where it
  * comes to rest, without the rise it may still be animating.
  */
 function openPart(element: HTMLElement) {
   const map = element.getBoundingClientRect();
-  const covers = [...(element.parentElement?.querySelectorAll<HTMLElement>(".inspector, .sheet") ?? [])].map(
-    (sheet) => {
-      const box = sheet.getBoundingClientRect();
-      const risen = new DOMMatrixReadOnly(getComputedStyle(sheet).transform).m42;
-      return {
-        x1: box.left - map.left,
-        y1: box.top - risen - map.top,
-        x2: box.right - map.left,
-        y2: box.bottom - risen - map.top,
-      };
-    },
-  );
+  return uncovered(map.width, map.height, coverOf(element));
+}
+
+/** The sheets and panes that may cover the Map. */
+function panelsOver(element: HTMLElement): HTMLElement[] {
+  return [...(element.parentElement?.querySelectorAll<HTMLElement>(".inspector, .sheet") ?? [])];
+}
+
+/** The panel covering most of the Map, in its pixels, where it comes to rest; null with none open. */
+function coverOf(element: HTMLElement) {
+  const map = element.getBoundingClientRect();
+  const covers = panelsOver(element).map((sheet) => {
+    const box = sheet.getBoundingClientRect();
+    const risen = new DOMMatrixReadOnly(getComputedStyle(sheet).transform).m42;
+    return {
+      x1: box.left - map.left,
+      y1: box.top - risen - map.top,
+      x2: box.right - map.left,
+      y2: box.bottom - risen - map.top,
+    };
+  });
   const most = covers.reduce<(typeof covers)[number] | null>(
     (best, one) =>
       best === null || (one.x2 - one.x1) * (one.y2 - one.y1) > (best.x2 - best.x1) * (best.y2 - best.y1) ? one : best,
     null,
   );
-  return uncovered(map.width, map.height, most);
+  return most;
 }
