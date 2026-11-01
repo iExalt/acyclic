@@ -170,7 +170,7 @@ describe("failure", () => {
     const bug = await items(malformed).then(() => null, failure);
     expect(bug?.code).toBe("network");
     expect(bug?.message).not.toBe("Can't reach the server");
-    expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "try again" });
+    expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "Try again" });
   });
 
   it("tells a browser the server no longer knows to pair again, on the server's own port", () => {
@@ -179,6 +179,17 @@ describe("failure", () => {
       "This browser isn't paired with acyclic up any more. Run acyclic up --link --port 7479 where it runs, and open the link it prints within five minutes",
     );
     expect(failure(refused, "").message).toContain("Run acyclic up --link where it runs");
+  });
+
+  it("words a refusal the server names by id for people, and starts any other as a sentence", () => {
+    const cycle = new CommandError("parent-cycle", "water can't go under itself or its own descendant");
+    expect(failure(cycle)).toEqual({
+      code: "parent-cycle",
+      message: "An item can't go inside itself, or inside anything under it",
+    });
+    expect(failure(new CommandError("claimed", "thread t is claimed by run/1")).message).toBe(
+      "Thread t is claimed by run/1",
+    );
   });
 });
 

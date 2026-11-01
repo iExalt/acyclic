@@ -55,7 +55,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
             <Prose text={line?.name ?? one.id} />
           </span>
           <span className="counts">
-            <StageCounts counts={one.counts} none="No tasks shown" />
+            <StageCounts counts={one.counts} none="No items shown" />
           </span>
           {one.after.length === 0 ? null : <span className="after">after {badges(one.after)}</span>}
           {one.looped.length === 0 ? null : <span className="looped">waits in a cycle with {badges(one.looped)}</span>}

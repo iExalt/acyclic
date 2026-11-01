@@ -24,6 +24,8 @@ const NEEDS_SHOWN_STACKED = 5;
 export interface OverviewProps {
   needs: Need[];
   lines: ReadonlyMap<string, Line>;
+  /** An item's title, for an entry in Needs you that names it by id. */
+  titleOf: (id: string) => string;
   /** Each thread's items by stage. */
   counts: ReadonlyMap<string, Counts>;
   waves: WavesView | null;
@@ -43,6 +45,7 @@ export interface OverviewProps {
 export function Overview({
   needs,
   lines,
+  titleOf,
   counts,
   waves,
   outline,
@@ -112,7 +115,7 @@ export function Overview({
         ) : (
           <ul className="rows">
             {needs.slice(0, needsShown).map((need) => {
-              const view = needView(need, lines);
+              const view = needView(need, lines, undefined, titleOf);
               return (
                 <li key={view.key}>
                   <button
@@ -179,7 +182,7 @@ export function Overview({
 
       <section className="overview-section overview-phases" aria-labelledby="overview-phases">
         <header>
-          <h2 id="overview-phases">Phases</h2>
+          <h2 id="overview-phases">Projects</h2>
           <span className="count muted">{outline?.phases.length ?? 0}</span>
           <span className="grow" />
           <button type="button" className="quiet" onClick={() => onView("map")}>
@@ -187,7 +190,7 @@ export function Overview({
           </button>
         </header>
         {outline === null || outline.phases.length === 0 ? (
-          <p className="empty">No phases yet: add an item at the top level, and work inside it.</p>
+          <p className="empty">No projects yet: add an item at the top level, and work inside it.</p>
         ) : (
           <ul className="rows">
             {outline.phases.map((phase) => {

@@ -19,7 +19,7 @@ _Avoid_: epic, category
 
 **Project**:
 A top-level item with children; a top-level item is a project even when it also has a gate.
-_Avoid_: theatre, repository
+_Avoid_: theatre, repository, phase
 
 **Gate**:
 The exit check an item must pass to be done. Not enforced yet: `done` doesn't check it. Today it is free text that sets
@@ -52,6 +52,11 @@ _Avoid_: partition, breakdown
 A bounded piece of work that one continuing agent conversation works through from start to finish, approved as a
 unit.
 _Avoid_: workstream, track, lane, operation
+
+**Wave**:
+A step in the order threads can start: each thread with work left comes after every thread its work waits on, and a
+thread that waits on none and that none waits on is in no wave and can start any time.
+_Avoid_: round, tier
 
 **Provisional thread**:
 A thread an agent or an import created that the user has not yet approved.
