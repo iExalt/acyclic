@@ -5,6 +5,8 @@ import { type FormEvent, useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import type { Edited } from "./edits";
 import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
+import { StageLabel } from "./Stage";
+import { stateWords } from "./stages";
 
 export interface ItemEditorProps {
   item: Item;
@@ -46,20 +48,24 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
         <input name="title" value={draft.title} onChange={set("title")} />
       </label>
       {item.state === "done" ? (
-        <label>
+        // Finished work's state is set by finishing it, so it reads as the panel says it, not as a field.
+        <div className="fixed-field">
           State
-          <input name="state" value="done" disabled />
-        </label>
+          <StageLabel stage={item.stage ?? "done"} />
+        </div>
       ) : (
         <label>
           State
           <select name="state" value={draft.state} onChange={set("state")}>
             {STATES.map((state) => (
               <option key={state} value={state}>
-                {state}
+                {stateWords(state)}
               </option>
             ))}
           </select>
+          {draft.state === "backlog" ? (
+            <span className="hint">Shows as Ready or Blocked, by what it waits on</span>
+          ) : null}
         </label>
       )}
       <label>

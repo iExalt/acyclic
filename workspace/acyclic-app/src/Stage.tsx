@@ -2,7 +2,7 @@
 // icon. The icon only repeats the word, so it is hidden from assistive technology.
 
 import type { Counts, Stage } from "./api";
-import { QUIET, STAGE_ICONS, STAGE_WORDS, stageCounts } from "./stages";
+import { QUIET, STAGE_ICONS, STAGE_WORDS, stageCounts, stageCountWords } from "./stages";
 
 export function StageIcon({ stage }: { stage: Stage }) {
   return (
@@ -44,7 +44,7 @@ export function StageCounts({ counts, none = "No tasks" }: { counts: Counts; non
       {shown.map(({ stage, count }, at) => (
         <span key={stage} className="stage-mark" data-stage={stage}>
           <StageIcon stage={stage} />
-          <span className="count">{count}</span> {STAGE_WORDS[stage].toLowerCase()}
+          <span className="count">{count}</span> {stageCountWords(stage, count)}
           {at < shown.length - 1 ? "," : ""}
         </span>
       ))}

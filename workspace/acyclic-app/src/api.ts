@@ -1,6 +1,6 @@
 // The server's API: one endpoint that runs a CLI command, given as JSON, and answers with the CLI's envelope.
 
-import { STAGE_WORDS, stageCounts } from "./stages";
+import { stageCounts, stageCountWords } from "./stages";
 
 export type Envelope<T> =
   | { ok: true; data: T }
@@ -54,7 +54,7 @@ export interface Progress {
 /** A parent's leaves by stage in words, in the order work moves through them, leaving out stages with none. */
 export function countsText(counts: Counts): string {
   return stageCounts(counts)
-    .map(({ stage, count }) => `${count} ${STAGE_WORDS[stage].toLowerCase()}`)
+    .map(({ stage, count }) => `${count} ${stageCountWords(stage, count)}`)
     .join(", ");
 }
 

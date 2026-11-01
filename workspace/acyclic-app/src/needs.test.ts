@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
-import { countText, groupOf, needView, threadLabel } from "./needs";
+import { awaitingApproval, countText, groupOf, needView, threadLabel } from "./needs";
 import { PALETTES } from "./palette";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
@@ -85,18 +85,25 @@ describe("needView", () => {
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
     expect(waiting("thread-3", "3. Ship it")).toMatchObject({
-      text: "Ship it now waits for your approval",
+      text: "Ship it now",
       line: lines.get("thread-3"),
       thread: "thread-3",
       threads: [],
     });
     // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
     expect(waiting("thread-9", "9. Gone")).toMatchObject({
-      text: "9. Gone waits for your approval",
+      text: "9. Gone",
       line: undefined,
       thread: null,
       threads: [{ id: "thread-9", title: "9. Gone" }],
     });
+    // What it asks, for a list without its button, gives the button's own count.
+    const covering = needView(
+      { kind: "awaiting-approval", thread: { id: "thread-3", title: "Ship", counts: { members: 4 } } },
+      lines,
+    );
+    expect(covering.detail).toBe("4 items to approve");
+    expect(covering.actions[0]?.label).toBe("Approve 4 items");
     expect(threadLabel({ id: "thread-9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
     expect(threadLabel({ id: "thread-3", title: "3. Ship it" }, lines)).toEqual({
       line: lines.get("thread-3"),
@@ -214,6 +221,15 @@ describe("the needs-you list's groups and count", () => {
     expect(
       ["conflict", "resource-clash", "number-clash", "dangling", "unverified", "link-cycle", "never-seen"].map(groupOf),
     ).toEqual(Array(7).fill("unblock"));
+  });
+
+  it("names the threads waiting for approval, and no thread another kind names", () => {
+    const needs = [
+      { kind: "awaiting-approval", thread: { id: "thread-1", title: "One" } },
+      { kind: "unapproved", thread: { id: "thread-2" }, item: { id: "a" } },
+      { kind: "awaiting-approval", thread: null },
+    ];
+    expect(awaitingApproval(needs)).toEqual(new Set(["thread-1"]));
   });
 
   it("counts exactly to 99, then says 99+", () => {

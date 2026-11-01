@@ -11,7 +11,8 @@ export const STAGE_ICONS: Record<Stage, string> = {
   ready: '<circle cx="8" cy="8" r="6"/>',
   blocked: '<circle cx="8" cy="8" r="6"/><path d="M4.5 8h7"/>',
   parked: '<path d="M6 3.5v9M10 3.5v9"/>',
-  unthreaded: '<path d="M2 8h4M10 8h4"/>',
+  // The dashed ring a task with no thread carries where its badge would be: one mark for one fact everywhere.
+  unthreaded: '<circle cx="8" cy="8" r="6" stroke-dasharray="3 2.4"/>',
 };
 
 /** Each stage's word, as a sentence starts it. */
@@ -22,8 +23,15 @@ export const STAGE_WORDS: Record<Stage, string> = {
   ready: "Ready",
   blocked: "Blocked",
   parked: "Parked",
-  unthreaded: "Not in a thread",
+  // A status, and what settles it: an item in no thread is never ready.
+  unthreaded: "Needs a thread",
 };
+
+/** `count` leaves at `stage`, as a parent's counts say it: "3 ready", "1 needs a thread", "3 need a thread". */
+export function stageCountWords(stage: Stage, count: number): string {
+  if (stage === "unthreaded") return count === 1 ? "needs a thread" : "need a thread";
+  return STAGE_WORDS[stage].toLowerCase();
+}
 
 /** The stages whose work is finished or set aside, drawn quieter. */
 export const QUIET: ReadonlySet<Stage> = new Set(["done", "blocked", "parked", "unthreaded"]);

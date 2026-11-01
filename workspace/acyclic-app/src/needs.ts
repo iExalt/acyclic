@@ -36,6 +36,11 @@ export interface NeedView {
   /** A stable key for the entry: its kind and what it names. */
   key: string;
   text: string;
+  /**
+   * What it asks, where the text is a name alone, for a list that shows the entry without its actions: an approval's
+   * text names its thread, and this says it waits and for how many items, the count its Approve button gives.
+   */
+  detail: string | null;
   /** The line of the one thread its text names, for its badge, which carries the number the text leaves out. */
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
@@ -77,6 +82,15 @@ export const GROUPS: { group: NeedGroup; label: string }[] = [
 export function groupOf(kind: string): NeedGroup {
   if (["proposal", "unapproved", "awaiting-approval", "new-blocker"].includes(kind)) return "approve";
   return kind === "question" ? "answer" : "unblock";
+}
+
+/** The threads Needs you asks the user to approve. */
+export function awaitingApproval(needs: readonly Need[]): Set<string> {
+  const ids = needs
+    .filter((need) => need.kind === "awaiting-approval")
+    .map((need) => row(need.thread)?.id)
+    .filter((id) => id !== undefined);
+  return new Set(ids);
 }
 
 /** A count as the Needs you button shows it: exact to 99, then 99+. */
@@ -141,6 +155,7 @@ function viewOf(
     threads: threads.map((one) => ({ id: one.id, title: titled(one) })),
     actions: [] as Action[],
     note: null as string | null,
+    detail: null as string | null,
   };
   switch (need.kind) {
     case "proposal": {
@@ -190,7 +205,10 @@ function viewOf(
         key: `awaiting-approval:${id}`,
         items: listed,
         more: Math.max(0, count - listed.length),
-        text: `${name} waits for your approval`,
+        // The name alone: every entry here waits for approval, which the list's filter and the button say, and a
+        // sentence on each row read as noise.
+        text: name,
+        detail: `${items} to approve`,
         actions: [
           {
             label: `Approve ${items}`,
@@ -334,7 +352,7 @@ function describe(
     contest: "Two holders claim one thread",
     "clock-ahead": "A claim's clock runs ahead",
     "unknown-run": "A run nothing knows of claims a thread",
-    unthreaded: "In no thread",
+    unthreaded: "Needs a thread",
     "run-clash": "Two runs work one thread",
     "new-blocker": "Gained a new blocker",
     reopened: "Reopened, with work waiting on it",

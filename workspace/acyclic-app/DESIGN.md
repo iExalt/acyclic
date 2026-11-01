@@ -75,6 +75,9 @@ Overpass sets smaller than Inter at a size.)
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
   320 px), the phases across the page below them in columns of rows; an open panel keeps its width clear. (A single
   960 px column left most of a desktop empty.)
+- **Up next** lists the threads that can start now: not at work, approved, with a task ready; Any time first, then by
+  wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
+  listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
 
 ## Shapes
 
@@ -84,7 +87,14 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 
 - **Buttons, by tier:** `.primary` filled with the accent; secondary outlined; `.quiet` text-only; `.danger-quiet`
   red text, last in its group.
-- **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons.
+- **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons. An item
+  in no thread is never ready, so its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring a task
+  with no thread carries in its badge's place; on the Map the ring says it once, with no icon at the end. The editor
+  says a state in words ("Backlog", "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a
+  finished item's state as the panel's stage, as text: finishing sets it, not the form.
+- **A thread's status** follows Needs you: "Waiting for your approval" and a filled Approve only when Needs you asks
+  for it. Unapproved with nothing open reads "Not approved, with nothing open", quiet, with an outlined Approve, as
+  approval still covers what joins it later.
 - **Thread badges:** the thread's number on its line's colour.
 - **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
@@ -98,7 +108,9 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
   (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
-  muted rows, then its decision, compact, after what it acts on. An approval lists the first five items it covers and
+  muted rows, then its decision, compact, after what it acts on. An approval names its thread alone, as its button
+  and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
+  (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and
   says how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes
   it. A hairline between entries; the filters are tabs, the one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.

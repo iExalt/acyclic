@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overallStage, stageCounts, stateWords } from "./stages";
+import { overallStage, stageCounts, stageCountWords, stateWords } from "./stages";
 
 describe("a state in words", () => {
   it("reads as a sentence starts it", () => {
@@ -26,6 +26,16 @@ describe("stageCounts", () => {
       { stage: "ready", count: 3 },
       { stage: "unthreaded", count: 1 },
     ]);
+  });
+});
+
+describe("stageCountWords", () => {
+  it("agrees with its count, so a count of tasks needing a thread reads as a sentence", () => {
+    expect([1, 3].map((count) => `${count} ${stageCountWords("unthreaded", count)}`)).toEqual([
+      "1 needs a thread",
+      "3 need a thread",
+    ]);
+    expect(stageCountWords("in-review", 2)).toBe("in review");
   });
 });
 
