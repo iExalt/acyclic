@@ -265,8 +265,11 @@ before what went wrong.
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
   cross have none.
-- **Opening view.** The whole plan when it fits at a readable zoom (`READABLE`); otherwise the first box's corner, its
-  title and first item whole, at that zoom.
+- **Opening view.** The whole plan when it fits at 1:1 on a wide screen, or at a readable zoom (`READABLE`) on a
+  phone; otherwise the first box's corner, its title and first item whole, at that zoom.
+- **Titles read whole.** A task's title takes up to three lines on its tile, cut short only past that; backticks,
+  which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
+  between the two, so it never runs through a title.
 
 ## Open decisions
 
@@ -283,5 +286,7 @@ before what went wrong.
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
 - 2026-11-01: Up next lists the approved threads with an item ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
+- 2026-11-01: tiles three lines tall over wider ones or today's two, and a first view at 1:1 on a wide screen; the
+  user chose them.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
   over opening items in place. A thread opened from another view does the same, by extension (proposed).

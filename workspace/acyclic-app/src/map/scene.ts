@@ -184,7 +184,7 @@ export function scene(
 }
 
 /**
- * A node's label, in lines cut to fit `width`. A task's title takes two lines. A box's takes one, ending, when it is
+ * A node's label, in lines cut to fit `width`. A task's title takes three lines. A box's takes one, ending, when it is
  * collapsed, with how many items it hides, and a parent's leaves by stage take the line under it.
  */
 export function labelOf(
@@ -192,8 +192,10 @@ export function labelOf(
   width: number,
   fonts: Fonts,
 ): string {
-  if (node.kind === "leaf") return wrap(node.title, width, 2, fonts.regular).join("\n");
+  // Backticks set a run as code in the panels; the canvas draws only plain text, so it drops them.
+  const text = node.title.replace(/`([^`]+)`/g, "$1");
+  if (node.kind === "leaf") return wrap(text, width, 3, fonts.regular).join("\n");
   const hidden = node.kind === "collapsed" ? ` (+${node.hidden})` : "";
-  const title = cut(node.title, width - fonts.bold(hidden), fonts.bold) + hidden;
+  const title = cut(text, width - fonts.bold(hidden), fonts.bold) + hidden;
   return node.progress === null ? title : `${title}\n${cut(countsText(node.progress), width, fonts.bold)}`;
 }

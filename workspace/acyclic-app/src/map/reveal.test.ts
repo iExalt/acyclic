@@ -78,6 +78,16 @@ describe("firstView", () => {
     expect(firstView({ width: edge, height: 10 }, phone, 16, 2).zoom).toBeCloseTo(READABLE);
   });
 
+  it("opens no further out than the least zoom asked for, as 1:1 on a wide screen", () => {
+    const desk = { width: 1200, height: 800 };
+    expect(firstView({ width: 4000, height: 3000 }, desk, 16, 2, { x: 100, y: 0 }, 1)).toEqual({
+      zoom: 1,
+      pan: { x: -84, y: 16 },
+    });
+    // One that fits at 0.9 would open whole at a readable zoom, but not at 1:1.
+    expect(firstView({ width: 1168 / 0.9, height: 100 }, desk, 16, 2, { x: 0, y: 0 }, 1).zoom).toBe(1);
+  });
+
   it("opens a plan too big to read whole on its first item, not on the empty corner of a box", () => {
     const start = firstOf([
       { x: 300, y: 900 },

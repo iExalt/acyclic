@@ -12,6 +12,8 @@ export const FONT = "Overpass, system-ui, sans-serif";
 /** Its weights, a task's title and a box's: the app's text weight, and two steps above it, so a phase's title leads
  *  its tasks; in hundreds, as the renderer takes no other. */
 export const WEIGHT = { regular: 500, bold: 700 } as const;
+/** Where tiles start drawing, over every box at any depth: z-indexes below it are boxes and the links among them. */
+export const TILES = 1000;
 
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>
@@ -69,9 +71,11 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         "border-width": 1,
         "border-color": p.rule,
         // Drawn by z-index alone: by default Cytoscape draws every edge under every node, so a box hid the links in it.
-        // Nodes take the even levels, and a link the odd one between the box it is in and the items it joins.
+        // Boxes take the even levels, and a link the odd one between the box it is in and the items it joins; tiles,
+        // which never lie over one another, are drawn over every box, so a link across boxes can pass between.
         "z-index-compare": "manual",
-        "z-index": (node: cytoscape.NodeSingular) => 2 * (node.data("layer") as number),
+        "z-index": (node: cytoscape.NodeSingular) =>
+          (node.hasClass("box") ? 0 : TILES) + 2 * (node.data("layer") as number),
       },
     },
     {

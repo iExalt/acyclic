@@ -9,6 +9,7 @@ import type { Line } from "../lines";
 import type { Palette } from "../palette";
 import { boxMarkOf, markOf, QUIET } from "./marks";
 import type { Scene } from "./scene";
+import { TILES } from "./style";
 
 /** An element as the renderer is given it; `data.id` is its id. */
 export type Drawn = ElementDefinition & { data: { id: string } & Record<string, unknown>; classes: string };
@@ -64,9 +65,9 @@ export function elementsOf(
         source: edge.source,
         target: edge.target,
         line,
-        // A link across boxes is drawn over everything: it is drawn only for the selected item or the lit thread, to
-        // be seen.
-        z: edge.crossing ? 1000 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
+        // A link across boxes is drawn over every box, as it is drawn only for the selected item or the lit thread, to
+        // be seen; and under the tiles, so it never runs through a title.
+        z: edge.crossing ? TILES - 1 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
         ...edge.route,
       },
       classes: [

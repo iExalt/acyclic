@@ -123,6 +123,9 @@ export default function PlanMap({
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
+  // The first view's furthest zoom: 1:1 on a wide screen, which has the room to show titles at full size; on a phone,
+  // as far out as titles can still be read.
+  const firstZoom = useWide() ? 1 : READABLE;
   /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
@@ -290,9 +293,9 @@ export default function PlanMap({
         }),
         screen.width,
         16,
-        READABLE,
+        firstZoom,
       );
-      const view = firstView(placed, screen, 16, MAX_ZOOM, start);
+      const view = firstView(placed, screen, 16, MAX_ZOOM, start, firstZoom);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
       // Pan so the toggled box's corner is where it was before the layout changed.

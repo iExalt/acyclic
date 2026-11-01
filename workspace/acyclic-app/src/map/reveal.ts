@@ -58,8 +58,8 @@ export function newlyCovered(
 export const READABLE = 0.85;
 
 /**
- * The first view of a plan `plan` big on a screen `screen` big: the whole plan, centred, when it fits at a readable
- * zoom, else at that zoom with `start` at the top-left, the plan's first item, so the screen opens on titles rather
+ * The first view of a plan `plan` big on a screen `screen` big: the whole plan, centred, when it fits at `least` or
+ * closer, else at `least` with `start` at the top-left, the plan's first item, so the screen opens on titles rather
  * than on the empty corner of a box. A pinch still zooms out to the whole.
  */
 export function firstView(
@@ -68,13 +68,13 @@ export function firstView(
   padding: number,
   maxZoom: number,
   start: { x: number; y: number } = { x: 0, y: 0 },
+  least = READABLE,
 ): { zoom: number; pan: { x: number; y: number } } {
   const fit = Math.min(
     (screen.width - 2 * padding) / Math.max(1, plan.width),
     (screen.height - 2 * padding) / Math.max(1, plan.height),
   );
-  if (fit < READABLE)
-    return { zoom: READABLE, pan: { x: padding - start.x * READABLE, y: padding - start.y * READABLE } };
+  if (fit < least) return { zoom: least, pan: { x: padding - start.x * least, y: padding - start.y * least } };
   const zoom = Math.min(maxZoom, fit);
   return { zoom, pan: { x: (screen.width - plan.width * zoom) / 2, y: (screen.height - plan.height * zoom) / 2 } };
 }
