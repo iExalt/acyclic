@@ -43,3 +43,9 @@ toml = { version = "1.1.8", default-features = false, features = ["parse", "serd
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
 tower-http = { version = "0.7.1", default-features = false, features = ["fs", "compression-br", "compression-gzip"] }
 zeroize = "1.9.1"
+
+# The CLI and server the browser checks drive (mise run check:browser): the journeys wait on every write and read, and
+# unoptimised these took about a quarter of the run. Level 1 keeps an incremental build about as quick as dev's.
+[profile.journeys]
+inherits = "dev"
+opt-level = 1
