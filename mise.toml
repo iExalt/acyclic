@@ -97,10 +97,10 @@ depends = ["vendor:graph", "build:app"]
 # Unbuffered, so each journey's line reaches CI's log as it finishes, and the log's timestamps time it.
 env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
 run = [
-  "cargo build --quiet --locked -p acyclic -p acyclic-fixtures",
+  "cargo build --quiet --locked --profile journeys -p acyclic -p acyclic-fixtures",
   "uv run --no-project --with playwright==1.64.0 python -m playwright install chromium webkit",
-  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/debug/acyclic target/debug/acyclic-fixtures",
-  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/debug/acyclic target/debug/acyclic-fixtures",
+  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/journeys/acyclic target/journeys/acyclic-fixtures",
+  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/journeys/acyclic target/journeys/acyclic-fixtures",
 ]
 
 [tasks."deps:browser"]
