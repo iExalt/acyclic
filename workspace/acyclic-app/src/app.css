@@ -692,14 +692,17 @@ button.icon[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* The outline: projects, each opening into its threads, then the threads in none. */
+/* The outline: projects, each opening into its threads, then the threads in none, in one column no wider than the
+   sidebar, so a long name is cut short rather than widening every row. */
 .outline {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 2px;
 }
 .outline ul {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 0;
   padding: 0;

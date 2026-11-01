@@ -1237,6 +1237,10 @@ def outline_journey(page, view, plan, name, failures):
         failures.append(f"{name}: picking {thread} from {picked}'s panel didn't swap it for the thread's")
     page.keyboard.press("Escape")
     if not phone:
+        # With a project open, a long name in the outline is cut short rather than the sidebar scrolling sideways.
+        wide = page.locator(".sidebar-body").evaluate("b => b.scrollWidth - b.clientWidth")
+        if wide > 0:
+            failures.append(f"{name}: the sidebar's outline is {wide} px wider than the sidebar")
         # The sidebar folds to a rail that keeps Needs you's count, remembered here, and unfolds from the same place.
         fold = page.locator("[data-action=fold]")
         spot = fold.bounding_box()
