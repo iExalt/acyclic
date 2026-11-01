@@ -347,11 +347,22 @@ function viewOf(
     case "unverified": {
       const repository = str(need.repository);
       const reason = str(need.reason);
+      // The item is its row, so the text doesn't name it twice; the Overview, which shows no rows, gives it as detail.
       return {
         ...base,
         key: `unverified:${item?.id ?? ""}:${repository}`,
-        text: `Can't confirm ${item === null ? "an item" : titled(item)} merged into ${repository}`,
+        text: `Can't confirm ${item === null ? "an item" : "its"} merge into ${repository}`,
+        detail: item === null ? null : titled(item),
         note: unverifiedWhy(repository, reason),
+      };
+    }
+    case "unthreaded": {
+      return {
+        ...base,
+        key: `unthreaded:${item?.id ?? ""}`,
+        text: "Needs a thread",
+        detail: item === null ? null : titled(item),
+        note: "Open it to choose its thread in its editor",
       };
     }
     default: {
@@ -383,7 +394,7 @@ function unverifiedWhy(repository: string, reason: string): string {
   if (reason === "no clone of the repository is mapped")
     return `This machine has no clone of ${repository} to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml`;
   if (reason === "not a commit id") return "Its merge evidence isn't a commit id: record the merged commit on the item";
-  return `Looking for its commit in this machine's clone of ${repository} failed: ${reason}`;
+  return `Looking for its commit in this machine's clone of ${repository} failed (${reason}): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml`;
 }
 
 function shown(value: unknown): string {

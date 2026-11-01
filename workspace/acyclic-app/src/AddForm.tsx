@@ -4,6 +4,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type NewItem, newId } from "./edits";
 import { useFieldInView, useFocusIn } from "./focus";
+import { Icon, X } from "./icons";
 
 export interface AddFormProps {
   parent: string | null;
@@ -67,6 +68,10 @@ export function AddForm({
     >
       <div className="form-head">
         <h2>New item</h2>
+        {/* Where every other panel has it, beside the title, as well as Cancel at the foot. */}
+        <button type="button" className="close" aria-label="Close" onClick={onCancel}>
+          <Icon of={X} />
+        </button>
         {parent === null ? null : <p className="muted">Inside {parentTitle}</p>}
       </div>
       <label>

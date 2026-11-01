@@ -166,7 +166,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       },
     },
     { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
-    { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 2 } },
+    { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
     // Outside the thread lit, a tile fades but its title stays legible, muted at full strength, since it can still be
     // picked. The selection is never dimmed.
     {
@@ -181,14 +181,15 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue, a dark one close to
-    // ink: an ink edge heavier than a lit one's, and a halo around it that widens the node, as a focused tile's.
+    // ink: an ink edge twice a lit one's, and a faint halo around it that widens the node, as a focused tile's; a
+    // stronger one read as a second ring.
     {
       selector: "node.selected",
       style: {
         "border-color": p.ink,
         "border-width": 3,
         "underlay-color": p.ink,
-        "underlay-opacity": 0.22,
+        "underlay-opacity": 0.1,
         "underlay-padding": 5,
         "underlay-shape": "round-rectangle",
       },

@@ -2,7 +2,7 @@
 // on it, so the button comes after what it acts on.
 
 import { useEffect, useRef, useState } from "react";
-import type { Command, Stage } from "./api";
+import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
 import { useHeld } from "./held";
@@ -11,7 +11,6 @@ import type { Line } from "./lines";
 import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
-import { StageIcon } from "./Stage";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
 const PRIMARY = new Set(["keep", "approve"]);
@@ -19,8 +18,6 @@ const PRIMARY = new Set(["keep", "approve"]);
 export interface NeedsListProps {
   needs: Need[];
   titleOf: (id: string) => string;
-  /** An item's stage, its icon beside its title, as a link's in an item's panel, which says the row opens it. */
-  stageOf: (id: string) => Stage | undefined;
   lines: ReadonlyMap<string, Line>;
   /** A thread's items, as an approval covers them. */
   membersOf?: (thread: string) => string[];
@@ -40,7 +37,6 @@ export interface NeedsListProps {
 export function NeedsList({
   needs,
   titleOf,
-  stageOf,
   lines,
   membersOf,
   busy,
@@ -128,7 +124,7 @@ export function NeedsList({
             {view.thread === null ? (
               <p className="facts line need-head" style={lineStyle(view.line)}>
                 <Badge line={view.line} />
-                <span>{view.text}</span>
+                <Prose text={view.text} />
               </p>
             ) : (
               <button
@@ -139,7 +135,7 @@ export function NeedsList({
                 onClick={() => view.thread !== null && onPickThread(view.thread)}
               >
                 <Badge line={view.line} />
-                <span>{view.text}</span>
+                <Prose text={view.text} />
               </button>
             )}
             {view.note === null ? null : <p className="why need-why">{view.note}</p>}
@@ -160,17 +156,13 @@ export function NeedsList({
                   </li>
                 );
               })}
-              {view.items.map((id) => {
-                const stage = stageOf(id);
-                return (
-                  <li key={`i-${id}`}>
-                    <button type="button" className="row" data-select={id} onClick={() => onSelect(id)}>
-                      {stage === undefined ? null : <StageIcon stage={stage} />}
-                      <Prose text={titleOf(id)} />
-                    </button>
-                  </li>
-                );
-              })}
+              {view.items.map((id) => (
+                <li key={`i-${id}`}>
+                  <button type="button" className="row" data-select={id} onClick={() => onSelect(id)}>
+                    <Prose text={titleOf(id)} />
+                  </button>
+                </li>
+              ))}
               {view.more === 0 ? null : (
                 <li>
                   {view.thread === null ? (

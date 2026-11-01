@@ -16,7 +16,18 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
-import { firstView, frame, framesAll, headed, nearest, newlyCovered, reveal, startOf, uncovered } from "./reveal";
+import {
+  firstView,
+  frame,
+  framesAll,
+  headed,
+  nearest,
+  newlyCovered,
+  READABLE,
+  reveal,
+  startOf,
+  uncovered,
+} from "./reveal";
 import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
 import { wheelZoom } from "./wheel";
@@ -111,6 +122,7 @@ export default function PlanMap({
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
+  const [drawnOnce, setDrawnOnce] = useState(false);
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
@@ -118,6 +130,8 @@ export default function PlanMap({
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
   const shown = useRef<string | null>(null);
+  // Whether that item was picked, which zooms a Map too far out to read in to it, rather than moved by a write.
+  const picked = useRef(false);
   /** The elements the renderer holds, by id. */
   const held = useRef<ReadonlyMap<string, Drawn>>(new Map());
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
@@ -134,6 +148,7 @@ export default function PlanMap({
     if (core === null) {
       // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
       shown.current = focus.id;
+      picked.current = focus.pin === null;
       setToggles((was) => expandTo(model, focus.id, was));
       return;
     }
@@ -147,10 +162,11 @@ export default function PlanMap({
     if (next === toggles && model === drawnModel.current) {
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
-      if (host.current !== null) revealIn(core, host.current, focus.id, true);
+      if (host.current !== null) revealIn(core, host.current, focus.id, true, focus.pin === null);
       return;
     }
     shown.current = focus.id;
+    picked.current = focus.pin === null;
     if (host.current !== null) host.current.dataset.state = "laying-out";
     setToggles(next);
   }, [focus]);
@@ -296,7 +312,7 @@ export default function PlanMap({
     }
     if (shown.current !== null) {
       // The pin holds still unless that leaves the item hidden.
-      revealIn(core, element, shown.current, true);
+      revealIn(core, element, shown.current, true, picked.current);
       shown.current = null;
     }
     drawnModel.current = model;
@@ -312,6 +328,7 @@ export default function PlanMap({
       requestAnimationFrame(() => {
         element.dataset.drawMs = String(Math.round(performance.now() - drawing));
         element.dataset.state = "drawn";
+        setDrawnOnce(true);
       }),
     );
   }, [drawn, placed, colour, lines, palette]);
@@ -447,7 +464,17 @@ export default function PlanMap({
     };
   }, []);
 
-  return <div ref={host} className="map" data-testid="map" data-state="laying-out" />;
+  return (
+    <>
+      <div ref={host} className="map" data-testid="map" data-state="laying-out" />
+      {/* Until the plan is first drawn, which on a phone takes a second or two, a blank canvas would read as no plan. */}
+      {drawnOnce || items.length === 0 ? null : (
+        <p className="status map-status" role="status">
+          Laying out the Map…
+        </p>
+      )}
+    </>
+  );
 }
 
 /**
@@ -482,12 +509,21 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
 
 /**
  * Pans the least that shows a drawn node clear of the sheet or pane over the Map, if one covers it; `centred`, to the
- * middle of what is left, for one brought in from elsewhere.
+ * middle of what is left, for one brought in from elsewhere. One the user `picked`, on a Map zoomed out past reading,
+ * comes in at a zoom its title reads at, wherever it was; one a write moved keeps the user's zoom unless it must move.
  */
-function revealIn(core: Core, element: HTMLElement, id: string, centred = false) {
+function revealIn(core: Core, element: HTMLElement, id: string, centred = false, picked = false) {
   const node = core.getElementById(id);
   if (node.empty()) return;
-  core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element), 8, centred));
+  const open = openPart(element);
+  const box = () => node.renderedBoundingBox({ includeLabels: false });
+  const pan = reveal(box(), open, 8, centred);
+  if ((picked || pan.x !== 0 || pan.y !== 0) && centred && core.zoom() < READABLE) {
+    core.zoom({ level: READABLE, renderedPosition: node.renderedPosition() });
+    core.panBy(reveal(box(), open, 8, true));
+    return;
+  }
+  core.panBy(pan);
 }
 
 /** Whether the user is typing, as a phone's keyboard, which takes from the Map's height, is up for. */

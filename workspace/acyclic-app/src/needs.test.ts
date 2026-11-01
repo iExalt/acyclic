@@ -93,11 +93,13 @@ describe("needView", () => {
     const unverified = (reason: string) =>
       needView({ kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "app", reason }, none);
     expect(unverified("no clone of the repository is mapped")).toMatchObject({
-      text: "Can't confirm Move in merged into app",
+      text: "Can't confirm its merge into app",
+      detail: "Move in",
+      items: ["i1"],
       note: "This machine has no clone of app to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml",
     });
     expect(unverified("the clone has no main branch").note).toBe(
-      "Looking for its commit in this machine's clone of app failed: the clone has no main branch",
+      "Looking for its commit in this machine's clone of app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
     );
   });
 
@@ -202,8 +204,13 @@ describe("needView", () => {
   it("shows a kind it has no command for with what it names and the CLI's hint", () => {
     const cycle = needView({ kind: "parent-cycle", items: [item("a"), item("b")] }, none);
     expect(cycle).toMatchObject({ text: "Parents form a cycle: A, B", items: ["a", "b"], actions: [] });
+    // An item needing a thread says so in words, not the CLI's command, and names the item once, as its row.
     const loose = needView({ kind: "unthreaded", item: item("o"), fix: "acyclic item edit o --thread <THREAD>" }, none);
-    expect(loose.note).toBe("acyclic item edit o --thread <THREAD>");
+    expect(loose).toMatchObject({
+      text: "Needs a thread",
+      items: ["o"],
+      note: "Open it to choose its thread in its editor",
+    });
     expect(needView({ kind: "something-new" }, none).text).toBe("something-new");
     expect(needView({ kind: "contest", thread: thread("t") }, none).key).toBe("contest:t");
   });

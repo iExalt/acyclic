@@ -74,8 +74,10 @@ describe("undo", () => {
     const threaded = plan(
       [...before.items.values()].map((one) => ({ ...one, thread: one.id === "beds" ? null : "t" })),
     );
-    const undo = undoOf({ thread: { approve: { thread: "t" } } }, threaded);
+    const undo = undoOf({ thread: { approve: { thread: "t" } } }, threaded, undefined, () => "Garden");
     expect(undo?.command).toEqual({ thread: { revoke: { thread: "t" } } });
+    // Taken back, it names the thread, as what the approval said did.
+    expect(undo?.undone).toBe("Took back the approval of Garden");
     expect(undo?.holds(changed(threaded, "sow", { stage: "ready" }))).toBe(true);
     expect(undo?.holds(changed(threaded, "sow", { stage: "in-progress" }))).toBe(false);
   });
