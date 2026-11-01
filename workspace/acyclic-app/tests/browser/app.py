@@ -595,7 +595,15 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         page.go_back()
         needs.wait_for(state="detached", timeout=5_000)
         page.locator("[data-overview-thread]").first.click()
-        page.get_by_test_id("thread-panel").wait_for(timeout=10_000)
+        panel = page.get_by_test_id("thread-panel")
+        panel.wait_for(timeout=10_000)
+        # A task chosen from the thread's panel closes back to the thread, and the thread back to the Overview.
+        task = panel.locator("[data-select]").first
+        if task.count():
+            task.click()
+            title.wait_for(timeout=5_000)
+            page.go_back()
+            panel.wait_for(timeout=5_000)
         page.go_back()
         try:
             overview.wait_for(timeout=5_000)

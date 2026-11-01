@@ -106,6 +106,8 @@ export function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [showArchived, setShowArchived] = useState(false);
   const [thread, setThread] = useState<string | null>(null);
+  const threadNow = useRef(thread);
+  threadNow.current = thread;
   /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The command menu, over everything; listing only what has a key, as ? asks. */
@@ -122,10 +124,11 @@ export function App() {
   const wide = useWide();
   const [selected, setSelected] = useState<string | null>(null);
   /**
-   * The view an item or a thread was opened from, which closing it returns to: both are shown on the Map, but the user
-   * came from there. Dropped once they select on the Map or go to another view, which makes that where they are.
+   * The view an item or a thread was opened from, which closing the one opened from it returns to: both are shown on
+   * the Map, but the user came from there. An item chosen from a thread's panel leaves the thread's, for the thread's
+   * close. Dropped once the user selects on the Map or goes to another view, which makes that where they are.
    */
-  const [cameFrom, setCameFrom] = useState<View | null>(null);
+  const [cameFrom, setCameFrom] = useState<{ view: View; by: "item" | "thread" } | null>(null);
   /** A thread the command menu opened while Needs you showed, so shown over it. */
   const [threadOver, setThreadOver] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -253,14 +256,15 @@ export function App() {
   useEffect(() => {
     if (thread === null) setThreadOver(null);
   }, [thread]);
-  /** Closes the item or the thread on top, going back to the view it was opened from. */
+  /** Goes back to the view what is closing was opened from. */
   const goBack = () => {
-    if (cameFrom !== null) setView(cameFrom);
+    if (cameFrom !== null) setView(cameFrom.view);
     setCameFrom(null);
   };
+  /** Closes the item: one chosen from a thread's panel goes back to the thread, whose own close goes back further. */
   const closeItem = () => {
     setSelected(null);
-    goBack();
+    if (cameFrom?.by === "item") goBack();
   };
   const closeThread = () => {
     setThread(null);
@@ -286,8 +290,14 @@ export function App() {
       selectOnly(id);
       if (id === null) return;
       setFocus((was) => ({ id, pin, n: (was?.n ?? 0) + 1 }));
-      // An item is shown on the Map, so selecting one from another view goes to it, and closing it goes back.
-      setCameFrom(viewNow.current === "map" ? null : viewNow.current);
+      // An item is shown on the Map, so selecting one from another view goes to it, and closing it goes back. One
+      // chosen from a thread's panel keeps where the thread came from, for the thread's close.
+      // Read now: the update runs at the next render, by when the view is the Map.
+      const from = viewNow.current;
+      const inThread = threadNow.current !== null;
+      setCameFrom((was) =>
+        from !== "map" ? { view: from, by: "item" } : inThread && was?.by === "thread" ? was : null,
+      );
       setView("map");
     },
     [selectOnly],
@@ -299,7 +309,7 @@ export function App() {
   const toThread = useCallback((id: string) => {
     setSelected(null);
     setThread(id);
-    setCameFrom(viewNow.current === "map" ? null : viewNow.current);
+    setCameFrom(viewNow.current === "map" ? null : { view: viewNow.current, by: "thread" });
     setView("map");
     setFramed((was) => ({ thread: id, n: (was?.n ?? 0) + 1 }));
   }, []);
