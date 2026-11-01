@@ -13,7 +13,7 @@ export interface PhaseRow {
 
 export interface Outline {
   phases: PhaseRow[];
-  /** Threads with work in no phase: none at all, or only in tasks at the top level. */
+  /** Threads with work in no phase: none at all, or only in items at the top level. */
   others: string[];
 }
 

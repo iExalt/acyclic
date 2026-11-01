@@ -1,4 +1,4 @@
-// Where a leaf stands, said the same way everywhere: each stage's icon, which the Map's tasks and the app's text share,
+// Where a leaf stands, said the same way everywhere: each stage's icon, which the Map's items and the app's text share,
 // and its word; and a parent's leaves counted by stage, as text a glance can read and nothing hides behind a tap.
 
 import type { Counts, Stage } from "./api";
@@ -11,7 +11,7 @@ export const STAGE_ICONS: Record<Stage, string> = {
   ready: '<circle cx="8" cy="8" r="6"/>',
   blocked: '<circle cx="8" cy="8" r="6"/><path d="M4.5 8h7"/>',
   parked: '<path d="M6 3.5v9M10 3.5v9"/>',
-  // The dashed ring a task with no thread carries where its badge would be: one mark for one fact everywhere.
+  // The dashed ring an item with no thread carries where its badge would be: one mark for one fact everywhere.
   unthreaded: '<circle cx="8" cy="8" r="6" stroke-dasharray="3 2.4"/>',
 };
 

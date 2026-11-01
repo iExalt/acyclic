@@ -2,16 +2,17 @@
 
 `acyclic up` runs on a fixture with a home of its own; the browser pairs through the link it prints, and every request
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
-needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should:
-the default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a
-thread's members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown
-as text, the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a
-thread is approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level
-are set; from the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
-subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list it names. WebKit draws the default view at the phone's size. In Chromium and WebKit, a page on another port of the same
-host can neither write with the paired browser's cookie nor frame the app. Chromium then draws the 3,500-item fixture.
-What the Map should show is worked out here from the tracker's own answers, not from the app's code. Screenshots go
-to target/browser/.
+needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should: the
+default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
+members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
+the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread is
+approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level are set; from
+the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
+subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list
+it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
+and WebKit, a page on another port of the same host can neither write with the paired browser's cookie nor frame the
+app. Chromium then draws the 3,500-item fixture. What the Map should show is worked out here from the tracker's own
+answers, not from the app's code. Screenshots go to target/browser/.
 
 Usage: app.py <acyclic binary> <acyclic-fixtures binary>
 """

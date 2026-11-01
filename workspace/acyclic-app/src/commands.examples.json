@@ -1,5 +1,5 @@
 {
-  "about": "Every command the app sends, as it sends them, in an order that succeeds on a tracker holding item a, item b under a, item e done, thread t approved, and two proposals by an agent, $proposal-1 and $proposal-2. The app's unit tests check its builders make exactly these; the server's tests run them through the API.",
+  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which its form always gives), in an order that succeeds on a tracker holding item a, item b under a, item e done, thread t approved, and two proposals by an agent, $proposal-1 and $proposal-2. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
   "examples": [
     {
       "name": "list",
