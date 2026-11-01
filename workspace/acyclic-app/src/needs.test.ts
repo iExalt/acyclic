@@ -215,6 +215,11 @@ describe("needView", () => {
   it("names a new blocker and the threads a resource clash holds, to select", () => {
     const blocked = needView({ kind: "new-blocker", item: item("a"), thread: thread("t"), blocker: item("b") }, none);
     expect(blocked).toMatchObject({ items: ["a", "b"], text: "A gained a new blocker since its approval: B" });
+    // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
+    const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
+    expect(needView({ kind: "new-blocker", item: item("a"), thread: thread("t"), blocker: torn }, none).text).toBe(
+      "A gained a new blocker since its approval: Bee",
+    );
     // Approving the thread again acknowledges it.
     expect(blocked.actions).toEqual([
       { label: "Approve again", command: approveCommand("t"), action: "approve", done: "Approved t again" },
@@ -265,14 +270,14 @@ describe("needView", () => {
 });
 
 describe("the needs-you list's groups and count", () => {
-  it("puts every kind in one group, a kind the app doesn't know among what to unblock", () => {
+  it("puts every kind in one group, a kind the app doesn't know among what to resolve", () => {
     expect(["proposal", "unapproved", "awaiting-approval", "new-blocker"].map(groupOf)).toEqual(
       Array(4).fill("approve"),
     );
     expect(groupOf("question")).toBe("answer");
     expect(
       ["conflict", "resource-clash", "number-clash", "dangling", "unverified", "link-cycle", "never-seen"].map(groupOf),
-    ).toEqual(Array(7).fill("unblock"));
+    ).toEqual(Array(7).fill("resolve"));
   });
 
   it("names the threads waiting for approval, and no thread another kind names", () => {

@@ -9,8 +9,8 @@ import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
 export const FONT = "Overpass, system-ui, sans-serif";
-/** Its weights, a task's title and a box's: the app's text weight, and two steps above it, so a phase's title leads
- *  its tasks; in hundreds, as the renderer takes no other. */
+/** Its weights, a tile's title and a box's: the app's text weight, and two steps above it, so a box's title leads
+ *  its tiles; in hundreds, as the renderer takes no other. */
 export const WEIGHT = { regular: 500, bold: 700 } as const;
 /** Where tiles start drawing, over every box at any depth: z-indexes below it are boxes and the links among them. */
 export const TILES = 1000;
@@ -103,7 +103,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       },
     },
     // A box's marks, its chevron and the icon of where its work stands, drawn over its title strip; its title in ink
-    // while its work moves or can, muted once done or held up, as a task's.
+    // while its work moves or can, muted once done or held up, as a tile's.
     {
       selector: "node.box, node.collapsed",
       style: {
@@ -117,7 +117,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     { selector: "node.box.quiet, node.collapsed.quiet", style: { color: p.muted } },
     // A box's title alone, with no counts under it, sits half a line lower: in the middle of the strip.
     { selector: "node.box.one-line", style: { "text-margin-y": STRIP / 2 + 8 } },
-    // A task's marks, its thread's stripe and badge and its stage's icon, with its title between them.
+    // A tile's marks, its thread's stripe and badge and its stage's icon, with its title between them.
     {
       selector: "node.leaf",
       style: {
@@ -167,7 +167,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     },
     { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 2 } },
-    // Outside the thread lit, a task fades but its title stays legible, muted at full strength, since it can still be
+    // Outside the thread lit, a tile fades but its title stays legible, muted at full strength, since it can still be
     // picked. The selection is never dimmed.
     {
       selector: "node.dim",

@@ -13,7 +13,7 @@ export interface Open {
   /** An item selected that is drawn. */
   item: boolean;
   needs: boolean;
-  /** The phases' sheet, on a phone. */
+  /** The projects' sheet, on a phone. */
   phases: boolean;
   thread: boolean;
   /**
@@ -30,7 +30,7 @@ export interface Open {
 
 /** The layers open, the one shown first. */
 export function openLayers(open: Open): Layer[] {
-  // The phases' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
+  // The projects' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
   const order: Layer[] = open.threadOverNeeds
     ? ["command", "mode", "add", "phases", "item", "thread", "needs", "away"]
     : ["command", "mode", "add", "phases", "item", "needs", "thread", "away"];

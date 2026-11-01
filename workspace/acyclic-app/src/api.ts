@@ -80,6 +80,13 @@ function isConflict<T>(raw: Raw<T>): raw is { conflict: (T | null)[] } {
   return typeof raw === "object" && raw !== null && "conflict" in raw;
 }
 
+/** A title to show: a conflicted one reads as its first value, as an item's does, and one unset or unreadable as `id`. */
+export function titleOr(raw: unknown, id: string): string {
+  if (typeof raw === "string") return raw;
+  const values = isConflict(raw as Raw<unknown>) ? (raw as { conflict: unknown[] }).conflict : [];
+  return values.find((one): one is string => typeof one === "string") ?? id;
+}
+
 /** Settles an item's conflicted fields, once, at the API's edge. */
 export function settle(raw: RawItem): Item {
   const conflicts: Item["conflicts"] = {};
@@ -215,7 +222,7 @@ export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
   return {
     threads: raw.threads.map((row) => ({
       id: row.id,
-      title: typeof row.title === "string" ? row.title : row.id,
+      title: titleOr(row.title, row.id),
       waitsFor: row.waits_for,
     })),
     waves: raw.waves,

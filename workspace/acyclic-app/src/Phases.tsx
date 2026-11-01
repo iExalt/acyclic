@@ -1,5 +1,5 @@
-// The sidebar's outline: phases, each opening into the threads at work in it, then the threads in none. A selected
-// item marks its phase and its thread's row there, and opens that phase; so does a thread picked elsewhere.
+// The sidebar's outline: projects, each opening into the threads at work in it, then the threads in none. A selected
+// item marks its project and its thread's row there, and opens that project; so does a thread picked elsewhere.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Badge, lineStyle } from "./Badge";
@@ -28,7 +28,7 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
   useEffect(() => {
     reveal(current.phase ?? undefined);
   }, [current.phase]);
-  // A thread picked with none of its rows in view opens the first phase it works in.
+  // A thread picked with none of its rows in view opens the first project it works in.
   useEffect(() => {
     if (picked === null) return;
     const homes = outline.phases.filter((phase) => phase.threads.some((one) => one.id === picked));
@@ -97,12 +97,14 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
                   <Prose text={phase.title} />
                 </button>
               </div>
-              {expanded ? (
+              {!expanded ? null : phase.threads.length === 0 ? (
+                <p className="subheading">No thread has work in this project</p>
+              ) : (
                 <>
                   <h3 className="subheading">Threads in this project</h3>
                   <ul>{phase.threads.map((one) => row(one.id, phase.id, one.also))}</ul>
                 </>
-              ) : null}
+              )}
             </li>
           );
         })}

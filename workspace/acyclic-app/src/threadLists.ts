@@ -8,8 +8,8 @@ export interface ThreadLists {
   /** Threads with work in progress or in review, by id in natural order. */
   working: string[];
   /**
-   * Threads to start: not at work, approved, with a task ready, the Any time ones first (what can start now reads
-   * first, as on the Map), then by wave. A thread waiting for approval is in Needs you instead, and one with every task
+   * Threads to start: not at work, approved, with an item ready, the Any time ones first (what can start now reads
+   * first, as on the Map), then by wave. A thread waiting for approval is in Needs you instead, and one with every item
    * blocked can't be started.
    */
   next: string[];

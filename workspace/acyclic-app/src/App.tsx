@@ -132,7 +132,7 @@ export function App() {
   const [thread, setThread] = useState<string | null>(null);
   const threadNow = useRef(thread);
   threadNow.current = thread;
-  /** The phases' sheet, open over the Map on a phone; side by side, the outline is always in view. */
+  /** The projects' sheet, open over the Map on a phone; side by side, the outline is always in view. */
   const [showPhases, setShowPhases] = useState(false);
   /** The command menu, over everything; listing only what has a key, as ? asks. */
   const [showCommand, setShowCommand] = useState(false);
@@ -307,8 +307,8 @@ export function App() {
   }, [selected]);
 
   // One thing in focus: an item selected outside the picked thread unpicks it, in the same update, so the outline never
-  // marks a phase and a thread the selection isn't in at once, and the layers swap without a step through the history.
-  // One in the thread keeps it, its panel over the thread's.
+  // marks a project and a thread the selection isn't in at once, and the layers swap without a step through the
+  // history. One in the thread keeps it, its panel over the thread's.
   const modelNow = useRef(model);
   modelNow.current = model;
   const selectOnly = useCallback((id: string | null) => {

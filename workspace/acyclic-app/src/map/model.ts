@@ -286,7 +286,7 @@ export function visible(model: Model, state: ViewState): View {
 }
 
 /**
- * A stage for a task core gives none: one archived, or a parent drawn as a task because everything under it is
+ * A stage for a tile core gives none: one archived, or a parent drawn as a tile because everything under it is
  * archived. Its own state says what it can: done, parked or started, and nothing otherwise.
  */
 export function fallbackStage(state: string): Stage | null {

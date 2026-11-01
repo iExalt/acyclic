@@ -1426,6 +1426,11 @@ button.row {
   .need-actions button {
     min-height: var(--hit);
   }
+  /* A fingertip's height as room around the text rather than a floor under it, so a one-line row is spaced as a
+     two-line one is, instead of standing apart from it. */
+  .need-items button.row {
+    padding-block: calc((var(--hit) - 1lh) / 2);
+  }
 }
 
 /* A panel's parts. */
