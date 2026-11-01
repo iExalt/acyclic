@@ -49,6 +49,33 @@ function fontNotice(): Plugin {
   };
 }
 
+/** The most a chunk the app loads in normal use may weigh, minified, as Vite's own warning has it by default. */
+const CHUNK_BUDGET = 500 * 1000;
+
+/**
+ * Fails the build for a chunk over the budget, where Vite only warns, which went unnoticed in the build's output. One
+ * chunk is let through: ELK's bundled engine, which runs layouts on the page's own thread and loads only for
+ * `?engine=inline`, as the timing script compares it with the worker the app uses. Splitting it gains nothing, as it
+ * loads whole or not at all, and leaving it out of the build would leave the script nothing to time.
+ */
+function chunkBudget(): Plugin {
+  return {
+    name: "acyclic-chunk-budget",
+    apply: "build",
+    generateBundle(_, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== "chunk" || chunk.facadeModuleId?.endsWith("elkjs/lib/elk.bundled.js")) continue;
+        const size = Buffer.byteLength(chunk.code);
+        if (size > CHUNK_BUDGET)
+          this.error(
+            `${chunk.fileName} is ${Math.round(size / 1000)} kB, over the ${CHUNK_BUDGET / 1000} kB budget: load ` +
+              "what it holds lazily, or let it through in vite.config.ts's chunkBudget with the reason beside it",
+          );
+      }
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -56,8 +83,10 @@ export default defineConfig({
     license({ thirdParty: { includePrivate: false, output: { file: "dist/licenses.txt" } } }),
     fontNotice(),
     precompress(),
+    chunkBudget(),
   ],
-  build: { sourcemap: false },
+  // Vite's own warning can't leave one chunk out, so `chunkBudget` keeps the limit instead.
+  build: { sourcemap: false, chunkSizeWarningLimit: Number.POSITIVE_INFINITY },
   server: { proxy: upstream(process.env.ACYCLIC_UP) },
 });
 
