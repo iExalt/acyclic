@@ -692,7 +692,7 @@ button.icon[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* The outline: phases, each opening into its threads, then the threads in none. */
+/* The outline: projects, each opening into its threads, then the threads in none. */
 .outline {
   display: grid;
   align-content: start;
@@ -718,16 +718,16 @@ button.icon[aria-pressed="true"] {
   font-size: 12px;
   font-weight: 600;
 }
-.phase-row {
+.project-row {
   display: flex;
   align-items: center;
   border-radius: var(--radius);
 }
-.phase[aria-current="true"] > .phase-row {
+.project[aria-current="true"] > .project-row {
   background: var(--tile);
   box-shadow: inset 3px 0 0 var(--ink);
 }
-.phase-row .count {
+.project-row .count {
   padding: 0 10px;
 }
 button.chevron {
@@ -750,7 +750,7 @@ button.chevron::before {
 button.chevron[aria-expanded="true"]::before {
   transform: translateY(-2px) rotate(45deg);
 }
-button.phase-title {
+button.project-title {
   flex: 1;
   min-width: 0;
   padding: 6px 4px;
@@ -767,8 +767,8 @@ button.phase-title {
   width: 100%;
   max-width: none;
 }
-/* A phase's threads sit under its title, inside the list's width. */
-.phase ul {
+/* A project's threads sit under its title, inside the list's width. */
+.project ul {
   padding-left: 24px;
 }
 .outline .thread[aria-current="true"] {
@@ -786,7 +786,7 @@ button.phase-title {
 }
 .sidebar .thread .name,
 .sidebar .thread .also,
-.sidebar button.phase-title {
+.sidebar button.project-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -850,14 +850,14 @@ button.phase-title {
   align-items: center;
   min-width: 0;
 }
-.card .phases,
+.card .projects,
 .card .counts,
 .card .after,
 .card .looped {
   color: var(--muted);
   font-size: 0.8rem;
 }
-.card .phases {
+.card .projects {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1551,7 +1551,7 @@ input[aria-invalid="true"] + .hint,
   min-height: 28px;
 }
 /* An upright tablet keeps the phone's layout, but has the width for In progress and Up next side by side, and for
-   the phases in two columns. */
+   the projects in two columns. */
 @media (min-width: 700px) and (max-width: 899px) {
   .overview-pair {
     display: grid;
@@ -1559,13 +1559,13 @@ input[aria-invalid="true"] + .hint,
     column-gap: 32px;
     align-items: start;
   }
-  .overview-phases > .rows {
+  .overview-projects > .rows {
     display: grid;
     grid-template-columns: 1fr 1fr;
     column-gap: 32px;
   }
 }
-/* Wide, the sections stand side by side as the width allows, Needs you first, and the phases span the page below
+/* Wide, the sections stand side by side as the width allows, Needs you first, and the projects span the page below
    them, their rows in columns; an open panel keeps its width clear. */
 @media (min-width: 900px) {
   .overview {
@@ -1576,13 +1576,13 @@ input[aria-invalid="true"] + .hint,
     align-content: start;
   }
   .overview > .view-title,
-  .overview > .overview-phases {
+  .overview > .overview-projects {
     grid-column: 1 / -1;
   }
   .overview-pair {
     display: contents;
   }
-  .overview-phases > .rows {
+  .overview-projects > .rows {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     column-gap: 40px;

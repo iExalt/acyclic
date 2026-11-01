@@ -16,7 +16,7 @@ describe("markSvg", () => {
     const mark = markSvg("ready", thread, 200, 48, DARK);
     expect(mark).toContain('<rect width="6" height="48" fill="#4ec695"/>');
     expect(mark).toContain(">31</text>");
-    // The badge leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the task.
+    // The badge leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the tile.
     expect(mark.indexOf('<rect x="14"')).toBeGreaterThan(-1);
     expect(mark).toContain(`translate(${200 - 12 - 16} 16)`);
   });
@@ -40,12 +40,12 @@ describe("markSvg", () => {
     const none = markSvg("unthreaded", null, 200, 48, DARK);
     expect(none).toContain("stroke-dasharray");
     expect(none).not.toContain("<rect");
-    // The ring says it once: no stage icon repeats it at the end; a done task with no thread still ends with its own.
+    // The ring says it once: no stage icon repeats it at the end; a done tile with no thread still ends with its own.
     expect(none).not.toContain("<g ");
     expect(markSvg("done", null, 200, 48, DARK)).toContain("<g ");
   });
 
-  it("leads a box whose tasks all need a thread with the same dashed ring", () => {
+  it("leads a box whose tiles all need a thread with the same dashed ring", () => {
     expect(boxMarkSvg("box", "unthreaded", 300, 400, DARK)).toContain('stroke-dasharray="3 2.4"');
   });
 
@@ -56,8 +56,8 @@ describe("markSvg", () => {
   });
 });
 
-describe("a task's stage", () => {
-  it("is core's, or for an archived task or a parent drawn as one, what its own state says", () => {
+describe("a tile's stage", () => {
+  it("is core's, or for an archived tile or a parent drawn as one, what its own state says", () => {
     expect(["done", "parked", "in-progress", "backlog"].map(fallbackStage)).toEqual([
       "done",
       "parked",

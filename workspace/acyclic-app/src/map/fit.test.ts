@@ -6,10 +6,10 @@ const measure = (text: string) => text.length;
 
 describe("cut", () => {
   it("keeps what fits and cuts the rest short with an ellipsis, never after a space", () => {
-    expect(cut("Phase two", 9, measure)).toBe("Phase two");
-    expect(cut("Phase two", 8, measure)).toBe("Phase t…");
-    expect(cut("Phase two", 7, measure)).toBe("Phase…");
-    expect(cut("Phase two", 0, measure)).toBe("…");
+    expect(cut("Patch two", 9, measure)).toBe("Patch two");
+    expect(cut("Patch two", 8, measure)).toBe("Patch t…");
+    expect(cut("Patch two", 7, measure)).toBe("Patch…");
+    expect(cut("Patch two", 0, measure)).toBe("…");
   });
 });
 

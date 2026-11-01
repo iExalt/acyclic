@@ -61,7 +61,7 @@ export function NeedsList({
   const shown = groups.some((one) => one.group === filter) ? filter : null;
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
   const panel = useRef<HTMLElement>(null);
-  // A task list: full height on a phone, where half would show a small phone no decision.
+  // A list of decisions: full height on a phone, where half would show a small phone no decision.
   const sheet = useSheet(panel, "full", onDismiss);
   useFocusIn(panel);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter

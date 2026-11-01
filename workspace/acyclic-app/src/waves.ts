@@ -7,7 +7,7 @@ import type { Outline } from "./outline";
 export interface Card {
   id: string;
   /** The titles of the projects it has work in. */
-  phases: string[];
+  projects: string[];
   /** Its leaves by stage; parents and archived leaves have none. */
   counts: Counts;
   /** The threads in earlier waves it waits on. */
@@ -60,7 +60,9 @@ export function wavesView(listed: Threads, items: readonly Item[], outline: Outl
     const on = waits.get(id) ?? [];
     return {
       id,
-      phases: outline.phases.filter((phase) => phase.threads.some((one) => one.id === id)).map((phase) => phase.title),
+      projects: outline.projects
+        .filter((project) => project.threads.some((one) => one.id === id))
+        .map((project) => project.title),
       counts: counts.get(id) ?? NONE,
       after: on.filter((other) => (wave.get(other) ?? -1) < (wave.get(id) ?? -1)),
       looped: on.filter((other) => wave.get(other) === wave.get(id)),

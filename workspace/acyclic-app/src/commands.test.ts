@@ -50,11 +50,11 @@ describe("the command menu", () => {
     expect(titles("garden")).toEqual(["Garden"]);
   });
 
-  it("finds an entry only when every word is in it, and gives a phase, not its items, for its id", () => {
+  it("finds an entry only when every word is in it, and gives a project, not its items, for its id", () => {
     expect(titles("beds dig")).toEqual(["Dig the beds"]);
     expect(titles("beds zebra")).toEqual([]);
     const garden = rank("garden", entries(plan), plan.working)[0];
-    expect(garden?.run).toEqual({ kind: "phase", id: "garden" });
+    expect(garden?.run).toEqual({ kind: "project", id: "garden" });
     const dig = rank("dig", entries(plan), plan.working)[0];
     expect(dig?.detail).toBe("dig in Garden");
   });
@@ -70,7 +70,7 @@ describe("the command menu", () => {
     expect(titles("2")).toContain("Autumn");
     // A plan the size of the largest the app is timed with: a key typed ranks it in a few passes over its titles.
     const many = buildModel(
-      Array.from({ length: 3500 }, (_, n) => item(`task-${n}`, null, [], { title: `Task ${n} of the résumé batch` })),
+      Array.from({ length: 3500 }, (_, n) => item(`item-${n}`, null, [], { title: `Item ${n} of the résumé batch` })),
     );
     const listed = entries({ ...plan, model: many });
     // Timed against folding every title once, in the same rounds: a slow or busy machine (a CI runner with every test
@@ -91,11 +91,11 @@ describe("the command menu", () => {
       );
       each.push(
         time(() => {
-          for (const query of ["t", "ta", "tas", "task", "task 1", "resume batch"]) rank(query, listed, plan.working);
+          for (const query of ["i", "it", "ite", "item", "item 1", "resume batch"]) rank(query, listed, plan.working);
         }) / 6,
       );
     }
-    expect(rank("task", listed, plan.working)).toHaveLength(MOST);
+    expect(rank("item", listed, plan.working)).toHaveLength(MOST);
     // About three passes on a laptop, and under five with the whole suite running; a dozen, the most allowed, is there
     // about a frame.
     expect(Math.min(...each) / Math.min(...pass)).toBeLessThan(12);
@@ -105,7 +105,7 @@ describe("the command menu", () => {
     const move = targets(plan, "move");
     expect(move[0]?.run).toEqual({ kind: "target", id: null });
     expect(rank("garden", move, new Set()).map((one) => one.run)).toEqual([{ kind: "target", id: "garden" }]);
-    // Phases in their own group, offered before anything is typed.
+    // Projects in their own group, offered before anything is typed.
     expect(move.find((one) => one.title === "Garden")?.group).toBe("Projects");
     expect(rank("", move, new Set()).map((one) => one.title)).toEqual(["Top level", "Garden"]);
     expect(targets(plan, "link").some((one) => one.run.kind === "target" && one.run.id === null)).toBe(false);

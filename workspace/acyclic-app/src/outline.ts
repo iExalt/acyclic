@@ -4,7 +4,7 @@
 import { dependencyOrder, topOrder } from "./map/elk";
 import type { Model } from "./map/model";
 
-export interface PhaseRow {
+export interface ProjectRow {
   id: string;
   title: string;
   /** The threads with work under it, in the order given; `also` names the other projects each has work in. */
@@ -12,7 +12,7 @@ export interface PhaseRow {
 }
 
 export interface Outline {
-  phases: PhaseRow[];
+  projects: ProjectRow[];
   /** Threads with work in no project: none at all, or only in items at the top level. */
   others: string[];
 }
@@ -25,7 +25,7 @@ export interface Outline {
  */
 export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
   const shown = (id: string) => showArchived || !model.items.get(id)?.archived;
-  const phases: { id: string; title: string; threads: Set<string> }[] = [];
+  const projects: { id: string; title: string; threads: Set<string> }[] = [];
   for (const root of topOrder(model, showArchived)) {
     const kids = (model.children.get(root) ?? []).filter(shown);
     if (!shown(root) || kids.length === 0) continue;
@@ -36,16 +36,17 @@ export function outlineOf(model: Model, threads: readonly string[], showArchived
       for (const child of model.children.get(id) ?? []) if (shown(child)) walk(child);
     };
     walk(root);
-    phases.push({ id: root, title: model.items.get(root)?.title ?? root, threads: touched });
+    projects.push({ id: root, title: model.items.get(root)?.title ?? root, threads: touched });
   }
-  const homes = (thread: string) => phases.filter((phase) => phase.threads.has(thread)).map((phase) => phase.id);
+  const homes = (thread: string) =>
+    projects.filter((project) => project.threads.has(thread)).map((project) => project.id);
   return {
-    phases: phases.map((phase) => ({
-      id: phase.id,
-      title: phase.title,
+    projects: projects.map((project) => ({
+      id: project.id,
+      title: project.title,
       threads: threads
-        .filter((thread) => phase.threads.has(thread))
-        .map((thread) => ({ id: thread, also: homes(thread).filter((other) => other !== phase.id) })),
+        .filter((thread) => project.threads.has(thread))
+        .map((thread) => ({ id: thread, also: homes(thread).filter((other) => other !== project.id) })),
     })),
     others: threads.filter((thread) => homes(thread).length === 0),
   };
@@ -56,16 +57,16 @@ export function currentRows(
   model: Model,
   outline: Outline,
   selected: string | null,
-): { phase: string | null; thread: string | null } {
-  if (selected === null || !model.items.has(selected)) return { phase: null, thread: null };
+): { project: string | null; thread: string | null } {
+  if (selected === null || !model.items.has(selected)) return { project: null, thread: null };
   // Up to the top as the Map walks it: a root, or the item where a cycle of parents was broken.
   let root = selected;
   for (let parent = model.items.get(root)?.parent; (model.depth.get(root) ?? 0) > 0 && parent; ) {
     root = parent;
     parent = model.items.get(root)?.parent;
   }
-  const phase = outline.phases.some((one) => one.id === root) ? root : null;
-  return { phase, thread: model.items.get(selected)?.thread ?? null };
+  const project = outline.projects.some((one) => one.id === root) ? root : null;
+  return { project, thread: model.items.get(selected)?.thread ?? null };
 }
 
 /**

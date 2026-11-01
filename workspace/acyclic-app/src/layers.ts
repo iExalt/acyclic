@@ -2,7 +2,7 @@
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app. Pure, so the rules are tested without a browser.
 
-export type Layer = "command" | "mode" | "add" | "phases" | "item" | "needs" | "thread" | "away";
+export type Layer = "command" | "mode" | "add" | "projects" | "item" | "needs" | "thread" | "away";
 
 export interface Open {
   /** The command menu: over everything, as it can be opened from anywhere. */
@@ -14,7 +14,7 @@ export interface Open {
   item: boolean;
   needs: boolean;
   /** The projects' sheet, on a phone. */
-  phases: boolean;
+  projects: boolean;
   thread: boolean;
   /**
    * On a phone, a view other than the home one: Back returns home before it leaves the app, as a phone's tabs do. The
@@ -32,8 +32,8 @@ export interface Open {
 export function openLayers(open: Open): Layer[] {
   // The projects' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
   const order: Layer[] = open.threadOverNeeds
-    ? ["command", "mode", "add", "phases", "item", "thread", "needs", "away"]
-    : ["command", "mode", "add", "phases", "item", "needs", "thread", "away"];
+    ? ["command", "mode", "add", "projects", "item", "thread", "needs", "away"]
+    : ["command", "mode", "add", "projects", "item", "needs", "thread", "away"];
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 

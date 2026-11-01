@@ -67,7 +67,7 @@ export interface Engine {
 
 /**
  * The children in dependency order: each after everything it waits for, ties by id in natural order, so the boxes of a
- * plan without links come in the order their ids were given (phase-2 before phase-10), and a cycle broken at its least
+ * plan without links come in the order their ids were given (item-2 before item-10), and a cycle broken at its least
  * id.
  */
 export function dependencyOrder(

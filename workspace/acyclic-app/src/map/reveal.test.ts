@@ -129,7 +129,7 @@ describe("startOf", () => {
     expect(start(box(0, 0, 300, 5000), item(12, 40), box(400, 0, 300, 200))).toEqual({ x: 0, y: 0 });
   });
 
-  it("starts at a top-level task's own corner, and nowhere without nodes", () => {
+  it("starts at a top-level tile's own corner, and nowhere without nodes", () => {
     expect(start({ ...item(0, 0), top: true })).toEqual({ x: 0, y: 0 });
     expect(start()).toBeUndefined();
   });

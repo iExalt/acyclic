@@ -1,4 +1,4 @@
-// Natural order, as the CLI sorts: runs of ASCII digits compare as numbers, so "phase-2" sorts before "phase-10", and
+// Natural order, as the CLI sorts: runs of ASCII digits compare as numbers, so "item-2" sorts before "item-10", and
 // the rest compares with ASCII case folded, so "step 1" sorts beside "Step 1". Strings that differ only in leading
 // zeros or case, such as "02" and "2", fall back to plain order, by UTF-8 bytes as the CLI compares, so the order is
 // total and the same on every screen.

@@ -30,7 +30,7 @@ describe("stageCounts", () => {
 });
 
 describe("stageCountWords", () => {
-  it("agrees with its count, so a count of tasks needing a thread reads as a sentence", () => {
+  it("agrees with its count, so a count of items needing a thread reads as a sentence", () => {
     expect([1, 3].map((count) => `${count} ${stageCountWords("unthreaded", count)}`)).toEqual([
       "1 needs a thread",
       "3 need a thread",

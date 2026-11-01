@@ -14,7 +14,7 @@ export type Run =
   | { kind: "refresh" }
   | { kind: "item"; id: string }
   | { kind: "thread"; id: string }
-  | { kind: "phase"; id: string }
+  | { kind: "project"; id: string }
   /** Something to do to the item whose panel shows. */
   | { kind: "on-item"; action: OnItem }
   /** The target of a move or link waiting for one: an item, or the top level for a move. */
@@ -124,12 +124,12 @@ export function entries(plan: Plan): Entry[] {
       run: { kind: "thread", id: thread.id },
     }),
   );
-  const phases: Entry[] = [];
+  const projects: Entry[] = [];
   const items: Entry[] = [];
-  for (const { id, title, phase, isPhase } of listed(plan))
-    if (isPhase)
-      phases.push(
-        entry({ key: `phase:${id}`, group: "Projects", title, detail: id, also: id, run: { kind: "phase", id } }),
+  for (const { id, title, project, isProject } of listed(plan))
+    if (isProject)
+      projects.push(
+        entry({ key: `project:${id}`, group: "Projects", title, detail: id, also: id, run: { kind: "project", id } }),
       );
     else
       items.push(
@@ -137,12 +137,12 @@ export function entries(plan: Plan): Entry[] {
           key: `item:${id}`,
           group: "Items",
           title,
-          detail: detail(id, phase),
+          detail: detail(id, project),
           also: id,
           run: { kind: "item", id },
         }),
       );
-  return [...onItem, ...actions, ...threads, ...phases, ...items];
+  return [...onItem, ...actions, ...threads, ...projects, ...items];
 }
 
 /**
@@ -179,12 +179,12 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
     ...top,
     ...listed(plan)
       .filter(({ id }) => left(id))
-      .map(({ id, title, phase, isPhase }) =>
+      .map(({ id, title, project, isProject }) =>
         entry({
           key: `target:${id}`,
-          group: isPhase ? "Projects" : "Items",
+          group: isProject ? "Projects" : "Items",
           title,
-          detail: detail(id, phase),
+          detail: detail(id, project),
           also: id,
           run: { kind: "target", id },
         }),
@@ -192,7 +192,7 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
   ];
 }
 
-const detail = (id: string, phase: string | null) => (phase === null ? id : `${id} in ${phase}`);
+const detail = (id: string, project: string | null) => (project === null ? id : `${id} in ${project}`);
 
 /**
  * Every item shown, with the title of the project it is in, and whether it is a project: a top-level item with
@@ -201,7 +201,7 @@ const detail = (id: string, phase: string | null) => (phase === null ? id : `${i
 function listed({ model, showArchived }: Plan) {
   const shown = (id: string) => showArchived || !inArchived(model, id);
   /** The title of the project an item is in, from its top-level ancestor; parents that loop end the walk. */
-  const phaseOf = (id: string) => {
+  const projectOf = (id: string) => {
     const seen = new Set([id]);
     let top = id;
     for (let up = model.items.get(id)?.parent ?? null; up !== null && model.items.has(up) && !seen.has(up); ) {
@@ -217,8 +217,8 @@ function listed({ model, showArchived }: Plan) {
     .map((item) => ({
       id: item.id,
       title: item.title,
-      phase: phaseOf(item.id),
-      isPhase: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
+      project: projectOf(item.id),
+      isProject: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
     }));
 }
 

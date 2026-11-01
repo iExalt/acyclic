@@ -239,7 +239,7 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, kindOf: (id: strin
       </span>
     );
   }
-  if (run.kind === "phase" || (run.kind === "target" && run.id === null)) return <Icon of={ListTree} size={16} />;
+  if (run.kind === "project" || (run.kind === "target" && run.id === null)) return <Icon of={ListTree} size={16} />;
   if (run.kind === "item" || run.kind === "target") {
     const kind = run.id === null ? undefined : kindOf(run.id);
     if (kind === "box") return <Icon of={ListTree} size={16} />;

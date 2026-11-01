@@ -12,8 +12,8 @@ export interface AddFormProps {
   /** The thread it starts in. */
   thread: string | null;
   /** With no parent, the projects to put it in, and the one it starts in. */
-  phases: readonly { id: string; title: string }[];
-  phase: string | null;
+  projects: readonly { id: string; title: string }[];
+  project: string | null;
   threads: Thread[];
   taken: ReadonlySet<string>;
   /** Set when the server refused the id, to have the user change it. */
@@ -31,8 +31,8 @@ export function AddForm({
   parent,
   parentTitle,
   thread: initialThread,
-  phases,
-  phase: initialPhase,
+  projects,
+  project: initialProject,
   threads,
   taken,
   idRefused,
@@ -45,7 +45,7 @@ export function AddForm({
   const [title, setTitle] = useState(draft?.title ?? "");
   const [id, setId] = useState<string | null>(draft?.item ?? null);
   const [thread, setThread] = useState(draft === null ? initialThread : draft.thread);
-  const [phase, setPhase] = useState(draft === null ? initialPhase : draft.parent);
+  const [project, setProject] = useState(draft === null ? initialProject : draft.parent);
   const idField = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
   useFocusIn(form);
@@ -56,7 +56,7 @@ export function AddForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (title.trim() === "") return;
-    onSubmit({ item: shownId, title: title.trim(), parent: parent ?? phase, thread });
+    onSubmit({ item: shownId, title: title.trim(), parent: parent ?? project, thread });
   };
   return (
     <form
@@ -77,16 +77,16 @@ export function AddForm({
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}
         <input name="title" value={title} autoFocus onChange={(event) => setTitle(event.target.value)} />
       </label>
-      {parent !== null || phases.length === 0 ? null : (
+      {parent !== null || projects.length === 0 ? null : (
         <label>
           Project
           <select
-            name="phase"
-            value={phase ?? ""}
-            onChange={(event) => setPhase(event.target.value === "" ? null : event.target.value)}
+            name="project"
+            value={project ?? ""}
+            onChange={(event) => setProject(event.target.value === "" ? null : event.target.value)}
           >
             <option value="">None, at the top level</option>
-            {phases.map((one) => (
+            {projects.map((one) => (
               <option key={one.id} value={one.id}>
                 {one.title}
               </option>

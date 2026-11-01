@@ -4,7 +4,7 @@ import { buildModel } from "./map/model";
 import { outlineOf } from "./outline";
 import { wavesView } from "./waves";
 
-// Phase p holds a's work and some of b's, phase q the rest of b's; c waits on b, and b and d on each other.
+// Project p holds a's work and some of b's, project q the rest of b's; c waits on b, and b and d on each other.
 const items = [
   item("p"),
   item("a1", "p", [], { thread: "a", stage: "done" }),
@@ -31,10 +31,10 @@ const listed = {
 describe("wavesView", () => {
   const view = wavesView(listed, items, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"], false));
 
-  it("cards each wave's threads, with the phases they work in and what they wait on, earlier or in a cycle", () => {
+  it("cards each wave's threads, with the projects they work in and what they wait on, earlier or in a cycle", () => {
     expect(view.waves.map((wave) => wave.map((card) => card.id))).toEqual([["b", "d"], ["c"]]);
-    expect(view.waves[0]?.[0]).toMatchObject({ phases: ["P", "Q"], after: [], looped: ["d"] });
-    expect(view.waves[1]?.[0]).toMatchObject({ phases: ["Q"], after: ["b", "d"], looped: [] });
+    expect(view.waves[0]?.[0]).toMatchObject({ projects: ["P", "Q"], after: [], looped: ["d"] });
+    expect(view.waves[1]?.[0]).toMatchObject({ projects: ["Q"], after: ["b", "d"], looped: [] });
     expect(view.anytime.map((card) => card.id)).toEqual(["a", "e"]);
   });
 
