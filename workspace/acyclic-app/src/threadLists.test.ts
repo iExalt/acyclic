@@ -29,8 +29,8 @@ describe("the Overview's threads", () => {
       ["thread-6", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-7", { ...NONE, leaves: 1, ready: 1 }],
     ]);
-    // Wave 1 is at work (in progress, or in review with a task ready) or blocked, so nothing in it is to start; thread-6 waits for approval, so it is in Needs you
-    // instead; thread-7, any time, comes first.
+    // Wave 1 is at work (in progress, or in review with a task ready) or blocked, so nothing in it is to start;
+    // thread-6 waits for approval, so it is in Needs you instead; thread-7, any time, comes first.
     const view = { ...lists(["thread-2", "thread-8", "thread-4"], ["thread-10", "thread-6", "thread-3", "thread-5"]) };
     view.anytime = [card("thread-7")];
     expect(threadLists(counts, view, new Set(["thread-6"]))).toEqual({

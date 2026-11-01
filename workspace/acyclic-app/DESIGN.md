@@ -222,5 +222,7 @@ you. Errors say what to check before what went wrong.
 - 2026-10-31: the Overview as home over the Map; the user preferred it.
 - 2026-10-31: Needs you open is marked lighter than the view shown, so only one place reads as current.
 - 2026-10-31: the scheme follows the system's.
+- 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
+  whole; the user chose it.
 - 2026-10-31: the Map's links bundled on the way out, in one column per chain; the user found it cleanest and liked it
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.

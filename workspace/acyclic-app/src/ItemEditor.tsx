@@ -4,7 +4,7 @@
 import { type FormEvent, useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import type { Edited } from "./edits";
-import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
+import { draftOf, type ItemDraft, itemEdit, SIZES, STATES, stateHint } from "./forms";
 import { StageLabel } from "./Stage";
 import { stateWords } from "./stages";
 
@@ -25,6 +25,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
   const edit = itemEdit(item.id, base, draft);
+  const hint = stateHint(draft, item.stage !== undefined);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (edit === null) onCancel();
@@ -63,9 +64,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
               </option>
             ))}
           </select>
-          {draft.state === "backlog" ? (
-            <span className="hint">Shows as Ready or Blocked, by what it waits on</span>
-          ) : null}
+          {hint === null ? null : <span className="hint">{hint}</span>}
         </label>
       )}
       <label>
