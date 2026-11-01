@@ -907,6 +907,8 @@ button.phase-title {
   position: relative;
   min-height: 0;
   background: var(--ground);
+  /* A sheet rising from below its foot stays inside it, rather than over the tab bar. */
+  overflow: clip;
 }
 .map {
   position: absolute;
@@ -1000,21 +1002,23 @@ button.phase-title {
     display: none;
   }
 }
-/* A form takes the whole height: at 45 %, less a phone's keyboard, it would be a few lines tall. */
+/* A form takes the whole height: at 45 %, less a phone's keyboard, it would be a few lines tall. It appears without the
+   rise, which would show a strip of the Map above it. */
 .inspector.tall,
 .sheet.add {
   max-height: none;
   top: 0;
   border-radius: 0;
+  animation: none;
 }
 .inspector.tall::before,
 .sheet.add::before {
   display: none;
 }
+/* Transform alone, so the sheet is opaque from its first frame and the Map never shows through it. */
 @keyframes rise {
   from {
     transform: translateY(12px);
-    opacity: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
