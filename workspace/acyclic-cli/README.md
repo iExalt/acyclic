@@ -17,14 +17,14 @@ Every command's inputs follow these rules, so you can guess a command from its n
    and `--no-field` to clear it. A set takes `--field <VALUE>`, repeatable, to add elements and `--no-field <VALUE>`,
    repeatable, to remove them. A boolean is a pair of presence flags, such as `--public` and `--private`. Naming a
    field and its `--no-` form together is a usage error. The common flags also take a short form, their initial:
-   `-t` for `--title`, `-n` for `--note`, and `-n` for `--dry-run` as other tools have it. `-o` is left free.
+   `-t` for `--title`, `-n` for `--note`, and `-n` for `--dry-run` as other tools have it; `-o` is `--output`.
 4. **`add` and `edit`** take the same fields. `add` creates; adding what exists again with the same values changes
    nothing, and with other values is refused as `already-exists`, naming the fields that differ. `edit` changes an
    existing entity and refuses an unknown one as `not-found`. A write is all or nothing: if any part is refused,
    nothing is written. `item add` and `thread add` take the id as optional: without one, the tracker assigns
    `<kind>-<replica>-<n>`, one past the highest `n` among that kind's ids starting `<kind>-`, and refuses a retry
-   whose title matches a thread's or an open item's as `already-exists` with that record's `id` in its details. A
-   new explicit id starting `item-` or `thread-` is refused as `reserved-id`.
+   whose title matches a thread's, for a thread, or an open item's, for an item, as `already-exists` with that record's
+   `id` in its details. A new explicit id starting `item-` or `thread-` is refused as `reserved-id`.
 5. **Relations are fields.** An item has `--parent`, `--thread`, `--repository` and `--state`; a thread has
    `--repository` and `--level`. An agent's change to an approved thread's membership or repositories doesn't apply:
    it waits as a proposal, listed in the result's `proposals`, for the user to `proposal keep` or `proposal drop`.
@@ -42,8 +42,9 @@ are `waits-for`, which holds work back, and `relates-to`, which is context only.
 Every command's output follows these rules, so you can guess a key from the inputs.
 
 1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Every
-   command prints one, except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and
-   version text, which print text; errors are JSON too. Times are RFC 3339 in UTC and their keys end in `_at`.
+   command prints one, except `prime`, `completions`, `graph` without `--file` or `--open`, `import --schema` and help
+   and version text, which print text; errors are JSON too, except those of a command line that doesn't parse, which
+   print as text on standard error with exit code 2. Times are RFC 3339 in UTC and their keys end in `_at`.
    Pretty output prints the same data for people instead: a table for `list`, `ready` and `thread list`, a block of
    fields for each record, one line for a write, and an error as one line on standard error with the same exit code.
    Tables fit the terminal's width, and print without borders or wrapping when piped. Output is pretty at a terminal

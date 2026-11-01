@@ -727,8 +727,8 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// Runs one batch as the actor. Sync's lease renewal rides along; `changed` says whether the command itself
-    /// changed anything.
+    /// Runs one batch as the actor. Lease renewal rides along, so a batch can commit though the command changed
+    /// nothing; `changed` says whether the command itself changed anything.
     fn write(
         &self,
         apply: impl Fn(&mut Replica, By<'_>) -> Result<Json, CliError>,

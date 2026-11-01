@@ -1,9 +1,10 @@
 //! Finding a code repository's tracker: a private mapping from remote URL prefixes to tracker clones, kept in
 //! `~/.config/acyclic/trackers.toml` so no acyclic files go into code repositories. A tracker clone is its own
 //! tracker, so it needs no entry.
+//! The mapping applies only inside a Git repository.
 //!
 //! ```toml
-//! # Used when no prefix matches.
+//! # Used when no prefix matches a repository's remotes.
 //! default = "~/trackers/personal"
 //!
 //! [prefixes]

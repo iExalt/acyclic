@@ -25,6 +25,7 @@ pub const VERSION: u32 = 2;
 pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its records named by keys you choose.
 // Importing adds and updates what it names and never deletes, so importing it again changes nothing.
 // JSON has no comments: remove the lines that start with //.
+// Version 1 documents are still read: they name the link kinds blocks and relates.
 {
   "format": "acyclic-import",
   "version": 2,
@@ -43,7 +44,8 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
   "links": [
     {"from": "plant", "kind": "waits-for", "to": "beds"}
   ],
-  // A thread groups items for one continuing agent conversation; "items" lists its members' keys.
+  // A thread groups items for one continuing agent conversation; "items" lists its members' keys. Optional: brief,
+  // repositories (keys, beyond those of its items) and approved (only the user may import approved threads).
   "threads": [
     {"key": "spring", "title": "Spring planting", "items": ["beds", "plant"]}
   ]

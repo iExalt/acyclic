@@ -24,7 +24,8 @@ the `--repository` and `--commit` form, or with `--note` when the result isn't a
 ## Setting up a clone
 
 `acyclic init --replica <id> <path> --remote <url>` creates a tracker clone at `<path>` as a new replica, with the
-shared repository as its `origin`. `acyclic sync` then pulls in what other machines recorded and pushes yours.
+shared repository as its `origin`. Choose an id no other clone has used. `acyclic sync` then pulls in what other
+machines recorded and pushes yours.
 
 ## Who you are
 
@@ -55,14 +56,15 @@ For example, `acyclic item edit beds --thread garden --no-notes --area soil --no
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
 
 Leave out the id in `acyclic item add` and `acyclic thread add`: the tracker assigns one, such as `item-mac-143`, and
-prints it. Ids starting `item-` or `thread-` are the tracker's alone. If an add without an id fails `already-exists`, a
-thread or open item has that title, most likely from an earlier try; the error's details give its id. Give an id only
-to add a second record with the same title. Never put counters in titles.
+prints it. A new id of your own starting `item-` or `thread-` is refused; those are the tracker's to give. If an add
+without an id fails `already-exists`, a thread (for `thread add`) or an open item (for `item add`) has that title, most
+likely from an earlier try; the error's details give its id. Give an id only to add a second record with the same title.
+Never put counters in titles.
 
-`acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence
-or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic link` has
-`add` and `remove`. `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it would
-change. `acyclic import --schema` prints the plan format.
+`acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence, a
+done state or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic
+link` has `add` and `remove`. `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it
+would change. `acyclic import --schema` prints the plan format.
 
 Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
 and thread it belongs with.
@@ -72,8 +74,8 @@ standard output.
 
 ## Output
 
-- `prime`, `completions`, `import --schema`, help and version text, and `graph` without `--file`, print documents
-  or text. Every other command prints one JSON document when its output is piped, as a tool's is:
+- `prime`, `completions`, `import --schema`, help and version text, and `graph` without `--file` or `--open`, print
+  documents or text. Every other command prints one JSON document when its output is piped, as a tool's is:
   `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on
   `error.code`, not on the message. At a terminal it prints text for people instead; if your commands run in one,
   set `ACYCLIC_OUTPUT=json`.
@@ -85,8 +87,8 @@ standard output.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
-- Writes report `changed`. A repeated command changes nothing of its own; it can still commit when a claim's lease
-  is due for renewal.
+- Writes report `changed`. A repeated command changes nothing, except `claim`, which writes its lease again; any
+  write can also commit a lease renewal that its own `changed` leaves out.
 
 ## Finding and doing work
 
@@ -96,14 +98,15 @@ standard output.
    never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic list` lists every item. `acyclic show
    <item>...` explains items, as an array in the order given: their readiness, children and their thread's claims.
    See "Details" for work that waits as `in-review` or `unverified`.
-2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by
-   default, `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker,
-   which renews it at each write while you work. Don't use `--force` to take someone else's work. If `claim`, `ready`
-   or `acyclic thread show <thread>` says another holder wins a contest for your thread, stop and run `acyclic release
-   <thread>`: it drops only your claim. A claim refused with readiness `resource-busy` means another thread's claim
-   holds a resource one of your thread's open items names: wait for that work, and don't force it. A lapsed lease
-   frees your thread and its resources, so before work that needs a resource after a pause, check that `acyclic
-   thread show <thread>` still names you as holder.
+2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
+   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
+   through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
+   written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take
+   someone else's work. If `claim` or `acyclic thread show <thread>` says another holder wins a contest for your thread,
+   or `ready` stops listing a thread you hold, stop and run `acyclic release <thread>`: it drops only your claim. A
+   claim refused with readiness `resource-busy` means another thread's claim holds a resource one of your thread's open
+   items names: wait for that work, and don't force it. A lapsed lease frees your thread and its resources, so before
+   work that needs a resource after a pause, check that `acyclic thread show <thread>` still names you as holder.
 3. `acyclic done <item> --repository <record> --commit <id>` when an item is finished, or `--note` when the result
    isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are done;
    don't use `--force` to finish someone else's work. A parent needs no `done`: its `progress` reads done once every

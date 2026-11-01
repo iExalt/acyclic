@@ -17,7 +17,8 @@ pub use rng::SplitMix64;
 /// The item count the shape's rates are measured at.
 pub const BASE_ITEMS: usize = 350;
 
-/// e^-1.3, for a mean of 1.3 hard links per item. A constant rather than `exp`, whose last bit varies by platform.
+/// e^-1.3, for a Poisson draw of 1.3 hard links from each item below the top level, before those that would repeat or
+/// break a rule are skipped. A constant rather than `exp`, whose last bit varies by platform.
 const EXP_MINUS_1_3: f64 = 0.272_531_793_034_012_6;
 
 const AREAS: [&str; 7] = ["core", "api", "storage", "interface", "infra", "research", "docs"];

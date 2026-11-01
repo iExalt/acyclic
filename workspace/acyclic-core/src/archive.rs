@@ -1,4 +1,4 @@
-//! Archiving done subtrees and reopening them (plan D62). Archived is a field on a subtree's root that `ready` and
+//! Archiving done subtrees and reopening them. Archived is a field on a subtree's root that `ready` and
 //! the graph filter on; links into archived items count as satisfied. A root is eligible once its whole subtree is
 //! done and merged and no open item outside it links into it; a root without a gate also waits 30 days from its
 //! last item's done. Reopening an archived item only flags its dependents; reopening any other done item blocks them

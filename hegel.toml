@@ -1,5 +1,5 @@
-# Property tests run 256 cases in the routine check, locally and on CI; `mise run check:properties` runs them at
-# scale through HEGEL_TEST_CASES, which overrides every profile here.
+# Property tests run 256 cases in the routine check, locally and on CI, or 128 for a test whose cases cost more;
+# `mise run check:properties` runs them at scale through HEGEL_TEST_CASES, which overrides every profile here.
 
 [profiles.common]
 extends = "base"

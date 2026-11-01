@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The checks need only Rust, nextest and Gitleaks; skip the rest of mise.toml's tools.
+  # The checks need only Rust, nextest, Gitleaks, rumdl, actionlint and ShellCheck; skip the rest of mise.toml's tools.
   MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about,node,pnpm
 
 jobs:

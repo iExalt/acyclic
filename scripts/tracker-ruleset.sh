@@ -1,5 +1,5 @@
 #!/bin/sh
-# Keeps a tracker's shared repository append-only where it must be: audit-log and usage refs (everything under
+# Stops a tracker's shared repository from rewriting its audit logs: audit-log and usage refs (everything under
 # refs/heads/log/ and refs/heads/usage/) may be created and deleted, never force-pushed, by anyone, admins included.
 # State refs stay outside it, since a squash rewrites them. GitHub's patterns need `/**/*` to match every depth.
 # Creates the ruleset, or updates it in place when it exists, so running it again is safe. Rulesets need the
