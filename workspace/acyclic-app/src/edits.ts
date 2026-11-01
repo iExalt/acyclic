@@ -124,13 +124,13 @@ export function pick(model: Model, mode: Mode, target: Pick): Step {
   if (target.kind === "cancel" || mode.kind === "idle") return { mode: idle, command: null, refusal: null };
   const refuse = (refusal: string): Step => ({ mode, command: null, refusal });
   if (mode.kind === "move") {
-    if (target.kind === "background") return refuse("Tap the box it goes in, or Top level");
+    if (target.kind === "background") return refuse("Choose the box it goes in, or Top level");
     const parent = target.kind === "top" ? null : target.id;
     const refusal = moveRefusal(model, mode.item, parent);
     if (refusal !== null) return refuse(refusal);
     return { mode: idle, command: moveCommand(mode.item, parent), refusal: null };
   }
-  if (target.kind !== "item") return refuse("Tap the item to link to");
+  if (target.kind !== "item") return refuse("Choose the item to link to");
   const refusal = linkRefusal(model, mode.item, target.id);
   if (refusal !== null) return refuse(refusal);
   return { mode: idle, command: linkCommand(mode.item, mode.link, target.id), refusal: null };

@@ -62,9 +62,12 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
     // work under it is no further along than it was.
     const unstarted = (now: Plan) =>
       added || kind !== "waits-for" || started(now.items.get(from)) <= started(before.items.get(from));
+    // Said as the link reads, so which waits for which is plain.
+    const [a, b, verb] = [titleOf(from), titleOf(to), kind === "waits-for" ? "waits for" : "relates to"];
+    const [now, longer, again] = [`${a} now ${verb} ${b}`, `${a} no longer ${verb} ${b}`, `${a} ${verb} ${b} again`];
     return {
-      text: `${added ? "Linked" : "Unlinked"} ${titleOf(from)} and ${titleOf(to)}`,
-      undone: `${added ? "Unlinked" : "Linked"} ${titleOf(from)} and ${titleOf(to)} again`,
+      text: added ? now : longer,
+      undone: added ? longer : again,
       command: { link: { [added ? "remove" : "add"]: { from, kind, to } } },
       holds: (now) => linked(now) === added && unstarted(now),
     };
@@ -82,7 +85,7 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
     const back = was.parent;
     return {
       text: to === null ? `Moved ${titleOf(id)} to the top level` : `Moved ${titleOf(id)} into ${titleOf(to)}`,
-      undone: `Undid the move of ${titleOf(id)}`,
+      undone: `Moved ${titleOf(id)} back`,
       command: { item: { edit: back === null ? { item: id, "no-parent": true } : { item: id, parent: back } } },
       holds: (now) => (now.items.get(id)?.parent ?? null) === to,
     };
@@ -112,7 +115,7 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
   }
   return {
     text: `Edited ${titleOf(id)}${thread ? ". Its thread can't be changed back from here" : ""}`,
-    undone: `Undid the edit of ${titleOf(id)}${thread ? ", but its thread" : ""}`,
+    undone: `Set ${titleOf(id)} back${thread ? ", except its thread" : ""}`,
     command: { item: { edit: back } },
     holds: (now) =>
       [...set].every(([field, value]) => held(now.items.get(id), field) === value) &&

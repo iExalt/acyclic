@@ -28,6 +28,16 @@ export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: bo
     : "Shows as Ready or Blocked, by what it waits on";
 }
 
+/** What a level lets reach the user, as core's levels say it; null for one the app doesn't know. */
+export function levelHint(level: string): string | null {
+  const said: Record<string, string> = {
+    everything: "Agents ask about everything",
+    "scope-and-irreversible": "Agents ask about scope changes and irreversible actions",
+    blockers: "Agents ask only about blockers",
+  };
+  return said[level] ?? null;
+}
+
 /** The item's fields the editor changes; an empty string is a clear. */
 export interface ItemDraft {
   title: string;

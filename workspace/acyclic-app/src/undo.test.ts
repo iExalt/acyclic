@@ -48,12 +48,14 @@ describe("undo", () => {
   it("takes back a link added or removed, while it is still so", () => {
     const added = undoOf({ link: { add: { from: "sow", kind: "relates-to", to: "garden" } } }, before);
     expect(added?.command).toEqual({ link: { remove: { from: "sow", kind: "relates-to", to: "garden" } } });
-    expect(added?.text).toBe("Linked Sow and Garden");
+    // Said as the link reads, so which way it runs is plain.
+    expect([added?.text, added?.undone]).toEqual(["Sow now relates to Garden", "Sow no longer relates to Garden"]);
     const removed = undoOf({ link: { remove: { from: "sow", kind: "waits-for", to: "dig" } } }, before);
     expect(removed?.command).toEqual({ link: { add: { from: "sow", kind: "waits-for", to: "dig" } } });
     expect(removed?.holds(before)).toBe(false);
     const gone = after("sow", { links: { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] } });
     expect(removed?.holds(gone)).toBe(true);
+    expect([removed?.text, removed?.undone]).toEqual(["Sow no longer waits for Dig", "Sow waits for Dig again"]);
   });
 
   it("sets the autonomy back, while it is still what was set", () => {

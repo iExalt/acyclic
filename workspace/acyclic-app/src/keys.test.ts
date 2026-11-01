@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type KeyContext, type KeyPress, nextRow, SEQUENCE_MS, step } from "./keys";
+import { type KeyContext, type KeyPress, keyReference, nextRow, SEQUENCE_MS, SHORTCUTS, step } from "./keys";
 
 const press = (key: string, fields: Partial<KeyPress> = {}): KeyPress => ({
   key,
@@ -89,5 +89,27 @@ describe("nextRow", () => {
       0, 2, 1, 2, 0,
     ]);
     expect(nextRow(0, -1, 1)).toBe(-1);
+  });
+});
+
+describe("keyReference", () => {
+  it("lists every shortcut ? can't run now, so each is either runnable or described, with the platform's chords", () => {
+    const runnable = new Set(["view:overview", "view:map", "view:threads", "needs", "add"]);
+    const rows = keyReference(runnable, true);
+    const said = rows.map((row) => row.keys).join(" | ");
+    for (const key of Object.keys(SHORTCUTS))
+      expect(runnable.has(key) || said.includes(SHORTCUTS[key] ?? "?")).toBe(true);
+    expect(rows[0]).toEqual({
+      what: "With an item open",
+      keys: "E edit, M move, W waits for, R relates to, A add inside",
+    });
+    expect(said).toContain("⌘K");
+    expect(
+      keyReference(runnable, false)
+        .map((row) => row.keys)
+        .join(" | "),
+    ).toContain("Ctrl Z");
+    // With an item open, its keys run, so the reference doesn't repeat them.
+    expect(keyReference(new Set(Object.keys(SHORTCUTS)), true)[0]?.what).toBe("Next or previous row");
   });
 });

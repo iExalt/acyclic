@@ -1819,3 +1819,22 @@ dl.facts .chip.line {
 .actions > .aside {
   margin: 0;
 }
+/* What ? can't run from the list: keys said as text, beside what they do. */
+.key-reference dl {
+  margin: 0;
+  padding: 0 12px 8px;
+}
+.key-reference dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.key-reference dl > div > dt {
+  color: var(--muted);
+}
+.key-reference dl > div > dd {
+  margin: 0;
+  text-align: end;
+}

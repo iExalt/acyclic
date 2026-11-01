@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byNumber, lineColour, lineOf, linesOf } from "./lines";
+import { byNumber, lineColour, lineLabel, lineOf, linesOf } from "./lines";
 import { PALETTES } from "./palette";
 
 const DARK = PALETTES.dark;
@@ -96,3 +96,12 @@ function distance(a: string, b: string): number {
   const [x, y] = [channels(a), channels(b)];
   return Math.hypot(...x.map((value, at) => value - (y[at] ?? 0)));
 }
+
+describe("lineLabel", () => {
+  it("says a thread with its number where no badge carries it, else its name, else the title it was given", () => {
+    const line = { number: "4", name: "CLI features", colour: "#000", ink: "#fff" };
+    expect(lineLabel(line, "CLI features")).toBe("4. CLI features");
+    expect(lineLabel({ ...line, number: null }, "CLI features")).toBe("CLI features");
+    expect(lineLabel(undefined, "9. Gone")).toBe("9. Gone");
+  });
+});

@@ -20,7 +20,7 @@ import {
   unanswered,
   unlinkCommand,
 } from "./edits";
-import { globalLevelCommand, LEVELS, type Level, levelLabel } from "./forms";
+import { globalLevelCommand, LEVELS, type Level, levelHint, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
@@ -436,7 +436,6 @@ export function App() {
    */
   const panel = topLayer({ ...open, command: false });
   // What the command menu finds, built once as it opens rather than at every render while it shows.
-  const picks = mode.kind === "idle" ? null : mode.kind;
   const menuEntries = useMemo(() => {
     if (!showCommand || model === null) return [];
     const threads = sorted.map((one) => ({
@@ -446,8 +445,8 @@ export function App() {
     }));
     const item = panel === "item" && selected !== null ? model.items.get(selected) : undefined;
     const plan = { model, threads, working, showArchived, item: item === undefined ? null : item };
-    return picks === null ? commandEntries(plan) : targets(plan, picks);
-  }, [showCommand, model, sorted, lines, working, showArchived, picks, panel, selected]);
+    return mode.kind === "idle" ? commandEntries(plan) : targets(plan, mode.kind, mode.item);
+  }, [showCommand, model, sorted, lines, working, showArchived, mode, panel, selected]);
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
@@ -869,9 +868,9 @@ export function App() {
     );
   const prompt =
     mode.kind === "move"
-      ? `Tap the box to put ${titleOf(mode.item)} in`
+      ? `Choose the box to put ${titleOf(mode.item)} in`
       : mode.kind === "link"
-        ? `Tap the item ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
+        ? `Choose the item ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
         : null;
   const menu = (
     <>
@@ -897,8 +896,9 @@ export function App() {
         Single-key shortcuts
       </label>
       <Choice
-        label="Autonomy for every thread without its own"
+        label="Autonomy, for threads without their own"
         testid="global-level"
+        hint={levelHint(load.level)}
         value={load.level}
         disabled={busy}
         onWrite={(level) => send(globalLevelCommand(level as Level), { select: null, pin: null, undo: true })}

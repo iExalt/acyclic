@@ -16,10 +16,12 @@ export interface ChoiceProps {
   onWrite: (value: string) => void;
   name?: string;
   testid?: string;
+  /** What the value chosen means, said under the list. */
+  hint?: string | null;
   children: ReactNode;
 }
 
-export function Choice({ label, className, value, disabled, onWrite, name, testid, children }: ChoiceProps) {
+export function Choice({ label, className, value, disabled, onWrite, name, testid, hint, children }: ChoiceProps) {
   const [state, setState] = useState(UNCHOSEN);
   /** Set while a key's own task runs: a change then is an arrow key's on the closed list, not a pick. */
   const keying = useRef(false);
@@ -66,6 +68,7 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
       >
         {children}
       </select>
+      {hint ? <span className="hint">{hint}</span> : null}
     </label>
   );
 }

@@ -8,6 +8,7 @@ import {
   globalLevelCommand,
   itemEdit,
   keepCommand,
+  levelHint,
   pmCommand,
   reopenCommand,
   resolveCommand,
@@ -102,5 +103,16 @@ describe("stateHint", () => {
     expect(stateHint({ state: "backlog", thread: "" }, true)).toBe("Shows as Needs a thread until it's in one");
     expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
+  });
+});
+
+describe("levelHint", () => {
+  it("says what each level lets reach the user, and nothing for one the app doesn't know", () => {
+    expect(["everything", "scope-and-irreversible", "blockers", "later"].map(levelHint)).toEqual([
+      "Agents ask about everything",
+      "Agents ask about scope changes and irreversible actions",
+      "Agents ask only about blockers",
+      null,
+    ]);
   });
 });

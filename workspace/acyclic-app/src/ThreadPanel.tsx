@@ -22,6 +22,7 @@ import {
   keepCommand,
   LEVELS,
   type Level,
+  levelHint,
   levelLabel,
   pmCommand,
   revokeCommand,
@@ -225,6 +226,14 @@ export function ThreadPanel({
           className="setting"
           name="level"
           value={detail.level ?? ""}
+          hint={
+            detail.level === null
+              ? (() => {
+                  const said = levelHint(globalLevel);
+                  return said === null ? null : `${said}, as set for every thread`;
+                })()
+              : levelHint(detail.level)
+          }
           disabled={busy}
           onWrite={(level) => onCommand(threadLevelCommand(id, level === "" ? null : (level as Level)))}
         >
