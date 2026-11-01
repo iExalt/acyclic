@@ -2,8 +2,8 @@
 
 A decentralized, Git-native issue tracker and project management tool for one person and many agents.
 
-The CLI, the server and the app work. The north star below is wider than what is built: nothing yet starts runs on
-its own or runs agents in a cluster.
+The CLI, the server and the app work. The north star below is wider than what is built: nothing starts runs yet, and
+nothing runs agents in a cluster.
 
 ## North star
 

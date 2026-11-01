@@ -61,10 +61,10 @@ The runners' listener also serves git's smart HTTP protocol at `/git/<owner>/<na
 credential for the forge. A run reaches only the repositories of its thread's set as it stands at each request; any
 other is refused as not in this thread.
 
-Each repository has a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by default under `~/.local/share`), made on
-first use and fetched from `https://github.com/<owner>/<name>.git` (`ACYCLIC_UPSTREAM` names another forge) whenever a
-run fetches, unless another fetch began in the last 5 seconds (`ACYCLIC_MIRROR_FRESH`), and every 5 minutes unless
-`--sync-every 0`; when the forge can't be reached, runs get the mirror as last
+Each repository has a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by default under `~/.local/share`), made on first
+use and fetched from `https://github.com/<owner>/<name>.git` (`ACYCLIC_UPSTREAM` names another forge) whenever a run
+fetches, unless another fetch began in the last 5 seconds (`ACYCLIC_MIRROR_FRESH`), and every 5 minutes when `up` is
+given a non-zero `--sync-every`, which by default it isn't; when the forge can't be reached, runs get the mirror as last
 fetched. Git runs there with no settings or credentials of the user's, so only public repositories can be mirrored for
 now. Readiness checks whether a commit is merged against the mirror of a repository with no clone mapped in
 `~/.config/acyclic/clones.toml`.
@@ -76,10 +76,11 @@ only commits; a push's hook scans the new commits for the deny-list's terms, in 
 Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB and 64 refs, and a run one push at a time to
 each repository.
 
-Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, unless
-`--sync-every 0`, the repositories of finished threads, those with every item done and no run under way, are removed
-once every run's ref in them is on the forge, as the mirror has it, since until then they hold the only copy of that
-work; and a mirror no thread borrows from any more drops what the forge no longer has.
+Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes when `up` is
+given a non-zero `--sync-every`, which by default it isn't, the repositories of finished threads, those with every item
+done and no run under way, are removed once every run's ref in them is on the forge, as the mirror has it, since until
+then they hold the only copy of that work; and a mirror no thread borrows from any more drops what the forge no longer
+has.
 
 The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
 any of the forge's URLs, to the server with the run's token.
