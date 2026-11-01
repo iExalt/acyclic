@@ -43,6 +43,9 @@ _wait_for = Locator.wait_for
 
 
 def _wait_for_promptly(self, state="visible", timeout=None):
+    # No limit, as Playwright reads a timeout of 0, has no deadline to slice up to.
+    if timeout == 0:
+        return _wait_for(self, state=state, timeout=0)
     limit = 30_000 if timeout is None else timeout
     deadline = time.monotonic() + limit / 1000
     while True:
