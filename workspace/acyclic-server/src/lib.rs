@@ -22,7 +22,7 @@ use axum::http::header::{
     AUTHORIZATION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE as COOKIE_HEADER, HOST, LOCATION,
     ORIGIN, SET_COOKIE, WWW_AUTHENTICATE, X_FRAME_OPTIONS,
 };
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -160,7 +160,9 @@ impl Access {
                     };
                 }
                 let browser = token.browser();
-                if cookies(headers, *port).any(|value| session::equal(value, browser.as_bytes())) {
+                let own = cookie(*port);
+                let names = [own.as_str(), SHARED_COOKIE];
+                if cookies(headers, &names).any(|value| session::equal(value, browser.as_bytes())) {
                     return Ok(Credential::Cookie);
                 }
                 Err(Refusal::NoSession)
@@ -240,18 +242,35 @@ fn cookie(port: u16) -> String {
 /// stays paired; another server's cookie of this name can only fail to match, so it does no harm.
 const SHARED_COOKIE: &str = "acyclic-up";
 
-/// The values of every cookie in the request named for `port` or [`SHARED_COOKIE`]; each is tried.
-fn cookies(headers: &HeaderMap, port: u16) -> impl Iterator<Item = &[u8]> {
-    let own = cookie(port);
+/// The values of every cookie in the request with one of `names`; each is tried.
+fn cookies<'a>(headers: &'a HeaderMap, names: &'a [&str]) -> impl Iterator<Item = &'a [u8]> {
     headers.get_all(COOKIE_HEADER).into_iter().flat_map(move |value| {
-        let own = own.clone();
         value.as_bytes().split(|byte| *byte == b';').filter_map(move |pair| {
             let (name, value) = pair
                 .trim_ascii()
                 .split_at(pair.trim_ascii().iter().position(|byte| *byte == b'=')?);
-            (name == own.as_bytes() || name == SHARED_COOKIE.as_bytes()).then_some(&value[1..])
+            names.iter().any(|one| name == one.as_bytes()).then_some(&value[1..])
         })
     })
+}
+
+/// The cookie that holds the address an unpaired browser opened, while it pairs, so pairing lands there: only the
+/// query of an address the app could have written, sent only to the pairing link's path, for as long as a link lasts.
+fn landing(port: u16) -> String {
+    format!("acyclic-up-{port}-to")
+}
+
+/// The longest query a landing keeps.
+const LANDING_MAX: usize = 1024;
+
+/// Whether `query` may be a landing: one the app could have written, with nothing a cookie or a redirect would read
+/// otherwise. It is checked again when read, since any page on the host, whatever its port, can set the cookie.
+fn landable(query: &[u8]) -> bool {
+    query.first().is_some_and(u8::is_ascii_alphanumeric)
+        && query.len() <= LANDING_MAX
+        && query
+            .iter()
+            .all(|byte| (0x21..=0x7e).contains(byte) && !matches!(byte, b'"' | b',' | b';' | b'\\'))
 }
 
 /// Why a request was refused.
@@ -511,7 +530,7 @@ async fn guard(
         && request.uri().path() == LOGIN
     {
         return match access.host(request.headers()) {
-            Ok(()) => pair(&listener, *port, token, request.uri().query()),
+            Ok(()) => pair(&listener, *port, token, request.uri().query(), request.headers()),
             Err(refusal) => refusal.into_response(),
         };
     }
@@ -523,25 +542,68 @@ async fn guard(
         Err(Refusal::NoSession)
             if request.method() == Method::GET && !request.uri().path().starts_with("/api/") =>
         {
-            page(StatusCode::UNAUTHORIZED, UNPAIRED)
+            let Access::Session { port, .. } = access else {
+                return page(StatusCode::UNAUTHORIZED, UNPAIRED);
+            };
+            unpaired(*port, request.uri())
         },
         Err(refusal) => refusal.into_response(),
     }
 }
 
-const UNPAIRED: &str = "This browser isn't paired with acyclic up. Run acyclic up --link, with the same --port as the \
-                        server if it has one, and open the link it prints within five minutes.";
+const UNPAIRED: &str = "This browser isn't paired with acyclic up. Run <code>acyclic up --link</code>, with the same \
+                        <code>--port</code> as the server if it has one, and open the link it prints within five \
+                        minutes.";
 
-const SPENT: &str =
-    "This pairing link has expired or was already used. Run acyclic up --link for a new one.";
+const SPENT: &str = "This pairing link has expired or was already used. Run <code>acyclic up --link</code> for a new one.";
 
-/// A short page for people.
+/// A short page for people, one paragraph of static HTML: nothing in it comes from the request, so nothing needs
+/// escaping.
 fn page(status: StatusCode, text: &'static str) -> Response {
-    (status, [(CONTENT_TYPE, "text/plain; charset=utf-8")], format!("{text}\n")).into_response()
+    let html = format!(
+        "<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" \
+         content=\"width=device-width, initial-scale=1\">\n<title>acyclic</title>\n<p>{text}</p>\n"
+    );
+    (status, [(CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
-/// Pairs a browser that opened a link with a valid, unspent code, by giving it the cookie, and sends it home.
-fn pair(listener: &Listener, port: u16, token: &Token, query: Option<&str>) -> Response {
+/// The page for a browser that isn't paired, which keeps the app address it opened as its landing, or forgets an
+/// earlier one when it opened the app's home: the latest address wins.
+fn unpaired(port: u16, uri: &Uri) -> Response {
+    let mut response = page(StatusCode::UNAUTHORIZED, UNPAIRED);
+    let kept = match uri.query() {
+        _ if uri.path() != "/" => return response,
+        Some(query) if landable(query.as_bytes()) => {
+            format!(
+                "{}={query}; HttpOnly; SameSite=Lax; Path={LOGIN}; Max-Age={LANDING_AGE}",
+                landing(port)
+            )
+        },
+        _ => forget(port),
+    };
+    response
+        .headers_mut()
+        .insert(SET_COOKIE, HeaderValue::from_str(&kept).expect("a landable query is a header"));
+    response
+}
+
+/// How long a landing is kept, in seconds: as long as a pairing link lasts.
+const LANDING_AGE: i64 = session::CODE_LIFE / 1000;
+
+/// The header that removes a landing.
+fn forget(port: u16) -> String {
+    format!("{}=; HttpOnly; SameSite=Lax; Path={LOGIN}; Max-Age=0", landing(port))
+}
+
+/// Pairs a browser that opened a link with a valid, unspent code, by giving it the cookie, and sends it home, or to the
+/// app address it opened before it paired.
+fn pair(
+    listener: &Listener,
+    port: u16,
+    token: &Token,
+    query: Option<&str>,
+    headers: &HeaderMap,
+) -> Response {
     let now = acyclic_cli::now(&listener.server.config.env);
     let code = query.and_then(|query| query.strip_prefix("code="));
     let made = code.and_then(|code| Some((code, token.verify(code, now)?)));
@@ -552,7 +614,19 @@ fn pair(listener: &Listener, port: u16, token: &Token, query: Option<&str>) -> R
                 cookie(port),
                 token.browser()
             );
-            (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, "/".to_owned())]).into_response()
+            // Home, or the address the browser opened before it paired: only a query, so it stays on this server.
+            let name = landing(port);
+            let names = [name.as_str()];
+            let kept = cookies(headers, &names)
+                .find(|value| landable(value))
+                .and_then(|value| str::from_utf8(value).ok());
+            let home = kept.map_or_else(|| "/".to_owned(), |query| format!("/?{query}"));
+            let mut response =
+                (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, home)]).into_response();
+            let forgotten =
+                HeaderValue::from_str(&forget(port)).expect("a cookie's name is a header");
+            response.headers_mut().append(SET_COOKIE, forgotten);
+            response
         },
         _ => page(StatusCode::FORBIDDEN, SPENT),
     }

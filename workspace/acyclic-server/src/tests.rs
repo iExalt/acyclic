@@ -488,6 +488,57 @@ fn a_link_pairs_a_browser_once_while_it_is_fresh() {
 }
 
 #[test]
+fn pairing_lands_on_the_app_address_the_browser_opened_unpaired() {
+    let now = 1_792_022_400_000;
+    let router = up_router(now);
+    let token = Token::parse(TOKEN).unwrap();
+    let host = ("host", "127.0.0.1:7478");
+    let kept = |path: &str| {
+        let (status, headers) = exchange(&router, path, &[host]);
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        assert_eq!(headers[CONTENT_TYPE], "text/html; charset=utf-8");
+        headers.get(SET_COOKIE).map(|value| value.to_str().unwrap().to_owned())
+    };
+    // An app address is kept, for the pairing link's path alone and as long as a link lasts.
+    assert_eq!(
+        kept("/?item=a&view=map").as_deref(),
+        Some(
+            "acyclic-up-7478-to=item=a&view=map; HttpOnly; SameSite=Lax; Path=/login; Max-Age=300"
+        )
+    );
+    // Nothing else is: not an asset, nor a query the app never writes, which forgets an earlier one, as home does.
+    // (A query can't hold a control character: a request can't be built with one.)
+    assert_eq!(kept("/assets/app.js?v=1"), None);
+    let long = format!("/?item={}", "a".repeat(LANDING_MAX));
+    for forgotten in ["/", "/?//evil.example", "/?item=%22a%22;b", "/?item=a,b", long.as_str()] {
+        let cookie = kept(forgotten).unwrap();
+        assert!(
+            cookie.starts_with("acyclic-up-7478-to=;")
+                && cookie.ends_with("Path=/login; Max-Age=0"),
+            "{cookie}"
+        );
+    }
+    let pair = |seed: u8, cookie: &str| {
+        let path = format!("/login?code={}", token.code(now, [seed; 8]));
+        let (status, headers) = exchange(&router, &path, &[host, ("cookie", cookie)]);
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let set: Vec<_> =
+            headers.get_all(SET_COOKIE).iter().map(|value| value.to_str().unwrap()).collect();
+        assert!(
+            set.iter()
+                .any(|one| one.starts_with("acyclic-up-7478-to=;") && one.ends_with("Max-Age=0")),
+            "{set:?}"
+        );
+        headers[LOCATION].to_str().unwrap().to_owned()
+    };
+    assert_eq!(pair(1, "acyclic-up-7478-to=item=a&view=map"), "/?item=a&view=map");
+    // Any page on the host can set the cookie, so what it holds is checked again, and only this port's is read.
+    assert_eq!(pair(2, "acyclic-up-7478-to=//evil.example"), "/");
+    assert_eq!(pair(3, "acyclic-up-7479-to=item=a"), "/");
+    assert_eq!(pair(4, "other=1"), "/");
+}
+
+#[test]
 fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     let router = up_router(0);
     let credential = Token::parse(TOKEN).unwrap().browser();
