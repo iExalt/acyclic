@@ -46,7 +46,8 @@ and a unit test keeps the two in step.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
   a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
   title muted at full strength, since it can still be picked; its badge and stage icon fade with it, below 3:1, on
-  purpose, as the title carries it.
+  purpose, as the title carries it. Its fill stays opaque, the colour it would show at 35 % over its box, so a link
+  across boxes passes beneath it.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an OKLCH lightness band per scheme, so every line's badge takes a readable ink.
 
@@ -265,8 +266,11 @@ before what went wrong.
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
   cross have none.
-- **Opening view.** The whole plan when it fits at a readable zoom (`READABLE`); otherwise the first box's corner, its
-  title and first item whole, at that zoom.
+- **Opening view.** The whole plan when it fits at 1:1 on a wide screen, or at a readable zoom (`READABLE`) on a
+  phone; otherwise the first box's corner, its title and first item whole, at that zoom.
+- **Titles read whole.** A task's title takes up to three lines on its tile, cut short only past that; backticks,
+  which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
+  between the two, so it never runs through a title.
 
 ## Open decisions
 
@@ -283,5 +287,7 @@ before what went wrong.
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
 - 2026-11-01: Up next lists the approved threads with an item ready, Any time first, then by wave, over the next wave
   whole; the user chose it.
+- 2026-11-01: tiles three lines tall over wider ones or today's two, and a first view at 1:1 on a wide screen; the
+  user chose them.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
   over opening items in place. A thread opened from another view does the same, by extension (proposed).

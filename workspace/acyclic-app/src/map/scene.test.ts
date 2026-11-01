@@ -160,9 +160,15 @@ describe("labelOf", () => {
     expect(labelOf({ ...node, progress: null }, 60, fonts)).toBe("Phase two of the plan");
   });
 
-  it("wraps a task's title over two lines and cuts the second short", () => {
-    const leaf = { title: "Route the links inside a box", kind: "leaf" as const, hidden: 0, progress: null };
-    expect(labelOf(leaf, 12, fonts)).toBe("Route the\nlinks insid…");
+  it("wraps a task's title over three lines and cuts the third short", () => {
+    const leaf = { title: "Route the links inside a box and out", kind: "leaf" as const, hidden: 0, progress: null };
+    expect(labelOf(leaf, 12, fonts)).toBe("Route the\nlinks inside\na box and o…");
+  });
+
+  it("drops the backticks that set a run as code, which the canvas can't", () => {
+    const leaf = { title: "Run `acyclic up` on the Mac", kind: "leaf" as const, hidden: 0, progress: null };
+    expect(labelOf(leaf, 40, fonts)).toBe("Run acyclic up on the Mac");
+    expect(labelOf({ ...leaf, kind: "box", progress: null }, 40, fonts)).toBe("Run acyclic up on the Mac");
   });
 });
 

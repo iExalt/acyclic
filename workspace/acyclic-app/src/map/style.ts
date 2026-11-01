@@ -12,6 +12,8 @@ export const FONT = "Overpass, system-ui, sans-serif";
 /** Its weights, a task's title and a box's: the app's text weight, and two steps above it, so a phase's title leads
  *  its tasks; in hundreds, as the renderer takes no other. */
 export const WEIGHT = { regular: 500, bold: 700 } as const;
+/** Where tiles start drawing, over every box at any depth: z-indexes below it are boxes and the links among them. */
+export const TILES = 1000;
 
 /** An inline SVG, as the renderer takes an image. */
 const svg = (size: number, body: string) =>
@@ -26,6 +28,19 @@ const stagesOf = (p: Palette): cytoscape.StylesheetJson =>
     selector: `node.leaf.stage-${stage}`,
     style: { "background-color": p.tints[stage], color: QUIET.has(stage) ? p.muted : p.ink },
   }));
+
+/** `colour` at a dimmed node's 35 % over `under`, as `#rrggbb`: what it shows when drawn translucent there. */
+export function faded(colour: string, under: string): string {
+  const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+  const [top, bottom] = [channels(colour), channels(under)];
+  return `#${top
+    .map((value, at) =>
+      Math.round(0.35 * value + 0.65 * (bottom[at] ?? 0))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
 
 const made = new WeakMap<Palette, cytoscape.StylesheetJson>();
 
@@ -69,9 +84,11 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         "border-width": 1,
         "border-color": p.rule,
         // Drawn by z-index alone: by default Cytoscape draws every edge under every node, so a box hid the links in it.
-        // Nodes take the even levels, and a link the odd one between the box it is in and the items it joins.
+        // Boxes take the even levels, and a link the odd one between the box it is in and the items it joins; tiles,
+        // which never lie over one another, are drawn over every box, so a link across boxes can pass between.
         "z-index-compare": "manual",
-        "z-index": (node: cytoscape.NodeSingular) => 2 * (node.data("layer") as number),
+        "z-index": (node: cytoscape.NodeSingular) =>
+          (node.hasClass("box") ? 0 : TILES) + 2 * (node.data("layer") as number),
       },
     },
     {
@@ -156,6 +173,12 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       selector: "node.dim",
       style: { "background-opacity": 0.35, "border-opacity": 0.35, "background-image-opacity": 0.35, color: p.muted },
     },
+    // A dimmed tile looks as faint, but opaque, so a link across boxes, drawn under the tiles, doesn't show through it.
+    ...(Object.keys(p.tints) as Stage[]).map((stage) => ({
+      selector: `node.leaf.dim.stage-${stage}`,
+      style: { "background-opacity": 1, "background-color": faded(p.tints[stage], p.box) },
+    })),
+    { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
     // soft halo around it that widens the node, as a focused card's.

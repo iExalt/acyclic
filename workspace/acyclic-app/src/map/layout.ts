@@ -10,7 +10,7 @@ import type { Point } from "./route";
 
 /** The scope above the top-level items. */
 export const ROOT = "";
-export const LEAF = { width: 200, height: 48 };
+export const LEAF = { width: 200, height: 64 };
 export const COLLAPSED = { width: 200, height: 64 };
 
 export interface Size {
