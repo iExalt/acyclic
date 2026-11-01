@@ -65,7 +65,8 @@ jobs:
 
   browser:
     name: mise run check:browser
-    runs-on: ubuntu-latest
+    # Pinned: the pinned Playwright's WebKit links the ICU 24.04 ships, which ubuntu-latest's newer image lacks.
+    runs-on: ubuntu-24.04
     env:
       # Python and uv run Playwright here, and Node and pnpm build the app.
       MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
