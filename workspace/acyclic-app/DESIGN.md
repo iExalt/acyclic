@@ -46,7 +46,8 @@ and a unit test keeps the two in step.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
   a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
   title muted at full strength, since it can still be picked; its badge and stage icon fade with it, below 3:1, on
-  purpose, as the title carries it.
+  purpose, as the title carries it. Its fill stays opaque, the colour it would show at 35 % over its box, so a link
+  across boxes passes beneath it.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an OKLCH lightness band per scheme, so every line's badge takes a readable ink.
 
