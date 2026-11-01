@@ -4,7 +4,7 @@ import type { Stage } from "../api";
 import { linesOf } from "../lines";
 import { PALETTES, type Palette } from "../palette";
 import { boxMarkOf, markOf } from "./marks";
-import { hatchOf, styleFor } from "./style";
+import { faded, hatchOf, styleFor } from "./style";
 
 /** A hex colour as Cytoscape gives a parsed one back. */
 const rgb = (hex: string) => `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(",")})`;
@@ -102,6 +102,8 @@ describe("a scheme's drawing", () => {
           ...Object.values(p.tints),
           ...p.badgeInks,
           ...[...lines.values()].map((line) => line.colour),
+          // A dimmed tile's colour, its own faded over its box's.
+          ...[...Object.values(p.tints), p.tile].map((colour) => faded(colour, p.box)),
         ]
           .filter((value): value is string => typeof value === "string")
           .map((value) => value.toLowerCase()),
@@ -110,5 +112,12 @@ describe("a scheme's drawing", () => {
       expect(found.size, then).toBeGreaterThan(5);
       for (const colour of found) expect(allowed.has(colour), `${colour} in the ${then} drawing`).toBe(true);
     }
+  });
+});
+
+describe("faded", () => {
+  it("is a colour at 35 % over what is under it, as a dimmed node is drawn", () => {
+    expect(faded("#ffffff", "#000000")).toBe("#595959");
+    expect(faded("#23282e", "#23282e")).toBe("#23282e");
   });
 });

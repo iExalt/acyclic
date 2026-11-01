@@ -29,6 +29,19 @@ const stagesOf = (p: Palette): cytoscape.StylesheetJson =>
     style: { "background-color": p.tints[stage], color: QUIET.has(stage) ? p.muted : p.ink },
   }));
 
+/** `colour` at a dimmed node's 35 % over `under`, as `#rrggbb`: what it shows when drawn translucent there. */
+export function faded(colour: string, under: string): string {
+  const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+  const [top, bottom] = [channels(colour), channels(under)];
+  return `#${top
+    .map((value, at) =>
+      Math.round(0.35 * value + 0.65 * (bottom[at] ?? 0))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
 const made = new WeakMap<Palette, cytoscape.StylesheetJson>();
 
 /** The Map's stylesheet in a palette, made once for each. */
@@ -160,6 +173,12 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
       selector: "node.dim",
       style: { "background-opacity": 0.35, "border-opacity": 0.35, "background-image-opacity": 0.35, color: p.muted },
     },
+    // A dimmed tile looks as faint, but opaque, so a link across boxes, drawn under the tiles, doesn't show through it.
+    ...(Object.keys(p.tints) as Stage[]).map((stage) => ({
+      selector: `node.leaf.dim.stage-${stage}`,
+      style: { "background-opacity": 1, "background-color": faded(p.tints[stage], p.box) },
+    })),
+    { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue: an ink edge, and a
     // soft halo around it that widens the node, as a focused card's.
