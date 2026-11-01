@@ -2179,14 +2179,16 @@ def push_journey(context, page, env, origin, name, failures):
     without sending a notification to the operating system.
     """
     context.grant_permissions(["notifications"], origin=origin)
-    # The switch reads the permission as the list opens.
-    page.get_by_test_id("needs-button").click()
+    # The switch, in the menu, reads the permission as the menu opens.
+    page.get_by_test_id("menu").click()
     notify = page.get_by_test_id("notify")
     notify.wait_for(timeout=10_000)
     if notify.is_checked() or not notify.is_enabled():
         failures.append(
             f"{name}: with permission and no subscription, the switch isn't off and ready"
         )
+    page.keyboard.press("Escape")
+    page.get_by_test_id("needs-button").click()
     endpoint = "https://push.example/journey"
     answer = page.evaluate(
         """async (endpoint) => {

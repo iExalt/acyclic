@@ -338,11 +338,14 @@ export default function PlanMap({
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick });
   handlers.current = { onSelect, onPick };
+  /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
+  const taps = useRef(0);
   useEffect(() => {
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
       const { onSelect, onPick } = handlers.current;
+      const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
       const node = target !== core && "isNode" in target && target.isNode() ? target : null;
       if (onPick !== null) {
@@ -363,6 +366,14 @@ export default function PlanMap({
         return;
       }
       onSelect(id);
+      // The panel a tap opens may cover what was tapped: once it is drawn, the Map pans the least that shows it,
+      // unless another tap came since, which the Map now answers to.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (taps.current === now && cy.current !== null && host.current !== null)
+            revealIn(cy.current, host.current, id);
+        }),
+      );
     };
     // The renderer pans only from the background; a drag from an item or a box pans too, since nothing moves items. A
     // second finger makes it a pinch, which the renderer zooms.
@@ -442,13 +453,28 @@ function revealIn(core: Core, element: HTMLElement, id: string) {
   core.panBy(reveal(node.renderedBoundingBox({ includeLabels: false }), openPart(element)));
 }
 
-/** The part of the Map no sheet or pane covers, in its own pixels. */
+/**
+ * The part of the Map no sheet or pane covers, in its own pixels: of the panels open, the one covering most, where it
+ * comes to rest, without the rise it may still be animating.
+ */
 function openPart(element: HTMLElement) {
   const map = element.getBoundingClientRect();
-  const sheet = element.parentElement?.querySelector<HTMLElement>(".inspector, .sheet")?.getBoundingClientRect();
-  const cover =
-    sheet === undefined
-      ? null
-      : { x1: sheet.left - map.left, y1: sheet.top - map.top, x2: sheet.right - map.left, y2: sheet.bottom - map.top };
-  return uncovered(map.width, map.height, cover);
+  const covers = [...(element.parentElement?.querySelectorAll<HTMLElement>(".inspector, .sheet") ?? [])].map(
+    (sheet) => {
+      const box = sheet.getBoundingClientRect();
+      const risen = new DOMMatrixReadOnly(getComputedStyle(sheet).transform).m42;
+      return {
+        x1: box.left - map.left,
+        y1: box.top - risen - map.top,
+        x2: box.right - map.left,
+        y2: box.bottom - risen - map.top,
+      };
+    },
+  );
+  const most = covers.reduce<(typeof covers)[number] | null>(
+    (best, one) =>
+      best === null || (one.x2 - one.x1) * (one.y2 - one.y1) > (best.x2 - best.x1) * (best.y2 - best.y1) ? one : best,
+    null,
+  );
+  return uncovered(map.width, map.height, most);
 }

@@ -1,6 +1,9 @@
-// The "Notify this device" switch: whether the server pushes to this device when something new needs the user.
+// The "Notify this device" switch: whether the server pushes to this device when something new needs the user. It sits
+// in the menu, a setting of this device, and reads the browser's state each time the menu opens, as the user may have
+// allowed notifications in the browser since. Only then: reading sends a held subscription to the server again, a write
+// that opening the app shouldn't cost.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { browserDevice, type PushState, pushState, turnOff, turnOn } from "./push";
 
 const LABELS: Record<PushState, string> = {
@@ -14,18 +17,26 @@ export function Notify() {
   const [state, setState] = useState<PushState | "checking">("checking");
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const here = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let live = true;
-    pushState(browserDevice()).then(
-      (found) => live && setState(found),
-      // The subscription the device holds couldn't be sent again; it is off as far as the server knows.
-      () => live && setState("off"),
-    );
+    const read = () =>
+      pushState(browserDevice()).then(
+        (found) => live && setState(found),
+        // The subscription the device holds couldn't be sent again; it is off as far as the server knows.
+        () => live && setState("off"),
+      );
+    const menu = here.current?.closest("details");
+    const opened = () => {
+      if (menu?.open) read();
+    };
+    opened();
+    menu?.addEventListener("toggle", opened);
     return () => {
       live = false;
+      menu?.removeEventListener("toggle", opened);
     };
   }, []);
-  if (state === "checking") return null;
   const device = browserDevice();
   const toggle = async () => {
     if (device === null) return;
@@ -40,7 +51,7 @@ export function Notify() {
   };
   const can = state === "on" || state === "off";
   return (
-    <div className="notify">
+    <div className="notify" ref={here} hidden={state === "checking"}>
       <label>
         <input
           type="checkbox"
@@ -49,7 +60,7 @@ export function Notify() {
           disabled={!can || busy}
           onChange={toggle}
         />{" "}
-        {LABELS[state]}
+        {state === "checking" ? "" : LABELS[state]}
       </label>
       {failure === null ? null : (
         <p className="why" role="alert">

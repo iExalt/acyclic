@@ -498,6 +498,13 @@ button.icon[aria-pressed="true"] {
   font-size: 12px;
   line-height: 18px;
 }
+/* A key is shown only where a keyboard is likely: with a fine pointer or hover. A phone, or a tablet without its
+   keyboard, shows none; the menu's switch for the keys stays on every device. */
+@media not ((any-pointer: fine) or (hover: hover)) {
+  .kbd {
+    display: none;
+  }
+}
 
 .sidebar button.view,
 .sidebar button.new {
@@ -851,9 +858,10 @@ button.phase-title {
   border-radius: 14px 14px 0 0;
   animation: rise 150ms ease-out;
 }
-/* The handle says the sheet is a layer over the Map. */
+/* The handle says the sheet is a layer over the Map. A panel's is a button that switches its height, drawn the same. */
 .inspector::before,
-.sheet::before {
+.sheet::before,
+.sheet-handle::before {
   content: "";
   position: absolute;
   top: 6px;
@@ -864,10 +872,61 @@ button.phase-title {
   border-radius: 2px;
   background: var(--edge);
 }
-/* A panel still loading takes the most room it will, so what the Map brings into view above it stays there. */
+/* A panel opens at half height, at least 320 px so a small phone still shows a decision; the handle or a drag takes it
+   to the full height of the views, and a drag follows the finger. A panel still loading takes the most room it will,
+   so what the Map brings into view above it stays there. */
 @media (max-width: 899px) {
-  .inspector[aria-busy="true"] {
-    height: 45%;
+  .inspector {
+    max-height: min(100%, max(320px, 50%));
+    transition: max-height 150ms ease-out;
+  }
+  .inspector[data-detent="full"] {
+    max-height: 100%;
+    height: 100%;
+  }
+  .inspector[data-dragging="true"] {
+    max-height: none;
+    height: var(--dragged);
+    transition: none;
+  }
+  .inspector[aria-busy="true"]:not([data-detent="full"]) {
+    height: min(100%, max(320px, 50%));
+  }
+  /* The panel's own handle stands in for the drawn one. */
+  .inspector::before {
+    display: none;
+  }
+  /* The handle takes the strip at the top of the header, which stays in view as the sheet scrolls, and only that
+     strip: the header's own buttons sit right below it. 28 px tall, not the 44 px of other touch targets, as a taller
+     strip would push every panel's content down or lie over its buttons; a drag from the header's free space moves
+     the sheet too. */
+  .inspector > header:has(> .sheet-handle) {
+    padding-top: 28px;
+  }
+  .sheet-handle {
+    position: absolute;
+    top: 0;
+    left: calc(50% - 50px);
+    z-index: 2;
+    width: 100px;
+    height: 28px;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    touch-action: none;
+  }
+  .sheet-handle::before {
+    left: calc(50% - 18px);
+    top: 10px;
+  }
+  .inspector > header {
+    touch-action: none;
+  }
+}
+@media (min-width: 900px) {
+  .sheet-handle {
+    display: none;
   }
 }
 /* A form takes the whole height: at 45 %, less a phone's keyboard, it would be a few lines tall. */
@@ -891,6 +950,7 @@ button.phase-title {
   .inspector,
   .sheet {
     animation: none;
+    transition: none;
   }
 }
 .inspector header,
@@ -1184,8 +1244,7 @@ code {
   scroll-margin-top: 48px;
 }
 .notify {
-  margin: 0 0 4px;
-  color: var(--muted);
+  margin: 0;
 }
 /* Items listed to pick from: rows a finger's height, ruled apart, since titles are too long to sit side by side. */
 .rows {
@@ -1397,6 +1456,21 @@ input[aria-invalid="true"] + .hint,
 }
 .overview-section header button {
   min-height: 28px;
+}
+/* An upright tablet keeps the phone's layout, but has the width for In progress and Up next side by side, and for
+   the phases in two columns. */
+@media (min-width: 700px) and (max-width: 899px) {
+  .overview-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 32px;
+    align-items: start;
+  }
+  .overview-phases > .rows {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 32px;
+  }
 }
 /* Wide, the sections stand side by side as the width allows, Needs you first, and the phases span the page below
    them, their rows in columns; an open panel keeps its width clear. */
