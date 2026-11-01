@@ -12,10 +12,14 @@ import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
 import { threadLists } from "./threadLists";
 import type { WavesView } from "./waves";
+import { useWide } from "./wide";
 
-/** How many rows each section shows before it says how many more. */
-const NEEDS_SHOWN = 5;
+/**
+ * How many rows each section shows before it says how many more: wide, as many in Needs you as beside it, so the
+ * columns end level; on a phone, where the sections stack, fewer, so the rest is reached sooner.
+ */
 const THREADS_SHOWN = 8;
+const NEEDS_SHOWN_STACKED = 5;
 
 export interface OverviewProps {
   needs: Need[];
@@ -50,6 +54,7 @@ export function Overview({
   onView,
 }: OverviewProps) {
   const { working, next } = threadLists(counts, waves, awaitingApproval(needs));
+  const needsShown = useWide() ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
   const thread = (id: string) => {
     const line = lines.get(id);
     const tally = counts.get(id);
@@ -106,7 +111,7 @@ export function Overview({
           <p className="empty">Nothing needs you. New approvals and blockers show here.</p>
         ) : (
           <ul className="rows">
-            {needs.slice(0, NEEDS_SHOWN).map((need) => {
+            {needs.slice(0, needsShown).map((need) => {
               const view = needView(need, lines);
               return (
                 <li key={view.key}>
@@ -137,7 +142,7 @@ export function Overview({
             })}
           </ul>
         )}
-        {more(NEEDS_SHOWN, needs.length, "in Needs you", () => onNeeds())}
+        {more(needsShown, needs.length, "in Needs you", () => onNeeds())}
       </section>
 
       <div className="overview-pair">

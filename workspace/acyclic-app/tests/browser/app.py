@@ -1224,6 +1224,23 @@ def outline_journey(page, view, plan, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: picking {thread} from {picked}'s panel didn't swap it for the thread's")
     page.keyboard.press("Escape")
+    if not phone:
+        # The sidebar folds to a rail that keeps Needs you's count, remembered here, and unfolds from the same place.
+        fold = page.locator("[data-action=fold]")
+        spot = fold.bounding_box()
+        fold.click()
+        rail = page.locator(".sidebar").bounding_box()
+        kept = page.get_by_test_id("needs-count").is_visible()
+        again = fold.bounding_box()
+        remembered = page.evaluate("localStorage.getItem('acyclic.sidebar')")
+        fold.click()
+        if rail["width"] > 56 or not kept or remembered != "folded" or abs(again["y"] - spot["y"]) > 1:
+            failures.append(
+                f"{name}: folded, the sidebar was {rail['width']} px, count shown {kept}, remembered {remembered!r},"
+                f" the fold button moving from {spot['y']} to {again['y']}"
+            )
+        if page.locator(".sidebar").bounding_box()["width"] < 200:
+            failures.append(f"{name}: the sidebar didn't unfold")
     print(f"{name}: selecting {picked} marked its phase and its thread's row, and its thread opened from it")
 
 
@@ -1541,6 +1558,18 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
     edge = f"{first}->{added}"
     item_action(page, "waits-for")
+    # A target refused, the box holding it, says why in the slot, whole however narrow the screen: the link waits on.
+    tap_middle(page, view, second)
+    refused = page.locator(".slot [data-testid=notice]")
+    try:
+        refused.wait_for(timeout=5_000)
+        whole = refused.locator("span").first.evaluate("s => s.scrollWidth <= s.clientWidth + 1")
+        if not whole or not page.get_by_test_id("prompt").is_visible():
+            failures.append(f"{name}: a refused target's reason was cut, or the link stopped waiting")
+    except PlaywrightTimeout:
+        failures.append(f"{name}: a refused target said nothing in the slot")
+    page.locator(".slot [aria-label=Dismiss]").click()
+    page.locator(".slot").wait_for(state="detached", timeout=5_000)
     tap_middle(page, view, first)
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
     page.wait_for_function(

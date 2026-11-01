@@ -17,6 +17,8 @@ export {
   ListTree,
   Map as MapIcon,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   RotateCcw,

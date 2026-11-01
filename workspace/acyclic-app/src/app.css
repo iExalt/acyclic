@@ -472,7 +472,19 @@ button.icon[aria-pressed="true"] {
   border-right: 1px solid var(--rule);
 }
 .workspace {
-  padding: 6px 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 6px 10px;
+}
+/* Everything between the wordmark and the foot scrolls as one: the outline is never a scroll area of its own. */
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0 8px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .sidebar .views {
   display: grid;
@@ -524,14 +536,6 @@ button.icon[aria-pressed="true"] {
   border-color: var(--rule);
   font-weight: 600;
 }
-.sidebar .threads {
-  flex: 1;
-  min-height: 0;
-  margin: 0 -8px;
-  padding: 0 8px 12px;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
 .sidebar-foot {
   display: flex;
   gap: 8px;
@@ -544,6 +548,59 @@ button.icon[aria-pressed="true"] {
   display: grid;
   flex: 1;
   min-width: 0;
+}
+/* Folded, a rail of the controls' icons: their names kept for assistive technology and a tooltip, Needs you's count
+   on its icon's corner, the outline and the foot's words left for unfolding. */
+.sidebar-shell[data-folded="true"] {
+  grid-template-columns: 52px 1fr;
+}
+[data-folded="true"] .sidebar {
+  padding: 10px 4px 0;
+}
+[data-folded="true"] .sidebar .workspace {
+  justify-content: center;
+  padding: 0 0 6px;
+}
+[data-folded="true"] .sidebar .wordmark,
+[data-folded="true"] .sidebar .kbd,
+[data-folded="true"] .sidebar-foot .about {
+  display: none;
+}
+[data-folded="true"] .sidebar .text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+[data-folded="true"] .sidebar-body {
+  margin: 0 -4px;
+  padding: 0 4px 12px;
+}
+[data-folded="true"] .sidebar button.view,
+[data-folded="true"] .sidebar button.new,
+[data-folded="true"] .sidebar button.search {
+  justify-content: center;
+  min-height: var(--hit);
+  padding: 0;
+}
+[data-folded="true"] .sidebar .needs-button {
+  position: relative;
+}
+[data-folded="true"] .sidebar .needs-button .label {
+  flex: none;
+}
+[data-folded="true"] .sidebar .needs-n {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 11px;
+}
+[data-folded="true"] .sidebar-foot {
+  justify-content: center;
+  margin: 0 -4px;
+  padding: 8px 0;
 }
 
 /* The menu of what's changed rarely: archived items, autonomy, a refresh. */
@@ -722,6 +779,17 @@ button.phase-title {
   color: var(--muted);
   font-size: 12px;
   font-weight: 500;
+}
+/* Each row of the outline a line, cut short with the full name on hover, as Linear's sidebar has it. */
+.sidebar .thread {
+  align-items: center;
+}
+.sidebar .thread .name,
+.sidebar .thread .also,
+.sidebar button.phase-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The Threads view: the waves over the Map, which stays drawn beneath, so going back to it is instant. Waves stack
@@ -1217,9 +1285,19 @@ code {
 .sheet > .notice {
   margin: 0 0 8px;
 }
+/* An Undo in the slot is a line, its button saying what it offers, so the slot takes the least of the view's height;
+   its whole text is in the title and read out. Anything else there wraps: it is the only place its reason shows. */
+.slot .notice[data-lasts="offer"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* The last column: the views' column wide, the only one on a phone. */
 .slot {
   grid-column: -2 / -1;
+  /* As narrow as its column, whatever a line in it holds: a one-line Undo is cut, not the page widened. */
+  min-width: 0;
   padding: 8px;
   background: var(--chrome);
   border-top: 1px solid var(--rule);

@@ -82,10 +82,14 @@ Overpass sets smaller than Inter at a size.)
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about
   210 px beside a panel), with In progress and Up next side by side from 700 px, and the phases in two columns.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of phases and threads, the menu at its foot); panels
-  open on the right.
+  open on the right. All but the foot scrolls as one, and each outline row is a line, cut short with its full name on
+  hover, as Linear's. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs you's count on
+  its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in a scroll area
+  of their own, read as clutter.)
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
-  320 px), the phases across the page below them in columns of rows; an open panel keeps its width clear. (A single
-  960 px column left most of a desktop empty.)
+  320 px, each up to eight rows, so the columns end level; five for Needs you on a phone, where they stack), the
+  phases across the page below them in columns of rows; an open panel keeps its width clear. (A single 960 px column
+  left most of a desktop empty.)
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
@@ -185,7 +189,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
   what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it
   reads ("Sow now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", fields "Set X back". Undo
-  sits in the slot, one place to look that doesn't move as its panel closes.
+  sits in the slot, one place to look that doesn't move as its panel closes, its text a line there, as its button says
+  what it offers; anything else in the slot wraps, as it is the only place its reason shows.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
