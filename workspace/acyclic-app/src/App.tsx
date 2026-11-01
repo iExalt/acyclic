@@ -24,7 +24,17 @@ import { globalLevelCommand, LEVELS, type Level, levelHint, levelLabel } from ".
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
-import { arrived, depth, type Entries, follow, type HistoryAction, type Open, openLayers, topLayer } from "./layers";
+import {
+  arrived,
+  depth,
+  type Entries,
+  follow,
+  type HistoryAction,
+  type Open,
+  openLayers,
+  restored,
+  topLayer,
+} from "./layers";
 import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
@@ -646,13 +656,28 @@ export function App() {
     entries.current = step.entries;
     const { action } = step;
     if (action === null) return;
-    if (action.kind === "push")
-      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "");
-    else if (action.kind === "back") window.history.go(-action.by);
+    if (action.kind === "push") {
+      // Each with the address of what is open, so Forward onto any of them opens it again; while a link waits, the
+      // address it was opened at stays. The entry under them, unless it is the app's first, takes it too: what it
+      // stood for may have closed as these opened, as the command menu does choosing an item, and its address with it.
+      const url = waitingLink.current ? undefined : addressOf(hereNow.current, window.location.search);
+      if (url !== undefined && action.from > 0) window.history.replaceState(window.history.state, "", url);
+      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n }, "", url);
+    } else if (action.kind === "back") window.history.go(-action.by);
+    else if (action.kind === "relabel")
+      window.history.replaceState({ ...window.history.state, layers: action.layers }, "");
+    else if (action.kind === "restore") {
+      // Read now, before the address is written over with what was open: Forward opens it as a link does.
+      waitingLink.current = true;
+      setWanted(parse(window.location.search));
+    }
     // A form left open by Back takes its entries again.
     else if (closeTop.current(action.by) === 0) act(follow(entries.current, layersNow.current));
   }, []);
-  useEffect(() => act(follow(entries.current, layers)), [act, layers]);
+  // What Forward restores settles once it has opened: until then the layers open are the ones before it.
+  useEffect(() => {
+    if (!(entries.current.restoring && wanted !== null)) act(follow(entries.current, layers));
+  }, [act, layers, wanted]);
   useEffect(() => {
     const onMove = (event: PopStateEvent) => {
       const at = typeof event.state?.layers === "number" ? event.state.layers : 0;
@@ -727,6 +752,8 @@ export function App() {
                 ? "Threads"
                 : "the Overview";
     if (document.querySelector("form[data-dirty='true']") !== null) {
+      // An entry Forward landed on stands for what is open meanwhile, so no later move goes back over it unasked.
+      if (entries.current.restoring) act(restored(entries.current, layersNow.current));
       setNotice({
         text: `Unsaved changes: save or cancel, then ${name} opens`,
         offer: null,

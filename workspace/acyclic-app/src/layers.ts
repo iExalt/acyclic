@@ -51,6 +51,12 @@ export const depth = (open: Open): number => openLayers(open).length;
 export interface Entries {
   pushed: number;
   waiting: boolean;
+  /**
+   * Forward landed on an entry whose layers open again from its address. Once they have, the entry is relabelled with
+   * how many did, as one may stand for layers no address names, such as the command menu: going back from there would
+   * only meet Forward again.
+   */
+  restoring?: boolean;
 }
 
 export type HistoryAction =
@@ -58,10 +64,15 @@ export type HistoryAction =
   | { kind: "back"; by: number }
   /** Back, over `by` entries, closes as many layers from the top. */
   | { kind: "close"; by: number }
+  /** Forward: open what the entry's address names. */
+  | { kind: "restore" }
+  /** The entry shown stands for `layers` layers. */
+  | { kind: "relabel"; layers: number }
   | null;
 
 /** Brings the entries to `open` layers: pushing more as they open, going back over the extra as the app closes them. */
 export function follow(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
+  if (entries.restoring) return restored(entries, open);
   if (entries.waiting || open === entries.pushed) return { entries, action: null };
   if (open > entries.pushed)
     return { entries: { pushed: open, waiting: false }, action: { kind: "push", from: entries.pushed, to: open } };
@@ -69,11 +80,24 @@ export function follow(entries: Entries, open: number): { entries: Entries; acti
 }
 
 /**
- * Where a move through the history landed, on an entry standing for `landed` layers, with `open` layers open: the
- * app's own move back done, which may let a push it held wait go ahead; or Back, which closes the layer on top.
+ * Where a move through the history landed, on an entry standing for `at` layers, with `open` layers open: the app's
+ * own move back done, which may let a push it held wait go ahead; Back, which closes the layer on top; or Forward,
+ * which opens again what the entry's address names.
  */
 export function arrived(entries: Entries, at: number, open: number): { entries: Entries; action: HistoryAction } {
   if (entries.waiting) return follow({ ...entries, waiting: false }, open);
-  if (at >= entries.pushed) return { entries, action: null };
+  if (at > entries.pushed)
+    return { entries: { pushed: at, waiting: false, restoring: true }, action: { kind: "restore" } };
+  if (at === entries.pushed) return { entries, action: null };
   return { entries: { pushed: at, waiting: false }, action: { kind: "close", by: entries.pushed - at } };
+}
+
+/**
+ * The entries once what Forward restored is open, or once its address waits behind a form: the entry shown says how
+ * many layers are open, never moving through the history, and a layer more than it counted takes an entry of its own.
+ */
+export function restored(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
+  const settled = { pushed: open, waiting: false };
+  if (open > entries.pushed) return { entries: settled, action: { kind: "push", from: entries.pushed, to: open } };
+  return { entries: settled, action: open < entries.pushed ? { kind: "relabel", layers: open } : null };
 }
