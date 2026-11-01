@@ -133,10 +133,12 @@ impl Names {
         }))
     }
 
-    /// The commit `id` names, in full, or `None` when it names none, several, or git failed.
+    /// The commit `id` names, in full, or `None` when it names none, several objects, another kind of object, or git
+    /// failed.
     fn full(&mut self, id: &str) -> Option<String> {
         let (_, stdin, stdout) = self.0.as_mut()?;
-        writeln!(stdin, "{id}^{{commit}}").and_then(|()| stdin.flush()).ok()?;
+        // Bare, as merge-base takes it: an id that also starts another kind of object is ambiguous to both.
+        writeln!(stdin, "{id}").and_then(|()| stdin.flush()).ok()?;
         let mut line = String::new();
         stdout.read_line(&mut line).ok()?;
         // `<id> commit <size>` when found, else the id asked for and why not, such as `missing` or `ambiguous`.
