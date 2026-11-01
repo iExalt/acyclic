@@ -214,7 +214,8 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a
-  page of their own.
+  page of their own. A browser the server no longer knows, after `acyclic up --rotate`, is told how to pair again, with
+  the server's port, and offered no Try again or Refresh: coming back to the app once paired reads the plan again.
 
 ## Voice & copy
 
