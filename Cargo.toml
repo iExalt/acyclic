@@ -45,7 +45,8 @@ tower-http = { version = "0.7.1", default-features = false, features = ["fs", "c
 zeroize = "1.9.1"
 
 # The CLI and server the browser checks drive (mise run check:browser): the journeys wait on every write and read, and
-# unoptimised these took about a quarter of the run. Level 1 keeps an incremental build about as quick as dev's.
+# unoptimised these took about a quarter of the run. Level 1 keeps an incremental build about as quick as dev's; CI,
+# which builds the workspace's crates afresh each run, sets it back to 0.
 [profile.journeys]
 inherits = "dev"
 opt-level = 1
