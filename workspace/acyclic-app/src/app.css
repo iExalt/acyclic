@@ -140,10 +140,14 @@ button {
 button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--tile);
 }
-/* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. */
+/* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. The
+   others held with it stay as they were, but inert, as a dimmed column of them said they were all at work. */
+button:disabled,
+button[aria-busy="true"] {
+  opacity: 0.45;
+}
 button:disabled,
 button[aria-disabled="true"] {
-  opacity: 0.45;
   cursor: default;
 }
 button[aria-busy="true"] {

@@ -51,6 +51,9 @@ describe("topLayer", () => {
 
   it("puts Needs you over the item it was opened over, so closing it shows the item again", () => {
     expect(openLayers({ ...none, item: true, needs: true, needsOverItem: true })).toEqual(["needs", "item"]);
+    // Needs you over an item, then a thread from the command menu over Needs you: each over the one it was opened on.
+    const all = { ...none, item: true, needs: true, thread: true, needsOverItem: true, threadOverNeeds: true };
+    expect(openLayers(all)).toEqual(["thread", "needs", "item"]);
   });
 });
 

@@ -1,6 +1,7 @@
 // A panel's one-press actions while their write is out: held rather than disabled, since a disabled button loses the
 // focus it had, and once the write lands, the keyboard kept in the panel when the button went with what it settled.
-// Only the pressed one looks held; the rest wait unchanged, as greying every button said they all were at work.
+// Only the pressed one looks held; the rest look unchanged, as greying every button said they were all at work, but
+// each says it is unavailable and doesn't light up under the pointer.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -33,8 +34,7 @@ export function useHeld(busy: boolean, settled: unknown) {
     } else if (settled !== was.settled) pending.current = null;
   }, [busy, settled]);
   return (key: string, act: () => void, next: Next) => ({
-    "aria-disabled": (busy && pressed === key) || undefined,
-    "aria-busy": (busy && pressed === key) || undefined,
+    ...heldState(busy, pressed, key),
     onClick: () => {
       if (busy) return;
       pending.current = { next, settled, landed: false };
@@ -42,4 +42,12 @@ export function useHeld(busy: boolean, settled: unknown) {
       act();
     },
   });
+}
+
+/**
+ * How the action `key`'s button says it is held: while a write is out, every one unavailable, and the one `pressed`
+ * busy, which alone looks held.
+ */
+export function heldState(busy: boolean, pressed: string | null, key: string) {
+  return { "aria-disabled": busy || undefined, "aria-busy": (busy && pressed === key) || undefined };
 }
