@@ -1796,7 +1796,7 @@ def failed_add_journey(page, errors, name, failures):
     page.keyboard.press("Escape")
     if (
         not form.count()
-        or not form.get_by_test_id("notice").get_by_text("Unsaved changes").count()
+        or not page.locator(".slot [data-testid=notice]").get_by_text("Unsaved changes").count()
     ):
         failures.append(f"{name}: Escape threw away an add form's typed title")
     # Nor does Back.

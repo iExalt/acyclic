@@ -50,13 +50,11 @@ export interface ThreadPanelProps {
   version: number;
   busy: boolean;
   /** Sends an edit, with what to say once it is saved when that is all that shows it was. */
-  onCommand: (command: Command, done?: string) => void;
+  onCommand: (command: Command, done?: string, undo?: true) => void;
   onSelect: (id: string) => void;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
   onDismiss: () => void;
-  /** A refusal or failure of what this panel sent, shown in it. */
-  notice?: ReactNode;
   /** Copies the address that opens this again. */
   onCopyLink: () => Promise<boolean>;
 }
@@ -77,7 +75,6 @@ export function ThreadPanel({
   onSelect,
   onClose,
   onDismiss,
-  notice,
   onCopyLink,
 }: ThreadPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
@@ -138,7 +135,6 @@ export function ThreadPanel({
           <Icon of={X} />
         </button>
       </header>
-      {notice}
       {/* Waiting only as Needs you says it is: an unapproved thread with nothing open asks nothing of the user. No
           total beside it: the counts below are of the items drawn, which a total of every member would not add up to. */}
       <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
@@ -161,7 +157,7 @@ export function ThreadPanel({
             className={awaiting ? "primary" : undefined}
             data-action="approve"
             {...held(
-              () => onCommand(approveCommand(id), awaiting ? `Approved ${name}: ${items}` : `Approved ${name}`),
+              () => onCommand(approveCommand(id), awaiting ? `Approved ${name}: ${items}` : `Approved ${name}`, true),
               toPanel,
             )}
           >

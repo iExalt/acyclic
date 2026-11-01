@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { noticeAfter as after, type Lasts, type Place, placed } from "./notices";
+import { noticeAfter as after, type Lasts, type Place } from "./notices";
 
 const map: Place = { layer: null, item: null, thread: null, view: "map" };
 const item: Place = { ...map, layer: "item", item: "i1" };
@@ -46,16 +46,5 @@ describe("a notice's life", () => {
     expect(after(raised("form"), { kind: "write" })).toEqual(raised("form"));
     expect(after(raised("form"), { kind: "form-closed" })).toBeNull();
     expect(after(raised("news"), { kind: "form-closed" })).toEqual(raised("news"));
-  });
-});
-
-describe("where a notice shows", () => {
-  it("shows under the panel on top, in the slot with no panel, and an offer or a stale plan always in the slot", () => {
-    expect(placed(raised("refusal"), item)).toBe("panel");
-    expect(placed(raised("news"), { ...map, layer: "needs" })).toBe("panel");
-    expect(placed(raised("news"), map)).toBe("slot");
-    expect(placed(raised("refusal"), { ...map, layer: "mode" })).toBe("slot");
-    expect(placed(raised("offer"), item)).toBe("slot");
-    expect(placed(raised("stale"), item)).toBe("slot");
   });
 });

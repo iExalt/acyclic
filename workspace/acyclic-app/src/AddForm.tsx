@@ -1,7 +1,7 @@
 // Adding an item: a title, its thread, and, when no parent is given, the project it goes in or the top level. Its id is
 // made from the title, and asked for only when the server refused it.
 
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { Thread } from "./api";
 import { type NewItem, newId } from "./edits";
 import { useFocusIn } from "./focus";
@@ -21,8 +21,6 @@ export interface AddFormProps {
   /** What the user wrote before, when a failed add opens the form again. */
   draft: NewItem | null;
   busy: boolean;
-  /** A refusal or failure to show, under its heading rather than over it. */
-  notice: ReactNode;
   onSubmit: (item: NewItem) => void;
   onCancel: () => void;
 }
@@ -38,7 +36,6 @@ export function AddForm({
   idRefused,
   draft,
   busy,
-  notice,
   onSubmit,
   onCancel,
 }: AddFormProps) {
@@ -71,7 +68,6 @@ export function AddForm({
         <h2>New item</h2>
         {parent === null ? null : <p className="muted">Inside {parentTitle}</p>}
       </div>
-      {notice}
       <label>
         Title
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}
@@ -113,7 +109,7 @@ export function AddForm({
       {idRefused ? (
         <label>
           Id
-          <span className="hint">Not accepted: see why above, and choose another.</span>
+          <span className="hint">Not accepted: see why below, and choose another.</span>
           <input
             name="id"
             ref={idField}

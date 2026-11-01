@@ -1288,17 +1288,16 @@ code {
   border-left: 3px dashed var(--signal);
   border-radius: var(--radius);
 }
-.inspector > .notice,
-.sheet > .notice {
-  margin: 0 0 8px;
-}
-/* An Undo in the slot is a line, its button saying what it offers, so the slot takes the least of the view's height;
-   its whole text is in the title and read out. Anything else there wraps: it is the only place its reason shows. */
+/* An Undo in the slot takes two lines at most, its button saying what it offers, so the slot takes little of the
+   view's height and still says what was done; its whole text is in the title and read out. Anything else there wraps:
+   it is the only place its reason shows. */
 .slot .notice[data-lasts="offer"] > span {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 /* The last column: the views' column wide, the only one on a phone. */
 .slot {

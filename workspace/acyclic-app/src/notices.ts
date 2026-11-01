@@ -1,7 +1,7 @@
-// How long a notice lasts and where it shows. What happened stays with what it is about: news goes once the user
-// moves on, a refusal stays on the surface that raised it, a form's warning with the form, and what is offered
-// whatever the user does next (Undo, a refresh that failed) waits in one place at the stage's foot, the slot, which
-// takes its height from the view rather than covering it. Pure, so the rules are tested without a browser.
+// How long a notice lasts. Every notice shows in one place, the slot at the stage's foot, which takes its height from
+// the view rather than covering it; how long it stays there follows what it is about: news goes once the user moves
+// on, a refusal once the surface that raised it closes, a form's warning with the form, and what is offered (Undo, a
+// refresh that failed) whatever the user does next. Pure, so the rules are tested without a browser.
 
 import type { Layer } from "./layers";
 import type { View } from "./Shell";
@@ -53,18 +53,6 @@ export function noticeAfter<T extends Raised>(notice: T | null, event: NoticeEve
   if (notice.lasts === "news") return same(at, to) ? notice : null;
   if (notice.lasts === "refusal") return sameSurface(at, to) ? notice : null;
   return notice;
-}
-
-/** Layers that are panels, which show their own notices under their headings. */
-const PANELS: readonly Layer[] = ["add", "item", "thread", "needs"];
-
-/**
- * Where a notice shows with the user at `now`: in the panel on top, under its heading, or in the slot. An offer and
- * a stale plan are always the slot's, one place to look that doesn't move as panels close.
- */
-export function placed(notice: Raised, now: Place): "panel" | "slot" {
-  const anywhere = notice.lasts === "offer" || notice.lasts === "stale";
-  return !anywhere && now.layer !== null && PANELS.includes(now.layer) ? "panel" : "slot";
 }
 
 const same = (a: Place, b: Place) =>

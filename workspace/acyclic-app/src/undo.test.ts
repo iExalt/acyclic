@@ -66,12 +66,25 @@ describe("undo", () => {
     expect([undo?.holds(plan([], "all")), undo?.holds(plan([], "none"))]).toEqual([true, false]);
   });
 
+  it("names an edited item as it now reads", () => {
+    expect(undoOf({ item: { edit: { item: "dig", title: "Dig deep" } } }, before)?.text).toBe("Edited Dig deep");
+  });
+
+  it("takes back a first approval with a revoke, while no agent has started on the thread's work", () => {
+    const threaded = plan(
+      [...before.items.values()].map((one) => ({ ...one, thread: one.id === "beds" ? null : "t" })),
+    );
+    const undo = undoOf({ thread: { approve: { thread: "t" } } }, threaded);
+    expect(undo?.command).toEqual({ thread: { revoke: { thread: "t" } } });
+    expect(undo?.holds(changed(threaded, "sow", { stage: "ready" }))).toBe(true);
+    expect(undo?.holds(changed(threaded, "sow", { stage: "in-progress" }))).toBe(false);
+  });
+
   it("offers nothing for a write without an exact inverse", () => {
     for (const command of [
       "list",
       { item: { add: { item: "hose", title: "Hose" } } },
       { item: { reopen: { item: "dig" } } },
-      { thread: { approve: { thread: "t" } } },
       { proposal: { keep: { proposal: "p" } } },
       { item: { edit: { item: "gone", title: "X" } } },
       { item: { edit: { item: "dig", parent: "beds", title: "X" } } },

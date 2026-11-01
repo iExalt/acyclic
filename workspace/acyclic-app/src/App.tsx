@@ -41,7 +41,7 @@ import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
 import { Notify } from "./Notify";
 import { awaitingApproval, type Need } from "./needs";
-import { noticeAfter, type Place, placed, type Raised } from "./notices";
+import { noticeAfter, type Place, type Raised } from "./notices";
 import { Overview } from "./Overview";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 import { Projects, ProjectsSheet } from "./Projects";
@@ -72,7 +72,10 @@ interface After {
   /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
   select: string | null;
   pin: string | null;
-  /** Offer to undo it, once saved: for the user's own moves, links, field edits and autonomy, never a decision. */
+  /**
+   * Offer to undo it, once saved: for the user's own moves, links, field edits and autonomy, and a first approval;
+   * never another decision.
+   */
   undo?: true;
   /** Said once saved, for an undo: what it did. */
   undone?: string;
@@ -443,7 +446,16 @@ export function App() {
           at: null,
         });
       else if (undo !== null)
-        setNotice({ text: undo.text, offer: "undo", retry: null, undo, lasts: "offer", at: null });
+        setNotice({
+          text: after.done ?? undo.text,
+          offer: "undo",
+          retry: null,
+          undo,
+          // A decision's outcome is said politely, as it is without an Undo.
+          ...(after.done === undefined ? {} : { polite: true }),
+          lasts: "offer",
+          at: null,
+        });
       else if (saved && after.undone !== undefined)
         setNotice({ text: after.undone, offer: null, retry: null, lasts: "news", at: null });
       else if (saved && after.done !== undefined)
@@ -561,7 +573,7 @@ export function App() {
   }, []);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [panel]);
-  /** Where the user is, which says how long a notice stays and where it shows. */
+  /** Where the user is, which says how long a notice stays. */
   const shownItem = chosen?.id ?? null;
   const place: Place = useMemo(
     () => ({ layer: panel, item: shownItem, thread, view }),
@@ -572,7 +584,6 @@ export function App() {
   useEffect(() => {
     if (notice !== null) setNotice((was) => noticeAfter(was, { kind: "moved", to: place }));
   }, [notice, place]);
-  const noticeAt = notice === null ? null : placed(notice, place);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
@@ -1022,8 +1033,6 @@ export function App() {
         </button>
       </div>
     );
-  /** The notice for the panel on top to show under its heading, if it is the panel's. */
-  const panelNotice = noticeAt === "panel" ? noticeView : null;
   const prompt =
     mode.kind === "move"
       ? `Choose the box to put ${titleOf(mode.item)} in`
@@ -1211,7 +1220,6 @@ export function App() {
             idRefused={adding.idRefused}
             draft={adding.draft}
             busy={busy}
-            notice={panelNotice}
             onSubmit={add}
             onCancel={() => setAdding(null)}
           />
@@ -1249,7 +1257,6 @@ export function App() {
               send(edit, { select: chosen.id, pin: chosen.id, undo: true }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
-            notice={panelNotice}
             lines={lines}
             busy={busy}
           />
@@ -1261,7 +1268,7 @@ export function App() {
             lines={lines}
             membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
-            onCommand={(edit, done) => send(edit, { select: null, pin: null, done })}
+            onCommand={(edit, done, undo) => send(edit, { select: null, pin: null, done, ...(undo ? { undo } : {}) })}
             onSelect={(id) => select(id, null)}
             onPickThread={(id) => {
               setShowNeeds(false);
@@ -1269,7 +1276,6 @@ export function App() {
             }}
             onClose={() => setShowNeeds(false)}
             onDismiss={() => closeTop.current(1)}
-            notice={panelNotice}
             at={needsAt}
           />
         ) : null}
@@ -1303,17 +1309,24 @@ export function App() {
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             version={version}
             busy={busy}
-            onCommand={(edit, done) => send(edit, { select: null, pin: null, ...(done === undefined ? {} : { done }) })}
+            onCommand={(edit, done, undo) =>
+              send(edit, {
+                select: null,
+                pin: null,
+                ...(done === undefined ? {} : { done }),
+                ...(undo ? { undo } : {}),
+              })
+            }
             onSelect={(id) => select(id, null)}
             onClose={closeThread}
             onDismiss={() => closeTop.current(1)}
             onCopyLink={() => copyLink({ ...NOTHING, view: "threads", thread })}
-            notice={panelNotice}
           />
         ) : null}
       </main>
-      {/* The slot: at the stage's foot, in its flow, so it covers nothing and a sheet rises above it. */}
-      {noticeAt === "slot" ? <div className="slot">{noticeView}</div> : null}
+      {/* The slot, where every notice shows: at the stage's foot, in its flow, so it covers nothing and a sheet rises
+          above it. */}
+      {noticeView === null ? null : <div className="slot">{noticeView}</div>}
     </Shell>
   );
 }
