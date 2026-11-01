@@ -81,17 +81,19 @@ Overpass sets smaller than Inter at a size.)
   Escape does, so a form holding typing stays, saying how to leave it. Needs you opens full, a list of decisions;
   the other panels open at half. A tap on the Map that opens a panel over what it tapped pans the least that shows
   it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at all.)
-- **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about
-  210 px beside a panel), with In progress and Up next side by side from 700 px, and the projects in two columns.
+- **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about 210
+  px beside a panel), with the Overview's lists in two columns from 700 px, and the projects in two columns; New item
+  opens from the top as tall as its fields, clear of the keyboard, the Map in view below it.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of projects and threads, the menu at its foot);
   panels open on the right. All but the foot scrolls as one, and each outline row is a line, cut short with its full
   name on hover, as Linear's. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs you's
   count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in a
   scroll area of their own, read as clutter.)
-- **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
-  320 px, each up to eight rows, so the columns end level; five for Needs you on a phone, where they stack), the
-  projects across the page below them in columns of rows; an open panel keeps its width clear. (A single 960 px column
-  left most of a desktop empty.)
+- **The Overview, wide:** Needs you beside In progress, with Up next under it, from 700 px (each at least 320 px, each
+  up to eight rows; five for Needs you on a phone, where they stack), the projects across the page below them in columns
+  of rows; an open panel keeps its width clear. (A single 960 px column left most of a desktop empty, and Up next in a
+  column of its own stood one row tall beside eight.) With more in Needs you than it shows, the link under its rows
+  opens it, and the header has none.
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
@@ -140,20 +142,22 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 - **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"), and under each list that sets it, what
   it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding
   "as set for every thread".
-- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
-  muted rows, then its decision, compact, after what it acts on. An approval names its thread alone, as its button
-  and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
-  (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and
-  says how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes
-  it. A hairline between entries; the filters are tabs, the one shown filled.
+- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as muted
+  rows, each with its stage's icon, as a link in an item's panel, which says it opens, then its decision, compact, after
+  what it acts on. An approval names its thread alone, as its button and the list's filter say what it asks; the
+  Overview, which shows no buttons, adds "4 items to approve". (Each row ending "waits for your approval" read as
+  noise.) An approval lists the first five items it covers and says how many more, so its count and its list agree; an
+  entry the app can only show says what failed and what fixes it. A hairline between entries; the filters are tabs, the
+  one shown filled.
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too. A view's row
   fills so too, lighter than the view shown, which keeps its fill under the pointer.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
-- **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end. A
-  thread's row is its badge and name; the number is the badge's. A waiting move or link offers its targets with the
-  projects in their own group, first before anything is typed, never the item itself, nor, for a move, where it is
-  already or anything inside it.
+- **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
+  at the field's end. A thread's row is its badge and name; the number is the badge's. An item's row says the project it
+  is in, not its id, which finds it but would only be plumbing under its title. A waiting move or link offers its
+  targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
+  where it is already or anything inside it.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
 ## Interaction conventions
@@ -197,10 +201,10 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits in the slot, its text two
   lines at most there, so it says what was done, as its button says what it offers; anything else in the slot wraps, as
   it is the only place its reason shows.
-- **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
-  its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
-  the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
-  screen reader politely.
+- **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while its
+  write is out, so focus stays on it; only the pressed one looks held, as greying every one said they were all at work.
+  Once what it settled goes, focus goes to the next entry's action, else to the panel. What a one-press decision did is
+  said once saved ("Approved Codex: 2 items"), in its notice and to a screen reader politely.
 - **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
   waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
@@ -213,8 +217,9 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
 - **The selection stays in view.** A strip taken from the Map, such as the slot, or a window turned, shows the selected
   item again if it hid it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user
   types.
-- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is
-  made from the title and asked for only once the server refuses it.
+- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is made
+  from the title and asked for only once the server refuses it. Added, the item's panel takes the focus, and its Status
+  says Saving… until the server has placed it, rather than its state first; its editor opens on Title.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a

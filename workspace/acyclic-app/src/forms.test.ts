@@ -98,9 +98,11 @@ describe("resolveCommand", () => {
 describe("stateHint", () => {
   it("says how a leaf in the backlog shows, by whether it is in a thread, and nothing for a parent or other states", () => {
     expect(stateHint({ state: "backlog", thread: "thread-1" }, true)).toBe(
-      "Shows as Ready or Blocked, by what it waits on",
+      "Backlog shows as Ready or Blocked in Status, by what it waits on",
     );
-    expect(stateHint({ state: "backlog", thread: "" }, true)).toBe("Shows as Needs a thread until it's in one");
+    expect(stateHint({ state: "backlog", thread: "" }, true)).toBe(
+      "Backlog shows as Needs a thread in Status until it's in one",
+    );
     expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
   });

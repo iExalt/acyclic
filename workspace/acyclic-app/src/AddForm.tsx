@@ -2,9 +2,8 @@
 // made from the title, and asked for only when the server refused it.
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import type { Thread } from "./api";
 import { type NewItem, newId } from "./edits";
-import { useFocusIn } from "./focus";
+import { useFieldInView, useFocusIn } from "./focus";
 
 export interface AddFormProps {
   parent: string | null;
@@ -14,7 +13,8 @@ export interface AddFormProps {
   /** With no parent, the projects to put it in, and the one it starts in. */
   projects: readonly { id: string; title: string }[];
   project: string | null;
-  threads: Thread[];
+  /** Each thread, named as everywhere a badge doesn't stand beside it ("4. CLI features"). */
+  threads: readonly { id: string; label: string }[];
   taken: ReadonlySet<string>;
   /** Set when the server refused the id, to have the user change it. */
   idRefused: boolean;
@@ -46,6 +46,7 @@ export function AddForm({
   const idField = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
   useFocusIn(form);
+  useFieldInView(form);
   const shownId = id ?? newId(title, taken);
   useEffect(() => {
     if (idRefused) idField.current?.focus();
@@ -100,7 +101,7 @@ export function AddForm({
           <option value="">None</option>
           {threads.map((one) => (
             <option key={one.id} value={one.id}>
-              {one.title}
+              {one.label}
             </option>
           ))}
         </select>

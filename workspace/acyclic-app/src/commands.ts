@@ -129,7 +129,7 @@ export function entries(plan: Plan): Entry[] {
   for (const { id, title, project, isProject } of listed(plan))
     if (isProject)
       projects.push(
-        entry({ key: `project:${id}`, group: "Projects", title, detail: id, also: id, run: { kind: "project", id } }),
+        entry({ key: `project:${id}`, group: "Projects", title, detail: null, also: id, run: { kind: "project", id } }),
       );
     else
       items.push(
@@ -137,7 +137,7 @@ export function entries(plan: Plan): Entry[] {
           key: `item:${id}`,
           group: "Items",
           title,
-          detail: detail(id, project),
+          detail: where(project),
           also: id,
           run: { kind: "item", id },
         }),
@@ -184,7 +184,7 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
           key: `target:${id}`,
           group: isProject ? "Projects" : "Items",
           title,
-          detail: detail(id, project),
+          detail: where(project),
           also: id,
           run: { kind: "target", id },
         }),
@@ -192,7 +192,8 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
   ];
 }
 
-const detail = (id: string, project: string | null) => (project === null ? id : `${id} in ${project}`);
+/** Where an item is; its id, which finds it too, would only be plumbing under its title. */
+const where = (project: string | null) => (project === null ? null : `in ${project}`);
 
 /**
  * Every item shown, with the title of the project it is in, and whether it is a project: a top-level item with

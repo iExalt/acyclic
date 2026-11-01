@@ -35,7 +35,7 @@ import {
   restored,
   topLayer,
 } from "./layers";
-import { byNumber, linesOf } from "./lines";
+import { byNumber, lineLabel, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
@@ -158,6 +158,8 @@ export function App() {
   const [cameFrom, setCameFrom] = useState<{ view: View; by: "item" | "thread" } | null>(null);
   /** A thread the command menu opened while Needs you showed, so shown over it. */
   const [threadOver, setThreadOver] = useState<string | null>(null);
+  /** The item Needs you was opened over, which shows again once it closes. */
+  const [needsOver, setNeedsOver] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [framed, setFramed] = useState<Framed | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
@@ -547,6 +549,7 @@ export function App() {
     thread: thread !== null,
     away: !wide && view !== HOME,
     threadOverNeeds: showNeeds && thread !== null && threadOver === thread,
+    needsOverItem: showNeeds && chosen !== undefined && needsOver === chosen.id,
   };
   /**
    * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
@@ -1092,7 +1095,8 @@ export function App() {
       closeTop.current(above);
       return;
     }
-    setSelected(null);
+    // Over the item open, which shows again once it closes.
+    setNeedsOver(showNeeds ? null : selected);
     setShowProjects(false);
     setThreadOver(null);
     setShowNeeds((was) => !was);
@@ -1212,10 +1216,11 @@ export function App() {
             key={adding.parent ?? ""}
             parent={adding.parent}
             parentTitle={adding.parent === null ? null : titleOf(adding.parent)}
-            thread={thread ?? (adding.parent === null ? null : (model?.items.get(adding.parent)?.thread ?? null))}
+            // The thread picked, else the one of the item it goes in, else of the item selected, as the project is.
+            thread={thread ?? model?.items.get(adding.parent ?? selected ?? "")?.thread ?? null}
             projects={outline?.projects ?? []}
             project={current.project}
-            threads={sorted}
+            threads={sorted.map((one) => ({ id: one.id, label: lineLabel(lines.get(one.id), one.title) }))}
             taken={new Set(model?.items.keys())}
             idRefused={adding.idRefused}
             draft={adding.draft}
@@ -1265,11 +1270,16 @@ export function App() {
           <NeedsList
             needs={load.needs}
             titleOf={titleOf}
+            stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             lines={lines}
             membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
             onCommand={(edit, done, undo) => send(edit, { select: null, pin: null, done, ...(undo ? { undo } : {}) })}
-            onSelect={(id) => select(id, null)}
+            onSelect={(id) => {
+              // Picked from the list, an item shows over it, even the one the list was opened over.
+              setNeedsOver(null);
+              select(id, null);
+            }}
             onPickThread={(id) => {
               setShowNeeds(false);
               setThread(id);

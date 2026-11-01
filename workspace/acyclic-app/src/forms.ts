@@ -24,8 +24,8 @@ export function levelLabel(level: string): string {
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
   if (!isLeaf || draft.state !== "backlog") return null;
   return draft.thread === ""
-    ? "Shows as Needs a thread until it's in one"
-    : "Shows as Ready or Blocked, by what it waits on";
+    ? "Backlog shows as Needs a thread in Status until it's in one"
+    : "Backlog shows as Ready or Blocked in Status, by what it waits on";
 }
 
 /** What a level lets reach the user, as core's levels say it; null for one the app doesn't know. */

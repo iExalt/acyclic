@@ -12,11 +12,11 @@ import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
 import { threadLists } from "./threadLists";
 import type { WavesView } from "./waves";
-import { useWide } from "./wide";
+import { COLUMNS, useWide } from "./wide";
 
 /**
- * How many rows each section shows before it says how many more: wide, as many in Needs you as beside it, so the
- * columns end level; on a phone, where the sections stack, fewer, so the rest is reached sooner.
+ * How many rows each section shows before it says how many more: in columns, as many in Needs you as beside it, so the
+ * columns end nearer level; on a phone, where the sections stack, fewer, so the rest is reached sooner.
  */
 const THREADS_SHOWN = 8;
 const NEEDS_SHOWN_STACKED = 5;
@@ -57,7 +57,7 @@ export function Overview({
   onView,
 }: OverviewProps) {
   const { working, next } = threadLists(counts, waves, awaitingApproval(needs));
-  const needsShown = useWide() ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
+  const needsShown = useWide(COLUMNS) ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
   const thread = (id: string) => {
     const line = lines.get(id);
     const tally = counts.get(id);
@@ -104,7 +104,8 @@ export function Overview({
           <h2 id="overview-needs">Needs you</h2>
           <span className="count muted">{countText(needs.length)}</span>
           <span className="grow" />
-          {needs.length === 0 ? null : (
+          {/* With more than fit, the link under the rows opens the list, and one link to it is enough. */}
+          {needs.length === 0 || needs.length > needsShown ? null : (
             <button type="button" className="quiet" onClick={() => onNeeds()}>
               Open the list
             </button>
