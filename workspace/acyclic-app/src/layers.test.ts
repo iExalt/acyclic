@@ -7,21 +7,21 @@ const none = {
   adding: false,
   item: false,
   needs: false,
-  phases: false,
+  projects: false,
   thread: false,
   away: false,
   threadOverNeeds: false,
 };
 
 describe("topLayer", () => {
-  it("puts the command menu over all, a waiting move over a form, a form over the phases, those over an item, that over the needs list, and those over a thread", () => {
+  it("puts the command menu over all, a waiting move over a form, a form over the projects, those over an item, that over the needs list, and those over a thread", () => {
     const all = {
       command: false,
       mode: true,
       adding: true,
       item: true,
       needs: true,
-      phases: true,
+      projects: true,
       thread: true,
       away: true,
       threadOverNeeds: false,
@@ -29,8 +29,8 @@ describe("topLayer", () => {
     expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
     expect(topLayer({ ...all, mode: false })).toBe("add");
-    expect(topLayer({ ...all, mode: false, adding: false })).toBe("phases");
-    expect(topLayer({ ...all, mode: false, adding: false, phases: false })).toBe("item");
+    expect(topLayer({ ...all, mode: false, adding: false })).toBe("projects");
+    expect(topLayer({ ...all, mode: false, adding: false, projects: false })).toBe("item");
     expect(topLayer({ ...none, needs: true, thread: true })).toBe("needs");
     expect(topLayer({ ...none, thread: true })).toBe("thread");
     expect(topLayer(none)).toBeNull();

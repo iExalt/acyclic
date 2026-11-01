@@ -15,7 +15,7 @@ describe("natural", () => {
       "Step 2b",
       "Step 10",
     ]);
-    expect(["phase-10", "phase-2", "i10", "i2"].sort(natural)).toEqual(["i2", "i10", "phase-2", "phase-10"]);
+    expect(["project-10", "project-2", "i10", "i2"].sort(natural)).toEqual(["i2", "i10", "project-2", "project-10"]);
   });
 
   it("is total: strings equal only when the same, by UTF-8 bytes past case and zeros", () => {

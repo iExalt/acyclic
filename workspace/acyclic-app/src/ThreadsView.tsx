@@ -49,7 +49,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         >
           <span className="head">
             <Badge line={line} />
-            <span className="phases">{one.phases.join(", ")}</span>
+            <span className="projects">{one.projects.join(", ")}</span>
           </span>
           <span className="name">
             <Prose text={line?.name ?? one.id} />

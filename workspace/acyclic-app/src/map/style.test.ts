@@ -10,11 +10,11 @@ import { faded, hatchOf, styleFor } from "./style";
 const rgb = (hex: string) => `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(",")})`;
 const HATCH = hatchOf(PALETTES.dark);
 
-/** A task's marks, as an image its data carries. */
+/** A tile's marks, as an image its data carries. */
 const MARK = "data:image/svg+xml;utf8,%3Csvg%2F%3E";
 
 describe("style", () => {
-  it("draws each kind of box with its chevron, a task with its marks, crosses out what is archived, and dashes an open archived box", () => {
+  it("draws each kind of box with its chevron, a tile with its marks, crosses out what is archived, and dashes an open archived box", () => {
     const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
     const node = (id: string, classes: string) =>
       core.add({
@@ -45,7 +45,7 @@ describe("style", () => {
     expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, MARK] });
     // Lit or selected, an open archived box keeps its dash.
     expect(drawn("box archived lit selected").border).toBe("dashed");
-    // Outside the thread lit, a task fades, but its title stays at full strength, muted.
+    // Outside the thread lit, a tile fades, but its title stays at full strength, muted.
     expect(drawn("leaf dim")).toMatchObject({ opacity: 1, fill: 0.35, colour: rgb(PALETTES.dark.muted) });
   });
 });

@@ -37,7 +37,7 @@ export interface OverviewProps {
   /** Needs you is open over the Overview, so its section here would only repeat it. */
   needsOpen: boolean;
   onPickThread: (id: string) => void;
-  onSelectPhase: (id: string) => void;
+  onSelectProject: (id: string) => void;
   /** The view to see everything a section stands for. */
   onView: (view: "map" | "threads") => void;
 }
@@ -53,7 +53,7 @@ export function Overview({
   onNeeds,
   needsOpen,
   onPickThread,
-  onSelectPhase,
+  onSelectProject,
   onView,
 }: OverviewProps) {
   const { working, next } = threadLists(counts, waves, awaitingApproval(needs));
@@ -180,35 +180,35 @@ export function Overview({
         </section>
       </div>
 
-      <section className="overview-section overview-phases" aria-labelledby="overview-phases">
+      <section className="overview-section overview-projects" aria-labelledby="overview-projects">
         <header>
-          <h2 id="overview-phases">Projects</h2>
-          <span className="count muted">{outline?.phases.length ?? 0}</span>
+          <h2 id="overview-projects">Projects</h2>
+          <span className="count muted">{outline?.projects.length ?? 0}</span>
           <span className="grow" />
           <button type="button" className="quiet" onClick={() => onView("map")}>
             Open the Map
           </button>
         </header>
-        {outline === null || outline.phases.length === 0 ? (
+        {outline === null || outline.projects.length === 0 ? (
           <p className="empty">No projects yet: add an item at the top level, and work inside it.</p>
         ) : (
           <ul className="rows">
-            {outline.phases.map((phase) => {
-              const progress = items.get(phase.id)?.progress;
+            {outline.projects.map((project) => {
+              const progress = items.get(project.id)?.progress;
               return (
-                <li key={phase.id}>
+                <li key={project.id}>
                   <button
                     type="button"
                     className="row overview-row"
                     data-row
-                    data-overview-phase={phase.id}
-                    onClick={() => onSelectPhase(phase.id)}
+                    data-overview-project={project.id}
+                    onClick={() => onSelectProject(project.id)}
                   >
                     <span className="what">
-                      <Prose text={phase.title} />
+                      <Prose text={project.title} />
                       <span className="detail">
                         {progress === undefined ? (
-                          `${phase.threads.length} threads`
+                          `${project.threads.length} threads`
                         ) : (
                           <StageCounts counts={progress.counts} />
                         )}

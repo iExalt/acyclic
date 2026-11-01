@@ -44,7 +44,7 @@ import { awaitingApproval, type Need } from "./needs";
 import { noticeAfter, type Place, placed, type Raised } from "./notices";
 import { Overview } from "./Overview";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
-import { Phases, PhasesSheet } from "./Phases";
+import { Projects, ProjectsSheet } from "./Projects";
 import { PALETTES, useScheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
 import { HOME, Shell, type View, Wordmark } from "./Shell";
@@ -133,7 +133,7 @@ export function App() {
   const threadNow = useRef(thread);
   threadNow.current = thread;
   /** The projects' sheet, open over the Map on a phone; side by side, the outline is always in view. */
-  const [showPhases, setShowPhases] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
   /** The command menu, over everything; listing only what has a key, as ? asks. */
   const [showCommand, setShowCommand] = useState(false);
   const [shortcutsOnly, setShortcutsOnly] = useState(false);
@@ -264,7 +264,8 @@ export function App() {
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   const awaiting = useMemo(() => awaitingApproval(loaded?.needs ?? []), [loaded]);
   const current = useMemo(
-    () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
+    () =>
+      model === null || outline === null ? { project: null, thread: null } : currentRows(model, outline, selected),
     [model, outline, selected],
   );
   // An item that went away, deleted or moved out of reach elsewhere, or hidden with archived items, is no longer
@@ -530,7 +531,7 @@ export function App() {
     adding: adding !== null,
     item: chosen !== undefined,
     needs: showNeeds,
-    phases: showPhases && !wide,
+    projects: showProjects && !wide,
     thread: thread !== null,
     away: !wide && view !== HOME,
     threadOverNeeds: showNeeds && thread !== null && threadOver === thread,
@@ -591,7 +592,7 @@ export function App() {
       else if (layer === "add") setAdding(null);
       else if (layer === "item") closeItem();
       else if (layer === "needs") setShowNeeds(false);
-      else if (layer === "phases") setShowPhases(false);
+      else if (layer === "projects") setShowProjects(false);
       else if (layer === "away") setView(HOME);
       else closeThread();
     }
@@ -776,7 +777,7 @@ export function App() {
     setShowCommand(false);
     setMode({ kind: "idle" });
     setAdding(null);
-    setShowPhases(false);
+    setShowProjects(false);
     setView(to.view);
     setSelected(null);
     if (to.item !== null) {
@@ -1083,7 +1084,7 @@ export function App() {
       return;
     }
     setSelected(null);
-    setShowPhases(false);
+    setShowProjects(false);
     setThreadOver(null);
     setShowNeeds((was) => !was);
   };
@@ -1109,18 +1110,18 @@ export function App() {
       menu={menu}
       outline={
         outline === null || !wide ? null : (
-          <Phases
+          <Projects
             outline={outline}
             lines={lines}
             picked={thread}
             current={current}
             onPickThread={pickFromOutline}
-            onSelectPhase={(id) => select(id, null)}
+            onSelectProject={(id) => select(id, null)}
           />
         )
       }
-      outlineOpen={showPhases}
-      onOutline={() => setShowPhases((was) => !was)}
+      outlineOpen={showProjects}
+      onOutline={() => setShowProjects((was) => !was)}
       onSearch={() => {
         setShortcutsOnly(false);
         setShowCommand(true);
@@ -1169,7 +1170,7 @@ export function App() {
             onNeeds={openNeeds}
             needsOpen={showNeeds}
             onPickThread={toThread}
-            onSelectPhase={(id) => select(id, null)}
+            onSelectProject={(id) => select(id, null)}
             onView={setView}
           />
         ) : null}
@@ -1203,8 +1204,8 @@ export function App() {
             parent={adding.parent}
             parentTitle={adding.parent === null ? null : titleOf(adding.parent)}
             thread={thread ?? (adding.parent === null ? null : (model?.items.get(adding.parent)?.thread ?? null))}
-            phases={outline?.phases ?? []}
-            phase={current.phase}
+            projects={outline?.projects ?? []}
+            project={current.project}
             threads={sorted}
             taken={new Set(model?.items.keys())}
             idRefused={adding.idRefused}
@@ -1272,23 +1273,23 @@ export function App() {
             at={needsAt}
           />
         ) : null}
-        {panel === "phases" && outline !== null ? (
-          <PhasesSheet onClose={() => setShowPhases(false)} onDismiss={() => closeTop.current(1)}>
-            <Phases
+        {panel === "projects" && outline !== null ? (
+          <ProjectsSheet onClose={() => setShowProjects(false)} onDismiss={() => closeTop.current(1)}>
+            <Projects
               outline={outline}
               lines={lines}
               picked={thread}
               current={current}
               onPickThread={(id) => {
-                setShowPhases(false);
+                setShowProjects(false);
                 pickFromOutline(id);
               }}
-              onSelectPhase={(id) => {
-                setShowPhases(false);
+              onSelectProject={(id) => {
+                setShowProjects(false);
                 select(id, null);
               }}
             />
-          </PhasesSheet>
+          </ProjectsSheet>
         ) : null}
         {panel === "thread" && thread !== null ? (
           <ThreadPanel

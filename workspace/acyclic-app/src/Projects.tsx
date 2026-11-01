@@ -10,33 +10,33 @@ import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
 
-export interface PhasesProps {
+export interface ProjectsProps {
   outline: Outline;
   lines: ReadonlyMap<string, Line>;
   /** The thread picked, whose rows are pressed. */
   picked: string | null;
   /** The rows the selected item marks. */
-  current: { phase: string | null; thread: string | null };
+  current: { project: string | null; thread: string | null };
   onPickThread: (id: string) => void;
-  onSelectPhase: (id: string) => void;
+  onSelectProject: (id: string) => void;
 }
 
-export function Phases({ outline, lines, picked, current, onPickThread, onSelectPhase }: PhasesProps) {
+export function Projects({ outline, lines, picked, current, onPickThread, onSelectProject }: ProjectsProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const reveal = (phase: string | undefined) =>
-    phase !== undefined && setOpen((was) => (was.has(phase) ? was : new Set([...was, phase])));
+  const reveal = (project: string | undefined) =>
+    project !== undefined && setOpen((was) => (was.has(project) ? was : new Set([...was, project])));
   useEffect(() => {
-    reveal(current.phase ?? undefined);
-  }, [current.phase]);
+    reveal(current.project ?? undefined);
+  }, [current.project]);
   // A thread picked with none of its rows in view opens the first project it works in.
   useEffect(() => {
     if (picked === null) return;
-    const homes = outline.phases.filter((phase) => phase.threads.some((one) => one.id === picked));
-    if (!homes.some((phase) => open.has(phase.id))) reveal(homes[0]?.id);
+    const homes = outline.projects.filter((project) => project.threads.some((one) => one.id === picked));
+    if (!homes.some((project) => open.has(project.id))) reveal(homes[0]?.id);
   }, [picked]);
-  const title = (id: string) => outline.phases.find((phase) => phase.id === id)?.title ?? id;
+  const title = (id: string) => outline.projects.find((project) => project.id === id)?.title ?? id;
 
-  const row = (thread: string, phase: string | null, also: string[] = []) => {
+  const row = (thread: string, project: string | null, also: string[] = []) => {
     const line = lines.get(thread);
     return (
       <li key={thread}>
@@ -45,9 +45,9 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
           className="thread"
           style={lineStyle(line)}
           aria-pressed={thread === picked}
-          aria-current={thread === current.thread && phase === current.phase ? "true" : undefined}
+          aria-current={thread === current.thread && project === current.project ? "true" : undefined}
           data-thread={thread}
-          data-phase={phase ?? ""}
+          data-project={project ?? ""}
           title={line?.name}
           onClick={() => onPickThread(thread)}
         >
@@ -64,45 +64,45 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
   return (
     <div className="outline">
       <h2 className="heading">
-        Projects <span className="count">{outline.phases.length}</span>
+        Projects <span className="count">{outline.projects.length}</span>
       </h2>
       <ul>
-        {outline.phases.map((phase) => {
-          const expanded = open.has(phase.id);
+        {outline.projects.map((project) => {
+          const expanded = open.has(project.id);
           return (
-            <li key={phase.id} className="phase" aria-current={phase.id === current.phase ? "true" : undefined}>
-              <div className="phase-row">
+            <li key={project.id} className="project" aria-current={project.id === current.project ? "true" : undefined}>
+              <div className="project-row">
                 <button
                   type="button"
                   className="chevron"
                   aria-expanded={expanded}
-                  aria-label={`${expanded ? "Close" : "Open"} ${phase.title}`}
-                  data-toggle-phase={phase.id}
+                  aria-label={`${expanded ? "Close" : "Open"} ${project.title}`}
+                  data-toggle-project={project.id}
                   onClick={() =>
                     setOpen((was) => {
                       const next = new Set(was);
-                      if (expanded) next.delete(phase.id);
-                      else next.add(phase.id);
+                      if (expanded) next.delete(project.id);
+                      else next.add(project.id);
                       return next;
                     })
                   }
                 />
                 <button
                   type="button"
-                  className="phase-title"
-                  title={phase.title}
-                  data-select-phase={phase.id}
-                  onClick={() => onSelectPhase(phase.id)}
+                  className="project-title"
+                  title={project.title}
+                  data-select-project={project.id}
+                  onClick={() => onSelectProject(project.id)}
                 >
-                  <Prose text={phase.title} />
+                  <Prose text={project.title} />
                 </button>
               </div>
-              {!expanded ? null : phase.threads.length === 0 ? (
+              {!expanded ? null : project.threads.length === 0 ? (
                 <p className="subheading">No thread has work in this project</p>
               ) : (
                 <>
                   <h3 className="subheading">Threads in this project</h3>
-                  <ul>{phase.threads.map((one) => row(one.id, phase.id, one.also))}</ul>
+                  <ul>{project.threads.map((one) => row(one.id, project.id, one.also))}</ul>
                 </>
               )}
             </li>
@@ -122,7 +122,7 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
 }
 
 /** The outline as a sheet over the Map, as a phone shows it. */
-export function PhasesSheet({
+export function ProjectsSheet({
   onClose,
   onDismiss,
   children,
@@ -140,7 +140,7 @@ export function PhasesSheet({
       ref={panel}
       tabIndex={-1}
       className="inspector"
-      data-testid="phases"
+      data-testid="projects"
       aria-label="Outline"
       data-detent={sheet.detent}
     >

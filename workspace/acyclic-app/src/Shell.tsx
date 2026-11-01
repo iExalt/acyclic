@@ -236,8 +236,8 @@ function PhoneShell(props: ShellProps) {
         </button>
         <button
           type="button"
-          className="icon phases-button"
-          data-testid="phases-button"
+          className="icon projects-button"
+          data-testid="projects-button"
           aria-label="Outline"
           aria-pressed={props.outlineOpen}
           onClick={props.onOutline}
