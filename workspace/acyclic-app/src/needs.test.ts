@@ -217,8 +217,13 @@ describe("needView", () => {
     expect(blocked).toMatchObject({ items: ["a", "b"], text: "A gained a new blocker since its approval: B" });
     // Approving the thread again acknowledges it.
     expect(blocked.actions).toEqual([
-      { label: "Approve again", command: approveCommand("t"), action: "approve", done: "Approved T again" },
+      { label: "Approve again", command: approveCommand("t"), action: "approve", done: "Approved t again" },
     ]);
+    // The thread it approves keeps its row, named, since the text doesn't name it.
+    const lines = linesOf([{ id: "t", title: "Tend" }], PALETTES.light);
+    const lined = needView({ kind: "new-blocker", item: item("a"), thread: thread("t"), blocker: item("b") }, lines);
+    expect(lined).toMatchObject({ thread: null, threads: [{ id: "t" }], line: undefined });
+    expect(lined.actions[0]?.done).toBe(`Approved ${lines.get("t")?.name} again`);
     const clash = needView(
       {
         kind: "resource-clash",

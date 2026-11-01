@@ -298,7 +298,8 @@ function viewOf(
     case "new-blocker": {
       const blocker = row(need.blocker);
       // Approving the thread again acknowledges what its approval didn't see.
-      const name = thread === null ? null : lineName(thread);
+      // Its row names the thread under the action, so the name here mustn't move it to a badge the text never names.
+      const name = thread === null ? null : threadName(thread.id);
       return {
         ...base,
         items: [...base.items, ...(blocker === null ? [] : [blocker.id])],
