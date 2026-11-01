@@ -157,8 +157,9 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
   const relabelled = changes.update.filter((change) => change.data?.label !== undefined);
   if (relabelled.length > 0) {
     const measured = relabelled.reduce((all, change) => all.union(core.getElementById(change.id)), core.collection());
-    // A method the types leave out; false measures even what Cytoscape thinks it has measured.
-    (measured as unknown as { recalculateRenderedStyle(useCache: boolean): void }).recalculateRenderedStyle(false);
+    // A method the types leave out, called only if it is there, so a Cytoscape without it draws as before; false
+    // measures even what Cytoscape thinks it has measured.
+    (measured as unknown as { recalculateRenderedStyle?(useCache: boolean): void }).recalculateRenderedStyle?.(false);
   }
   return new Map(next.map((element) => [element.data.id, element]));
 }

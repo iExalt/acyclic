@@ -84,8 +84,16 @@ export function Menu({
       event.stopPropagation();
       close(details.current);
     };
+    // One fixed to the window for its size is out of place at another, as after a turn: it closes.
+    const onResize = () => {
+      if (details.current?.querySelector<HTMLElement>(".menu-body")?.style.position === "fixed") close(details.current);
+    };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
   return (
     <details className={up ? "menu up" : "menu"} ref={details} onToggle={(event) => place(event.currentTarget)}>
