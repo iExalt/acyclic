@@ -1,9 +1,10 @@
 // The selected item's fields as a form. Save sends only what changed; sets of areas, resources and repositories stay
 // with the CLI.
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import type { Command, Item } from "./api";
 import type { Edited } from "./edits";
+import { useFieldInView } from "./focus";
 import { draftOf, type ItemDraft, itemEdit, SIZES, STATES, stateHint } from "./forms";
 import { StageLabel } from "./Stage";
 import { stateWords } from "./stages";
@@ -27,6 +28,8 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
     setDraft((was) => ({ ...was, [field]: event.target.value }));
   const edit = itemEdit(item.id, base, draft);
   const hint = stateHint(draft, item.stage !== undefined);
+  const form = useRef<HTMLFormElement>(null);
+  useFieldInView(form);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (edit === null) onCancel();
@@ -34,6 +37,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   };
   return (
     <form
+      ref={form}
       className="fields"
       data-testid="item-form"
       // What the user changed, which no key throws away; unchanged, Escape closes the editor alone.
@@ -47,7 +51,8 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
     >
       <label>
         Title
-        <input name="title" value={draft.title} onChange={set("title")} />
+        {/* biome-ignore lint/a11y/noAutofocus: the editor opens to change what it says, its title first */}
+        <input name="title" value={draft.title} autoFocus onChange={set("title")} />
       </label>
       {item.state === "done" ? (
         // Finished work's state is set by finishing it, so it reads as the panel says it, not as a field.

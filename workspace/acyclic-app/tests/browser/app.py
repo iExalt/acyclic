@@ -746,7 +746,10 @@ def keys_journey(page, plan, name, failures):
     form = page.get_by_test_id("item-form")
     form.wait_for(timeout=5_000)
     title = form.locator("input").first
-    title.focus()
+    # E opens the editor on its title, so what is typed goes there.
+    if not title.evaluate("field => field === document.activeElement"):
+        failures.append(f"{name}: the editor didn't open on its title")
+        title.focus()
     before = title.input_value()
     page.keyboard.press("End")
     page.keyboard.press("e")
@@ -1508,6 +1511,16 @@ def edit_journey(page, view, env, plan, box, name, failures):
     wait_drawn(page, base + 1)
     if len(waiting) != 1 or form.count():
         failures.append(f"{name}: an add wasn't drawn until the server answered")
+    # Drawn, its panel takes the focus the form had, and says it is saving rather than the state core hasn't placed.
+    drawn = page.evaluate(
+        """() => {
+            const panel = document.querySelector("[data-testid=inspector]");
+            const status = [...(panel?.querySelectorAll("dt") ?? [])].find((dt) => dt.textContent === "Status");
+            return { focused: panel?.contains(document.activeElement), status: status?.nextElementSibling?.textContent };
+        }"""
+    )
+    if drawn != {"focused": True, "status": "Saving…"}:
+        failures.append(f"{name}: a drawn add's panel had neither the focus nor Saving…: {drawn}")
     page.unroute("**/api/command")
     for route in waiting:
         route.continue_()

@@ -26,14 +26,20 @@ export interface Open {
    * is looking, rather than under it as a thread Needs you was opened over.
    */
   threadOverNeeds: boolean;
+  /** Likewise, Needs you opened over an item shows over it, and closing it shows the item again. */
+  needsOverItem: boolean;
 }
 
 /** The layers open, the one shown first. */
 export function openLayers(open: Open): Layer[] {
   // The projects' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
-  const order: Layer[] = open.threadOverNeeds
-    ? ["command", "mode", "add", "projects", "item", "thread", "needs", "away"]
-    : ["command", "mode", "add", "projects", "item", "needs", "thread", "away"];
+  const order: Layer[] = ["command", "mode", "add", "projects", "item", "needs", "thread", "away"];
+  const swap = (a: Layer, b: Layer) => {
+    const [i, j] = [order.indexOf(a), order.indexOf(b)];
+    [order[i], order[j]] = [b, a];
+  };
+  if (open.needsOverItem) swap("item", "needs");
+  if (open.threadOverNeeds) swap("needs", "thread");
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 

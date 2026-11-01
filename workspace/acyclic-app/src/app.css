@@ -146,6 +146,9 @@ button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }
+button[aria-busy="true"] {
+  cursor: progress;
+}
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -326,7 +329,8 @@ button.view {
   color: var(--muted);
   text-align: left;
 }
-button.view:hover:not(:disabled, [aria-current="page"]) {
+/* Not Needs you open: filled under a pointer left on it, or a finger just lifted, it read as a second view shown. */
+button.view:hover:not(:disabled, [aria-current="page"], [aria-pressed="true"]) {
   color: var(--ink);
   background: var(--hover);
 }
@@ -536,6 +540,14 @@ button.icon[aria-pressed="true"] {
   border-color: var(--rule);
   font-weight: 600;
 }
+/* 32 px rows with a pointer, as Linear's; a fingertip's 44 on a touch screen. */
+@media (pointer: coarse) {
+  .sidebar button.search,
+  .sidebar button.view,
+  .sidebar button.new {
+    min-height: var(--hit);
+  }
+}
 .sidebar-foot {
   display: flex;
   gap: 8px;
@@ -595,7 +607,8 @@ button.icon[aria-pressed="true"] {
   position: absolute;
   top: 2px;
   right: 2px;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 700;
 }
 [data-folded="true"] .sidebar-foot {
   justify-content: center;
@@ -770,6 +783,12 @@ button.project-title {
   width: 100%;
   max-width: none;
 }
+@media (pointer: coarse) {
+  .outline .thread,
+  button.phase-title {
+    min-height: var(--hit);
+  }
+}
 /* A project's threads sit under its title, inside the list's width. */
 .project ul {
   padding-left: 24px;
@@ -928,6 +947,8 @@ button.project-title {
   max-height: 45%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* A field scrolled to, as one focused under a keyboard is, clears a form's Save and Cancel, which stick below. */
+  scroll-padding-bottom: calc(var(--hit) + 48px);
   padding: 18px 16px max(16px, env(safe-area-inset-bottom));
   background: var(--sheet);
   border-top: 1px solid var(--rule);
@@ -1017,6 +1038,15 @@ button.project-title {
 .inspector.tall::before,
 .sheet.add::before {
   display: none;
+}
+/* An upright tablet's keyboard leaves most of its height, so the new item's form takes only what its fields need, from
+   the top down, clear of the keyboard, and the Map stays in view below it. */
+@media (min-width: 700px) and (max-width: 899px) {
+  .sheet.add {
+    bottom: auto;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0 0 14px 14px;
+  }
 }
 /* Transform alone, so the sheet is opaque from its first frame and the Map never shows through it. */
 @keyframes rise {
@@ -1224,7 +1254,8 @@ code {
 
 .setting {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   align-items: center;
   margin: 8px 0;
 }
@@ -1359,7 +1390,7 @@ button.row {
 }
 /* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
    from the badge so the badges make a column to scan; a hairline between entries, as between any rows. */
-/* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. A fingertip keeps it. */
+/* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. */
 :is(p, button).need-head {
   align-items: flex-start;
   gap: 10px;
@@ -1367,9 +1398,11 @@ button.row {
   padding: 2px 0;
   font-weight: 600;
 }
+/* On touch, a fingertip's height as room around its text, as an entry's rows have it, rather than a floor under it,
+   which left a gap between a one-line head and what it names. */
 @media (pointer: coarse) {
   button.need-head {
-    min-height: var(--hit);
+    padding-block: calc((var(--hit) - 1lh) / 2);
   }
 }
 .need-head .badge {
@@ -1483,6 +1516,10 @@ code.id {
   color: var(--muted);
   font-size: 12px;
 }
+/* What the choice means, under it at the panel's width rather than a narrow column beside it. */
+.setting .hint {
+  flex-basis: 100%;
+}
 input[aria-invalid="true"] + .hint,
 .hint:has(+ input[aria-invalid="true"]) {
   color: var(--danger);
@@ -1552,28 +1589,13 @@ input[aria-invalid="true"] + .hint,
 .overview-section header button {
   min-height: 28px;
 }
-/* An upright tablet keeps the phone's layout, but has the width for In progress and Up next side by side, and for
-   the projects in two columns. */
-@media (min-width: 700px) and (max-width: 899px) {
-  .overview-pair {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 32px;
-    align-items: start;
-  }
-  .overview-projects > .rows {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 32px;
-  }
-}
-/* Wide, the sections stand side by side as the width allows, Needs you first, and the projects span the page below
-   them, their rows in columns; an open panel keeps its width clear. */
-@media (min-width: 900px) {
+/* From an upright tablet up, Needs you stands beside In progress, with Up next under it: a short list then leaves no
+   column empty beside a long one. The projects span the page below them, their rows in columns. */
+@media (min-width: 700px) {
   .overview {
     display: grid;
-    /* At least 320 px a list, and no more than three across: the three lists, not an empty fourth. */
-    grid-template-columns: repeat(auto-fit, minmax(max(320px, calc((100% - 80px) / 3)), 1fr));
+    /* At least 320 px a list, and two across at most: Needs you, and the threads at work and next. */
+    grid-template-columns: repeat(auto-fit, minmax(max(320px, calc((100% - 40px) / 2)), 1fr));
     column-gap: 40px;
     align-content: start;
   }
@@ -1581,20 +1603,27 @@ input[aria-invalid="true"] + .hint,
   .overview > .overview-projects {
     grid-column: 1 / -1;
   }
-  .overview-pair {
-    display: contents;
-  }
   .overview-projects > .rows {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     column-gap: 40px;
   }
+}
+/* Wide, an open panel keeps its width clear. */
+@media (min-width: 900px) {
   .stage:has(> .inspector, > .sheet.add) > .overview {
     padding-right: calc(360px + 24px);
   }
 }
-.overview-row {
+/* The badge in a column as wide as a two-digit one, so every row's title starts at the same edge. */
+button.overview-row {
+  display: grid;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto;
   border-bottom: 1px solid var(--rule);
+}
+/* A project's row has no badge: its title takes the badge's column too. */
+button.overview-row:not(:has(> .badge)) {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 /* Each row rules itself off below, so the list's own rule between rows would double it. */
 .overview .rows li + li {
@@ -1761,6 +1790,8 @@ button.more {
 .command-row[aria-selected="true"] {
   background: var(--tile);
   box-shadow: inset 2px 0 0 var(--ink);
+  /* Square where the bar runs, which a rounded corner would bend into a bracket. */
+  border-radius: 0 6px 6px 0;
 }
 .command-icon {
   display: grid;
@@ -1807,6 +1838,17 @@ button.more {
 
 /* The item panel, quiet as Linear's: its properties as text, Edit, Copy link and the menu beside its title, and its
    links as rows. Last, as each refines a rule above. */
+/* Its buttons float at the title's end, so a long title wraps under them at the header's whole width rather than
+   in a column beside them. */
+.inspector > header:has(> .header-actions) {
+  display: flow-root;
+}
+.inspector .header-actions {
+  float: right;
+  display: flex;
+  gap: 8px;
+  margin-left: 8px;
+}
 .inspector h3 .count {
   font-weight: 600;
 }
@@ -1884,6 +1926,14 @@ dl.facts .chip:hover:not(:disabled) {
   }
   .link-row {
     min-height: var(--hit);
+  }
+  /* Without hover to show the whole title, two lines of it. */
+  .link-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
   }
 }
 /* A list of actions: a row each, its icon, its name and its key. */

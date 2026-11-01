@@ -11,6 +11,7 @@ const none = {
   thread: false,
   away: false,
   threadOverNeeds: false,
+  needsOverItem: false,
 };
 
 describe("topLayer", () => {
@@ -25,6 +26,7 @@ describe("topLayer", () => {
       thread: true,
       away: true,
       threadOverNeeds: false,
+      needsOverItem: false,
     };
     expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
@@ -45,6 +47,10 @@ describe("topLayer", () => {
     expect(openLayers({ ...both, item: true })).toEqual(["item", "thread", "needs"]);
     expect(depth(both)).toBe(2);
     expect(depth({ ...none, threadOverNeeds: true })).toBe(0);
+  });
+
+  it("puts Needs you over the item it was opened over, so closing it shows the item again", () => {
+    expect(openLayers({ ...none, item: true, needs: true, needsOverItem: true })).toEqual(["needs", "item"]);
   });
 });
 

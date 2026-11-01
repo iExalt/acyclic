@@ -151,7 +151,7 @@ export function Inspector({
                 <button
                   type="button"
                   className="unlink"
-                  aria-label={`Remove the link to ${id}`}
+                  aria-label={`Remove the link to ${titleOf(id)}`}
                   disabled={busy}
                   onClick={() => unlink(id)}
                 >
@@ -174,35 +174,38 @@ export function Inspector({
     >
       <header {...sheet.header}>
         {sheet.handle}
+        {/* First, to float at the title's end: the title wraps under them, at the header's whole width. */}
+        <div className="header-actions">
+          <button
+            type="button"
+            className="close"
+            aria-label="Edit"
+            title="Edit"
+            onClick={() => setEditing(true)}
+            data-action="edit"
+            {...key("Edit", "E")}
+            disabled={editing || busy}
+          >
+            <Icon of={Pencil} />
+          </button>
+          <Menu label="Item actions" testid="item-menu" list>
+            {action("move", "Move…", FolderInput, onMove, "M")}
+            {item.state === "done"
+              ? action("reopen", "Reopen", RotateCcw, () => onCommand(reopenCommand(item.id)))
+              : null}
+            {action("add-child", "Add inside", Plus, onAdd, "A")}
+            {action("waits-for", "Waits for…", ArrowUpLeft, () => onLink("waits-for"), "W")}
+            {action("relates-to", "Relates to…", Link2, () => onLink("relates-to"), "R")}
+            {/* In the menu rather than beside it, so the title keeps the header's width. */}
+            {action("copy-link", "Copy link", LinkIcon, onCopyLink)}
+          </Menu>
+          <button type="button" className="close" aria-label="Close" onClick={onClose}>
+            <Icon of={X} />
+          </button>
+        </div>
         <h2>
           <Prose text={item.title} />
         </h2>
-        <button
-          type="button"
-          className="close"
-          aria-label="Edit"
-          title="Edit"
-          onClick={() => setEditing(true)}
-          data-action="edit"
-          {...key("Edit", "E")}
-          disabled={editing || busy}
-        >
-          <Icon of={Pencil} />
-        </button>
-        <Menu label="Item actions" testid="item-menu" list>
-          {action("move", "Move…", FolderInput, onMove, "M")}
-          {item.state === "done"
-            ? action("reopen", "Reopen", RotateCcw, () => onCommand(reopenCommand(item.id)))
-            : null}
-          {action("add-child", "Add inside", Plus, onAdd, "A")}
-          {action("waits-for", "Waits for…", ArrowUpLeft, () => onLink("waits-for"), "W")}
-          {action("relates-to", "Relates to…", Link2, () => onLink("relates-to"), "R")}
-          {/* In the menu rather than beside it, so the title keeps the header's width. */}
-          {action("copy-link", "Copy link", LinkIcon, onCopyLink)}
-        </Menu>
-        <button type="button" className="close" aria-label="Close" onClick={onClose}>
-          <Icon of={X} />
-        </button>
       </header>
       <dl className="facts">
         {/* While editing, the form's State and Thread say these, so the rows would only repeat them. */}
@@ -260,7 +263,8 @@ export function Inspector({
       {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, "waits-for", item.id), "waited-on-by")}
       {links("Relates to", item.links.relates_to, (id) => onUnlink(item.id, "relates-to", id), "relates-to")}
       {links("Related from", item.links.related_from, (id) => onUnlink(id, "relates-to", item.id), "related-from")}
-      {item.notes === null ? null : (
+      {/* While editing, the form's Notes field holds them. */}
+      {item.notes === null || editing ? null : (
         <div className="notes-block">
           <h3>Notes</h3>
           <p className="notes" data-testid="notes">
@@ -331,6 +335,9 @@ function ItemStatus({ item }: { item: Item }) {
         {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
       </>
     );
+  // A leaf core hasn't placed is one drawn before the server has it: its stage comes with the server's read, and its
+  // state, backlog, would say something else first.
+  if (item.stage === undefined && !item.archived) return <span className="muted">Saving…</span>;
   return (
     <span>
       {item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}

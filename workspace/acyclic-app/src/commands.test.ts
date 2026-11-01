@@ -56,7 +56,7 @@ describe("the command menu", () => {
     const garden = rank("garden", entries(plan), plan.working)[0];
     expect(garden?.run).toEqual({ kind: "project", id: "garden" });
     const dig = rank("dig", entries(plan), plan.working)[0];
-    expect(dig?.detail).toBe("dig in Garden");
+    expect(dig?.detail).toBe("in Garden");
   });
 
   it("finds archived items only while they're shown, and says which way the switch goes", () => {

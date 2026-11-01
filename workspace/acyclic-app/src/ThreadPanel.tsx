@@ -157,6 +157,7 @@ export function ThreadPanel({
             className={awaiting ? "primary" : undefined}
             data-action="approve"
             {...held(
+              "approve",
               () => onCommand(approveCommand(id), awaiting ? `Approved ${name}: ${items}` : `Approved ${name}`, true),
               toPanel,
             )}
@@ -194,7 +195,11 @@ export function ThreadPanel({
                 <button
                   type="button"
                   data-action="keep"
-                  {...held(() => onCommand(keepCommand(proposal.id), `Kept ${change(proposal)}`), nextProposal(index))}
+                  {...held(
+                    `keep ${proposal.id}`,
+                    () => onCommand(keepCommand(proposal.id), `Kept ${change(proposal)}`),
+                    nextProposal(index),
+                  )}
                 >
                   Keep
                 </button>
@@ -203,6 +208,7 @@ export function ThreadPanel({
                   className="quiet"
                   data-action="drop"
                   {...held(
+                    `drop ${proposal.id}`,
                     () => onCommand(dropCommand(proposal.id), `Dropped ${change(proposal)}`),
                     nextProposal(index),
                   )}
@@ -266,7 +272,7 @@ export function ThreadPanel({
             type="button"
             className="danger-quiet"
             data-action="revoke"
-            {...held(() => onCommand(revokeCommand(id), `Revoked ${name}'s approval`), toPanel)}
+            {...held("revoke", () => onCommand(revokeCommand(id), `Revoked ${name}'s approval`), toPanel)}
           >
             Revoke approval
           </button>
