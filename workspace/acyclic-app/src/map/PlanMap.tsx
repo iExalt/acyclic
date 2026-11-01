@@ -338,11 +338,14 @@ export default function PlanMap({
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick });
   handlers.current = { onSelect, onPick };
+  /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
+  const taps = useRef(0);
   useEffect(() => {
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
       const { onSelect, onPick } = handlers.current;
+      const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
       const node = target !== core && "isNode" in target && target.isNode() ? target : null;
       if (onPick !== null) {
@@ -363,10 +366,12 @@ export default function PlanMap({
         return;
       }
       onSelect(id);
-      // The panel a tap opens may cover what was tapped: once it is drawn, the Map pans the least that shows it.
+      // The panel a tap opens may cover what was tapped: once it is drawn, the Map pans the least that shows it,
+      // unless another tap came since, which the Map now answers to.
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          if (cy.current !== null && host.current !== null) revealIn(cy.current, host.current, id);
+          if (taps.current === now && cy.current !== null && host.current !== null)
+            revealIn(cy.current, host.current, id);
         }),
       );
     };

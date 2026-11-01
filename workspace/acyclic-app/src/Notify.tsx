@@ -1,6 +1,7 @@
 // The "Notify this device" switch: whether the server pushes to this device when something new needs the user. It sits
-// in the menu, a setting of this device, and reads the browser's state again each time the menu opens, as the user may
-// have allowed notifications in the browser since.
+// in the menu, a setting of this device, and reads the browser's state each time the menu opens, as the user may have
+// allowed notifications in the browser since. Only then: reading sends a held subscription to the server again, a write
+// that opening the app shouldn't cost.
 
 import { useEffect, useRef, useState } from "react";
 import { browserDevice, type PushState, pushState, turnOff, turnOn } from "./push";
@@ -25,11 +26,11 @@ export function Notify() {
         // The subscription the device holds couldn't be sent again; it is off as far as the server knows.
         () => live && setState("off"),
       );
-    read();
     const menu = here.current?.closest("details");
     const opened = () => {
       if (menu?.open) read();
     };
+    opened();
     menu?.addEventListener("toggle", opened);
     return () => {
       live = false;
