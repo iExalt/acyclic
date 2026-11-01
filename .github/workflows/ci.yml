@@ -70,6 +70,9 @@ jobs:
     env:
       # Python and uv run Playwright here, and Node and pnpm build the app.
       MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
+      # Unoptimised here: a fresh checkout rebuilds the workspace's crates, which at level 1 took about 26 s longer on
+      # these runners than the journeys saved.
+      CARGO_PROFILE_JOURNEYS_OPT_LEVEL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
