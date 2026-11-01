@@ -1,7 +1,7 @@
 // The needs-you list: each entry in a line, with what it names to select under it, then the actions the app can take
 // on it, so the button comes after what it acts on.
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { useFocusIn } from "./focus";
@@ -23,14 +23,12 @@ export interface NeedsListProps {
   membersOf?: (thread: string) => string[];
   busy: boolean;
   /** Sends an entry's action, with what to say once it is saved. */
-  onCommand: (command: Command, done: string) => void;
+  onCommand: (command: Command, done: string, undo?: true) => void;
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
   onDismiss: () => void;
-  /** A refusal or failure of what this panel sent, shown in it. */
-  notice?: ReactNode;
   /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
    *  so a stray Enter decides nothing. */
   at?: string | null;
@@ -47,7 +45,6 @@ export function NeedsList({
   onPickThread,
   onClose,
   onDismiss,
-  notice,
   at = null,
 }: NeedsListProps) {
   const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
@@ -96,7 +93,6 @@ export function NeedsList({
           <Icon of={X} />
         </button>
       </header>
-      {notice}
       {groups.length < 2 ? null : (
         <fieldset className="filters" aria-label="Show">
           {[{ group: null, label: "All", count: all.length }, ...groups].map((one) => (
@@ -192,7 +188,7 @@ export function NeedsList({
                     key={action.label}
                     className={PRIMARY.has(action.action) ? "primary" : "quiet"}
                     data-action={action.action}
-                    {...held(() => onCommand(action.command, action.done), after(index))}
+                    {...held(() => onCommand(action.command, action.done, action.undo), after(index))}
                   >
                     {action.label}
                   </button>

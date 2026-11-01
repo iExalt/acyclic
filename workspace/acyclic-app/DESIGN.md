@@ -124,9 +124,9 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
-  Dismiss. A notice shows under the heading of the panel on top; an offer, a stale plan, and anything with no panel to
-  hold it show in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a sheet rises above
-  it. Dismiss is the panels' quiet ✕. One shows at a time: the next replaces it, including one a link from a
+  Dismiss. Every notice shows in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a
+  sheet rises above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet
+  ✕. One shows at a time: the next replaces it, including one a link from a
   notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as
   noise.)
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover. Edit (a
@@ -186,15 +186,17 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   through the Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No
   single key approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the
   menu's Single-key shortcuts switch, per device, turns them off.
-- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the global autonomy
-  level offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (an
-  approval, a proposal kept or dropped, a thread's own level or flag, a thread changed: agents act on them). Undo reads
-  the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a removed wait or a
-  state once the work it released has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set
-  back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig",
-  "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits
-  in the slot, one place to look that doesn't move as its panel closes, its text a line there, as its button says what
-  it offers; anything else in the slot wraps, as it is the only place its reason shows.
+- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, the global autonomy level,
+  and a thread's first approval offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else
+  has an exact inverse (an approval again, a revoking, a proposal kept or dropped, a thread's own level or flag, a
+  thread changed: agents act on them). An approval is taken back, by a revoke, only while no agent has started on the
+  work it approved, as a claim shows on any of its items that could start. Undo reads the plan first, and without that
+  read it undoes nothing; it takes back nothing changed since, nor a removed wait or a state once the work it released
+  has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set back to Blockers", not
+  "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig", "Sow no longer waits for
+  Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits in the slot, its text two
+  lines at most there, so it says what was done, as its button says what it offers; anything else in the slot wraps, as
+  it is the only place its reason shows.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
@@ -292,3 +294,6 @@ before what went wrong.
   user chose them.
 - 2026-11-01: an item opened from another view shows on the Map, and Back returns to that view; the user chose it
   over opening items in place. A thread opened from another view does the same, by extension (proposed).
+- 2026-11-01: threads' lines in Okhsl, at saturation 0.9, with neighbouring numbers still alike; every notice in the
+  slot, over notices under the panel on top; Undo for a first approval while no agent has started its work; the user
+  chose them.

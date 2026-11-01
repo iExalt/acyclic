@@ -3,7 +3,7 @@
 // title and on their keys. Notes are agents' text, so only a small, safe part of Markdown is read in them, built as
 // elements and never as markup.
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited, LinkKind } from "./edits";
@@ -48,8 +48,6 @@ export interface InspectorProps {
   /** The editor's draft, open again after a save failed, or null. */
   reopened: Edited | null;
   threads: Thread[];
-  /** A refusal or failure to show, under its title rather than over it. */
-  notice: ReactNode;
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
   busy: boolean;
@@ -75,7 +73,6 @@ export function Inspector({
   onSave,
   reopened,
   threads,
-  notice,
   lines,
   busy,
 }: InspectorProps) {
@@ -207,7 +204,6 @@ export function Inspector({
           <Icon of={X} />
         </button>
       </header>
-      {notice}
       <dl className="facts">
         {/* While editing, the form's State and Thread say these, so the rows would only repeat them. */}
         {editing ? null : (

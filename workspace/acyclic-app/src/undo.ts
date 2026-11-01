@@ -1,10 +1,10 @@
 // Undo: for a write that has an exact inverse, the write that takes it back, with what must still hold for that to be
-// safe. A move, an item's fields but its thread, a link added or removed, and the global autonomy level undo; nothing
-// else does: an add (the app has no delete), a reopen, an approval or its revoking (agents act on them), a proposal
-// kept or dropped, a conflict settled, a thread changed (back in an approved thread, an item is a late member waiting
-// for approval again). The guard is checked against a plan read just before the undo is sent; the server has no
-// compare-and-set, so a write landing between that read and the undo isn't caught. Pure, so tested without a browser.
-
+// safe. A move, an item's fields but its thread, a link added or removed, the global autonomy level, and a thread's
+// first approval while no agent has started its work undo; nothing else does: an add (the app has no delete), a
+// reopen, an approval again or a revoking (agents act on them), a proposal kept or dropped, a conflict settled, a
+// thread changed (back in an approved thread, an item is a late member waiting for approval again). The guard is
+// checked against a plan read just before the undo is sent; the server has no compare-and-set, so a write landing
+// between that read and the undo isn't caught. Pure, so tested without a browser.
 import type { Command, Item, Stage } from "./api";
 import type { LinkKind } from "./edits";
 
@@ -51,6 +51,19 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
       undone: `Autonomy set back to ${levelLabel(before.level)}`,
       command: { level: { level: before.level } },
       holds: (now) => now.level === set,
+    };
+  }
+
+  // Sent only for a first approval, which a revoke takes back exactly while no agent has started on what it approved.
+  const approve = record(record(body.thread)?.approve);
+  if (approve !== null && typeof approve.thread === "string") {
+    const thread = approve.thread;
+    const members = [...before.items.values()].filter((one) => one.thread === thread);
+    return {
+      text: "Approved the thread",
+      undone: "Took the approval back",
+      command: { thread: { revoke: { thread } } },
+      holds: (now) => members.every((one) => started(now.items.get(one.id)) <= started(one)),
     };
   }
 
@@ -116,8 +129,10 @@ export function undoOf(command: Command, before: Plan, levelLabel = (level: stri
     if (old === null) back[`no-${field}`] = true;
     else back[field] = old;
   }
+  // Named as it now reads: a title just changed is the new one.
+  const named = set.get("title") ?? titleOf(id);
   return {
-    text: `Edited ${titleOf(id)}${thread ? ". Its thread can't be changed back from here" : ""}`,
+    text: `Edited ${named}${thread ? ". Its thread can't be changed back from here" : ""}`,
     undone: `Set ${titleOf(id)} back${thread ? ", except its thread" : ""}`,
     command: { item: { edit: back } },
     holds: (now) =>

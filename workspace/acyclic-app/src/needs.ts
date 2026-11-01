@@ -30,6 +30,8 @@ export interface Action {
   action: string;
   /** What the app says once it is saved, since the entry it settles goes. */
   done: string;
+  /** Offered back, as a first approval is, while no agent has started its work. */
+  undo?: true;
 }
 
 export interface NeedView {
@@ -241,6 +243,7 @@ function viewOf(
             command: approveCommand(id),
             action: "approve",
             done: `Approved ${name}: ${items}`,
+            undo: true,
           },
         ],
       };
