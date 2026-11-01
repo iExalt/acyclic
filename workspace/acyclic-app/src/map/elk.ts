@@ -50,6 +50,16 @@ export function shapeOf(width: number, height: number): number {
   return Math.min(3, Math.max(PORTRAIT, Math.round((5 * width) / Math.max(1, height)) / 5));
 }
 
+/**
+ * The shape to lay out at after a resize to `width` by `height`, from the one laid out at, `was`: kept unless the
+ * new one is more than three quarters of a step away, so a notice taking a strip of the Map's height, which moves it
+ * well under a step, never lays the plan out again, even at the edge between two steps.
+ */
+export function shapeAfter(was: number | null, width: number, height: number): number {
+  const raw = Math.min(3, Math.max(PORTRAIT, width / Math.max(1, height)));
+  return was !== null && Math.abs(raw - was) <= 0.15 ? was : shapeOf(width, height);
+}
+
 /** Anything that lays out an ELK graph: ELK's API in the browser, its bundled build in tests. */
 export interface Engine {
   layout(graph: ElkNode): Promise<ElkNode>;

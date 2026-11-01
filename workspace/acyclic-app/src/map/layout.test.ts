@@ -2,7 +2,7 @@ import ELK from "elkjs/lib/elk.bundled.js";
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { describe, expect, it } from "vitest";
 import { STRIP } from "./chevron";
-import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeOf } from "./elk";
+import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeAfter, shapeOf } from "./elk";
 import { item } from "./fixture";
 import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
 import { buildModel, type ViewState, visible } from "./model";
@@ -207,6 +207,15 @@ describe("elkLayBox", () => {
     expect(shapeOf(1000, 1000)).toBe(1);
     expect(shapeOf(300, 900)).toBe(PORTRAIT);
     expect(shapeOf(5000, 400)).toBe(3);
+  });
+
+  it("keeps its shape while a notice takes a strip of the Map's height, and takes a new one when turned", () => {
+    // 1192 wide: 900 tall is 1.32, a step from 1.4's edge; the slot's 52 px makes it 1.41.
+    const laid = shapeAfter(null, 1192, 900);
+    expect(laid).toBe(1.4);
+    expect(shapeAfter(laid, 1192, 848)).toBe(laid);
+    expect(shapeAfter(1.2, 1192, 900)).toBe(1.2);
+    expect(shapeAfter(laid, 900, 1192)).toBe(0.8);
   });
 
   it("breaks a dependency cycle at its least id", () => {
