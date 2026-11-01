@@ -55,7 +55,7 @@ and a unit test keeps the two in step.
 Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
-Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's item titles stay at 500,
+Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's leaves' titles stay at 500,
 as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a phase's title barely led its
 items. Overpass's regular strokes are thin on a screen, and the text strained to read
 beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
@@ -202,9 +202,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose" its
 target, as a tap or a click both do. Names follow `GLOSSARY.md`: item, thread, project, the needs-you list (written
 Needs you), and its other words. Three more are the app's own, which the glossary doesn't define: a phase is the
-glossary's project, in the outline and on the Map, a wave is a group of threads that can start once the earlier waves'
-threads are done (the tracker's `waves`), and a stage is where an item stands. A card, in the Threads view, is one
-thread's tile, not the glossary's Card. Errors say what to check before what went wrong.
+glossary's project, in the outline and on the Map, a wave is a step in the order threads can start: each thread comes
+one wave after the latest thread it waits on, and waits until that work is merged (the tracker's `waves`); threads that
+wait on nothing, and that nothing waits on, are Any time, and a stage is where an item stands. A card, in the Threads
+view, is one thread's tile, not the glossary's Card. Errors say what to check before what went wrong.
 
 ## Do's and Don'ts
 
