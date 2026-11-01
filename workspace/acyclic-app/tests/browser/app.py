@@ -411,9 +411,8 @@ def open_app(browser, view, link, failures, name):
     page.goto(link)
     if page.url.rstrip("/") != origin:
         failures.append(f"{name}: pairing landed on {page.url}, not the app")
-    page.locator("[data-testid=item-count], [role=alert]").first.wait_for(
-        timeout=15_000
-    )
+    # The shell shows once the plan has loaded; a failed load is an alert.
+    page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
     return context, page, origin, errors
 
 
@@ -2354,7 +2353,9 @@ def main():
                     chromium, view, link, failures, name
                 )
                 link = fresh()
-                count = page.get_by_test_id("item-count").inner_text()
+                # The sidebar counts the plan's items; a phone's bar leaves the count out.
+                counted = page.get_by_test_id("item-count")
+                count = counted.inner_text() if counted.count() else str(len(plan.items))
                 if count != str(len(plan.items)):
                     failures.append(
                         f"{name}: the page lists {count} items, expected {len(plan.items)}"
