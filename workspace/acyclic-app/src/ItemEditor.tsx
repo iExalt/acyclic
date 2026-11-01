@@ -2,7 +2,7 @@
 // with the CLI.
 
 import { type FormEvent, useState } from "react";
-import type { Command, Item, Thread } from "./api";
+import type { Command, Item } from "./api";
 import type { Edited } from "./edits";
 import { draftOf, type ItemDraft, itemEdit, SIZES, STATES, stateHint } from "./forms";
 import { StageLabel } from "./Stage";
@@ -10,7 +10,8 @@ import { stateWords } from "./stages";
 
 export interface ItemEditorProps {
   item: Item;
-  threads: Thread[];
+  /** The threads to pick from, each as text with its number. */
+  threads: { id: string; label: string }[];
   /** What the user wrote before, and over what, when a failed save opens the editor again. */
   initial: Edited | null;
   busy: boolean;
@@ -57,14 +58,23 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
       ) : (
         <label>
           State
-          <select name="state" value={draft.state} onChange={set("state")}>
+          <select
+            name="state"
+            value={draft.state}
+            onChange={set("state")}
+            aria-describedby={hint === null ? undefined : "state-hint"}
+          >
             {STATES.map((state) => (
               <option key={state} value={state}>
                 {stateWords(state)}
               </option>
             ))}
           </select>
-          {hint === null ? null : <span className="hint">{hint}</span>}
+          {hint === null ? null : (
+            <span className="hint" id="state-hint">
+              {hint}
+            </span>
+          )}
         </label>
       )}
       <label>
@@ -73,14 +83,17 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
           <option value="">None</option>
           {threads.map((one) => (
             <option key={one.id} value={one.id}>
-              {one.title}
+              {one.label}
             </option>
           ))}
         </select>
       </label>
       <label>
         Gate
-        <input name="gate" value={draft.gate} onChange={set("gate")} />
+        <input name="gate" value={draft.gate} onChange={set("gate")} aria-describedby="gate-hint" />
+        <span className="hint" id="gate-hint">
+          What must pass for it to be done
+        </span>
       </label>
       <label>
         Size

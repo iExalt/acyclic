@@ -8,7 +8,7 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import type { Stage } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import { type Entry, type Run, rank } from "./commands";
+import { type Entry, isMac, type Run, rank } from "./commands";
 import {
   Archive,
   ArrowUpLeft,
@@ -26,6 +26,7 @@ import {
   Waypoints,
   X,
 } from "./icons";
+import { keyReference } from "./keys";
 import type { Line } from "./lines";
 import { StageIcon } from "./Stage";
 
@@ -199,6 +200,19 @@ export function CommandMenu({
             </div>
           ))}
         </div>
+        {shortcutsOnly && keys !== null && query.trim() === "" ? (
+          <section className="key-reference" aria-label="Other keys">
+            <div className="command-group">Other keys</div>
+            <dl>
+              {keyReference(new Set(pool.map((entry) => entry.key)), isMac(navigator.platform)).map((row) => (
+                <div key={row.what}>
+                  <dt>{row.what}</dt>
+                  <dd>{row.keys}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
         {found.length > 0 ? null : shortcutsOnly && keys === null ? (
           <p className="command-none muted" role="status">
             Single-key shortcuts are off: turn them on in the menu.

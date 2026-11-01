@@ -118,7 +118,8 @@ export function entries(plan: Plan): Entry[] {
       key: `thread:${thread.id}`,
       group: "Threads",
       title: thread.name,
-      detail: thread.number === null ? null : `Thread ${thread.number}`,
+      // Its badge carries the number, which a search still finds.
+      detail: null,
       also: thread.number ?? thread.id,
       run: { kind: "thread", id: thread.id },
     }),
@@ -148,9 +149,21 @@ export function entries(plan: Plan): Entry[] {
  * What a move or a link waiting for its target can be pointed at from the menu: any item shown, phases among them, and
  * for a move the top level first.
  */
-export function targets(plan: Plan, pick: "move" | "link"): Entry[] {
+export function targets(plan: Plan, pick: "move" | "link", from: string | null = null): Entry[] {
+  const { model } = plan;
+  // Never the item itself, nor, for a move, where it already is or anything inside it: none of those moves it.
+  const parent = from === null ? null : (model.items.get(from)?.parent ?? null);
+  const inside = (id: string) => {
+    const seen = new Set<string>();
+    for (let up: string | null = id; up !== null && !seen.has(up); up = model.items.get(up)?.parent ?? null) {
+      if (up === from) return true;
+      seen.add(up);
+    }
+    return false;
+  };
+  const left = (id: string) => (pick === "move" ? !inside(id) && id !== parent : id !== from);
   const top =
-    pick === "move"
+    pick === "move" && (from === null || parent !== null)
       ? [
           entry({
             key: "target:top",
@@ -164,16 +177,18 @@ export function targets(plan: Plan, pick: "move" | "link"): Entry[] {
       : [];
   return [
     ...top,
-    ...listed(plan).map(({ id, title, phase }) =>
-      entry({
-        key: `target:${id}`,
-        group: "Items",
-        title,
-        detail: detail(id, phase),
-        also: id,
-        run: { kind: "target", id },
-      }),
-    ),
+    ...listed(plan)
+      .filter(({ id }) => left(id))
+      .map(({ id, title, phase, isPhase }) =>
+        entry({
+          key: `target:${id}`,
+          group: isPhase ? "Phases" : "Items",
+          title,
+          detail: detail(id, phase),
+          also: id,
+          run: { kind: "target", id },
+        }),
+      ),
   ];
 }
 
@@ -211,7 +226,7 @@ export const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, 
  * The entries `query` finds, best first, at most `MOST`: every word of it must be in the title or the id. A title
  * starting with the whole query comes first, then one where every word starts a word, then any match in the title,
  * then one in the id alone; ties go by group, then title. Then grouped, the group of the best first. With nothing
- * typed, the actions and the threads at work.
+ * typed, the actions and the threads at work, or for a waiting move or link, the phases it can go to.
  */
 export function rank(query: string, all: readonly Entry[], working: ReadonlySet<string>): Entry[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
@@ -219,7 +234,13 @@ export function rank(query: string, all: readonly Entry[], working: ReadonlySet<
     GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || natural(a.title, b.title);
   if (words.length === 0)
     return all
-      .filter((entry) => entry.group === "Actions" || (entry.run.kind === "thread" && working.has(entry.run.id)))
+      .filter(
+        (entry) =>
+          entry.group === "Actions" ||
+          (entry.run.kind === "thread" && working.has(entry.run.id)) ||
+          // A move's or link's targets offer the phases, the places most moves go, before anything is typed.
+          (entry.run.kind === "target" && entry.group === "Phases"),
+      )
       .slice(0, MOST);
   const whole = words.join(" ");
   const starts = words.map((word) => new RegExp(`(^|[^\\p{L}\\p{N}])${escaped(word)}`, "u"));

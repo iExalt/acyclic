@@ -117,3 +117,45 @@ export const SHORTCUTS: Record<string, string> = {
   "on-item:relates-to": "R",
   "on-item:add-inside": "A",
 };
+
+/** What each item key does, said as the reference says it, for the keys that act only with an item's panel shown. */
+const ON_ITEM_WORDS: Record<string, string> = {
+  "on-item:edit": "edit",
+  "on-item:move": "move",
+  "on-item:waits-for": "waits for",
+  "on-item:relates-to": "relates to",
+  "on-item:add-inside": "add inside",
+};
+
+/** The rest, as the menu's entries name them, should one not be runnable. */
+const OTHER_WORDS: Record<string, string> = {
+  "view:overview": "Go to Overview",
+  "view:map": "Go to Map",
+  "view:threads": "Go to Threads",
+  needs: "Open Needs you",
+  add: "New item",
+};
+
+/**
+ * The keys ? can't list as entries to run: those of `SHORTCUTS` not runnable now (`runnable` holds the entries' keys
+ * the menu lists), and the keys no entry stands for, with the platform's own chords.
+ */
+export function keyReference(runnable: ReadonlySet<string>, mac: boolean): { what: string; keys: string }[] {
+  const resting = Object.keys(SHORTCUTS).filter((key) => !runnable.has(key));
+  const onItem = resting.filter((key) => key in ON_ITEM_WORDS);
+  const other = resting.filter((key) => !(key in ON_ITEM_WORDS));
+  return [
+    ...(onItem.length === 0
+      ? []
+      : [
+          {
+            what: "With an item open",
+            keys: onItem.map((key) => `${SHORTCUTS[key]} ${ON_ITEM_WORDS[key]}`).join(", "),
+          },
+        ]),
+    ...other.map((key) => ({ what: OTHER_WORDS[key] ?? key, keys: SHORTCUTS[key] ?? "" })),
+    { what: "Next or previous row", keys: "J, K" },
+    { what: "Search", keys: mac ? "/ or ⌘K" : "/ or Ctrl K" },
+    { what: "Undo, while Undo shows", keys: mac ? "⌘Z" : "Ctrl Z" },
+  ];
+}

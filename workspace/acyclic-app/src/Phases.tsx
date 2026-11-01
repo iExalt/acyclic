@@ -94,7 +94,6 @@ export function Phases({ outline, lines, picked, current, onPickThread, onSelect
                 >
                   <Prose text={phase.title} />
                 </button>
-                <span className="count">{phase.threads.length}</span>
               </div>
               {expanded ? (
                 <>
@@ -123,9 +122,9 @@ export function PhasesSheet({ onClose, children }: { onClose: () => void; childr
   const panel = useRef<HTMLElement>(null);
   useFocusIn(panel);
   return (
-    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="phases" aria-label="Phases">
+    <aside ref={panel} tabIndex={-1} className="inspector" data-testid="phases" aria-label="Outline">
       <header>
-        <h2>Phases</h2>
+        <h2>Outline</h2>
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>

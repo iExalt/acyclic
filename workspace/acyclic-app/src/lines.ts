@@ -47,6 +47,12 @@ export interface Line {
   ink: string;
 }
 
+/** A thread as text where no badge stands beside it: its number, then its name ("4. CLI features"), else `title`. */
+export function lineLabel(line: Line | undefined, title: string): string {
+  if (line === undefined) return title;
+  return line.number === null ? line.name : `${line.number}. ${line.name}`;
+}
+
 /**
  * The tracker's thread ids: `thread-<n>`, or `thread-<clone>-<n>` for one a clone assigned, where the clone's id may
  * hold dashes itself.

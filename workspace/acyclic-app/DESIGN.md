@@ -68,8 +68,9 @@ Overpass sets smaller than Inter at a size.)
 
 ## Layout
 
-- **Phone (under 900 px):** a bar on top (the view's name, the outline, New item, the menu), the views and Needs you
-  in a tab bar along the bottom, panels as sheets rising from the bottom.
+- **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, the outline, New item, the menu),
+  the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
+  button and sheet are both called Outline; its phases carry no count, as opening one shows its threads.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of phases and threads, the menu at its foot); panels
   open on the right.
 - **The Overview, wide:** its lists side by side as the width allows (Needs you, In progress, Up next, each at least
@@ -106,7 +107,12 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
   to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it
   holds one; a row's remove button shows on hover or with focus in the row, and always where there may be no hover.
-  (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.)
+  (Chosen by the user over one row of quiet buttons and over today's layout unboxed, as the calmest.) While it edits,
+  the form's State and Thread stand in for the Status and Thread rows, which would only repeat them; Parent and Id
+  stay. The form's thread picker says each thread as "4. CLI features", as text names a thread without a badge.
+- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"), and under each list that sets it, what
+  it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding
+  "as set for every thread".
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as
   muted rows, then its decision, compact, after what it acts on. An approval names its thread alone, as its button
   and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
@@ -116,7 +122,10 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 - **Hover:** quiet controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
-- **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end.
+- **Command menu:** a field over a list, the chosen row filled with a bar at its start; Close at the field's end. A
+  thread's row is its badge and name; the number is the badge's. A waiting move or link offers its targets with the
+  phases in their own group, first before anything is typed, never the item itself, nor, for a move, where it is
+  already or anything inside it.
 - **Lists:** rows a finger's height, ruled apart, each opening what it names, a chevron at its end.
 
 ## Interaction conventions
@@ -137,18 +146,20 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the focus back
   where it was.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
-  ⌘K search; ? lists the keys in the command menu, each runnable. With an item's panel shown, E edits, M moves, W and R
-  link, A adds inside; a move or link from the keyboard finds its target in the menu. J and K move through the
-  Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No single key
-  approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the menu's
-  Single-key shortcuts switch, per device, turns them off.
+  ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys
+  while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M
+  moves, W and R link, A adds inside; a move or link from the keyboard finds its target in the menu. J and K move
+  through the Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No
+  single key approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the
+  menu's Single-key shortcuts switch, per device, turns them off.
 - **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, and the global autonomy
   level offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse
   (an approval, a proposal kept or dropped, a thread's own level or flag, a thread changed: agents act on them).
   Undo reads the plan first, and without that read it undoes nothing; it takes back nothing changed since, nor a
   removed wait or a state once the work it released has started, saying so. It says "Undoing…" until done, then
-  what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands). The notice stays until
-  dismissed or the next write.
+  what it did ("Autonomy set back to Blockers", not "Undone": agents' work meanwhile stands), a link said as it
+  reads ("Sow now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", fields "Set X back". The
+  notice stays until dismissed or the next write.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while
   its write is out, so focus stays on it; once what it settled goes, focus goes to the next entry's action, else to
   the panel. What a one-press decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a
@@ -168,7 +179,8 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
 
 ## Voice & copy
 
-Plain verbs on actions ("Approve 3 items", "Add item"). Names follow `GLOSSARY.md`: item, thread, phase, wave, Needs
+Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose"
+its target, as a tap or a click both do. Names follow `GLOSSARY.md`: item, thread, phase, wave, Needs
 you. Errors say what to check before what went wrong.
 
 ## Do's and Don'ts
@@ -222,7 +234,7 @@ you. Errors say what to check before what went wrong.
 - 2026-10-31: the Overview as home over the Map; the user preferred it.
 - 2026-10-31: Needs you open is marked lighter than the view shown, so only one place reads as current.
 - 2026-10-31: the scheme follows the system's.
-- 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
-  whole; the user chose it.
 - 2026-10-31: the Map's links bundled on the way out, in one column per chain; the user found it cleanest and liked it
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
+- 2026-11-01: Up next lists the approved threads with a task ready, Any time first, then by wave, over the next wave
+  whole; the user chose it.

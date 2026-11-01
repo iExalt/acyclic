@@ -188,9 +188,8 @@ function PhoneShell(props: ShellProps) {
       <header className="bar">
         <div className="brand">
           <h1>{title}</h1>
-          <p>
-            <Count count={props.count} />, autonomy {props.autonomy}
-          </p>
+          {/* The level, safety-relevant, in view as the sidebar's foot says it; the count is the sidebar's alone. */}
+          <p>Autonomy: {props.autonomy}</p>
         </div>
         <button type="button" className="icon" aria-label="Search" onClick={props.onSearch} data-action="search">
           <Icon of={Search} size={22} />

@@ -12,7 +12,7 @@ import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, Link2, Pencil, Plus, RotateCcw, X } from "./icons";
-import type { Line } from "./lines";
+import { type Line, lineLabel } from "./lines";
 import { Menu } from "./Menu";
 import { Prose } from "./Prose";
 import { StageCounts, StageIcon, StageLabel } from "./Stage";
@@ -202,27 +202,32 @@ export function Inspector({
       </header>
       {notice}
       <dl className="facts">
-        <dt>Status</dt>
-        <dd data-testid="state" className="status-value">
-          <ItemStatus item={item} />
-        </dd>
-        <dt>Thread</dt>
-        <dd>
-          {item.thread === null ? (
-            <span className="muted">None</span>
-          ) : (
-            <button
-              type="button"
-              className="chip line"
-              style={lineStyle(lines.get(item.thread))}
-              data-pick-thread={item.thread}
-              onClick={() => item.thread !== null && onPickThread(item.thread)}
-            >
-              <Badge line={lines.get(item.thread)} />
-              <Prose text={lines.get(item.thread)?.name ?? item.thread} />
-            </button>
-          )}
-        </dd>
+        {/* While editing, the form's State and Thread say these, so the rows would only repeat them. */}
+        {editing ? null : (
+          <>
+            <dt>Status</dt>
+            <dd data-testid="state" className="status-value">
+              <ItemStatus item={item} />
+            </dd>
+            <dt>Thread</dt>
+            <dd>
+              {item.thread === null ? (
+                <span className="muted">None</span>
+              ) : (
+                <button
+                  type="button"
+                  className="chip line"
+                  style={lineStyle(lines.get(item.thread))}
+                  data-pick-thread={item.thread}
+                  onClick={() => item.thread !== null && onPickThread(item.thread)}
+                >
+                  <Badge line={lines.get(item.thread)} />
+                  <Prose text={lines.get(item.thread)?.name ?? item.thread} />
+                </button>
+              )}
+            </dd>
+          </>
+        )}
         <dt>Parent</dt>
         <dd>{item.parent === null ? <span className="muted">Top level</span> : chip(item.parent)}</dd>
         <dt>Id</dt>
@@ -234,7 +239,7 @@ export function Inspector({
       {editing ? (
         <ItemEditor
           item={item}
-          threads={threads}
+          threads={threads.map((one) => ({ id: one.id, label: lineLabel(lines.get(one.id), one.title) }))}
           initial={reopened}
           busy={busy}
           onSave={(edit, edited) => {
