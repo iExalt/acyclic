@@ -132,5 +132,14 @@ describe("undo", () => {
       { item: { edit: { item: "dig", parent: "garden" } } },
     ]);
     expect([kept?.holds(after("dig", { parent: "beds" })), kept?.holds(before)]).toEqual([true, false]);
+    // Only what an undo of an edit reads is kept, not the whole plan: the item, its boxes, what waits on them.
+    expect(keep(command, before, "", "").items.map((one) => one.id)).toEqual(["beds", "dig", "garden", "sow"]);
+  });
+
+  it("keeps what a state's guard reads over a reload: what waits on the item or a box above it", () => {
+    const command = { item: { edit: { item: "dig", state: "done" } } };
+    const kept = unkeep(JSON.parse(JSON.stringify(keep(command, before, "Edited Dig", "Set Dig back"))));
+    expect(kept?.holds(after("dig", { state: "done" }))).toBe(true);
+    expect(kept?.holds(changed(after("dig", { state: "done" }), "sow", { stage: "in-progress" }))).toBe(false);
   });
 });

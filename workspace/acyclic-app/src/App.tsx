@@ -99,6 +99,8 @@ interface Notice extends Raised {
   undo?: Undo;
   /** That Undo as it is kept over a reload. */
   kept?: Kept;
+  /** Brought back by a reload, and not yet checked against the plan read since. */
+  restored?: true;
   /** News, not a failure: told politely, as a status. */
   polite?: true;
 }
@@ -140,7 +142,7 @@ function kept(): Notice | null {
     const was: Kept | null = raw === null ? null : JSON.parse(raw);
     const undo = was === null ? null : unkeep(was);
     if (was === null || undo === null) return null;
-    return { text: was.text, offer: "undo", retry: null, undo, kept: was, lasts: "offer", at: null };
+    return { text: was.text, offer: "undo", retry: null, undo, kept: was, restored: true, lasts: "offer", at: null };
   } catch {
     return null;
   }
@@ -243,7 +245,14 @@ export function App() {
       (next) => {
         if (next === null) return;
         setLoad(next);
-        setNotice((was) => noticeAfter(was, { kind: "read" }));
+        setNotice((was) => {
+          const now = noticeAfter(was, { kind: "read" });
+          if (now?.restored !== true) return now;
+          // A tab brought back hours later offers an Undo only while it can still take its write back.
+          const { restored: _, ...checked } = now;
+          const plan = { items: new Map(next.items.map((one) => [one.id, one])), level: next.level };
+          return now.undo?.holds(plan) === true ? checked : null;
+        });
         // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
         if (!sending.current) setPending(null);
       },
@@ -662,7 +671,7 @@ export function App() {
   keysSee.current = { shortcuts, panel, menu: showCommand };
   /** The undo on offer, while its notice shows and nothing is being sent: what ⌘Z takes back. */
   const undoNow = useRef<Undo | null>(null);
-  undoNow.current = notice?.offer === "undo" && !busy ? (notice.undo ?? null) : null;
+  undoNow.current = notice?.offer === "undo" && !notice.restored && !busy ? (notice.undo ?? null) : null;
   const runUndoNow = useRef(runUndo);
   runUndoNow.current = runUndo;
   /** What a single-key shortcut does; set once the plan has loaded. */
@@ -1014,7 +1023,8 @@ export function App() {
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
 
   const noticeView =
-    notice === null ? null : (
+    // One a reload brought back shows once the plan read since says it can still be undone.
+    notice === null || notice.restored ? null : (
       // News is told by the status line below, always there, as a live region must be to be heard.
       <div className="notice" role={notice.polite ? undefined : "alert"} data-testid="notice" data-lasts={notice.lasts}>
         <span className={notice.link === undefined ? "grow" : undefined} title={notice.text}>

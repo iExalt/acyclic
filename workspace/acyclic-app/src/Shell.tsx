@@ -232,7 +232,13 @@ function Autonomy({ level }: { level: string }) {
     requestAnimationFrame(() => menu.querySelector<HTMLElement>("[data-testid=global-level]")?.focus());
   };
   return (
-    <button type="button" className="autonomy" onClick={(event) => open(event.currentTarget)}>
+    <button
+      type="button"
+      className="autonomy"
+      title="What agents ask you about: change it in the menu"
+      aria-haspopup="true"
+      onClick={(event) => open(event.currentTarget)}
+    >
       Autonomy: {level}
     </button>
   );

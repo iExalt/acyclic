@@ -152,10 +152,15 @@ export function undoOf(
  * setting the state back wouldn't stop that, so a state is only undone while none of it is further along.
  */
 function waitersOf(plan: Plan, id: string): string[] {
-  const above = new Set<string>();
-  for (let at: string | null = id; at !== null && !above.has(at); at = plan.items.get(at)?.parent ?? null)
-    above.add(at);
-  return [...plan.items.values()].filter((one) => one.links.waits_for.some((on) => above.has(on))).map((one) => one.id);
+  const up = above(plan, id);
+  return [...plan.items.values()].filter((one) => one.links.waits_for.some((on) => up.has(on))).map((one) => one.id);
+}
+
+/** An item and the boxes above it. */
+function above(plan: Plan, id: string): Set<string> {
+  const up = new Set<string>();
+  for (let at: string | null = id; at !== null && !up.has(at); at = plan.items.get(at)?.parent ?? null) up.add(at);
+  return up;
 }
 
 const STARTED: ReadonlySet<Stage> = new Set(["in-progress", "in-review", "done"]);
@@ -183,7 +188,28 @@ export interface Kept {
 }
 
 export function keep(command: Command, before: Plan, text: string, undone: string): Kept {
-  return { command, items: [...before.items.values()], level: before.level, text, undone };
+  return { command, items: neededBy(command, before), level: before.level, text, undone };
+}
+
+/**
+ * Of `before`, the items the undo of `command` reads, so a large plan isn't written whole after every write: what the
+ * write names, the boxes above an edited item and what waits on them, or an approved thread's members.
+ */
+function neededBy(command: Command, before: Plan): Item[] {
+  const body = record(command);
+  const ids = new Set<string>();
+  const thread = record(record(body?.thread)?.approve)?.thread;
+  if (typeof thread === "string") for (const one of before.items.values()) if (one.thread === thread) ids.add(one.id);
+  const link = record(body?.link);
+  const linking = record(link?.add) ?? record(link?.remove);
+  for (const end of [linking?.from, linking?.to]) if (typeof end === "string") ids.add(end);
+  const edit = record(record(body?.item)?.edit);
+  if (typeof edit?.item === "string") {
+    const id = edit.item;
+    if (typeof edit.parent === "string") ids.add(edit.parent);
+    for (const one of [...above(before, id), ...waitersOf(before, id)]) ids.add(one);
+  }
+  return [...ids].flatMap((id) => before.items.get(id) ?? []);
 }
 
 /** The Undo a kept one offers again, saying what it said, or null when it no longer has one. */

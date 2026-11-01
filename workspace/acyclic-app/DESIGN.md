@@ -136,12 +136,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
-  Dismiss; the Undo stays on offer over a reload of the tab, its guard checked against the plan as it is when pressed.
-  Every notice shows in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a sheet rises
-  above it: one place to look, which doesn't move as panels open and close. Dismiss is the panels' quiet ✕. A notice of
-  news or an Undo is edged with a rule; the signal's dash is for a refusal, a failure or a form's warning, as news needs
-  nothing of the user. One shows at a time: the next replaces it, including one a link from a notification brings.
-  (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as noise.)
+  Dismiss; the Undo stays on offer over a reload of the tab, shown once the plan read then says it can still be undone,
+  and its guard checked again when pressed. Every notice shows in the slot, a bar at the stage's foot in the page's
+  flow, so it covers nothing and a sheet rises above it: one place to look, which doesn't move as panels open and close.
+  Dismiss is the panels' quiet ✕. A notice of news or an Undo is edged with a rule; the signal's dash is for a refusal,
+  a failure or a form's warning, as news needs nothing of the user. One shows at a time: the next replaces it, including
+  one a link from a notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's
+  titles, read as noise.)
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels: Thread and Parent are buttons that fill on
   hover, Status and Id text. Edit (a pencil), the ⋯ menu and Close beside the title, which keeps most of the header's
   width; Move, Reopen, Add inside, Waits for, Relates to and Copy link in the ⋯ menu, each but Reopen and Copy link with
@@ -151,9 +152,10 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker says each
   thread as "4. CLI features", as text names a thread without a badge.
 - **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"); under the view's name on a phone and at
-  the sidebar's foot, pressing it opens the menu at the setting, so the word is never left unexplained. Under each list
-  that sets it, what it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its
-  own level adding "as set for every thread".
+  the sidebar's foot, pressing it opens the menu at the setting, so the word is never left unexplained; on a touch
+  screen the view's name above it is part of its target, as its own line is too short for a finger. Under each list that
+  sets it, what it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own
+  level adding "as set for every thread".
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as rows
   in ink, lighter than the head, which says they open (muted, they read as inert notes; a stage's icon beside each read
   as a mark without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
