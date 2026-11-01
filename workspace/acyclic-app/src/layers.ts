@@ -22,8 +22,8 @@ export interface Open {
    */
   away: boolean;
   /**
-   * Not a layer but an order: a thread opened from the command menu while Needs you shows goes over it, where the user
-   * is looking, rather than under it as a thread Needs you was opened over.
+   * Not a layer but an order: a thread picked from Needs you, or from the command menu while it shows, goes over it,
+   * where the user is looking, rather than under it as a thread Needs you was opened over.
    */
   threadOverNeeds: boolean;
   /** Likewise, Needs you opened over an item shows over it, and closing it shows the item again. */

@@ -172,7 +172,8 @@ export function Inspector({
       aria-label="Selected item"
       data-detent={sheet.detent}
     >
-      <header {...sheet.header}>
+      {/* A form has no height to change, so its editor neither shows the handle (app.css) nor follows a drag. */}
+      <header {...(editing ? {} : sheet.header)}>
         {sheet.handle}
         {/* First, to float at the title's end: the title wraps under them, at the header's whole width. */}
         <div className="header-actions">

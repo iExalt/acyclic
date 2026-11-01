@@ -69,7 +69,8 @@ export const PALETTES: Record<Scheme, Palette> = {
     accentInk: DARK_GROUND,
     tints: {
       done: "#1a1e22",
-      "in-review": "#283042",
+      // In review keeps the tile's fill, its icon saying it: tinted, it read as a selection.
+      "in-review": "#23282e",
       "in-progress": "#2f3d48",
       ready: "#23282e",
       blocked: "#16191c",
@@ -98,7 +99,7 @@ export const PALETTES: Record<Scheme, Palette> = {
     accentInk: "#ffffff",
     tints: {
       done: "#f1f2f4",
-      "in-review": "#e7ecf7",
+      "in-review": "#ffffff",
       "in-progress": "#dbe5ee",
       ready: "#ffffff",
       blocked: "#eef0f2",

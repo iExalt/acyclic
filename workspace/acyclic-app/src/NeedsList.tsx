@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Command } from "./api";
-import { Badge, lineStyle } from "./Badge";
+import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useFocusIn } from "./focus";
 import { useHeld } from "./held";
 import { Icon, X } from "./icons";
@@ -123,7 +123,7 @@ export function NeedsList({
           >
             {view.thread === null ? (
               <p className="facts line need-head" style={lineStyle(view.line)}>
-                <Badge line={view.line} />
+                <NeedBadge line={view.line} />
                 <Prose text={view.text} />
               </p>
             ) : (

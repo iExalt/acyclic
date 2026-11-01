@@ -38,7 +38,8 @@ the accent, so colour is left to the threads' lines and the signal. The scheme f
 and a unit test keeps the two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
-  Map's items and boxes).
+  Map's items and boxes). A tile in progress takes a cooler tint, one done, blocked or parked a greyer one; one in
+  review keeps the tile's, its icon saying so, after a tint read as a selection.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
@@ -51,7 +52,9 @@ and a unit test keeps the two in step.
   across boxes passes beneath it.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an Okhsl lightness band per scheme, every hue at the same share of the colour
-  it can hold, so every line's badge takes a readable ink.
+  it can hold, so every line's badge takes a readable ink. Hues step round the wheel by number, a lap every 27
+  threads, each lap a quarter of the band lighter: thread 4 and thread 31 share a hue and look nearly alike (ΔE about
+  4), and the badge's number tells them apart; the user's call: "Don't change the hue step."
 
 ## Typography
 
@@ -85,8 +88,8 @@ Overpass sets smaller than Inter at a size.)
   all.)
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about 210
   px beside a panel), with the Overview's lists in two columns once it is 680 px wide (a 728 px screen), and the
-  projects in two columns; New item opens from the top as tall as its fields, clear of the keyboard, the Map in view
-  below it.
+  projects in two columns, as each wave's tiles in the Threads view are; New item opens from the top as tall as its
+  fields, clear of the keyboard, the Map in view below it.
 - **Wide:** a sidebar (the views, Needs you, New item, the outline of projects and threads, the menu at its foot);
   panels open on the right. All between the wordmark and the foot scrolls as one, and each outline row is a line, cut
   short with its full name on hover, as Linear's; a thread in more than one project adds a second line saying where
@@ -97,9 +100,11 @@ Overpass sets smaller than Inter at a size.)
   px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
   stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px
   with no panel open, Up next takes a third column of its own, the user's call: "allow three columns for the overview on
-  wide screens". (A single 960 px column left most of a desktop empty.) With more in Needs you than it shows, the link
-  under its rows opens it ("19 more in Needs you"), and the header has none; the threads' say where theirs go too ("9
-  more in Threads").
+  wide screens"; an Up next at most half as long as the longest list beside it stays under In progress, and the projects
+  take the third column instead, one row under another. (A single 960 px column left most of a desktop empty, and a
+  one-row Up next column left a third of it empty, the projects below the first view.) With more in Needs you than it
+  shows, the link under its rows opens it ("19 more in Needs you"), and the header has none; the threads' say where
+  theirs go too ("9 more in Threads").
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
@@ -115,10 +120,11 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Buttons, by tier:** `.primary` filled with the accent; secondary outlined; `.quiet` text-only; `.danger-quiet`
   red text, last in its group.
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons, each count
-  set apart by its icon rather than a comma, which only a screen reader reads. An item in no thread is never ready, so
-  its stage reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item with no thread carries in its
-  badge's place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Backlog",
-  "In progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
+  set apart by its icon rather than a comma, which only a screen reader reads; a Map box's line of counts, drawn as text
+  on the canvas, which sets no icon inside a line, takes the commas. An item in no thread is never ready, so its stage
+  reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item with no thread carries in its badge's
+  place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Backlog", "In
+  progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
   stage, as text: finishing sets it, not the form.
 - **A thread's status** follows Needs you: "Waiting for your approval", beside the inbox icon Needs you has, and a
   filled Approve only when Needs you asks for it; until the thread is read again after a decision, it says what it said
@@ -163,7 +169,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
   how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
   words, never a command to type, and names its item once, as its row. A hairline between entries; the filters are tabs,
-  the one shown filled.
+  the one shown filled, named as nouns (Approvals, Questions, Problems), as "Approve 20" over the entries' Approve
+  buttons read as one more of them.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
   the pointer.
@@ -185,8 +192,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   On a phone and an upright tablet, where Needs you covers the view, picking a view from the tabs closes it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one. A
-  thread the command menu opens while Needs you shows goes over it, where the user is looking, as one picked from the
-  list does, so closing it comes back to the list.
+  thread picked from Needs you, or from the command menu while Needs you shows, goes over the list, as an item picked
+  from it does, so closing it comes back to the list.
 - **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows on
   the Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on the
   Map or going to another view makes that where the user is, and going to another view closes the item, which it doesn't
@@ -311,7 +318,8 @@ before what went wrong.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.
-- **The wheel zooms 12 % a notch**, with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
+- **The wheel zooms 12 % a notch** of a Mac's mouse, which scrolls 80 px, and in step with the pixels where a notch
+  scrolls more (15 % for 100 px), with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
 - **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.
@@ -340,3 +348,6 @@ before what went wrong.
   chose them.
 - 2026-11-01: the phone's view tabs close Needs you, and the Overview stands in three columns on a wide screen; the
   user chose them. Needs you open is marked by ink alone, after the lighter fill read as a second current place.
+- 2026-11-01: a thread picked from Needs you goes to the Map, as every thread does; a short Up next stacks under In
+  progress, the projects taking the third column; the thread colours' hue step stays, and project names show as
+  written; the user chose them.
