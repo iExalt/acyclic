@@ -852,9 +852,11 @@ export function App() {
     else if (run.kind === "add") startAdd(null);
     else if (run.kind === "on-item") onItem(run.action);
     else if (run.kind === "thread") {
+      // Over Needs you, where the user is looking; else to the Map, framed, as the Overview's and the outline's rows go.
+      setThreadOver(showNeeds ? run.id : null);
+      if (!showNeeds) return toThread(run.id);
       setSelected(null);
       setThread(run.id);
-      setThreadOver(showNeeds ? run.id : null);
     } else select(run.id, null);
   };
   /**
