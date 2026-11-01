@@ -242,9 +242,10 @@ def tap_box(page, view, id, chevron=True):
 
 def centre(page, id, rise=0):
     """Brings a node to full size in the middle of the screen, as a person would before tapping it: on a phone, the
-    fitted plan draws it too small to tap. `rise` lifts it by that share of the Map's height."""
+    fitted plan draws it too small to tap. `rise` lifts it by that share of the Map's height. The renderer's size is
+    read again first: a slot that just came or went has changed the Map's height before the app's observer says so."""
     page.get_by_test_id("map").evaluate(
-        "(m, [id, rise]) => { m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); m.cy.panBy({ x: 0, y: -rise * m.clientHeight }); }",
+        "(m, [id, rise]) => { m.cy.resize(); m.cy.zoom(1); m.cy.center(m.cy.getElementById(id)); m.cy.panBy({ x: 0, y: -rise * m.clientHeight }); }",
         [id, rise],
     )
 
@@ -1475,10 +1476,8 @@ def edit_journey(page, view, env, plan, box, name, failures):
     item_action(page, "add-child")
     form = page.get_by_test_id("add-form")
     form.locator("input[name=title]").fill("Journey: added!")
-    if form.locator("input[name=id]").input_value() != added:
-        failures.append(
-            f"{name}: the add form didn't make the id {added} from the title"
-        )
+    if form.locator("input[name=id], select[name=phase]").count():
+        failures.append(f"{name}: the add form asked for an id, or a phase inside an item")
     # It is drawn and selected at once, before the server answers, which is held back until then.
     waiting = []
     page.route(

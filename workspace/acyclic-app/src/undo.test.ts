@@ -27,6 +27,8 @@ describe("undo", () => {
   it("moves an item back where it was, while it is still where it went", () => {
     const undo = undoOf({ item: { edit: { item: "dig", parent: "beds" } } }, before);
     expect(undo?.text).toBe("Moved Dig into Beds");
+    // Put back elsewhere on the Map, it is brought into view there, as the move brought it.
+    expect(undo?.shows).toBe("dig");
     expect(undo?.command).toEqual({ item: { edit: { item: "dig", parent: "garden" } } });
     expect(undo?.holds(after("dig", { parent: "beds" }))).toBe(true);
     expect(undo?.holds(after("dig", { parent: null }))).toBe(false);
