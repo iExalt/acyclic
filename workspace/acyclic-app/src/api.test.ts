@@ -179,7 +179,7 @@ describe("countsText", () => {
 
   it("names every stage, done ones apart from those in review, and leaves out stages with none", () => {
     const all = { done: 3, leaves: 9, in_review: 1, in_progress: 1, ready: 1, blocked: 1, parked: 1, unthreaded: 1 };
-    expect(countsText(all)).toBe("2 done, 1 in review, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 not in a thread");
+    expect(countsText(all)).toBe("2 done, 1 in review, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 needs a thread");
     expect(countsText({ ...none, leaves: 2, blocked: 2 })).toBe("2 blocked");
   });
 });

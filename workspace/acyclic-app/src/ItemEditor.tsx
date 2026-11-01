@@ -4,7 +4,9 @@
 import { type FormEvent, useState } from "react";
 import type { Command, Item, Thread } from "./api";
 import type { Edited } from "./edits";
-import { draftOf, type ItemDraft, itemEdit, SIZES, STATES } from "./forms";
+import { draftOf, type ItemDraft, itemEdit, SIZES, STATES, stateHint } from "./forms";
+import { StageLabel } from "./Stage";
+import { stateWords } from "./stages";
 
 export interface ItemEditorProps {
   item: Item;
@@ -23,6 +25,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
   const edit = itemEdit(item.id, base, draft);
+  const hint = stateHint(draft, item.stage !== undefined);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (edit === null) onCancel();
@@ -46,20 +49,22 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
         <input name="title" value={draft.title} onChange={set("title")} />
       </label>
       {item.state === "done" ? (
-        <label>
+        // Finished work's state is set by finishing it, so it reads as the panel says it, not as a field.
+        <div className="fixed-field">
           State
-          <input name="state" value="done" disabled />
-        </label>
+          <StageLabel stage={item.stage ?? "done"} />
+        </div>
       ) : (
         <label>
           State
           <select name="state" value={draft.state} onChange={set("state")}>
             {STATES.map((state) => (
               <option key={state} value={state}>
-                {state}
+                {stateWords(state)}
               </option>
             ))}
           </select>
+          {hint === null ? null : <span className="hint">{hint}</span>}
         </label>
       )}
       <label>

@@ -1104,6 +1104,7 @@ code {
 }
 
 .fields label,
+.fields .fixed-field,
 .sheet.add label {
   display: grid;
   gap: 4px;
@@ -1806,4 +1807,15 @@ dl.facts .chip.line {
   .sheet textarea {
     font-size: 14px;
   }
+}
+.fields .fixed-field .stage-mark {
+  color: var(--ink);
+  font-weight: 500;
+}
+/* A note beside an action, centred on it. */
+.actions:has(> .aside) {
+  align-items: center;
+}
+.actions > .aside {
+  margin: 0;
 }

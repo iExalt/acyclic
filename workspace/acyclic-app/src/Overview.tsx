@@ -6,7 +6,7 @@ import type { Counts, Item } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { ChevronRight, Icon, Inbox } from "./icons";
 import type { Line } from "./lines";
-import { countText, type Need, needView } from "./needs";
+import { awaitingApproval, countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
@@ -46,7 +46,7 @@ export function Overview({
   onSelectPhase,
   onView,
 }: OverviewProps) {
-  const { working, next, wave } = threadLists(counts, waves);
+  const { working, next } = threadLists(counts, waves, awaitingApproval(needs));
   const thread = (id: string) => {
     const line = lines.get(id);
     const tally = counts.get(id);
@@ -123,6 +123,7 @@ export function Overview({
                     )}
                     <span className="what">
                       <Prose text={view.text} />
+                      {view.detail === null ? null : <span className="detail">{view.detail}</span>}
                     </span>
                     <span className="go">
                       <Icon of={ChevronRight} size={16} />
@@ -154,18 +155,17 @@ export function Overview({
           <header>
             <h2 id="overview-next">Up next</h2>
             <span className="count muted">{next.length}</span>
-            {wave === null ? null : <span className="muted">wave {wave + 1}</span>}
             <span className="grow" />
             <button type="button" className="quiet" onClick={() => onView("threads")}>
               All waves
             </button>
           </header>
           {next.length === 0 ? (
-            <p className="empty">No thread has work left to start.</p>
+            <p className="empty">No approved thread has work ready to start.</p>
           ) : (
             <ul className="rows">{next.slice(0, THREADS_SHOWN).map(thread)}</ul>
           )}
-          {more(THREADS_SHOWN, next.length, "in this wave", () => onView("threads"))}
+          {more(THREADS_SHOWN, next.length, "ready", () => onView("threads"))}
         </section>
       </div>
 

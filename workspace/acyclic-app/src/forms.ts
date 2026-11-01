@@ -16,6 +16,18 @@ export function levelLabel(level: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/**
+ * How a state the editor shows reads elsewhere, where that differs from its word: a leaf in the backlog shows as Ready
+ * or Blocked by its waits, or as Needs a thread while it is in none; null for a parent, which has no stage, and for
+ * every other state.
+ */
+export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
+  if (!isLeaf || draft.state !== "backlog") return null;
+  return draft.thread === ""
+    ? "Shows as Needs a thread until it's in one"
+    : "Shows as Ready or Blocked, by what it waits on";
+}
+
 /** The item's fields the editor changes; an empty string is a clear. */
 export interface ItemDraft {
   title: string;

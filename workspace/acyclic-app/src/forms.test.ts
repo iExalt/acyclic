@@ -12,6 +12,7 @@ import {
   reopenCommand,
   resolveCommand,
   revokeCommand,
+  stateHint,
   threadLevelCommand,
   unsettledWhy,
 } from "./forms";
@@ -90,5 +91,16 @@ describe("resolveCommand", () => {
     expect(resolveCommand("settings", "global", "autonomy", "blockers")).toEqual(example("the global level"));
     expect(resolveCommand("settings", "global", "autonomy", null)).toBeNull();
     expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic done/);
+  });
+});
+
+describe("stateHint", () => {
+  it("says how a leaf in the backlog shows, by whether it is in a thread, and nothing for a parent or other states", () => {
+    expect(stateHint({ state: "backlog", thread: "thread-1" }, true)).toBe(
+      "Shows as Ready or Blocked, by what it waits on",
+    );
+    expect(stateHint({ state: "backlog", thread: "" }, true)).toBe("Shows as Needs a thread until it's in one");
+    expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
+    expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
   });
 });

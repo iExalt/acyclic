@@ -58,7 +58,9 @@ export function markSvg(
       `<text x="${left + wide / 2}" y="${middle}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="${thread.ink}">${xml(thread.number)}</text>`,
     );
   }
-  if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
+  // With no thread, the ring at its left already says what its stage would repeat.
+  if (stage !== null && !(stage === "unthreaded" && thread === null))
+    parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }
 

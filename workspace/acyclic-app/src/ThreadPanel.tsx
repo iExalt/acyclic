@@ -36,6 +36,8 @@ import { StageCounts, StageIcon } from "./Stage";
 export interface ThreadPanelProps {
   id: string;
   globalLevel: string;
+  /** Needs you asks the user to approve it: it is unapproved with work open. */
+  awaiting: boolean;
   /** The thread's line, for its badge. */
   line: Line | undefined;
   /** Its leaves by stage, or undefined when it has none drawn. */
@@ -60,6 +62,7 @@ type Loaded = { detail: ThreadDetail; open: Proposal[] } | { failed: string } | 
 export function ThreadPanel({
   id,
   globalLevel,
+  awaiting,
   line,
   counts,
   titleOf,
@@ -128,11 +131,11 @@ export function ThreadPanel({
         </button>
       </header>
       {notice}
-      <p className={detail.approved ? "thread-status" : "thread-status waiting"} data-testid="thread-status">
-        <Icon of={detail.approved ? Check : CircleAlert} size={16} />
-        {/* No total beside it: the counts below are of the tasks drawn, which a total of every member would not add
-            up to. */}
-        {detail.approved ? "Approved" : "Waiting for your approval"}
+      {/* Waiting only as Needs you says it is: an unapproved thread with nothing open asks nothing of the user. No
+          total beside it: the counts below are of the tasks drawn, which a total of every member would not add up to. */}
+      <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
+        {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={CircleAlert} size={16} /> : null}
+        {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved, with nothing open"}
       </p>
       <div className="progress">
         {counts === undefined || counts.leaves === 0 ? (
@@ -143,14 +146,20 @@ export function ThreadPanel({
       </div>
       {detail.approved ? null : (
         <div className="actions">
+          {/* Still offered with nothing open, as approval covers what joins the thread later, but not as the decision:
+              its items, all finished, are no longer what it approves. */}
           <button
             type="button"
-            className="primary"
+            className={awaiting ? "primary" : undefined}
             data-action="approve"
-            {...held(() => onCommand(approveCommand(id), `Approved ${name}: ${items}`), toPanel)}
+            {...held(
+              () => onCommand(approveCommand(id), awaiting ? `Approved ${name}: ${items}` : `Approved ${name}`),
+              toPanel,
+            )}
           >
-            Approve {items}
+            {awaiting ? `Approve ${items}` : "Approve"}
           </button>
+          {awaiting ? null : <p className="muted aside">Covers what's added to it later.</p>}
         </div>
       )}
       {detail.heads.length === 0 ? null : (

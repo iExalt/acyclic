@@ -40,6 +40,13 @@ describe("markSvg", () => {
     const none = markSvg("unthreaded", null, 200, 48, DARK);
     expect(none).toContain("stroke-dasharray");
     expect(none).not.toContain("<rect");
+    // The ring says it once: no stage icon repeats it at the end; a done task with no thread still ends with its own.
+    expect(none).not.toContain("<g ");
+    expect(markSvg("done", null, 200, 48, DARK)).toContain("<g ");
+  });
+
+  it("leads a box whose tasks all need a thread with the same dashed ring", () => {
+    expect(boxMarkSvg("box", "unthreaded", 300, 400, DARK)).toContain('stroke-dasharray="3 2.4"');
   });
 
   it("makes each image once for each palette", () => {

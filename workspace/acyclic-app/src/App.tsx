@@ -29,7 +29,7 @@ import { byNumber, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
 import { NeedsList } from "./NeedsList";
-import type { Need } from "./needs";
+import { awaitingApproval, type Need } from "./needs";
 import { Overview } from "./Overview";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 import { Phases, PhasesSheet } from "./Phases";
@@ -38,7 +38,7 @@ import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type U
 import { HOME, Shell, type View, Wordmark } from "./Shell";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
-import { threadLists } from "./threadLists";
+import { workingThreads } from "./threadLists";
 import { type Undo, undoOf } from "./undo";
 import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
@@ -218,7 +218,8 @@ export function App() {
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
     [loaded, shown, outline],
   );
-  const working = useMemo(() => new Set(threadLists(counts, waves).working), [counts, waves]);
+  const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
+  const awaiting = useMemo(() => awaitingApproval(loaded?.needs ?? []), [loaded]);
   const current = useMemo(
     () => (model === null || outline === null ? { phase: null, thread: null } : currentRows(model, outline, selected)),
     [model, outline, selected],
@@ -1122,6 +1123,7 @@ export function App() {
             key={thread}
             id={thread}
             globalLevel={load.level}
+            awaiting={awaiting.has(thread)}
             line={lines.get(thread)}
             counts={counts.get(thread)}
             titleOf={titleOf}
