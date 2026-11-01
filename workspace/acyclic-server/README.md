@@ -22,8 +22,8 @@ lives in `~/.config/acyclic/up/session`, readable by the user alone, and lasts a
 A browser pairs instead: `up` prints a link when it starts, and `acyclic up --link` (with the server's `--port`, if
 it has one) prints a fresh one. A link is good once, for five minutes, and gives the browser a cookie with a
 credential derived from the session, so rotating the session unpairs it too. Each server names its cookie for its
-port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a write it
-authenticates must come from the listener's own origin, and no page may frame the app.
+port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a command it
+authenticates, a read as much as a write, must come from the listener's own origin, and no page may frame the app.
 
 `up --tailscale --login <login> --host <name>.ts.net` also serves requests through `tailscale serve`, checked as
 `serve` checks them: Tailscale replaces any `Tailscale-User-Login` a client sends with the user's, and passes the
@@ -76,10 +76,10 @@ only commits; a push's hook scans the new commits for the deny-list's terms, in 
 Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB and 64 refs, and a run one push at a time to
 each repository.
 
-Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, the
-repositories of finished threads, those with every item done and no run under way, are removed once every run's ref
-in them is on the forge, as the mirror has it, since until then they hold the only copy of that work; and a mirror no
-thread borrows from any more drops what the forge no longer has.
+Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes, unless
+`--sync-every 0`, the repositories of finished threads, those with every item done and no run under way, are removed
+once every run's ref in them is on the forge, as the mirror has it, since until then they hold the only copy of that
+work; and a mirror no thread borrows from any more drops what the forge no longer has.
 
 The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
 any of the forge's URLs, to the server with the run's token.
@@ -90,7 +90,8 @@ Both serve the app built into the binary (`acyclic-app-assets`), or the one in `
 `index.html`; runs' listeners serve neither. `/` is `/index.html`, and a path with no file is 404, since the app has
 no routes of its own. Files are sent Brotli- or gzip-compressed when the browser takes it and the build wrote the
 copy. The bundle's hashed files under `/assets/` may be kept for good; everything else is revalidated. Every response
-carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing.
+carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing, except
+the empty 404 that `up --tailscale` gives a path outside its secret.
 
 ## The API
 

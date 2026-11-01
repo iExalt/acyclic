@@ -5,9 +5,9 @@
 //! valid for a few minutes and only once, and gets a cookie in exchange. The cookie holds a credential derived from the
 //! session rather than the session itself, so rotating the session shuts the browser out too, and a link left in the
 //! browser's history is spent. Browsers send a cookie for `localhost` to every port on it, and treat every such port
-//! as the same site, so a page from any other local server carries the cookie too: a write that the cookie
-//! authenticates must therefore come from the listener's own origin, and one without an `Origin` is refused; and no
-//! page may frame the app, or it could be clicked into writes that its own origin sends.
+//! as the same site, so a page from any other local server carries the cookie too: a command that the cookie
+//! authenticates, read or write, must therefore come from the listener's own origin, and one without an `Origin` is
+//! refused; and no page may frame the app, or it could be clicked into writes that its own origin sends.
 //!
 //! The file outlives the server, so a browser paired once stays paired across restarts; `acyclic up --rotate`
 //! replaces it, and a server already running keeps the old token until it restarts. Whatever can read the file holds

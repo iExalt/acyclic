@@ -2,7 +2,7 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and version text
+The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `graph` without `--file` or `--open`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
@@ -20,7 +20,7 @@ Command Groups:
   link         Adds or removes links between items
   thread       Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
   repo         Adds, edits, lists and shows repository records
-  proposal     Lists and shows proposals, and keeps or drops them (user only)
+  proposal     Lists and shows proposals; only the user keeps or drops them
 
 Other Commands:
   init         Sets up a tracker clone as a new replica, creating the repository if there is none
@@ -39,7 +39,7 @@ Options:
   -V, --version  Print version
 
 Global options:
-      --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in ~/.config/acyclic/trackers.toml
+      --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else, in a Git repository, the mapping in ~/.config/acyclic/trackers.toml, whose default applies when no prefix matches
       --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
       --as-user            Act as the user
   -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error; otherwise `ACYCLIC_OUTPUT`, else pretty on a terminal and json when piped [possible values: json, pretty]

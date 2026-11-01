@@ -439,7 +439,8 @@ impl Tracker {
     /// A replica id is only trusted while this clone holds its state ref, or while the id is still marked unused by
     /// [`init_replica`]. Otherwise this clone may be a fresh or rebuilt copy of a replica that wrote before, and
     /// reusing its id could reuse its dots, which peers would silently drop. So it takes a new id, `<id>-<random>`,
-    /// records it and reports the change.
+    /// records it and reports the change. The check reads only the state refs this clone holds, so an id given to
+    /// [`init_replica`] that another clone wrote under is trusted while this clone hasn't fetched that clone's state.
     ///
     /// # Errors
     ///

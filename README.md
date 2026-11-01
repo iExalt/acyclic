@@ -2,12 +2,13 @@
 
 A decentralized, Git-native issue tracker and project management tool for one person and many agents.
 
-Early days: nothing here works yet.
+The CLI, the server and the app work. The north star below is wider than what is built: nothing yet starts runs on
+its own or runs agents in a cluster.
 
 ## North star
 
 - Decentralized and Git-native: every machine keeps its own replica and works offline; replicas merge through Git.
-- Threads and projects form a DAG with several kinds of edge: hard and soft dependencies, relationships and more.
+- Threads and projects form a DAG with several kinds of edge: dependencies that hold work back, relationships and more.
 - "Automatic" (well, model- or agent-assisted) placement and connection of new bugs, issues and feature requests as
   leaves in the DAG.
 - Agent runs: spawn agents to tackle an issue, a thread, or a whole (sub)tree of issues, each run in its own pod in
@@ -22,7 +23,7 @@ The tracker is a library with a CLI, and works without the app or the cluster.
 The [glossary](GLOSSARY.md) defines the vocabulary.
 
 A tracker syncs through a shared Git repository. On GitHub, `sh scripts/tracker-ruleset.sh <owner>/<repository>`
-keeps that repository's audit logs append-only; run it before the first sync.
+keeps that repository's audit logs from being force-pushed; run it before the first sync.
 
 ## Install
 

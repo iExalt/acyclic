@@ -1,4 +1,4 @@
-//! Edits to approved scope, applied or proposed by actor (plan D17, D60, D71). The user's edits and a
+//! Edits to approved scope, applied or proposed by actor. The user's edits and a
 //! project-management agent's apply at once; any other agent's edit to an approved thread's scope waits as a
 //! proposal for the user to keep or drop. The replica that applies the write decides, against its own view then.
 //!

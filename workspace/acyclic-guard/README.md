@@ -19,9 +19,10 @@ the remote's tracking refs:
 - every added line of the patch, binary files included, with merges compared against their first parent;
 - the text of annotated tags.
 
-Reports name the commit, the channel and the deny-list line that matched, never the term itself. Gitleaks then scans
-the same commits with its default rules, ignoring any `.gitleaks.toml`, `.gitleaksignore` or `gitleaks:allow` in the
-pushed content; a leak or a Gitleaks error blocks the push. A push to a URL rather than a named remote has no
-tracking refs to compare against, so the whole history is scanned.
+Reports name the commit or tag, or for a ref name the local or remote ref, with the channel and the deny-list line that
+matched, never the term itself. Gitleaks then scans the same commits with its default rules, ignoring any
+`.gitleaks.toml`, `.gitleaksignore` or `gitleaks:allow` in the pushed content; a leak or a Gitleaks error blocks the
+push. A push to a URL rather than a named remote has no tracking refs to compare against, so the whole history is
+scanned.
 
 Install the hook with `mise run hooks:install`. Never bypass it; if it blocks, fix the content.

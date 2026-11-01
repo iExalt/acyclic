@@ -1,5 +1,5 @@
 //! Names of the entity kinds and fields the model gives meaning to. The state layer stores any name; these are the
-//! ones later steps read and write.
+//! ones the model reads and writes, except those marked reserved.
 
 /// Entity kinds.
 pub mod kind {
@@ -11,7 +11,7 @@ pub mod kind {
     pub const THREAD: &str = "thread";
     /// A run of an agent on a thread.
     pub const RUN: &str = "run";
-    /// An actor: a person, an agent or a run.
+    /// An actor: a person, an agent or a run. Reserved: nothing reads or writes one yet.
     pub const ACTOR: &str = "actor";
     /// A code repository record.
     pub const REPOSITORY: &str = "repository";
@@ -133,9 +133,10 @@ pub mod thread {
     pub const PM_FLAG: &str = "pm-flag";
     /// The thread's autonomy level, overriding the global default.
     pub const AUTONOMY: &str = "autonomy";
-    /// The thread's launch choice: provider, credential and model.
+    /// The thread's launch choice: provider, credential and model. Reserved: the user alone may write it, and nothing
+    /// reads it yet.
     pub const LAUNCH: &str = "launch";
-    /// Where the thread runs: the cluster or the Mac.
+    /// Where the thread runs: the cluster or the Mac. Reserved like [`LAUNCH`].
     pub const PLACEMENT: &str = "placement";
     /// Set when a renumber retired the thread's id; the same field as an item's, read by `model::is_deleted`.
     pub const DELETED: &str = super::item::DELETED;

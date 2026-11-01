@@ -1,4 +1,4 @@
-//! Readiness, computed on read under plan D18: done inside a thread, merged across. A dependency in the same thread
+//! Readiness, computed on read: done inside a thread, merged across. A dependency in the same thread
 //! is met when it is done; one in another thread, or for an item in no thread, is met once its evidence commit is on
 //! its repository's default branch, and is "in review" until then. Work with no repository is met when done, and an
 //! archived dependency always is.

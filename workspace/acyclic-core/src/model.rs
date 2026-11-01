@@ -189,7 +189,7 @@ impl RunState {
     }
 }
 
-/// An autonomy level: which agents' questions reach the needs-you list (plan D61). Blockers always do.
+/// An autonomy level: which agents' questions reach the needs-you list. Blockers always do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Level {
@@ -214,7 +214,7 @@ pub struct Reopened {
     pub archived: bool,
 }
 
-/// An item's role, derived from its place in the tree (plan D14).
+/// An item's role, derived from its place in the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
@@ -790,7 +790,7 @@ impl Model {
         chosen.all().into_iter().min().copied().unwrap_or(Level::Blockers)
     }
 
-    /// Phase 1's liveness for claims without a time lease: a run's claim holds unless its record shows the run
+    /// Liveness for claims without a time lease: a run's claim holds unless its record shows the run
     /// ended; any other holder's does.
     #[must_use]
     pub fn run_alive(&self, holder: &str) -> bool {

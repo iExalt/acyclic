@@ -18,12 +18,13 @@ use serde::Serialize;
 const GLOBAL_OPTIONS: &str = "Global options";
 
 /// The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o`
-/// chooses), except `prime`, `completions`, `graph` without `--file`, `import --schema` and help and version text.
+/// chooses), except `prime`, `completions`, `graph` without `--file` or `--open`, `import --schema` and help and
+/// version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
-    /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else the mapping in
-    /// ~/.config/acyclic/trackers.toml.
+    /// The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else, in a Git repository, the mapping
+    /// in ~/.config/acyclic/trackers.toml, whose default applies when no prefix matches.
     #[arg(long, global = true, help_heading = GLOBAL_OPTIONS)]
     pub tracker: Option<PathBuf>,
     /// Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command.
@@ -281,7 +282,7 @@ pub enum Command {
     /// Adds, edits, lists and shows repository records.
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// Lists and shows proposals, and keeps or drops them (user only).
+    /// Lists and shows proposals; only the user keeps or drops them.
     #[command(subcommand)]
     Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
@@ -381,8 +382,8 @@ pub struct Up {
     pub socket: Option<PathBuf>,
     /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
     /// the writes of their own work, applied as the run, and fetch and push their thread's code through mirrors in
-    /// ~/.local/share/acyclic/mirrors. Needs the operator's public key, which the operator writes to
-    /// ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
+    /// `$XDG_DATA_HOME/acyclic/mirrors`, by default under ~/.local/share. Needs the operator's public key, which the
+    /// operator writes to ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
     #[arg(long, value_name = "PORT")]
     pub runners: Option<u16>,
 }
@@ -583,7 +584,8 @@ pub enum ItemCommand {
         /// The subtree's root.
         item: String,
     },
-    /// Deletes an item nothing refers to: no children, links, evidence or live claim; in an approved thread, user only.
+    /// Deletes an item nothing refers to: no children, links or evidence, not done, and no one else's live claim; in an
+    /// approved thread, user only.
     Delete {
         /// The item.
         item: String,
@@ -901,7 +903,7 @@ pub enum RepoCommand {
     },
 }
 
-/// The proposal commands (user only).
+/// The proposal commands; keeping and dropping are the user's alone.
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ProposalCommand {

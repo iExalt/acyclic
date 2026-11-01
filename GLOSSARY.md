@@ -22,7 +22,8 @@ A top-level item with children; a top-level item is a project even when it also 
 _Avoid_: theatre, repository
 
 **Gate**:
-The exit check an item must pass to be done.
+The exit check an item must pass to be done. Not enforced yet: `done` doesn't check it. Today it is free text that sets
+the item's role and delays archiving a finished subtree.
 _Avoid_: acceptance criteria (as a separate concept), exit criteria
 
 **Area**:
@@ -110,8 +111,8 @@ _Avoid_: closed, deleted
 The state of finished code work whose commit is not yet on its repository's default branch.
 
 **Needs-you list**:
-Everything waiting on the user: approvals, agents' questions and permission prompts, conflicts nobody resolved, and new
-blockers on approved work.
+Everything waiting on the user: approvals, agents' questions and permission prompts (nothing records either yet),
+conflicts nobody resolved, and new blockers on approved work.
 _Avoid_: inbox, notifications
 
 ## Relationships between items

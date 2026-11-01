@@ -243,8 +243,9 @@ pub fn claim(
     Ok(dot.expect("a write with a value mints a dot"))
 }
 
-/// Renews, at a sync, the time leases this replica recorded whose holders are still at work: each winning thread claim with
-/// less than half of `lease` left whose holder wrote something other than a claim within the last `lease`. A holder that stopped writing, such as a
+/// Renews the time leases this replica recorded whose holders are still at work: each winning thread claim with less
+/// than half of `lease` left whose holder wrote something other than a claim within the last `lease`. The CLI calls it
+/// at the start of each of its write batches, whoever writes; a sync doesn't. A holder that stopped writing, such as a
 /// session that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
 ///
 /// # Panics

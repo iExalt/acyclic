@@ -1,6 +1,6 @@
 //! The needs-you list, computed on read: everything waiting on the user. What the state shows (conflicts, cycles,
 //! contests, clashes, proposals, new blockers on approved work, reopened work, dangling references) always appears;
-//! agents' questions are filtered by the thread's autonomy level (plan D61), and blockers always pass.
+//! agents' questions are filtered by the thread's autonomy level, and blockers always pass.
 
 use std::collections::{BTreeMap, BTreeSet};
 
