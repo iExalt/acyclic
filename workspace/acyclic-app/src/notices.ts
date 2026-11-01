@@ -70,7 +70,11 @@ export function placed(notice: Raised, now: Place): "panel" | "slot" {
 const same = (a: Place, b: Place) =>
   a.layer === b.layer && a.item === b.item && a.thread === b.thread && a.view === b.view;
 
-/** The same surface: the same panel showing the same item or thread, or, with no panel, the same view. */
+/**
+ * The same surface: the same panel showing the same item or thread, or, with no panel, the same view. Any other layer,
+ * such as a move waiting for its target or the add form, is the same surface for as long as it stays open, so a
+ * refused target is said for as long as the move waits.
+ */
 function sameSurface(a: Place, b: Place): boolean {
   if (a.layer !== b.layer) return false;
   if (a.layer === "item") return a.item === b.item;

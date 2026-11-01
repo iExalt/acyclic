@@ -115,13 +115,14 @@ One radius, 8 px (`--radius`), for controls, cards and panels. Sheets on a phone
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)
 - **Notices stay with what they are about** (`src/notices.ts`). News of what just happened (saved, undone, a link
-  opened) goes once the user moves; a refusal or failure stays on the surface that raised it until that surface
-  closes; a form's warning stays with the form. An offered Undo, and a plan that couldn't be read again, wait
-  wherever the user goes, until the next write or Dismiss. A notice shows under the heading of the panel on top; an
-  offer, a stale plan, and anything with no panel to hold it show in the slot, a bar at the stage's foot in the
-  page's flow, so it covers nothing and a sheet rises above it. Dismiss is the panels' quiet ✕. One shows at a time:
-  the next replaces it, including one a link from a notification brings. (Notices that followed the user to unrelated
-  panels, and floated over the Map's titles, read as noise.)
+  opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
+  refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
+  form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
+  Dismiss. A notice shows under the heading of the panel on top; an offer, a stale plan, and anything with no panel to
+  hold it show in the slot, a bar at the stage's foot in the page's flow, so it covers nothing and a sheet rises above
+  it. Dismiss is the panels' quiet ✕. One shows at a time: the next replaces it, including one a link from a
+  notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's titles, read as
+  noise.)
 - **Item panel:** quiet, as Linear's. Properties as text beside muted labels, each a button that fills on hover.
   Edit (a pencil), the ⋯ menu, Copy link and Close beside the title; Move, Reopen, Add inside, Waits for and Relates
   to in the ⋯ menu, each with its key. Links as rows cut to a line, the full title on hover, a section only when it
