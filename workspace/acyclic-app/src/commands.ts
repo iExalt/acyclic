@@ -31,9 +31,9 @@ export interface Entry {
   key: string;
   group: Group;
   title: string;
-  /** A second, quieter line: an item's id and phase, a thread's number. */
+  /** A second, quieter line: an item's id and project, a thread's number. */
   detail: string | null;
-  /** Searched beside the title: an item's or phase's id, a thread's number. */
+  /** Searched beside the title: an item's or project's id, a thread's number. */
   also: string;
   run: Run;
   /** The title and `also`, folded once when listed rather than on every key typed. */
@@ -59,7 +59,7 @@ export interface Plan {
   item?: { id: string; title: string } | null;
 }
 
-/** Every entry the menu can find in `plan`: actions, threads, phases, then items, archived ones only while shown. */
+/** Every entry the menu can find in `plan`: actions, threads, projects, then items, archived ones only while shown. */
 export function entries(plan: Plan): Entry[] {
   const actions: Entry[] = [
     ...(["overview", "map", "threads"] as const).map((view) =>
@@ -146,8 +146,8 @@ export function entries(plan: Plan): Entry[] {
 }
 
 /**
- * What a move or a link waiting for its target can be pointed at from the menu: any item shown, phases among them, and
- * for a move the top level first.
+ * What a move or a link waiting for its target can be pointed at from the menu: any item shown, projects among them,
+ * and for a move the top level first.
  */
 export function targets(plan: Plan, pick: "move" | "link", from: string | null = null): Entry[] {
   const { model } = plan;
@@ -194,10 +194,13 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
 
 const detail = (id: string, phase: string | null) => (phase === null ? id : `${id} in ${phase}`);
 
-/** Every item shown, with the title of the phase it is in, and whether it is a phase: a top-level item with children. */
+/**
+ * Every item shown, with the title of the project it is in, and whether it is a project: a top-level item with
+ * children.
+ */
 function listed({ model, showArchived }: Plan) {
   const shown = (id: string) => showArchived || !inArchived(model, id);
-  /** The title of the phase an item is in, from its top-level ancestor; parents that loop end the walk. */
+  /** The title of the project an item is in, from its top-level ancestor; parents that loop end the walk. */
   const phaseOf = (id: string) => {
     const seen = new Set([id]);
     let top = id;
@@ -226,7 +229,7 @@ export const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, 
  * The entries `query` finds, best first, at most `MOST`: every word of it must be in the title or the id. A title
  * starting with the whole query comes first, then one where every word starts a word, then any match in the title,
  * then one in the id alone; ties go by group, then title. Then grouped, the group of the best first. With nothing
- * typed, the actions and the threads at work, or for a waiting move or link, the phases it can go to.
+ * typed, the actions and the threads at work, or for a waiting move or link, the projects it can go to.
  */
 export function rank(query: string, all: readonly Entry[], working: ReadonlySet<string>): Entry[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
@@ -238,7 +241,7 @@ export function rank(query: string, all: readonly Entry[], working: ReadonlySet<
         (entry) =>
           entry.group === "Actions" ||
           (entry.run.kind === "thread" && working.has(entry.run.id)) ||
-          // A move's or link's targets offer the phases, the places most moves go, before anything is typed.
+          // A move's or link's targets offer the projects, the places most moves go, before anything is typed.
           (entry.run.kind === "target" && entry.group === "Projects"),
       )
       .slice(0, MOST);

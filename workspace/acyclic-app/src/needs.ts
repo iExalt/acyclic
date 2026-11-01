@@ -1,7 +1,7 @@
 // The needs-you list: what each entry says, what it names, and the actions the app can take on it. Entries the app
 // has no command for say so and give the CLI's hint. Pure, so every kind is tested without a browser.
 
-import type { Command } from "./api";
+import { type Command, titleOr } from "./api";
 import type { Entity } from "./forms";
 import {
   approveCommand,
@@ -63,16 +63,16 @@ interface Row {
 const row = (value: unknown): Row | null =>
   typeof value === "object" && value !== null && typeof (value as Row).id === "string" ? (value as Row) : null;
 const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).filter((one) => one !== null) : []);
-const titled = (one: Row) => (typeof one.title === "string" ? one.title : one.id);
+const titled = (one: Row) => titleOr(one.title, one.id);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** What the user does about an entry, by which the needs-you list filters: say yes or no, answer, or unblock work. */
-export type NeedGroup = "approve" | "answer" | "unblock";
+/** What the user does about an entry, by which the needs-you list filters: say yes or no, answer, or resolve. */
+export type NeedGroup = "approve" | "answer" | "resolve";
 
 export const GROUPS: { group: NeedGroup; label: string }[] = [
   { group: "approve", label: "Approve" },
   { group: "answer", label: "Answer" },
-  { group: "unblock", label: "Unblock" },
+  { group: "resolve", label: "Resolve" },
 ];
 
 /**
@@ -81,7 +81,7 @@ export const GROUPS: { group: NeedGroup; label: string }[] = [
  */
 export function groupOf(kind: string): NeedGroup {
   if (["proposal", "unapproved", "awaiting-approval", "new-blocker"].includes(kind)) return "approve";
-  return kind === "question" ? "answer" : "unblock";
+  return kind === "question" ? "answer" : "resolve";
 }
 
 /** The threads Needs you asks the user to approve. */

@@ -15,7 +15,7 @@ import { TILES } from "./style";
 export type Drawn = ElementDefinition & { data: { id: string } & Record<string, unknown>; classes: string };
 
 /**
- * The elements for a scene, with the lit thread's colour, if any, and each task's marks from its thread's line, drawn
+ * The elements for a scene, with the lit thread's colour, if any, and each tile's marks from its thread's line, drawn
  * in `palette`.
  */
 export function elementsOf(
@@ -81,7 +81,7 @@ export function elementsOf(
   ];
 }
 
-/** A task's thread as its marks show it, or null for one in no thread, or in one the plan doesn't list. */
+/** A tile's thread as its marks show it, or null for one in no thread, or in one the plan doesn't list. */
 function threadOf(thread: string | null, lines: ReadonlyMap<string, Line>) {
   const line = thread === null ? undefined : lines.get(thread);
   return line === undefined ? null : { colour: line.colour, number: line.number, ink: line.ink };

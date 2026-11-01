@@ -34,7 +34,7 @@ import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
 const MAX_ZOOM = 2;
-/** What the pointer shows the links of: a task, or a collapsed box, which holds its tasks' links. */
+/** What the pointer shows the links of: a tile, or a collapsed box, which holds its tiles' links. */
 const HOVERABLE = "node.leaf, node.collapsed";
 
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */

@@ -1,4 +1,4 @@
-// The Threads view's cards: each thread with work left, in the wave the tracker puts it in, with the phases it works
+// The Threads view's cards: each thread with work left, in the wave the tracker puts it in, with the projects it works
 // in, its leaves by stage, and the threads it waits on. Pure, so the rules are tested without a browser.
 
 import type { Counts, Item, Threads } from "./api";
@@ -6,7 +6,7 @@ import type { Outline } from "./outline";
 
 export interface Card {
   id: string;
-  /** The titles of the phases it has work in. */
+  /** The titles of the projects it has work in. */
   phases: string[];
   /** Its leaves by stage; parents and archived leaves have none. */
   counts: Counts;
@@ -48,7 +48,7 @@ export function threadCounts(items: readonly Item[]): Map<string, Counts> {
   return counts;
 }
 
-/** The cards for `listed`'s waves, counted from `items` and placed in `outline`'s phases. */
+/** The cards for `listed`'s waves, counted from `items` and placed in `outline`'s projects. */
 export function wavesView(listed: Threads, items: readonly Item[], outline: Outline): WavesView {
   const counts = threadCounts(items);
   const wave = new Map<string, number>();

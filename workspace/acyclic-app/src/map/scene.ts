@@ -23,7 +23,7 @@ export interface SceneNode {
   label: string;
   textWidth: number;
   kind: Kind;
-  /** A task's stage and thread, which its marks show; null for a box. */
+  /** A tile's stage and thread, which its marks show; null for a box. */
   stage: Stage | null;
   thread: string | null;
   /** The node's centre, as the renderer places nodes. */
@@ -40,7 +40,7 @@ export interface SceneNode {
   archived: boolean;
 }
 
-/** How wide labels are drawn: a task's in the face's regular weight, a box's in bold. */
+/** How wide labels are drawn: a tile's in the face's regular weight, a box's in bold. */
 export interface Fonts {
   regular: Measure;
   bold: Measure;
@@ -49,7 +49,7 @@ export interface Fonts {
 /** Everything fits: for scenes whose labels nobody reads, such as tests of anything else. */
 export const UNMEASURED: Fonts = { regular: () => 0, bold: () => 0 };
 
-/** How wide a node's label may be drawn: a task's between its marks, a box's after its chevron. */
+/** How wide a node's label may be drawn: a tile's between its marks, a box's after its chevron. */
 export function textWidthOf(kind: Kind, width: number): number {
   return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : BOX_TEXT_LEFT + 10));
 }
@@ -184,7 +184,7 @@ export function scene(
 }
 
 /**
- * A node's label, in lines cut to fit `width`. A task's title takes three lines. A box's takes one, ending, when it is
+ * A node's label, in lines cut to fit `width`. A tile's title takes three lines. A box's takes one, ending, when it is
  * collapsed, with how many items it hides, and a parent's leaves by stage take the line under it.
  */
 export function labelOf(

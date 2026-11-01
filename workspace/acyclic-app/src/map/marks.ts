@@ -1,6 +1,6 @@
-// What a task carries besides its title: its thread's stripe down the left and its badge beside it, as the sidebar
+// What an item carries besides its title: its thread's stripe down the left and its badge beside it, as the sidebar
 // leads a thread's row with its badge, and an icon for its stage at the right, which its tint repeats so no stage is
-// told by colour alone. Drawn as one image per task, since the
+// told by colour alone. Drawn as one image per tile, since the
 // renderer gives a node a single label. Pure, so every stage's mark is tested without a canvas.
 
 import type { Stage } from "../api";
@@ -18,11 +18,11 @@ const BADGE = 20;
 /** The widest a badge is drawn for a two-digit number; a clone's initial ("32m") may run a little past it. */
 const BADGE_ROOM = 22;
 const ICON = 16;
-/** The room the marks take from a task's title: the stripe and badge at its left, the icon at its right. */
+/** The room the marks take from a tile's title: the stripe and badge at its left, the icon at its right. */
 export const MARKS_LEFT = BADGE_AT + BADGE_ROOM + 8;
 export const MARKS_RIGHT = ICON + 14;
 
-/** A task's thread as its marks show it: the line's colour, its badge's text (a number, or none for a dot) and ink. */
+/** A tile's thread as its marks show it: the line's colour, its badge's text (a number, or none for a dot) and ink. */
 export interface Thread {
   colour: string;
   number: string | null;
@@ -31,7 +31,7 @@ export interface Thread {
 
 const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** The marks' image for a task `width` by `height`, as SVG markup. */
+/** The marks' image for a tile `width` by `height`, as SVG markup. */
 export function markSvg(
   stage: Stage | null,
   thread: Thread | null,
@@ -73,7 +73,7 @@ export const BOX_TEXT_LEFT = TITLE - 4 + ICON + 6;
 
 /**
  * A box's marks: its chevron at the left of its title strip, then the icon of where its work stands as a whole, so a
- * done phase is told from one in progress or blocked at a glance, leading its title as a status leads a project's name.
+ * done box is told from one in progress or blocked at a glance, leading its title as a status leads a project's name.
  * Drawn over the strip, or a collapsed box's whole height.
  */
 export function boxMarkSvg(

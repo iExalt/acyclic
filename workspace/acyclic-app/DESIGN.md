@@ -10,7 +10,7 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 
 ## Primary tasks
 
-1. Settle what needs them: approve a thread, keep or drop an agent's proposal, unblock an item.
+1. Settle what needs them: approve a thread, keep or drop an agent's proposal, resolve a conflict.
 2. See where work stands: which threads are at work, which to start next, how each project is doing.
 3. Reshape the plan: add, move, link and edit items on the Map.
 
@@ -171,8 +171,8 @@ One radius, 8 px (`--radius`), for controls, tiles and panels. Sheets on a phone
   `?needs=<entry>`), so a reload, a copied link or a notification opens it again. A link opens over home, one history
   entry per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item
   shows archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a
-  thread's panel carries it beside the title, ticking in place. A device not yet paired loses the address through
-  pairing.
+  thread's panel carries it beside the title, ticking in place. A device not yet paired keeps the address through
+  pairing, so the link it opened shows once it is.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
   thread, project and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
@@ -268,7 +268,7 @@ before what went wrong.
   cross have none.
 - **Opening view.** The whole plan when it fits at 1:1 on a wide screen, or at a readable zoom (`READABLE`) on a
   phone; otherwise the first box's corner, its title and first item whole, at that zoom.
-- **Titles read whole.** A task's title takes up to three lines on its tile, cut short only past that; backticks,
+- **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.
 

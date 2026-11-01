@@ -1,4 +1,4 @@
-// The Overview home: what needs the user, the threads at work, the threads to start next, and each phase's progress,
+// The Overview home: what needs the user, the threads at work, the threads to start next, and each project's progress,
 // as lists to scan; each row opens what it names. Nothing here acts on the plan: a decision is made in Needs you,
 // where it is the entry's own, and a row here only opens it.
 
@@ -30,7 +30,7 @@ export interface OverviewProps {
   counts: ReadonlyMap<string, Counts>;
   waves: WavesView | null;
   outline: Outline | null;
-  /** The plan's items by id, for each phase's own progress. */
+  /** The plan's items by id, for each project's own progress. */
   items: ReadonlyMap<string, Pick<Item, "progress">>;
   /** Opens Needs you, at the entry `key` names if given. */
   onNeeds: (key?: string) => void;

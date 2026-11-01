@@ -80,14 +80,14 @@ describe("items", () => {
 });
 
 describe("threads", () => {
-  it("lists threads, titling one with a conflicted title by its id", async () => {
+  it("lists threads, titling one with a conflicted title by its first value", async () => {
     const { fetcher, sent } = server({
       thread: {
         ok: true,
         data: {
           threads: [
             { id: "t", title: "T", waits_for: [] },
-            { id: "u", title: { conflict: ["U", "V"] }, waits_for: ["t"] },
+            { id: "u", title: { conflict: [null, "V"] }, waits_for: ["t"] },
           ],
           waves: [["t"], ["u"]],
           anytime: [],
@@ -97,7 +97,7 @@ describe("threads", () => {
     await expect(threads(fetcher)).resolves.toEqual({
       threads: [
         { id: "t", title: "T", waitsFor: [] },
-        { id: "u", title: "u", waitsFor: ["t"] },
+        { id: "u", title: "V", waitsFor: ["t"] },
       ],
       waves: [["t"], ["u"]],
       anytime: [],

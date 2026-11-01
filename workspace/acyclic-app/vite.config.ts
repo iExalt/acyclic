@@ -49,7 +49,10 @@ function fontNotice(): Plugin {
   };
 }
 
-/** The most a chunk the app loads in normal use may weigh, minified, as Vite's own warning has it by default. */
+/**
+ * The most a JavaScript chunk may weigh, minified, as Vite's own warning has it by default. ELK's worker, which every
+ * Map loads, isn't a chunk but a file the app opens by its address (`?url`), so it is outside the budget.
+ */
 const CHUNK_BUDGET = 500 * 1000;
 
 /**

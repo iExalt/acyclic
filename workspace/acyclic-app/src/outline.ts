@@ -1,4 +1,4 @@
-// The sidebar's outline: the plan's phases, the top-level items the Map draws as zones, each opening into the threads
+// The sidebar's outline: the plan's projects, the top-level items the Map draws as zones, each opening into the threads
 // at work in it, and the threads in none. Pure, so the rules are tested without a browser.
 
 import { dependencyOrder, topOrder } from "./map/elk";
@@ -7,20 +7,20 @@ import type { Model } from "./map/model";
 export interface PhaseRow {
   id: string;
   title: string;
-  /** The threads with work under it, in the order given; `also` names the other phases each has work in. */
+  /** The threads with work under it, in the order given; `also` names the other projects each has work in. */
   threads: { id: string; also: string[] }[];
 }
 
 export interface Outline {
   phases: PhaseRow[];
-  /** Threads with work in no phase: none at all, or only in items at the top level. */
+  /** Threads with work in no project: none at all, or only in items at the top level. */
   others: string[];
 }
 
 /**
  * The outline of `model` as the Map shows it, archived subtrees only when `showArchived`, for `threads` in their
- * order, and its phases in the order the Map packs its top level in: each after those it waits on. A phase is a
- * top-level item with something under it shown; a thread is in a phase when any item shown in it, the phase itself
+ * order, and its projects in the order the Map packs its top level in: each after those it waits on. A project is a
+ * top-level item with something under it shown; a thread is in a project when any item shown in it, the project itself
  * included, is in the thread.
  */
 export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
@@ -51,7 +51,7 @@ export function outlineOf(model: Model, threads: readonly string[], showArchived
   };
 }
 
-/** The rows a selected item marks: its phase, unless it is a task at the top level, and its thread's row there. */
+/** The rows a selected item marks: its project, unless it is a tile at the top level, and its thread's row there. */
 export function currentRows(
   model: Model,
   outline: Outline,

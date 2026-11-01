@@ -12,7 +12,7 @@ import { type BoxLayout, type LayBox, LEAF, ROOT, type Size, scopes } from "./la
 import { type Model, visible } from "./model";
 import type { Point } from "./route";
 
-/** A box's padding, the space between its children, and the wider gap between its graph and the tasks aside. */
+/** A box's padding, the space between its children, and the wider gap between its graph and the tiles aside. */
 const PAD = 12;
 const GAP = 24;
 const ASIDE = 40;
@@ -26,7 +26,7 @@ const LAYERED = {
   // port, which splits on the way. Shared on both ends, an outgoing trunk and an incoming one could run as one line, and
   // a link would seem to join two items it doesn't.
   "elk.layered.mergeEdges": "false",
-  // Of the placements Brandes and Köpf's method makes, their balance: a task waiting on two sits centred under them,
+  // Of the placements Brandes and Köpf's method makes, their balance: a tile waiting on two sits centred under them,
   // as each pulls it equally, not under whichever the first placement favoured.
   "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   // Room at the top for the box's title strip.
@@ -100,7 +100,7 @@ export function topOrder(model: Model, showArchived: boolean): string[] {
 /**
  * A box's layout with its unlinked children aside: in order in columns on the left, then the graph as ELK laid it out,
  * moved right past them, or none when nothing in the box is linked. A column holds as many as fit the graph's height,
- * or a near-square grid's when that is taller, so a box of only unlinked tasks is about as tall as it is wide in tasks.
+ * or a near-square grid's when that is taller, so a box of only unlinked tiles is about as tall as it is wide in tiles.
  */
 export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string } & Size)[]): BoxLayout {
   const empty = { width: 2 * PAD, height: STRIP + PAD, at: {} };
