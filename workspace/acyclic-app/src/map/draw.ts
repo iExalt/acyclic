@@ -151,5 +151,14 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
       if (change.classes !== null) element.classes(change.classes);
     }
   });
+  // Cytoscape measures a new label only as it next draws, but keeps a label's bounds, and the texture it draws the
+  // label from, as first worked out: asked where a node is before then, it kept the old height, and a title that gained
+  // a line was drawn squeezed or cut into it until a reload. Measured now, it is drawn whole.
+  const relabelled = changes.update.filter((change) => change.data?.label !== undefined);
+  if (relabelled.length > 0) {
+    const measured = relabelled.reduce((all, change) => all.union(core.getElementById(change.id)), core.collection());
+    // A method the types leave out; false measures even what Cytoscape thinks it has measured.
+    (measured as unknown as { recalculateRenderedStyle(useCache: boolean): void }).recalculateRenderedStyle(false);
+  }
   return new Map(next.map((element) => [element.data.id, element]));
 }

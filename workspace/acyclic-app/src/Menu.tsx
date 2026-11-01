@@ -15,6 +15,49 @@ function close(menu: HTMLDetailsElement | null) {
   if (hidden) menu.querySelector("summary")?.focus();
 }
 
+/** The edge of the window a menu keeps clear of. */
+const MARGIN = 8;
+
+type Box = Pick<DOMRect, "top" | "bottom" | "left" | "height">;
+
+/**
+ * Where a menu `shown` opened from `button` goes so it is whole on screen, `floor` being as low as it may reach: null
+ * where it is whole already, else fixed to the window, below its button if it fits there, else above it, else on the
+ * side with more room, scrolling.
+ */
+export function placed(shown: Box, button: Box, floor: number, height: number): Partial<CSSStyleDeclaration> | null {
+  if (shown.bottom <= floor - MARGIN && shown.top >= MARGIN) return null;
+  const below = floor - MARGIN - (button.bottom + 6);
+  const above = button.top - 6 - MARGIN;
+  const down = shown.height <= below || (shown.height > above && below >= above);
+  return {
+    position: "fixed",
+    left: `${shown.left}px`,
+    right: "auto",
+    top: down ? `${button.bottom + 6}px` : "auto",
+    bottom: down ? "auto" : `${height - button.top + 6}px`,
+    maxHeight: `${Math.max(down ? below : above, 0)}px`,
+    overflowY: "auto",
+  };
+}
+
+/**
+ * Keeps an open menu whole on screen: one that would run past the foot of the panel it opens in, as a long one does in
+ * a phone's half sheet over the tab bar, is fixed to the window instead, which the panel's scrolling doesn't cut.
+ */
+function place(menu: HTMLDetailsElement) {
+  const body = menu.querySelector<HTMLElement>(".menu-body");
+  const button = menu.querySelector("summary");
+  if (body === null || button === null) return;
+  body.removeAttribute("style");
+  if (!menu.open) return;
+  let clip: Element | null = menu.parentElement;
+  while (clip !== null && getComputedStyle(clip).overflowY === "visible") clip = clip.parentElement;
+  const floor = Math.min(window.innerHeight, clip?.getBoundingClientRect().bottom ?? window.innerHeight);
+  const style = placed(body.getBoundingClientRect(), button.getBoundingClientRect(), floor, window.innerHeight);
+  if (style !== null) Object.assign(body.style, style);
+}
+
 /**
  * `up` opens the menu above its button, as at the foot of a sidebar; `list` makes it a list of actions, a row each,
  * rather than settings.
@@ -45,7 +88,7 @@ export function Menu({
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
   return (
-    <details className={up ? "menu up" : "menu"} ref={details}>
+    <details className={up ? "menu up" : "menu"} ref={details} onToggle={(event) => place(event.currentTarget)}>
       <summary aria-label={label} data-testid={testid}>
         <Icon of={MoreHorizontal} size={20} />
       </summary>

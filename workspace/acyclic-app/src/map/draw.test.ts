@@ -122,6 +122,25 @@ describe("draw", () => {
       update: [{ id: "sow", data: { label: "Sow seeds" }, unset: [], position: null, classes: null }],
     });
   });
+
+  it("measures a node it gives a new title at once, so its label isn't kept at the old one's height", () => {
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
+    const drawn = apply(core, new Map(), elements(start));
+    const measured: string[][] = [];
+    const prototype = Object.getPrototypeOf(core.collection()) as { recalculateRenderedStyle(useCache: boolean): void };
+    const spy = vi.spyOn(prototype, "recalculateRenderedStyle").mockImplementation(function (
+      this: cytoscape.Collection,
+    ) {
+      measured.push(this.map((one) => one.id()));
+    });
+    apply(
+      core,
+      drawn,
+      elements({ items: base.map((one) => (one.id === "sow" ? { ...one, title: "Sow seeds" } : one)) }),
+    );
+    spy.mockRestore();
+    expect(measured).toEqual([["sow"]]);
+  });
 });
 
 describe("a junction's dot", () => {
