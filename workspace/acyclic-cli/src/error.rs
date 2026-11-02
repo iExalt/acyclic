@@ -14,7 +14,8 @@ use serde_json::{Value as Json, json};
 /// What an unreadable state hints at, except from `doctor` itself.
 pub(crate) const DOCTOR_HINT: &str = "run acyclic doctor";
 /// What a state an earlier format version wrote hints at, from every command.
-const MIGRATE_HINT: &str = "written by an earlier acyclic: migrate the tracker";
+const MIGRATE_HINT: &str = "written by an earlier acyclic: read it with that version, or rebuild it with \
+                            `acyclic import` from a version-3 document";
 /// What a state a later format version wrote hints at.
 const LATER_HINT: &str = "written by a later acyclic: run that version";
 

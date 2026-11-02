@@ -378,11 +378,15 @@ fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
         assert_eq!((code, out["error"]["code"].as_str()), (6, Some("unreadable")), "{line}: {out}");
         out["error"].clone()
     };
-    // Every command, doctor too, says to migrate.
+    // Every command, doctor too, says what reads it.
     for line in ["item list", "doctor"] {
         let error = refused(line);
         assert!(error["message"].as_str().unwrap().contains("must be migrated"), "{line}: {error}");
-        assert_eq!(error["details"]["hint"], "written by an earlier acyclic: migrate the tracker");
+        assert_eq!(
+            error["details"]["hint"],
+            "written by an earlier acyclic: read it with that version, or rebuild it with `acyclic import` from a \
+             version-3 document"
+        );
     }
     // Any other unreadable state points to doctor, except from doctor itself.
     write_header("not a header".to_owned());

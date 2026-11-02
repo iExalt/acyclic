@@ -35,23 +35,24 @@ fn state(item: &Item) -> Json {
 }
 
 /// Evidence with both parts named, a part nobody gave as `null`: the commit as `owner/name@sha`, by its repository's
-/// name as it is now, and the words.
+/// name as it is now, and the words. A conflict is `{"conflict": [...]}`, each side in that shape, or `null` for a side
+/// that cleared it.
 pub(crate) fn evidence(model: &Model, value: &Value<acyclic_core::model::Evidence>) -> Json {
-    match value {
-        Value::One(e) => {
-            let commit = e.commit.as_ref().map(|sha| {
-                let repository = e.repository.as_ref().map(|id| {
-                    model
-                        .repositories
-                        .get(id)
-                        .and_then(repository_name)
-                        .unwrap_or_else(|| id.clone())
-                });
-                repository.map_or_else(|| sha.clone(), |repository| format!("{repository}@{sha}"))
+    let one = |e: &acyclic_core::model::Evidence| {
+        let commit = e.commit.as_ref().map(|sha| {
+            let repository = e.repository.as_ref().map(|id| {
+                model.repositories.get(id).and_then(repository_name).unwrap_or_else(|| id.clone())
             });
-            json!({"commit": commit, "text": e.text})
+            repository.map_or_else(|| sha.clone(), |repository| format!("{repository}@{sha}"))
+        });
+        json!({"commit": commit, "text": e.text})
+    };
+    match value {
+        Value::None => Json::Null,
+        Value::One(e) => one(e),
+        Value::Conflict(sides) => {
+            json!({"conflict": sides.iter().map(|side| side.as_ref().map_or(Json::Null, one)).collect::<Vec<_>>()})
         },
-        other => json!(other),
     }
 }
 
@@ -553,6 +554,24 @@ mod tests {
                 follows_the_conventions(shape, "item");
             }
         });
+    }
+
+    #[test]
+    fn conflicted_evidence_shows_each_side_as_evidence_shows() {
+        let r = tracker();
+        let model = Model::read(r.state()).unwrap();
+        let side = |repository: &str, commit: &str| acyclic_core::model::Evidence {
+            repository: Some(repository.into()),
+            commit: Some(commit.into()),
+            text: None,
+        };
+        let conflict =
+            Value::Conflict(vec![Some(side("r", "abc1234")), Some(side("gone", "def5678")), None]);
+        assert_eq!(
+            evidence(&model, &conflict),
+            json!({"conflict": [{"commit": "me/code@abc1234", "text": null},
+                                {"commit": "gone@def5678", "text": null}, null]})
+        );
     }
 
     #[test]
