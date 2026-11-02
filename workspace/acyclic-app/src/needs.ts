@@ -55,6 +55,8 @@ export interface NeedView {
   actions: Action[];
   /** Why there is no action here, or how to settle it elsewhere. */
   note: string | null;
+  /** The keys of the entries it stands for besides its own, where several are shown as one (`together`). */
+  merged?: string[];
 }
 
 interface Row {
@@ -390,14 +392,15 @@ function viewOf(
 /**
  * The entries with the merges that can't be confirmed for one cause in one repository as one, at the first's place:
  * eight entries each repeating the same why read as noise, and one fix settles them all. Its text counts them, its
- * rows list the first few, and its key is the first's.
+ * rows list the first few, and its key is the first's, the others' kept as `merged`.
  */
 export function together(views: readonly NeedView[]): NeedView[] {
   const out: NeedView[] = [];
   const at = new Map<string, number>();
   for (const view of views) {
     const repository = view.key.startsWith("unverified:") ? view.key.slice(view.key.lastIndexOf(":") + 1) : null;
-    const cause = repository === null ? null : `${repository}\n${view.note ?? ""}`;
+    // One with no item names nothing to count, so it stands alone.
+    const cause = repository === null || view.items.length === 0 ? null : `${repository}\n${view.note ?? ""}`;
     const first = cause === null ? undefined : at.get(cause);
     const was = first === undefined ? undefined : out[first];
     if (cause === null || first === undefined || was === undefined) {
@@ -413,6 +416,7 @@ export function together(views: readonly NeedView[]): NeedView[] {
       detail: null,
       items: items.slice(0, LISTED),
       more: all - Math.min(items.length, LISTED),
+      merged: [...(was.merged ?? []), view.key],
     };
   }
   return out;

@@ -75,6 +75,8 @@ export function NeedsList({
   // A filter whose entries have all been settled shows everything again.
   const shown = groups.some((one) => one.group === filter) ? filter : null;
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
+  // The entry asked for, or the one it was shown as part of.
+  const target = at === null ? null : (all.find(({ view }) => view.merged?.includes(at))?.view.key ?? at);
   const page = useRef<HTMLElement>(null);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
   // down it; with nothing left to settle, to the page.
@@ -99,11 +101,11 @@ export function NeedsList({
       (entry?.querySelector<HTMLElement>(was.control) ?? entry)?.focus({ preventScroll: true });
       return;
     }
-    if (at === null) return;
-    const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(at)}"]`);
+    if (target === null) return;
+    const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(target)}"]`);
     entry?.scrollIntoView({ block: "start" });
     entry?.focus({ preventScroll: true });
-  }, [at, left]);
+  }, [target, left]);
   /** Keeps where the view is, for the item or thread an entry opens, then opens it. */
   const leave = (entry: string, control: string, open: () => void) => () => {
     left.current = { filter: shown, top: page.current?.scrollTop ?? 0, entry, control };
@@ -136,7 +138,7 @@ export function NeedsList({
           <li
             key={view.key}
             data-need={view.key}
-            data-at={view.key === at || undefined}
+            data-at={view.key === target || undefined}
             // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
             // nothing; Tab reaches its actions.
             data-row

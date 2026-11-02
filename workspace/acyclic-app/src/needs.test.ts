@@ -113,6 +113,10 @@ describe("needView", () => {
       unverified("i9", "app", "not a commit id"),
     ];
     const shown = together(views);
+    expect(shown[0]?.merged).toEqual(["i3", "i4", "i5", "i6", "i7", "i8"].map((id) => `unverified:${id}:app`));
+    // One with no item names nothing to count, so two stay two.
+    const bare = needView({ kind: "unverified", item: null, repository: "app", reason: "x" }, none);
+    expect(together([bare, bare])).toHaveLength(2);
     expect(shown.map((view) => [view.key, view.text, view.items.length, view.more])).toEqual([
       ["unverified:i1:app", "Can't confirm 7 items' merges into app", 5, 2],
       ["unverified:i2:cli", "Can't confirm its merge into cli", 1, 0],
