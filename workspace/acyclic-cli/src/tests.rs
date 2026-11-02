@@ -694,11 +694,3 @@ fn id_prints_new_v7s_one_per_line_outside_any_tracker() {
         assert!(out.stderr.contains("1 to 1000"), "{out:?}");
     }
 }
-
-#[test]
-fn a_suggested_command_quotes_what_a_shell_would_split() {
-    use crate::commands::shell_word;
-    assert_eq!(shell_word("Follow-ups"), "Follow-ups");
-    assert_eq!(shell_word("The CLI's plan"), r"'The CLI'\''s plan'");
-    assert_eq!(shell_word(""), "''");
-}

@@ -481,3 +481,23 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     assert_eq!(renamed["changes"][0]["fields"]["title"]["to"], plan.items[0].title);
     assert_eq!(sh.run("import missing.json", &[]), 3);
 }
+
+#[test]
+fn a_parent_that_is_a_thread_suggests_a_command_that_pastes_as_it_is() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    assert_eq!(sh.run("thread add --title Q&A", AGENT), 0);
+    assert_eq!(sh.run("item add --title It's", AGENT), 0);
+    let meant = |sh: &mut Shell, line: &str| {
+        let (_, out) = sh.output(line, AGENT);
+        out["error"]["details"]["meant"].as_str().map(str::to_owned)
+    };
+    assert_eq!(
+        meant(&mut sh, "item edit It's --parent Q&A").as_deref(),
+        Some(r"acyclic item edit 'It'\''s' --thread 'Q&A'")
+    );
+    assert_eq!(
+        meant(&mut sh, "item add --title New --parent Q&A").as_deref(),
+        Some("acyclic item add --title <TITLE> --thread 'Q&A'")
+    );
+}

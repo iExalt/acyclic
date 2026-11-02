@@ -22,7 +22,7 @@ body=$(cat <<EOF
 }
 EOF
 )
-id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$name\" or .name == \"$old_name\") | .id")
+id=$(gh api "repos/$repo/rulesets" --jq "[.[] | select(.name == \"$name\" or .name == \"$old_name\")] | first | .id // empty")
 if [ -n "$id" ]; then
   printf '%s' "$body" | gh api --method PUT "repos/$repo/rulesets/$id" --input - --jq '"updated ruleset \(.id)"'
 else

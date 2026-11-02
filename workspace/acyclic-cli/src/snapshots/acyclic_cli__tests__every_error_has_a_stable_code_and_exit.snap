@@ -1,6 +1,5 @@
 ---
 source: workspace/acyclic-cli/src/tests.rs
-assertion_line: 144
 expression: table
 ---
 2 invalid-name
