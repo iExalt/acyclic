@@ -425,7 +425,7 @@ export function App() {
    * edit `drawn` is drawn at once, its form closed, and if the write fails, the form opens again with what the user
    * wrote, unless the server turns out to hold it after all.
    */
-  const queued = useRef<{ body: Command; after: After; saved: (saved: boolean) => void }[]>([]);
+  const queued = useRef<{ body: Command; after: After; drawn: Pending | null; saved: (saved: boolean) => void }[]>([]);
   /** The write out is a setting's, which holds nothing, so a write the user makes meanwhile waits for it. */
   const quietOut = useRef(false);
   const send = useCallback(
@@ -433,7 +433,9 @@ export function App() {
       if (sending.current) {
         // Any other write sent while one is out was made through a control the busy state forgot to hold: dropped.
         if (after.background === undefined && !quietOut.current) return false;
-        return new Promise((saved) => queued.current.push({ body, after, saved }));
+        // One waiting behind a setting holds the controls as its own send would, so its form can't send it twice.
+        if (after.background === undefined) setBusy(true);
+        return new Promise((saved) => queued.current.push({ body, after, drawn, saved }));
       }
       sending.current = true;
       quietOut.current = after.background !== undefined;
@@ -539,7 +541,7 @@ export function App() {
       setBusy(false);
       // A setting changed while this was out goes now, in the order chosen.
       const next = queued.current.shift();
-      if (next !== undefined) void send(next.body, next.after).then(next.saved);
+      if (next !== undefined) void send(next.body, next.after, next.drawn).then(next.saved);
       return sent.write === "saved";
     },
     [fetchAll],
@@ -1165,8 +1167,9 @@ export function App() {
         onWrite={(level) => {
           setLevelChosen(level);
           void send(globalLevelCommand(level as Level), { select: null, pin: null, undo: true, background: true }).then(
+            // Refused, it goes back, unless a later pick has taken its place.
             (saved) => {
-              if (!saved) setLevelChosen(null);
+              if (!saved) setLevelChosen((was) => (was === level ? null : was));
             },
           );
         }}

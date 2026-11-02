@@ -99,7 +99,11 @@ export function ThreadPanel({
   const setting = (name: string, value: string, command: Command) => {
     setChosen((was) => ({ ...was, [name]: value }));
     void onSetting(command).then((saved) => {
-      if (!saved) setChosen(({ [name]: _, ...rest }) => rest);
+      // Refused, it goes back, unless a later pick has taken its place.
+      if (!saved)
+        setChosen((was) =>
+          was[name] === value ? Object.fromEntries(Object.entries(was).filter(([n]) => n !== name)) : was,
+        );
     });
   };
   const awaitingRef = useRef(awaitingNow);
