@@ -987,7 +987,7 @@ button.project-title {
   font-weight: 600;
   text-align: left;
 }
-.thread-tile[aria-pressed="true"] {
+.thread-tile[aria-current="true"] {
   border-color: var(--ink);
   border-left-color: var(--line, var(--ink));
 }

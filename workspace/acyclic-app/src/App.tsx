@@ -385,8 +385,8 @@ export function App() {
     [selectOnly],
   );
   /**
-   * Takes the user to the Map for a thread: picked, its panel open, and its items framed in the part of the Map the
-   * panel leaves, unlike `pickThread`.
+   * Takes the user to the Map for a thread, as its row or tile anywhere does: picked, its panel open, and its items
+   * framed in the part of the Map the panel leaves.
    */
   const toThread = useCallback((id: string) => {
     setSelected(null);
@@ -404,14 +404,6 @@ export function App() {
     if (thread === id && view === "map" && selected === null) setThread(null);
     else toThread(id);
   };
-  /**
-   * Picks a thread, as a tile in the Threads view does, or unpicks the one picked, leaving the Map's view alone
-   * unless nothing of the thread is in it.
-   */
-  const pickThread = useCallback((id: string) => {
-    setSelected(null);
-    setThread((was) => (was === id ? null : id));
-  }, []);
 
   /**
    * Sends an edit; once saved, reloads the plan and brings `after.select` into view with `after.pin` held still. An
@@ -1260,7 +1252,7 @@ export function App() {
           <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1>
         ) : null}
         {view === "threads" && waves !== null ? (
-          <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
+          <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={toThread} />
         ) : null}
         {view === "overview" ? (
           <Overview
