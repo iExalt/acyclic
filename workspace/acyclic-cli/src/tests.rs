@@ -47,13 +47,13 @@ fn output_is_pretty_at_a_terminal_and_json_in_a_pipe_unless_said_otherwise() {
     };
     let (tty, pipe) = (Some(80), None);
     // An agent's tool reads a pipe, so agents get JSON without asking.
-    assert_eq!(output("acyclic list", pipe), Json);
-    assert_eq!(output("acyclic list", tty), Pretty);
+    assert_eq!(output("acyclic item list", pipe), Json);
+    assert_eq!(output("acyclic item list", tty), Pretty);
     // The flag overrides the terminal.
-    assert_eq!(output("acyclic list -o json", tty), Json);
-    assert_eq!(output("acyclic list -o pretty", pipe), Pretty);
+    assert_eq!(output("acyclic item list -o json", tty), Json);
+    assert_eq!(output("acyclic item list -o pretty", pipe), Pretty);
     // At a terminal, an error is pretty's line on standard error.
-    let args = ["acyclic", "show", "a1", "--tracker", "/nonexistent"].map(Into::into);
+    let args = ["acyclic", "item", "show", "a1", "--tracker", "/nonexistent"].map(Into::into);
     let out = execute(args, &Env { terminal: tty, ..env(&[]) });
     assert!(out.stdout.is_empty() && out.stderr.starts_with("error: "), "{out:?}");
 }
@@ -70,7 +70,7 @@ fn a_tracker_clone_needs_no_home_or_mapping() {
     git(&["-C", "clone", "config", "acyclic.replica", "mac"]);
     let inside = dir.path().join("clone/deeper");
     std::fs::create_dir(&inside).unwrap();
-    let cli = args::Cli::try_parse_from(["acyclic", "list"]).unwrap();
+    let cli = args::Cli::try_parse_from(["acyclic", "item", "list"]).unwrap();
     // No HOME, so no mapping could be read.
     let found = context::tracker(&cli, &Env { cwd: inside, ..Env::default() }).unwrap();
     assert_eq!(found.canonicalize().unwrap(), dir.path().join("clone").canonicalize().unwrap());
@@ -169,7 +169,7 @@ fn run(line: &str) -> Outcome {
 #[test]
 fn usage_errors_and_help_are_text() {
     // A command line that doesn't parse explains itself on standard error, as other tools do.
-    for line in ["acyclic nonsense", "acyclic show", "acyclic link add a1 sideways a2"] {
+    for line in ["acyclic nonsense", "acyclic item show", "acyclic link add a1 sideways a2"] {
         let out = run(line);
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
         assert!(
@@ -182,7 +182,7 @@ fn usage_errors_and_help_are_text() {
         (out.code, out.stdout.trim()),
         (exit::OK, format!("acyclic {}", acyclic_core::VERSION).as_str())
     );
-    // The top level holds what every session uses, apart from the groups and the rest.
+    // The top level holds the groups, then the commands that act on the tracker or the tool.
     let help = run("acyclic --help");
     assert_eq!(help.code, exit::OK);
     insta::assert_snapshot!(help.stdout);
@@ -343,13 +343,13 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(
         found,
         [
-            "done: commit",
-            "done: repository",
             "import: dry_run",
             "import: file",
             "import: schema",
-            "repo show: repositories",
-            "show: items",
+            "item done: commit",
+            "item done: repository",
+            "item show: items",
+            "repository show: repositories",
             "thread show: threads",
         ]
     );
@@ -357,26 +357,34 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
         let command: args::Command = serde_json::from_value(value).unwrap();
         command.validate().map_err(|err| err.code)
     };
-    assert_eq!(refused(json!({"show": {"items": []}})), Err("usage"));
+    assert_eq!(refused(json!({"item": {"show": {"items": []}}})), Err("usage"));
     assert_eq!(refused(json!({"thread": {"show": {"threads": []}}})), Err("usage"));
-    assert_eq!(refused(json!({"done": {"item": "a", "commit": "c"}})), Err("usage"));
+    assert_eq!(refused(json!({"item": {"done": {"item": "a", "commit": "c"}}})), Err("usage"));
     assert_eq!(refused(json!({"import": {}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"file": "p", "schema": true}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"schema": true, "dry-run": true}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"schema": true}})), Ok(()));
     assert_eq!(refused(json!({"import": {"file": "p", "dry-run": true}})), Ok(()));
-    assert_eq!(refused(json!({"repo": {"show": {"repositories": []}}})), Err("usage"));
+    assert_eq!(refused(json!({"repository": {"show": {"repositories": []}}})), Err("usage"));
     for lease in [0, 481] {
-        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Err("usage"));
+        assert_eq!(
+            refused(json!({"thread": {"claim": {"thread": "t", "lease": lease}}})),
+            Err("usage")
+        );
     }
     for lease in [1, 480] {
-        assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Ok(()));
+        assert_eq!(refused(json!({"thread": {"claim": {"thread": "t", "lease": lease}}})), Ok(()));
     }
-    assert_eq!(refused(json!({"done": {"item": "a", "repository": "r", "commit": "c"}})), Ok(()));
+    assert_eq!(
+        refused(json!({"item": {"done": {"item": "a", "repository": "r", "commit": "c"}}})),
+        Ok(())
+    );
     // Unknown fields and the server's own command are refused when deserializing.
     assert!(
-        serde_json::from_value::<args::Command>(json!({"show": {"items": ["a"], "force": true}}))
-            .is_err()
+        serde_json::from_value::<args::Command>(
+            json!({"item": {"show": {"items": ["a"], "force": true}}})
+        )
+        .is_err()
     );
     assert!(serde_json::from_value::<args::Command>(json!({"serve": {"login": "x"}})).is_err());
     assert!(
@@ -452,14 +460,16 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
 #[test]
 fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
     for lease in ["0", "481", "999"] {
-        let err =
-            args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", lease]).unwrap_err();
+        let err = args::Cli::try_parse_from(["acyclic", "thread", "claim", "a", "--lease", lease])
+            .unwrap_err();
         assert!(err.to_string().contains("--lease takes 1 to 480 minutes"), "{err}");
         assert!(!err.to_string().contains("1..="), "{err}");
     }
-    assert!(args::Cli::try_parse_from(["acyclic", "claim", "a", "--lease", "480"]).is_ok());
+    assert!(
+        args::Cli::try_parse_from(["acyclic", "thread", "claim", "a", "--lease", "480"]).is_ok()
+    );
     // The help text says the same bound.
-    let help = run("acyclic help claim").stdout;
+    let help = run("acyclic help thread claim").stdout;
     assert!(help.contains(&format!("1 to {}", args::LEASE_MAX_MINUTES)), "{help}");
 }
 
@@ -540,6 +550,8 @@ fn every_command_follows_the_input_conventions() {
         ("link remove", "to"),
     ];
     let entities = ["ITEM", "THREAD", "REPOSITORY"];
+    // A long flag has the same short form, or none, in every command that takes it.
+    let mut shorts = std::collections::BTreeMap::new();
     for (path, command) in &commands {
         let longs: Vec<&str> = command.get_arguments().filter_map(clap::Arg::get_long).collect();
         for arg in command.get_arguments() {
@@ -553,6 +565,10 @@ fn every_command_follows_the_input_conventions() {
                     entities.contains(&shown.as_str()) || exceptions.contains(&(path.as_str(), id)),
                     "{path}: positional <{shown}> is neither an entity's id nor a listed exception"
                 );
+            }
+            if let Some(long) = arg.get_long().filter(|_| !arg.is_global_set()) {
+                let (short, first) = shorts.entry(long).or_insert((arg.get_short(), path.as_str()));
+                assert_eq!(*short, arg.get_short(), "--{long} in {path} and in {first}");
             }
             // A short flag is its long's initial, apart from the usual `-n` for a dry run.
             if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
@@ -580,9 +596,9 @@ fn every_command_follows_the_input_conventions() {
         commands.iter().filter_map(|(path, _)| path.strip_prefix(name)?.strip_prefix(' ')).collect()
     };
     for (name, verbs) in [
-        ("item", &["add", "edit"][..]),
+        ("item", &["add", "edit", "list", "show"][..]),
         ("thread", &["add", "edit", "list", "show"]),
-        ("repo", &["add", "edit", "list", "show"]),
+        ("repository", &["add", "edit", "list", "show"]),
     ] {
         for verb in verbs {
             assert!(group(name).contains(verb), "{name} {verb}");
@@ -591,12 +607,28 @@ fn every_command_follows_the_input_conventions() {
 }
 
 #[test]
-fn a_removed_command_such_as_graph_is_a_usage_error() {
+fn a_removed_or_moved_command_is_a_usage_error_at_its_old_place() {
     for line in ["acyclic graph", "acyclic thread set t1 --title T"] {
         let out = run(line);
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
         assert!(out.stderr.starts_with("error: unrecognized subcommand"), "{out:?}");
     }
+    // Each command that acts on one kind of record lives in its group alone, with no alias at the top.
+    for (group, line) in [
+        ("item", "show a"),
+        ("item", "list"),
+        ("item", "done a -e shipped"),
+        ("thread", "ready"),
+        ("thread", "claim t"),
+        ("thread", "release t"),
+        ("repository", "list"),
+    ] {
+        let top = format!("acyclic {line}");
+        assert!(args::Cli::try_parse_from(top.split(' ')).is_err(), "{top}");
+        let grouped = format!("acyclic {group} {line}");
+        assert!(args::Cli::try_parse_from(grouped.split(' ')).is_ok(), "{grouped}");
+    }
+    assert!(args::Cli::try_parse_from(["acyclic", "repo", "list"]).is_err());
 }
 
 #[test]
@@ -620,8 +652,8 @@ fn flags_that_contradict_each_other_are_usage_errors() {
     }
     for line in [
         "acyclic item edit a --area x --no-area y --no-notes --parent b",
-        "acyclic repo add r --owner o --name n --default-branch main",
-        "acyclic repo edit r --default-branch trunk",
+        "acyclic repository add r --owner o --name n --default-branch main",
+        "acyclic repository edit r --default-branch trunk",
     ] {
         assert_eq!(check(line), Ok(()), "{line}");
     }

@@ -26,7 +26,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 6
 {
   "error": {

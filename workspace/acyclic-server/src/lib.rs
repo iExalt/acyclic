@@ -617,7 +617,7 @@ pub fn router(config: Config, access: Access) -> Router {
 }
 
 fn routes(server: Arc<Server>, access: Access) -> Router {
-    // The API's answers are compressed when they're worth it: a whole tracker's `show` is megabytes of JSON, and a
+    // The API's answers are compressed when they're worth it: a whole tracker's `item show` is megabytes of JSON, and a
     // phone may reach the server through a relay. None of them holds a secret an attacker could guess at through
     // their compressed size: the session travels only in the request. The app's files are compressed already.
     let router = Router::new()

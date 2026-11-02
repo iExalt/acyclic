@@ -1,5 +1,5 @@
-//! What the read commands print: one summary row per entity, defined here once and shared by `list`, `show`, `ready`
-//! and `needs`. A row holds an entity's id and what to know before opening it; `show` adds the rest to the same
+//! What the read commands print: one summary row per entity, defined here once and shared by each group's `list`
+//! and `show`, `thread ready` and `needs`. A row holds an entity's id and what to know before opening it; `show` adds the rest to the same
 //! object. Nothing here is stored, so the core's types keep their own shape and the output follows the conventions in
 //! the README: records carry their own `id`, references are named for the entity, collections are arrays, counts sit
 //! under `counts`, booleans are never null, and times are `*_at`.
@@ -274,7 +274,7 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
         let command = match entity {
             "item" => "item edit",
             "thread" => "thread edit",
-            _ => "repo edit",
+            _ => "repository edit",
         };
         Some(format!(
             "acyclic {command} {id} --{flag} <{}>{clear}",
@@ -289,7 +289,7 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
         },
         ("repository", "default-branch") => edit("default-branch", false),
         ("item", "evidence") => Some(format!(
-            "acyclic done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --note <NOTE>)"
+            "acyclic item done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --evidence <TEXT>)"
         )),
         ("item", "archived") => Some(format!("acyclic item archive {id}")),
         ("item", "reopened") => Some(format!("acyclic item reopen {id}")),

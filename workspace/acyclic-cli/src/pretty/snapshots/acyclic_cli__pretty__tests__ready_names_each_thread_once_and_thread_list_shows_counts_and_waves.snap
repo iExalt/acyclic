@@ -1,6 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/pretty/tests.rs
-expression: "format!(\"{}\\n{}\", render(&command(\"ready\"), &ready, None),\nrender(&command(\"thread list\"), &threads, None))"
+expression: "format!(\"{}\\n{}\", render(&command(\"thread ready\"), &ready, None),\nrender(&command(\"thread list\"), &threads, None))"
 ---
 THREAD      ITEM  TITLE
 t1 Garden   beds  Beds

@@ -22,7 +22,7 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepoCommand, StateWord,
+    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepositoryCommand, StateWord,
     ThreadCommand,
 };
 use crate::context;
@@ -95,11 +95,11 @@ impl<'a> Session<'a> {
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
-            Command::Ready { include_archived } => {
+            Command::Thread(ThreadCommand::Ready { include_archived }) => {
                 self.ready(*include_archived)
             },
-            Command::List => self.list(),
-            Command::Show { items } => self.show(items),
+            Command::Item(ItemCommand::List) => self.list(),
+            Command::Item(ItemCommand::Show { items }) => self.show(items),
             Command::Needs => self.needs(),
             Command::Sync => self.sync(),
             Command::Doctor => self.doctor(),
@@ -192,7 +192,7 @@ impl<'a> Session<'a> {
                     Ok(json!({"from": from, "kind": word, "to": to}))
                 })
             },
-            Command::Done { item: id, repository, commit, note, force } => {
+            Command::Item(ItemCommand::Done { item: id, repository, commit, evidence: note, force }) => {
                 let ancestry = GitAncestry::new(context::clones(self.env)?);
                 self.write(|replica, by| {
                     let key = existing(replica, id)?;
@@ -223,7 +223,7 @@ impl<'a> Session<'a> {
                     Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
                 })
             },
-            Command::Release { thread } => self.write(|replica, by| {
+            Command::Thread(ThreadCommand::Release { thread }) => self.write(|replica, by| {
                 let key = existing_thread(replica, thread)?;
                 Ok(json!({"thread": thread, "released": claim::release(replica, &key, by.actor)}))
             }),
@@ -231,7 +231,7 @@ impl<'a> Session<'a> {
                 archive::reopen(replica, id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Claim { thread, lease, force } => self.claim(thread, *lease, *force),
+            Command::Thread(ThreadCommand::Claim { thread, lease, force }) => self.claim(thread, *lease, *force),
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
             Command::Thread(ThreadCommand::Add { thread, title, brief, repository }) => {
@@ -261,11 +261,11 @@ impl<'a> Session<'a> {
                     Ok(json!({"thread": thread}))
                 })
             },
-            Command::Repo(RepoCommand::List) => self.repositories(),
-            Command::Repo(RepoCommand::Show { repositories }) => {
+            Command::Repository(RepositoryCommand::List) => self.repositories(),
+            Command::Repository(RepositoryCommand::Show { repositories }) => {
                 self.show_repositories(repositories)
             },
-            Command::Repo(RepoCommand::Add {
+            Command::Repository(RepositoryCommand::Add {
                 repository,
                 owner,
                 name,
@@ -281,7 +281,7 @@ impl<'a> Session<'a> {
                     Ok(json!({"repository": repository}))
                 })
             },
-            Command::Repo(RepoCommand::Edit {
+            Command::Repository(RepositoryCommand::Edit {
                 repository,
                 owner,
                 name,
@@ -477,7 +477,7 @@ impl<'a> Session<'a> {
                 CliError::new(
                     "not-found",
                     exit::NOT_FOUND,
-                    format!("no repository record {id}; `acyclic repo list` lists them"),
+                    format!("no repository record {id}; `acyclic repository list` lists them"),
                 )
             })?;
             shown.push(view::repo_show(&model, record));
@@ -629,7 +629,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
         return Err(CliError::new(
             "not-found",
             exit::NOT_FOUND,
-            format!("no repository record {id}; `acyclic repo list` lists them"),
+            format!("no repository record {id}; `acyclic repository list` lists them"),
         ));
     };
     let missing: Vec<&str> = [
@@ -646,7 +646,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     Err(CliError::refused(
         "incomplete-repository",
         format!(
-            "repository record {id} is missing {}; set it with `acyclic repo edit {id}`",
+            "repository record {id} is missing {}; set it with `acyclic repository edit {id}`",
             missing.join(", ")
         ),
     )
@@ -680,13 +680,13 @@ fn check_finish(
         }
         return Err(CliError::refused(
             "not-ready",
-            format!("item {id} can't be finished yet: it has open children or is held back; `acyclic show {id}` says which"),
+            format!("item {id} can't be finished yet: it has open children or is held back; `acyclic item show {id}` says which"),
         )
         .with(json!({"readiness": status, "open": open, "held": held})));
     }
     Err(CliError::refused(
         "not-ready",
-        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show {id}` says which"),
+        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show {id}` says which"),
     )
     .with(json!({"readiness": status})))
 }

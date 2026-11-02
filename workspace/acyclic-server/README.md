@@ -52,7 +52,7 @@ the empty 404 that `up --tailscale` gives a path outside its secret.
 
 ## The API
 
-`POST /api/command` takes one of the CLI's commands as JSON, such as `{"show": {"items": ["a"]}}` or
+`POST /api/command` takes one of the CLI's commands as JSON, such as `{"item": {"show": {"items": ["a"]}}}` or
 `{"item": {"add": {"item": "a", "title": "A"}}}`, runs it as the user, and answers with the CLI's envelope. It runs
 every read and write, but nothing that sets up or syncs the clone, or reads or writes the server's files. The tracker,
 the actor and the clock are the server's. Requests must be `application/json`, and a browser's must come from the

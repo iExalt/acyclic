@@ -57,7 +57,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     // An agent reopening finished work: news for the user.
     let reopen = |n: u32| {
         run(json!({"item": {"add": {"item": format!("p{n}"), "title": format!("P{n}")}}}));
-        run(json!({"done": {"item": format!("p{n}"), "note": "n", "force": true}}));
+        run(json!({"item": {"done": {"item": format!("p{n}"), "evidence": "n", "force": true}}}));
         let edit = json!({"item": {"reopen": {"item": format!("p{n}")}}});
         let (code, answer) = acyclic_cli::call_as(
             serde_json::from_value(edit).unwrap(),
@@ -150,7 +150,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     let user = |command: Value| call(&router, Method::POST, "/api/command", command.to_string());
     for command in [
         json!({"item": {"add": {"item": "m", "title": "M"}}}),
-        json!({"done": {"item": "m", "note": "n", "force": true}}),
+        json!({"item": {"done": {"item": "m", "evidence": "n", "force": true}}}),
         json!({"item": {"reopen": {"item": "m"}}}),
     ] {
         assert_eq!(user(command).await.0, StatusCode::OK);

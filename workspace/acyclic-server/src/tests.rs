@@ -273,14 +273,14 @@ fn the_server_runs_only_the_commands_it_allows() {
         (status, code(&body))
     };
     // A read passes every check and runs; the tracker clone is missing, so it fails as the CLI's would.
-    let (status, code) = post(&pass, r#"{"show": {"items": ["a"]}}"#);
+    let (status, code) = post(&pass, r#"{"item": {"show": {"items": ["a"]}}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     // So does a write.
     let (status, code) = post(&pass, r#"{"item": {"add": {"item": "a", "title": "A"}}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     assert_eq!(post(&pass, r#""sync""#), (StatusCode::FORBIDDEN, "not-allowed".into()));
     assert_eq!(
-        post(&pass, r#"{"show": {"items": []}}"#),
+        post(&pass, r#"{"item": {"show": {"items": []}}}"#),
         (StatusCode::BAD_REQUEST, "usage".into())
     );
     assert_eq!(post(&pass, r#"{"serve": {}}"#), (StatusCode::BAD_REQUEST, "usage".into()));
@@ -294,32 +294,35 @@ fn the_server_runs_only_the_commands_it_allows() {
         assert_eq!(post(&pass, old), (StatusCode::BAD_REQUEST, "usage".into()), "{old}");
     }
     assert_eq!(
-        post(&pass[..2], r#""list""#),
+        post(&pass[..2], r#"{"item": "list"}"#),
         (StatusCode::UNSUPPORTED_MEDIA_TYPE, "not-json".into())
     );
     let foreign = [pass[0], pass[1], pass[2], ("origin", "https://elsewhere.example")];
-    assert_eq!(post(&foreign, r#""list""#), (StatusCode::FORBIDDEN, "wrong-origin".into()));
+    assert_eq!(
+        post(&foreign, r#"{"item": "list"}"#),
+        (StatusCode::FORBIDDEN, "wrong-origin".into())
+    );
 }
 
 #[test]
 fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
     let classify = |value: Value| serde_json::from_value::<Command>(value).unwrap().class();
     for read in [
-        json!("list"),
+        json!({"item": "list"}),
         json!("needs"),
-        json!({"ready": {}}),
-        json!({"show": {"items": ["a"]}}),
+        json!({"thread": {"ready": {}}}),
+        json!({"item": {"show": {"items": ["a"]}}}),
         json!({"thread": "list"}),
         json!({"thread": {"show": {"threads": ["t"]}}}),
-        json!({"repo": "list"}),
-        json!({"repo": {"show": {"repositories": ["r"]}}}),
+        json!({"repository": "list"}),
+        json!({"repository": {"show": {"repositories": ["r"]}}}),
     ] {
         assert_eq!(classify(read.clone()), Class::Read, "{read}");
     }
     for write in [
-        json!({"claim": {"thread": "t"}}),
-        json!({"release": {"thread": "t"}}),
-        json!({"done": {"item": "a", "note": "n"}}),
+        json!({"thread": {"claim": {"thread": "t"}}}),
+        json!({"thread": {"release": {"thread": "t"}}}),
+        json!({"item": {"done": {"item": "a", "evidence": "n"}}}),
         json!({"item": {"add": {"item": "a", "title": "A"}}}),
         json!({"item": {"edit": {"item": "a", "no-thread": true, "area": ["x"]}}}),
         json!({"item": {"archive": {"item": "a"}}}),
@@ -327,8 +330,8 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
         json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
         json!({"thread": {"edit": {"thread": "t", "no-brief": true}}}),
-        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
-        json!({"repo": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
+        json!({"repository": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
+        json!({"repository": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
     ] {
         assert_eq!(classify(write.clone()), Class::Write, "{write}");
     }
@@ -360,7 +363,7 @@ fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
     );
     assert_eq!((status, code(&body)), (StatusCode::SERVICE_UNAVAILABLE, "busy".into()));
     // Reads don't wait for it.
-    let (status, body) = send(&router, Method::POST, "/api/command", &pass, r#""list""#);
+    let (status, body) = send(&router, Method::POST, "/api/command", &pass, r#"{"item": "list"}"#);
     assert_ne!(code(&body), "busy", "{status}");
 }
 
@@ -475,7 +478,8 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     let json = ("content-type", "application/json");
     let paired = ("cookie", browser.as_str());
     let post = |pairs: &[(&str, &str)]| {
-        let (status, body) = send(&router, Method::POST, "/api/command", pairs, r#""list""#);
+        let (status, body) =
+            send(&router, Method::POST, "/api/command", pairs, r#"{"item": "list"}"#);
         (status, code(&body))
     };
     // The tracker clone is missing, so a request let in fails as the CLI would.
@@ -574,7 +578,7 @@ fn the_tailscale_port_answers_only_under_its_secret_taken_off_once() {
         Method::POST,
         &format!("/{secret}/api/command"),
         &[(IDENTITY, LOGIN), ("host", HOST_NAME), json],
-        r#""list""#,
+        r#"{"item": "list"}"#,
     );
     assert!(
         serde_json::from_str::<Value>(&body).is_ok_and(|v| v.get("ok").is_some()),
@@ -585,7 +589,7 @@ fn the_tailscale_port_answers_only_under_its_secret_taken_off_once() {
         Method::POST,
         &format!("/{secret}/api/command"),
         &[("host", HOST_NAME), json],
-        r#""list""#,
+        r#"{"item": "list"}"#,
     );
     assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "no-identity".to_owned()));
 }
@@ -631,7 +635,7 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
             (response.status(), sent, response.headers().get("etag").cloned())
         })
     };
-    let show = r#"{"show": {"items": ["a"]}}"#;
+    let show = r#"{"item": {"show": {"items": ["a"]}}}"#;
     let api = |accept: &str, body: &str| {
         encodings(Method::POST, "/api/command", &[("accept-encoding", accept)], body).1
     };
@@ -640,7 +644,7 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
     assert_eq!(api("gzip", show), ["gzip"]);
     assert_eq!(api("br", show), ["br"]);
     assert_eq!(api("identity", show), Vec::<String>::new());
-    assert_eq!(api("gzip", r#"{"repo": "list"}"#), Vec::<String>::new());
+    assert_eq!(api("gzip", r#"{"repository": "list"}"#), Vec::<String>::new());
     // The app's files keep the one encoding they were built with, if any, for GET, HEAD and a 304 alike.
     let built = acyclic_app_assets::get("/index.html").unwrap().gz.is_some();
     let expected: Vec<String> = if built { vec!["gzip".into()] } else { Vec::new() };
@@ -672,7 +676,7 @@ fn every_command_the_app_sends_runs_through_the_api() {
     run(json!({"item": {"add": {"item": "b", "title": "B", "parent": "a"}}}));
     run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
     run(json!({"item": {"add": {"item": "e", "title": "E"}}}));
-    run(json!({"done": {"item": "e", "note": "n", "force": true}}));
+    run(json!({"item": {"done": {"item": "e", "evidence": "n", "force": true}}}));
     let examples: Value = serde_json::from_str(&examples).unwrap();
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();

@@ -20,13 +20,13 @@ fn lists_are_tables_fitted_to_a_terminal_and_bare_in_a_pipe() {
         json!({"id": "plant", "title": "Plant tomatoes", "state": "backlog", "parent": "beds", "thread": "t1",
                "readiness": {"status": "blocked", "waiting": {"beds": {"why": "open"}}}}),
     ]});
-    let piped = render(&command("list"), &list, None);
-    let narrow = render(&command("list"), &list, Some(60));
+    let piped = render(&command("item list"), &list, None);
+    let narrow = render(&command("item list"), &list, Some(60));
     // Piped, a row is one line with no borders, so `grep` and `cut` work on it.
     assert!(piped.lines().all(|line| line == line.trim()), "{piped}");
     assert!(narrow.lines().all(|line| line.chars().count() <= 60), "{narrow}");
     insta::assert_snapshot!(format!("{piped}\n{narrow}"));
-    assert_eq!(render(&command("list"), &json!({"items": []}), None), "none\n");
+    assert_eq!(render(&command("item list"), &json!({"items": []}), None), "none\n");
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
     let threads = json!({"threads": ready["ready"], "waves": [["t1"]], "anytime": ["t2"]});
     insta::assert_snapshot!(format!(
         "{}\n{}",
-        render(&command("ready"), &ready, None),
+        render(&command("thread ready"), &ready, None),
         render(&command("thread list"), &threads, None)
     ));
 }
@@ -61,7 +61,7 @@ fn records_are_blocks_and_writes_are_one_line() {
     let untitled = json!({"changed": true, "thread": "t2", "title": null});
     insta::assert_snapshot!(format!(
         "{}\n{}{}{}{}",
-        render(&command("show plant"), &shown, None),
+        render(&command("item show plant"), &shown, None),
         render(&command("item edit plant --thread t1"), &edited, None),
         render(&command("thread add t1 --title T"), &unchanged, None),
         render(&command("thread add t1 --title T"), &titled, None),
@@ -112,8 +112,8 @@ fn a_lone_list_is_its_table_and_notes_keep_their_column() {
     insta::assert_snapshot!(format!(
         "{}{}{}",
         render(&command("needs"), &needs, None),
-        render(&command("repo list"), &empty, None),
-        render(&command("show a1"), &noted, None)
+        render(&command("repository list"), &empty, None),
+        render(&command("item show a1"), &noted, None)
     ));
     let details = json!({"ok": false, "error": {"code": "not-found", "message": "no thread a1",
         "details": {"thread": "t"}}});

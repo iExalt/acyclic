@@ -3,13 +3,17 @@
   "examples": [
     {
       "name": "list",
-      "command": "list"
+      "command": {
+        "item": "list"
+      }
     },
     {
       "name": "show",
       "command": {
-        "show": {
-          "items": ["a", "b"]
+        "item": {
+          "show": {
+            "items": ["a", "b"]
+          }
         }
       }
     },

@@ -3,7 +3,7 @@
 
 import type { Command, Item } from "./api";
 
-/** The states a command may set; `done` is set by `acyclic done`, with evidence. */
+/** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
 export const STATES = ["backlog", "parked", "in-progress"] as const;
 export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
 /**
@@ -96,7 +96,7 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
 /** Why a value of a conflict can't be kept from the app, for a value `resolveCommand` gives no command for. */
 export function unsettledWhy(entity: Entity, field: string, value: unknown): string {
   if (entity === "item" && field === "state" && value === "done")
-    return "Keep done in a terminal: run acyclic done with its evidence";
+    return "Keep done in a terminal: run acyclic item done with its evidence";
   if (value === null) return "This field can't be cleared";
   return "Settle this one in a terminal: run acyclic needs to see how";
 }

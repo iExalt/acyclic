@@ -8,18 +8,18 @@ older copy.
 Set `ACYCLIC_ACTOR` first (see "Who you are"), then:
 
 ```sh
-acyclic ready
-acyclic claim <thread>
+acyclic thread ready
+acyclic thread claim <thread>
 # ...work its ready items in order, finishing each:
-acyclic done <item> --repository <record> --commit <id>
-acyclic done <item> --note "what was done"
+acyclic item done <item> --repository <record> --commit <id>
+acyclic item done <item> --evidence "what was done"
 # ...and when none of its items is left ready:
-acyclic release <thread>
+acyclic thread release <thread>
 ```
 
 A thread is the unit of work: you claim a whole thread, and you and your subagents work every member without
-claiming items. `ready` lists threads with ready work, best first, each with its ready `items` in order. Finish with
-the `--repository` and `--commit` form, or with `--note` when the result isn't a commit.
+claiming items. `thread ready` lists threads with ready work, best first, each with its ready `items` in order. Finish
+with the `--repository` and `--commit` form, or with `--evidence` when the result isn't a commit.
 
 ## Setting up a clone
 
@@ -65,8 +65,8 @@ done state or someone else's live claim on its thread. `acyclic link` has `add` 
 applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the plan
 format.
 
-Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
-and thread it belongs with.
+Before adding work, read the plan with `acyclic item list` and `acyclic thread list`, and give the item the parent,
+links and thread it belongs with.
 
 ## Output
 
@@ -82,36 +82,37 @@ and thread it belongs with.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
-- Writes report `changed`. A repeated command changes nothing, except `claim`, which writes its lease again; any
+- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which writes its lease again; any
   write can also commit a lease renewal that its own `changed` leaves out.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists the threads you may work: yours first, then those nobody holds, by title. Each row is the
-   thread's summary with its ready `items`. An item in no thread is never ready, and `acyclic needs` lists it as
-   `unthreaded`. `acyclic list` lists every item. `acyclic show <item>...` explains items, as an array in the order
-   given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
+1. `acyclic thread ready` lists the threads you may work: yours first, then those nobody holds, by title. Each row is
+   the thread's summary with its ready `items`. An item in no thread is never ready, and `acyclic needs` lists it as
+   `unthreaded`. `acyclic item list` lists every item. `acyclic item show <item>...` explains items, as an array in the
+   order given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
    `unverified`.
-2. `acyclic claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
-   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
-   through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
-   written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take
-   someone else's work. If `claim` or `acyclic thread show <thread>` says another holder wins a contest for your thread,
-   or `ready` stops listing a thread you hold, stop and run `acyclic release <thread>`: it drops only your claim. A
-   claim refused with readiness `resource-busy` means another thread's claim holds a resource one of your thread's open
-   items names: wait for that work, and don't force it. A lapsed lease frees your thread and its resources, so before
-   work that needs a resource after a pause, check that `acyclic thread show <thread>` still names you as holder.
-3. `acyclic done <item> --repository <record> --commit <id>` when an item is finished, or `--note` when the result
-   isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are done;
-   don't use `--force` to finish someone else's work. A parent needs no `done`: its `progress` reads done once every
-   leaf under it is, and work waiting on it waits on those leaves. Finished items hold no resources. `acyclic release
-   <thread>` once none of its items is left ready.
-4. `acyclic thread` and `acyclic repo` keep threads and repository records; an item's thread and repositories are set
-   with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts, and
-   `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
+2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
+   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any
+   write through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder
+   has written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take
+   someone else's work. If `thread claim` or `acyclic thread show <thread>` says another holder wins a contest for your
+   thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
+   only your claim. A claim refused with readiness `resource-busy` means another thread's claim holds a resource one of
+   your thread's open items names: wait for that work, and don't force it. A lapsed lease frees your thread and its
+   resources, so before work that needs a resource after a pause, check that `acyclic thread show <thread>` still names
+   you as holder.
+3. `acyclic item done <item> --repository <record> --commit <id>` when an item is finished, or `--evidence` when the
+   result isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are
+   done; don't use `--force` to finish someone else's work. A parent needs no `item done`: its `progress` reads done
+   once every leaf under it is, and work waiting on it waits on those leaves. Finished items hold no resources.
+   `acyclic thread release <thread>` once none of its items is left ready.
+4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread and repositories are
+   set with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts,
+   and `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
    open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
-   link them. `thread list` also puts the threads with work left in `waves`, first to last, each after the threads
-   its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under `anytime`.
+   link them. `thread list` also puts the threads with work left in `waves`, first to last, each after the threads its
+   work waits on (a row's `waits_for`), with those that wait on none and that none waits on under `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, and give each a title and brief. New or moved work joins the thread its parent passes down, or else the
    one its siblings share; an add, a move under another parent or an import reports it as `placed`. Threads whose
@@ -128,5 +129,5 @@ and thread it belongs with.
 A done item counts for what waits on it from another thread, or outside any thread, only once each commit in its
 evidence is on that repository's default branch, as last fetched in your clone (named in
 `~/.config/acyclic/clones.toml`). Until then they wait on it as `in-review`; run `git fetch` there before
-`acyclic ready`. They wait as `unverified`, with a reason, when the commit can't be checked, such as with no clone
-mapped: fix the mapping, since fetching won't help. Work finished without a commit counts at once.
+`acyclic thread ready`. They wait as `unverified`, with a reason, when the commit can't be checked, such as with no
+clone mapped: fix the mapping, since fetching won't help. Work finished without a commit counts at once.

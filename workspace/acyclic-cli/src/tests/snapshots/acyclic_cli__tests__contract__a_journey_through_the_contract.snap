@@ -77,7 +77,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic link add a2 waits-for a1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 0
 {
   "data": {
@@ -119,7 +119,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 0
 {
   "data": {
@@ -154,7 +154,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim a1
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim a1
 # exit 3
 {
   "error": {
@@ -167,7 +167,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim a1
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim t0
 # exit 0
 {
   "data": {
@@ -183,7 +183,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done a2
+$ ACYCLIC_ACTOR=session/mac acyclic item done a2
 # exit 1
 {
   "error": {
@@ -198,7 +198,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a2
         }
       }
     },
-    "message": "item a2 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show a2` says which"
+    "message": "item a2 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show a2` says which"
   },
   "ok": false
 }
@@ -212,7 +212,7 @@ error: invalid value 'done' for '--state <STATE>'
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/pi acyclic claim t0
+$ ACYCLIC_ACTOR=session/pi acyclic thread claim t0
 # exit 1
 {
   "error": {
@@ -231,7 +231,7 @@ $ ACYCLIC_ACTOR=session/pi acyclic claim t0
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/pi acyclic done a1
+$ ACYCLIC_ACTOR=session/pi acyclic item done a1
 # exit 1
 {
   "error": {
@@ -242,12 +242,12 @@ $ ACYCLIC_ACTOR=session/pi acyclic done a1
         "status": "claimed"
       }
     },
-    "message": "item a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic show a1` says which"
+    "message": "item a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show a1` says which"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done a1 -n shipped
+$ ACYCLIC_ACTOR=session/mac acyclic item done a1 -e shipped
 # exit 0
 {
   "data": {
@@ -263,7 +263,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done a1 -n shipped
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done a1 --note shipped
+$ ACYCLIC_ACTOR=session/mac acyclic item done a1 --evidence shipped
 # exit 0
 {
   "data": {
@@ -343,7 +343,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic release t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread release t0
 # exit 0
 {
   "data": {
@@ -354,7 +354,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic release t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic release t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread release t0
 # exit 0
 {
   "data": {
@@ -365,7 +365,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic release t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 0
 {
   "data": {
@@ -459,7 +459,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --title Renamed --parent nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show a2
+$ ACYCLIC_ACTOR=session/mac acyclic item show a2
 # exit 0
 {
   "data": [
@@ -510,7 +510,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 0
 {
   "data": {
@@ -565,7 +565,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic list
+$ ACYCLIC_ACTOR=session/mac acyclic item list
 # exit 0
 {
   "data": {
@@ -635,13 +635,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic list -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic item list -o pretty
 # exit 0
 ID  TITLE   STATE    THREAD  READINESS
 a1  First   done     t1      done
 a2  Second  backlog  t1      ready
 
-$ ACYCLIC_ACTOR=session/mac acyclic ready -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready -o pretty
 # exit 0
 THREAD   ITEM  TITLE
 t1 Work  a2    Second
@@ -652,7 +652,7 @@ ID  TITLE  MEMBERS  DONE  WAVE  HEADS
 t0  Start  0        0
 t1  Work   2        1     any   a2
 
-$ ACYCLIC_ACTOR=session/mac acyclic show a1 -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic item show a1 -o pretty
 # exit 0
 id         a1
 title      First
@@ -671,7 +671,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First -o pretty
 # exit 0
 no change to item a1 "First"
 
-$ ACYCLIC_ACTOR=session/mac acyclic show nope -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic item show nope -o pretty
 # exit 3
 
 # stderr
@@ -743,7 +743,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1 nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
+$ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
 # exit 0
 {
   "data": [
@@ -819,7 +819,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 a2
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show a1 nope
+$ ACYCLIC_ACTOR=session/mac acyclic item show a1 nope
 # exit 3
 {
   "error": {
@@ -841,7 +841,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --name code
+$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --name code
 # exit 2
 
 # stderr
@@ -849,11 +849,11 @@ error: the following required arguments were not provided:
   --owner <OWNER>
   --default-branch <DEFAULT_BRANCH>
 
-Usage: acyclic repo add --owner <OWNER> --name <NAME> --default-branch <DEFAULT_BRANCH> <REPOSITORY>
+Usage: acyclic repository add --owner <OWNER> --name <NAME> --default-branch <DEFAULT_BRANCH> <REPOSITORY>
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch main
 # exit 0
 {
   "data": {
@@ -863,7 +863,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch main
 # exit 0
 {
   "data": {
@@ -873,7 +873,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch trunk
+$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch trunk
 # exit 1
 {
   "error": {
@@ -883,12 +883,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
         "default_branch"
       ]
     },
-    "message": "repository record r1 exists with other --default-branch; change it with `acyclic repo edit r1 --default-branch …`"
+    "message": "repository record r1 exists with other --default-branch; change it with `acyclic repository edit r1 --default-branch …`"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo edit r1 --default-branch trunk
+$ ACYCLIC_ACTOR=session/mac acyclic repository edit r1 --default-branch trunk
 # exit 0
 {
   "data": {
@@ -898,13 +898,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo edit r1 --default-branch trunk
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo edit nope --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repository edit nope --default-branch main
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no repository record nope; `acyclic repo list` lists them"
+    "message": "no repository record nope; `acyclic repository list` lists them"
   },
   "ok": false
 }
@@ -920,7 +920,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --repository r1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo show r1
+$ ACYCLIC_ACTOR=session/mac acyclic repository show r1
 # exit 0
 {
   "data": [
@@ -950,7 +950,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-repository r1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo show r1
+$ ACYCLIC_ACTOR=session/mac acyclic repository show r1
 # exit 0
 {
   "data": [
@@ -967,7 +967,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo show r1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo list
+$ ACYCLIC_ACTOR=session/mac acyclic repository list
 # exit 0
 {
   "data": {
@@ -1154,7 +1154,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done g1
+$ ACYCLIC_ACTOR=session/mac acyclic item done g1
 # exit 1
 {
   "error": {
@@ -1168,7 +1168,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1
         "status": "parent"
       }
     },
-    "message": "item g1 can't be finished yet: it has open children or is held back; `acyclic show g1` says which"
+    "message": "item g1 can't be finished yet: it has open children or is held back; `acyclic item show g1` says which"
   },
   "ok": false
 }
@@ -1184,7 +1184,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit g1-a --thread t2
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic claim t2
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim t2
 # exit 0
 {
   "data": {
@@ -1200,7 +1200,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic claim t2
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done g1-a
+$ ACYCLIC_ACTOR=session/mac acyclic item done g1-a
 # exit 0
 {
   "data": {
@@ -1212,7 +1212,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic done g1-a
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done g1
+$ ACYCLIC_ACTOR=session/mac acyclic item done g1
 # exit 0
 {
   "data": {
@@ -1248,7 +1248,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic done g2 --force
+$ ACYCLIC_ACTOR=session/mac acyclic item done g2 --force
 # exit 0
 {
   "data": {
@@ -1353,7 +1353,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item delete d1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic show d1
+$ ACYCLIC_ACTOR=session/mac acyclic item show d1
 # exit 3
 {
   "error": {

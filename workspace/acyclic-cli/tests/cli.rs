@@ -125,12 +125,12 @@ fn two_machines_sync_through_a_shared_repository() {
         (code, &out["data"]["fetched"], out["data"]["joined"].as_bool()),
         (0, &serde_json::json!(["mac"]), Some(true))
     );
-    assert_eq!(sh.output("show a1", PI).0, 0);
+    assert_eq!(sh.output("item show a1", PI).0, 0);
     sh.run("item add b1 --title Second", PI);
     sh.run("sync", PI);
     let (_, out) = sh.output("sync", AGENT);
     assert_eq!(out["data"]["fetched"], serde_json::json!(["mac", "pi"]));
-    assert_eq!(sh.output("show b1", AGENT).0, 0, "and the first sees the second's");
+    assert_eq!(sh.output("item show b1", AGENT).0, 0, "and the first sees the second's");
 }
 
 #[test]

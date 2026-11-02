@@ -1,7 +1,7 @@
 //! Several agents working one replica at once, each a process in its own worktree running the binary as an agent does:
-//! `ready`, `claim` a thread, `done` its items, `release` it, until nothing is left. Their audit log shows every thread
-//! claimed once, every item finished once by the agent holding its thread, after everything it waited on, and no write
-//! lost.
+//! `thread ready`, `thread claim` a thread, `item done` its items, `thread release` it, until nothing is left. Their
+//! audit log shows every thread claimed once, every item finished once by the agent holding its thread, after
+//! everything it waited on, and no write lost.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -95,7 +95,7 @@ fn agent_child() {
         }
     };
     wait_for(&["go".to_owned()]);
-    let (code, contest) = acyclic(tracker, &actor, &format!("claim {CONTESTED}"));
+    let (code, contest) = acyclic(tracker, &actor, &format!("thread claim {CONTESTED}"));
     // No one moves on, and the winner finishes nothing, until every agent has tried: each loser sees a live claim.
     std::fs::write(report.with_extension("contested"), "").unwrap();
     wait_for(&(0..AGENTS).map(|agent| format!("agent{agent}.contested")).collect::<Vec<_>>());
@@ -105,7 +105,7 @@ fn agent_child() {
     claimed.extend(held.clone());
     loop {
         assert!(Instant::now() < deadline, "{actor} still working at the deadline");
-        let (code, ready) = acyclic(tracker, &actor, "ready");
+        let (code, ready) = acyclic(tracker, &actor, "thread ready");
         assert_eq!(code, 0, "{ready}");
         // One row per thread, the actor's own first; flattened to its items.
         let ready: Vec<Value> = ready["data"]["ready"]
@@ -120,18 +120,18 @@ fn agent_child() {
             if let Some(row) = ours {
                 let item = row["id"].as_str().unwrap().to_owned();
                 let (code, out) =
-                    acyclic(tracker, &actor, &format!("done {item} --note by-{actor}"));
+                    acyclic(tracker, &actor, &format!("item done {item} --evidence by-{actor}"));
                 assert_eq!(code, 0, "{out}");
                 done.push(item);
             } else {
-                let (code, out) = acyclic(tracker, &actor, &format!("release {thread}"));
+                let (code, out) = acyclic(tracker, &actor, &format!("thread release {thread}"));
                 assert_eq!((code, &out["data"]["released"]), (0, &json!(true)), "{out}");
                 held = None;
             }
             continue;
         }
         if ready.is_empty() {
-            let (_, list) = acyclic(tracker, &actor, "list");
+            let (_, list) = acyclic(tracker, &actor, "item list");
             let items = list["data"]["items"].as_array().unwrap();
             if items.iter().all(|item| item["state"] == "done") {
                 break;
@@ -143,7 +143,7 @@ fn agent_child() {
         // Agents start at different places in the list, so they mostly want different threads.
         let index: usize = actor.trim_start_matches("session/agent").parse().unwrap();
         let thread = ready[index % ready.len()]["thread"].as_str().unwrap().to_owned();
-        let (code, out) = acyclic(tracker, &actor, &format!("claim {thread}"));
+        let (code, out) = acyclic(tracker, &actor, &format!("thread claim {thread}"));
         match code {
             0 => {
                 claimed.push(thread.clone());
@@ -293,11 +293,11 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
             assert_eq!(theirs, ours, "{actor} {field}");
         }
     }
-    let (_, list) = acyclic(&tracker, "session/check", "list");
+    let (_, list) = acyclic(&tracker, "session/check", "item list");
     let list = list["data"]["items"].as_array().unwrap();
     assert!(list.iter().all(|item| item["state"] == "done"), "{list:?}");
     let every: Vec<&str> = items.iter().copied().collect();
-    let (_, shown) = acyclic(&tracker, "session/check", &format!("show {}", every.join(" ")));
+    let (_, shown) = acyclic(&tracker, "session/check", &format!("item show {}", every.join(" ")));
     for item in shown["data"].as_array().unwrap() {
         assert_eq!(item["claims"], json!([]), "nothing left claimed: {item}");
     }

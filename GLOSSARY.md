@@ -22,9 +22,13 @@ A top-level item with children; a top-level item is a project even when it also 
 _Avoid_: theatre, repository, phase
 
 **Gate**:
-The exit check an item must pass to be done. Not enforced yet: `done` doesn't check it. Today it is free text that sets
-the item's role and delays archiving a finished subtree.
+The exit check an item must pass to be done. Not enforced yet: `item done` doesn't check it. Today it is free text that
+sets the item's role and delays archiving a finished subtree.
 _Avoid_: acceptance criteria (as a separate concept), exit criteria
+
+**Evidence**:
+What `item done` records to show an item was finished: the commit that completed it, or a line of text.
+_Avoid_: note (that is the item's own notes field)
 
 **Area**:
 A long-lived topic tag on items, independent of the outcome tree.
