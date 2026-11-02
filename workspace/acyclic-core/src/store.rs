@@ -1007,8 +1007,10 @@ impl Tracker {
         crate::probe::mark("join: join");
         let mut state = replica.into_state();
         let journal = state.take_journal().expect("the join records");
-        let mut transaction = self.git.transaction()?;
         let outcome = if state.unchanged_since(&journal) {
+            if markers.is_empty() {
+                return Ok(Outcome::Unchanged);
+            }
             Outcome::Unchanged
         } else {
             let at = state.context.clocks.get(&self.replica).copied().unwrap_or(0);
@@ -1023,14 +1025,14 @@ impl Tracker {
             };
             let commit = self.git.import_commits(&[commit])?.remove(0);
             crate::probe::mark("join: commit");
-            transaction.update(&name, &commit, tip.as_deref())?;
             Outcome::Committed { commit }
         };
+        let mut transaction = self.git.transaction()?;
+        if let Outcome::Committed { commit } = &outcome {
+            transaction.update(&name, commit, tip.as_deref())?;
+        }
         for (marker, tip) in markers {
             transaction.set(marker, tip)?;
-        }
-        if let (Outcome::Unchanged, []) = (&outcome, markers) {
-            return Ok(outcome);
         }
         transaction.prepare()?;
         transaction.commit()?;
