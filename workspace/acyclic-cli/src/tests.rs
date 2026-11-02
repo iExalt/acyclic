@@ -102,6 +102,7 @@ fn every_error_has_a_stable_code_and_exit() {
         ArchiveError::NotDone("a1".into()).into(),
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
+        StoreError::Duplicate(id()).into(),
         StoreError::Locked { path: "x".into(), age_seconds: None }.into(),
         StoreError::Config("no replica".into()).into(),
         StoreError::RemoteMoved.into(),
@@ -144,13 +145,21 @@ fn every_error_has_a_stable_code_and_exit() {
     // Every code a command can raise is in the table above, so the next one added there must be added here.
     let known: std::collections::BTreeSet<&str> = errors.iter().map(|error| error.code).collect();
     let mut scanned = 0;
-    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs", "resolve.rs"] {
+    for file in
+        ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs", "resolve.rs", "error.rs"]
+    {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
         )
         .unwrap();
         let tests = source.find("#[cfg(test)]").unwrap_or(source.len());
-        for call in ["CliError::new(", "CliError::refused("] {
+        // error.rs builds its errors as `Self`.
+        let calls: &[&str] = if file == "error.rs" {
+            &["Self::new(", "Self::refused("]
+        } else {
+            &["CliError::new(", "CliError::refused("]
+        };
+        for call in calls {
             for (at, _) in source[..tests].match_indices(call) {
                 let rest = source[at + call.len()..].trim_start();
                 let code = rest.strip_prefix('"').and_then(|r| r.split('"').next());
@@ -684,4 +693,12 @@ fn id_prints_new_v7s_one_per_line_outside_any_tracker() {
         assert_eq!(out.code, exit::USAGE, "{count}");
         assert!(out.stderr.contains("1 to 1000"), "{out:?}");
     }
+}
+
+#[test]
+fn a_suggested_command_quotes_what_a_shell_would_split() {
+    use crate::commands::shell_word;
+    assert_eq!(shell_word("Follow-ups"), "Follow-ups");
+    assert_eq!(shell_word("The CLI's plan"), r"'The CLI'\''s plan'");
+    assert_eq!(shell_word(""), "''");
 }

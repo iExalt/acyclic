@@ -48,7 +48,7 @@ machines recorded and pushes yours.
 `--no-waits-for 'Beds'` undoes it, and `acyclic item add` takes `--waits-for` too. An edit that would make items wait
 for each other in a circle is refused.
 
-Only waits-for orders work: ids, numbering and thread membership never do, so say every dependency you mean.
+Only waits-for orders work: ids, titles and thread membership never do, so say every dependency you mean.
 
 ## Shaping the plan
 

@@ -1387,6 +1387,14 @@ def threads_journey(page, view, env, name, failures):
         page.get_by_test_id("threads-view").wait_for(timeout=5_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: closing {picked}'s panel didn't go back to the Threads view")
+    # A tile's "after" names each thread it waits on in words, not by its dot alone.
+    named = page.locator(".thread-tile .after > span").evaluate_all(
+        "spans => spans.map(s => [s.title, s.querySelector('.visually-hidden')?.textContent ?? ''])"
+    )
+    if not named:
+        failures.append(f"{name}: no tile said what it comes after, so naming those threads went unchecked")
+    elif any(not title or title != text for title, text in named):
+        failures.append(f"{name}: a tile's after dots weren't each named: {named[:3]}")
     # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; a
     # thread's panel kept over the view, picked on the Map, closes first.
     if view.get("has_touch"):

@@ -1,5 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/tests.rs
+assertion_line: 144
 expression: table
 ---
 2 invalid-name
@@ -22,6 +23,7 @@ expression: table
 1 not-done
 4 git
 4 conflict
+1 duplicate-replica
 4 locked
 5 no-replica
 4 remote-moved

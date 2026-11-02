@@ -28,12 +28,17 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
   const [hovered, setHovered] = useState<string | null>(null);
   // A state, not a ref: the arrows measure the columns once they are there, which a ref wouldn't tell them.
   const [columns, setColumns] = useState<HTMLDivElement | null>(null);
+  // Each a dot, named on hover and to a screen reader, as a badge alone says nothing in words.
   const badges = (ids: string[]) =>
-    ids.map((id) => (
-      <span key={id} style={lineStyle(lines.get(id))}>
-        <Badge line={lines.get(id)} />
-      </span>
-    ));
+    ids.map((id) => {
+      const name = lines.get(id)?.name ?? id;
+      return (
+        <span key={id} style={lineStyle(lines.get(id))} title={name}>
+          <Badge line={lines.get(id)} />
+          <span className="visually-hidden">{name}</span>
+        </span>
+      );
+    });
   const tile = (one: ThreadTile) => {
     const line = lines.get(one.id);
     return (

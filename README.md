@@ -8,7 +8,7 @@ nothing runs agents in a cluster.
 ## North star
 
 - Decentralized and Git-native: every machine keeps its own replica and works offline; replicas merge through Git.
-- Threads and projects form a DAG with several kinds of edge: dependencies that hold work back, relationships and more.
+- Items form a DAG whose edges are waits-for: work that holds other work back until it is done.
 - "Automatic" (well, model- or agent-assisted) placement and connection of new bugs, issues and feature requests as
   leaves in the DAG.
 - Agent runs: spawn agents to tackle an issue, a thread, or a whole (sub)tree of issues, each run in its own pod in

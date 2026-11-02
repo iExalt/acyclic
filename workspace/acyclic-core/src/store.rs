@@ -111,7 +111,7 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Git(message) => write!(f, "git failed: {message}"),
-            Self::Conflict => write!(f, "another writer moved the ref first"),
+            Self::Conflict => write!(f, "something outside the batch lock moved the ref first"),
             Self::Locked { path, age_seconds } => {
                 write!(f, "a ref is locked by {}", path.display())?;
                 if let Some(age) = age_seconds {
