@@ -57,14 +57,6 @@ pub fn actor(cli: &Cli, env: &Env) -> Result<String, CliError> {
 }
 
 fn checked_actor(actor: &str) -> Result<String, CliError> {
-    // The operator writes through the library with its own identity; a command line naming it could start runs.
-    if actor.starts_with(acyclic_core::scope::OPERATOR) {
-        return Err(CliError::new(
-            "operator-actor",
-            exit::USAGE,
-            format!("{actor} is the operator's identity, which no command line may claim"),
-        ));
-    }
     let valid = actor.split_once('/').is_some_and(|(kind, id)| !kind.is_empty() && !id.is_empty())
         && !actor.chars().any(char::is_whitespace);
     if valid {
@@ -73,7 +65,7 @@ fn checked_actor(actor: &str) -> Result<String, CliError> {
         Err(CliError::new(
             "invalid-actor",
             exit::USAGE,
-            format!("{actor:?} isn't a valid actor: use a name such as session/mac or run/r1"),
+            format!("{actor:?} isn't a valid actor: use a name such as session/mac"),
         ))
     }
 }
@@ -146,7 +138,7 @@ struct Clones {
     clones: BTreeMap<String, String>,
 }
 
-/// Where each repository record's clone is on this machine: the one `clones.toml` maps, else the server's mirror of it.
+/// Where each repository record's clone is on this machine: the one `clones.toml` maps.
 pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use<>, CliError> {
     let home = home(env);
     let mapping = match &home {
@@ -169,33 +161,10 @@ pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use
         },
         None => BTreeMap::new(),
     };
-    let env = env.clone();
-    Ok(move |record: &Repository| match mapping.get(&record.id) {
-        Some(path) => Some(match (path.strip_prefix("~/"), &home) {
+    Ok(move |record: &Repository| {
+        mapping.get(&record.id).map(|path| match (path.strip_prefix("~/"), &home) {
             (Some(rest), Some(home)) => home.join(rest),
             _ => Path::new(path).to_path_buf(),
-        }),
-        None => mirror(&env, &record.id).filter(|mirror| mirror.is_dir()),
+        })
     })
-}
-
-/// Where the server keeps its mirrors of code repositories: `$XDG_DATA_HOME/acyclic/mirrors`, by default under
-/// `~/.local/share`. `None` without a home.
-#[must_use]
-pub fn mirrors(env: &Env) -> Option<PathBuf> {
-    let data = match env.var("XDG_DATA_HOME").filter(|dir| Path::new(dir).is_absolute()) {
-        Some(dir) => PathBuf::from(dir),
-        None => home(env)?.join(".local/share"),
-    };
-    Some(data.join("acyclic/mirrors"))
-}
-
-/// The server's mirror of repository record `id`, `<id>.git` under [`mirrors`]. `None` without a home, or for an id
-/// that can't be a file's name; none starts with a dot, so the mirrors' directory keeps those for itself.
-#[must_use]
-pub fn mirror(env: &Env, id: &str) -> Option<PathBuf> {
-    let safe = !id.is_empty()
-        && !id.starts_with('.')
-        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte));
-    safe.then(|| mirrors(env)).flatten().map(|dir| dir.join(format!("{id}.git")))
 }

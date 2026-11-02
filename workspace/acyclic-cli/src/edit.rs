@@ -75,8 +75,6 @@ pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
     pub level: Change<Level>,
-    /// Whether its agent is a project-management agent; clearing it leaves an ordinary one.
-    pub pm: Change<bool>,
     pub repositories: Delta,
 }
 
@@ -86,7 +84,6 @@ pub(crate) struct RepositoryFields {
     pub owner: Option<String>,
     pub name: Option<String>,
     pub default_branch: Option<String>,
-    pub public: Option<bool>,
 }
 
 /// What a write did beyond writing: the proposals it left for the user, and the threads items inherited.
@@ -253,7 +250,7 @@ fn scope_already(
                 return Ok(false);
             }
             thread.is_none()
-                || scope::classify(model, actor) != scope::Actor::User
+                || scope::classify(actor) != scope::Actor::User
                 || !scope::unapproved(state, model)?.iter().any(|u| u.item == *item)
         },
         ScopeEdit::ItemRepository { item, repository, present } => {
@@ -485,7 +482,6 @@ fn write_thread(
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
     write_change(replica, &key, thread_field::AUTONOMY, &fields.level, by)?;
-    write_change(replica, &key, thread_field::PM_FLAG, &fields.pm, by)?;
     let mut written = Written::default();
     for change in thread_scope(id, fields) {
         scope_step(replica, &change, by, &mut written.proposals)?;
@@ -581,7 +577,6 @@ fn write_repository(
 ) -> Result<(), CliError> {
     set_if(replica, key, repo_field::OWNER, fields.owner.as_ref(), by)?;
     set_if(replica, key, repo_field::NAME, fields.name.as_ref(), by)?;
-    set_if(replica, key, repo_field::PUBLIC, fields.public.as_ref(), by)?;
     set_if(replica, key, repo_field::DEFAULT_BRANCH, fields.default_branch.as_ref(), by)
 }
 
@@ -605,7 +600,6 @@ pub(crate) fn add_repository(
         ("--owner", fields.owner.as_ref() == record.owner.one()),
         ("--name", fields.name.as_ref() == record.name.one()),
         ("--default-branch", fields.default_branch.as_ref() == record.default_branch.one()),
-        ("--public/--private", fields.public.as_ref() == record.public.one()),
     ] {
         if !same {
             differs.push(flag);

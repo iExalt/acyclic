@@ -153,8 +153,7 @@ pub fn reasons(
     {
         found.push(Reason::Finished);
     }
-    let alive = |holder: &str| model.run_alive(holder);
-    for held in claim::covering(&replica.state, model, id, now, &alive)? {
+    for held in claim::covering(&replica.state, model, id, now)? {
         if held.holder != actor {
             found.push(Reason::Claimed { holder: held.holder });
         }

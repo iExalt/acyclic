@@ -98,26 +98,12 @@ pub enum Entry {
         /// The holder.
         holder: String,
     },
-    /// A run's claim names a run with no record.
-    UnknownRun {
-        /// The thread.
-        thread: String,
-        /// The holder.
-        holder: String,
-    },
     /// An open leaf in no thread, or in one with no record, which is never ready until it joins one.
     Unthreaded {
         /// The item.
         item: String,
         /// The command that puts it in a thread.
         fix: String,
-    },
-    /// A thread has more than one active run.
-    RunClash {
-        /// The thread.
-        thread: String,
-        /// Its active runs.
-        runs: Vec<String>,
     },
     /// An agent's edit to approved scope awaits keep or drop.
     Proposal {
@@ -223,8 +209,6 @@ impl Entry {
             | Self::ParentCycle { .. }
             | Self::Contest { .. }
             | Self::ResourceClash { .. }
-            | Self::UnknownRun { .. }
-            | Self::RunClash { .. }
             | Self::Proposal { .. }
             | Self::Unapproved { .. }
             | Self::NewBlocker { .. }
@@ -263,9 +247,6 @@ pub fn needs_you(
     claims(state, model, now, &mut entries)?;
     for clash in claim::clashes(state, model, now)? {
         entries.insert(Entry::ResourceClash { resource: clash.resource, holders: clash.holders });
-    }
-    for (thread, runs) in model.run_clashes() {
-        entries.insert(Entry::RunClash { thread, runs });
     }
     for proposal in scope::proposals(state)?.into_values() {
         if proposal.decision == Value::None {
@@ -400,9 +381,8 @@ fn claims(
     now: Millis,
     entries: &mut BTreeSet<Entry>,
 ) -> Result<(), Error> {
-    let alive = |holder: &str| model.run_alive(holder);
     for id in model.threads.keys() {
-        let live = claim::live_with(state, &claim::thread_key(id)?, now, &alive)?;
+        let live = claim::live(state, &claim::thread_key(id)?, now)?;
         let mut holders: Vec<String> = Vec::new();
         for held in &live {
             if !holders.contains(&held.holder) {
@@ -411,15 +391,6 @@ fn claims(
             if held.starts_in_future(now) {
                 entries
                     .insert(Entry::ClockAhead { thread: id.clone(), holder: held.holder.clone() });
-            }
-            let unknown = held.lease_expires.is_none()
-                && held
-                    .holder
-                    .strip_prefix("run/")
-                    .is_some_and(|run| !model.runs.contains_key(run));
-            if unknown {
-                entries
-                    .insert(Entry::UnknownRun { thread: id.clone(), holder: held.holder.clone() });
             }
         }
         if holders.len() > 1 {
@@ -502,11 +473,6 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
             thread.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
         {
             add(kind::THREAD, id, "repository", repository);
-        }
-    }
-    for (id, run) in &model.runs {
-        for thread in run.thread.all().into_iter().filter(|t| !model.threads.contains_key(*t)) {
-            add(kind::RUN, id, "thread", thread);
         }
     }
     for link in &model.links {

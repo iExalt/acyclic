@@ -9,7 +9,6 @@ import {
   itemEdit,
   keepCommand,
   levelHint,
-  pmCommand,
   reopenCommand,
   resolveCommand,
   revokeCommand,
@@ -45,8 +44,6 @@ describe("form commands", () => {
     expect(dropCommand("$proposal-2")).toEqual(example("drop"));
     expect(threadLevelCommand("t", "everything")).toEqual(example("a thread's own level"));
     expect(threadLevelCommand("t", null)).toEqual(example("the global level for a thread"));
-    expect(pmCommand("t", true)).toEqual(example("flag project management"));
-    expect(pmCommand("t", false)).toEqual(example("unflag project management"));
     expect(globalLevelCommand("blockers")).toEqual(example("the global level"));
   });
 });
@@ -76,11 +73,6 @@ describe("resolveCommand", () => {
     expect(resolveCommand("item", "a", "thread", null)).toEqual({ item: { edit: { item: "a", "no-thread": true } } });
     expect(resolveCommand("item", "a", "state", "done")).toBeNull();
     expect(resolveCommand("item", "a", "title", null)).toBeNull();
-    // One replica flagged the thread and another cleared the flag: either value settles it.
-    expect(resolveCommand("thread", "t", "pm-flag", true)).toEqual({ thread: { edit: { thread: "t", pm: true } } });
-    expect(resolveCommand("thread", "t", "pm-flag", null)).toEqual({
-      thread: { edit: { thread: "t", "no-pm": true } },
-    });
     expect(resolveCommand("thread", "t", "autonomy", "blockers")).toEqual({
       thread: { edit: { thread: "t", level: "blockers" } },
     });

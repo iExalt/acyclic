@@ -125,7 +125,7 @@ pub enum ArchiveError {
     },
     /// Reopening needs a done item.
     NotDone(String),
-    /// Only the user or a project-management run archives.
+    /// Only the user archives.
     NotAllowed(String),
 }
 
@@ -146,7 +146,7 @@ impl std::fmt::Display for ArchiveError {
                 write!(f, "{}", crate::say::list(reasons, "; "))
             },
             Self::NotAllowed(actor) => {
-                write!(f, "{actor} may not archive; the user or a project manager may")
+                write!(f, "{actor} may not archive; the user may")
             },
             Self::NotDone(id) => write!(f, "{id} isn't done, so there is nothing to reopen"),
         }
@@ -168,7 +168,7 @@ impl From<Error> for ArchiveError {
 }
 
 /// Archives an eligible root, judged against the replica's own view at the write's time. Archiving takes work out
-/// of `ready` and the graph, so only the user or a project-management run archives; any actor may reopen.
+/// of `ready` and the graph, so only the user archives; any actor may reopen.
 ///
 /// # Errors
 ///
@@ -181,7 +181,7 @@ pub fn archive(
 ) -> Result<(), ArchiveError> {
     model::existing(&replica.state, root)?;
     let model = Model::read(&replica.state)?;
-    if scope::classify(&model, by.actor) == scope::Actor::Agent {
+    if scope::classify(by.actor) == scope::Actor::Agent {
         return Err(ArchiveError::NotAllowed(by.actor.to_owned()));
     }
     let reasons = {

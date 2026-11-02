@@ -10,12 +10,11 @@ mod edit;
 mod hints;
 mod page;
 mod pretty;
-pub mod remote;
 mod view;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
@@ -23,8 +22,7 @@ use serde_json::{Value, json};
 use acyclic_core::time::rfc3339;
 
 use crate::args::{Cli, Command, Format, Serve, Up};
-pub use crate::commands::{Operation, Reach};
-pub use crate::context::{mirror, mirrors, now};
+pub use crate::context::now;
 use crate::error::{CliError, exit};
 
 /// Starts the server for `acyclic serve` or `acyclic up` on a tracker clone, and returns when it stops.
@@ -175,27 +173,6 @@ fn execute_with(
     if let Err(err) = cli.command.validate() {
         return failed(err);
     }
-    let local = matches!(
-        cli.command,
-        Command::Prime | Command::Completions { .. } | Command::Import { schema: true, .. }
-    );
-    if let Some(url) = env.var(remote::REMOTE).filter(|_| !local) {
-        return match remote::run(&cli, env, url) {
-            Ok(mut data) => match output {
-                Format::Json => Outcome::out(exit::OK, render(&json!({"ok": true, "data": data}))),
-                Format::Pretty => {
-                    timestamps(&mut data);
-                    Outcome::out(exit::OK, pretty::render(&cli.command, &data, env.terminal))
-                },
-            },
-            Err((code, envelope)) => match output {
-                Format::Json => Outcome::out(code, render(&envelope)),
-                Format::Pretty => {
-                    Outcome { code, stdout: String::new(), stderr: pretty::error(&envelope) }
-                },
-            },
-        };
-    }
     let start = match &cli.command {
         Command::Serve(options) => Some(Start::Serve(options)),
         Command::Up(options) => Some(Start::Up(options)),
@@ -276,162 +253,6 @@ fn answer(cli: &Cli, env: &Env) -> (u8, Value) {
     };
     timestamps(&mut envelope);
     (code, envelope)
-}
-
-/// What applying a run's operation did.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Applied {
-    /// The command ran, or the tracker refused it: either way its number is spent. The exit code and the envelope.
-    Ran(u8, Value),
-    /// The number was applied already, so nothing ran: the outcome recorded for it, if it was the run's latest.
-    Duplicate(Option<Value>),
-}
-
-/// Applies a run's operation to the tracker clone at `tracker`: `command`, as `run/<run>`, writing under the run's
-/// view and spending its number in the same batch. A command the tracker refuses spends its number too, with the
-/// refusal as its outcome, so the run's later operations aren't stuck behind it.
-///
-/// # Errors
-///
-/// A failure that says nothing about the command, such as the store failing, a gap in the run's numbers, or a
-/// replica that doesn't apply this run, as its exit code and envelope. The number stays unspent, so the run can send
-/// the operation again.
-pub fn apply(
-    operation: Operation,
-    command: Command,
-    tracker: PathBuf,
-    env: &Env,
-) -> Result<Applied, (u8, Value)> {
-    let cli = Cli {
-        tracker: Some(tracker),
-        actor: Some(format!("run/{}", operation.run)),
-        as_user: false,
-        output: Some(Format::Json),
-        command,
-    };
-    let duplicate =
-        |err: CliError| Applied::Duplicate(Some(err.details).filter(|details| !details.is_null()));
-    let failed = |err: CliError| (err.exit, err.envelope());
-    match cli.command.validate().and_then(|()| commands::apply(&cli, env, operation.clone())) {
-        Ok(data) => {
-            let mut envelope = json!({"ok": true, "data": data});
-            timestamps(&mut envelope);
-            Ok(Applied::Ran(exit::OK, envelope))
-        },
-        Err(err) if err.code == commands::DUPLICATE => Ok(duplicate(err)),
-        Err(err) if spends(&err) => match commands::refuse(&cli, env, operation, &err) {
-            Ok(()) => Ok(Applied::Ran(err.exit, err.envelope())),
-            Err(again) if again.code == commands::DUPLICATE => Ok(duplicate(again)),
-            Err(again) => Err(failed(again)),
-        },
-        Err(err) => Err(failed(err)),
-    }
-}
-
-/// Starts run `run` on `thread` in the clone at `tracker`, as the operator `operator` (`operator/<id>`).
-///
-/// # Errors
-///
-/// When the thread already has a run under way, or the tracker can't be opened or written, as an exit code and
-/// envelope.
-pub fn start_run(
-    operator: &str,
-    run: &str,
-    thread: &str,
-    tracker: &Path,
-    env: &Env,
-) -> Result<Value, (u8, Value)> {
-    commands::start_run(tracker, env, operator, run, thread)
-        .map_err(|err| (err.exit, err.envelope()))
-}
-
-/// Moves run `run` to `state` in the clone at `tracker`, as the operator `operator`.
-///
-/// # Errors
-///
-/// When the run can't move that way, or the tracker can't be opened or written, as an exit code and envelope.
-pub fn set_run_state(
-    operator: &str,
-    run: &str,
-    state: acyclic_core::model::RunState,
-    tracker: &Path,
-    env: &Env,
-) -> Result<Value, (u8, Value)> {
-    commands::set_run_state(tracker, env, operator, run, state)
-        .map_err(|err| (err.exit, err.envelope()))
-}
-
-/// Whether run `run` is under way on `thread` in the clone at `tracker`.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read, as an exit code and envelope.
-pub fn run_active(run: &str, thread: &str, tracker: &Path) -> Result<bool, (u8, Value)> {
-    commands::run_active(tracker, run, thread).map_err(|err| (err.exit, err.envelope()))
-}
-
-/// What run `run` on `thread` may reach of repository `owner`/`name` in the clone at `tracker`.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read, as an exit code and envelope.
-pub fn reach(
-    run: &str,
-    thread: &str,
-    owner: &str,
-    name: &str,
-    tracker: &Path,
-) -> Result<Reach, (u8, Value)> {
-    commands::reach(tracker, run, thread, owner, name).map_err(|err| (err.exit, err.envelope()))
-}
-
-/// Which of `threads` are finished in the clone at `tracker`: gone, or with every item done and no run under way.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read, as an exit code and envelope.
-pub fn finished(
-    threads: &std::collections::BTreeSet<String>,
-    tracker: &Path,
-) -> Result<std::collections::BTreeSet<String>, (u8, Value)> {
-    commands::finished(tracker, threads).map_err(|err| (err.exit, err.envelope()))
-}
-
-/// The repository records in the clone at `tracker`.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read, as an exit code and envelope.
-pub fn repositories(tracker: &Path) -> Result<Vec<acyclic_core::model::Repository>, (u8, Value)> {
-    commands::repositories(tracker).map_err(|err| (err.exit, err.envelope()))
-}
-
-/// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read, as an exit code and envelope.
-pub fn applied(run: &str, tracker: &Path) -> Result<u64, (u8, Value)> {
-    commands::applied(tracker, run).map_err(|err| (err.exit, err.envelope()))
-}
-
-/// Whether a failed operation spends its number: when the command itself was refused, as it would be again, but not
-/// when the store, the setup, the clock or the run's numbering failed, which a later try may get past.
-fn spends(err: &CliError) -> bool {
-    match err.exit {
-        exit::USAGE | exit::NOT_FOUND => true,
-        exit::REFUSED => !matches!(
-            err.code,
-            "sequence-gap"
-                | "wrong-replica"
-                | "clock-jump"
-                | "not-continuous"
-                | "id-reused"
-                | "inactive"
-                | "seq-taken"
-        ),
-        _ => false,
-    }
 }
 
 fn render(value: &serde_json::Value) -> String {

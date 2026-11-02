@@ -14,7 +14,7 @@ use std::process::Command;
 
 use acyclic_core::claim;
 use acyclic_core::export::{self, Scope};
-use acyclic_core::model::{self, By, ItemState, LinkKind, Model, RunState, SetField};
+use acyclic_core::model::{self, By, ItemState, LinkKind, Model, SetField};
 use acyclic_core::needs::{self, Entry};
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, Readiness};
@@ -88,11 +88,9 @@ impl Pair {
 
     /// One batch on `tracker` as `actor`, at `now` or the replica's latest time if later.
     fn edit(tracker: &Tracker, actor: &str, now: Millis, edit: Edit<'_>) {
-        let meta = Meta { actor: actor.to_owned(), run: None };
+        let meta = Meta { actor: actor.to_owned() };
         tracker
-            .batch(&meta, now, false, &|_, _| None, |replica, at| {
-                edit(replica, By { actor, at, seen: None })
-            })
+            .batch(&meta, now, false, &|_, _| None, |replica, at| edit(replica, By { actor, at }))
             .unwrap();
     }
 
@@ -309,8 +307,7 @@ fn claims_that_never_saw_each_other_contest_alike_on_both_until_the_loser_steps_
     pair.spread(&pair.mac);
     for (tracker, holder) in [(&pair.mac, "session/mac"), (&pair.pi, "session/pi")] {
         Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, "t", by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE)
-                .map(|_| ())?)
+            Ok(claim::claim(r, "t", by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
         });
     }
     pair.exchange();
@@ -352,7 +349,7 @@ fn claims_on_one_resource_clash_on_both() {
         [(&pair.mac, "session/mac", "gpu1"), (&pair.pi, "session/pi", "gpu2")]
     {
         Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, id, by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE).map(|_| ())?)
+            Ok(claim::claim(r, id, by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
         });
     }
     pair.exchange();
@@ -368,25 +365,6 @@ fn claims_on_one_resource_clash_on_both() {
 }
 
 #[test]
-fn two_runs_on_one_thread_clash_until_one_stops() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        Ok(model::set(r, &Key::new(kind::THREAD, "t")?, thread::TITLE, Some(&"T"), by)?)
-    });
-    pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| Ok(model::start_run(r, "r1", "t", by).map(|_| ())?));
-    pair.user(&pair.pi, &|r, by| Ok(model::start_run(r, "r2", "t", by).map(|_| ())?));
-    pair.exchange();
-    pair.assert_settled();
-    let clash = Entry::RunClash { thread: "t".into(), runs: vec!["r1".into(), "r2".into()] };
-    assert!(pair.needs(NOW).contains(&clash));
-    pair.user(&pair.pi, &|r, by| Ok(model::set_run_state(r, "r2", RunState::Stopped, by)?));
-    pair.spread(&pair.pi);
-    pair.assert_settled();
-    assert!(!pair.needs(NOW).contains(&clash));
-}
-
-#[test]
 fn a_claim_from_a_clock_running_ahead_is_listed_until_time_catches_up() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| {
@@ -396,7 +374,7 @@ fn a_claim_from_a_clock_running_ahead_is_listed_until_time_catches_up() {
     pair.spread(&pair.mac);
     let ahead = NOW + 30 * MINUTE;
     Pair::edit(&pair.pi, "session/pi", ahead, &|r, by| {
-        Ok(claim::claim(r, "t", by.actor, by.at, Some(60 * MINUTE), 480 * MINUTE).map(|_| ())?)
+        Ok(claim::claim(r, "t", by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
     });
     pair.exchange();
     pair.assert_settled();

@@ -1,7 +1,7 @@
 //! The commands. Reads build one model; writes run as one batch each and write nothing that is already so, so a
 //! repeated command changes nothing and commits nothing.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -17,7 +17,7 @@ use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::renumber;
 use acyclic_core::schema::{GLOBAL, item as field, kind, link as link_field, settings};
 use acyclic_core::scope;
-use acyclic_core::state::{Context, Key, Millis, Replica, ReplicaId, Sequence, State};
+use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
@@ -46,290 +46,6 @@ const MINUTE: Millis = 60 * 1000;
 const LEASE: Millis = 60 * MINUTE;
 /// The longest time lease.
 const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
-
-/// What a run's command must find in the tracker, inside the batch that writes it, to stay within the run's thread.
-#[derive(Debug)]
-enum Within {
-    /// The item is in the thread.
-    Item(String),
-    /// The link is the run's own: only the run wrote it.
-    OwnLink(String, model::LinkKind, String),
-}
-
-fn outside(thread: &str, what: impl std::fmt::Display) -> CliError {
-    CliError::refused("not-in-thread", format!("{what} is outside this run's thread {thread}"))
-}
-
-/// What `command` must find to stay within `thread`, or why it can't: a claim or a release of another thread, an add
-/// outside the thread, or an edit that moves an item's thread or drops its parent, which only the user does.
-fn within(command: &Command, thread: &str) -> Result<Vec<Within>, CliError> {
-    use Within::{Item, OwnLink};
-    let parent = |parent: &Option<String>| {
-        parent.iter().map(|parent| Item(parent.clone())).collect::<Vec<_>>()
-    };
-    match command {
-        Command::Claim { thread: named, .. } | Command::Release { thread: named } => {
-            if named == thread {
-                Ok(vec![])
-            } else {
-                Err(outside(thread, format!("thread {named}")))
-            }
-        },
-        Command::Done { item, .. } | Command::Item(ItemCommand::Reopen { item }) => {
-            Ok(vec![Item(item.clone())])
-        },
-        Command::Item(ItemCommand::Add { item, thread: named, parent: up, .. }) => {
-            if named.as_deref() == Some(thread) {
-                Ok(parent(up))
-            } else {
-                let item = item.as_deref().map(|id| format!(" {id}")).unwrap_or_default();
-                Err(outside(thread, format!("new item{item}, added with no thread or another")))
-            }
-        },
-        Command::Item(ItemCommand::Edit(edit)) => {
-            if edit.thread.is_some() || edit.no_thread || edit.no_parent {
-                return Err(outside(
-                    thread,
-                    format!("moving {} between threads or out from its parent", edit.item),
-                ));
-            }
-            Ok([Item(edit.item.clone())].into_iter().chain(parent(&edit.parent)).collect())
-        },
-        Command::Link(LinkCommand::Add { from, .. }) => Ok(vec![Item(from.clone())]),
-        Command::Link(LinkCommand::Remove { from, kind, to }) => {
-            Ok(vec![Item(from.clone()), OwnLink(from.clone(), kind.kind(), to.clone())])
-        },
-        _ => Ok(vec![]),
-    }
-}
-
-/// Refuses what `within` asks of the state now: an item counts as in the thread only when every value of its thread
-/// field names it, so a conflict over its thread keeps it out.
-fn check_within(
-    replica: &Replica,
-    needs: &[Within],
-    thread: &str,
-    actor: &str,
-) -> Result<(), CliError> {
-    if needs.is_empty() {
-        return Ok(());
-    }
-    let model = Model::read(replica.state())?;
-    for need in needs {
-        match need {
-            Within::Item(id) => {
-                let inside = model.items.get(id).is_some_and(|item| match &item.thread {
-                    Value::One(named) => named == thread,
-                    Value::Conflict(values) => {
-                        values.iter().all(|named| named.as_deref() == Some(thread))
-                    },
-                    Value::None => false,
-                });
-                if !inside {
-                    return Err(outside(thread, format!("item {id}")));
-                }
-            },
-            Within::OwnLink(from, kind, to) => {
-                let key = model::link_key(from, to, *kind)?;
-                let writers =
-                    replica.state().field(&key, link_field::PRESENT).into_iter().flatten();
-                if !writers.map(|(_, value)| value.actor.as_str()).all(|writer| writer == actor) {
-                    return Err(CliError::refused(
-                        "not-the-runs",
-                        format!(
-                            "the link from {from} to {to} is someone else's: a run removes only its own links"
-                        ),
-                    ));
-                }
-            },
-        }
-    }
-    Ok(())
-}
-
-/// Checks that `op` is the run's next operation, refusing a duplicate with [`DUPLICATE`] and its recorded outcome.
-fn next(replica: &Replica, op: &Operation, hash: &str) -> Result<(), CliError> {
-    match replica.sequence(&op.run, op.seq, hash)? {
-        Sequence::Next => Ok(()),
-        Sequence::Duplicate { latest, refusal } => {
-            let outcome = match (latest, refusal) {
-                (true, Some(refusal)) => json!({"ok": false, "code": refusal["code"]}),
-                (true, None) => json!({"ok": true}),
-                (false, _) => Json::Null,
-            };
-            Err(CliError::new(DUPLICATE, exit::OK, "the operation was applied already")
-                .with(outcome))
-        },
-    }
-}
-
-/// Applies a run's operation: its command, as the run, in a batch that checks and records its number. A command
-/// that writes nothing still has its number recorded, in a batch of its own.
-///
-/// # Errors
-///
-/// The command's error, or [`DUPLICATE`] with the recorded outcome when the number was applied already.
-pub fn apply(cli: &Cli, env: &Env, operation: Operation) -> Result<Json, CliError> {
-    let mut session = Session::open(cli, env)?;
-    session.within = within(&cli.command, &operation.thread)?;
-    session.hash = hash(&cli.command);
-    session.operation = Some(operation);
-    let data = session.dispatch(&cli.command)?;
-    if !session.recorded.get() {
-        session.record(None)?;
-    }
-    Ok(data)
-}
-
-/// Records a run's operation whose command the tracker refused, with the refusal as its outcome, so that sending it
-/// again gets the same answer rather than running it again, and the run's later operations aren't stuck behind it.
-///
-/// # Errors
-///
-/// When the store fails, or [`DUPLICATE`] when the number was recorded meanwhile.
-pub fn refuse(
-    cli: &Cli,
-    env: &Env,
-    operation: Operation,
-    refusal: &CliError,
-) -> Result<(), CliError> {
-    let mut session = Session::open(cli, env)?;
-    session.hash = hash(&cli.command);
-    session.operation = Some(operation);
-    session.record(Some(&json!({"code": refusal.code})))
-}
-
-/// Starts run `run` on `thread`, as the operator `operator`, which no command line may name.
-///
-/// # Errors
-///
-/// When the tracker can't be opened, the thread already has a run under way, or the store fails.
-pub fn start_run(
-    tracker: &Path,
-    env: &Env,
-    operator: &str,
-    run: &str,
-    thread: &str,
-) -> Result<Json, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let session = Session {
-        tracker: opened,
-        actor: operator.to_owned(),
-        now: context::now(env),
-        env,
-        operation: None,
-        recorded: Cell::new(false),
-        within: Vec::new(),
-        hash: String::new(),
-    };
-    session.write(|replica, by| {
-        model::start_run(replica, run, thread, by)?;
-        Ok(json!({"run": run, "thread": thread}))
-    })
-}
-
-/// Moves run `run` to `state`, as the operator `operator`.
-///
-/// # Errors
-///
-/// When the tracker can't be opened, the run can't move that way, or the store fails.
-pub fn set_run_state(
-    tracker: &Path,
-    env: &Env,
-    operator: &str,
-    run: &str,
-    state: model::RunState,
-) -> Result<Json, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let session = Session {
-        tracker: opened,
-        actor: operator.to_owned(),
-        now: context::now(env),
-        env,
-        operation: None,
-        recorded: Cell::new(false),
-        within: Vec::new(),
-        hash: String::new(),
-    };
-    session.write(|replica, by| {
-        model::set_run_state(replica, run, state, by)?;
-        Ok(json!({"run": run, "state": state}))
-    })
-}
-
-/// Whether run `run` is under way on `thread` in the clone at `tracker`.
-///
-/// # Errors
-///
-/// When the tracker can't be opened or read.
-pub fn run_active(tracker: &Path, run: &str, thread: &str) -> Result<bool, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let (_, state) = opened.load()?;
-    Ok(model::run_active(&state, run, thread))
-}
-
-/// What a run may reach of a repository it names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Reach {
-    /// The run isn't under way.
-    Inactive,
-    /// No repository record names it, or the run's thread doesn't hold it.
-    NotInThread,
-    /// More than one record in the run's thread names it, differing only in case.
-    Ambiguous,
-    /// The record, in the run's thread.
-    Found(model::Repository),
-}
-
-/// What run `run` on `thread` may reach of repository `owner`/`name` in the clone at `tracker`.
-pub fn reach(
-    tracker: &Path,
-    run: &str,
-    thread: &str,
-    owner: &str,
-    name: &str,
-) -> Result<Reach, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let (_, state) = opened.load()?;
-    if !model::run_active(&state, run, thread) {
-        return Ok(Reach::Inactive);
-    }
-    let model = Model::read(&state)?;
-    // Only records in the thread count, so a run learns nothing of those outside it.
-    let set = model.repository_set(thread);
-    let named: Vec<_> = model
-        .repositories_named(owner, name)
-        .into_iter()
-        .filter(|record| set.contains(&record.id))
-        .collect();
-    Ok(match named.as_slice() {
-        [] => Reach::NotInThread,
-        [record] => Reach::Found((*record).clone()),
-        _ => Reach::Ambiguous,
-    })
-}
-
-/// Which of `threads` are finished in the clone at `tracker`.
-pub fn finished(tracker: &Path, threads: &BTreeSet<String>) -> Result<BTreeSet<String>, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let (_, state) = opened.load()?;
-    let model = Model::read(&state)?;
-    Ok(threads.iter().filter(|thread| model.thread_finished(thread)).cloned().collect())
-}
-
-/// The repository records in the clone at `tracker`.
-pub fn repositories(tracker: &Path) -> Result<Vec<model::Repository>, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let (_, state) = opened.load()?;
-    Ok(Model::read(&state)?.repositories.into_values().collect())
-}
-
-/// The latest operation of run `run` applied in the clone at `tracker`, 0 for none.
-pub fn applied(tracker: &Path, run: &str) -> Result<u64, CliError> {
-    let (opened, _) = Tracker::open(tracker)?;
-    let (_, state) = opened.load()?;
-    Ok(state.applied_seq(run)?)
-}
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
@@ -380,44 +96,7 @@ struct Session<'a> {
     actor: String,
     now: Millis,
     env: &'a Env,
-    /// The run's operation this session applies, if it applies one.
-    operation: Option<Operation>,
-    /// Whether the operation's number has been recorded.
-    recorded: Cell<bool>,
-    /// What the operation's command must find to stay within the run's thread.
-    within: Vec<Within>,
-    /// The operation's command's hash, recorded with its number so that another command sent with the same number is
-    /// told apart from the same one sent again.
-    hash: String,
 }
-
-/// A short hash of a command, as JSON.
-fn hash(command: &Command) -> String {
-    use sha2::Digest as _;
-    use std::fmt::Write as _;
-    let json = serde_json::to_vec(command).unwrap_or_default();
-    sha2::Sha256::digest(json).iter().take(8).fold(String::new(), |mut hex, byte| {
-        let _ = write!(hex, "{byte:02x}");
-        hex
-    })
-}
-
-/// A run's operation: one command, numbered in the run's sequence from 1, with the run's view of the tracker when it
-/// made it. The command's batch checks the number, writes under the run's view, and records the number with it.
-#[derive(Debug, Clone)]
-pub struct Operation {
-    /// The run's id.
-    pub run: String,
-    /// The thread the run works on, which its operations may not reach outside.
-    pub thread: String,
-    /// Its number in the run's sequence.
-    pub seq: u64,
-    /// What the run had seen.
-    pub seen: Context,
-}
-
-/// The code of the error that says an operation was applied already; its details are the recorded outcome.
-pub const DUPLICATE: &str = "duplicate-operation";
 
 impl<'a> Session<'a> {
     fn open(cli: &Cli, env: &'a Env) -> Result<Self, CliError> {
@@ -428,16 +107,7 @@ impl<'a> Session<'a> {
             // A clone without its own state took a fresh id; say so once, but carry on.
             eprintln!("acyclic: this clone is now replica {renamed}");
         }
-        Ok(Self {
-            tracker,
-            actor,
-            now: context::now(env),
-            env,
-            operation: None,
-            recorded: Cell::new(false),
-            within: Vec::new(),
-            hash: String::new(),
-        })
+        Ok(Self { tracker, actor, now: context::now(env), env })
     }
 
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
@@ -458,7 +128,7 @@ impl<'a> Session<'a> {
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
             Command::Needs => self.needs(),
-            Command::Sync { with_usage } => self.sync(*with_usage),
+            Command::Sync => self.sync(),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add {
                 item,
@@ -596,7 +266,6 @@ impl<'a> Session<'a> {
                     title: Some(title.clone()),
                     brief: Change::of(brief.clone(), false),
                     level: Change::of(*level, false),
-                    pm: Change::Keep,
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
@@ -612,7 +281,6 @@ impl<'a> Session<'a> {
                     title: edit.title.clone(),
                     brief: Change::of(edit.brief.clone(), edit.no_brief),
                     level: Change::of(edit.level, edit.no_level),
-                    pm: Change::of(edit.pm.then_some(true), edit.no_pm),
                     repositories: Delta {
                         add: edit.repository.clone(),
                         remove: edit.no_repository.clone(),
@@ -632,14 +300,11 @@ impl<'a> Session<'a> {
                 owner,
                 name,
                 default_branch,
-                public,
-                ..
             }) => {
                 let fields = RepositoryFields {
                     owner: Some(owner.clone()),
                     name: Some(name.clone()),
                     default_branch: Some(default_branch.clone()),
-                    public: Some(*public),
                 };
                 self.write(|replica, by| {
                     edit::add_repository(replica, repository, &fields, by)?;
@@ -651,14 +316,11 @@ impl<'a> Session<'a> {
                 owner,
                 name,
                 default_branch,
-                public,
-                private,
             }) => {
                 let fields = RepositoryFields {
                     owner: owner.clone(),
                     name: name.clone(),
                     default_branch: default_branch.clone(),
-                    public: (*public || *private).then_some(*public),
                 };
                 self.write(|replica, by| {
                     edit::edit_repository(replica, repository, &fields, by)?;
@@ -716,17 +378,6 @@ impl<'a> Session<'a> {
         Ok((state, model))
     }
 
-    /// Records the operation's number alone, in a batch that checks it again.
-    fn record(&self, refusal: Option<&Json>) -> Result<(), CliError> {
-        let Some(op) = &self.operation else { return Ok(()) };
-        let meta = Meta { actor: self.actor.clone(), run: Some((op.run.clone(), op.seq)) };
-        self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
-            next(replica, op, &self.hash)?;
-            Ok::<_, CliError>(replica.record(&op.run, op.seq, &self.hash, refusal, at)?)
-        })?;
-        Ok(())
-    }
-
     /// Runs one batch as the actor. Lease renewal rides along, so a batch can commit though the command changed
     /// nothing; `changed` says whether the command itself changed anything.
     fn write(
@@ -734,36 +385,15 @@ impl<'a> Session<'a> {
         apply: impl Fn(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
-        let meta = Meta {
-            actor: self.actor.clone(),
-            run: self.operation.as_ref().map(|op| (op.run.clone(), op.seq)),
-        };
-        let operation = self.operation.as_ref();
+        let meta = Meta { actor: self.actor.clone() };
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
-            if let Some(op) = operation {
-                next(replica, op, &self.hash)?;
-                // Checked again here, on the state the write goes into: a run ended since its request arrived writes
-                // nothing more.
-                if !model::run_active(replica.state(), &op.run, &op.thread) {
-                    return Err(CliError::refused(
-                        "inactive",
-                        format!("run {} isn't under way on thread {}", op.run, op.thread),
-                    ));
-                }
-                check_within(replica, &self.within, &op.thread, &self.actor)?;
-            }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();
-            let seen = operation.map(|op| &op.seen);
-            let data = apply(replica, By { actor: &self.actor, at, seen })?;
+            let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
-            if let Some(op) = operation {
-                replica.record(&op.run, op.seq, &self.hash, None, at)?;
-            }
             Ok(())
         })?;
-        self.recorded.set(operation.is_some());
         let (mut data, changed) = result.into_inner();
         if let Json::Object(map) = &mut data {
             map.insert("changed".to_owned(), Json::Bool(changed));
@@ -1074,9 +704,9 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn sync(&self, with_usage: bool) -> Result<Json, CliError> {
+    fn sync(&self) -> Result<Json, CliError> {
         let remote = self.remote()?;
-        let synced = self.tracker.sync_with(remote, store::Fetch { usage: with_usage })?;
+        let synced = self.tracker.sync(remote)?;
         // Threads two clones numbered alike, which only a sync brings together; `needs` lists those one can renumber.
         let (state, model) = self.read()?;
         let clashes = renumber::clashes(&state, &model, self.now)?;
@@ -1135,7 +765,7 @@ impl<'a> Session<'a> {
             let (_, state) = self.tracker.load()?;
             let mut replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let by = By { actor: &self.actor, at, seen: None };
+            let by = By { actor: &self.actor, at };
             let report = import::apply(&doc, &mut replica, by)?;
             let placed = place::place(&mut replica, &keys, by)?;
             return Ok(import_json(&report, &placed, true));
@@ -1148,12 +778,7 @@ impl<'a> Session<'a> {
     }
 
     fn claim(&self, thread: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
-        let is_run = self.actor.starts_with("run/");
-        let lease = match (lease, is_run) {
-            (None, true) => None,
-            (None, false) => Some(LEASE),
-            (Some(minutes), _) => Some(Millis::from(minutes) * MINUTE),
-        };
+        let lease = lease.map_or(LEASE, |minutes| Millis::from(minutes) * MINUTE);
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         self.write(|replica, by| {
@@ -1173,9 +798,7 @@ impl<'a> Session<'a> {
                 }
             }
             claim::claim(replica, thread, by.actor, by.at, lease, MAX_LEASE)?;
-            let model = Model::read(replica.state())?;
-            let alive = |holder: &str| model.run_alive(holder);
-            let held = claim::winner_with(replica.state(), &key, by.at, &alive)?;
+            let held = claim::winner(replica.state(), &key, by.at)?;
             Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
@@ -1216,7 +839,6 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     let missing: Vec<&str> = [
         ("owner", record.owner.one().is_some()),
         ("name", record.name.one().is_some()),
-        ("public", record.public.one().is_some()),
         ("default-branch", record.default_branch.one().is_some()),
     ]
     .into_iter()

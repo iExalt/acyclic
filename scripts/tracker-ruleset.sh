@@ -1,6 +1,6 @@
 #!/bin/sh
-# Stops a tracker's shared repository from rewriting its audit logs: audit-log and usage refs (everything under
-# refs/heads/log/ and refs/heads/usage/) may be created and deleted, never force-pushed, by anyone, admins included.
+# Stops a tracker's shared repository from rewriting its audit logs: audit-log refs (everything under refs/heads/log/)
+# may be created and deleted, never force-pushed, by anyone, admins included.
 # State refs stay outside it, since a squash rewrites them. GitHub's patterns need `/**/*` to match every depth.
 # Creates the ruleset, or updates it in place when it exists, so running it again is safe. Rulesets need the
 # repository's administration: run it with the owner's gh login.
@@ -15,7 +15,7 @@ body=$(cat <<EOF
   "target": "branch",
   "enforcement": "active",
   "bypass_actors": [],
-  "conditions": {"ref_name": {"include": ["refs/heads/log/**/*", "refs/heads/usage/**/*"], "exclude": []}},
+  "conditions": {"ref_name": {"include": ["refs/heads/log/**/*"], "exclude": []}},
   "rules": [{"type": "non_fast_forward"}]
 }
 EOF

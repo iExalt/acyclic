@@ -217,23 +217,3 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         "{answer}"
     );
 }
-
-#[test]
-fn a_run_may_not_subscribe_or_read_the_key() {
-    use acyclic_operator::token::Signer;
-    let signer = Signer::from_seed([3; 32]);
-    let access =
-        Access::Run { verifier: signer.verifier(), deny: DenyList::parse("term\n"), code: None };
-    let now = acyclic_cli::now(&Env::default());
-    let bearer = format!("Bearer {}", signer.mint("r1", "t1", now, 600_000).unwrap());
-    let router = super::router(config(None), access);
-    let pass = [("authorization", bearer.as_str()), ("content-type", "application/json")];
-    for (method, path) in [
-        (Method::GET, "/api/push/key"),
-        (Method::POST, "/api/push/subscribe"),
-        (Method::POST, "/api/push/unsubscribe"),
-    ] {
-        let (status, body) = send(&router, method, path, &pass, "{}");
-        assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "not-for-runs".into()), "{path}");
-    }
-}

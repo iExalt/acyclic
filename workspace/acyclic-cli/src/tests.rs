@@ -4,7 +4,7 @@ use acyclic_core::archive::ArchiveError;
 use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
-use acyclic_core::model::{RunState, WriteError};
+use acyclic_core::model::WriteError;
 use acyclic_core::scope::ScopeError;
 use acyclic_core::state::{Error as StateError, Key, ReplicaId};
 use acyclic_core::store::StoreError;
@@ -37,10 +37,6 @@ fn the_user_is_never_inherited_from_the_environment() {
     assert_eq!(actor("acyclic needs --as-user", &user), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor actor/user", &session), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs --actor nobody", &[]), Err("invalid-actor"));
-    // Nor is the operator, from anywhere.
-    let operator = [("ACYCLIC_ACTOR", "operator/mac")];
-    assert_eq!(actor("acyclic needs", &operator), Err("operator-actor"));
-    assert_eq!(actor("acyclic needs --actor operator/mac", &[]), Err("operator-actor"));
 }
 
 #[test]
@@ -91,7 +87,6 @@ fn a_tracker_clone_needs_no_home_or_mapping() {
 }
 
 #[test]
-#[expect(clippy::too_many_lines, reason = "one line per error")]
 fn every_error_has_a_stable_code_and_exit() {
     let key = Key::new("item", "a1").unwrap();
     // One of each variant, so a renamed code shows here.
@@ -102,12 +97,8 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::ClockJump { now: 0, last: 1 }.into(),
         StateError::NotContinuous(id()).into(),
         StateError::IdReused { replica: id(), mine: 1, theirs: 2 }.into(),
-        StateError::Gap { run: "r".into(), expected: 1, got: 2 }.into(),
-        StateError::WrongReplica { run: "r".into(), applied_by: "mac".into() }.into(),
-        StateError::SeqTaken { run: "r".into(), seq: 1 }.into(),
         StateError::Claimed(key.clone()).into(),
         StateError::NoThread("t".into()).into(),
-        StateError::LeaseRequired("session/s".into()).into(),
         StateError::ResourceHeld {
             resource: "gpu".into(),
             thread: "t".into(),
@@ -123,9 +114,6 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::Checked { field: "state".into(), write: "set_state" }.into(),
         WriteError::UserOnly { field: "approved".into(), actor: "session/s".into() }.into(),
         WriteError::SelfLink("a1".into()).into(),
-        WriteError::RunTransition { run: "r".into(), to: RunState::Running }.into(),
-        WriteError::RunActive { thread: "t".into(), run: "r".into() }.into(),
-        WriteError::RunWriter("run/r".into()).into(),
         ScopeError::NotTheUser("session/s".into()).into(),
         ScopeError::NoProposal("p".into()).into(),
         ScopeError::Decided("p".into()).into(),
@@ -133,7 +121,7 @@ fn every_error_has_a_stable_code_and_exit() {
         DeleteError::NotAllowed { actor: "session/s".into(), thread: "t".into() }.into(),
         ArchiveError::Ineligible { item: "a1".into(), reasons: vec![] }.into(),
         ArchiveError::NotDone("a1".into()).into(),
-        ArchiveError::NotAllowed("run/r".into()).into(),
+        ArchiveError::NotAllowed("session/s".into()).into(),
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
         StoreError::Locked { path: "x".into(), age_seconds: None }.into(),
@@ -154,9 +142,6 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
-        CliError::refused("not-in-thread", ""),
-        CliError::refused("not-the-runs", ""),
-        CliError::refused("inactive", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("unwritable", ""),
         CliError::refused("unopenable", ""),
@@ -167,16 +152,13 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("reserved-id", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("user-from-environment", exit::USAGE, ""),
-        CliError::new("operator-actor", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
         CliError::new("no-server", exit::CONFIG, ""),
     ];
     let mut table = String::new();
     for error in &errors {
-        // Whether a run's operation that fails this way spends its number: a new code takes a side here.
-        let spent = if spends(error) { " spends" } else { "" };
-        writeln!(table, "{} {}{spent}", error.exit, error.code).unwrap();
+        writeln!(table, "{} {}", error.exit, error.code).unwrap();
     }
     insta::assert_snapshot!(table);
     // Every code a command can raise is in the table above, so the next one added there must be added here.
@@ -289,11 +271,11 @@ fn an_actor_may_claim_past_its_own_claims_only() {
     for (status, may) in [
         (Status::Ready, true),
         (claimed(me), true),
-        (claimed("run/r1"), false),
-        (contested(me, "run/r1"), true),
-        (contested("run/r1", me), false),
+        (claimed("session/r1"), false),
+        (contested(me, "session/r1"), true),
+        (contested("session/r1", me), false),
         (busy(me), true),
-        (busy("run/r1"), false),
+        (busy("session/r1"), false),
         (Status::Parent, false),
     ] {
         assert_eq!(may_claim(Some(&status), me), may, "{status:?}");
@@ -325,7 +307,7 @@ fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
     use acyclic_core::schema::{kind, thread};
     use acyclic_core::scope::ScopeEdit;
     use acyclic_core::state::Replica;
-    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
+    let user = By { actor: acyclic_core::scope::USER, at: 1 };
     let thread_key = |id: &str| Key::new(kind::THREAD, id).unwrap();
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), acyclic_core::state::State::new());
     for id in ["x", "y", "z", "late", "raced"] {
@@ -366,7 +348,7 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
     use acyclic_core::model::{By, LinkKind, Model, add_item, link};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: USER, at: 1, seen: None };
+    let user = By { actor: USER, at: 1 };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     let join = |replica: &mut Replica, item: &str, thread: &str| {
         let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
@@ -507,7 +489,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     use acyclic_core::model::{By, Evidence, ItemState, Model, add_item, set, set_state};
     use acyclic_core::schema::{item, kind, repository};
     use acyclic_core::state::{Replica, State};
-    let user = By { actor: acyclic_core::scope::USER, at: 1, seen: None };
+    let user = By { actor: acyclic_core::scope::USER, at: 1 };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
     add_item(&mut mac, "a", "A", user).unwrap();
     let repo = Key::new(kind::REPOSITORY, "r").unwrap();
@@ -521,11 +503,9 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     let model = Model::read(mac.state()).unwrap();
     assert_eq!(code(&model, &evidence("ghost", "abc1234")), Err("not-found"));
     assert_eq!(code(&model, &evidence("r", "abc1234")), Err("incomplete-repository"));
-    for (name, value) in [
-        (repository::NAME, json!("n")),
-        (repository::PUBLIC, json!(true)),
-        (repository::DEFAULT_BRANCH, json!("main")),
-    ] {
+    for (name, value) in
+        [(repository::NAME, json!("n")), (repository::DEFAULT_BRANCH, json!("main"))]
+    {
         set(&mut mac, &repo, name, Some(&value), user).unwrap();
     }
     let model = Model::read(mac.state()).unwrap();
@@ -751,7 +731,7 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         "acyclic item edit a1 --state parked",
         "acyclic level blockers",
         "acyclic thread edit t1 --level blockers",
-        "acyclic repo edit r1 --private",
+        "acyclic repo edit r1 --default-branch trunk",
         // A way to print parses as one, so a graph line failing with it failed for another reason.
         "acyclic graph --output pretty --bogus",
         "acyclic --output=json graph --bogus",
@@ -786,106 +766,32 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
         "acyclic thread edit t --level blockers --no-level",
-        "acyclic thread edit t --pm --no-pm",
         "acyclic thread edit t --repository r --no-repository r",
-        "acyclic repo edit r --public --private",
-        "acyclic repo add r --owner o --name n --default-branch main",
-        "acyclic repo add r --owner o --name n --default-branch main --public --private",
     ] {
         assert_eq!(check(line), Err("usage"), "{line}");
     }
     for line in [
         "acyclic item edit a --area x --no-area y --no-notes --parent b",
-        "acyclic repo add r --owner o --name n --default-branch main --private",
-        "acyclic repo edit r --public",
+        "acyclic repo add r --owner o --name n --default-branch main",
+        "acyclic repo edit r --default-branch trunk",
     ] {
         assert_eq!(check(line), Ok(()), "{line}");
     }
 }
 
 #[test]
-fn a_refusal_whose_number_was_spent_meanwhile_is_a_duplicate() {
-    let dir = tempfile::tempdir().unwrap();
-    let env = Env { cwd: dir.path().to_path_buf(), ..env(&[("ACYCLIC_NOW", "1792022400000")]) };
-    let init = execute(["acyclic", "init", "tracker", "--replica", "mac"].map(Into::into), &env);
-    assert_eq!(init.code, 0, "{}", init.stdout);
-    let tracker = dir.path().join("tracker");
-    let cli = |command| Cli {
-        tracker: Some(tracker.clone()),
-        actor: Some("run/r1".into()),
-        as_user: false,
-        output: Some(args::Format::Json),
-        command,
-    };
-    let op = commands::Operation {
-        run: "r1".into(),
-        thread: "t".into(),
-        seq: 1,
-        seen: acyclic_core::state::Context::default(),
-    };
-    // The refused command's first batch found number 1 unspent; before its second, the same number was applied.
-    let add = || -> Command {
-        serde_json::from_value(json!({"thread": {"add": {"thread": "t", "title": "T"}}})).unwrap()
-    };
-    commands::start_run(&tracker, &env, "operator/mac", "r1", "t").unwrap();
-    commands::apply(&cli(add()), &env, op.clone()).unwrap();
-    let refusal = CliError::refused("refused", "");
-    let err = commands::refuse(&cli(add()), &env, op, &refusal).unwrap_err();
-    assert_eq!((err.code, err.details), (commands::DUPLICATE, json!({"ok": true})));
-}
-
-#[test]
-fn a_run_sends_only_the_writes_of_its_own_work() {
-    let command = |value: serde_json::Value| serde_json::from_value::<Command>(value).unwrap();
-    for ok in [
-        json!({"claim": {"thread": "t"}}),
-        json!({"release": {"thread": "t"}}),
-        json!({"done": {"item": "a", "note": "n"}}),
-        json!({"item": {"add": {"item": "a", "title": "A"}}}),
-        json!({"item": {"edit": {"item": "a", "title": "T"}}}),
-        json!({"item": {"reopen": {"item": "a"}}}),
-        json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
-        json!({"link": {"remove": {"from": "a", "kind": "waits-for", "to": "b"}}}),
-    ] {
-        let sent = command(ok.clone());
-        assert!(sent.run_may_send(), "{ok}");
-        // A queued operation is the command serialized, so it must read back as itself.
-        let queued = serde_json::to_value(&sent).unwrap();
-        assert_eq!(serde_json::to_value(command(queued.clone())).unwrap(), queued, "{ok}");
-    }
-    for refused in [
-        json!("list"),
-        json!({"show": {"items": ["a"]}}),
-        json!({"level": {"level": "blockers"}}),
-        json!({"item": {"archive": {"item": "a"}}}),
-        json!({"item": {"delete": {"item": "a"}}}),
-        json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
-        json!({"thread": {"approve": {"thread": "t"}}}),
-        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main", "public": true}}}),
-        json!({"proposal": {"keep": {"proposal": "p"}}}),
-        json!({"sync": {}}),
-        json!({"import": {"file": "/tmp/x"}}),
-        json!({"claim": {"thread": "t", "force": true}}),
-        json!({"done": {"item": "a", "note": "n", "force": true}}),
-    ] {
-        assert!(!command(refused.clone()).run_may_send(), "{refused}");
-    }
-}
-
-#[test]
-fn readiness_checks_a_repository_without_a_mapped_clone_against_the_servers_mirror() {
+fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
     let temp = tempfile::TempDir::new().unwrap();
     let home = temp.path().to_str().unwrap();
     let record = |id: &str| acyclic_core::model::Repository {
         id: id.to_owned(),
         owner: acyclic_core::model::Value::None,
         name: acyclic_core::model::Value::None,
-        public: acyclic_core::model::Value::None,
         default_branch: acyclic_core::model::Value::None,
         installation: acyclic_core::model::Value::None,
     };
-    let mirrored = temp.path().join(".local/share/acyclic/mirrors/app.git");
-    std::fs::create_dir_all(&mirrored).unwrap();
+    // A mirror where older servers kept one is no longer read.
+    std::fs::create_dir_all(temp.path().join(".local/share/acyclic/mirrors/app.git")).unwrap();
     std::fs::create_dir_all(temp.path().join(".config/acyclic")).unwrap();
     std::fs::write(
         temp.path().join(".config/acyclic/clones.toml"),
@@ -893,44 +799,6 @@ fn readiness_checks_a_repository_without_a_mapped_clone_against_the_servers_mirr
     )
     .unwrap();
     let clone_of = context::clones(&env(&[("HOME", home)])).unwrap();
-    assert_eq!(clone_of(&record("app")), Some(mirrored));
+    assert_eq!(clone_of(&record("app")), None);
     assert_eq!(clone_of(&record("mapped")), Some(PathBuf::from("/code/mapped")));
-    assert_eq!(clone_of(&record("unmirrored")), None);
-    // An id that isn't a file's name names no mirror, wherever it would point.
-    for id in ["..", ".hooks", "a/b"] {
-        assert_eq!(context::mirror(&env(&[("HOME", home)]), id), None, "{id}");
-    }
-}
-
-#[test]
-fn a_run_reaches_a_repository_by_its_threads_records_alone() {
-    let dir = tempfile::tempdir().unwrap();
-    let tracker = dir.path().join("tracker");
-    let vars = [("ACYCLIC_NOW", "1792022400000"), ("ACYCLIC_TRACKER", tracker.to_str().unwrap())];
-    let env = Env { cwd: dir.path().to_path_buf(), ..env(&vars) };
-    let run = |line: &str| {
-        let args = ["acyclic"].into_iter().chain(line.split(' ')).chain(["--as-user"]);
-        let done = execute(args.map(Into::into), &env);
-        assert_eq!(done.code, 0, "{line}: {}", done.stdout);
-    };
-    let init = execute(["acyclic", "init", "tracker", "--replica", "mac"].map(Into::into), &env);
-    assert_eq!(init.code, 0, "{}", init.stdout);
-    // Two records name the same repository, differing in case; only one is in t0.
-    for line in [
-        "repo add mine --owner o1 --name app --default-branch main --public",
-        "repo add theirs --owner O1 --name App --default-branch main --public",
-        "thread add t0 --title T0 --repository mine",
-        "thread add t1 --title T1",
-    ] {
-        run(line);
-    }
-    commands::start_run(&tracker, &env, "operator/mac", "r0", "t0").unwrap();
-    commands::start_run(&tracker, &env, "operator/mac", "r1", "t1").unwrap();
-    let reach =
-        |run: &str, thread: &str| commands::reach(&tracker, run, thread, "o1", "APP").unwrap();
-    assert!(matches!(reach("r0", "t0"), commands::Reach::Found(record) if record.id == "mine"));
-    assert_eq!(reach("r1", "t1"), commands::Reach::NotInThread);
-    assert_eq!(reach("r9", "t0"), commands::Reach::Inactive);
-    run("thread edit t0 --repository theirs");
-    assert_eq!(reach("r0", "t0"), commands::Reach::Ambiguous);
 }

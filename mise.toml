@@ -9,20 +9,12 @@ ruff = "0.17.0"
 "github:nextest-rs/nextest" = { version = "0.9.148", version_prefix = "cargo-nextest-" }
 # The pre-push guard's secret scanner.
 "aqua:gitleaks/gitleaks" = "8.30.1"
-# Podman runs agent containers on macOS; gvproxy and vfkit, pinned below, are its machine's helpers.
-podman = { version = "6.1.4", os = ["macos"] }
 "aqua:rvben/rumdl" = "0.2.79"
 # Collects the Rust crates' licences for the release's notices.
 "github:EmbarkStudios/cargo-about" = "0.9.2"
 # Lints the workflows, with ShellCheck for their scripts.
 "aqua:rhysd/actionlint" = "1.7.12"
 "aqua:koalaman/shellcheck" = "0.11.0"
-# Podman's machine helpers at the versions its 6.1.4 installer bundles; the vfkit release is signed with the
-# virtualization entitlement the applehv provider needs.
-"github:containers/gvisor-tap-vsock" = { version = "0.9.0", asset_pattern = "gvproxy-darwin", bin = "gvproxy", os = ["macos"] }
-"github:crc-org/vfkit" = { version = "0.6.4", asset_pattern = "vfkit", bin = "vfkit", os = ["macos"] }
-# Decrypts the Mac's secrets file for acyclic-secrets; CI's tests use a stand-in.
-sops = { version = "3.13.0", os = ["macos"] }
 # The app's toolchain (workspace/acyclic-app); its own dependencies are pinned in its pnpm-lock.yaml.
 node = "26.12.1"
 pnpm = "12.15.0"
@@ -87,10 +79,6 @@ depends = ["vendor:graph"]
 env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
 
-[tasks."check:secrets-live"]
-description = "Hands the secrets file named by ACYCLIC_SECRETS_FILE to a container on the running Podman machine; SOPS must find the age identity"
-run = '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p acyclic-secrets --test live --run-ignored only --locked'
-
 [tasks."check:browser"]
 description = "Draws graph pages in headless Chromium and WebKit with the network blocked, and drives the app; downloads Playwright's browsers (budget: 3 minutes)"
 depends = ["vendor:graph", "build:app"]
@@ -126,13 +114,6 @@ description = "Install the pre-push guard for this clone"
 run = "git config core.hooksPath .githooks"
 
 [env]
-# Podman on macOS fails at startup when XDG_RUNTIME_DIR names a directory that doesn't exist, as a Linux-style
-# /run/user/<uid> does; unset, it keeps its sockets under the macOS temporary directory.
-XDG_RUNTIME_DIR = false
-# Podman's machine uses Apple's hypervisor through vfkit, which it finds on PATH; gvproxy it finds only in its helper
-# directories, so point it at mise's copy.
-CONTAINERS_MACHINE_PROVIDER = "applehv"
-CONTAINERS_HELPER_BINARY_DIR = { value = "{{ exec(command='d=$(command -v gvproxy) && dirname \"$d\" || true') }}", tools = true }
 # Keep uv project environments outside the checkout so repository moves do not relocate them.
 UV_PROJECT_ENVIRONMENT = "{{ env.HOME }}/.virtualenvs/{{ config_root | basename }}"
 # Create and activate a seeded central environment so Python and pip both resolve inside it.

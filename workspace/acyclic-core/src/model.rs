@@ -1,4 +1,4 @@
-//! The model: items, links, threads, repositories and runs, read as a typed snapshot of the state and written through
+//! The model: items, links, threads and repositories, read as a typed snapshot of the state and written through
 //! checked writes. Nothing derived is stored: roles, membership, repository sets and cycles are computed on read.
 //!
 //! Every field reads as a [`Value`], so a reader sees concurrent writes as a conflict and never silently picks one.
@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph;
-use crate::schema::{item as field, kind, link, repository, run, set, thread};
-use crate::state::{Context, Error, Key, Millis, Replica, State};
+use crate::schema::{item as field, kind, link, repository, set, thread};
+use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
 pub const MAX_ID_LEN: usize = 64;
@@ -167,28 +167,6 @@ impl LinkKind {
     }
 }
 
-/// A run's state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RunState {
-    /// Launched, not yet working.
-    Starting,
-    /// Working.
-    Running,
-    /// Stopped before its thread was finished.
-    Stopped,
-    /// Finished its work.
-    Done,
-}
-
-impl RunState {
-    /// Whether the run is under way.
-    #[must_use]
-    pub fn is_active(self) -> bool {
-        matches!(self, Self::Starting | Self::Running)
-    }
-}
-
 /// An autonomy level: which agents' questions reach the needs-you list. Blockers always do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -321,8 +299,6 @@ pub struct Thread {
     pub brief: Value<String>,
     /// Whether the thread's scope is approved; a conflict counts as approved, which protects more.
     pub approved: Value<bool>,
-    /// Whether the thread's agent is a project-management agent; a conflict counts as not.
-    pub pm_flag: Value<bool>,
     /// The members the latest approval saw; none on threads approved before approvals recorded them.
     pub approved_members: Value<Vec<String>>,
     /// Repositories added explicitly, beyond those of its items.
@@ -345,13 +321,6 @@ impl Thread {
         let lists = self.approved_members.all();
         (!lists.is_empty()).then(|| lists.into_iter().flatten().any(|member| member == item))
     }
-
-    /// Whether the thread's agent is a project-management agent: only when every value says so.
-    #[must_use]
-    pub fn is_pm(&self) -> bool {
-        let values = self.pm_flag.all();
-        !values.is_empty() && values.into_iter().all(|flag| *flag)
-    }
 }
 
 /// A repository record as read.
@@ -363,31 +332,10 @@ pub struct Repository {
     pub owner: Value<String>,
     /// The repository's name.
     pub name: Value<String>,
-    /// Whether the repository is public.
-    pub public: Value<bool>,
     /// The default branch.
     pub default_branch: Value<String>,
     /// The App's installation that reaches it.
     pub installation: Value<String>,
-}
-
-/// A run record as read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Run {
-    /// The run's id.
-    pub id: String,
-    /// The thread it works on.
-    pub thread: Value<String>,
-    /// Its state.
-    pub state: Value<RunState>,
-}
-
-impl Run {
-    /// Whether the run may be under way: any active value counts.
-    #[must_use]
-    pub fn is_active(&self) -> bool {
-        self.state.all().into_iter().any(|state| state.is_active())
-    }
 }
 
 /// A snapshot of the model, read once from a state.
@@ -401,8 +349,6 @@ pub struct Model {
     pub threads: BTreeMap<String, Thread>,
     /// Repository records by id.
     pub repositories: BTreeMap<String, Repository>,
-    /// Runs by id.
-    pub runs: BTreeMap<String, Run>,
     /// The global autonomy level.
     pub autonomy: Value<Level>,
     children: BTreeMap<String, BTreeSet<String>>,
@@ -448,7 +394,6 @@ impl Model {
         self.links.extend(other.links);
         self.threads.extend(other.threads);
         self.repositories.extend(other.repositories);
-        self.runs.extend(other.runs);
         if other.autonomy != Value::None {
             self.autonomy = other.autonomy;
         }
@@ -488,7 +433,6 @@ impl Model {
                     title: value(state, key, thread::TITLE)?,
                     brief: value(state, key, thread::BRIEF)?,
                     approved: value(state, key, thread::APPROVED)?,
-                    pm_flag: value(state, key, thread::PM_FLAG)?,
                     approved_members: value(state, key, thread::APPROVED_MEMBERS)?,
                     repositories: elements(state, key, set::REPOSITORY),
                     autonomy: value(state, key, thread::AUTONOMY)?,
@@ -500,19 +444,10 @@ impl Model {
                     id: key.id.clone(),
                     owner: value(state, key, repository::OWNER)?,
                     name: value(state, key, repository::NAME)?,
-                    public: value(state, key, repository::PUBLIC)?,
                     default_branch: value(state, key, repository::DEFAULT_BRANCH)?,
                     installation: value(state, key, repository::INSTALLATION)?,
                 };
                 self.repositories.insert(key.id.clone(), record);
-            },
-            kind::RUN => {
-                let record = Run {
-                    id: key.id.clone(),
-                    thread: value(state, key, run::THREAD)?,
-                    state: value(state, key, run::STATE)?,
-                };
-                self.runs.insert(key.id.clone(), record);
             },
             kind::SETTINGS if key.id == crate::schema::GLOBAL => {
                 self.autonomy = value(state, key, crate::schema::settings::AUTONOMY)?;
@@ -668,34 +603,6 @@ impl Model {
         repositories
     }
 
-    /// Whether a thread is finished: gone, or with every item done and no run under way. A thread with no items yet
-    /// isn't.
-    #[must_use]
-    pub fn thread_finished(&self, thread: &str) -> bool {
-        if !self.threads.contains_key(thread) {
-            return true;
-        }
-        let members = self.members(thread);
-        let running = self
-            .runs
-            .values()
-            .any(|run| run.is_active() && run.thread.all().into_iter().any(|t| t == thread));
-        !members.is_empty() && members.iter().all(|id| self.reads_done(id)) && !running
-    }
-
-    /// The repository records naming `owner`/`name`, compared without regard to case as GitHub does: none, one, or
-    /// several that the caller must not choose between.
-    #[must_use]
-    pub fn repositories_named(&self, owner: &str, name: &str) -> Vec<&Repository> {
-        let same = |value: &Value<String>, wanted: &str| {
-            value.one().is_some_and(|value| value.eq_ignore_ascii_case(wanted))
-        };
-        self.repositories
-            .values()
-            .filter(|record| same(&record.owner, owner) && same(&record.name, name))
-            .collect()
-    }
-
     /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {
@@ -789,29 +696,6 @@ impl Model {
         };
         chosen.all().into_iter().min().copied().unwrap_or(Level::Blockers)
     }
-
-    /// Liveness for claims without a time lease: a run's claim holds unless its record shows the run
-    /// ended; any other holder's does.
-    #[must_use]
-    pub fn run_alive(&self, holder: &str) -> bool {
-        match holder.strip_prefix("run/").and_then(|id| self.runs.get(id)) {
-            Some(run) => run.is_active() || run.state == Value::None,
-            None => true,
-        }
-    }
-
-    /// Threads with more than one active run, which only a join can make.
-    #[must_use]
-    pub fn run_clashes(&self) -> BTreeMap<String, Vec<String>> {
-        let mut active: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for run in self.runs.values().filter(|run| run.is_active()) {
-            for thread in run.thread.all() {
-                active.entry(thread.clone()).or_default().push(run.id.clone());
-            }
-        }
-        active.retain(|_, runs| runs.len() > 1);
-        active
-    }
 }
 
 /// A refused write.
@@ -847,22 +731,6 @@ pub enum WriteError {
     SelfLink(String),
     /// Follows links are retired: nothing adds one.
     FollowsRetired,
-    /// A run's state can't move that way.
-    RunTransition {
-        /// The run.
-        run: String,
-        /// The refused state.
-        to: RunState,
-    },
-    /// Only the user or an operator starts or moves a run.
-    RunWriter(String),
-    /// The thread already has an active run.
-    RunActive {
-        /// The thread.
-        thread: String,
-        /// Its active run.
-        run: String,
-    },
 }
 
 impl fmt::Display for WriteError {
@@ -889,13 +757,6 @@ impl fmt::Display for WriteError {
                 "follows links are retired: use waits-for when one item can't start before the other is done, \
                  or relates-to for context"
             ),
-            Self::RunTransition { run, to } => write!(f, "run {run} can't move to {to:?}"),
-            Self::RunWriter(actor) => {
-                write!(f, "only the user or an operator starts or moves a run, not {actor}")
-            },
-            Self::RunActive { thread, run } => {
-                write!(f, "thread {thread} already has run {run} under way")
-            },
         }
     }
 }
@@ -915,11 +776,6 @@ pub struct By<'a> {
     pub actor: &'a str,
     /// The write's timestamp.
     pub at: Millis,
-    /// For a run's write, what the run had seen: a field set through [`set`] supersedes only the values this covers,
-    /// so values written meanwhile that the run never saw survive beside its own as a conflict. `None` supersedes
-    /// every value this replica has seen, as every other writer does. Writes that read the field and decide, such
-    /// as a state's move or a claim, supersede what they read either way.
-    pub seen: Option<&'a Context>,
 }
 
 /// A checked id or element name: a valid key id of at most [`MAX_ID_LEN`] characters.
@@ -955,7 +811,7 @@ fn to_json<T: Serialize>(value: &T) -> Json {
 }
 
 /// The fields only a checked write may set, with the write to use instead.
-const CHECKED: [(&str, &str, &str); 9] = [
+const CHECKED: [(&str, &str, &str); 7] = [
     (kind::ITEM, field::THREAD, "scope::edit"),
     (kind::ITEM, field::ARCHIVED, "archive::archive"),
     (kind::ITEM, field::DELETED, "delete::delete_item"),
@@ -963,25 +819,19 @@ const CHECKED: [(&str, &str, &str); 9] = [
     (kind::ITEM, field::PARENT, "set_parent"),
     (kind::ITEM, field::STATE, "set_state"),
     (kind::LINK, "", "link or unlink"),
-    (kind::RUN, run::THREAD, "start_run"),
-    (kind::RUN, run::STATE, "set_run_state"),
 ];
 
-/// Fields only the user's batches set: a thread's approval, flags and choices, and every global setting.
-const USER_ONLY: [(&str, &str); 7] = [
+/// Fields only the user's batches set: a thread's approval and autonomy level, and every global setting.
+const USER_ONLY: [(&str, &str); 4] = [
     (kind::THREAD, thread::APPROVED),
     (kind::THREAD, thread::APPROVED_MEMBERS),
-    (kind::THREAD, thread::PM_FLAG),
     (kind::THREAD, thread::AUTONOMY),
-    (kind::THREAD, thread::LAUNCH),
-    (kind::THREAD, thread::PLACEMENT),
     (kind::SETTINGS, ""),
 ];
 
 /// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
-/// archived flag and reopen flag, a link's fields, a run's thread and state) are refused: use their checked writes.
-/// A thread's approval, flags and choices and the global settings are the user's alone. A run's write supersedes only
-/// what it had seen ([`By::seen`]).
+/// archived flag and reopen flag, and a link's fields) are refused: use their checked writes. A thread's approval and
+/// autonomy level and the global settings are the user's alone.
 ///
 /// # Errors
 ///
@@ -1005,14 +855,7 @@ pub fn set<T: Serialize>(
     if user_only && by.actor != crate::scope::USER {
         return Err(WriteError::UserOnly { field: name.to_owned(), actor: by.actor.to_owned() });
     }
-    match by.seen {
-        Some(seen) => {
-            let value = value.map_or(Json::Null, to_json);
-            replica.write_seen(key, name, by.actor, by.at, value, seen)?;
-            Ok(())
-        },
-        None => put(replica, key, name, value, by),
-    }
+    put(replica, key, name, value, by)
 }
 
 /// Writes a single-valued field. A clear writes `null` rather than nothing, so a set it never saw conflicts with it
@@ -1231,89 +1074,6 @@ pub fn unlink(
         wrote = true;
     }
     Ok(wrote)
-}
-
-/// Refuses a run's start or move by anyone but the user or an operator: a run on a project-management thread acts as
-/// a project manager, so whoever could start one could grant themselves that.
-///
-/// It stops actors that arrive from a run's token, which are never the user or an operator, and mistakes; the CLI
-/// refuses to declare an operator, but a process with the tracker clone can write anything, so the real boundary is
-/// that runs get a token and never the clone.
-fn run_writer(by: By<'_>) -> Result<(), WriteError> {
-    if by.actor == crate::scope::USER || by.actor.starts_with(crate::scope::OPERATOR) {
-        Ok(())
-    } else {
-        Err(WriteError::RunWriter(by.actor.to_owned()))
-    }
-}
-
-/// Whether run `id` is under way on `thread` in `state`: an active state among its values and a thread value naming
-/// `thread`, as [`Run::is_active`] judges, reading the run alone.
-#[must_use]
-pub fn run_active(state: &State, id: &str, thread: &str) -> bool {
-    let Ok(key) = Key::new(kind::RUN, id) else { return false };
-    let values =
-        |name| state.field(&key, name).into_iter().flat_map(|r| r.values()).map(|v| &v.value);
-    values(run::STATE)
-        .filter_map(|value| serde_json::from_value::<RunState>(value.clone()).ok())
-        .any(RunState::is_active)
-        && values(run::THREAD).any(|value| value.as_str() == Some(thread))
-}
-
-/// Records a run starting on a thread.
-///
-/// # Errors
-///
-/// Fails when anyone but the user or an operator starts it, when the thread already has an active run in this
-/// replica's view, or when the state layer refuses.
-pub fn start_run(
-    replica: &mut Replica,
-    id: &str,
-    thread: &str,
-    by: By<'_>,
-) -> Result<Key, WriteError> {
-    run_writer(by)?;
-    let model = Model::read(&replica.state)?;
-    if let Some(active) = model
-        .runs
-        .values()
-        .find(|run| run.is_active() && run.thread.all().iter().any(|t| *t == thread))
-    {
-        return Err(WriteError::RunActive { thread: thread.to_owned(), run: active.id.clone() });
-    }
-    let key = Key::new(kind::RUN, name(id)?)?;
-    put(replica, &key, run::THREAD, Some(&thread), by)?;
-    put(replica, &key, run::STATE, Some(&RunState::Starting), by)?;
-    Ok(key)
-}
-
-/// Moves a run's state forward: starting to running, and either to stopped or done. A run never becomes active
-/// again, so it can't make a second active run on its thread.
-///
-/// # Errors
-///
-/// Fails when anyone but the user or an operator moves it, on an unknown run, a move backward or out of an ended
-/// state, or when the state layer refuses.
-pub fn set_run_state(
-    replica: &mut Replica,
-    id: &str,
-    state: RunState,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    run_writer(by)?;
-    let key = Key::new(kind::RUN, name(id)?)?;
-    let current = value::<RunState>(&replica.state, &key, run::STATE)?;
-    let allowed = current.all().into_iter().all(|from| {
-        matches!(
-            (from, state),
-            (RunState::Starting, RunState::Running | RunState::Stopped | RunState::Done)
-                | (RunState::Running, RunState::Stopped | RunState::Done)
-        )
-    });
-    if current == Value::None || !allowed {
-        return Err(WriteError::RunTransition { run: id.to_owned(), to: state });
-    }
-    put(replica, &key, run::STATE, Some(&state), by)
 }
 
 /// Whether an item has been deleted: its tombstone is set, and nothing clears it.

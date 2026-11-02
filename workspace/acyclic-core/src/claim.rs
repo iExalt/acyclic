@@ -17,23 +17,18 @@ pub const FIELD: &str = "claim";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Claim {
-    /// Who holds it: a run or an interactive session.
+    /// Who holds it, such as an interactive session.
     pub holder: String,
     /// The replica that recorded it.
     pub replica: String,
     /// When the lease began.
     pub lease_start: Millis,
-    /// When a time lease ends; `None` for a claim that lives while its run is alive.
+    /// When the lease ends. Older versions wrote `None` for a claim that lived while its run did; such a claim no
+    /// longer holds.
     pub lease_expires: Option<Millis>,
 }
 
 impl Claim {
-    /// Whether the claim holds at `now`.
-    #[must_use]
-    pub fn is_live(&self, now: Millis) -> bool {
-        self.lease_expires.is_none_or(|expires| now < expires)
-    }
-
     /// Whether the lease starts in the reader's future beyond the clock skew: the writer's clock ran ahead, an
     /// anomaly for the needs-you list.
     #[must_use]
@@ -42,41 +37,20 @@ impl Claim {
     }
 }
 
-/// Whether a claim without a time lease is still held: the run behind it is alive.
-pub type Alive<'a> = &'a dyn Fn(&str) -> bool;
-
 /// Every claim on an entity that holds at `now`, in the order that decides a contest: earliest lease, then replica.
-/// Claims without a time lease all count as held.
+/// A claim without a time lease, which only older versions wrote, never holds.
 ///
 /// # Errors
 ///
 /// Fails when a claim value can't be read, such as one from a newer version: hiding it would let anyone claim the
 /// item.
 pub fn live(state: &State, item: &Key, now: Millis) -> Result<Vec<Claim>, Error> {
-    live_with(state, item, now, &|_| true)
-}
-
-/// Like [`live`], where a claim without a time lease holds only while `alive` says its holder is.
-///
-/// # Errors
-///
-/// Fails when a claim value can't be read.
-pub fn live_with(
-    state: &State,
-    item: &Key,
-    now: Millis,
-    alive: Alive<'_>,
-) -> Result<Vec<Claim>, Error> {
     let mut claims = Vec::new();
     for value in state.field(item, FIELD).into_iter().flatten().map(|(_, v)| &v.value) {
         let claim: Claim = serde_json::from_value(value.clone()).map_err(|e| {
             Error::Format(format!("unreadable claim on {} {}: {e}", item.kind, item.id))
         })?;
-        let held = match claim.lease_expires {
-            Some(expires) => now < expires,
-            None => alive(&claim.holder),
-        };
-        if held {
+        if claim.lease_expires.is_some_and(|expires| now < expires) {
             claims.push(claim);
         }
     }
@@ -92,20 +66,6 @@ pub fn live_with(
 /// Fails when a claim value can't be read.
 pub fn winner(state: &State, item: &Key, now: Millis) -> Result<Option<Claim>, Error> {
     Ok(live(state, item, now)?.into_iter().next())
-}
-
-/// Like [`winner`], with run liveness from `alive`.
-///
-/// # Errors
-///
-/// Fails when a claim value can't be read.
-pub fn winner_with(
-    state: &State,
-    item: &Key,
-    now: Millis,
-    alive: Alive<'_>,
-) -> Result<Option<Claim>, Error> {
-    Ok(live_with(state, item, now, alive)?.into_iter().next())
 }
 
 /// Releases `holder`'s claims on an entity and no one else's, so a contest's loser can step aside without taking the
@@ -136,10 +96,9 @@ pub fn covering(
     model: &Model,
     item: &str,
     now: Millis,
-    alive: Alive<'_>,
 ) -> Result<Vec<Claim>, Error> {
     match model.thread_of(item).filter(|thread| model.threads.contains_key(*thread)) {
-        Some(thread) => live_with(state, &thread_key(thread)?, now, alive),
+        Some(thread) => live(state, &thread_key(thread)?, now),
         None => Ok(Vec::new()),
     }
 }
@@ -189,10 +148,9 @@ pub fn resource_held(
     Ok(None)
 }
 
-/// Claims a thread for `holder`, or renews the claim `holder` already wins. A time lease runs for `lease` from `at`,
+/// Claims a thread for `holder`, or renews the claim `holder` already wins. The lease runs for `lease` from `at`,
 /// capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its write
-/// supersedes the other contestants' values: an ordinary resolving write. Run liveness comes from the run records
-/// (see [`Model::run_alive`]).
+/// supersedes the other contestants' values: an ordinary resolving write.
 ///
 /// # Panics
 ///
@@ -200,7 +158,7 @@ pub fn resource_held(
 ///
 /// # Errors
 ///
-/// Fails when a holder other than a run claims without a time lease, when the thread has no record, when another
+/// Fails when the thread has no record, when another
 /// holder wins the thread in this replica's view (so a claim never silently replaces one it has seen; only claims made
 /// without seeing each other contest), when another holder's winning claim on another thread holds a resource one of
 /// this thread's open members names, or on an unreadable claim.
@@ -209,26 +167,21 @@ pub fn claim(
     thread: &str,
     holder: &str,
     at: Millis,
-    lease: Option<Millis>,
+    lease: Millis,
     max_lease: Millis,
 ) -> Result<Dot, Error> {
-    // Only a run has a liveness signal; any other holder must take a time lease, or its claim would never end.
-    if lease.is_none() && !holder.starts_with("run/") {
-        return Err(Error::LeaseRequired(holder.to_owned()));
-    }
     let model = Model::read(&replica.state)?;
     if !model.threads.contains_key(thread) {
         return Err(Error::NoThread(thread.to_owned()));
     }
     let key = thread_key(thread)?;
-    let alive = |holder: &str| model.run_alive(holder);
-    let current = winner_with(&replica.state, &key, at, &alive)?;
+    let current = winner(&replica.state, &key, at)?;
     if current.as_ref().is_some_and(|claim| claim.holder != holder) {
         return Err(Error::Claimed(key));
     }
-    let winner = |other: &str| winner_with(&replica.state, &thread_key(other)?, at, &alive);
+    let winning = |other: &str| winner(&replica.state, &thread_key(other)?, at);
     if let Some((resource, thread, holder)) =
-        resource_held(&resources(&model), thread, Some(holder), winner)?
+        resource_held(&resources(&model), thread, Some(holder), winning)?
     {
         return Err(Error::ResourceHeld { resource, thread, holder });
     }
@@ -236,7 +189,7 @@ pub fn claim(
         holder: holder.to_owned(),
         replica: replica.id().as_str().to_owned(),
         lease_start: current.map_or(at, |claim| claim.lease_start),
-        lease_expires: lease.map(|lease| at.saturating_add(lease.clamp(0, max_lease))),
+        lease_expires: Some(at.saturating_add(lease.clamp(0, max_lease))),
     };
     let value = serde_json::to_value(claim).expect("a claim always serializes");
     let dot = replica.write(&key, FIELD, holder, at, Some(value))?;
@@ -314,10 +267,9 @@ pub struct Clash {
 ///
 /// Fails on an unreadable claim.
 pub fn clashes(state: &State, model: &Model, now: Millis) -> Result<Vec<Clash>, Error> {
-    let alive = |holder: &str| model.run_alive(holder);
     let mut by_resource: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     for (thread, held) in resources(model) {
-        if let Some(claim) = winner_with(state, &thread_key(thread)?, now, &alive)? {
+        if let Some(claim) = winner(state, &thread_key(thread)?, now)? {
             for resource in held {
                 by_resource
                     .entry(resource)

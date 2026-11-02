@@ -340,7 +340,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
           "title": "Second"
         }
       ],
-      "pm": false,
       "readiness": {
         "holder": "session/mac",
         "items": [
@@ -888,7 +887,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "title": "Second"
         }
       ],
-      "pm": false,
       "readiness": {
         "items": [
           "a2"
@@ -1024,7 +1022,7 @@ Usage: acyclic repo add --owner <OWNER> --name <NAME> --default-branch <DEFAULT_
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --public
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main
 # exit 0
 {
   "data": {
@@ -1034,7 +1032,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --public
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main
 # exit 0
 {
   "data": {
@@ -1044,17 +1042,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch main --private
+$ ACYCLIC_ACTOR=session/mac acyclic repo add r1 --owner me --name code --default-branch trunk
 # exit 1
 {
   "error": {
     "code": "already-exists",
     "details": {
       "fields": [
-        "public"
+        "default_branch"
       ]
     },
-    "message": "repository record r1 exists with other --public/--private; change it with `acyclic repo edit r1 --public|--private`"
+    "message": "repository record r1 exists with other --default-branch; change it with `acyclic repo edit r1 --default-branch …`"
   },
   "ok": false
 }
@@ -1069,7 +1067,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo edit r1 --default-branch trunk
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repo edit nope --private
+$ ACYCLIC_ACTOR=session/mac acyclic repo edit nope --default-branch main
 # exit 3
 {
   "error": {
@@ -1105,7 +1103,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo show r1
       ],
       "name": "code",
       "owner": "me",
-      "public": true,
       "threads": []
     }
   ],
@@ -1135,7 +1132,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo show r1
       "items": [],
       "name": "code",
       "owner": "me",
-      "public": true,
       "threads": []
     }
   ],
@@ -1151,8 +1147,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo list
         "default_branch": "trunk",
         "id": "r1",
         "name": "code",
-        "owner": "me",
-        "public": true
+        "owner": "me"
       }
     ]
   },

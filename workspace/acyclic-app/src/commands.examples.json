@@ -247,28 +247,6 @@
       }
     },
     {
-      "name": "flag project management",
-      "command": {
-        "thread": {
-          "edit": {
-            "thread": "t",
-            "pm": true
-          }
-        }
-      }
-    },
-    {
-      "name": "unflag project management",
-      "command": {
-        "thread": {
-          "edit": {
-            "thread": "t",
-            "no-pm": true
-          }
-        }
-      }
-    },
-    {
       "name": "the global level",
       "command": {
         "level": {

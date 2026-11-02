@@ -43,7 +43,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # The build needs only Rust and cargo-about, and Node and pnpm for the app.
-  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
+  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
 
 jobs:
   build:

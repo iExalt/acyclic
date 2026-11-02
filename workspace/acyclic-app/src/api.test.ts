@@ -118,7 +118,6 @@ describe("thread, proposals and globalLevel", () => {
             brief: { conflict: ["x", "y"] },
             approved: false,
             level: null,
-            pm: true,
             heads: ["a"],
             members: [{ id: "a", title: "A" }],
           },
@@ -127,7 +126,7 @@ describe("thread, proposals and globalLevel", () => {
       proposal: { ok: true, data: { proposals: [] } },
       level: { ok: true, data: { global: "blockers", threads: [] } },
     });
-    await expect(thread("t", fetcher)).resolves.toMatchObject({ title: "T", brief: null, pm: true, level: null });
+    await expect(thread("t", fetcher)).resolves.toMatchObject({ title: "T", brief: null, level: null });
     await expect(proposals(fetcher)).resolves.toEqual([]);
     await expect(globalLevel(fetcher)).resolves.toBe("blockers");
     expect(sent).toEqual([example("a thread"), example("proposals"), example("levels")]);
@@ -187,8 +186,8 @@ describe("failure", () => {
       code: "parent-cycle",
       message: "An item can't go inside itself, or inside anything under it",
     });
-    expect(failure(new CommandError("claimed", "thread t is claimed by run/1")).message).toBe(
-      "Thread t is claimed by run/1",
+    expect(failure(new CommandError("claimed", "thread t is claimed by session/1")).message).toBe(
+      "Thread t is claimed by session/1",
     );
   });
 });

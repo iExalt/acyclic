@@ -17,7 +17,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # The checks need only Rust, nextest, Gitleaks, rumdl, actionlint and ShellCheck; skip the rest of mise.toml's tools.
-  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about,node,pnpm
+  MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:EmbarkStudios/cargo-about,node,pnpm
 
 jobs:
   check:
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The app's check needs only Node and pnpm.
-      MISE_DISABLE_TOOLS: rust,python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,podman,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
+      MISE_DISABLE_TOOLS: rust,python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       # Python and uv run Playwright here, and Node and pnpm build the app.
-      MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,podman,github:EmbarkStudios/cargo-about
+      MISE_DISABLE_TOOLS: ruff,cargo:cargo-edit,cargo:cargo-generate,github:EmbarkStudios/cargo-about
       # Unoptimised here: a fresh checkout rebuilds the workspace's crates, which at level 1 took about 26 s longer on
       # these runners than the journeys saved.
       CARGO_PROFILE_JOURNEYS_OPT_LEVEL: "0"

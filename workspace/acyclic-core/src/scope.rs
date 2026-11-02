@@ -1,6 +1,6 @@
-//! Edits to approved scope, applied or proposed by actor. The user's edits and a
-//! project-management agent's apply at once; any other agent's edit to an approved thread's scope waits as a
-//! proposal for the user to keep or drop. The replica that applies the write decides, against its own view then.
+//! Edits to approved scope, applied or proposed by actor. The user's edits apply at once; an agent's edit to an
+//! approved thread's scope waits as a proposal for the user to keep or drop. The replica that applies the write
+//! decides, against its own view then.
 //!
 //! An actor is the user only when it says so: anything undeclared or unknown is an agent.
 
@@ -16,34 +16,19 @@ use crate::state::{Error, Key, Replica, State};
 /// The user's actor id.
 pub const USER: &str = "actor/user";
 
-/// The prefix of an operator's actor id, such as `operator/mac`: the one other actor that starts and moves runs.
-/// Anywhere else it counts as an agent.
-pub const OPERATOR: &str = "operator/";
-
 /// Who an edit comes from, as far as scope is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {
     /// The user.
     User,
-    /// A run on a thread flagged as project management.
-    ProjectManager,
-    /// Any other run, session or undeclared actor.
+    /// Any session or undeclared actor.
     Agent,
 }
 
-/// Classifies an actor id against the model.
+/// Classifies an actor id.
 #[must_use]
-pub fn classify(model: &Model, actor: &str) -> Actor {
-    if actor == USER {
-        return Actor::User;
-    }
-    let pm = actor
-        .strip_prefix("run/")
-        .and_then(|id| model.runs.get(id))
-        .and_then(|run| run.thread.one())
-        .and_then(|thread| model.threads.get(thread))
-        .is_some_and(model::Thread::is_pm);
-    if pm { Actor::ProjectManager } else { Actor::Agent }
+pub fn classify(actor: &str) -> Actor {
+    if actor == USER { Actor::User } else { Actor::Agent }
 }
 
 /// An edit to a thread's scope.
@@ -195,8 +180,8 @@ impl From<Error> for ScopeError {
     }
 }
 
-/// Applies a scope edit, or records it as a proposal when it changes an approved thread's scope and comes from
-/// neither the user nor a project-management agent.
+/// Applies a scope edit, or records it as a proposal when it changes an approved thread's scope and doesn't come from
+/// the user.
 ///
 /// # Errors
 ///
@@ -215,7 +200,7 @@ pub(crate) fn edit_in(
 ) -> Result<Outcome, ScopeError> {
     validate(&replica.state, change)?;
     let protected = !change.approved_threads(model).is_empty();
-    if !protected || classify(model, by.actor) != Actor::Agent {
+    if !protected || classify(by.actor) != Actor::Agent {
         apply(replica, change, by)?;
         return Ok(Outcome::Applied);
     }
@@ -345,7 +330,7 @@ pub fn unapproved(state: &State, model: &Model) -> Result<Vec<Unapproved>, Error
             .flatten()
             .map(|(_, v)| v.actor.as_str())
             .collect();
-        if writers.iter().all(|actor| classify(model, actor) == Actor::Agent)
+        if writers.iter().all(|actor| classify(actor) == Actor::Agent)
             && let Some(actor) = writers.first()
         {
             found.push(Unapproved {
@@ -460,10 +445,10 @@ fn apply(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), Wr
     }
 }
 
-/// Extends an approved thread's approval to a member applied to it, so work the user kept, or the user or a
-/// project manager added, counts as approved. The approval records members and nothing else, so a repository edit
-/// has nothing to extend. Competing records of members, which approvals on two replicas leave, are united. A thread
-/// that isn't approved, or whose approval recorded no members and so counts every member, is left alone.
+/// Extends an approved thread's approval to a member applied to it, so work the user kept or added counts as
+/// approved. The approval records members and nothing else, so a repository edit has nothing to extend. Competing
+/// records of members, which approvals on two replicas leave, are united. A thread that isn't approved, or whose
+/// approval recorded no members and so counts every member, is left alone.
 fn see_member(
     replica: &mut Replica,
     thread: &str,

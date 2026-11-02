@@ -1,5 +1,5 @@
-// The commands the app's forms send: an item's fields, a conflict settled, a reopen, a thread approved, its level and
-// project-management flag, the global level, and a proposal kept or dropped. Pure, so each shape is tested against
+// The commands the app's forms send: an item's fields, a conflict settled, a reopen, a thread approved, its level, the
+// global level, and a proposal kept or dropped. Pure, so each shape is tested against
 // the commands the server's tests run.
 
 import type { Command, Item } from "./api";
@@ -113,7 +113,6 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
     return value === null ? edit({ "no-brief": true }) : text === null ? null : edit({ brief: text });
   if (field === "autonomy")
     return value === null ? edit({ "no-level": true }) : isLevel(text) ? edit({ level: text }) : null;
-  if (field === "pm-flag") return edit(value === true ? { pm: true } : { "no-pm": true });
   if (field === "approved") return value === true ? approveCommand(id) : revokeCommand(id);
   // Approving again records the members as they are now.
   if (field === "approved-members") return approveCommand(id);
@@ -147,10 +146,6 @@ export function revokeCommand(thread: string): Command {
 /** A thread's own level, or none, so the global one applies. */
 export function threadLevelCommand(thread: string, level: Level | null): Command {
   return { thread: { edit: level === null ? { thread, "no-level": true } : { thread, level } } };
-}
-
-export function pmCommand(thread: string, pm: boolean): Command {
-  return { thread: { edit: pm ? { thread, pm: true } : { thread, "no-pm": true } } };
 }
 
 export function globalLevelCommand(level: Level): Command {

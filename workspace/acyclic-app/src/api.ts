@@ -238,7 +238,6 @@ export interface ThreadDetail {
   approved: boolean;
   /** Its own autonomy level, or null when the global one applies. */
   level: string | null;
-  pm: boolean;
   heads: string[];
   members: { id: string; title: string }[];
 }

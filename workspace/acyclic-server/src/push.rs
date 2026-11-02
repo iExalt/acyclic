@@ -647,7 +647,7 @@ pub fn line(entry: &Value) -> String {
         "new-blocker" => format!("{} has a new blocker", title(&entry["item"])),
         "reopened" => format!("{} was reopened", title(&entry["item"])),
         "done-early" => format!("{} is done with work in it open", title(&entry["item"])),
-        "contest" | "run-clash" | "unknown-run" => {
+        "contest" => {
             format!("{} has a claim to sort out", title(&entry["thread"]))
         },
         "resource-clash" => {

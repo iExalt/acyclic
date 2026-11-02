@@ -72,12 +72,9 @@ An agent's change to an approved thread's scope, waiting for the user to keep or
 _Avoid_: suggestion, pending change
 
 **Proposed member**:
-An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes and
-a project-management agent's apply at once. An agent's add that crossed the approval between machines is listed in
+An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes
+apply at once. An agent's add that crossed the approval between machines is listed in
 the same way, kept by the user adding it to the thread again or, all at once, by approving the thread again.
-
-**Project-management agent**:
-An agent the user deployed to change the graph's structure, whose edits apply like the user's.
 
 **Card**:
 A one-shot task the intake chat suggests, which the user starts, keeps or dismisses with a tap.

@@ -34,7 +34,7 @@ impl Ancestry for Fake {
 }
 
 fn by(at: Millis) -> By<'static> {
-    By { actor: "actor/user", at, seen: None }
+    By { actor: "actor/user", at }
 }
 
 fn replica(name: &str) -> Replica {
@@ -217,10 +217,10 @@ fn a_threads_claim_shows_on_its_members_and_a_contest_names_its_winner_first() {
     items(&mut a, &["x"]);
     let mut b = replica("b");
     b.join(&a.state).unwrap();
-    claim::claim(&mut a, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut a, "main", "session/one", 900, 500, 1_000).unwrap();
     let none = Fake::default();
     assert_eq!(status(&a, &none, "x"), Status::Claimed { holder: "session/one".into() });
-    claim::claim(&mut b, "main", "session/two", 950, Some(500), 1_000).unwrap();
+    claim::claim(&mut b, "main", "session/two", 950, 500, 1_000).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(
         status(&a, &none, "x"),
@@ -274,7 +274,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     assert!(!at(&a, "quiet").claimable_by("session/one"));
     assert_eq!(ready(&a, "session/one"), ["dep", "x", "y"]);
     let unclaimed = a.state.clone();
-    claim::claim(&mut a, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut a, "main", "session/one", 900, 500, 1_000).unwrap();
     // Its members stay workable for the holder alone.
     let held = at(&a, "main");
     assert_eq!(held, ThreadStatus::Claimed { holder: "session/one".into(), items: workable });
@@ -286,7 +286,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     // A contest's winner may go on; its loser may not.
     let mut c = replica("c");
     c.join(&unclaimed).unwrap();
-    claim::claim(&mut c, "main", "session/two", 950, Some(500), 1_000).unwrap();
+    claim::claim(&mut c, "main", "session/two", 950, 500, 1_000).unwrap();
     b.join(&c.state).unwrap();
     let contested = at(&b, "main");
     assert!(
@@ -334,7 +334,7 @@ fn git_ancestry_takes_only_commit_ids() {
 }
 
 #[test]
-fn a_held_resource_keeps_another_threads_work_waiting_and_a_dead_runs_claim_frees_it() {
+fn a_held_resource_keeps_another_threads_work_waiting_until_its_claim_is_released() {
     let mut r = replica("a");
     items(&mut r, &["x"]);
     add_item(&mut r, "y", "y", by(1)).unwrap();
@@ -343,13 +343,12 @@ fn a_held_resource_keeps_another_threads_work_waiting_and_a_dead_runs_claim_free
         set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
             .unwrap();
     }
-    model::start_run(&mut r, "r1", "main", by(2)).unwrap();
-    claim::claim(&mut r, "main", "run/r1", 10, None, 1_000).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     let none = Fake::default();
     let busy = Status::ResourceBusy {
         resource: "gpu".into(),
         thread: "main".into(),
-        holder: "run/r1".into(),
+        holder: "session/one".into(),
     };
     assert_eq!(status(&r, &none, "y"), busy);
     let model = Model::read(&r.state).unwrap();
@@ -358,10 +357,10 @@ fn a_held_resource_keeps_another_threads_work_waiting_and_a_dead_runs_claim_free
         ThreadStatus::ResourceBusy {
             resource: "gpu".into(),
             thread: "main".into(),
-            holder: "run/r1".into()
+            holder: "session/one".into()
         }
     );
-    model::set_run_state(&mut r, "r1", model::RunState::Done, by(20)).unwrap();
+    claim::release(&mut r, &claim::thread_key("main").unwrap(), "session/one");
     assert_eq!(status(&r, &none, "x"), Status::Ready);
     assert_eq!(status(&r, &none, "y"), Status::Ready);
 }
@@ -391,8 +390,8 @@ fn ready_lists_the_actors_thread_first_then_approved_ones_by_natural_title_and_l
         add_item(&mut r, item, title, by(1)).unwrap();
         thread(&mut r, item, "d");
     }
-    claim::claim(&mut r, "d", "session/me", 900, Some(500), 1_000).unwrap();
-    claim::claim(&mut r, "e", "session/other", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "d", "session/me", 900, 500, 1_000).unwrap();
+    claim::claim(&mut r, "e", "session/other", 900, 500, 1_000).unwrap();
     let model = Model::read(&r.state).unwrap();
     let ready =
         Readiness::new(&r.state, &model, NOW, &Fake::default()).ready(false, "session/me").unwrap();
@@ -423,7 +422,7 @@ fn an_item_is_busy_whenever_its_thread_is_even_through_another_members_resource(
         set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
             .unwrap();
     }
-    claim::claim(&mut r, "other", "session/other", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "other", "session/other", 900, 500, 1_000).unwrap();
     let none = Fake::default();
     let busy = Status::ResourceBusy {
         resource: "gpu".into(),
@@ -492,7 +491,7 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
     };
     assert_eq!(state(&r, NOW), ItemState::Backlog);
     // A claim lasts its lease: the parent reads in progress while it lives, and backlog once it lapses.
-    claim::claim(&mut r, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     assert_eq!(state(&r, NOW), ItemState::InProgress);
     assert_eq!(state(&r, 2_000), ItemState::Backlog);
     // Parked work isn't being worked, though its thread is claimed.
@@ -527,7 +526,7 @@ fn a_leaf_started_by_hand_reads_in_progress_whatever_holds_it_and_a_claim_starts
     assert_eq!(stage(&r, "x"), Some(Stage::InProgress));
     // A backlog leaf in a claimed thread is in progress; one that waits is still blocked.
     link(&mut r, "y", "dep", LinkKind::Blocks, by(4)).unwrap();
-    claim::claim(&mut r, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     assert_eq!(stage(&r, "dep"), Some(Stage::InProgress));
     assert_eq!(stage(&r, "y"), Some(Stage::Blocked));
     set_state(&mut r, "y", ItemState::Parked, by(5)).unwrap();
@@ -611,7 +610,7 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves(
         link(&mut r, leaf, "first", LinkKind::Blocks, by(2)).unwrap();
     }
     assert_eq!(rollup(&r, "box").progress.state, ItemState::Backlog);
-    claim::claim(&mut r, "main", "session/one", 900, Some(500), 1_000).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     let rolled = rollup(&r, "box");
     assert_eq!(rolled.progress.state, ItemState::InProgress);
     assert_eq!(rolled.stages, Stages { blocked: 2, ..Stages::default() }, "the counts stay honest");
@@ -650,7 +649,7 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
         }
     }
     if claims && below(2) == 0 && Model::read(&r.state).unwrap().threads.contains_key("t0") {
-        claim::claim(&mut r, "t0", "session/one", 900, Some(500), 1_000).unwrap();
+        claim::claim(&mut r, "t0", "session/one", 900, 500, 1_000).unwrap();
     }
     r
 }

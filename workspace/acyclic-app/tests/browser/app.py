@@ -6,7 +6,7 @@ needs the manifest and its icons fetched through the session's cookie), and draw
 default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
 the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread is
-approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level are set; from
+approved, an agent's proposals to it are kept and dropped, and its level and the global level are set; from
 Needs you's view, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
 subscription it is given, records a pushed notification without displaying a system banner, and opens Needs you's view
 it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
@@ -2207,8 +2207,8 @@ def settled_control(page, selector, prop, value):
 
 @timed
 def thread_journey(page, env, plan, thread, name, failures):
-    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level, its
-    project-management flag and the global level, checking the panel and then the tracker."""
+    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level and the global
+    level, checking the panel and then the tracker."""
     panel = page.get_by_test_id("thread-panel")
     # Picking a thread already picked unpicks it.
     pick_thread(page, plan, thread)
@@ -2265,14 +2265,11 @@ def thread_journey(page, env, plan, thread, name, failures):
     first.wait_for(state="detached", timeout=10_000)
     rows.locator("[data-action=drop]").first.click()
     panel.get_by_test_id("proposals").wait_for(state="detached", timeout=10_000)
-    # Its own level, its project-management flag, and the global level.
+    # Its own level, and the global level.
     panel.locator("select[name=level]").select_option("everything")
     settled_control(
         page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
     )
-    # The choice shows the pick at once and saves it in the background; the tracker is checked once both land.
-    panel.locator("select[name=pm]").select_option("apply")
-    settled_control(page, "[data-testid=thread-panel] select[name=pm]", "value", "apply")
 
     def level():
         page.get_by_test_id("global-level").select_option("everything")
@@ -2290,17 +2287,15 @@ def thread_journey(page, env, plan, thread, name, failures):
     deadline = time.monotonic() + 10
     while True:
         after = shown()
-        if (after["approved"], after["level"], after["pm"]) == (True, "everything", True) and json.loads(
+        if (after["approved"], after["level"]) == (True, "everything") and json.loads(
             run(env, "level")
         )["data"]["global"] == "everything":
             break
         if time.monotonic() > deadline:
             break
         page.wait_for_timeout(200)
-    if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
-        failures.append(
-            f"{name}: the tracker shows {thread} as {after['approved'], after['level'], after['pm']}"
-        )
+    if (after["approved"], after["level"]) != (True, "everything"):
+        failures.append(f"{name}: the tracker shows {thread} as {after['approved'], after['level']}")
     threads_of = {
         id: json.loads(run(env, "show", id))["data"][0]["thread"] for id in outside
     }
@@ -2310,7 +2305,7 @@ def thread_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: the global level didn't change")
     page.screenshot(path=SHOTS / f"app-{name}-thread-panel.png")
     print(
-        f"{name}: approved {thread}, kept and dropped proposals, and set its level, its flag and the global level"
+        f"{name}: approved {thread}, kept and dropped proposals, and set its level and the global level"
     )
 
 
