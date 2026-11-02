@@ -141,7 +141,7 @@ const REFUSALS: Record<string, string> = {
   "parent-cycle": "An item can't go inside itself, or inside anything under it",
   "link-cycle": "That link would close a loop: the items would wait on each other",
   "self-link": "An item can't link to itself",
-  deleted: "That id was a deleted item's, and isn't used again: choose another",
+  deleted: "That item was deleted after it was added: send it again to add it anew",
   "not-found": "It isn't in the plan any more: someone deleted or moved it meanwhile",
   locked: "The tracker is busy with another write: try again in a moment",
 };

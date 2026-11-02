@@ -401,7 +401,7 @@ impl<'a> Session<'a> {
     /// nothing; `changed` says whether the command itself changed anything.
     fn write(
         &self,
-        apply: impl Fn(&mut Replica, By<'_>) -> Result<Json, CliError>,
+        apply: impl FnOnce(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
         let meta = Meta { actor: self.actor.clone() };
@@ -411,8 +411,8 @@ impl<'a> Session<'a> {
             let before = replica.changes();
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
-            // A retried batch runs this again, so the names are those of the state it commits. Naming never fails a
-            // write: a model that can't be read leaves the names to the tracker afterwards.
+            // The names of the state the batch commits. Naming never fails a write: a model that can't be read leaves
+            // the names to the tracker afterwards.
             if let Some(named) = &self.named {
                 *named.borrow_mut() = Model::read(replica.state()).ok().as_ref().map(names_of);
             }

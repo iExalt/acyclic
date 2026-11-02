@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 /// The one state format this build reads. Version 3 names records by `UUIDv7`; a tracker written in an earlier format
-/// is migrated, not read.
+/// isn't read: that version reads it, or the tracker is rebuilt with an import.
 pub const FORMAT_VERSION: u32 = 3;
 
 /// How far a writer's clock may step back before a write is refused, in milliseconds.
@@ -251,7 +251,7 @@ impl fmt::Display for Error {
                 "unreadable state: format version {version} is not supported; this build reads only \
                  {FORMAT_VERSION}, so {}",
                 if *version < u64::from(FORMAT_VERSION) {
-                    "a tracker written by an earlier version must be migrated"
+                    "a tracker written by an earlier version is read by that version, or rebuilt with `acyclic import`"
                 } else {
                     "a tracker written by a later version needs a later acyclic"
                 }

@@ -13,6 +13,7 @@ import {
   type Pending,
   type Pick,
   pick,
+  redraft,
   type Sent,
   told,
   unanswered,
@@ -450,7 +451,7 @@ export function App() {
             }
           }
           setPending(null);
-          if (!held && drawn.kind === "add") setAdding({ parent: drawn.item.parent, draft: drawn.item });
+          if (!held && drawn.kind === "add") setAdding({ parent: drawn.item.parent, draft: redraft(drawn.item, code) });
           if (!held && drawn.kind === "edit")
             setReopened((was) => ({ id: drawn.id, edited: drawn.edited, n: (was?.n ?? 0) + 1 }));
         }
