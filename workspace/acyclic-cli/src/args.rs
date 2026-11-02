@@ -166,7 +166,8 @@ pub enum Command {
         /// The lease in minutes: 60 by default, 1 to 480.
         #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
-        /// Claim even when the thread has no ready work.
+        /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim
+        /// on it, or on a resource it needs, still refuses.
         #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
@@ -189,7 +190,7 @@ pub enum Command {
         /// A note, such as where a record lives.
         #[arg(short = 'n', long)]
         note: Option<String>,
-        /// Finish it although it isn't ready or someone else holds it.
+        /// Finish it although it isn't ready or someone else holds it, or replace the evidence it was finished with.
         #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
@@ -342,8 +343,10 @@ impl Command {
     #[must_use]
     pub fn class(&self) -> Class {
         match self {
-            Self::Init { .. } | Self::Prime | Self::Completions { .. } => Class::Standalone,
-            Self::Import { schema: true, .. } => Class::Standalone,
+            Self::Init { .. }
+            | Self::Prime
+            | Self::Completions { .. }
+            | Self::Import { schema: true, .. } => Class::Standalone,
             Self::Serve(_) | Self::Up(_) => Class::Server,
             Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
             Self::Ready { .. }

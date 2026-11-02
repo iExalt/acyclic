@@ -50,11 +50,14 @@ fn runs(text: &str) -> impl Iterator<Item = Run<'_>> {
 /// fall back to plain order, so the order is total.
 #[must_use]
 pub fn cmp(a: &str, b: &str) -> Ordering {
-    let (mut x, mut y) = (runs(a), runs(b));
+    let (mut left, mut right) = (runs(a), runs(b));
     loop {
-        let order = match (x.next(), y.next()) {
-            (Some(p), Some(q)) => p.cmp(&q),
-            (p, q) => return p.is_some().cmp(&q.is_some()).then_with(|| a.cmp(b)),
+        let order = match (left.next(), right.next()) {
+            (Some(mine), Some(theirs)) => mine.cmp(&theirs),
+            // A string that runs out first sorts first.
+            (mine, theirs) => {
+                return mine.is_some().cmp(&theirs.is_some()).then_with(|| a.cmp(b));
+            },
         };
         if order != Ordering::Equal {
             return order;

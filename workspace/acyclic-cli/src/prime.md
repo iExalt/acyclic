@@ -92,7 +92,7 @@ and thread it belongs with.
    `unthreaded`. `acyclic list` lists every item. `acyclic show <item>...` explains items, as an array in the order
    given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
    `unverified`.
-2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
+2. `acyclic claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
    through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
    written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take

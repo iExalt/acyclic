@@ -13,6 +13,8 @@ use clap::Parser;
 use super::*;
 use crate::error::CliError;
 
+mod contract;
+
 fn env(vars: &[(&str, &str)]) -> Env {
     Env {
         vars: vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
