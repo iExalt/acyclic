@@ -18,10 +18,23 @@ export interface ChoiceProps {
   testid?: string;
   /** What the value chosen means, said under the list. */
   hint?: string | null;
+  /** What the value chosen means, said on hover instead, where a line under the list would crowd it. */
+  title?: string | undefined;
   children: ReactNode;
 }
 
-export function Choice({ label, className, value, disabled, onWrite, name, testid, hint, children }: ChoiceProps) {
+export function Choice({
+  label,
+  className,
+  value,
+  disabled,
+  onWrite,
+  name,
+  testid,
+  hint,
+  title,
+  children,
+}: ChoiceProps) {
   const [state, setState] = useState(UNCHOSEN);
   const hintId = useId();
   /** Set while a key's own task runs: a change then is an arrow key's on the closed list, not a pick. */
@@ -38,6 +51,7 @@ export function Choice({ label, className, value, disabled, onWrite, name, testi
       <select
         name={name}
         data-testid={testid}
+        title={title}
         aria-describedby={hint ? hintId : undefined}
         value={draftOf(state, value) ?? value}
         disabled={disabled}

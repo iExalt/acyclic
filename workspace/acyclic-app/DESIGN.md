@@ -30,12 +30,14 @@ reachable by keyboard; focus is always visible. Reduced motion turns the sheets'
 ## Overview
 
 A quiet tool (Operate mode throughout), in the manner of Linear: neutral surfaces, ink rather than a brand colour as
-the accent, so colour is left to the threads' lines and the signal. The scheme follows the system's, light or dark.
+the accent, so colour is left to the threads' lines and the signal. The scheme follows the system's, light or dark,
+unless the menu's Theme picks one on the device (System, Light or Dark; System by default).
 
 ## Colors
 
-`PALETTES` in `src/palette.ts` is the source; `app.css` repeats it as custom properties under `/* palette <scheme> */`,
-and a unit test keeps the two in step.
+`PALETTES` in `src/palette.ts` is the source; `app.css` repeats it as custom properties under `/* palettes */`, each
+`light-dark(light, dark)`, so a Theme picked on the root (`data-theme`) needs no second copy, and a unit test keeps the
+two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
   Map's items and boxes). A tile in progress takes a cooler tint, one done, blocked or parked a greyer one; one in
@@ -128,9 +130,16 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   stage, as text: finishing sets it, not the form.
 - **A thread's status** follows Needs you: "Waiting for your approval", beside the inbox icon Needs you has, and a
   filled Approve only when Needs you asks for it; until the thread is read again after a decision, it says what it said
-  as it was read, not what the list says by then. Unapproved with nothing open reads "Not approved, with nothing open",
-  quiet, with an outlined Approve, as approval still covers what joins it later.
+  as it was read, not what the list says by then. Unapproved with nothing open reads "Not approved", quiet, with an
+  outlined Approve, as approval still covers what joins it later. Under it, the thread's Items, in the order their work
+  runs (each after what it waits for in the thread), each with its stage's icon, the first eight and then how many more;
+  "Starts with", its first items alone, meant nothing to the user. Its settings, Autonomy and Scope edits, are rows as
+  the item panel's properties are, label beside value, with what a value means on hover rather than a line under each.
 - **Thread badges:** the thread's number on its line's colour.
+- **Settings change at once.** A setting, in the ⋯ menu or a thread's panel, shows its new value as it is picked and
+  saves in the background, after any write already out, with no busy bar and nothing else held; a refusal puts the old
+  value back and says why. A setting leaves the menu open; only its buttons close it. (A busy bar and greyed controls
+  after each change read as "a brief loading screen - not good", and the menu closing on a checkbox as bad UX.)
 - **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
   of Needs you, where every visit passed it.
 - **Key hints** (the ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only with a fine
@@ -182,8 +191,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
   where it is already or anything inside it.
 - **Lists:** the Overview's rows a finger's height, ruled apart, each opening what it names, a chevron at its end. Rows
-  inside a panel, such as Needs you's items and a thread's Starts with, are text that opens what it names, with no
-  chevron.
+  inside a panel, such as Needs you's items and a thread's Items, are text that opens what it names, with no chevron.
 
 ## Interaction conventions
 
@@ -351,3 +359,6 @@ before what went wrong.
 - 2026-11-01: a thread picked from Needs you goes to the Map, as every thread does; a short Up next stacks under In
   progress, the projects taking the third column; the thread colours' hue step stays, and project names show as
   written; the user chose them.
+- 2026-11-01: a Theme in the menu, System, Light or Dark, System by default, after the user asked for a switch on the
+  phone; settings change at once and leave the menu open; a thread's panel lists its Items in place of Starts with. The
+  user chose them.

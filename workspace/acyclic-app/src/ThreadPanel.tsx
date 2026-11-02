@@ -1,5 +1,5 @@
-// The picked thread: what approving it lets agents work on, its autonomy level and project-management flag, and the
-// proposals agents made to it, each kept or dropped with one tap.
+// The picked thread: what approving it lets agents work on, its items in the order their work runs, its autonomy level
+// and project-management flag, and the proposals agents made to it, each kept or dropped with one tap.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -31,6 +31,7 @@ import {
 import { useHeld } from "./held";
 import { Check, Icon, Inbox, X } from "./icons";
 import type { Line } from "./lines";
+import { workOrder } from "./members";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
 import { StageCounts, StageIcon } from "./Stage";
@@ -46,11 +47,18 @@ export interface ThreadPanelProps {
   counts: Counts | undefined;
   titleOf: (id: string) => string;
   stageOf: (id: string) => Stage | undefined;
+  /** What an item waits for, to list the thread's items in the order their work runs. */
+  waitsFor: (id: string) => readonly string[];
   /** Changes after every edit sent, so the panel reads the thread again. */
   version: number;
   busy: boolean;
   /** Sends an edit, with what to say once it is saved when that is all that shows it was. */
   onCommand: (command: Command, done?: string, undo?: true) => void;
+  /**
+   * Saves a setting in the background, after any write out, resolving to whether it was saved: the setting shows its
+   * new value at once, and only a refusal puts the old one back.
+   */
+  onSetting: (command: Command) => Promise<boolean>;
   onSelect: (id: string) => void;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
@@ -73,15 +81,27 @@ export function ThreadPanel({
   counts,
   titleOf,
   stageOf,
+  waitsFor,
   version,
   busy,
   onCommand,
+  onSetting,
   onSelect,
   onClose,
   onDismiss,
   onCopyLink,
 }: ThreadPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
+  /** Settings chosen and not yet read back, by name: shown in place of what the thread was read with. */
+  const [showAll, setShowAll] = useState(false);
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  /** Shows `value` for setting `name` at once, and the thread's own value again once it is read back or refused. */
+  const setting = (name: string, value: string, command: Command) => {
+    setChosen((was) => ({ ...was, [name]: value }));
+    void onSetting(command).then((saved) => {
+      if (!saved) setChosen(({ [name]: _, ...rest }) => rest);
+    });
+  };
   const awaitingRef = useRef(awaitingNow);
   awaitingRef.current = awaitingNow;
   // A new version, after any edit, reads the thread again.
@@ -89,12 +109,15 @@ export function ThreadPanel({
     let live = true;
     Promise.all([thread(id), proposals()]).then(
       ([detail, all]) => {
-        if (live)
-          setLoaded({
-            detail,
-            open: all.filter((one) => one.decision === null && one.threads.includes(id)),
-            awaiting: awaitingRef.current,
-          });
+        if (!live) return;
+        setLoaded({
+          detail,
+          open: all.filter((one) => one.decision === null && one.threads.includes(id)),
+          awaiting: awaitingRef.current,
+        });
+        // A setting read back as chosen is the thread's own now; one read otherwise waits for its write to land.
+        const read: Record<string, string> = { level: detail.level ?? "", pm: detail.pm ? "apply" : "wait" };
+        setChosen((was) => Object.fromEntries(Object.entries(was).filter(([name, value]) => read[name] !== value)));
       },
       (err: unknown) => {
         if (live) setLoaded({ failed: failure(err).message });
@@ -128,6 +151,7 @@ export function ThreadPanel({
   if ("failed" in loaded) return shell(<p role="alert">{loaded.failed}</p>);
   const { detail, open, awaiting } = loaded;
   const members = detail.members.length;
+  const ordered = workOrder(detail.members, waitsFor);
   const name = line?.name ?? detail.title;
   const items = `${members} ${members === 1 ? "item" : "items"}`;
   /** After a proposal is settled, the next one's Keep, else the panel. */
@@ -150,7 +174,7 @@ export function ThreadPanel({
           total beside it: the counts below are of the items drawn, which a total of every member would not add up to. */}
       <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
         {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={Inbox} size={16} /> : null}
-        {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved, with nothing open"}
+        {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved"}
       </p>
       <div className="progress">
         {counts === undefined || counts.leaves === 0 ? (
@@ -178,22 +202,29 @@ export function ThreadPanel({
           {awaiting ? null : <p className="muted aside">Covers what's added to it later.</p>}
         </div>
       )}
-      {detail.heads.length === 0 ? null : (
-        <div className="heads">
-          <h3>Starts with</h3>
+      {ordered.length === 0 ? null : (
+        <div className="thread-items">
+          <h3>
+            Items <span className="count muted">{members}</span>
+          </h3>
           <ul className="rows">
-            {detail.heads.map((head) => {
-              const stage = stageOf(head);
+            {(showAll ? ordered : ordered.slice(0, ITEMS_SHOWN)).map((member) => {
+              const stage = stageOf(member);
               return (
-                <li key={head}>
-                  <button type="button" className="row" data-select={head} onClick={() => onSelect(head)}>
+                <li key={member}>
+                  <button type="button" className="row" data-select={member} onClick={() => onSelect(member)}>
                     {stage === undefined ? null : <StageIcon stage={stage} />}
-                    <Prose text={titleOf(head)} />
+                    <Prose text={titleOf(member)} />
                   </button>
                 </li>
               );
             })}
           </ul>
+          {showAll || ordered.length <= ITEMS_SHOWN ? null : (
+            <button type="button" className="quiet more" onClick={() => setShowAll(true)}>
+              {ordered.length - ITEMS_SHOWN} more
+            </button>
+          )}
         </div>
       )}
       {open.length === 0 ? null : (
@@ -239,23 +270,25 @@ export function ThreadPanel({
           </p>
         </div>
       )}
+      {/* Label beside value, as the item panel's properties are; what a value means is said on hover, as a line under
+          each read as clutter. */}
       <div className="settings">
         <h3>Settings</h3>
         <Choice
           label="Autonomy"
           className="setting"
           name="level"
-          value={detail.level ?? ""}
-          hint={
-            detail.level === null
+          value={chosen.level ?? detail.level ?? ""}
+          title={
+            (chosen.level ?? detail.level ?? "") === ""
               ? (() => {
                   const said = levelHint(globalLevel);
-                  return said === null ? null : `${said}, as set for every thread`;
+                  return said === null ? undefined : `${said}, as set for every thread`;
                 })()
-              : levelHint(detail.level)
+              : (levelHint(chosen.level ?? detail.level ?? "") ?? undefined)
           }
-          disabled={busy}
-          onWrite={(level) => onCommand(threadLevelCommand(id, level === "" ? null : (level as Level)))}
+          disabled={false}
+          onWrite={(level) => setting("level", level, threadLevelCommand(id, level === "" ? null : (level as Level)))}
         >
           <option value="">Global ({levelLabel(globalLevel)})</option>
           {LEVELS.map((level) => (
@@ -266,12 +299,13 @@ export function ThreadPanel({
         </Choice>
         {/* The project-management flag, said as what it does to an agent's edits. */}
         <Choice
-          label="Agent edits to approved scope"
+          label="Scope edits"
           className="setting"
           name="pm"
-          value={detail.pm ? "apply" : "wait"}
-          disabled={busy}
-          onWrite={(choice) => onCommand(pmCommand(id, choice === "apply"))}
+          value={chosen.pm ?? (detail.pm ? "apply" : "wait")}
+          title="What happens when an agent changes the scope of an approved thread"
+          disabled={false}
+          onWrite={(choice) => setting("pm", choice, pmCommand(id, choice === "apply"))}
         >
           <option value="wait">Wait for your OK</option>
           <option value="apply">Apply at once</option>
@@ -292,6 +326,9 @@ export function ThreadPanel({
     </>,
   );
 }
+
+/** How many of a thread's items show before the rest are asked for. */
+const ITEMS_SHOWN = 8;
 
 /** A proposal as settling it says, as the needs-you list does: whose change of what. */
 const change = (proposal: Proposal) => `${proposal.actor}'s ${proposal.edit.field} change`;

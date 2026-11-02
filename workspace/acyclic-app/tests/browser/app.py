@@ -204,19 +204,23 @@ def pick_thread(page, plan, thread):
     return rows.first
 
 
-def from_menu(page, act):
-    """Does `act` in the bar's menu, opening it first, as a hand would. Acting closes the menu, so the next tap reaches
-    what it lands on rather than only closing the menu."""
+def from_menu(page, act, closes=False):
+    """Does `act` in the bar's menu, opening it first, as a hand would. A button `closes` the menu, so the next tap
+    reaches what it lands on; a setting leaves it open, showing the new value, and Escape closes it after."""
     menu = page.locator("details.menu:has(> [data-testid=menu])")
     if not menu.evaluate("d => d.open"):
         page.get_by_test_id("menu").click()
     act()
-    if menu.evaluate("d => d.open"):
-        raise AssertionError("acting in the menu left it open, to swallow the next tap")
+    if menu.evaluate("d => d.open") != (not closes):
+        raise AssertionError(
+            "a button in the menu left it open" if closes else "a setting in the menu closed it"
+        )
+    if not closes:
+        page.keyboard.press("Escape")
 
 
 def refresh(page):
-    from_menu(page, lambda: page.get_by_role("button", name="Refresh").click())
+    from_menu(page, lambda: page.get_by_role("button", name="Refresh").click(), closes=True)
 
 
 # The Map's helpers reach the renderer through `evaluate`, which sends back whatever its function returns: return plain
@@ -1725,12 +1729,12 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
             )
-        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
+        # A setting leaves the menu open, showing what it now is.
+        if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
             failures.append(
-                f"{name}: Enter on the autonomy list wrote, but left the menu open"
+                f"{name}: Enter on the autonomy list wrote, and closed the menu"
             )
             page.get_by_test_id("menu").click()
-        page.get_by_test_id("menu").click()
         levels.focus()
         page.keyboard.press("ArrowUp")
         page.keyboard.press("Escape")
@@ -1739,7 +1743,7 @@ def level_keys_journey(page, name, failures):
             failures.append(
                 f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
             )
-        # Only an act closes the menu: Enter on the list with nothing chosen isn't one.
+        # Enter on the list with nothing chosen leaves it open too.
         levels.focus()
         page.keyboard.press("Enter")
         if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
@@ -2164,6 +2168,10 @@ def thread_journey(page, env, plan, thread, name, failures):
         panel.locator("[data-action=revoke]").click()
     approve = panel.locator("[data-action=approve]")
     members = len(shown()["members"])
+    # Its items, in the order their work runs, the first eight shown.
+    listed = panel.locator(".thread-items li").count()
+    if listed != min(members, 8):
+        failures.append(f"{name}: the panel lists {listed} of {thread}'s {members} items")
     if approve.inner_text() != f"Approve {members} items":
         failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
     approve.click()
@@ -2196,7 +2204,24 @@ def thread_journey(page, env, plan, thread, name, failures):
         settled_control(page, "[data-testid=global-level]", "value", "everything")
 
     from_menu(page, level)
-    after = shown()
+    # A Theme picked on the device shows at once, over the system's scheme, and System gives it back.
+    ground = "() => getComputedStyle(document.documentElement).backgroundColor"
+    lit = page.evaluate(ground)
+    from_menu(page, lambda: page.get_by_test_id("theme").select_option("dark"))
+    if lit == page.evaluate(ground) or page.evaluate("document.documentElement.dataset.theme") != "dark":
+        failures.append(f"{name}: picking Dark over a light system left the page {lit}")
+    from_menu(page, lambda: page.get_by_test_id("theme").select_option("system"))
+    # Settings show at once and save in the background, one after another: the tracker has them once the last lands.
+    deadline = time.monotonic() + 10
+    while True:
+        after = shown()
+        if (after["approved"], after["level"], after["pm"]) == (True, "everything", True) and json.loads(
+            run(env, "level")
+        )["data"]["global"] == "everything":
+            break
+        if time.monotonic() > deadline:
+            break
+        page.wait_for_timeout(200)
     if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
         failures.append(
             f"{name}: the tracker shows {thread} as {after['approved'], after['level'], after['pm']}"

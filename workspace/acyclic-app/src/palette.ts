@@ -1,6 +1,6 @@
-// The app's colours in each scheme, light and dark, which follow the system's. app.css repeats them as custom
-// properties for the page; the Map's canvas, which custom properties can't reach, draws from these, and redraws when
-// the scheme changes.
+// The app's colours in each scheme, light and dark, which follow the system's unless the menu's Theme picks one on this
+// device. app.css repeats them as custom properties for the page; the Map's canvas, which custom properties can't
+// reach, draws from these, and redraws when the scheme changes.
 
 import { useSyncExternalStore } from "react";
 import type { Stage } from "./api";
@@ -113,17 +113,64 @@ export const PALETTES: Record<Scheme, Palette> = {
 
 const QUERY = "(prefers-color-scheme: light)";
 
+/** What the menu's Theme sets on this device: the system's scheme, or one kept whatever the system's is. */
+export type Theme = "system" | Scheme;
+
+const THEME_KEY = "acyclic.theme";
+/** Said to every screen drawing in the scheme when the Theme changes, as the system's query says its changes. */
+const THEME_CHANGED = "acyclic-theme";
+
+export function readTheme(): Theme {
+  const kept = typeof localStorage === "undefined" ? null : localStorage.getItem(THEME_KEY);
+  return kept === "light" || kept === "dark" ? kept : "system";
+}
+
+/**
+ * Shows `theme`: on the root, where app.css's palettes read it, and in the bar's colour, which index.html gives each
+ * system scheme and a picked one overrides.
+ */
+export function applyTheme(theme: Theme) {
+  const root = document.documentElement;
+  if (theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const own: Scheme = meta.media.includes("light") ? "light" : "dark";
+    meta.content = PALETTES[theme === "system" ? own : theme].chrome;
+  }
+}
+
+/** Keeps `theme` on this device and shows it. */
+export function setTheme(theme: Theme) {
+  if (theme === "system") localStorage.removeItem(THEME_KEY);
+  else localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+  window.dispatchEvent(new Event(THEME_CHANGED));
+}
+
 function subscribe(changed: () => void) {
   const query = window.matchMedia(QUERY);
   query.addEventListener("change", changed);
-  return () => query.removeEventListener("change", changed);
+  window.addEventListener(THEME_CHANGED, changed);
+  return () => {
+    query.removeEventListener("change", changed);
+    window.removeEventListener(THEME_CHANGED, changed);
+  };
 }
 
-/** The system's scheme, following it as it changes. */
+/** The scheme shown: the Theme's, else the system's, following either as it changes. */
 export function useScheme(): Scheme {
   return useSyncExternalStore(
     subscribe,
-    () => (window.matchMedia(QUERY).matches ? "light" : "dark"),
+    () => {
+      const theme = readTheme();
+      if (theme !== "system") return theme;
+      return window.matchMedia(QUERY).matches ? "light" : "dark";
+    },
     () => "dark",
   );
+}
+
+/** The Theme picked on this device, following the menu as it changes it. */
+export function useTheme(): Theme {
+  return useSyncExternalStore(subscribe, readTheme, () => "system");
 }
