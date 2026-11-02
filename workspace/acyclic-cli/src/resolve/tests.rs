@@ -136,6 +136,15 @@ fn every_printed_ending_names_its_own_record() {
 }
 
 #[test]
+fn an_id_shorter_than_an_ending_is_its_own_name() {
+    let endings = endings(["t", "abc", "0abc"]);
+    assert_eq!(
+        endings.into_iter().collect::<Vec<_>>(),
+        [("0abc", "0abc"), ("abc", "abc"), ("t", "t")].map(|(a, b)| (a.to_owned(), b.to_owned()))
+    );
+}
+
+#[test]
 fn a_removal_finds_an_element_among_those_held_first() {
     let held = [id("c0ffee"), id("abcdef")];
     assert_eq!(held_one(&held, &id("c0ffee").to_uppercase()), Some(id("c0ffee")));

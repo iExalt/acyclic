@@ -321,3 +321,29 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
         assert!(new_id(&r, kind::ITEM, None, title).is_ok(), "{title}");
     }
 }
+
+#[test]
+fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
+    let mut r = replica();
+    add_item(&mut r, &id(1), &titled("Ship it"), USER_BY).unwrap();
+    add_item(&mut r, &id(2), &titled("Wait"), USER_BY).unwrap();
+    let garden =
+        RepositoryFields { name: Some("me/garden".into()), default_branch: Some("main".into()) };
+    add_repository(&mut r, &id(3), &garden, USER_BY).unwrap();
+    let model = Model::read(r.state()).unwrap();
+    let both =
+        |add: &str, remove: &str| Delta { add: vec![add.into()], remove: vec![remove.into()] };
+    let ending = &id(1)[id(1).len() - 6..];
+    let item = |fields: ItemFields| code(fields.resolve(&model, Some(&id(2))));
+    assert_eq!(
+        item(ItemFields { waits_for: both("Ship it", ending), ..ItemFields::default() }),
+        "usage"
+    );
+    assert_eq!(
+        item(ItemFields { repositories: both("ME/Garden", &id(3)), ..ItemFields::default() }),
+        "usage"
+    );
+    let thread =
+        ThreadFields { repositories: both(&id(3), "me/garden"), ..ThreadFields::default() };
+    assert_eq!(code(thread.resolve(&model, None)), "usage");
+}

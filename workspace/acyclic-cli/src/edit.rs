@@ -90,6 +90,21 @@ pub(crate) struct RepositoryFields {
     pub default_branch: Option<String>,
 }
 
+impl Delta {
+    /// Refuses a change that adds and removes the same record, however each flag spelled it: the check on the
+    /// command line compares only what was typed.
+    fn disjoint(self, flag: &str) -> Result<Self, CliError> {
+        match self.add.iter().find(|id| self.remove.contains(id)) {
+            Some(id) => Err(CliError::new(
+                "usage",
+                exit::USAGE,
+                format!("--{flag} and --no-{flag} both name {id}"),
+            )),
+            None => Ok(self),
+        }
+    }
+}
+
 /// The repositories a removal names: each element `held` that it names by id or ending, else the record the resolver
 /// finds.
 fn removals(
@@ -137,7 +152,8 @@ impl ItemFields {
                 .map(|r| records.repository(r))
                 .collect::<Result<_, _>>()?,
             remove: removals(&records, &held_repositories, &self.repositories.remove)?,
-        };
+        }
+        .disjoint("repository")?;
         let waits_for = Delta {
             add: self.waits_for.add.iter().map(|i| records.item(i)).collect::<Result<_, _>>()?,
             remove: self
@@ -149,7 +165,8 @@ impl ItemFields {
                     None => records.item(name),
                 })
                 .collect::<Result<_, _>>()?,
-        };
+        }
+        .disjoint("waits-for")?;
         Ok(Self { parent, thread, repositories, waits_for, ..self })
     }
 }
@@ -171,7 +188,8 @@ impl ThreadFields {
                 .map(|r| records.repository(r))
                 .collect::<Result<_, _>>()?,
             remove: removals(&records, &held, &self.repositories.remove)?,
-        };
+        }
+        .disjoint("repository")?;
         Ok(Self { repositories, ..self })
     }
 }
