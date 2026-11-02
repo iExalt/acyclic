@@ -84,10 +84,21 @@ export interface SceneJunction {
   dim: boolean;
 }
 
+/** A dashed line in a box between its items aside, which can start any time, and its graph. */
+export interface SceneDivider {
+  id: string;
+  x: number;
+  top: number;
+  bottom: number;
+  /** Its box's layer, to be drawn just over the box. */
+  layer: number;
+}
+
 export interface Scene {
   nodes: SceneNode[];
   edges: SceneEdge[];
   junctions: SceneJunction[];
+  dividers: SceneDivider[];
   /** The thread lit up, if any. */
   thread: string | null;
 }
@@ -180,7 +191,12 @@ export function scene(
         dim: edge.dim && (was?.dim ?? true),
       });
     }
-  return { nodes, edges, junctions: [...junctions.values()], thread };
+  const dividers: SceneDivider[] = [];
+  for (const node of nodes) {
+    const line = node.kind === "box" ? placed.dividers.get(node.id) : undefined;
+    if (line !== undefined) dividers.push({ id: `divider ${node.id}`, ...line, layer: node.layer });
+  }
+  return { nodes, edges, junctions: [...junctions.values()], dividers, thread };
 }
 
 /**

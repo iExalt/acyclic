@@ -137,15 +137,17 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   runs (each after what it waits for in the thread), each with its stage's icon, the first eight and then how many more;
   "Starts with", its first items alone, meant nothing to the user. Its settings, Autonomy and Scope edits, are rows as
   the item panel's properties are, label beside value, with what a value means on hover rather than a line under each.
-- **Thread badges:** the thread's number on its line's colour.
+- **Thread badges:** the thread's number on its line's colour. A badge, and a stage's icon, stand on the middle of the
+  capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting, in the ⋯ menu or a thread's panel, shows its new value as it is picked and
   saves in the background, after any write already out, with no busy bar and nothing else held; a refusal puts the old
   value back and says why. A setting leaves the menu open; only its buttons close it. (A busy bar and greyed controls
   after each change read as "a brief loading screen - not good", and the menu closing on a checkbox as bad UX.)
 - **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
   of Needs you, where every visit passed it.
-- **Key hints** (the ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only with a fine
-  pointer or hover, where a keyboard is likely; the menu's switch for single-key shortcuts stays on every device.
+- **Key hints** (the ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only where a mouse is
+  the main pointer, or once a key from a physical keyboard has been pressed: a phone's stylus is a fine pointer but
+  brings no keys. The menu's switch for single-key shortcuts stays on every device.
 - **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)
@@ -173,8 +175,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   screen the view's name above it is part of its target, as its own line is too short for a finger. Under each list that
   sets it, what it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own
   level adding "as set for every thread".
-- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, then what it names as rows
-  in ink, lighter than the head, which says they open (muted, they read as inert notes; a stage's icon beside each read
+- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px, then what
+  it names as rows in ink at 14 px, regular and 32 px apart on touch, so they read as the head's parts (the user's
+  ask), and in ink, which says they open (muted, they read as inert notes; a stage's icon beside each read
   as a mark without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
   its button and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
   (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
@@ -208,6 +211,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   another view closes the item, which it doesn't show, and going to the Overview or Needs you closes the thread too, as
   its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
   the Map.
+- **A new item shows where it landed.** Added from another view, it opens on the Map once saved, selected and in view,
+  and closing it goes back (the user's ask); a refused add reopens its form where the user was.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`, and
   `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;
@@ -311,9 +316,14 @@ before what went wrong.
   already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
   shows them all.
 - **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
-  the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first).
-- **One reading order.** The top level is packed in rows, each box after those it waits on; the sidebar's and the
-  Overview's projects come in that same order (`topOrder`), so a list and the Map never disagree.
+  the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed
+  line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
+  at a glance (the user's ask).
+- **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as
+  the boxes allow (the user's ask: no gaps between rows), each box after those it waits on: below one, or level with
+  it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
+  and the Overview's projects come in dependency order (`topOrder`), which the Map keeps wherever one box waits on
+  another.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
@@ -330,6 +340,9 @@ before what went wrong.
   and a fold survives the plan being read again.
 - **The wheel zooms 12 % a notch** of a Mac's mouse, which scrolls 80 px, and in step with the pixels where a notch
   scrolls more (15 % for 100 px), with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
+- **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past
+  it, a pinch holds the zoom there about the fingers' midpoint and still follows the fingers, where Cytoscape on its
+  own drops each step that would pass it, pan and all, so the plan stuck short of the floor and then jumped.
 - **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.

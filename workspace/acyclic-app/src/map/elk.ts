@@ -1,15 +1,16 @@
 // ELK as the Map's layout engine, one box at a time. Inside a box, children are layered top to bottom by their links,
 // and those with no link in the box stand aside in columns on its left, first, since they can start any time and would
 // only widen the graph's first layer.
-// The top level is packed into rows instead: there the children are the plan's largest boxes, layering them stacks
+// The top level is packed instead (pack.ts): there the children are the plan's largest boxes, layering them stacks
 // them in a tall diagonal strip, and its links all run between items inside them, which the Map draws only for the
-// selection anyway. Packing keeps only the order it is given, so the top level's boxes are given in dependency order.
+// selection anyway.
 
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
 import { type BoxLayout, type LayBox, LEAF, ROOT, type Size, scopes } from "./layout";
 import { type Model, visible } from "./model";
+import { pack } from "./pack";
 import type { Point } from "./route";
 
 /** A box's padding, the space between its children, and the wider gap between its graph and the tiles aside. */
@@ -33,19 +34,10 @@ const LAYERED = {
   "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
 
-const PACKED = {
-  "elk.algorithm": "rectpacking",
-  "elk.spacing.nodeNode": "24",
-  "elk.padding": "[top=12,left=12,bottom=12,right=12]",
-  // Every box keeps the size its own layout gave it, or what it holds would no longer fit it.
-  "elk.expandNodes": "false",
-  "elk.rectpacking.orderBySize": "false",
-};
-
 /** The top level's shape, width over height, on a phone: portrait. A wider screen gives its own. */
 export const PORTRAIT = 0.6;
 
-/** A width over height, rounded to a fifth, within what packing boxes into rows can sensibly make. */
+/** A width over height, rounded to a fifth, within what packing boxes can sensibly make. */
 export function shapeOf(width: number, height: number): number {
   return Math.min(3, Math.max(PORTRAIT, Math.round((5 * width) / Math.max(1, height)) / 5));
 }
@@ -127,6 +119,9 @@ export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string
     width: dx + graph.width,
     height,
     at,
+    // Halfway across the wider gap, from under the title to the padding at the foot: the items that can start any
+    // time stand apart from the ones their links order, as the Threads view's Any time column does.
+    divider: { x: placed.right + ASIDE / 2, top: STRIP, bottom: height - PAD },
     ...(routes === undefined ? {} : { routes }),
     ...(junctions === undefined ? {} : { junctions }),
   };
@@ -153,15 +148,15 @@ function stack(children: readonly ({ id: string } & Size)[], cap: number, share:
 export function elkLayBox(engine: Engine): LayBox {
   return async (input) => {
     const size = new Map(input.children.map(({ id, width, height }) => [id, { id, width, height }]));
-    if (input.id === ROOT)
-      return laid(
-        await engine.layout({
-          id: "root",
-          layoutOptions: { ...PACKED, "elk.aspectRatio": String(input.aspect ?? PORTRAIT) },
-          children: dependencyOrder([...size.keys()], input.edges).flatMap((id) => size.get(id) ?? []),
-          edges: [],
-        }),
+    if (input.id === ROOT) {
+      const waits = new Map<string, string[]>();
+      for (const { source, target } of input.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
+      return pack(
+        dependencyOrder([...size.keys()], input.edges).flatMap((id) => size.get(id) ?? []),
+        waits,
+        input.aspect ?? PORTRAIT,
       );
+    }
     const linked = new Set(input.edges.flatMap((edge) => [edge.source, edge.target]));
     const graph =
       linked.size === 0

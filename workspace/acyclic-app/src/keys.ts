@@ -106,6 +106,21 @@ export function typingIn(target: EventTarget | null): boolean {
   return target.isContentEditable || takesTyping(target.tagName, type) || target.closest(".command") !== null;
 }
 
+/**
+ * Whether a key press came from a physical keyboard, so key hints are worth showing. Outside a field no on-screen
+ * keyboard is up, so any key but a composing one counts; in a field only the keys an on-screen keyboard lacks do:
+ * Escape, Tab and a chord with Ctrl or ⌘ (some on-screen keyboards send arrows).
+ */
+export function fromKeyboard(
+  press: Pick<KeyPress, "key" | "keyCode" | "isComposing" | "ctrlKey" | "metaKey">,
+  typing: boolean,
+): boolean {
+  if (press.isComposing || press.keyCode === 229 || press.key === "Unidentified") return false;
+  if (press.ctrlKey || press.metaKey) return true;
+  if (["Escape", "Tab"].includes(press.key)) return true;
+  return !typing && (press.key.length === 1 || press.key.startsWith("Arrow") || press.key === "Enter");
+}
+
 /** The inputs a key press only presses, such as a checkbox: a single key there is still a shortcut. */
 const PRESSED = new Set(["checkbox", "radio", "button", "submit", "reset", "image", "range", "color", "file"]);
 

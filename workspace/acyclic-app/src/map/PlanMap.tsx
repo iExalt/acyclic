@@ -217,13 +217,36 @@ export default function PlanMap({
       event.stopPropagation();
       const at = element.getBoundingClientRect();
       core.zoom({
-        level: wheelZoom(core.zoom(), event, core.minZoom(), core.maxZoom(), element.clientHeight),
+        level: wheelZoom(core.zoom(), event, floorOf(core), core.maxZoom(), element.clientHeight),
         renderedPosition: { x: event.clientX - at.left, y: event.clientY - at.top },
       });
     };
     above.addEventListener("wheel", wheel as EventListener, { capture: true, passive: false });
+    // A pinch past the floor is held at it, about the fingers. Cytoscape's own limit drops the whole step of a pinch
+    // that would cross it, its pan with it, so near the limit the plan stuck, then leapt as the fingers moved on: its
+    // limit sits below the floor instead, and the floor is kept here, where the fingers are known.
+    // Only while two fingers are down: a zoom left past a floor that rose, as after hiding archived items, stays until
+    // the user zooms, rather than leaping on a pan.
+    let fingers: { x: number; y: number } | null = null;
+    const touch = (event: TouchEvent) => {
+      const [one, two] = [event.touches[0], event.touches[1]];
+      if (one === undefined || two === undefined) {
+        fingers = null;
+        return;
+      }
+      const at = element.getBoundingClientRect();
+      fingers = { x: (one.clientX + two.clientX) / 2 - at.left, y: (one.clientY + two.clientY) / 2 - at.top };
+    };
+    for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
+      element.addEventListener(kind, touch, { capture: true, passive: true });
+    core.on("viewport", () => {
+      if (fingers !== null && core.zoom() < floorOf(core))
+        core.zoom({ level: floorOf(core), renderedPosition: fingers });
+    });
     return () => {
       above.removeEventListener("wheel", wheel as EventListener, { capture: true });
+      for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
+        element.removeEventListener(kind, touch, { capture: true });
       core.destroy();
       cy.current = null;
       held.current = new Map();
@@ -317,7 +340,7 @@ export default function PlanMap({
     }
     drawnModel.current = model;
     // What the renderer holds, for the journeys to compare with the plan.
-    element.dataset.nodes = String(core.nodes().not(".junction").length);
+    element.dataset.nodes = String(core.nodes().not(".junction, .divider").length);
     element.dataset.edges = String(core.edges().length);
     element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
     element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
@@ -498,13 +521,24 @@ function useAspect(host: RefObject<HTMLDivElement | null>): number | null {
   return wide ? shape : PORTRAIT;
 }
 
-/** Lets the Map zoom out until the whole plan fits it, and no further; a zoom already further out stays until moved. */
+/** How far below the floor Cytoscape's own limit sits, so a pinch's step past the floor is held rather than dropped. */
+const PINCH_SLACK = 0.5;
+
+/** The furthest out the Map zooms: the whole plan in view. */
+const floorOf = (core: Core): number => (core.scratch("floor") as number | undefined) ?? core.minZoom();
+
+/**
+ * Lets the Map zoom out until the whole plan fits it, and no further: the wheel stops there and a pinch is held there
+ * (see the viewport listener); a zoom already further out stays until moved.
+ */
 function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
   const fit = Math.min(
     element.clientWidth / Math.max(1, placed.width),
     element.clientHeight / Math.max(1, placed.height),
   );
-  core.minZoom(Math.min(1, fit * 0.9));
+  const floor = Math.min(1, fit * 0.9);
+  core.scratch("floor", floor);
+  core.minZoom(floor * PINCH_SLACK);
 }
 
 /**

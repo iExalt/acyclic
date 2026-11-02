@@ -237,6 +237,9 @@ label:has(> input[type="checkbox"]) {
   line-height: 1;
   /* Overpass sits high in its line box; this centres the figures. */
   padding-top: 0.12em;
+  /* And its capitals' middle stands a tenth of an em over the line's: centred on the line, a badge looks low beside
+     the text it leads, so it rises to meet the capitals. */
+  translate: 0 -0.1em;
 }
 .badge.plain {
   background: none;
@@ -264,6 +267,8 @@ label:has(> input[type="checkbox"]) {
   width: 1.1em;
   height: 1.1em;
   color: var(--ink);
+  /* To the capitals' middle, as a badge (above). */
+  translate: 0 -0.08em;
 }
 .stage-icon[data-quiet="true"] {
   color: var(--muted);
@@ -541,10 +546,11 @@ button.icon[aria-pressed="true"] {
   font-size: 12px;
   line-height: 18px;
 }
-/* A key is shown only where a keyboard is likely: with a fine pointer or hover. A phone, or a tablet without its
-   keyboard, shows none; the menu's switch for the keys stays on every device. */
-@media not ((any-pointer: fine) or (hover: hover)) {
-  .kbd {
+/* A key is shown where a keyboard is likely: where the main pointer is a mouse, or once a physical key has been
+   pressed (main.tsx). A phone, even one with a stylus, or a tablet without its keyboard, shows none; the menu's switch
+   for the keys stays on every device. */
+@media not ((pointer: fine) and (hover: hover)) {
+  :root:not([data-keyboard]) .kbd {
     display: none;
   }
 }
@@ -722,8 +728,10 @@ button.icon[aria-pressed="true"] {
   font-weight: 600;
   text-align: left;
 }
+/* Set by hand against the name's own offset below. */
 .thread .badge {
   margin-top: 0.05em;
+  translate: none;
 }
 .thread .name {
   min-width: 0;
@@ -1488,7 +1496,8 @@ button.row {
   gap: 10px;
   min-height: 0;
   padding: 2px 0;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
 }
 /* On touch, a fingertip's height as room around its text, as an entry's rows have it, rather than a floor under it,
    which left a gap between a one-line head and what it names. */
@@ -1497,8 +1506,9 @@ button.row {
     padding-block: calc((var(--hit) - 1lh) / 2);
   }
 }
+/* Its top on the first line's, as tall as that line within a pixel: so its middle is the line's. */
 .need-head .badge {
-  margin-top: 1px;
+  margin-top: 0;
 }
 .need-items,
 .need-actions,
@@ -1511,12 +1521,14 @@ button.row {
 .need-items li + li {
   border-top: none;
 }
-/* In ink, as what opens: muted, they read as inert notes under the head. Lighter than the head, which they follow. */
+/* In ink, as what opens: muted, they read as inert notes under the head. Smaller and lighter than the head, and close
+   together, so they read as its parts (the user's ask). */
 .need-items button.row {
   min-height: 24px;
-  padding: 2px 0;
+  padding: 1px 0;
   color: var(--ink);
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .need-items button.row:hover:not(:disabled) {
   background: none;
@@ -1550,14 +1562,14 @@ button.row {
   }
 }
 @media (pointer: coarse) {
-  .need-items button.row,
   .need-actions button {
     min-height: var(--hit);
   }
-  /* A fingertip's height as room around the text rather than a floor under it, so a one-line row is spaced as a
-     two-line one is, instead of standing apart from it. */
+  /* Room around the text rather than a floor under it, so a one-line row is spaced as a two-line one is. Closer than
+     a fingertip's height, as the head's parts; 32 px still clears the 24 px a target needs (WCAG 2.5.8). */
   .need-items button.row {
-    padding-block: calc((var(--hit) - 1lh) / 2);
+    min-height: 32px;
+    padding-block: calc((32px - 1lh) / 2);
   }
 }
 

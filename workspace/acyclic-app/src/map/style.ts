@@ -248,9 +248,37 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         "z-index": 999,
       },
     },
+    // A box's line between its items aside and its graph: dashed, in the controls' edge colour, as the Threads view's
+    // divider before wave 1 is; a pixel-wide node filled with a dash repeated down it, as Cytoscape draws no border on
+    // a node with no width.
+    {
+      selector: "node.divider",
+      style: {
+        shape: "rectangle",
+        width: 1,
+        height: "data(height)",
+        label: "",
+        "background-opacity": 0,
+        "background-image": dash(p.edge),
+        "background-repeat": "repeat-y",
+        "background-width": 1,
+        "background-height": 8,
+        "background-image-containment": "over",
+        "border-width": 0,
+        events: "no",
+        "z-index-compare": "manual",
+        "z-index": (node: cytoscape.NodeSingular) => 2 * (node.data("layer") as number) + 1,
+      },
+    },
     {
       selector: "node.junction-lit",
       style: { width: 7, height: 7, "background-color": "data(line)", "border-width": 0 },
     },
   ];
+}
+
+/** A dash 4 px long in `colour` with a 4 px gap, as an image a pixel wide, repeated down a divider. */
+function dash(colour: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="8"><rect width="1" height="4" fill="${colour}"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }

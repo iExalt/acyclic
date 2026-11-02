@@ -204,7 +204,7 @@ describe("place", () => {
 });
 
 describe("elkLayBox", () => {
-  it("packs the top level in dependency order and keeps every box's size", async () => {
+  it("orders the top level by its links, and packs it without ELK", async () => {
     const order = dependencyOrder(["a", "b", "c"], [{ source: "b", target: "a" }]);
     expect(order).toEqual(["b", "a", "c"]);
     // Without links, ids come in natural order, as the CLI lists them.
@@ -214,27 +214,15 @@ describe("elkLayBox", () => {
       "project-2",
       "project-10",
     ]);
-    const sizes = [
-      { id: "a", width: 900, height: 120 },
-      { id: "b", width: 200, height: 700 },
-      { id: "c", width: 444, height: 48 },
-      { id: "d", width: 300, height: 300 },
-    ];
-    const elk = new ELK();
-    let answer: ElkNode | undefined;
-    const watched = { layout: async (graph: ElkNode) => (answer = await elk.layout(graph)) };
-    const packed = await elkLayBox(watched)({ id: ROOT, children: sizes, edges: [] });
-    // Packing must not stretch a box to fill its row: what it holds was placed for its own size.
-    expect(
-      answer?.children
-        ?.map(({ id, width, height }) => ({ id, width, height }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
-    ).toEqual(sizes);
-    for (const box of sizes) {
-      const at = packed.at[box.id];
-      expect((at?.x ?? Infinity) + box.width).toBeLessThanOrEqual(packed.width);
-      expect((at?.y ?? Infinity) + box.height).toBeLessThanOrEqual(packed.height);
-    }
+    const asked: string[] = [];
+    const watched = {
+      layout: async (graph: ElkNode) => {
+        asked.push(graph.id);
+        return graph;
+      },
+    };
+    const packed = await elkLayBox(watched)({ id: ROOT, children: [{ id: "a", width: 90, height: 40 }], edges: [] });
+    expect([asked, packed.at.a]).toEqual([[], { x: 12, y: 12 }]);
   });
 
   it("shapes the top level like the Map, to a fifth, within portrait and three wide", () => {
@@ -287,6 +275,9 @@ describe("beside", () => {
     expect(out.junctions).toEqual({ "a->b": [{ x: 50 + dx, y: 90 }] });
     expect(out.width).toBe(dx + 224);
     expect(out.height).toBe(graph.height);
+    // A dashed line halfway across the wider gap, from under the title to the foot's padding.
+    expect(out.divider).toEqual({ x: 12 + 2 * 200 + 24 + 40 / 2, top: STRIP, bottom: graph.height - 12 });
+    expect(beside(null, tiles(5)).divider).toBeUndefined();
   });
 
   it("grids a box with nothing linked about as many tiles tall as wide, and grows past a short graph", () => {

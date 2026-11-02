@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fromKeyboard,
   type KeyContext,
   type KeyPress,
   keyReference,
@@ -67,6 +68,19 @@ describe("single-key shortcuts", () => {
       ["div", null],
     ];
     expect(pressed.map(([tag, type]) => takesTyping(tag, type))).toEqual([false, false, false, false, false]);
+  });
+
+  it("tell a physical keyboard from an on-screen one by the keys only a physical one sends", () => {
+    // Outside a field no on-screen keyboard is up; in one, its letters and Enter prove nothing, but Escape does.
+    const seen = (key: string, typing: boolean, fields: Partial<KeyPress> = {}) =>
+      fromKeyboard(press(key, fields), typing);
+    expect([seen("g", false), seen("Escape", true), seen("k", true, { metaKey: true })]).toEqual([true, true, true]);
+    expect([
+      seen("a", true),
+      seen("Enter", true),
+      seen("Unidentified", false),
+      seen("a", false, { keyCode: 229 }),
+    ]).toEqual([false, false, false, false]);
   });
 
   it("act on an item only while its panel shows, and never approve, keep or drop anything", () => {
