@@ -406,6 +406,26 @@ fn a_replica_that_lost_its_state_takes_a_new_id() {
 }
 
 #[test]
+fn a_peer_state_this_build_cant_read_whole_still_lets_a_clone_open() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (mac, _) = Tracker::open(&path).unwrap();
+    write(&mac, "a1", "f", json!(1));
+    // A peer's state holding an entity file this build can't read, beside a header it can.
+    std::fs::write(path.join("junk"), "{ \"not\": canonical").unwrap();
+    let blob = git(&path, &["hash-object", "-w", "junk"]);
+    git(&path, &["read-tree", "refs/heads/state/mac"]);
+    git(&path, &["update-index", "--add", "--cacheinfo", &format!("100644,{blob},item/junk.json")]);
+    let tree = git(&path, &["write-tree"]);
+    let peer = git(&path, &["commit-tree", &tree, "-m", "peer"]);
+    git(&path, &["update-ref", "refs/heads/state/pi", &peer]);
+    git(&path, &["update-ref", "-d", "refs/heads/state/mac"]);
+    // Opening reads only the peers' headers, which remember mac, so it takes a fresh id.
+    let (_, renamed) = Tracker::open(&path).unwrap();
+    assert_fresh(renamed.as_ref(), "mac");
+}
+
+#[test]
 fn fresh_clones_of_a_replica_take_different_ids() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
