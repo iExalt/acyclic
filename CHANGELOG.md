@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.4.0](https://github.com/iExalt/acyclic/compare/v0.3.0...v0.4.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** serve acyclic up through Tailscale's Mac apps, on a loopback port under a secret path ([#67](https://github.com/iExalt/acyclic/issues/67))
+
+### Features
+
+* **app:** change settings at once, list a thread's items in order, and add a System, Light or Dark theme ([#100](https://github.com/iExalt/acyclic/issues/100)) ([49b9b51](https://github.com/iExalt/acyclic/commit/49b9b5151514ef03624cb4f7922b1675d67f364c))
+* **app:** colour threads' lines in Okhsl, every hue as colourful as its lightness allows ([#93](https://github.com/iExalt/acyclic/issues/93)) ([aa1adc6](https://github.com/iExalt/acyclic/commit/aa1adc67fe567a8c861ffdf0a374a428a5c15d3e))
+* **app:** give Needs you its own view beside the Overview, the Map and Threads ([#101](https://github.com/iExalt/acyclic/issues/101)) ([64c40b2](https://github.com/iExalt/acyclic/commit/64c40b21b45c7bb8538d0abb2c91f0bfcd62bbb0))
+* **app:** show every notice in the slot, and offer Undo for a first approval while no agent has started its work ([#94](https://github.com/iExalt/acyclic/issues/94)) ([c10f029](https://github.com/iExalt/acyclic/commit/c10f02991ba171e9bbc38a6a3d474a9f53fb1c29))
+* **server:** serve acyclic up through Tailscale's Mac apps, on a loopback port under a secret path ([#67](https://github.com/iExalt/acyclic/issues/67)) ([f4a857e](https://github.com/iExalt/acyclic/commit/f4a857e21f86d7b454e15a012294f63bfb8a301f))
+
+
+### Bug Fixes
+
+* **app:** close an item or a thread back to the view it was opened from, and show a searched thread over Needs you ([#74](https://github.com/iExalt/acyclic/issues/74)) ([fc33736](https://github.com/iExalt/acyclic/commit/fc33736bd3905ba96c59378402aeeebfd889f5e5))
+* **app:** explain autonomy and gates, name the outline once, and say links and undos as they read ([#72](https://github.com/iExalt/acyclic/issues/72)) ([7b1fe52](https://github.com/iExalt/acyclic/commit/7b1fe5262d3e01dea030a190687811fa782f6cc9))
+* **app:** fold the sidebar to a rail, scroll it as one with a line per row, show eight needs wide, and cut only an Undo to a line in the slot ([#78](https://github.com/iExalt/acyclic/issues/78)) ([84c8142](https://github.com/iExalt/acyclic/commit/84c8142e27806dd436b6d2dd7def2de16e587e5a))
+* **app:** frame a thread from its sidebar row while one of its items is open, show a new item at a readable zoom, and list merges one cause leaves unconfirmed as one entry ([#103](https://github.com/iExalt/acyclic/issues/103)) ([dc85406](https://github.com/iExalt/acyclic/commit/dc85406845f640c3e42020154f6a557bcc5c6b01))
+* **app:** keep each notice with what it is about, and put Undo and a stale plan in a slot at the stage's foot ([#76](https://github.com/iExalt/acyclic/issues/76)) ([5709742](https://github.com/iExalt/acyclic/commit/570974259475632bfa969285c8d2ef05df8185a1))
+* **app:** keep panels where they were opened, fill the Overview's columns, and hold only the pressed button ([95e670e](https://github.com/iExalt/acyclic/commit/95e670e2f27639e85028ff023677e3b8515847fc))
+* **app:** keep the outline inside the sidebar, open a long menu where it fits, and draw a retitled tile whole ([#92](https://github.com/iExalt/acyclic/issues/92)) ([e6c4837](https://github.com/iExalt/acyclic/commit/e6c48376a9fbb77740576d6b6bec0d4835da8cff))
+* **app:** keep the selection in view as the Map shrinks or turns, frame a thread with its boxes' titles, and ask New item for a project rather than an id ([#81](https://github.com/iExalt/acyclic/issues/81)) ([ac83006](https://github.com/iExalt/acyclic/commit/ac83006ccf501c0fd4e29537fe9c8901946d51da))
+* **app:** land a link opened before pairing where it pointed, and tell a browser shut out by --rotate to pair again ([#79](https://github.com/iExalt/acyclic/issues/79)) ([6694394](https://github.com/iExalt/acyclic/commit/669439459a86c67edfc6a72c6b4da93500c489ff))
+* **app:** leave the Map where it was moved after a tap, and look again within 80 ms while a test waits ([#75](https://github.com/iExalt/acyclic/issues/75)) ([8db4e61](https://github.com/iExalt/acyclic/commit/8db4e61f879d91919a48ae1c55b3c06005ad686b))
+* **app:** let a phone's sheets open full or half and close by a drag, and keep a tapped item in view ([#73](https://github.com/iExalt/acyclic/issues/73)) ([da48291](https://github.com/iExalt/acyclic/commit/da4829158a3c8dbe7160c59333ec32492dd3d9f8))
+* **app:** list only threads that can start in Up next, and say each item's state one way ([#69](https://github.com/iExalt/acyclic/issues/69)) ([18d8681](https://github.com/iExalt/acyclic/commit/18d86818edfed63d4b015e5fd79c7164cafb4831))
+* **app:** name a conflicted title by its first value, say when a project has no threads, space phone rows evenly, and use the glossary's words ([#88](https://github.com/iExalt/acyclic/issues/88)) ([6ec9a40](https://github.com/iExalt/acyclic/commit/6ec9a40a5200534eb232eb9af1c9c2d175e388cc))
+* **app:** name things in Needs you, offer Approve again on a new blocker, word refusals for people, and use the glossary's words ([#80](https://github.com/iExalt/acyclic/issues/80)) ([7f2c56e](https://github.com/iExalt/acyclic/commit/7f2c56ed5ccd78e2ab783cea98dd6b1c7be1cc4d))
+* **app:** open a thread picked from Needs you on the Map, give the projects a short Up next's column, and tell in-review tiles from a selection ([#99](https://github.com/iExalt/acyclic/issues/99)) ([8934b97](https://github.com/iExalt/acyclic/commit/8934b97603ec38f5f52c35401387662bf707a638))
+* **app:** open a thread picked on the Threads view on the Map, as a thread from anywhere else opens ([#106](https://github.com/iExalt/acyclic/issues/106)) ([b14cc1e](https://github.com/iExalt/acyclic/commit/b14cc1ec5e6b087f148cc04a10358333fd1cbb39))
+* **app:** open the Map at 1:1 on a phone, centre an item brought in from elsewhere, and reopen an item over the view it was left on ([1bac8be](https://github.com/iExalt/acyclic/commit/1bac8be1232cee6a00e4f0eda65e38a2e2b0b8de))
+* **app:** pack the Map's boxes tight, mark where Any time ends, hold a pinch at the furthest zoom out, and show a new item on the Map ([#102](https://github.com/iExalt/acyclic/issues/102)) ([1cfdfdd](https://github.com/iExalt/acyclic/commit/1cfdfdd4bb1df68ec4f73f95713c20af945234a5))
+* **app:** reopen on Forward what Back closed, take a menu-picked thread to the Map, keep the Map still when a box collapses, and tidy single keys ([#82](https://github.com/iExalt/acyclic/issues/82)) ([7ba0437](https://github.com/iExalt/acyclic/commit/7ba0437234d11e068d38b89bc088250f905db795))
+* **app:** say what Needs you's entries need in words, keep views and panels where the user put them, show the Map laying out, and zoom a picked item in to read ([151e33a](https://github.com/iExalt/acyclic/commit/151e33aa962cba952fd796c83d92dcee55c788cd))
+* **app:** set the Overview in three columns on a wide screen, keep an offered Undo over a reload, and bring the docs in line with the app ([55dcd24](https://github.com/iExalt/acyclic/commit/55dcd2455a51a6ac2c88039518c9973ea3230fa6))
+* **app:** set the phone's bars, lists, menu and panels compactly, so the Map keeps most of the screen beside a panel ([#104](https://github.com/iExalt/acyclic/issues/104)) ([7ee2e2a](https://github.com/iExalt/acyclic/commit/7ee2e2aedb2fdb70986a7f101d9bf408cab71334))
+* **app:** show a task's title on three lines, open the Map at 1:1 on a wide screen, drop backticks on the canvas, and draw links across boxes under the tiles ([#87](https://github.com/iExalt/acyclic/issues/87)) ([dac4a0d](https://github.com/iExalt/acyclic/commit/dac4a0d4b6f4fa256ca00890ff3a3538fb64aef4))
+* **app:** slide a phone's sheet in opaque, and fail the build for an app chunk over 500 kB ([#84](https://github.com/iExalt/acyclic/issues/84)) ([5872857](https://github.com/iExalt/acyclic/commit/5872857c8f373ae3da7304bee3424deee7b92298))
+
+
+### Performance Improvements
+
+* **core:** look a clone's default branch up once per read, not twice per done dependency ([#89](https://github.com/iExalt/acyclic/issues/89)) ([ee053a7](https://github.com/iExalt/acyclic/commit/ee053a7420b7a124ca95aa0f5d4331d9f6139f18))
+
 ## [0.3.0](https://github.com/iExalt/acyclic/compare/v0.2.0...v0.3.0) (2026-10-31)
 
 
