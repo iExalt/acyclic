@@ -159,9 +159,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   after each change read as "a brief loading screen - not good", and the menu closing on a checkbox as bad UX.)
 - **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
   of Needs you, where every visit passed it.
-- **Key hints** (the ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only where a mouse is
-  the main pointer, or once a key from a physical keyboard has been pressed: a phone's stylus is a fine pointer but
-  brings no keys. The menu's switch for single-key shortcuts stays on every device.
+- **Key hints** (an item's ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only where a
+  mouse is the main pointer, or once a key from a physical keyboard has been pressed: a phone's stylus is a fine
+  pointer but brings no keys. The menu's switch for single-key shortcuts stays on every device.
 - **Needs you:** the inbox icon and the count beside its name, in ink, as an inbox's; nothing when nothing waits. A
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)
@@ -225,8 +225,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   and is filled, and a phone's bar names it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
-- **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows on
-  the Map, and one Back, Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the
+- **An item or a thread opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you, or
+  a thread from the Overview or Needs you, shows on the Map (a thread picked on the Threads view opens its panel
+  there), and one Back, Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the
   focus on the row picked. Selecting on the Map or going to another view makes that where the user is, and going to
   another view closes the item, which it doesn't show, and going to the Overview or Needs you closes the thread too, as
   its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
