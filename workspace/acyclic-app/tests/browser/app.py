@@ -6,7 +6,7 @@ needs the manifest and its icons fetched through the session's cookie), and draw
 default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
 the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread is
-approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level are set; from
+approved, an agent's proposals to it are kept and dropped, and its level and the global level are set; from
 Needs you's view, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
 subscription it is given, records a pushed notification without displaying a system banner, and opens Needs you's view
 it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
@@ -2305,7 +2305,7 @@ def thread_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: the global level didn't change")
     page.screenshot(path=SHOTS / f"app-{name}-thread-panel.png")
     print(
-        f"{name}: approved {thread}, kept and dropped proposals, and set its level, its flag and the global level"
+        f"{name}: approved {thread}, kept and dropped proposals, and set its level and the global level"
     )
 
 
