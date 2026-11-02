@@ -326,11 +326,39 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
+/// The second machine's actor and tracker clone.
+const PI: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/pi"), ("ACYCLIC_TRACKER", "pi")];
+
+/// A shell holding a bare repository, `shared.git`, for clones to sync through.
+fn shared() -> Shell {
+    let sh = Shell::new();
+    git(sh.path(), &["init", "-q", "--bare", "shared.git"]);
+    // The remote's own repacking is the host's business, not these tests'.
+    git(&sh.path().join("shared.git"), &["config", "receive.autogc", "false"]);
+    sh
+}
+
+/// Two machines syncing through `shared.git`: `mac`, which added a1, and `pi`, which has synced it.
+fn two_machines() -> Shell {
+    let mut sh = shared();
+    assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    sh.run("item add a1 --title First", AGENT);
+    sh.run("sync", AGENT);
+    assert_eq!(sh.run("init pi --replica pi --remote ../shared.git", &[]), 0);
+    sh.run("sync", PI);
+    sh
+}
+
+/// The needs, leaving out the items in no thread, which these tests never thread.
+fn needs(sh: &mut Shell) -> Vec<serde_json::Value> {
+    let (_, out) = sh.output("needs", AGENT);
+    let all = out["data"]["needs"].as_array().unwrap().clone();
+    all.into_iter().filter(|entry| entry["kind"] != "unthreaded").collect()
+}
+
 #[test]
 fn two_machines_sync_through_a_shared_repository() {
-    let mut sh = Shell::new();
-    let pi: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/pi"), ("ACYCLIC_TRACKER", "pi")];
-    git(sh.path(), &["init", "-q", "--bare", "shared.git"]);
+    let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
     let (code, out) = sh.output("sync", AGENT);
     assert_eq!((code, out["error"]["code"].as_str()), (5, Some("no-remote")));
@@ -341,64 +369,78 @@ fn two_machines_sync_through_a_shared_repository() {
     assert_eq!((code, out["data"]["pushed"].as_u64().is_some_and(|n| n > 0)), (0, true));
     // A second machine starts from the shared repository and sees the first's work.
     assert_eq!(sh.run("init pi --replica pi --remote ../shared.git", &[]), 0);
-    let (code, out) = sh.output("sync", pi);
+    let (code, out) = sh.output("sync", PI);
     assert_eq!(
         (code, &out["data"]["fetched"], out["data"]["joined"].as_bool()),
         (0, &serde_json::json!(["mac"]), Some(true))
     );
-    assert_eq!(sh.output("show a1", pi).0, 0);
-    sh.run("item add b1 --title Second", pi);
-    sh.run("sync", pi);
+    assert_eq!(sh.output("show a1", PI).0, 0);
+    sh.run("item add b1 --title Second", PI);
+    sh.run("sync", PI);
     let (_, out) = sh.output("sync", AGENT);
     assert_eq!(out["data"]["fetched"], serde_json::json!(["mac", "pi"]));
     assert_eq!(sh.output("show b1", AGENT).0, 0, "and the first sees the second's");
-    // Asked to push every write, a write reports its push; one that fails shows in needs until a sync.
+}
+
+#[test]
+fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_sync() {
+    let mut sh = shared();
+    assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
     git(&sh.path().join("tracker"), &["config", "acyclic.pushAfterWrite", "true"]);
     let (_, out) = sh.output("item add a2 --title Pushed", AGENT);
     assert_eq!(out["data"]["push"]["ok"].as_bool(), Some(true), "{out}");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../nowhere.git"]);
     let (code, out) = sh.output("item add a3 --title Stranded", AGENT);
     assert_eq!((code, out["data"]["push"]["ok"].as_bool()), (0, Some(false)), "the write stands");
-    // The needs, leaving out the items in no thread, which this test never threads.
-    let needs = |sh: &mut Shell| {
-        let (_, out) = sh.output("needs", AGENT);
-        let all = out["data"]["needs"].as_array().unwrap().clone();
-        all.into_iter().filter(|entry| entry["kind"] != "unthreaded").collect::<Vec<_>>()
-    };
     assert_eq!(needs(&mut sh)[0]["kind"], "unpushed");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
-    // The user's move to the top racing the other machine's move is a conflict, and moving it again settles it.
+}
+
+#[test]
+fn a_move_to_the_top_racing_another_machines_move_is_a_conflict_until_moved_again() {
+    let mut sh = two_machines();
+    sh.run("item add a2 --title Parent", AGENT);
     sh.run("item edit a1 --parent a2", AGENT);
     sh.run("sync", AGENT);
-    sh.run("sync", pi);
+    sh.run("sync", PI);
     sh.run("item edit a1 --no-parent", AGENT);
-    sh.run("item edit a1 --parent b1", pi);
-    sh.run("sync", pi);
+    sh.run("item add b1 --title Other", PI);
+    sh.run("item edit a1 --parent b1", PI);
+    sh.run("sync", PI);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["kind"], "conflict");
     let (_, out) = sh.output("item edit a1 --no-parent", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
-    // Likewise taking an item out of a thread while the other machine puts it in one.
+}
+
+#[test]
+fn taking_an_item_out_of_a_thread_racing_another_machine_threading_it_is_a_conflict_until_taken_out_again()
+ {
+    let mut sh = two_machines();
     sh.run("thread add t1 --title One", AGENT);
     sh.run("thread add t2 --title Two", AGENT);
     sh.run("item edit a1 --thread t1", AGENT);
     sh.run("sync", AGENT);
-    sh.run("sync", pi);
+    sh.run("sync", PI);
     sh.run("item edit a1 --no-thread", AGENT);
-    sh.run("item edit a1 --thread t2", pi);
-    sh.run("sync", pi);
+    sh.run("item edit a1 --thread t2", PI);
+    sh.run("sync", PI);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["field"], "thread");
     let (_, out) = sh.output("item edit a1 --no-thread", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
-    // Threads each machine numbers before seeing the other's clash once a sync brings them together.
+}
+
+#[test]
+fn threads_each_machine_numbers_alike_clash_once_a_sync_brings_them_together() {
+    let mut sh = two_machines();
     sh.run("thread add --title Beds", AGENT);
-    sh.run("thread add --title Rows", pi);
-    sh.run("sync", pi);
+    sh.run("thread add --title Rows", PI);
+    sh.run("sync", PI);
     let (_, out) = sh.output("sync", AGENT);
     let clash = &out["data"]["number_clashes"][0];
     assert_eq!(

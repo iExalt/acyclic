@@ -61,12 +61,52 @@ fn unset(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsStr
 /// when git's environment names another repository, as a git hook's does. Every git acyclic runs starts here.
 #[must_use]
 pub fn git_at(repo: &Path) -> std::process::Command {
-    let mut command = std::process::Command::new("git");
+    let mut command = std::process::Command::new(git_program());
     for name in unset(std::env::vars_os().map(|(name, _)| name)) {
         command.env_remove(name);
     }
     command.arg("-C").arg(repo);
     command
+}
+
+/// macOS's `git` in `/usr/bin`: a stub that asks `xcrun` for the developer tools' git on every call, which more than
+/// doubles the cost of a call.
+const MACOS_STUB: &str = "/usr/bin/git";
+
+/// The git [`git_at`] runs: `git` from `PATH`, except that where that is macOS's stub, the git the stub would run,
+/// asked of `xcrun` once per process, since a command runs git several times.
+fn git_program() -> &'static std::ffi::OsStr {
+    static PROGRAM: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+    still_there(PROGRAM.get_or_init(|| {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        cfg!(target_os = "macos")
+            .then(|| first_git(&path))
+            .flatten()
+            .filter(|git| git == Path::new(MACOS_STUB))
+            .and_then(|_| {
+                let found = std::process::Command::new("/usr/bin/xcrun")
+                    .args(["--find", "git"])
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())?;
+                let found = PathBuf::from(String::from_utf8(found.stdout).ok()?.trim());
+                found.is_file().then(|| found.into_os_string())
+            })
+            .unwrap_or_else(|| "git".into())
+    }))
+}
+
+/// `found`, a git found once, or `git` from `PATH` once it is gone, as when a long-running server outlives the
+/// developer tools it found it in. A stat per call, against a spawn's milliseconds.
+fn still_there(found: &std::ffi::OsStr) -> &std::ffi::OsStr {
+    if found == "git" || Path::new(found).is_file() { found } else { std::ffi::OsStr::new("git") }
+}
+
+/// The first `git` among the directories of `path`, a `PATH` value, as a command named `git` would find it.
+fn first_git(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path).map(|dir| dir.join("git")).find(|git| git.is_file())
 }
 
 /// How long a batch keeps retrying lost races.
@@ -1390,6 +1430,28 @@ mod tests {
             unset,
             ["GIT_DIR", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS"]
         );
+    }
+
+    #[test]
+    fn the_git_on_path_is_the_first_file_named_git() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let [none, folder, file, later] = ["none", "folder", "file", "later"].map(|name| {
+            let path = dir.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            path
+        });
+        std::fs::create_dir(folder.join("git")).unwrap();
+        for found in [&file, &later] {
+            std::fs::write(found.join("git"), "").unwrap();
+        }
+        let path = std::env::join_paths([&none, &folder, &file, &later]).unwrap();
+        assert_eq!(first_git(&path), Some(file.join("git")));
+        assert_eq!(first_git(&std::env::join_paths([&none]).unwrap()), None);
+        // A git found once and since removed gives way to the one on `PATH`.
+        let kept = file.join("git").into_os_string();
+        assert_eq!(still_there(&kept), kept);
+        std::fs::remove_file(file.join("git")).unwrap();
+        assert_eq!(still_there(&kept), "git");
     }
 
     #[test]
