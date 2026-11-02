@@ -184,6 +184,12 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     .await;
     let message: Value = serde_json::from_slice(&decrypt(&delivered, &device, &auth)).unwrap();
     assert_eq!(message["body"], "P4 was reopened");
+    // The service has it, but the server records it as told only once it hears back: a restart before then would
+    // tell it again.
+    eventually("recording P4 as told", || {
+        read(&sent).contains("reopened:01900000-0000-7000-8000-000000000004").then_some(())
+    })
+    .await;
     let told = service.sent.lock().unwrap().len();
 
     // A restart on the same files tells nothing again, and a device the service says is gone is dropped.
