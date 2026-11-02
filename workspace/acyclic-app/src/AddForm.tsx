@@ -1,10 +1,11 @@
 // Adding an item: a title, its thread, and, when no parent is given, the project it goes in or the top level. Its id is
-// made from the title, and asked for only when the server refused it.
+// made as the form opens, so a send that is repeated is the same add.
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { type NewItem, newId } from "./edits";
+import { type FormEvent, useRef, useState } from "react";
+import type { NewItem } from "./edits";
 import { useFieldInView, useFocusIn } from "./focus";
 import { Icon, X } from "./icons";
+import { uuidv7 } from "./uuid";
 
 export interface AddFormProps {
   parent: string | null;
@@ -14,11 +15,8 @@ export interface AddFormProps {
   /** With no parent, the projects to put it in, and the one it starts in. */
   projects: readonly { id: string; title: string }[];
   project: string | null;
-  /** Each thread, named as everywhere a badge doesn't stand beside it ("4. CLI features"). */
+  /** Each thread, named as everywhere a badge doesn't stand beside it. */
   threads: readonly { id: string; label: string }[];
-  taken: ReadonlySet<string>;
-  /** Set when the server refused the id, to have the user change it. */
-  idRefused: boolean;
   /** What the user wrote before, when a failed add opens the form again. */
   draft: NewItem | null;
   busy: boolean;
@@ -33,29 +31,23 @@ export function AddForm({
   projects,
   project: initialProject,
   threads,
-  taken,
-  idRefused,
   draft,
   busy,
   onSubmit,
   onCancel,
 }: AddFormProps) {
   const [title, setTitle] = useState(draft?.title ?? "");
-  const [id, setId] = useState<string | null>(draft?.item ?? null);
+  // A reopened draft keeps its id: the add that failed may have been saved, and sending it again is the same add.
+  const [id] = useState(() => draft?.id ?? uuidv7());
   const [thread, setThread] = useState(draft === null ? initialThread : draft.thread);
   const [project, setProject] = useState(draft === null ? initialProject : draft.parent);
-  const idField = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
   useFocusIn(form);
   useFieldInView(form);
-  const shownId = id ?? newId(title, taken);
-  useEffect(() => {
-    if (idRefused) idField.current?.focus();
-  }, [idRefused]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (title.trim() === "") return;
-    onSubmit({ item: shownId, title: title.trim(), parent: parent ?? project, thread });
+    onSubmit({ id, title: title.trim(), parent: parent ?? project, thread });
   };
   return (
     <form
@@ -63,7 +55,7 @@ export function AddForm({
       className="sheet add"
       data-testid="add-form"
       // What the user typed, which no key throws away.
-      data-dirty={title !== "" || id !== null}
+      data-dirty={title !== ""}
       onSubmit={submit}
     >
       <div className="form-head">
@@ -111,20 +103,6 @@ export function AddForm({
           ))}
         </select>
       </label>
-      {/* Made from the title, which is all most adds need; asked for once the server refuses it. */}
-      {idRefused ? (
-        <label>
-          Id
-          <span className="hint">Not accepted: see why below, and choose another.</span>
-          <input
-            name="id"
-            ref={idField}
-            value={shownId}
-            aria-invalid={idRefused}
-            onChange={(event) => setId(event.target.value)}
-          />
-        </label>
-      ) : null}
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || title.trim() === ""}>
           Add item

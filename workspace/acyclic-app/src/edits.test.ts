@@ -8,16 +8,14 @@ import {
   linkRefusal,
   type Mode,
   moveCommand,
-  newId,
   pick,
-  recovery,
   told,
   unanswered,
   unlinkCommand,
   withPending,
 } from "./edits";
 import { draftOf } from "./forms";
-import { item } from "./map/fixture";
+import { ID, item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
 // garden: beds (dig), plant (sow); tools at the top level.
@@ -34,34 +32,17 @@ describe("commands", () => {
   it("builds exactly the commands the server's tests run", () => {
     const built = [
       ["list", { item: "list" }],
-      ["show", { item: { show: { items: ["a", "b"] } } }],
+      ["show", { item: { show: { items: [ID.a, ID.b] } } }],
       ["threads", { thread: "list" }],
-      ["add under a parent, in a thread", addCommand({ item: "c", title: "C", parent: "a", thread: "t" })],
-      ["add at the top level", addCommand({ item: "d", title: "D", parent: null, thread: null })],
-      ["move to the top level", moveCommand("c", null)],
-      ["move under a parent", moveCommand("d", "a")],
-      ["c waits for d", linkCommand("c", "d")],
-      ["c no longer waits for d", unlinkCommand("c", "d")],
+      ["add under a parent, in a thread", addCommand({ id: ID.c, title: "C", parent: ID.a, thread: ID.t })],
+      ["add at the top level", addCommand({ id: ID.d, title: "D", parent: null, thread: null })],
+      ["move to the top level", moveCommand(ID.c, null)],
+      ["move under a parent", moveCommand(ID.d, ID.a)],
+      ["c waits for d", linkCommand(ID.c, ID.d)],
+      ["c no longer waits for d", unlinkCommand(ID.c, ID.d)],
     ];
     const named = new Map(examples.map((one) => [one.name, one.command]));
     expect(built).toEqual(built.map(([name]) => [name, named.get(name as string)]));
-  });
-});
-
-describe("newId", () => {
-  it("slugs the title, numbers it past taken ids, and keeps the number within the tracker's 64 characters", () => {
-    expect(newId("Sow the Beans!", new Set())).toBe("sow-the-beans");
-    expect(newId("Crème brûlée", new Set())).toBe("creme-brulee");
-    expect(newId("Sow", new Set(["sow", "sow-2"]))).toBe("sow-3");
-    expect(newId("日本", new Set())).toBe("untitled");
-    // Never an id the tracker keeps for itself, however the title or the ids taken fall.
-    expect(newId("Item 5", new Set())).toBe("items-5");
-    expect(newId("Item", new Set(["items"]))).toBe("items-2");
-    const long = "a".repeat(70);
-    expect(newId(long, new Set())).toBe("a".repeat(64));
-    expect(newId(long, new Set(["a".repeat(64)]))).toBe(`${"a".repeat(62)}-2`);
-    // A cut that ends between words leaves no trailing dash before the number.
-    expect(newId(`${"a".repeat(61)} b`, new Set([`${"a".repeat(61)}-b`]))).toBe(`${"a".repeat(61)}-2`);
   });
 });
 
@@ -127,34 +108,20 @@ describe("expandTo", () => {
   });
 });
 
-describe("recovery", () => {
-  it("offers a retry when the server is busy, and a fix to the id when the id is refused", () => {
-    expect(recovery("busy")).toEqual({ retry: true, fixId: false });
-    for (const code of ["already-exists", "deleted", "invalid-name"]) expect(recovery(code).fixId).toBe(true);
-    expect(recovery("parent-cycle")).toEqual({ retry: false, fixId: false });
-  });
-});
-
 describe("told", () => {
   it("offers the write again only when it failed busy, and a refresh when it saved but the reload failed", () => {
     expect(told({ write: "failed", code: "busy", message: "busy" })).toEqual({
       text: "busy",
       offer: "retry",
-      fixId: false,
     });
-    expect(told({ write: "failed", code: "already-exists", message: "taken" })).toEqual({
-      text: "taken",
-      offer: null,
-      fixId: true,
-    });
+    expect(told({ write: "failed", code: "already-exists", message: "taken" }).offer).toBeNull();
     // Gone elsewhere: the app's view is stale, so it offers a refresh.
     expect(told({ write: "failed", code: "not-found", message: "gone" }).offer).toBe("refresh");
     expect(told({ write: "saved", reload: { failed: "offline" } })).toEqual({
       text: "Saved, but the refresh failed: offline",
       offer: "refresh",
-      fixId: false,
     });
-    expect(told({ write: "saved", reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
+    expect(told({ write: "saved", reload: "done" })).toEqual({ text: null, offer: null });
   });
 });
 
@@ -162,7 +129,7 @@ describe("a write drawn before the server answers", () => {
   const items = [item("garden"), item("beds", "garden", [], { notes: "old", size: "s" })];
 
   it("draws an added item where it goes, once, and says when the plan holds it", () => {
-    const add = { kind: "add" as const, item: { item: "pond", title: "Pond", parent: "garden", thread: "t" } };
+    const add = { kind: "add" as const, item: { id: "pond", title: "Pond", parent: "garden", thread: "t" } };
     const drawn = withPending(items, add);
     expect(drawn.at(-1)).toMatchObject({ id: "pond", title: "Pond", parent: "garden", thread: "t", state: "backlog" });
     expect(landed(add, items)).toBe(false);

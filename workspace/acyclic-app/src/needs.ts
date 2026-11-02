@@ -30,7 +30,7 @@ export interface NeedView {
   text: string;
   /** What it names besides its text, for a list that shows the entry without its rows, such as an item's title. */
   detail: string | null;
-  /** The line of the one thread its text names, for its badge, which carries the number the text leaves out. */
+  /** The line of the one thread its text names, for its badge, which the text leaves out. */
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
@@ -97,7 +97,7 @@ function viewOf(
   const item = row(need.item);
   const thread = row(need.thread);
   const threads =
-    need.kind === "number-clash" || need.kind === "thread-cycle"
+    need.kind === "thread-cycle"
       ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
       : thread === null
         ? []
@@ -170,13 +170,6 @@ function viewOf(
         key: `thread-cycle:${threads.map((one) => one.id).join(":")}`,
         text: `Threads wait on each other in a cycle: ${threads.map(lineName).join(", ")}`,
         note: IN_A_TERMINAL,
-      };
-    case "number-clash":
-      return {
-        ...base,
-        key: `number-clash:${shown(need.number)}`,
-        text: `Threads two machines numbered alike share ${shown(need.number)}: ${threads.map(lineName).join(", ")}`,
-        note: str(need.fix) || IN_A_TERMINAL,
       };
     case "dangling": {
       const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`;

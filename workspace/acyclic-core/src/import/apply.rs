@@ -1,7 +1,10 @@
 //! Applying a validated import to a replica: an upsert in one pass. Every field the document sets is written when it
-//! differs; nothing the document leaves out is cleared or deleted, so importing the same document twice writes
-//! nothing. The document is checked once as a whole, and the result once for cycles it would close with what is
-//! already there; the writes themselves skip the per-write checks, which would read the whole model each time.
+//! differs, so importing the same document twice writes nothing. A single value the document leaves out is kept; a
+//! list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`) is the whole of it, so what the
+//! list leaves out is removed, and removals are written before additions. The document is checked once as a whole,
+//! and the result once against what the tracker holds: references, cycles it would close, and evidence and archiving
+//! on work that isn't done. The writes themselves skip the per-write checks, which would read the whole model each
+//! time.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -9,8 +12,8 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use super::{Import, ValidationError};
-use crate::model::{self, By, Model, WriteError};
+use super::{Import, KeyKind, ValidationError, owner_name};
+use crate::model::{self, By, Evidence, ItemState, Model, WriteError};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::scope::{self, ScopeEdit};
 use crate::state::{Error, Key, Replica};
@@ -28,7 +31,7 @@ pub struct Report {
     pub threads: usize,
     /// Fields written, the created records' included.
     pub fields: usize,
-    /// Each record the import creates or changes, in the order they were met.
+    /// Each record the import creates, changes or removes, in the order they were met.
     pub changes: Vec<Change>,
 }
 
@@ -74,6 +77,8 @@ pub enum Action {
     Create,
     /// The record exists, and fields of it changed.
     Update,
+    /// The link is gone: the item's `waits_for` left it out.
+    Remove,
 }
 
 /// A field's value before an import and after it.
@@ -89,7 +94,7 @@ pub struct Edit {
 /// which discards them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyError {
-    /// The document breaks these rules.
+    /// The document breaks these rules, on its own or with what the tracker holds.
     Invalid(Vec<ValidationError>),
     /// With what is already there, the document closes these cycles of parents or ordering links.
     Cycles(Vec<Vec<String>>),
@@ -134,28 +139,38 @@ impl From<Error> for ApplyError {
 ///
 /// # Errors
 ///
-/// Fails when the document is invalid, when the result would hold a cycle the tracker didn't, or when a write is
-/// refused.
+/// Fails when the document is invalid, on its own or with the tracker, when the result would hold a cycle the tracker
+/// didn't, or when a write is refused.
 pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
     for item in &doc.items {
-        if model::is_deleted(&replica.state, &model::item_key(&item.key)?) {
-            return Err(WriteError::Deleted(item.key.clone()).into());
+        if model::is_deleted(&replica.state, &model::item_key(&item.id)?) {
+            return Err(WriteError::Deleted(item.id.clone()).into());
         }
     }
     let before = Model::read(&replica.state)?;
+    let errors = unknown_references(doc, &before);
+    if !errors.is_empty() {
+        return Err(ApplyError::Invalid(errors));
+    }
     let cycles_before: BTreeSet<Vec<String>> =
         before.parent_cycles().into_iter().chain(before.link_cycles()).collect();
     let mut writer =
         Writer { replica, by, before: &before, report: Report::default(), rows: BTreeMap::new() };
     writer.records(doc)?;
-    // Scope last, against the view before the import, so each edit reports what it changed.
-    writer.scope_edits(doc, &before)?;
+    // Removals first, so a document that turns a link around never holds both ways at once.
+    writer.lists(doc, false)?;
+    writer.lists(doc, true)?;
+    writer.members(doc)?;
 
     let after = Model::read(&writer.replica.state)?;
+    let errors = unfinished(doc, &after);
+    if !errors.is_empty() {
+        return Err(ApplyError::Invalid(errors));
+    }
     let new: Vec<Vec<String>> = after
         .parent_cycles()
         .into_iter()
@@ -166,6 +181,72 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
         return Err(ApplyError::Cycles(new));
     }
     Ok(writer.report)
+}
+
+/// The references that name no record of their kind, in the document or the tracker.
+fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
+    let mine = |ids: Vec<&String>| ids.into_iter().cloned().collect::<BTreeSet<String>>();
+    let items = mine(doc.items.iter().map(|i| &i.id).collect());
+    let threads = mine(doc.threads.iter().map(|t| &t.id).collect());
+    let repositories = mine(doc.repositories.iter().map(|r| &r.id).collect());
+    let known = |kind: KeyKind, id: &String| match kind {
+        KeyKind::Item => items.contains(id) || before.items.contains_key(id),
+        KeyKind::Thread => {
+            threads.contains(id)
+                || before.threads.contains_key(id)
+                || before.items.values().any(|item| item.thread.all().contains(&id))
+        },
+        KeyKind::Repository => repositories.contains(id) || before.repositories.contains_key(id),
+    };
+    let mut errors = Vec::new();
+    let mut check = |at: String, kind: KeyKind, id: &String| {
+        if !known(kind, id) {
+            errors.push(ValidationError::UnknownReference { at, kind, id: id.clone() });
+        }
+    };
+    for record in &doc.threads {
+        for id in record.repositories.iter().flatten() {
+            check(format!("thread {}, repositories", record.id), KeyKind::Repository, id);
+        }
+    }
+    for item in &doc.items {
+        let at = |field: &str| format!("item {}, {field}", item.id);
+        if let Some(parent) = &item.parent {
+            check(at("parent"), KeyKind::Item, parent);
+        }
+        if let Some(thread) = &item.thread {
+            check(at("thread"), KeyKind::Thread, thread);
+        }
+        for id in item.repositories.iter().flatten() {
+            check(at("repositories"), KeyKind::Repository, id);
+        }
+        for id in item.waits_for.iter().flatten() {
+            check(at("waits_for"), KeyKind::Item, id);
+        }
+        let commit = item.evidence.as_ref().and_then(|e| e.commit.as_ref());
+        if let Some((repository, _)) = commit.and_then(|c| c.rsplit_once('@')) {
+            check(at("evidence"), KeyKind::Repository, &repository.to_owned());
+        }
+    }
+    errors.sort();
+    errors.dedup();
+    errors
+}
+
+/// Evidence on an item that isn't done, and archived subtrees with work that isn't, judged by the state each item has
+/// once imported: its own where the document leaves its state out.
+fn unfinished(doc: &Import, after: &Model) -> Vec<ValidationError> {
+    let done = |id: &str| after.items.get(id).is_some_and(model::Item::is_done);
+    let mut errors = Vec::new();
+    for item in &doc.items {
+        if item.evidence.is_some() && !done(&item.id) {
+            errors.push(ValidationError::EvidenceNotDone(item.id.clone()));
+        }
+        if item.archived && !after.subtree(&item.id).into_iter().all(done) {
+            errors.push(ValidationError::ArchivedNotDone(item.id.clone()));
+        }
+    }
+    errors
 }
 
 struct Writer<'a, 'b> {
@@ -179,37 +260,103 @@ struct Writer<'a, 'b> {
 }
 
 impl Writer<'_, '_> {
-    /// Writes the records' own fields, sets and links.
+    /// Writes the records' own fields.
     fn records(&mut self, doc: &Import) -> Result<(), ApplyError> {
         for record in &doc.repositories {
-            let key = Key::new(kind::REPOSITORY, &record.key)?;
+            let key = Key::new(kind::REPOSITORY, &record.id)?;
             self.created(&key, |r| &mut r.repositories);
-            self.field(&key, repository::OWNER, Some(&record.owner))?;
-            self.field(&key, repository::NAME, Some(&record.name))?;
+            let (owner, name) = owner_name(&record.name).expect("validated");
+            self.field(&key, repository::OWNER, Some(&owner))?;
+            self.field(&key, repository::NAME, Some(&name))?;
             self.field(&key, repository::DEFAULT_BRANCH, Some(&record.default_branch))?;
         }
         for record in &doc.threads {
-            let key = Key::new(kind::THREAD, &record.key)?;
+            let key = Key::new(kind::THREAD, &record.id)?;
             self.created(&key, |r| &mut r.threads);
             self.field(&key, thread::TITLE, Some(&record.title))?;
             self.field(&key, thread::BRIEF, record.brief.as_ref())?;
         }
         for item in &doc.items {
-            let key = model::item_key(&item.key)?;
-            self.created(&key, |r| &mut r.items);
+            let key = model::item_key(&item.id)?;
+            let new = self.created(&key, |r| &mut r.items);
             self.field(&key, field::TITLE, Some(&item.title))?;
             self.field(&key, field::NOTES, item.notes.as_ref())?;
-            self.field(&key, field::STATE, Some(&item.state))?;
+            // Backlog only for a new item: one left out keeps its state, finished work included.
+            let state = item.state.or(new.then_some(super::State::Backlog));
+            self.field(&key, field::STATE, state.as_ref())?;
             self.field(&key, field::PARENT, item.parent.as_ref())?;
             self.field(&key, field::SIZE, item.size.as_ref())?;
-            self.field(&key, field::EVIDENCE, item.evidence.as_ref())?;
+            let evidence = item.evidence.as_ref().map(|evidence| {
+                let commit = evidence.commit.as_ref().and_then(|c| c.rsplit_once('@'));
+                Evidence {
+                    repository: commit.map(|(repository, _)| repository.to_owned()),
+                    commit: commit.map(|(_, sha)| sha.to_owned()),
+                    text: evidence.text.clone(),
+                }
+            });
+            self.field(&key, field::EVIDENCE, evidence.as_ref())?;
             if item.archived {
                 self.field(&key, field::ARCHIVED, Some(&true))?;
             }
         }
+        Ok(())
+    }
+
+    /// Writes the lists the document gives: when `adding`, what each lacks, and otherwise the removal of what each
+    /// holds and the document leaves out.
+    fn lists(&mut self, doc: &Import, adding: bool) -> Result<(), ApplyError> {
         for item in &doc.items {
-            for to in &item.waits_for {
-                self.link(&item.key, to)?;
+            if let Some(list) = &item.waits_for {
+                let held: BTreeSet<&String> =
+                    self.before.links.iter().filter(|l| l.from == item.id).map(|l| &l.to).collect();
+                let wanted: BTreeSet<&String> = list.iter().collect();
+                if adding {
+                    for to in &wanted {
+                        self.link(&item.id, to)?;
+                    }
+                } else {
+                    for to in held.difference(&wanted) {
+                        self.unlink(&item.id, to)?;
+                    }
+                }
+            }
+            if let Some(list) = &item.repositories {
+                let held = self.before.items.get(&item.id).map(|i| i.repositories.clone());
+                for (repository, present) in changes(&held.unwrap_or_default(), list, adding) {
+                    let edit =
+                        ScopeEdit::ItemRepository { item: item.id.clone(), repository, present };
+                    self.scope(&edit)?;
+                }
+            }
+        }
+        for record in &doc.threads {
+            if let Some(list) = &record.repositories {
+                let held = self.before.threads.get(&record.id).map(|t| t.repositories.clone());
+                for (repository, present) in changes(&held.unwrap_or_default(), list, adding) {
+                    let edit = ScopeEdit::ThreadRepository {
+                        thread: record.id.clone(),
+                        repository,
+                        present,
+                    };
+                    self.scope(&edit)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Puts each item the document gives a thread in it; an item it gives none stays where it is.
+    fn members(&mut self, doc: &Import) -> Result<(), ApplyError> {
+        for item in &doc.items {
+            if let Some(thread) = &item.thread {
+                let key = model::item_key(&item.id)?;
+                let held = self.replica.state.field(&key, field::THREAD).into_iter().flatten();
+                let values: Vec<&Json> = held.map(|(_, v)| &v.value).collect();
+                if values != [&json!(thread)] {
+                    let edit =
+                        ScopeEdit::Member { item: item.id.clone(), thread: Some(thread.clone()) };
+                    self.scope(&edit)?;
+                }
             }
         }
         Ok(())
@@ -220,12 +367,7 @@ impl Writer<'_, '_> {
         let key = model::link_key(from, to)?;
         if self.replica.state.field(&key, link::PRESENT).is_none() {
             self.report.links += 1;
-            self.report.changes.push(Change {
-                entity: kind::LINK,
-                name: Name::Link { from: from.to_owned(), kind: "waits-for", to: to.to_owned() },
-                action: Action::Create,
-                fields: BTreeMap::new(),
-            });
+            self.link_row(from, to, Action::Create);
         }
         self.field(&key, link::FROM, Some(&from))?;
         self.field(&key, link::TO, Some(&to))?;
@@ -234,52 +376,32 @@ impl Writer<'_, '_> {
         Ok(())
     }
 
-    /// Adds repositories and members.
-    fn scope_edits(&mut self, doc: &Import, before: &Model) -> Result<(), ApplyError> {
-        for item in &doc.items {
-            for name in &item.repositories {
-                let present =
-                    before.items.get(&item.key).is_some_and(|i| i.repositories.contains(name));
-                if !present {
-                    let change = ScopeEdit::ItemRepository {
-                        item: item.key.clone(),
-                        repository: name.clone(),
-                        present: true,
-                    };
-                    self.scope(before, &change)?;
-                }
-            }
-        }
-        for record in &doc.threads {
-            for name in &record.repositories {
-                let present =
-                    before.threads.get(&record.key).is_some_and(|t| t.repositories.contains(name));
-                if !present {
-                    let change = ScopeEdit::ThreadRepository {
-                        thread: record.key.clone(),
-                        repository: name.clone(),
-                        present: true,
-                    };
-                    self.scope(before, &change)?;
-                }
-            }
-            for member in &record.items {
-                if before.thread_of(member) != Some(record.key.as_str()) {
-                    let change = ScopeEdit::Member {
-                        item: member.clone(),
-                        thread: Some(record.key.clone()),
-                    };
-                    self.scope(before, &change)?;
-                }
-            }
+    /// Stops `from` waiting for `to`.
+    fn unlink(&mut self, from: &str, to: &str) -> Result<(), ApplyError> {
+        if model::unlink(self.replica, from, to, self.by)? {
+            self.report.fields += 1;
+            self.link_row(from, to, Action::Remove);
         }
         Ok(())
     }
-    fn created(&mut self, key: &Key, count: impl Fn(&mut Report) -> &mut usize) {
-        if self.replica.state.entity(key).is_none() {
+
+    fn link_row(&mut self, from: &str, to: &str, action: Action) {
+        self.report.changes.push(Change {
+            entity: kind::LINK,
+            name: Name::Link { from: from.to_owned(), kind: "waits-for", to: to.to_owned() },
+            action,
+            fields: BTreeMap::new(),
+        });
+    }
+
+    /// Counts a record the import creates, and says whether it does.
+    fn created(&mut self, key: &Key, count: impl Fn(&mut Report) -> &mut usize) -> bool {
+        let new = self.replica.state.entity(key).is_none();
+        if new {
             *count(&mut self.report) += 1;
             self.row(entity(&key.kind), &key.id).action = Action::Create;
         }
+        new
     }
 
     /// The row for a record, added as an update when it is the first mention.
@@ -314,7 +436,8 @@ impl Writer<'_, '_> {
             .flatten()
             .map(|(_, v)| &v.value)
             .collect();
-        if current != [&json] {
+        // Equal values written apart hold it too, so a done item is never marked done again.
+        if current.is_empty() || current.iter().any(|held| **held != json) {
             let from = match current.as_slice() {
                 [] => Json::Null,
                 [one] => (*one).clone(),
@@ -357,12 +480,12 @@ impl Writer<'_, '_> {
         before.unwrap_or_default()
     }
 
-    fn scope(&mut self, before: &Model, change: &ScopeEdit) -> Result<(), ApplyError> {
+    fn scope(&mut self, change: &ScopeEdit) -> Result<(), ApplyError> {
         scope::edit(self.replica, change, self.by)?;
         self.report.fields += 1;
         let (entity, id, element, present) = match change {
             ScopeEdit::Member { item, thread } => {
-                let from = before.items.get(item).map_or(Json::Null, |i| json!(i.thread));
+                let from = self.before.items.get(item).map_or(Json::Null, |i| json!(i.thread));
                 let edit = Edit { from, to: json!(thread) };
                 self.row(kind::ITEM, item).fields.insert("thread".to_owned(), edit);
                 return Ok(());
@@ -379,12 +502,33 @@ impl Writer<'_, '_> {
     }
 }
 
+/// The edits that take a set from `held` to `wanted`: when `adding`, each element to add, and otherwise each to remove.
+fn changes(held: &BTreeSet<String>, wanted: &[String], adding: bool) -> Vec<(String, bool)> {
+    let wanted: BTreeSet<String> = wanted.iter().cloned().collect();
+    if adding {
+        wanted.difference(held).map(|r| (r.clone(), true)).collect()
+    } else {
+        held.difference(&wanted).map(|r| (r.clone(), false)).collect()
+    }
+}
+
 /// The kind of record a key names, as a change reports it.
 fn entity(key_kind: &str) -> &'static str {
     [kind::ITEM, kind::THREAD, kind::REPOSITORY, kind::LINK]
         .into_iter()
         .find(|name| *name == key_kind)
         .unwrap_or(kind::ITEM)
+}
+
+/// The model's state for an imported one.
+impl From<super::State> for ItemState {
+    fn from(state: super::State) -> Self {
+        match state {
+            super::State::Backlog => Self::Backlog,
+            super::State::Parked => Self::Parked,
+            super::State::Done => Self::Done,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::import::State as Planned;
-use crate::import::tests::{item, valid};
+use crate::import::tests::{id, item, valid};
 use crate::model::{ItemState, Value};
 use crate::scope::USER;
 use crate::state::{Millis, ReplicaId, State};
@@ -21,6 +21,10 @@ fn imported() -> Replica {
     r
 }
 
+fn model(r: &Replica) -> Model {
+    Model::read(&r.state).unwrap()
+}
+
 #[test]
 fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     let mut r = replica();
@@ -28,34 +32,41 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     assert_eq!((report.repositories, report.items, report.links, report.threads), (1, 3, 1, 1));
     // Each record is a creation with the fields it was given; a set shows whole, and a link names its ends.
     let changes = serde_json::to_value(&report.changes).unwrap();
-    let find = |entity: &str, id: &str| {
-        changes.as_array().unwrap().iter().find(|c| c["entity"] == entity && c["id"] == id).unwrap()
+    let find = |entity: &str, n: u8| {
+        changes
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["entity"] == entity && c["id"] == id(n))
+            .unwrap()
     };
     assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 3 + 1);
-    assert_eq!(find("repository", "r")["action"], "create");
-    assert_eq!(
-        find("repository", "r")["fields"]["default_branch"],
-        json!({"from": null, "to": "main"})
-    );
-    assert_eq!(find("item", "a")["fields"]["repositories"], json!({"from": [], "to": ["r"]}));
-    assert_eq!(find("item", "a")["fields"]["parent"], json!({"from": null, "to": "top"}));
-    assert_eq!(find("item", "b")["fields"]["thread"], json!({"from": null, "to": "t"}));
+    assert_eq!(find("repository", 1)["action"], "create");
+    assert_eq!(find("repository", 1)["fields"]["owner"], json!({"from": null, "to": "example"}));
+    assert_eq!(find("item", 11)["fields"]["repositories"], json!({"from": [], "to": [id(1)]}));
+    assert_eq!(find("item", 11)["fields"]["parent"], json!({"from": null, "to": id(10)}));
+    assert_eq!(find("item", 12)["fields"]["thread"], json!({"from": null, "to": id(20)}));
     let link = changes.as_array().unwrap().iter().find(|c| c["entity"] == "link").unwrap();
     assert_eq!(
-        (&link["from"], &link["kind"], &link["action"], &link["fields"]),
-        (&json!("a"), &json!("waits-for"), &json!("create"), &json!({}))
+        (&link["from"], &link["kind"], &link["action"]),
+        (&json!(id(11)), &json!("waits-for"), &json!("create"))
     );
-    let model = Model::read(&r.state).unwrap();
-    let a = &model.items["a"];
-    assert_eq!(a.title, Value::One("Item a".to_owned()));
-    assert_eq!(a.parent, Value::One("top".to_owned()));
-    assert_eq!(a.repositories, ["r".to_owned()].into());
-    assert_eq!(model.items["b"].state, Value::One(ItemState::Done));
-    assert!(model.items["b"].evidence.one().is_some());
-    assert_eq!(model.thread_of("b"), Some("t"));
-    assert_eq!(model.links, [model::Link { from: "a".to_owned(), to: "b".to_owned() }]);
-    assert_eq!(model.repositories["r"].default_branch, Value::One("main".to_owned()));
+    let m = model(&r);
+    let a = &m.items[&id(11)];
+    assert_eq!(a.parent, Value::One(id(10)));
+    assert_eq!(a.repositories, [id(1)].into());
+    // A new item left without a state is in the backlog.
+    assert_eq!(m.items[&id(10)].state, Value::One(ItemState::Backlog));
+    // The evidence keeps the repository and the SHA apart.
+    let evidence = m.items[&id(12)].evidence.one().unwrap();
+    assert_eq!(
+        (evidence.repository.as_deref(), evidence.commit.as_deref(), evidence.text.as_deref()),
+        (Some(id(1).as_str()), Some("abc1234"), Some("shipped"))
+    );
+    assert_eq!(m.thread_of(&id(12)), Some(id(20).as_str()));
+    assert_eq!(m.links, [model::Link { from: id(11), to: id(12) }]);
 
+    // Again, later: finished work keeps its done time, since nothing is written.
     let before = r.state.clone();
     let again = apply(&valid(), &mut r, by(USER, 2)).unwrap();
     assert_eq!(again, Report::default());
@@ -63,64 +74,143 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
 }
 
 #[test]
-fn a_changed_title_is_one_write_and_what_the_document_omits_is_kept() {
+fn what_a_document_leaves_out_is_kept() {
     let mut r = imported();
-    let key = model::item_key("a").unwrap();
-    model::set(&mut r, &key, field::NOTES, Some(&"kept"), by(USER, 2)).unwrap();
+    let done_at = model(&r).items[&id(12)].done_at;
     let mut doc = valid();
     doc.items[1].title = "Renamed".to_owned();
+    for left in &mut doc.items {
+        (left.state, left.thread, left.repositories, left.waits_for, left.parent, left.evidence) =
+            (None, None, None, None, None, None);
+    }
     let report = apply(&doc, &mut r, by(USER, 3)).unwrap();
-    assert_eq!((report.items, report.fields), (0, 1));
     assert_eq!(
         serde_json::to_value(&report.changes).unwrap(),
-        json!([{"entity": "item", "id": "a", "action": "update",
-                "fields": {"title": {"from": "Item a", "to": "Renamed"}}}])
+        json!([{"entity": "item", "id": id(11), "action": "update",
+                "fields": {"title": {"from": "Item 11", "to": "Renamed"}}}])
     );
-    let a = &Model::read(&r.state).unwrap().items["a"];
-    assert_eq!(a.title, Value::One("Renamed".to_owned()));
-    assert_eq!(a.notes, Value::One("kept".to_owned()));
+    let m = model(&r);
+    let (kept, done) = (&m.items[&id(11)], &m.items[&id(12)]);
+    assert_eq!((kept.parent.one(), kept.repositories.len()), (Some(&id(10)), 1));
+    assert_eq!(m.thread_of(&id(11)), Some(id(20).as_str()));
+    assert_eq!((done.state.one(), done.done_at), (Some(&ItemState::Done), done_at));
+    assert!(done.evidence.one().is_some());
+    assert_eq!(m.links.len(), 1);
+}
+
+#[test]
+fn a_list_given_replaces_the_records_own() {
+    let mut r = imported();
+    let mut doc = valid();
+    doc.items.push(item(13, None, None));
+    doc.items[1].waits_for = Some(vec![id(13)]);
+    doc.items[1].repositories = Some(vec![]);
+    let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
+    let m = model(&r);
+    assert_eq!(m.links, [model::Link { from: id(11), to: id(13) }]);
+    assert!(m.items[&id(11)].repositories.is_empty());
+    let changes = serde_json::to_value(&report.changes).unwrap();
+    let removed: Vec<&Json> =
+        changes.as_array().unwrap().iter().filter(|c| c["action"] == "remove").collect();
+    assert_eq!(
+        removed,
+        [
+            &json!({"entity": "link", "from": id(11), "kind": "waits-for", "to": id(12), "action": "remove", "fields": {}})
+        ]
+    );
+    assert_eq!(report.links, 1, "counts.links counts only created links");
+}
+
+#[test]
+fn a_document_may_turn_a_link_around() {
+    let mut r = imported();
+    let mut doc = valid();
+    doc.items[1].waits_for = Some(vec![]);
+    doc.items[2].waits_for = Some(vec![id(11)]);
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    assert_eq!(model(&r).links, [model::Link { from: id(12), to: id(11) }]);
+}
+
+#[test]
+fn references_may_name_the_trackers_records_but_not_unknown_ones() {
+    let mut r = imported();
+    let mut doc = crate::import::Import::new();
+    let mut next = item(30, None, Some(10));
+    next.thread = Some(id(20));
+    next.waits_for = Some(vec![id(12)]);
+    next.repositories = Some(vec![id(1)]);
+    doc.items.push(next);
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    assert_eq!(model(&r).thread_of(&id(30)), Some(id(20).as_str()));
+    doc.items[0].parent = Some(id(99));
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("unknown parent accepted")
+    };
+    assert_eq!(
+        errors,
+        [ValidationError::UnknownReference {
+            at: format!("item {}, parent", id(30)),
+            kind: KeyKind::Item,
+            id: id(99)
+        }]
+    );
+}
+
+#[test]
+fn evidence_and_archiving_are_judged_by_the_state_each_item_ends_with() {
+    let mut r = imported();
+    // 12 is done in the tracker, so evidence and archiving on it, its state left out, are fine.
+    let mut doc = crate::import::Import::new();
+    let mut done = item(12, None, None);
+    done.evidence = Some(crate::import::Evidence { commit: None, text: Some("again".into()) });
+    done.archived = true;
+    doc.items.push(done);
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    // 11 isn't done, so evidence on it is refused.
+    doc.items[0] = item(11, None, None);
+    doc.items[0].evidence = Some(crate::import::Evidence { commit: None, text: Some("n".into()) });
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("evidence on open work accepted")
+    };
+    assert_eq!(errors, [ValidationError::EvidenceNotDone(id(11))]);
 }
 
 #[test]
 fn an_invalid_document_is_refused() {
     let mut doc = valid();
-    doc.items.push(item("a", Planned::Backlog, None));
+    doc.items.push(item(11, Some(Planned::Backlog), None));
     assert!(matches!(apply(&doc, &mut replica(), by(USER, 1)), Err(ApplyError::Invalid(_))));
 }
 
 #[test]
 fn a_document_closing_cycles_of_its_own_is_refused_naming_each_once() {
     let mut doc = valid();
-    for id in ["c", "d", "e"] {
-        doc.items.push(item(id, Planned::Backlog, None));
+    for n in [13, 14] {
+        doc.items.push(item(n, None, None));
     }
-    // top and a under each other; a and b waiting for each other, which c only reaches; d and e likewise.
-    doc.items[0].parent = Some("a".to_owned());
-    doc.items[2].waits_for.push("a".to_owned());
-    doc.items[3].waits_for.push("a".to_owned());
-    doc.items[4].waits_for.push("e".to_owned());
-    doc.items[5].waits_for.push("d".to_owned());
-    let mut r = replica();
-    let Err(ApplyError::Cycles(mut cycles)) = apply(&doc, &mut r, by(USER, 1)) else {
+    // 10 and 11 under each other; 11 and 12 waiting for each other; 13 and 14 likewise.
+    doc.items[0].parent = Some(id(11));
+    doc.items[2].waits_for = Some(vec![id(11)]);
+    doc.items[3].waits_for = Some(vec![id(14)]);
+    doc.items[4].waits_for = Some(vec![id(13)]);
+    let Err(ApplyError::Cycles(mut cycles)) = apply(&doc, &mut replica(), by(USER, 1)) else {
         panic!("cycles accepted")
     };
     cycles.sort();
-    assert_eq!(cycles, [["a", "b"], ["a", "top"], ["d", "e"]]);
+    assert_eq!(cycles, [[id(10), id(11)], [id(11), id(12)], [id(13), id(14)]]);
 }
 
 #[test]
 fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
     let mut r = imported();
-    let mut first = valid();
-    first.items.push(item("x", Planned::Backlog, Some("a")));
-    apply(&first, &mut r, by(USER, 2)).unwrap();
-    // On its own the document is acyclic, since it leaves x's parent alone; with the tracker's x under a it isn't.
-    let mut second = valid();
-    second.items.push(item("x", Planned::Backlog, None));
-    second.items[0].parent = Some("x".to_owned());
-    assert_eq!(second.validate(), vec![]);
-    let Err(ApplyError::Cycles(cycles)) = apply(&second, &mut r, by(USER, 3)) else {
+    // 11 waits for 12 in the tracker; a document making 12 wait for 11, leaving 11's list alone, closes a cycle.
+    let mut doc = crate::import::Import::new();
+    let mut back = item(12, None, None);
+    back.waits_for = Some(vec![id(11)]);
+    doc.items.push(back);
+    assert_eq!(doc.validate(), vec![]);
+    let Err(ApplyError::Cycles(cycles)) = apply(&doc, &mut r, by(USER, 2)) else {
         panic!("cycle accepted")
     };
-    assert_eq!(cycles.len(), 1);
+    assert_eq!(cycles, [[id(11), id(12)]]);
 }

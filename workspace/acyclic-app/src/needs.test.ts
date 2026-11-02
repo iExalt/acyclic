@@ -43,11 +43,11 @@ describe("needView", () => {
     ]);
   });
 
-  it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {
+  it("names a thread as the thread list does, with its badge, and as the entry gives it where the list lacks it", () => {
     const lines = linesOf(
       [
-        { id: "thread-3", title: "3. Ship it now" },
-        { id: "thread-7", title: "7. Build it" },
+        { id: "t3", title: "Ship it now" },
+        { id: "t7", title: "Build it" },
       ],
       PALETTES.dark,
     );
@@ -55,22 +55,22 @@ describe("needView", () => {
       needView({ kind: "contest", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
-    expect(waiting("thread-3", "3. Ship it")).toMatchObject({
+    expect(waiting("t3", "Ship it")).toMatchObject({
       text: "Two holders claim one thread: Ship it now",
-      line: lines.get("thread-3"),
-      thread: "thread-3",
+      line: lines.get("t3"),
+      thread: "t3",
       threads: [],
     });
-    // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
-    expect(waiting("thread-9", "9. Gone")).toMatchObject({
-      text: "Two holders claim one thread: 9. Gone",
+    // A thread the list lacks has no badge, and its row the title the entry gives.
+    expect(waiting("t9", "Gone")).toMatchObject({
+      text: "Two holders claim one thread: Gone",
       line: undefined,
       thread: null,
-      threads: [{ id: "thread-9", title: "9. Gone" }],
+      threads: [{ id: "t9", title: "Gone" }],
     });
-    expect(threadLabel({ id: "thread-9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
-    expect(threadLabel({ id: "thread-3", title: "3. Ship it" }, lines)).toEqual({
-      line: lines.get("thread-3"),
+    expect(threadLabel({ id: "t9", title: "Gone" }, lines)).toEqual({ line: undefined, text: "Gone" });
+    expect(threadLabel({ id: "t3", title: "Ship it" }, lines)).toEqual({
+      line: lines.get("t3"),
       text: "Ship it now",
     });
     // Text that doesn't name its thread has no badge: the thread's row below already shows it.
@@ -78,14 +78,14 @@ describe("needView", () => {
       {
         kind: "conflict",
         entity: "thread",
-        id: "thread-7",
+        id: "t7",
         field: "brief",
         values: ["x", "y"],
-        thread: { id: "thread-7", title: "7. Build it" },
+        thread: { id: "t7", title: "Build it" },
       },
       lines,
     );
-    expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "thread-7", title: "7. Build it" }] });
+    expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "t7", title: "Build it" }] });
   });
 
   it("settles a conflict with each value it can keep, and says why for one it can't", () => {
@@ -169,24 +169,6 @@ describe("needView", () => {
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
     expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");
-  });
-
-  it("names the threads two machines numbered alike, with the command that renumbers one", () => {
-    const clash = needView(
-      {
-        kind: "number-clash",
-        number: 32,
-        threads: [thread("thread-mac-32"), thread("thread-pi-32")],
-        fresh: ["thread-pi-32"],
-        fix: "acyclic thread renumber thread-pi-32",
-      },
-      none,
-    );
-    expect(clash).toMatchObject({
-      key: "number-clash:32",
-      threads: [{ id: "thread-mac-32" }, { id: "thread-pi-32" }],
-      note: "acyclic thread renumber thread-pi-32",
-    });
   });
 });
 

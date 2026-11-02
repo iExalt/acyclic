@@ -14,6 +14,8 @@
 //!
 //! Only an item that nothing refers to is deleted, judged against the replica's own view: no children, no link either
 //! way, not done and with no evidence, and no live claim on its thread but the deleter's own.
+//!
+//! A thread is deleted the same way, by the same field, once no item is in it and no one holds a live claim on it.
 
 use std::fmt;
 
@@ -44,10 +46,15 @@ pub enum Reason {
     },
     /// It is done, or holds evidence of it.
     Finished,
-    /// Someone else holds a live claim on its thread.
+    /// Someone else holds a live claim on its thread, or, for a thread, anyone holds one on it.
     Claimed {
         /// The holder.
         holder: String,
+    },
+    /// Items are in the thread.
+    HasMembers {
+        /// The members.
+        members: Vec<String>,
     },
 }
 
@@ -62,6 +69,9 @@ impl fmt::Display for Reason {
                 write!(f, "it is done, or holds evidence of it, and finished work stays")
             },
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on its thread"),
+            Self::HasMembers { members } => {
+                write!(f, "items are in it ({})", crate::say::list(members, ", "))
+            },
         }
     }
 }
@@ -78,15 +88,25 @@ pub enum DeleteError {
         /// Why not.
         reasons: Vec<Reason>,
     },
+    /// No such thread, or it was deleted.
+    NoThread(String),
+    /// The thread is in use.
+    ThreadInUse {
+        /// The thread.
+        thread: String,
+        /// Why not.
+        reasons: Vec<Reason>,
+    },
 }
 
 impl fmt::Display for DeleteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::InUse { item, reasons } => {
-                write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
+            Self::InUse { item: id, reasons } | Self::ThreadInUse { thread: id, reasons } => {
+                write!(f, "{id} can't be deleted: {}", crate::say::list(reasons, "; "))
             },
+            Self::NoThread(id) => write!(f, "no thread {id}"),
         }
     }
 }
@@ -158,6 +178,43 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     let reasons = reasons(replica, &model, id, by.actor, by.at)?;
     if !reasons.is_empty() {
         return Err(DeleteError::InUse { item: id.to_owned(), reasons });
+    }
+    model::put(replica, &key, field::DELETED, Some(&true), by)?;
+    Ok(true)
+}
+
+/// Deletes a thread, or does nothing when it is deleted already; returns whether it wrote. A thread only an item names
+/// has members, so only a thread with a record of its own can be deleted.
+///
+/// # Errors
+///
+/// Fails when the thread has no record, when an item is in it or anyone holds a live claim on it, or when the state
+/// layer refuses.
+pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
+    let key = claim::thread_key(id)?;
+    if model::is_deleted(&replica.state, &key) {
+        return Ok(false);
+    }
+    let model = Model::read(&replica.state)?;
+    if !model.threads.contains_key(id) {
+        return Err(DeleteError::NoThread(id.to_owned()));
+    }
+    let mut reasons = Vec::new();
+    // Every item that names it, a conflicted one included, so none is left in a thread that is gone.
+    let members: Vec<String> = model
+        .items
+        .values()
+        .filter(|item| item.thread.all().iter().any(|thread| *thread == id))
+        .map(|item| item.id.clone())
+        .collect();
+    if !members.is_empty() {
+        reasons.push(Reason::HasMembers { members });
+    }
+    for held in claim::live(&replica.state, &key, by.at)? {
+        reasons.push(Reason::Claimed { holder: held.holder });
+    }
+    if !reasons.is_empty() {
+        return Err(DeleteError::ThreadInUse { thread: id.to_owned(), reasons });
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
     Ok(true)

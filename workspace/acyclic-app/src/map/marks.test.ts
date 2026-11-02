@@ -5,19 +5,18 @@ import { item } from "./fixture";
 import { boxMarkSvg, markOf, markSvg } from "./marks";
 import { buildModel, fallbackStage, visible } from "./model";
 
-const thread = { colour: "#4ec695", number: "31", ink: "#141a1f" };
+const thread = { colour: "#4ec695", ink: "#141a1f" };
 const DARK = PALETTES.dark;
 const STAGES: Stage[] = ["done", "in-review", "in-progress", "ready", "blocked", "parked", "unthreaded"];
 
 describe("markSvg", () => {
-  it("draws a different icon for every stage, with the thread's stripe and numbered badge", () => {
+  it("draws a different icon for every stage, with the thread's stripe and dot", () => {
     const icons = STAGES.map((stage) => markSvg(stage, thread, 200, 48, DARK).match(/<g [^>]*>(.*?)<\/g>/)?.[1]);
     expect(new Set(icons).size).toBe(STAGES.length);
     const mark = markSvg("ready", thread, 200, 48, DARK);
     expect(mark).toContain('<rect width="6" height="48" fill="#4ec695"/>');
-    expect(mark).toContain(">31</text>");
-    // The badge leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the tile.
-    expect(mark.indexOf('<rect x="14"')).toBeGreaterThan(-1);
+    // The dot leads, after the stripe, as a thread's row in the sidebar does; the stage's icon ends the tile.
+    expect(mark).toContain('<circle cx="24" cy="24" r="5" fill="#4ec695"/>');
     expect(mark).toContain(`translate(${200 - 12 - 16} 16)`);
   });
 
@@ -32,11 +31,7 @@ describe("markSvg", () => {
     expect(closed).not.toContain("<g ");
   });
 
-  it("widens the badge for a clone's initial, draws a dot for a thread with no number, and a ring for none", () => {
-    const pill = (number: string) =>
-      Number(markSvg("ready", { ...thread, number }, 200, 48, DARK).match(/width="(\d+)" height="20"/)?.[1]);
-    expect(pill("32m")).toBeGreaterThan(pill("3"));
-    expect(markSvg("ready", { ...thread, number: null }, 200, 48, DARK)).toContain('r="5" fill="#4ec695"');
+  it("draws a ring where a tile with no thread would have its dot", () => {
     const none = markSvg("unthreaded", null, 200, 48, DARK);
     expect(none).toContain("stroke-dasharray");
     expect(none).not.toContain("<rect");

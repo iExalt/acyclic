@@ -9,6 +9,7 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+uuid.workspace = true
 
 [features]
 # Timing marks for the store benchmark; see `probe`.

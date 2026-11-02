@@ -56,9 +56,10 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     };
     // An agent reopening finished work: news for the user.
     let reopen = |n: u32| {
-        run(json!({"item": {"add": {"item": format!("p{n}"), "title": format!("P{n}")}}}));
-        run(json!({"item": {"done": {"item": format!("p{n}"), "evidence": "n", "force": true}}}));
-        let edit = json!({"item": {"reopen": {"item": format!("p{n}")}}});
+        let id = format!("01900000-0000-7000-8000-{n:012x}");
+        run(json!({"item": {"add": {"id": id, "title": format!("P{n}")}}}));
+        run(json!({"item": {"done": {"item": id, "evidence": "n", "force": true}}}));
+        let edit = json!({"item": {"reopen": {"item": id}}});
         let (code, answer) = acyclic_cli::call_as(
             serde_json::from_value(edit).unwrap(),
             tracker.clone(),
@@ -149,15 +150,18 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     // The user's own writes through the app bring news of their own doing, which is taken as seen.
     let user = |command: Value| call(&router, Method::POST, "/api/command", command.to_string());
     for command in [
-        json!({"item": {"add": {"item": "m", "title": "M"}}}),
-        json!({"item": {"done": {"item": "m", "evidence": "n", "force": true}}}),
-        json!({"item": {"reopen": {"item": "m"}}}),
+        json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000c1", "title": "M"}}}),
+        json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000c1", "evidence": "n", "force": true}}}),
+        json!({"item": {"reopen": {"item": "01900000-0000-7000-8000-0000000000c1"}}}),
     ] {
         assert_eq!(user(command).await.0, StatusCode::OK);
     }
     let sent = home.join(".config/acyclic/push/sent.json");
     let read = |file: &std::path::Path| std::fs::read_to_string(file).unwrap();
-    eventually("taking M as seen", || read(&sent).contains("reopened:m").then_some(())).await;
+    eventually("taking M as seen", || {
+        read(&sent).contains("reopened:01900000-0000-7000-8000-0000000000c1").then_some(())
+    })
+    .await;
     reopen(3);
     server.push.look();
     assert_eq!(received(3).await.1["body"], "P3 was reopened");

@@ -146,7 +146,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             &(0..runs).map(|_| tracker.time("thread ready", false)).collect::<Vec<_>>(),
         );
         let adds: Vec<Sample> = (0..runs)
-            .map(|n| tracker.time(&format!("item add z{n} --title First"), false))
+            .map(|n| tracker.time(&format!("item add --title First-{n}"), false))
             .collect();
         record(&mut row, "edit", &adds[..1]);
         println!("  (the edit column is the first add)");
@@ -154,20 +154,19 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         return row;
     }
     let item = if size < 50 {
-        let adds: Vec<Sample> = (0..size)
-            .map(|n| tracker.time(&format!("item add i{n} --title Item-{n}"), false))
-            .collect();
+        let adds: Vec<Sample> =
+            (0..size).map(|n| tracker.time(&format!("item add --title Item-{n}"), false)).collect();
         report("add", &adds);
-        format!("i{}", size - 1)
+        format!("Item-{}", size - 1)
     } else {
         let plan = acyclic_fixtures::generate(size, 7);
         std::fs::write(tracker.path().join("plan.json"), plan.to_json()).expect("the plan");
         record(&mut row, "import", &[tracker.time("import plan.json", false)]);
         record(&mut row, "import again", &[tracker.time("import plan.json", false)]);
-        let open = plan.items.iter().rev().find(|i| i.state != State::Done);
-        open.expect("an open item").key.clone()
+        let open = plan.items.iter().rev().find(|i| i.state != Some(State::Done));
+        open.expect("an open item").id.clone()
     };
-    tracker.run("item add bench-target --title Target", false);
+    tracker.run("item add --title Target", false);
     row.store = store_size(&tracker.repo());
     println!("  store: {}", row.store);
 
@@ -211,8 +210,8 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     }
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
-            let sample = tracker.time(&format!("item edit {item} --waits-for bench-target"), false);
-            tracker.run(&format!("item edit {item} --no-waits-for bench-target"), false);
+            let sample = tracker.time(&format!("item edit {item} --waits-for Target"), false);
+            tracker.run(&format!("item edit {item} --no-waits-for Target"), false);
             sample
         })
         .collect();
@@ -221,10 +220,10 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     let mut tops = Vec::new();
     let plain: Vec<Sample> = (0..runs)
         .map(|n| {
-            tops.push(tracker.time(&format!("item add top-{n} --title Top"), false));
-            tracker.run(&format!("thread add bench-{n} --title Bench"), false);
-            tracker.run(&format!("item edit top-{n} --thread bench-{n}"), false);
-            let line = format!("item add top-{n}-leaf --title Leaf --parent top-{n}");
+            tops.push(tracker.time(&format!("item add --title Top-{n}"), false));
+            tracker.run(&format!("thread add --title Bench-{n}"), false);
+            tracker.run(&format!("item edit Top-{n} --thread Bench-{n}"), false);
+            let line = format!("item add --title Leaf-{n} --parent Top-{n}");
             let (out, plain) = tracker.run(&line, false);
             assert!(
                 out["data"]["placed"].as_array().is_some_and(|placed| !placed.is_empty()),
@@ -274,7 +273,7 @@ fn sync(tracker: &Tracker, row: &mut Row, runs: usize) {
     peer.run("sync", false);
     let moved: Vec<Sample> = (0..runs)
         .map(|n| {
-            peer.run(&format!("item add peer-{n} --title Peer"), false);
+            peer.run(&format!("item add --title Peer-{n}"), false);
             peer.run("sync", false);
             tracker.time("sync", false)
         })

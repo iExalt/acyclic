@@ -1,6 +1,7 @@
 //! Output for people, from the same data the JSON envelope carries: tables for lists, a block of fields for each
 //! record, and one line for a write. Fitted to the terminal's width when printing to one, and without borders or
-//! wrapping when not, so it stays easy to pipe.
+//! wrapping when not, so it stays easy to pipe. Records are named as a person names them: items and threads by the
+//! shortest ending of their ids that names them, and repositories by `owner/name`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -17,8 +18,15 @@ const RULED: TableStyle =
 /// The entities a write names, in the order a summary looks for them.
 const ENTITIES: [&str; 3] = ["item", "thread", "repository"];
 
-/// A command's data for people. `width` is the terminal's, or `None` when not printing to one.
-pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> String {
+/// A command's data for people, each id that `names` holds printed as its name there. `width` is the terminal's, or
+/// `None` when not printing to one.
+pub(crate) fn render(
+    command: &Command,
+    data: &Json,
+    width: Option<u16>,
+    names: &BTreeMap<String, String>,
+) -> String {
+    let data = &named(data, names);
     let columns = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
     let text = match command {
         Command::Item(ItemCommand::List) => table(
@@ -42,6 +50,19 @@ pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> Stri
         },
     };
     if text.ends_with('\n') { text } else { format!("{text}\n") }
+}
+
+/// `value` with every string, and every key, that is an id in `names` replaced by its name.
+fn named(value: &Json, names: &BTreeMap<String, String>) -> Json {
+    let name = |text: &String| names.get(text).unwrap_or(text).clone();
+    match value {
+        Json::String(text) => Json::String(name(text)),
+        Json::Array(values) => values.iter().map(|value| named(value, names)).collect(),
+        Json::Object(fields) => {
+            fields.iter().map(|(key, value)| (name(key), named(value, names))).collect()
+        },
+        other => other.clone(),
+    }
 }
 
 /// An error's envelope as one line for standard error, with its details when it has any, since they often name what

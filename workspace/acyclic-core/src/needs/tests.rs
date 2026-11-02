@@ -65,7 +65,7 @@ fn the_state_puts_its_problems_on_the_list() {
     let evidence = model::Evidence {
         repository: Some("nowhere".into()),
         commit: Some("abcdef1".into()),
-        note: None,
+        text: None,
     };
     model::set(&mut a, &item_key("dep").unwrap(), field::EVIDENCE, Some(&evidence), by).unwrap();
     link(&mut a, "z", "dep", by).unwrap();

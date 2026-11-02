@@ -30,9 +30,9 @@ export interface Entry {
   key: string;
   group: Group;
   title: string;
-  /** A second, quieter line: an item's id and project, a thread's number. */
+  /** A second, quieter line: an item's id and project. */
   detail: string | null;
-  /** Searched beside the title: an item's or project's id, a thread's number. */
+  /** Searched beside the title: an item's or project's id. */
   also: string;
   run: Run;
   /** The title and `also`, folded once when listed rather than on every key typed. */
@@ -49,8 +49,8 @@ export const MOST = 50;
 
 export interface Plan {
   model: Model;
-  /** Threads by number, each with its badge's number and its name. */
-  threads: readonly { id: string; number: string | null; name: string }[];
+  /** Threads in the order they are listed, each with its name. */
+  threads: readonly { id: string; name: string }[];
   /** The threads at work, listed before a query is typed. */
   working: ReadonlySet<string>;
   showArchived: boolean;
@@ -117,9 +117,8 @@ export function entries(plan: Plan): Entry[] {
       key: `thread:${thread.id}`,
       group: "Threads",
       title: thread.name,
-      // Its badge carries the number, which a search still finds.
       detail: null,
-      also: thread.number ?? thread.id,
+      also: "",
       run: { kind: "thread", id: thread.id },
     }),
   );

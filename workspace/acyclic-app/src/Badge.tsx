@@ -1,4 +1,4 @@
-// A thread's badge: its number on its line's colour, or a dot in that colour when it has no number.
+// A thread's badge: a dot in its line's colour.
 
 import type { CSSProperties } from "react";
 import { Icon, Inbox } from "./icons";
@@ -11,11 +11,7 @@ export function lineStyle(line: Line | undefined): CSSProperties | undefined {
 
 export function Badge({ line }: { line: Line | undefined }) {
   if (line === undefined) return null;
-  return line.number === null ? (
-    <span className="badge dot" aria-hidden="true" />
-  ) : (
-    <span className="badge">{line.number}</span>
-  );
+  return <span className="badge dot" aria-hidden="true" />;
 }
 
 /** A need's badge: its thread's, or for a need with no thread the inbox icon in its place, so every head lines up. */

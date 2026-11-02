@@ -32,7 +32,7 @@ import {
   restored,
   topLayer,
 } from "./layers";
-import { byNumber, lineLabel, linesOf } from "./lines";
+import { byTitle, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
 import { type LeftAt, NeedsList } from "./NeedsList";
@@ -112,7 +112,6 @@ const UNSAVED: Notice = {
 /** The add form, open under a parent or at the top level, with what the user wrote if a failed add reopened it. */
 interface Adding {
   parent: string | null;
-  idRefused: boolean;
   draft: NewItem | null;
 }
 
@@ -277,7 +276,7 @@ export function App() {
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
   );
-  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byNumber)), [loaded]);
+  const sorted = useMemo(() => (loaded === null ? [] : [...loaded.threads.threads].sort(byTitle)), [loaded]);
   const palette = PALETTES[useScheme()];
   const theme = useTheme();
   const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
@@ -451,13 +450,12 @@ export function App() {
             }
           }
           setPending(null);
-          if (!held && drawn.kind === "add")
-            setAdding({ parent: drawn.item.parent, idRefused: told(sent).fixId, draft: drawn.item });
+          if (!held && drawn.kind === "add") setAdding({ parent: drawn.item.parent, draft: drawn.item });
           if (!held && drawn.kind === "edit")
             setReopened((was) => ({ id: drawn.id, edited: drawn.edited, n: (was?.n ?? 0) + 1 }));
         }
       }
-      const { text, offer, fixId } = told(sent);
+      const { text, offer } = told(sent);
       const saved = sent.write === "saved" && sent.reload === "done";
       const undo = saved && after.undo && before !== null ? undoOf(body, before) : null;
       if (text !== null)
@@ -486,7 +484,6 @@ export function App() {
       else if (saved && after.done !== undefined)
         setNotice({ text: after.done, offer: null, retry: null, polite: true, lasts: "news", at: null });
       else setNotice((was) => noticeAfter(was, { kind: "write" }));
-      if (fixId) setAdding((was) => (was === null ? null : { ...was, idRefused: true }));
       setVersion((was) => was + 1);
       sending.current = false;
       setBusy(false);
@@ -581,7 +578,6 @@ export function App() {
     if (!showCommand || model === null) return [];
     const threads = sorted.map((one) => ({
       id: one.id,
-      number: lines.get(one.id)?.number ?? null,
       name: lines.get(one.id)?.name ?? one.id,
     }));
     const item = panel === "item" && selected !== null ? model.items.get(selected) : undefined;
@@ -900,7 +896,7 @@ export function App() {
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;
   const startAdd = (parent: string | null) => {
     setMode({ kind: "idle" });
-    setAdding({ parent, idRefused: false, draft: null });
+    setAdding({ parent, draft: null });
   };
   /**
    * Adds an item and, once saved, shows it on the Map, selected where it landed; closing it goes back to the view it was
@@ -908,12 +904,12 @@ export function App() {
    */
   const add = async (item: NewItem) => {
     const from = viewNow.current;
-    const saved = await send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
+    const saved = await send(addCommand(item), { select: item.id, pin: item.parent }, { kind: "add", item });
     if (saved && from !== "map" && viewNow.current === from) {
       setCameFrom({ view: from, by: "item" });
       setView("map");
       // As one picked: on a Map zoomed out past reading, it comes in at a zoom its title reads at.
-      setFocus((was) => ({ id: item.item, pin: null, n: (was?.n ?? 0) + 1 }));
+      setFocus((was) => ({ id: item.id, pin: null, n: (was?.n ?? 0) + 1 }));
     }
     return saved;
   };
@@ -1252,9 +1248,7 @@ export function App() {
             thread={thread ?? model?.items.get(adding.parent ?? selected ?? "")?.thread ?? null}
             projects={outline?.projects ?? []}
             project={current.project}
-            threads={sorted.map((one) => ({ id: one.id, label: lineLabel(lines.get(one.id), one.title) }))}
-            taken={new Set(model?.items.keys())}
-            idRefused={adding.idRefused}
+            threads={sorted.map((one) => ({ id: one.id, label: one.title }))}
             draft={adding.draft}
             busy={busy}
             onSubmit={add}

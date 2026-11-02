@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CommandError, command, countsText, failure, items, settle, thread, threads } from "./api";
 import { examples } from "./commands.examples.json";
+import { ID } from "./map/fixture";
 
 /** The command the server's tests run under this name. */
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
@@ -53,9 +54,9 @@ describe("command", () => {
 
 describe("items", () => {
   it("shows every listed id in one request, and sends none for an empty tracker", async () => {
-    const shown = [raw("a"), raw("b")];
+    const shown = [raw(ID.a), raw(ID.b)];
     const full = server({
-      "item list": { ok: true, data: { items: [{ id: "a" }, { id: "b" }] } },
+      "item list": { ok: true, data: { items: [{ id: ID.a }, { id: ID.b }] } },
       "item show": { ok: true, data: shown },
     });
     await expect(items(full.fetcher)).resolves.toEqual(shown.map(settle));
@@ -102,16 +103,16 @@ describe("thread", () => {
         ok: true,
         data: [
           {
-            id: "t",
+            id: ID.t,
             title: "T",
             brief: { conflict: ["x", "y"] },
-            heads: ["a"],
-            members: [{ id: "a", title: "A" }],
+            heads: [ID.a],
+            members: [{ id: ID.a, title: "A" }],
           },
         ],
       },
     });
-    await expect(thread("t", fetcher)).resolves.toMatchObject({ title: "T", brief: null });
+    await expect(thread(ID.t, fetcher)).resolves.toMatchObject({ title: "T", brief: null });
     expect(sent).toEqual([example("a thread")]);
   });
 });

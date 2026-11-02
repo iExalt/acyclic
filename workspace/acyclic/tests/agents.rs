@@ -44,6 +44,14 @@ fn thread_of(item: &str) -> String {
     format!("t-{}", if shape.starts_with('c') { "c" } else { shape })
 }
 
+/// The id of the item or thread named `name`: a `UUIDv7` made from the name, so a run names each record alike.
+fn id(name: &str) -> String {
+    let hash = name.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("01900000-0000-7000-8000-{:012x}", hash & 0xffff_ffff_ffff)
+}
+
 fn acyclic(tracker: &Path, actor: &str, line: &str) -> (i32, Value) {
     let output = Command::new(BIN)
         .args(line.split(' '))
@@ -95,13 +103,13 @@ fn agent_child() {
         }
     };
     wait_for(&["go".to_owned()]);
-    let (code, contest) = acyclic(tracker, &actor, &format!("thread claim {CONTESTED}"));
+    let (code, contest) = acyclic(tracker, &actor, &format!("thread claim {}", id(CONTESTED)));
     // No one moves on, and the winner finishes nothing, until every agent has tried: each loser sees a live claim.
     std::fs::write(report.with_extension("contested"), "").unwrap();
     wait_for(&(0..AGENTS).map(|agent| format!("agent{agent}.contested")).collect::<Vec<_>>());
     let mut claimed = Vec::new();
     let mut done = Vec::new();
-    let mut held = (code == 0).then(|| CONTESTED.to_owned());
+    let mut held = (code == 0).then(|| id(CONTESTED));
     claimed.extend(held.clone());
     loop {
         assert!(Instant::now() < deadline, "{actor} still working at the deadline");
@@ -172,13 +180,13 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
     }
     let plan = json!({
         "format": "acyclic-import",
-        "version": 2,
+        "version": 3,
         "items": items().iter().map(|key| {
-            let waits_for: Vec<&str> =
-                WAITS.iter().filter(|(from, _)| from == key).map(|(_, to)| *to).collect();
-            json!({"key": key, "title": key, "waits_for": waits_for})
+            let waits_for: Vec<String> =
+                WAITS.iter().filter(|(from, _)| from == key).map(|(_, to)| id(to)).collect();
+            json!({"id": id(key), "title": key, "thread": id(&thread_of(key)), "waits_for": waits_for})
         }).collect::<Vec<_>>(),
-        "threads": threads.iter().map(|(key, items)| json!({"key": key, "title": key, "items": items})).collect::<Vec<_>>(),
+        "threads": threads.keys().map(|key| json!({"id": id(key), "title": key})).collect::<Vec<_>>(),
     });
     let file = dir.path().join("plan.json");
     std::fs::write(&file, plan.to_string()).unwrap();
@@ -275,14 +283,14 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
         }
     }
     for thread in threads.keys() {
-        assert_eq!(claims[thread].len(), 1, "{thread}: one claim");
+        assert_eq!(claims[&id(thread)].len(), 1, "{thread}: one claim");
     }
     for item in &items {
-        let (claim, done) = (&claims[&thread_of(item)], &dones[*item]);
+        let (claim, done) = (&claims[&id(&thread_of(item))], &dones[&id(item)]);
         assert_eq!(done.len(), 1, "{item}: one done");
         assert_eq!(claim[0].1, done[0].1, "{item}: finished by the agent holding its thread");
         for (_, dependency) in WAITS.iter().filter(|(waiting, _)| waiting == item) {
-            assert!(done[0].0 > dones[*dependency][0].0, "{item} done before {dependency}");
+            assert!(done[0].0 > dones[&id(dependency)][0].0, "{item} done before {dependency}");
         }
     }
     // Each agent's successful commands are the log's.

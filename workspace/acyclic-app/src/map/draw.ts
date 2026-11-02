@@ -91,7 +91,7 @@ export function elementsOf(
 /** A tile's thread as its marks show it, or null for one in no thread, or in one the plan doesn't list. */
 function threadOf(thread: string | null, lines: ReadonlyMap<string, Line>) {
   const line = thread === null ? undefined : lines.get(thread);
-  return line === undefined ? null : { colour: line.colour, number: line.number, ink: line.ink };
+  return line === undefined ? null : { colour: line.colour, ink: line.ink };
 }
 
 export interface Update {

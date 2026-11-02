@@ -10,7 +10,7 @@ import { stateWords } from "./stages";
 
 export interface ItemEditorProps {
   item: Item;
-  /** The threads to pick from, each as text with its number. */
+  /** The threads to pick from, each as its title. */
   threads: { id: string; label: string }[];
   /** What the user wrote before, and over what, when a failed save opens the editor again. */
   initial: Edited | null;

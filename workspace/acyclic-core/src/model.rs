@@ -127,12 +127,13 @@ pub struct Evidence {
     /// The id of the repository record holding the commit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    /// The commit that completed the item.
+    /// The commit that completed the item: its SHA, apart from the repository, so renaming the repository renames
+    /// its evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
-    /// A free-form note, such as where a record lives.
+    /// Evidence in words, such as where a record lives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    pub text: Option<String>,
 }
 
 /// A link's stored kind. Only one is left: `from` waits for `to`. A link stored with any other kind, such as the
@@ -324,7 +325,7 @@ impl Model {
 
     fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
         match key.kind.as_str() {
-            // A deleted item or thread is gone from every reader; see `crate::delete` and `crate::renumber`.
+            // A deleted item or thread is gone from every reader; see `crate::delete`.
             kind::ITEM | kind::THREAD if is_deleted(state, key) => {},
             kind::ITEM => {
                 let item = read_item(state, key)?;

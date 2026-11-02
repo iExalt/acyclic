@@ -90,9 +90,8 @@ The state of finished code work whose commit is not yet on its repository's defa
 
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, reopened work,
-claims or numbers two holders clash over, references to what doesn't exist, merges that can't be confirmed, and
-items in no thread. The app
-calls it Needs you, and shows it as a view of its own.
+claims two holders clash over, references to what doesn't exist, merges that can't be confirmed, and items in no
+thread. The app calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
 ## The app

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import { changes, draftOf, itemEdit, reopenCommand, resolveCommand, stateHint, unsettledWhy } from "./forms";
-import { item } from "./map/fixture";
+import { ID, item } from "./map/fixture";
 
 const example = (name: string) => {
   const found = examples.find((one) => one.name === name);
@@ -11,18 +11,18 @@ const example = (name: string) => {
 
 describe("form commands", () => {
   it("build exactly the commands the server's tests run", () => {
-    const c = { ...item("c"), title: "C" };
-    expect(itemEdit("c", draftOf(c), { title: "C2", state: "parked", thread: "t", notes: "n", size: "m" })).toEqual(
+    const c = { ...item(ID.c), title: "C" };
+    expect(itemEdit(ID.c, draftOf(c), { title: "C2", state: "parked", thread: ID.t, notes: "n", size: "m" })).toEqual(
       example("edit an item's fields"),
     );
-    const filled = { ...c, thread: "t", notes: "n", size: "m" };
-    expect(itemEdit("c", draftOf(filled), { ...draftOf(filled), thread: "", notes: "", size: "" })).toEqual(
+    const filled = { ...c, thread: ID.t, notes: "n", size: "m" };
+    expect(itemEdit(ID.c, draftOf(filled), { ...draftOf(filled), thread: "", notes: "", size: "" })).toEqual(
       example("clear an item's fields"),
     );
-    expect(resolveCommand("item", "d", "parent", null)).toEqual(example("settle an item's parent as a clear"));
-    expect(resolveCommand("thread", "t", "title", "T")).toEqual(example("settle a thread's title"));
-    expect(resolveCommand("thread", "t", "brief", null)).toEqual(example("settle a thread's brief as a clear"));
-    expect(reopenCommand("e")).toEqual(example("reopen"));
+    expect(resolveCommand("item", ID.d, "parent", null)).toEqual(example("settle an item's parent as a clear"));
+    expect(resolveCommand("thread", ID.t, "title", "T")).toEqual(example("settle a thread's title"));
+    expect(resolveCommand("thread", ID.t, "brief", null)).toEqual(example("settle a thread's brief as a clear"));
+    expect(reopenCommand(ID.e)).toEqual(example("reopen"));
   });
 });
 

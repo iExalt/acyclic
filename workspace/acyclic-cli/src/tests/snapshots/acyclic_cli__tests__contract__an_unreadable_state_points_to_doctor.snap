@@ -14,24 +14,24 @@ $ acyclic init tracker --replica mac
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a1 --title First
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "placed": [],
     "title": "First"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a2 --title Second
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": [],
     "title": "Second"
   },
@@ -46,7 +46,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
     "details": {
       "hint": "run acyclic doctor"
     },
-    "message": "unreadable state: unreadable state on item a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`"
+    "message": "unreadable state: unreadable state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`"
   },
   "ok": false
 }
@@ -64,13 +64,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "unreadable": [
       {
         "entity": "item",
-        "error": "unreadable state: unreadable state on item a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`",
-        "id": "a1"
+        "error": "unreadable state: unreadable state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`",
+        "id": "01900000-0000-7000-8000-0000000000a1"
       },
       {
         "entity": "link",
-        "error": "unreadable state: unreadable kind on link relates-2-a2-a1: unknown variant `relates`, expected `blocks`",
-        "id": "relates-2-a2-a1"
+        "error": "unreadable state: unreadable kind on link relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1: unknown variant `relates`, expected `blocks`",
+        "id": "relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1"
       }
     ]
   },

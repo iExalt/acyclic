@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use acyclic_core::archive::ArchiveError;
 use acyclic_core::delete::DeleteError;
-use acyclic_core::import::{ApplyError, ParseError};
+use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
 use acyclic_core::state::{Error as StateError, Key, ReplicaId};
@@ -112,7 +112,14 @@ fn every_error_has_a_stable_code_and_exit() {
         ParseError::NotAnImport.into(),
         ParseError::UnsupportedVersion { found: 9 }.into(),
         ApplyError::Invalid(vec![]).into(),
+        ApplyError::Invalid(vec![ValidationError::InvalidId {
+            at: "item id".into(),
+            id: "a1".into(),
+        }])
+        .into(),
         ApplyError::Cycles(vec![]).into(),
+        DeleteError::ThreadInUse { thread: "t".into(), reasons: vec![] }.into(),
+        DeleteError::NoThread("t".into()).into(),
         // Raised by the commands themselves.
         CliError::refused("not-ready", ""),
         CliError::refused("already-exists", ""),
@@ -121,7 +128,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("not-found", exit::NOT_FOUND, ""),
         CliError::new("usage", exit::USAGE, ""),
         CliError::new("invalid-commit", exit::USAGE, ""),
-        CliError::new("reserved-id", exit::USAGE, ""),
+        CliError::new("invalid-id", exit::USAGE, ""),
+        CliError::new("ambiguous", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
@@ -135,7 +143,7 @@ fn every_error_has_a_stable_code_and_exit() {
     // Every code a command can raise is in the table above, so the next one added there must be added here.
     let known: std::collections::BTreeSet<&str> = errors.iter().map(|error| error.code).collect();
     let mut scanned = 0;
-    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs"] {
+    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs", "resolve.rs"] {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
         )
@@ -333,8 +341,6 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             "import: dry_run",
             "import: file",
             "import: schema",
-            "item done: commit",
-            "item done: repository",
             "item show: items",
             "repository show: repositories",
             "thread show: threads",
@@ -346,7 +352,6 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     };
     assert_eq!(refused(json!({"item": {"show": {"items": []}}})), Err("usage"));
     assert_eq!(refused(json!({"thread": {"show": {"threads": []}}})), Err("usage"));
-    assert_eq!(refused(json!({"item": {"done": {"item": "a", "commit": "c"}}})), Err("usage"));
     assert_eq!(refused(json!({"import": {}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"file": "p", "schema": true}})), Err("usage"));
     assert_eq!(refused(json!({"import": {"schema": true, "dry-run": true}})), Err("usage"));
@@ -362,10 +367,10 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     for lease in [1, 480] {
         assert_eq!(refused(json!({"thread": {"claim": {"thread": "t", "lease": lease}}})), Ok(()));
     }
-    assert_eq!(
-        refused(json!({"item": {"done": {"item": "a", "repository": "r", "commit": "c"}}})),
-        Ok(())
-    );
+    for count in [0, 1001] {
+        assert_eq!(refused(json!({"id": {"count": count}})), Err("usage"), "{count}");
+    }
+    assert_eq!(refused(json!({"id": {}})), Ok(()));
     // Unknown fields and the server's own command are refused when deserializing.
     assert!(
         serde_json::from_value::<args::Command>(
@@ -410,7 +415,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     let evidence = |repository: &str, commit: &str| Evidence {
         repository: Some(repository.to_owned()),
         commit: Some(commit.to_owned()),
-        note: None,
+        text: None,
     };
     let code = |model: &Model, e: &Evidence| commands::check_evidence(model, e).map_err(|e| e.code);
     let model = Model::read(mac.state()).unwrap();
@@ -428,7 +433,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     for good in ["abc1234", "ABC1234", &"a".repeat(64)] {
         assert_eq!(code(&model, &evidence("r", good)), Ok(()), "{good}");
     }
-    assert_eq!(code(&model, &Evidence { note: Some("n".into()), ..Evidence::default() }), Ok(()));
+    assert_eq!(code(&model, &Evidence { text: Some("n".into()), ..Evidence::default() }), Ok(()));
 
     // Only done items with other evidence are overwritten.
     let first = evidence("r", "abc1234");
@@ -441,7 +446,7 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     set_state(&mut mac, "a", ItemState::Done, user).unwrap();
     assert!(!overwrites(&mac, &first), "the same evidence");
     assert!(overwrites(&mac, &evidence("r", "def5678")));
-    assert!(overwrites(&mac, &Evidence { note: Some("n".into()), ..Evidence::default() }));
+    assert!(overwrites(&mac, &Evidence { text: Some("n".into()), ..Evidence::default() }));
 }
 
 #[test]
@@ -504,7 +509,8 @@ fn every_command_follows_the_input_conventions() {
     let mut commands = Vec::new();
     walk(&root, "", &mut commands);
     // Positionals are the subject's id, named for the entity; these are the only others.
-    let exceptions = [("init", "path"), ("completions", "shell"), ("import", "file")];
+    let exceptions =
+        [("init", "path"), ("completions", "shell"), ("import", "file"), ("id", "count")];
     let entities = ["ITEM", "THREAD", "REPOSITORY"];
     // A long flag has the same short form, or none, in every command that takes it.
     let mut shorts = std::collections::BTreeMap::new();
@@ -564,7 +570,7 @@ fn every_command_follows_the_input_conventions() {
 
 #[test]
 fn a_removed_or_moved_command_is_a_usage_error_at_its_old_place() {
-    for line in ["acyclic graph", "acyclic thread set t1 --title T"] {
+    for line in ["acyclic graph", "acyclic thread set t1 --title T", "acyclic thread renumber t1"] {
         let out = run(line);
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
         assert!(out.stderr.starts_with("error: unrecognized subcommand"), "{out:?}");
@@ -624,7 +630,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
     }
     for line in [
         "acyclic item edit a --waits-for b --no-waits-for c --no-notes --parent b",
-        "acyclic repository add r --owner o --name n --default-branch main",
+        "acyclic repository add --name o/n --default-branch main",
         "acyclic repository edit r --default-branch trunk",
     ] {
         assert_eq!(check(line), Ok(()), "{line}");
@@ -635,22 +641,46 @@ fn flags_that_contradict_each_other_are_usage_errors() {
 fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
     let temp = tempfile::TempDir::new().unwrap();
     let home = temp.path().to_str().unwrap();
-    let record = |id: &str| acyclic_core::model::Repository {
-        id: id.to_owned(),
-        owner: acyclic_core::model::Value::None,
-        name: acyclic_core::model::Value::None,
+    let one = |text: &str| acyclic_core::model::Value::One(text.to_owned());
+    let record = |owner: &str, name: &str| acyclic_core::model::Repository {
+        id: "01900000-0000-7000-8000-000000000001".to_owned(),
+        owner: one(owner),
+        name: one(name),
         default_branch: acyclic_core::model::Value::None,
         installation: acyclic_core::model::Value::None,
     };
     // A mirror where older servers kept one is no longer read.
     std::fs::create_dir_all(temp.path().join(".local/share/acyclic/mirrors/app.git")).unwrap();
     std::fs::create_dir_all(temp.path().join(".config/acyclic")).unwrap();
-    std::fs::write(
-        temp.path().join(".config/acyclic/clones.toml"),
-        "[clones]\nmapped = \"/code/mapped\"\n",
-    )
-    .unwrap();
+    let clones = temp.path().join(".config/acyclic/clones.toml");
+    std::fs::write(&clones, "[clones]\n\"me/Mapped\" = \"/code/mapped\"\n").unwrap();
     let clone_of = context::clones(&env(&[("HOME", home)])).unwrap();
-    assert_eq!(clone_of(&record("app")), None);
-    assert_eq!(clone_of(&record("mapped")), Some(PathBuf::from("/code/mapped")));
+    assert_eq!(clone_of(&record("me", "app")), None);
+    // Keyed by owner/name, in any case.
+    assert_eq!(clone_of(&record("Me", "mapped")), Some(PathBuf::from("/code/mapped")));
+    // A key that isn't an owner/name, as a record's id once was, is refused rather than left unchecked.
+    std::fs::write(&clones, "[clones]\nmapped = \"/code/mapped\"\n").unwrap();
+    let Err(refused) = context::clones(&env(&[("HOME", home)])) else {
+        panic!("an id key accepted")
+    };
+    assert_eq!(refused.code, "config");
+    assert!(
+        refused.message.contains("clones.toml") && refused.message.contains("owner/name"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn id_prints_new_v7s_one_per_line_outside_any_tracker() {
+    let out = run("acyclic id 3");
+    assert_eq!(out.code, exit::OK);
+    let ids: std::collections::BTreeSet<&str> = out.stdout.lines().collect();
+    assert_eq!(ids.len(), 3, "{out:?}");
+    assert!(ids.iter().all(|id| acyclic_core::ids::v7(id).as_deref() == Some(*id)), "{out:?}");
+    assert_eq!(run("acyclic id").stdout.lines().count(), 1);
+    for count in ["0", "1001"] {
+        let out = run(&format!("acyclic id {count}"));
+        assert_eq!(out.code, exit::USAGE, "{count}");
+        assert!(out.stderr.contains("1 to 1000"), "{out:?}");
+    }
 }

@@ -1,12 +1,16 @@
-//! The import format: a whole plan as one JSON document with symbolic keys.
+//! The import format: a whole plan as one JSON document, every record named by its `UUIDv7` id.
 //!
 //! The format is versioned and kept apart from the model, so the model can change without breaking documents
-//! written against an earlier version. `acyclic import` maps a validated document into the model.
+//! written against an earlier version. `acyclic import` maps a validated document into the model. Since records are
+//! named by their ids, importing a document again updates the records it made, and a document may refer to records
+//! already in the tracker as well as its own.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+
+use crate::ids;
 
 mod apply;
 
@@ -16,33 +20,40 @@ pub use apply::{ApplyError, Report, apply};
 pub const FORMAT: &str = "acyclic-import";
 
 /// The one version this build reads.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
-/// An annotated version 2 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
+/// An annotated version 3 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
 /// remove, since JSON has no comments.
-pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its records named by keys you choose.
-// Importing adds and updates what it names and never deletes, so importing it again changes nothing.
+pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every record named by its own UUIDv7 id.
+// `acyclic id 20` prints twenty new ids to name records with. Importing the document again updates the same records.
+// A reference (parent, thread, waits_for, repositories, evidence) is an id, of a record in the document or already
+// in the tracker. A field left out keeps what the record holds; a new record takes the default.
 // JSON has no comments: remove the lines that start with //.
 {
   "format": "acyclic-import",
-  "version": 2,
-  // A code repository that items can name; all four fields are required.
+  "version": 3,
+  // A code repository that items can name, as "owner/name"; all three fields are required.
   "repositories": [
-    {"key": "code", "owner": "me", "name": "garden", "default_branch": "main"}
+    {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
   ],
   "items": [
-    // Required: key and title. "state" is backlog, parked or done, and defaults to backlog.
-    // Optional: parent (an item's key), notes, size (xs, s, m, l, xl), repositories, waits_for (the keys of items
-    // it can't start before they are done), archived, and evidence on done items.
-    {"key": "beds", "title": "Build the beds", "size": "m", "repositories": ["code"]},
-    {"key": "plant", "title": "Plant the seeds", "waits_for": ["beds"]}
+    // Required: id and title. "state" is backlog, parked or done, backlog for a new item.
+    // Optional: parent, thread, notes, size (xs, s, m, l, xl), repositories, waits_for (the items it can't start
+    // before they are done), archived, and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"},
+    // either part or both. A list given replaces the record's: [] clears it.
+    {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds", "size": "m",
+     "thread": "01900000-0000-7000-8000-000000000002", "repositories": ["01900000-0000-7000-8000-000000000001"]},
+    {"id": "01900000-0000-7000-8000-000000000004", "title": "Plant the seeds",
+     "thread": "01900000-0000-7000-8000-000000000002", "waits_for": ["01900000-0000-7000-8000-000000000003"]}
   ],
-  // A thread groups items for one continuing agent conversation; "items" lists its members' keys. Optional: brief,
-  // repositories (keys, beyond those of its items).
+  // A thread groups items for one continuing agent conversation; an item joins one with its "thread". Optional:
+  // brief, repositories (beyond those of its items).
   "threads": [
-    {"key": "spring", "title": "Spring planting", "items": ["beds", "plant"]}
+    {"id": "01900000-0000-7000-8000-000000000002", "title": "Spring planting"}
   ]
 }
+// On the command line, quote a title in single quotes ('Plant the seeds'), so the shell leaves its quotes and
+// backticks alone, or name a record by the last 6 or more characters of its id.
 "#;
 
 /// A plan to import.
@@ -51,7 +62,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
 pub struct Import {
     /// Always [`FORMAT`].
     pub format: String,
-    /// The format version, at most [`VERSION`].
+    /// The format version, [`VERSION`].
     pub version: u32,
     /// Code repositories that items name.
     #[serde(default)]
@@ -68,22 +79,19 @@ pub struct Import {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
-    /// The symbolic key items use.
-    pub key: String,
-    /// The owner, such as an organization.
-    pub owner: String,
-    /// The repository's name.
+    /// Its id.
+    pub id: String,
+    /// Its `owner/name`.
     pub name: String,
     /// The default branch.
     pub default_branch: String,
 }
 
 /// An item's state. "In review" and readiness are derived on read, never imported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum State {
     /// Not started.
-    #[default]
     Backlog,
     /// Set aside on purpose.
     Parked,
@@ -107,44 +115,44 @@ pub enum Size {
     Xl,
 }
 
-/// What shows a done item was done.
+/// What shows a done item was done: a commit, words, or both.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Evidence {
-    /// The commit that completed the item.
+    /// The commit that completed the item, as `<repository id>@<sha>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
-    /// The repository holding the commit.
+    /// Evidence in words, such as where a record lives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
-    /// A free-form note, such as where a record lives.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    pub text: Option<String>,
 }
 
 /// A work item at any depth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
-    /// The symbolic key parents, waits-for and threads use.
-    pub key: String,
+    /// Its id.
+    pub id: String,
     /// A short title.
     pub title: String,
     /// Design notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// The item's state; backlog when left out.
-    #[serde(default)]
-    pub state: State,
-    /// The parent item's key.
+    /// The item's state; left out, an existing item keeps its own and a new one is in the backlog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<State>,
+    /// The parent item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// Keys of the repositories the item touches.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub repositories: Vec<String>,
-    /// Keys of the items it waits for: it can't start until they are done.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub waits_for: Vec<String>,
+    /// The thread it is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+    /// The repositories it touches: the whole set, replacing the item's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repositories: Option<Vec<String>>,
+    /// The items it waits for, which it can't start until they are done: the whole list, replacing the item's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<Vec<String>>,
     /// A rough size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
@@ -160,18 +168,16 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Thread {
-    /// The thread's symbolic key.
-    pub key: String,
+    /// Its id.
+    pub id: String,
     /// A short title.
     pub title: String,
     /// The brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
-    /// Member items' keys.
-    pub items: Vec<String>,
-    /// Repositories added explicitly, beyond those of its items.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub repositories: Vec<String>,
+    /// Repositories added explicitly, beyond those of its items: the whole set, replacing the thread's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repositories: Option<Vec<String>>,
 }
 
 /// Why a document couldn't be read.
@@ -211,7 +217,7 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// The kind of thing a key names.
+/// The kind of record an id names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyKind {
     /// A repository.
@@ -232,21 +238,26 @@ impl fmt::Display for KeyKind {
     }
 }
 
-/// A rule a parsed document breaks.
+/// A rule a document breaks.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ValidationError {
-    /// A key is empty.
-    EmptyKey(KeyKind),
-    /// Two records of one kind share a key.
-    DuplicateKey(KeyKind, String),
-    /// A reference names no record of the expected kind.
+    /// An id or reference that isn't a `UUIDv7`.
+    InvalidId {
+        /// Where it is, such as `item …, parent`.
+        at: String,
+        /// What it holds.
+        id: String,
+    },
+    /// Two records of one kind share an id.
+    DuplicateId(KeyKind, String),
+    /// A reference names no record of its kind, in the document or the tracker.
     UnknownReference {
-        /// Where the reference is, such as `item a1, parent`.
+        /// Where the reference is, such as `item …, parent`.
         at: String,
         /// The kind it should name.
         kind: KeyKind,
-        /// The missing key.
-        key: String,
+        /// The missing id.
+        id: String,
     },
     /// An item waits for itself.
     SelfLink(String),
@@ -257,55 +268,77 @@ pub enum ValidationError {
         /// The item it names twice.
         waits_for: String,
     },
-    /// An item is a member of several threads.
-    ItemInSeveralThreads {
-        /// The item.
-        item: String,
-        /// The threads claiming it.
-        threads: Vec<String>,
-    },
     /// An archived item that isn't a wholly done subtree.
     ArchivedNotDone(String),
     /// Evidence on an item that isn't done.
     EvidenceNotDone(String),
-    /// A key or name that isn't a valid id: at most 64 lowercase letters, digits, `-`, `_` or `.`, not starting
-    /// with `.`.
-    InvalidName {
-        /// Where it is, such as `item key`.
-        at: String,
+    /// A repository's name that isn't `owner/name`.
+    InvalidRepositoryName {
+        /// The repository.
+        repository: String,
         /// The name.
         name: String,
     },
+    /// An evidence commit that isn't `<repository id>@<sha>`.
+    InvalidCommit {
+        /// The item.
+        item: String,
+        /// The commit.
+        commit: String,
+    },
+}
+
+impl ValidationError {
+    /// Whether the error is an id that isn't a `UUIDv7`.
+    #[must_use]
+    pub fn is_invalid_id(&self) -> bool {
+        matches!(self, Self::InvalidId { .. })
+    }
 }
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyKey(kind) => write!(f, "a {kind} has an empty key"),
-            Self::DuplicateKey(kind, key) => write!(f, "{kind} key {key:?} is used twice"),
-            Self::UnknownReference { at, kind, key } => {
-                write!(f, "{at} names unknown {kind} {key:?}")
+            Self::InvalidId { at, id } => {
+                write!(f, "{at}: {id:?} isn't a UUIDv7; `acyclic id` prints new ones")
             },
-            Self::SelfLink(item) => write!(f, "item {item:?} waits for itself"),
-            Self::ItemInSeveralThreads { item, threads } => {
-                write!(f, "item {item:?} is in several threads: {}", threads.join(", "))
+            Self::DuplicateId(kind, id) => write!(f, "{kind} id {id} is used twice"),
+            Self::UnknownReference { at, kind, id } => {
+                write!(f, "{at} names unknown {kind} {id}")
             },
+            Self::SelfLink(item) => write!(f, "item {item} waits for itself"),
             Self::ArchivedNotDone(item) => {
-                write!(f, "item {item:?} is archived but it or a descendant isn't done")
+                write!(f, "item {item} is archived but it or a descendant isn't done")
             },
             Self::DuplicateLink { item, waits_for } => {
-                write!(f, "item {item:?} names {waits_for:?} twice in waits_for")
+                write!(f, "item {item} names {waits_for} twice in waits_for")
             },
-            Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
-            Self::InvalidName { at, name } => write!(
-                f,
-                "{at}: {name:?} isn't a valid name (at most 64 lowercase letters, digits, '-', '_' or '.')"
-            ),
+            Self::EvidenceNotDone(item) => write!(f, "item {item} has evidence but isn't done"),
+            Self::InvalidRepositoryName { repository, name } => {
+                write!(f, "repository {repository}: {name:?} isn't owner/name")
+            },
+            Self::InvalidCommit { item, commit } => {
+                write!(f, "item {item}: evidence commit {commit:?} isn't <repository id>@<sha>")
+            },
         }
     }
 }
 
 impl std::error::Error for ValidationError {}
+
+/// Splits a repository's `owner/name` into its two parts, when it is one: both non-empty, with one `/` and no space.
+#[must_use]
+pub fn owner_name(text: &str) -> Option<(&str, &str)> {
+    let (owner, name) = text.split_once('/')?;
+    let part = |p: &str| !p.is_empty() && !p.contains('/') && !p.chars().any(char::is_whitespace);
+    (part(owner) && part(name)).then_some((owner, name))
+}
+
+/// Whether `sha` looks like a Git object id: 7 to 64 hexadecimal characters.
+#[must_use]
+pub fn is_object_id(sha: &str) -> bool {
+    (7..=64).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
 
 impl Import {
     /// An empty document of the current version.
@@ -320,7 +353,8 @@ impl Import {
         }
     }
 
-    /// Reads a document, checking its format and version before its shape.
+    /// Reads a document, checking its format and version before its shape, and lowercases every id in it, as stored
+    /// ids are.
     ///
     /// # Errors
     ///
@@ -330,12 +364,40 @@ impl Import {
         if value.get("format").and_then(serde_json::Value::as_str) != Some(FORMAT) {
             return Err(ParseError::NotAnImport);
         }
-        if let Some(found) = value.get("version").and_then(serde_json::Value::as_u64)
-            && found != u64::from(VERSION)
-        {
-            return Err(ParseError::UnsupportedVersion { found });
+        match value.get("version").and_then(serde_json::Value::as_u64) {
+            Some(found) if found != u64::from(VERSION) => {
+                return Err(ParseError::UnsupportedVersion { found });
+            },
+            _ => {},
         }
-        serde_json::from_value(value).map_err(ParseError::Json)
+        let mut doc: Self = serde_json::from_value(value).map_err(ParseError::Json)?;
+        doc.lowercase();
+        Ok(doc)
+    }
+
+    /// Lowercases every id and reference: a UUID in any case names the same record.
+    fn lowercase(&mut self) {
+        let low = |id: &mut String| id.make_ascii_lowercase();
+        let all = |ids: &mut Option<Vec<String>>| ids.iter_mut().flatten().for_each(low);
+        for record in &mut self.repositories {
+            low(&mut record.id);
+        }
+        for record in &mut self.threads {
+            low(&mut record.id);
+            all(&mut record.repositories);
+        }
+        for item in &mut self.items {
+            low(&mut item.id);
+            item.parent.iter_mut().for_each(low);
+            item.thread.iter_mut().for_each(low);
+            all(&mut item.repositories);
+            all(&mut item.waits_for);
+            if let Some(commit) = item.evidence.as_mut().and_then(|e| e.commit.as_mut())
+                && let Some((repository, sha)) = commit.rsplit_once('@')
+            {
+                *commit = format!("{}@{sha}", repository.to_ascii_lowercase());
+            }
+        }
     }
 
     /// Writes the document as pretty-printed JSON.
@@ -348,129 +410,111 @@ impl Import {
         serde_json::to_string_pretty(self).expect("an import always serializes")
     }
 
-    /// Checks every rule and returns each broken one, sorted.
+    /// Checks the rules the document can break on its own and returns each broken one, sorted. When any id isn't a
+    /// `UUIDv7`, those are all it returns, since nothing else can be judged. Whether references name records, and
+    /// whether evidence and archiving sit on done work, depend on the tracker too: [`apply`] checks them.
     #[must_use]
     pub fn validate(&self) -> Vec<ValidationError> {
-        let mut errors = Vec::new();
-        let repositories =
-            keys(KeyKind::Repository, self.repositories.iter().map(|r| &r.key), &mut errors);
-        let items = keys(KeyKind::Item, self.items.iter().map(|i| &i.key), &mut errors);
-        keys(KeyKind::Thread, self.threads.iter().map(|t| &t.key), &mut errors);
-
-        let mut check = |at: String, kind: KeyKind, key: &str, known: &HashSet<&str>| {
-            if !known.contains(key) {
-                errors.push(ValidationError::UnknownReference { at, kind, key: key.to_owned() });
-            }
-        };
-        for item in &self.items {
-            if let Some(parent) = &item.parent {
-                check(format!("item {:?}, parent", item.key), KeyKind::Item, parent, &items);
-            }
-            for repository in &item.repositories {
-                let at = format!("item {:?}, repositories", item.key);
-                check(at, KeyKind::Repository, repository, &repositories);
-            }
-            if let Some(repository) = item.evidence.as_ref().and_then(|e| e.repository.as_ref()) {
-                let at = format!("item {:?}, evidence", item.key);
-                check(at, KeyKind::Repository, repository, &repositories);
-            }
-            for to in &item.waits_for {
-                check(format!("item {:?}, waits_for", item.key), KeyKind::Item, to, &items);
-            }
+        let mut errors = self.invalid_ids();
+        if errors.is_empty() {
+            self.check_unique(&mut errors);
+            self.check_links(&mut errors);
+            self.check_shapes(&mut errors);
         }
-        for thread in &self.threads {
-            for item in &thread.items {
-                check(format!("thread {:?}, items", thread.key), KeyKind::Item, item, &items);
-            }
-            for repository in &thread.repositories {
-                let at = format!("thread {:?}, repositories", thread.key);
-                check(at, KeyKind::Repository, repository, &repositories);
-            }
-        }
-
-        self.check_names(&mut errors);
-        self.check_links(&mut errors);
-        self.check_threads(&mut errors);
-        self.check_done(&mut errors);
         errors.sort();
         errors.dedup();
         errors
     }
 
-    fn check_names(&self, errors: &mut Vec<ValidationError>) {
-        let mut check = |at: String, name: &str| {
-            if !name.is_empty() && crate::model::item_key(name).is_err() {
-                errors.push(ValidationError::InvalidName { at, name: name.to_owned() });
+    /// Every id and reference that isn't a `UUIDv7`.
+    fn invalid_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut check = |at: String, id: &str| {
+            if ids::v7(id).is_none() {
+                errors.push(ValidationError::InvalidId { at, id: id.to_owned() });
             }
         };
-        for repository in &self.repositories {
-            check("repository key".to_owned(), &repository.key);
+        for record in &self.repositories {
+            check("repository id".to_owned(), &record.id);
+        }
+        for record in &self.threads {
+            check("thread id".to_owned(), &record.id);
+            for id in record.repositories.iter().flatten() {
+                check(format!("thread {}, repositories", record.id), id);
+            }
         }
         for item in &self.items {
-            check("item key".to_owned(), &item.key);
+            check("item id".to_owned(), &item.id);
+            let at = |field: &str| format!("item {}, {field}", item.id);
+            for (field, id) in [("parent", &item.parent), ("thread", &item.thread)] {
+                if let Some(id) = id {
+                    check(at(field), id);
+                }
+            }
+            for id in item.repositories.iter().flatten() {
+                check(at("repositories"), id);
+            }
+            for id in item.waits_for.iter().flatten() {
+                check(at("waits_for"), id);
+            }
+            let commit = item.evidence.as_ref().and_then(|e| e.commit.as_ref());
+            if let Some((repository, _)) = commit.and_then(|commit| commit.rsplit_once('@')) {
+                check(at("evidence"), repository);
+            }
         }
-        for thread in &self.threads {
-            check("thread key".to_owned(), &thread.key);
-        }
+        errors
+    }
+
+    fn check_unique(&self, errors: &mut Vec<ValidationError>) {
+        let mut once = |kind: KeyKind, ids: Vec<&String>| {
+            let mut seen = HashSet::new();
+            for id in ids {
+                if !seen.insert(id) {
+                    errors.push(ValidationError::DuplicateId(kind, id.clone()));
+                }
+            }
+        };
+        once(KeyKind::Repository, self.repositories.iter().map(|r| &r.id).collect());
+        once(KeyKind::Item, self.items.iter().map(|i| &i.id).collect());
+        once(KeyKind::Thread, self.threads.iter().map(|t| &t.id).collect());
     }
 
     /// Cycles, among parents or waits-for, are left to the import, which judges them with what the tracker holds.
     fn check_links(&self, errors: &mut Vec<ValidationError>) {
         for item in &self.items {
             let mut seen = HashSet::new();
-            for to in &item.waits_for {
+            for to in item.waits_for.iter().flatten() {
                 if !seen.insert(to) {
                     errors.push(ValidationError::DuplicateLink {
-                        item: item.key.clone(),
+                        item: item.id.clone(),
                         waits_for: to.clone(),
                     });
                 }
-                if *to == item.key {
-                    errors.push(ValidationError::SelfLink(item.key.clone()));
+                if *to == item.id {
+                    errors.push(ValidationError::SelfLink(item.id.clone()));
                 }
             }
         }
     }
 
-    fn check_threads(&self, errors: &mut Vec<ValidationError>) {
-        let mut owners: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-        for thread in &self.threads {
-            for item in &thread.items {
-                owners.entry(item.as_str()).or_default().insert(thread.key.as_str());
-            }
-        }
-        for (item, threads) in owners.into_iter().filter(|(_, threads)| threads.len() > 1) {
-            errors.push(ValidationError::ItemInSeveralThreads {
-                item: item.to_owned(),
-                threads: threads.into_iter().map(str::to_owned).collect(),
-            });
-        }
-    }
-
-    fn check_done(&self, errors: &mut Vec<ValidationError>) {
-        let mut children: HashMap<&str, Vec<&Item>> = HashMap::new();
-        for item in &self.items {
-            if let Some(parent) = &item.parent {
-                children.entry(parent.as_str()).or_default().push(item);
+    fn check_shapes(&self, errors: &mut Vec<ValidationError>) {
+        for record in &self.repositories {
+            if owner_name(&record.name).is_none() {
+                errors.push(ValidationError::InvalidRepositoryName {
+                    repository: record.id.clone(),
+                    name: record.name.clone(),
+                });
             }
         }
         for item in &self.items {
-            if item.evidence.is_some() && item.state != State::Done {
-                errors.push(ValidationError::EvidenceNotDone(item.key.clone()));
-            }
-            if item.archived {
-                let mut stack = vec![item];
-                let mut seen = HashSet::new();
-                while let Some(node) = stack.pop() {
-                    if !seen.insert(node.key.as_str()) {
-                        continue;
-                    }
-                    if node.state != State::Done {
-                        errors.push(ValidationError::ArchivedNotDone(item.key.clone()));
-                        break;
-                    }
-                    stack.extend(children.get(node.key.as_str()).into_iter().flatten());
-                }
+            let Some(commit) = item.evidence.as_ref().and_then(|e| e.commit.as_ref()) else {
+                continue;
+            };
+            if !commit.rsplit_once('@').is_some_and(|(_, sha)| is_object_id(sha)) {
+                errors.push(ValidationError::InvalidCommit {
+                    item: item.id.clone(),
+                    commit: commit.clone(),
+                });
             }
         }
     }
@@ -482,207 +526,5 @@ impl Default for Import {
     }
 }
 
-fn keys<'a>(
-    kind: KeyKind,
-    keys: impl Iterator<Item = &'a String>,
-    errors: &mut Vec<ValidationError>,
-) -> HashSet<&'a str> {
-    let mut seen = HashSet::new();
-    for key in keys {
-        if key.is_empty() {
-            errors.push(ValidationError::EmptyKey(kind));
-        } else if !seen.insert(key.as_str()) {
-            errors.push(ValidationError::DuplicateKey(kind, key.clone()));
-        }
-    }
-    seen
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    pub(super) fn item(key: &str, state: State, parent: Option<&str>) -> Item {
-        Item {
-            key: key.to_owned(),
-            title: format!("Item {key}"),
-            notes: None,
-            state,
-            parent: parent.map(str::to_owned),
-            repositories: Vec::new(),
-            waits_for: Vec::new(),
-            size: None,
-            archived: false,
-            evidence: None,
-        }
-    }
-
-    pub(super) fn thread(key: &str, items: &[&str]) -> Thread {
-        Thread {
-            key: key.to_owned(),
-            title: format!("Thread {key}"),
-            brief: None,
-            items: items.iter().map(|&i| i.to_owned()).collect(),
-            repositories: Vec::new(),
-        }
-    }
-
-    pub(super) fn valid() -> Import {
-        let mut import = Import::new();
-        import.repositories.push(Repository {
-            key: "r".to_owned(),
-            owner: "example".to_owned(),
-            name: "code".to_owned(),
-            default_branch: "main".to_owned(),
-        });
-        import.items = vec![
-            item("top", State::Backlog, None),
-            item("a", State::Backlog, Some("top")),
-            item("b", State::Done, Some("top")),
-        ];
-        import.items[1].repositories.push("r".to_owned());
-        import.items[2].evidence = Some(Evidence {
-            commit: Some("abc".to_owned()),
-            repository: Some("r".to_owned()),
-            note: None,
-        });
-        import.items[1].waits_for.push("b".to_owned());
-        import.threads = vec![thread("t", &["a", "b"])];
-        import
-    }
-
-    #[test]
-    fn a_valid_document_round_trips() {
-        let import = valid();
-        assert_eq!(import.validate(), vec![]);
-        let json = import.to_json();
-        assert_eq!(Import::from_json(&json).unwrap(), import);
-    }
-
-    #[test]
-    fn format_version_and_unknown_fields_are_checked() {
-        assert!(matches!(Import::from_json("[]"), Err(ParseError::NotAnImport)));
-        assert!(matches!(
-            Import::from_json("{\"format\":\"other\",\"version\":1}"),
-            Err(ParseError::NotAnImport)
-        ));
-        let newer = format!("{{\"format\":\"{FORMAT}\",\"version\":{}}}", VERSION + 1);
-        assert!(matches!(
-            Import::from_json(&newer),
-            Err(ParseError::UnsupportedVersion { found: 3 })
-        ));
-        let zero = format!("{{\"format\":\"{FORMAT}\",\"version\":0}}");
-        assert!(matches!(
-            Import::from_json(&zero),
-            Err(ParseError::UnsupportedVersion { found: 0 })
-        ));
-        let older = format!("{{\"format\":\"{FORMAT}\",\"version\":1}}");
-        assert!(matches!(
-            Import::from_json(&older),
-            Err(ParseError::UnsupportedVersion { found: 1 })
-        ));
-        let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":2,\"itmes\":[]}}");
-        assert!(matches!(Import::from_json(&unknown), Err(ParseError::Json(_))));
-        let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":2}}");
-        assert_eq!(Import::from_json(&minimal).unwrap(), Import::new());
-    }
-
-    #[test]
-    fn removed_fields_and_states_are_refused() {
-        let read = |item: &str, rest: &str| {
-            Import::from_json(&format!(
-                "{{\"format\":\"{FORMAT}\",\"version\":2,\"items\":[{{\"key\":\"a\",\"title\":\"A\"{item}}}]{rest}}}"
-            ))
-        };
-        // A left-out state is the backlog.
-        assert_eq!(read("", "").unwrap().items[0].state, State::Backlog);
-        for removed in [
-            r#","areas":["x"]"#,
-            r#","resources":["x"]"#,
-            r#","gate":"x""#,
-            r#","relates":["a"]"#,
-            r#","state":"in-progress""#,
-        ] {
-            assert!(matches!(read(removed, ""), Err(ParseError::Json(_))), "{removed}");
-        }
-        let links = r#","links":[{"from":"a","to":"a","kind":"waits-for"}]"#;
-        assert!(matches!(read("", links), Err(ParseError::Json(_))));
-    }
-
-    #[test]
-    fn the_schema_example_is_a_valid_document() {
-        let json: String =
-            SCHEMA.lines().filter(|line| !line.trim_start().starts_with("//")).collect();
-        let example = Import::from_json(&json).unwrap();
-        assert_eq!(example.validate(), vec![]);
-        assert_eq!(example.version, VERSION);
-        assert_eq!(example.items[1].state, State::Backlog);
-    }
-
-    #[test]
-    fn keys_must_be_unique_non_empty_and_resolve() {
-        let mut import = valid();
-        import.items.push(item("a", State::Backlog, Some("nowhere")));
-        import.items.push(item("", State::Backlog, None));
-        import.threads.push(thread("t", &["ghost"]));
-        import.items[0].waits_for.push("missing".to_owned());
-        let errors = import.validate();
-        assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Item, "a".to_owned())));
-        assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Thread, "t".to_owned())));
-        assert!(errors.contains(&ValidationError::EmptyKey(KeyKind::Item)));
-        let mut unknown: Vec<&str> = errors
-            .iter()
-            .filter_map(|e| match e {
-                ValidationError::UnknownReference { key, .. } => Some(key.as_str()),
-                _ => None,
-            })
-            .collect();
-        unknown.sort_unstable();
-        assert_eq!(unknown, vec!["ghost", "missing", "nowhere"]);
-    }
-
-    #[test]
-    fn an_item_waiting_for_itself_is_refused() {
-        let mut import = valid();
-        import.items[1].waits_for.push("a".to_owned());
-        assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
-    }
-
-    #[test]
-    fn a_repeated_waits_for_is_refused() {
-        let mut import = valid();
-        import.items[1].waits_for.push("b".to_owned());
-        assert_eq!(
-            import.validate(),
-            vec![ValidationError::DuplicateLink {
-                item: "a".to_owned(),
-                waits_for: "b".to_owned()
-            }]
-        );
-    }
-
-    #[test]
-    fn an_item_belongs_to_one_thread() {
-        let mut import = valid();
-        import.threads.push(thread("u", &["a"]));
-        assert_eq!(
-            import.validate(),
-            vec![ValidationError::ItemInSeveralThreads {
-                item: "a".to_owned(),
-                threads: vec!["t".to_owned(), "u".to_owned()],
-            }]
-        );
-    }
-
-    #[test]
-    fn archive_and_evidence_need_done() {
-        let mut import = valid();
-        import.items[2].archived = true;
-        assert_eq!(import.validate(), vec![]);
-        import.items.push(item("c", State::Backlog, Some("b")));
-        assert_eq!(import.validate(), vec![ValidationError::ArchivedNotDone("b".to_owned())]);
-        import.items[1].evidence =
-            Some(Evidence { commit: None, repository: None, note: Some("n".to_owned()) });
-        assert!(import.validate().contains(&ValidationError::EvidenceNotDone("a".to_owned())));
-    }
-}
+mod tests;

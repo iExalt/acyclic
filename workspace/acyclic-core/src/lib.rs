@@ -19,7 +19,6 @@ pub mod private;
 #[doc(hidden)]
 pub mod probe;
 pub mod ready;
-pub mod renumber;
 mod say;
 pub mod schema;
 pub mod scope;

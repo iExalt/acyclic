@@ -1,4 +1,4 @@
-/* The line map: threads are the coloured, numbered lines of a transit map; everything else stays quiet so they read.
+/* The line map: threads are the coloured lines of a transit map; everything else stays quiet so they read.
    The colours are palette.ts's, which a unit test holds these to. */
 /* Overpass leaves out the backtick, U+0060: its font classes it as a mark, so browsers stacked it on the letter beside
    it as an accent. It falls back to the system face, on the Map's canvas too. */
@@ -215,7 +215,7 @@ label:has(> input[type="checkbox"]) {
   cursor: pointer;
 }
 
-/* A line's badge: one round shape, its size set by where it sits. A thread without a number gets a dot. */
+/* A line's badge: one round shape, its size set by where it sits. A thread's badge is a dot. */
 .badge {
   display: inline-grid;
   place-items: center;

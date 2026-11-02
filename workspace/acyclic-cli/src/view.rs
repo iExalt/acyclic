@@ -16,6 +16,7 @@ use serde_json::{Map, Value as Json, json};
 
 use crate::commands::{Member, thread_members};
 use crate::error::CliError;
+use crate::resolve::repository_name;
 
 /// Adds `extra`'s keys to the object `row`.
 fn with(mut row: Json, extra: Json) -> Json {
@@ -33,10 +34,23 @@ fn state(item: &Item) -> Json {
     }
 }
 
-/// Evidence with every part named, a part nobody gave as `null`.
-pub(crate) fn evidence(value: &Value<acyclic_core::model::Evidence>) -> Json {
+/// Evidence with both parts named, a part nobody gave as `null`: the commit as `owner/name@sha`, by its repository's
+/// name as it is now, and the words.
+pub(crate) fn evidence(model: &Model, value: &Value<acyclic_core::model::Evidence>) -> Json {
     match value {
-        Value::One(e) => json!({"repository": e.repository, "commit": e.commit, "note": e.note}),
+        Value::One(e) => {
+            let commit = e.commit.as_ref().map(|sha| {
+                let repository = e.repository.as_ref().map(|id| {
+                    model
+                        .repositories
+                        .get(id)
+                        .and_then(repository_name)
+                        .unwrap_or_else(|| id.clone())
+                });
+                repository.map_or_else(|| sha.clone(), |repository| format!("{repository}@{sha}"))
+            });
+            json!({"commit": commit, "text": e.text})
+        },
         other => json!(other),
     }
 }
@@ -126,7 +140,7 @@ impl View<'_> {
                 "children": model.children(id),
                 "links": links(&model.links, id),
                 "claims": claims,
-                "evidence": evidence(&item.evidence),
+                "evidence": evidence(model, &item.evidence),
                 "done_at": item.done_at.map(rfc3339),
                 "archived": model.is_archived(id),
                 "reopened": item.reopened != Value::None,
@@ -217,11 +231,6 @@ impl View<'_> {
                     }
                     shown
                 },
-                Entry::NumberClash { number, threads, fresh, fix } => json!({
-                    "kind": "number-clash", "number": number,
-                    "threads": threads.iter().map(|id| thread(id)).collect::<Vec<_>>(),
-                    "fresh": fresh, "fix": fix,
-                }),
                 Entry::Unverified { item, repository, reason } => json!({
                     "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
                     "reason": reason,
@@ -278,12 +287,13 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
         ))
     };
     match (entity, field) {
-        ("item" | "thread", "title") | ("repository", "owner" | "name") => edit(field, false),
+        ("item" | "thread", "title") => edit(field, false),
+        ("repository", "owner" | "name") => edit("name", false),
         ("item", "state") => edit("state", false),
         ("item", "notes" | "size" | "parent" | "thread") | ("thread", "brief") => edit(field, true),
         ("repository", "default-branch") => edit("default-branch", false),
         ("item", "evidence") => Some(format!(
-            "acyclic item done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --evidence <TEXT>)"
+            "acyclic item done {id} --force --commit <REPOSITORY>@<SHA> (or --evidence <TEXT>)"
         )),
         ("item", "archived") => Some(format!("acyclic item archive {id}")),
         ("item", "reopened") => Some(format!("acyclic item reopen {id}")),
@@ -432,8 +442,11 @@ mod tests {
         scope::edit(&mut r, &member("b", Some("t")), user).unwrap();
         r.write(&model::item_key("late").unwrap(), "thread", "session/mac", NOW, Some(json!("t")))
             .unwrap();
-        let evidence =
-            acyclic_core::model::Evidence { note: Some("shipped".into()), ..Default::default() };
+        let evidence = acyclic_core::model::Evidence {
+            repository: Some("r".into()),
+            commit: Some("abc1234".into()),
+            text: Some("shipped".into()),
+        };
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
@@ -530,10 +543,8 @@ mod tests {
                 (&json!(false), &json!(false), &Json::Null)
             );
             let done = view.item("d", &view.model.items["d"]).unwrap();
-            assert_eq!(
-                done["evidence"],
-                json!({"repository": null, "commit": null, "note": "shipped"})
-            );
+            // The commit by its repository's owner/name, which a rename changes.
+            assert_eq!(done["evidence"], json!({"commit": "me/code@abc1234", "text": "shipped"}));
             assert_eq!(done["archived"], true);
             assert!(done["done_at"].is_string());
             for shape in [&row, &shown, &done] {
