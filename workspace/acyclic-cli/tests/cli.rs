@@ -72,6 +72,8 @@ fn git(dir: &Path, args: &[&str]) {
         // stalls each call by seconds on a machine with a slow resolver.
         .env("GIT_COMMITTER_NAME", "acyclic test")
         .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .env("GIT_AUTHOR_NAME", "acyclic test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
         .status()
         .unwrap();
     assert!(status.success(), "git {args:?}");

@@ -344,8 +344,18 @@ fn a_tracker_an_earlier_format_wrote_is_refused_and_doctor_says_so() {
     // The replica's state as an earlier build wrote it: the same files under the previous format version.
     let tracker = sh.path().join("tracker");
     let git = |args: &[&str]| {
-        let out =
-            std::process::Command::new("git").args(args).current_dir(&tracker).output().unwrap();
+        // An identity of its own, since a machine may have none to commit as.
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&tracker)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "acyclic test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "acyclic test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap().trim().to_owned()
     };
