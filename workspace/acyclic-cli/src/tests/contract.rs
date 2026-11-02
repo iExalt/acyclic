@@ -505,3 +505,20 @@ fn a_parent_that_is_a_thread_suggests_a_command_that_pastes_as_it_is() {
         Some("acyclic item add --title <TITLE> --thread 'Q&A'")
     );
 }
+
+#[test]
+fn pretty_output_names_a_record_the_command_just_added_among_the_rest() {
+    let mut sh = Shell::new();
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    // Two ids sharing their last six characters, so each is named by seven once both exist.
+    let [old, new] = ["0abc12", "10abc12"].map(id);
+    assert_eq!(sh.run(&format!("item add --id {old} --title Old"), AGENT), 0);
+    let pretty = |sh: &Shell, line: String| {
+        let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
+        execute(args, &sh.env(AGENT)).stdout
+    };
+    let added = pretty(&sh, format!("item add --id {new} --title New -o pretty"));
+    assert!(added.contains("item 10abc12 "), "{added}");
+    let listed = pretty(&sh, "item list -o pretty".to_owned());
+    assert!(listed.contains("00abc12") && listed.contains("10abc12"), "{listed}");
+}

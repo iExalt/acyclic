@@ -159,11 +159,12 @@ fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() 
         }]
     );
     // Named by 6 characters of its id, in upper case: no record has that id now, but the item holds it.
+    let model = Model::read(mac.state()).unwrap();
     let let_go = ItemFields {
         waits_for: Delta { add: vec![], remove: vec!["0000B1".into()] },
         ..ItemFields::default()
     }
-    .resolve(&Model::read(mac.state()).unwrap(), Some(&a))
+    .resolve(&model, &Records::of(&model), Some(&a))
     .unwrap();
     assert_eq!(let_go.waits_for.remove, [b]);
     edit_item(&mut mac, &a, &let_go, AGENT).unwrap();
@@ -287,7 +288,8 @@ fn id(n: u16) -> String {
 fn an_add_without_an_id_is_given_a_new_one_and_a_retry_names_the_first() {
     let mut r = replica();
     let new = |r: &Replica, of: &str, given: Option<&str>, title: &str| {
-        new_id(r, of, given, title).map_err(|err| (err.code, err.details))
+        new_id(r, &Model::read(r.state()).unwrap(), of, given, title)
+            .map_err(|err| (err.code, err.details))
     };
     let made = new(&r, kind::ITEM, None, "Sow").unwrap();
     assert_eq!(acyclic_core::ids::v7(&made), Some(made.clone()));
@@ -318,7 +320,8 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
     for title in ["Weed", "Sow", "Rows"] {
-        assert!(new_id(&r, kind::ITEM, None, title).is_ok(), "{title}");
+        let model = Model::read(r.state()).unwrap();
+        assert!(new_id(&r, &model, kind::ITEM, None, title).is_ok(), "{title}");
     }
 }
 
@@ -331,10 +334,11 @@ fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
         RepositoryFields { name: Some("me/garden".into()), default_branch: Some("main".into()) };
     add_repository(&mut r, &id(3), &garden, USER_BY).unwrap();
     let model = Model::read(r.state()).unwrap();
+    let records = Records::of(&model);
     let both =
         |add: &str, remove: &str| Delta { add: vec![add.into()], remove: vec![remove.into()] };
     let ending = &id(1)[id(1).len() - 6..];
-    let item = |fields: ItemFields| code(fields.resolve(&model, Some(&id(2))));
+    let item = |fields: ItemFields| code(fields.resolve(&model, &records, Some(&id(2))));
     assert_eq!(
         item(ItemFields { waits_for: both("Ship it", ending), ..ItemFields::default() }),
         "usage"
@@ -345,5 +349,5 @@ fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
     );
     let thread =
         ThreadFields { repositories: both(&id(3), "me/garden"), ..ThreadFields::default() };
-    assert_eq!(code(thread.resolve(&model, None)), "usage");
+    assert_eq!(code(thread.resolve(&model, &records, None)), "usage");
 }

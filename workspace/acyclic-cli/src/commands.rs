@@ -45,27 +45,46 @@ const LEASE: Millis = 60 * MINUTE;
 /// The longest time lease.
 const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
 
+/// What pretty output calls each record, by id.
+pub type Names = BTreeMap<String, String>;
+
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
+    run_with(cli, env, false).map(|(output, _)| output)
+}
+
+/// Runs a parsed command, and says what pretty output calls each record the tracker holds once it is done: items and
+/// threads by the shortest ending of their ids that names them, and repositories by `owner/name`. They come from the
+/// state the command last read or wrote, so a record it added is named too, and from the tracker as it is after the
+/// command when it neither read nor wrote through the model; none for a command with no tracker, or one that can't
+/// be read.
+pub fn run_named(cli: &Cli, env: &Env) -> Result<(Output, Names), CliError> {
+    run_with(cli, env, true)
+}
+
+fn run_with(cli: &Cli, env: &Env, named: bool) -> Result<(Output, Names), CliError> {
+    let text = |text: String| (Output::Text(text), Names::new());
     match (cli.command.class(), &cli.command) {
         (Class::Standalone, Command::Init { path, replica, remote }) => {
-            init(&env.cwd.join(path), replica, remote.as_deref()).map(Output::Json)
+            init(&env.cwd.join(path), replica, remote.as_deref())
+                .map(|data| (Output::Json(data), Names::new()))
         },
-        (Class::Standalone, Command::Prime) => Ok(Output::Text(prime())),
+        (Class::Standalone, Command::Prime) => Ok(text(prime())),
         (Class::Standalone, Command::Id { count }) => {
-            Ok(Output::Text((0..*count).map(|_| ids::new() + "\n").collect()))
+            Ok(text((0..*count).map(|_| ids::new() + "\n").collect()))
         },
-        (Class::Standalone, Command::Completions { shell }) => {
-            Ok(Output::Text(completions(*shell)))
-        },
+        (Class::Standalone, Command::Completions { shell }) => Ok(text(completions(*shell))),
         // `import --schema`, the only other command needing no tracker.
-        (Class::Standalone, _) => Ok(Output::Text(import::SCHEMA.to_owned())),
+        (Class::Standalone, _) => Ok(text(import::SCHEMA.to_owned())),
         (Class::Server, _) => {
             Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
         },
         (Class::Clone | Class::Read | Class::Write, command) => {
-            let result = Session::open(cli, env).and_then(|session| session.dispatch(command));
-            result.map(Output::Json).map_err(|mut error| {
+            let result = Session::open(cli, env, named).and_then(|session| {
+                let data = session.dispatch(command)?;
+                Ok((Output::Json(data), if named { session.names() } else { Names::new() }))
+            });
+            result.map_err(|mut error| {
                 // Doctor doesn't point at itself.
                 if matches!(command, Command::Doctor)
                     && error.details == json!({"hint": crate::error::DOCTOR_HINT})
@@ -78,28 +97,17 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
     }
 }
 
-/// What pretty output calls each record, by id: items and threads by the shortest ending of their ids that names them,
-/// and repositories by `owner/name`. Read after the command, so a record it added is named too; empty for a command
-/// with no tracker, or one that can't be read.
-pub fn names(cli: &Cli, env: &Env) -> BTreeMap<String, String> {
-    let read = || -> Result<BTreeMap<String, String>, CliError> {
-        let (tracker, _) = Tracker::open(&context::tracker(cli, env)?)?;
-        let (_, state) = tracker.load()?;
-        let model = Model::read(&state)?;
-        let records = Records::of(&model);
-        let mut names = records.endings(true);
-        names.extend(records.endings(false));
-        for record in model.repositories.values() {
-            if let Some(name) = crate::resolve::repository_name(record) {
-                names.insert(record.id.clone(), name);
-            }
+/// What pretty output calls each record of `model`.
+fn names_of(model: &Model) -> Names {
+    let records = Records::of(model);
+    let mut names = records.endings(true);
+    names.extend(records.endings(false));
+    for record in model.repositories.values() {
+        if let Some(name) = crate::resolve::repository_name(record) {
+            names.insert(record.id.clone(), name);
         }
-        Ok(names)
-    };
-    match cli.command.class() {
-        Class::Clone | Class::Read | Class::Write => read().unwrap_or_default(),
-        Class::Standalone | Class::Server => BTreeMap::new(),
     }
+    names
 }
 
 struct Session<'a> {
@@ -107,10 +115,13 @@ struct Session<'a> {
     actor: String,
     now: Millis,
     env: &'a Env,
+    /// The names of the records in the state the command last read or wrote through [`Session::read`] or
+    /// [`Session::write`], kept only when pretty output asked for them.
+    named: Option<RefCell<Option<Names>>>,
 }
 
 impl<'a> Session<'a> {
-    fn open(cli: &Cli, env: &'a Env) -> Result<Self, CliError> {
+    fn open(cli: &Cli, env: &'a Env, named: bool) -> Result<Self, CliError> {
         let actor = context::actor(cli, env)?;
         let path = context::tracker(cli, env)?;
         let (tracker, renamed) = Tracker::open(&path)?;
@@ -118,7 +129,13 @@ impl<'a> Session<'a> {
             // A clone without its own state took a fresh id; say so once, but carry on.
             eprintln!("acyclic: this clone is now replica {renamed}");
         }
-        Ok(Self { tracker, actor, now: context::now(env), env })
+        Ok(Self {
+            tracker,
+            actor,
+            now: context::now(env),
+            env,
+            named: named.then(|| RefCell::new(None)),
+        })
     }
 
     #[expect(clippy::too_many_lines, reason = "one short arm per command")]
@@ -163,8 +180,10 @@ impl<'a> Session<'a> {
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let id = edit::new_id(replica, kind::ITEM, given.as_deref(), title)?;
-                    let fields = fields.clone().resolve(&Model::read(replica.state())?, None)?;
+                    let model = Model::read(replica.state())?;
+                    let records = Records::of(&model);
+                    let id = edit::new_id(replica, &model, kind::ITEM, given.as_deref(), title)?;
+                    let fields = fields.clone().resolve(&model, &records, None)?;
                     let mut data = edit::add_item(replica, &id, &fields, by)?.item(&id);
                     data["title"] = json!(title);
                     Ok(data)
@@ -200,8 +219,9 @@ impl<'a> Session<'a> {
                 let item = &edit.item;
                 self.write(|replica, by| {
                     let model = Model::read(replica.state())?;
-                    let id = Records::of(&model).item(item)?;
-                    let fields = fields.clone().resolve(&model, Some(&id))?;
+                    let records = Records::of(&model);
+                    let id = records.item(item)?;
+                    let fields = fields.clone().resolve(&model, &records, Some(&id))?;
                     Ok(edit::edit_item(replica, &id, &fields, by)?.item(&id))
                 })
                 .map_err(|error| {
@@ -270,8 +290,10 @@ impl<'a> Session<'a> {
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let id = edit::new_id(replica, kind::THREAD, given.as_deref(), title)?;
-                    let fields = fields.clone().resolve(&Model::read(replica.state())?, None)?;
+                    let model = Model::read(replica.state())?;
+                    let records = Records::of(&model);
+                    let id = edit::new_id(replica, &model, kind::THREAD, given.as_deref(), title)?;
+                    let fields = fields.clone().resolve(&model, &records, None)?;
                     edit::add_thread(replica, &id, &fields, by)?;
                     Ok(json!({"thread": id, "title": title}))
                 })
@@ -288,8 +310,9 @@ impl<'a> Session<'a> {
                 let thread = &edit.thread;
                 self.write(|replica, by| {
                     let model = Model::read(replica.state())?;
-                    let id = Records::of(&model).thread(thread)?;
-                    let fields = fields.clone().resolve(&model, Some(&id))?;
+                    let records = Records::of(&model);
+                    let id = records.thread(thread)?;
+                    let fields = fields.clone().resolve(&model, &records, Some(&id))?;
                     edit::edit_thread(replica, &id, &fields, by)?;
                     Ok(json!({"thread": id}))
                 })
@@ -350,7 +373,28 @@ impl<'a> Session<'a> {
         let (_, state) = self.tracker.load()?;
         let model = Model::read(&state)?;
         acyclic_core::probe::mark("model read");
+        self.remember(&model);
         Ok((state, model))
+    }
+
+    /// Keeps the names of `model`'s records, when pretty output asked for them.
+    fn remember(&self, model: &Model) {
+        if let Some(named) = &self.named {
+            *named.borrow_mut() = Some(names_of(model));
+        }
+    }
+
+    /// The names [`Session::remember`] kept; else, for a command that neither read nor wrote through the model, such
+    /// as `sync` or `doctor`, those of the tracker as it is now, read through the tracker this session opened.
+    fn names(&self) -> Names {
+        if let Some(names) = self.named.as_ref().and_then(|named| named.borrow_mut().take()) {
+            return names;
+        }
+        let read = || -> Result<Names, CliError> {
+            let (_, state) = self.tracker.load()?;
+            Ok(names_of(&Model::read(&state)?))
+        };
+        read().unwrap_or_default()
     }
 
     /// Runs one batch as the actor. Lease renewal rides along, so a batch can commit though the command changed
@@ -367,6 +411,11 @@ impl<'a> Session<'a> {
             let before = replica.changes();
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
+            // A retried batch runs this again, so the names are those of the state it commits. Naming never fails a
+            // write: a model that can't be read leaves the names to the tracker afterwards.
+            if let Some(named) = &self.named {
+                *named.borrow_mut() = Model::read(replica.state()).ok().as_ref().map(names_of);
+            }
             Ok(())
         })?;
         let (mut data, changed) = result.into_inner();
