@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.2](https://github.com/iExalt/acyclic/compare/v0.5.1...v0.5.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **core:** fail to read a state whose tree names a missing object ([#126](https://github.com/iExalt/acyclic/issues/126)) ([b93bf85](https://github.com/iExalt/acyclic/commit/b93bf858fdc862340fe002a8aa86525f54273e35))
+* give a draft refused as deleted a new id, and stop pointing at a migration ([#129](https://github.com/iExalt/acyclic/issues/129)) ([9073d93](https://github.com/iExalt/acyclic/commit/9073d93ab6cb51750f9d94cadda1f9378a5f1e12))
+* reopen work set back from done, refuse deleted threads on import, and keep printed endings apart from titles ([#128](https://github.com/iExalt/acyclic/issues/128)) ([0fd0f03](https://github.com/iExalt/acyclic/commit/0fd0f03dc1c639257305b3b292b0596f7222175e))
+
+
+### Performance Improvements
+
+* **cli:** read the model once per item or thread write ([#130](https://github.com/iExalt/acyclic/issues/130)) ([891ec1e](https://github.com/iExalt/acyclic/commit/891ec1e9736f5ada35116238431926a4c2409980))
+
 ## [0.5.1](https://github.com/iExalt/acyclic/compare/v0.5.0...v0.5.1) (2026-11-02)
 
 
