@@ -145,12 +145,16 @@ fn every_readiness_reads_as_a_phrase() {
         (json!(Status::Unthreaded), "unthreaded"),
         (json!(Status::Claimed { holder: s("session/s") }), "claimed by session/s"),
         (
-            json!(Status::Contested { holders: vec![s("run/1"), s("run/2")] }),
-            "contested by run/1, run/2",
+            json!(Status::Contested { holders: vec![s("session/1"), s("session/2")] }),
+            "contested by session/1, session/2",
         ),
         (
-            json!(Status::ResourceBusy { resource: s("gpu"), thread: s("t"), holder: s("run/1") }),
-            "waiting for gpu, held by thread t (run/1)",
+            json!(Status::ResourceBusy {
+                resource: s("gpu"),
+                thread: s("t"),
+                holder: s("session/1")
+            }),
+            "waiting for gpu, held by thread t (session/1)",
         ),
         (json!(Status::InCycle), "in a cycle"),
         (
@@ -179,10 +183,10 @@ fn every_readiness_reads_as_a_phrase() {
         ),
         (
             json!(ThreadStatus::Contested {
-                holders: vec![s("run/1"), s("run/2")],
+                holders: vec![s("session/1"), s("session/2")],
                 items: vec![s("a")]
             }),
-            "contested by run/1, run/2; ready: a",
+            "contested by session/1, session/2; ready: a",
         ),
     ];
     for (status, expected) in items {

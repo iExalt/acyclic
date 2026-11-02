@@ -110,7 +110,7 @@ fn fan(id: &str) -> u8 {
 /// One value of a field, with who wrote it and when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stamped {
-    /// The actor behind the write: a person, an agent or a run (`run/<id>`).
+    /// The actor behind the write: a person or an agent.
     pub actor: String,
     /// When the writer applied it.
     pub at: Millis,
@@ -191,7 +191,7 @@ impl Journal {
     }
 }
 
-/// Why a write, an operation or a read failed.
+/// Why a write or a read failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// A name that isn't safe as an id or path segment.
@@ -216,35 +216,10 @@ pub enum Error {
         /// The joined state's entry for it.
         theirs: u64,
     },
-    /// A run operation skipped a sequence number.
-    Gap {
-        /// The run.
-        run: String,
-        /// The sequence number expected next.
-        expected: u64,
-        /// The sequence number received.
-        got: u64,
-    },
-    /// A run's operation came with the number of the run's latest applied one but another command: two sent it.
-    SeqTaken {
-        /// The run.
-        run: String,
-        /// The number.
-        seq: u64,
-    },
-    /// A run operation reached a replica other than the one applying the run.
-    WrongReplica {
-        /// The run.
-        run: String,
-        /// The replica applying it.
-        applied_by: String,
-    },
     /// The thread already has a live claim in the writer's view.
     Claimed(Key),
     /// Only threads are claimed, and this one has no record.
     NoThread(String),
-    /// A holder other than a run claimed without a time lease.
-    LeaseRequired(String),
     /// Another holder's live claim on another thread holds a named resource this thread's open work needs.
     ResourceHeld {
         /// The resource.
@@ -279,20 +254,7 @@ impl fmt::Display for Error {
                 "another writer used replica id {replica} ({theirs} writes seen, this replica has {mine}), or this \
                  replica lost state; take a new replica id"
             ),
-            Self::Gap { run, expected, got } => {
-                write!(f, "run {run} sent operation {got} but {expected} comes next")
-            },
-            Self::WrongReplica { run, applied_by } => {
-                write!(f, "run {run} is applied by replica {applied_by}")
-            },
-            Self::SeqTaken { run, seq } => write!(
-                f,
-                "run {run}'s operation {seq} is another command, applied already; send this one as the next"
-            ),
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
-            Self::LeaseRequired(holder) => {
-                write!(f, "{holder} isn't a run, so its claim needs a time lease")
-            },
             Self::NoThread(thread) => write!(f, "no thread {thread}; claim a thread, not an item"),
             Self::ResourceHeld { resource, thread, holder } => {
                 write!(f, "{holder} holds {resource} through thread {thread}")
@@ -325,19 +287,6 @@ fn join_registers(a: &Register, a_seen: &Context, b: &Register, b_seen: &Context
 }
 
 impl State {
-    /// The latest operation of run `run` applied in this state, 0 for none.
-    ///
-    /// # Errors
-    ///
-    /// Fails when `run` isn't a valid id.
-    pub fn applied_seq(&self, run: &str) -> Result<u64, Error> {
-        let key = Key::new("run", run)?;
-        Ok(self
-            .field(&key, RUN_APPLIED_SEQ)
-            .and_then(|r| r.values().filter_map(|v| v.value["seq"].as_u64()).max())
-            .unwrap_or(0))
-    }
-
     /// An empty state.
     #[must_use]
     pub fn new() -> Self {
@@ -498,27 +447,6 @@ pub struct Replica {
     pub(crate) state: State,
 }
 
-/// Where a run's operation stands with the replica that applies the run's operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Sequence {
-    /// It is the next one: apply it, then [`Replica::record`] it.
-    Next,
-    /// It was applied already; apply nothing.
-    Duplicate {
-        /// Whether it was the run's latest.
-        latest: bool,
-        /// The refusal recorded for it, if it was the latest and was refused.
-        refusal: Option<Json>,
-    },
-}
-
-/// The run entity's field holding the last applied operation: `{"seq", "hash"}`, its number and its command's hash.
-pub const RUN_APPLIED_SEQ: &str = "applied-seq";
-/// The run entity's field naming the replica that applies the run.
-pub const RUN_APPLIED_BY: &str = "applied-by";
-/// The run entity's field holding the latest refused operation's number and refusal, for a run that sends it again.
-pub const RUN_APPLIED_REFUSAL: &str = "applied-refusal";
-
 impl Replica {
     /// A replica whose own state is intact.
     #[must_use]
@@ -656,108 +584,6 @@ impl Replica {
         let stamped = Stamped { actor: actor.to_owned(), at, value };
         self.set(key, field, Register::from([(dot.clone(), stamped)]));
         Ok(Some(dot))
-    }
-
-    /// Writes a field as [`Replica::write`] does, but superseding only the values `seen` covers and the actor's own:
-    /// values others wrote that it didn't see survive beside the new one as a conflict, and a run, whose view never
-    /// holds its own writes as this replica applied them, never conflicts with itself. With `seen` covering everything
-    /// this replica has seen, it is exactly [`Replica::write`] with a value.
-    ///
-    /// # Errors
-    ///
-    /// Fails on a non-integer number or when the replica can't mint dots yet.
-    pub fn write_seen(
-        &mut self,
-        key: &Key,
-        field: &str,
-        actor: &str,
-        at: Millis,
-        value: Json,
-        seen: &Context,
-    ) -> Result<Dot, Error> {
-        check_value(&value)?;
-        let mut register: Register = self
-            .state
-            .field(key, field)
-            .into_iter()
-            .flatten()
-            .filter(|(dot, value)| !seen.covers(dot) && value.actor != actor)
-            .map(|(dot, value)| (dot.clone(), value.clone()))
-            .collect();
-        let (dot, at) = self.mint(at)?;
-        register.insert(dot.clone(), Stamped { actor: actor.to_owned(), at, value });
-        self.set(key, field, register);
-        Ok(dot)
-    }
-
-    /// Where the run's operation `seq` stands: sequence numbers arrive in order from 1, so a number already recorded
-    /// is a duplicate and one past the next is a gap. Only the replica that recorded the run's first operation
-    /// applies the rest, so that its numbers stay in one place.
-    ///
-    /// # Errors
-    ///
-    /// Fails on a gap, a run applied by another replica, or the number of the latest applied operation sent with
-    /// another command, as `hash` tells: two sent it, and only one was applied.
-    pub fn sequence(&self, run: &str, seq: u64, hash: &str) -> Result<Sequence, Error> {
-        let key = Key::new("run", run)?;
-        let one =
-            |field| self.state.field(&key, field).and_then(|r| r.values().next()).map(|v| &v.value);
-        if let Some(applied_by) = one(RUN_APPLIED_BY).and_then(Json::as_str)
-            && applied_by != self.id.as_str()
-        {
-            return Err(Error::WrongReplica {
-                run: run.to_owned(),
-                applied_by: applied_by.to_owned(),
-            });
-        }
-        let last = self.state.applied_seq(run)?;
-        if seq <= last {
-            let latest = seq == last;
-            let taken = self.state.field(&key, RUN_APPLIED_SEQ).is_some_and(|r| {
-                r.values().any(|v| v.value["seq"] == seq && v.value["hash"].as_str() != Some(hash))
-            });
-            if latest && taken {
-                return Err(Error::SeqTaken { run: run.to_owned(), seq });
-            }
-            let refusal = one(RUN_APPLIED_REFUSAL)
-                .filter(|recorded| latest && recorded["seq"] == seq)
-                .map(|recorded| recorded["refusal"].clone());
-            return Ok(Sequence::Duplicate { latest, refusal });
-        }
-        if seq != last + 1 {
-            return Err(Error::Gap { run: run.to_owned(), expected: last + 1, got: seq });
-        }
-        Ok(Sequence::Next)
-    }
-
-    /// Records the run's operation `seq`, whose command `hash` names, as applied, or as refused with `refusal`, under
-    /// this replica's own actor. Call it in the same batch as the operation's writes, after [`Replica::sequence`] said
-    /// it was next. Only a refusal is stored beside the number and the hash, so an applied operation costs one write;
-    /// keep a refusal small, and its numbers integers.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the replica can't mint dots yet, or on a refusal holding a number that isn't an integer.
-    pub fn record(
-        &mut self,
-        run: &str,
-        seq: u64,
-        hash: &str,
-        refusal: Option<&Json>,
-        at: Millis,
-    ) -> Result<(), Error> {
-        let key = Key::new("run", run)?;
-        let system = format!("replica/{}", self.id);
-        let applied = serde_json::json!({"seq": seq, "hash": hash});
-        self.write(&key, RUN_APPLIED_SEQ, &system, at, Some(applied))?;
-        if let Some(refusal) = refusal {
-            let recorded = serde_json::json!({"seq": seq, "refusal": refusal});
-            self.write(&key, RUN_APPLIED_REFUSAL, &system, at, Some(recorded))?;
-        }
-        if self.state.field(&key, RUN_APPLIED_BY).is_none() {
-            self.write(&key, RUN_APPLIED_BY, &system, at, Some(Json::from(self.id.as_str())))?;
-        }
-        Ok(())
     }
 }
 

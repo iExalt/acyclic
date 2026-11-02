@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use acyclic_core::state::{Error as StateError, Key, Millis, ReplicaId, State};
 use acyclic_core::store::{self, BatchError, Hooks, Meta, Outcome, StoreError, Tracker};
-use acyclic_core::usage;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -40,7 +39,7 @@ fn tracker(dir: &TempDir, replica: &str) -> PathBuf {
 }
 
 fn meta() -> Meta {
-    Meta { actor: "actor/user".to_owned(), run: None }
+    Meta { actor: "actor/user".to_owned() }
 }
 
 fn no_project(_: &State, _: &Key) -> Option<String> {
@@ -105,26 +104,26 @@ fn an_unchanged_batch_commits_nothing() {
 }
 
 #[test]
-fn events_go_to_their_project_roots_file_with_run_and_actor() {
+fn events_go_to_their_project_roots_file_with_their_actor() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
     let root_of = |_: &State, key: &Key| (key.id.starts_with('p')).then(|| "p0".to_owned());
-    let actor = Key::new("run", "r1").unwrap();
-    let meta = Meta { actor: "run/r1".to_owned(), run: Some(("r1".to_owned(), 7)) };
+    let actor = Key::new("session", "mac").unwrap();
+    let meta = Meta { actor: "session/mac".to_owned() };
     tracker
         .batch(&meta, NOW, false, &root_of, |replica, at| {
             replica.write(&actor, "agent", "actor/user", at, Some(json!("claude")))?;
-            replica.write(&item("p1"), "title", "run/r1", at, Some(json!("in a project")))?;
+            replica.write(&item("p1"), "title", "session/mac", at, Some(json!("in a project")))?;
             Ok::<(), StateError>(())
         })
         .unwrap();
     let segment = "refs/heads/log/mac/2026-10/0001";
     let events = log_lines(&path, segment, "p0/15.jsonl");
     assert_eq!(events.len(), 1);
-    assert_eq!((events[0]["run"].clone(), events[0]["seq"].clone()), (json!("r1"), json!(7)));
+    assert_eq!(events[0]["actor"], json!("session/mac"));
     assert_eq!(events[0]["actor_record"]["agent"], json!(["claude"]));
-    assert_eq!(log_lines(&path, segment, "_/15.jsonl")[0]["writes"][0]["kind"], "run");
+    assert_eq!(log_lines(&path, segment, "_/15.jsonl")[0]["writes"][0]["kind"], "session");
 }
 
 #[test]
@@ -535,7 +534,7 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     );
 }
 
-/// A bare remote whose pre-receive hook refuses forced updates to log and usage segments, like the tracker's ruleset.
+/// A bare remote whose pre-receive hook refuses forced updates to log segments, like the tracker's ruleset.
 fn remote_with_ruleset(dir: &TempDir) -> PathBuf {
     let remote = dir.path().join("remote.git");
     git(dir.path(), &["init", "-q", "--bare", remote.to_str().unwrap()]);
@@ -546,7 +545,7 @@ fn remote_with_ruleset(dir: &TempDir) -> PathBuf {
 zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
 while read -r old new ref; do
   case "$ref" in
-    refs/heads/log/*|refs/heads/usage/*)
+    refs/heads/log/*)
       if [ "$old" != "$zero" ] && [ "$new" != "$zero" ] && ! git merge-base --is-ancestor "$old" "$new"; then
         echo "ruleset: $ref may not be force-pushed" >&2
         exit 1
@@ -576,9 +575,8 @@ fn pushes_are_atomic_and_pass_the_ruleset() {
     let remote_url = remote.to_str().unwrap();
     let (tracker, _) = Tracker::open(&path).unwrap();
     write_month(&tracker, JULY, 1);
-    tracker.record_usage(JULY, &[call("r1/1", JULY)]).unwrap();
     write(&tracker, "x1", "f", json!(2));
-    assert_eq!(tracker.push(remote_url).unwrap(), 4, "state, two log segments and a usage segment");
+    assert_eq!(tracker.push(remote_url).unwrap(), 3, "state and two log segments");
     assert_eq!(tracker.push(remote_url).unwrap(), 0, "nothing new");
 
     // A squash rewrites the state ref; the lease lets it through.
@@ -590,7 +588,7 @@ fn pushes_are_atomic_and_pass_the_ruleset() {
     // state ref hasn't moved.
     let pruned = tracker.prune(NOW, &|_| Some(1), &|_, _| true).unwrap();
     assert!(
-        pruned.iter().any(|dropped| dropped.starts_with("refs/heads/usage/mac/2026-07/")),
+        pruned.iter().any(|dropped| dropped.starts_with("refs/heads/log/mac/2026-07/")),
         "{pruned:?}"
     );
     tracker.sync(remote_url).unwrap();
@@ -799,63 +797,4 @@ fn a_lost_tracking_update_or_a_deleted_remote_ref_is_not_a_duplicate() {
         git(&remote, &["rev-parse", "refs/heads/state/mac"]),
         git(&path, &["rev-parse", "refs/heads/state/mac"])
     );
-}
-
-/// A model call made at `at`.
-fn call(id: &str, at: Millis) -> usage::Record {
-    serde_json::from_value(json!({
-        "id": id, "at": at, "provider": "anthropic", "model": "claude-test", "credential": "test-key",
-        "tokens": {"input": 10, "output": 5},
-    }))
-    .unwrap()
-}
-
-#[test]
-fn usage_lands_in_the_month_it_arrives_once_per_id_keeping_what_it_doesnt_know() {
-    let dir = TempDir::new().unwrap();
-    let path = tracker(&dir, "mac");
-    let (tracker, _) = Tracker::open(&path).unwrap();
-    // A call late on 31 October arrives on 1 November, after October's segment is sealed.
-    let late = call("r1/1", 1_793_491_140_000); // 2026-10-31T23:59:00Z
-    let mut newer = call("r1/2", 1_793_491_200_000); // 2026-11-01T00:00:00Z
-    newer.extra.insert("future_field".to_owned(), json!({"kept": true}));
-    assert_eq!(tracker.record_usage(1_793_491_200_000, &[late.clone(), newer.clone()]).unwrap(), 2);
-    let refs = git(&path, &["for-each-ref", "--format=%(refname)", "refs/heads/usage/"]);
-    assert_eq!(refs, "refs/heads/usage/mac/2026-11/0001");
-    // A copy arriving again is skipped, alone or beside a new call.
-    assert_eq!(tracker.record_usage(1_793_491_260_000, std::slice::from_ref(&late)).unwrap(), 0);
-    assert_eq!(
-        tracker.record_usage(1_793_491_260_000, &[late.clone(), call("r1/3", 1)]).unwrap(),
-        1
-    );
-    let ledger = tracker.usage().unwrap();
-    let ids: Vec<&str> = ledger.records.iter().map(|w| w.record.id.as_str()).collect();
-    assert_eq!(ids, ["r1/3", "r1/1", "r1/2"]);
-    assert_eq!(ledger.records[2].record, newer);
-    assert!(ledger.unreadable.is_empty());
-}
-
-#[test]
-fn usage_counts_once_across_writers_and_only_servers_fetch_others_usage() {
-    let dir = TempDir::new().unwrap();
-    let remote = remote_with_ruleset(&dir);
-    let remote_url = remote.to_str().unwrap();
-    let (mac, _) = Tracker::open(&tracker(&dir, "mac")).unwrap();
-    let server_path = tracker(&dir, "server");
-    let (server, _) = Tracker::open(&server_path).unwrap();
-    // The same call reaches both writers, the server's copy later.
-    mac.record_usage(NOW, &[call("r1/1", NOW), call("r1/2", NOW)]).unwrap();
-    server.record_usage(NOW + 1, &[call("r1/1", NOW)]).unwrap();
-    mac.sync(remote_url).unwrap();
-    server.sync(remote_url).unwrap();
-    // A plain sync brings no other writer's usage.
-    let ids = |tracker: &Tracker| -> Vec<(String, String)> {
-        let ledger = tracker.usage().unwrap();
-        ledger.records.into_iter().map(|w| (w.writer, w.record.id)).collect()
-    };
-    assert_eq!(ids(&server), [("server".to_owned(), "r1/1".to_owned())]);
-    server.sync_with(remote_url, store::Fetch { usage: true }).unwrap();
-    // Each call once; of equal copies, the lowest writer's, so every replica keeps the same.
-    let both = [("mac".to_owned(), "r1/1".to_owned()), ("mac".to_owned(), "r1/2".to_owned())];
-    assert_eq!(ids(&server), both);
 }

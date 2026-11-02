@@ -2,38 +2,31 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: table
 ---
-2 invalid-name spends
-2 invalid-value spends
+2 invalid-name
+2 invalid-value
 1 clock-jump
 1 not-continuous
 1 id-reused
-1 sequence-gap
-1 wrong-replica
-1 seq-taken
-1 claimed spends
-3 not-found spends
-1 lease-required spends
-1 resource-held spends
+1 claimed
+3 not-found
+1 resource-held
 6 unreadable
-2 invalid-name spends
-3 not-found spends
-1 deleted spends
-1 parent-cycle spends
-1 link-cycle spends
-1 checked-field spends
-1 user-only spends
-1 self-link spends
-1 run-transition spends
-1 run-active spends
-1 run-writer spends
-1 user-only spends
-3 not-found spends
-1 decided spends
-1 in-use spends
-1 user-only spends
-1 ineligible spends
-1 not-done spends
-1 not-allowed spends
+2 invalid-name
+3 not-found
+1 deleted
+1 parent-cycle
+1 link-cycle
+1 checked-field
+1 user-only
+1 self-link
+1 user-only
+3 not-found
+1 decided
+1 in-use
+1 user-only
+1 ineligible
+1 not-done
+1 not-allowed
 4 git
 4 conflict
 4 locked
@@ -45,28 +38,24 @@ expression: table
 5 no-tracker
 5 no-tracker
 5 no-tracker
-1 invalid-import spends
-1 invalid-import spends
-1 invalid-import spends
-1 user-only spends
-1 import-cycle spends
-1 not-ready spends
-1 already-exists spends
-1 already-done spends
-1 not-in-thread spends
-1 not-the-runs spends
-1 inactive
-1 incomplete-repository spends
-1 unwritable spends
-1 unopenable spends
-1 no-renderer spends
-3 not-found spends
-2 usage spends
-2 invalid-commit spends
-2 reserved-id spends
-2 invalid-actor spends
-2 user-from-environment spends
-2 operator-actor spends
+1 invalid-import
+1 invalid-import
+1 invalid-import
+1 user-only
+1 import-cycle
+1 not-ready
+1 already-exists
+1 already-done
+1 incomplete-repository
+1 unwritable
+1 unopenable
+1 no-renderer
+3 not-found
+2 usage
+2 invalid-commit
+2 reserved-id
+2 invalid-actor
+2 user-from-environment
 5 config
 5 no-remote
 5 no-server

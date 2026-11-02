@@ -1,5 +1,5 @@
-// The picked thread: what approving it lets agents work on, its items in the order their work runs, its autonomy level
-// and project-management flag, and the proposals agents made to it, each kept or dropped with one tap.
+// The picked thread: what approving it lets agents work on, its items in the order their work runs, its autonomy level,
+// and the proposals agents made to it, each kept or dropped with one tap.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -24,7 +24,6 @@ import {
   type Level,
   levelHint,
   levelLabel,
-  pmCommand,
   revokeCommand,
   threadLevelCommand,
 } from "./forms";
@@ -120,7 +119,7 @@ export function ThreadPanel({
           awaiting: awaitingRef.current,
         });
         // A setting read back as chosen is the thread's own now; one read otherwise waits for its write to land.
-        const read: Record<string, string> = { level: detail.level ?? "", pm: detail.pm ? "apply" : "wait" };
+        const read: Record<string, string> = { level: detail.level ?? "" };
         setChosen((was) => Object.fromEntries(Object.entries(was).filter(([name, value]) => read[name] !== value)));
       },
       (err: unknown) => {
@@ -315,19 +314,6 @@ export function ThreadPanel({
               {levelLabel(level)}
             </option>
           ))}
-        </Choice>
-        {/* The project-management flag, said as what it does to an agent's edits. */}
-        <Choice
-          label="Scope edits"
-          className="setting"
-          name="pm"
-          value={chosen.pm ?? (detail.pm ? "apply" : "wait")}
-          title="What happens when an agent changes the scope of an approved thread"
-          disabled={false}
-          onWrite={(choice) => setting("pm", choice, pmCommand(id, choice === "apply"))}
-        >
-          <option value="wait">Wait for your OK</option>
-          <option value="apply">Apply at once</option>
         </Choice>
       </div>
     </>,

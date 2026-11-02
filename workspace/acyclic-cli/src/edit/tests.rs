@@ -7,8 +7,8 @@ fn replica() -> Replica {
     Replica::open(ReplicaId::new("mac").unwrap(), State::new())
 }
 
-const AGENT: By<'static> = By { actor: "session/mac", at: 2, seen: None };
-const USER_BY: By<'static> = By { actor: USER, at: 1, seen: None };
+const AGENT: By<'static> = By { actor: "session/mac", at: 2 };
+const USER_BY: By<'static> = By { actor: USER, at: 1 };
 
 fn titled(title: &str) -> ItemFields {
     ItemFields { title: Some(title.to_owned()), ..ItemFields::default() }
@@ -241,27 +241,6 @@ fn an_edit_naming_a_missing_thread_or_repository_writes_nothing() {
         assert_eq!(code(edit_item(&mut r, "a", &fields, AGENT)), "not-found", "{what}");
     }
     assert_eq!((r.changes(), item(&r, "a").title.one().cloned()), (before, Some("Before".into())));
-}
-
-#[test]
-fn only_the_user_flags_a_thread_as_project_management_and_clears_it() {
-    let mut r = replica();
-    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
-    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
-    let pm = |r: &Replica| Model::read(r.state()).unwrap().threads["t"].is_pm();
-    let flag = ThreadFields { pm: Change::Set(true), ..ThreadFields::default() };
-    assert_eq!(code(edit_thread(&mut r, "t", &flag, AGENT)), "user-only");
-    assert!(!pm(&r));
-    edit_thread(&mut r, "t", &flag, USER_BY).unwrap();
-    assert!(pm(&r));
-    // Flagging it again writes nothing.
-    let before = r.changes();
-    edit_thread(&mut r, "t", &flag, USER_BY).unwrap();
-    assert_eq!(r.changes(), before);
-    let unflag = ThreadFields { pm: Change::Clear, ..ThreadFields::default() };
-    assert_eq!(code(edit_thread(&mut r, "t", &unflag, AGENT)), "user-only");
-    edit_thread(&mut r, "t", &unflag, USER_BY).unwrap();
-    assert!(!pm(&r));
 }
 
 #[test]

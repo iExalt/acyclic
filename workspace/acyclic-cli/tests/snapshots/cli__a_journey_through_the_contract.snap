@@ -340,7 +340,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
           "title": "Second"
         }
       ],
-      "pm": false,
       "readiness": {
         "holder": "session/mac",
         "items": [
@@ -888,7 +887,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "title": "Second"
         }
       ],
-      "pm": false,
       "readiness": {
         "items": [
           "a2"

@@ -45,10 +45,10 @@ fn a_dependency_in_another_thread_is_met_once_its_commit_merges() {
     git(dir.path(), &["init", "-q", path.to_str().unwrap()]);
     store::init_replica(&path, &ReplicaId::new("mac").unwrap()).unwrap();
     let (tracker, _) = Tracker::open(&path).unwrap();
-    let meta = Meta { actor: "actor/user".to_owned(), run: None };
+    let meta = Meta { actor: "actor/user".to_owned() };
     tracker
         .batch(&meta, NOW, false, &|_, _| None, |replica, at| {
-            let by = By { actor: "actor/user", at, seen: None };
+            let by = By { actor: "actor/user", at };
             let record = Key::new(kind::REPOSITORY, "code").unwrap();
             model::set(replica, &record, repository::DEFAULT_BRANCH, Some(&"main"), by)
                 .map_err(state_error)?;

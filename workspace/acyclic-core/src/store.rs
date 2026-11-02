@@ -25,7 +25,6 @@ use serde_json::Value as Json;
 
 use crate::state::{self, Dot, Journal, Key, Millis, Replica, ReplicaId, State};
 use crate::time::civil;
-use crate::usage;
 use cache::{Cache, Found};
 use git::{Git, NewCommit};
 
@@ -183,13 +182,11 @@ impl<E: fmt::Display> fmt::Display for BatchError<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for BatchError<E> {}
 
-/// Who a batch is for: the actor and, for a run's operations, the run and its sequence number.
+/// Who a batch is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
-    /// The actor behind the batch, such as `actor/user` or `run/r1`.
+    /// The actor behind the batch, such as `actor/user` or `session/mac`.
     pub actor: String,
-    /// The run and sequence number, for a batch applying a run's operation.
-    pub run: Option<(String, u64)>,
 }
 
 /// Maps an entity to its project root's id, or `None` for no project.
@@ -249,13 +246,6 @@ pub struct Synced {
     pub pushed: usize,
 }
 
-/// What a fetch brings besides every replica's state and this replica's own segments.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Fetch {
-    /// Every writer's usage segments, which a server needs for cost totals; clones and the CLI never fetch them.
-    pub usage: bool,
-}
-
 /// The remote a tracker clone syncs with.
 pub const REMOTE: &str = "origin";
 
@@ -306,7 +296,7 @@ pub fn state_ref(replica: &ReplicaId) -> String {
     format!("refs/heads/state/{replica}")
 }
 
-/// The ref of a log or usage segment: `refs/heads/<namespace>/<replica>/<yyyy-mm>/<generation>`.
+/// The ref of a log segment: `refs/heads/<namespace>/<replica>/<yyyy-mm>/<generation>`.
 #[must_use]
 pub fn segment_ref(namespace: &str, replica: &ReplicaId, month: &str, generation: u32) -> String {
     format!("refs/heads/{namespace}/{replica}/{month}/{generation:04}")
@@ -336,7 +326,6 @@ fn log_path(root: &str, day: &str) -> String {
 /// don't keep what those make unreachable.
 const SCRATCH_STATE: &str = "refs/acyclic/scratch/state";
 const SCRATCH_LOG: &str = "refs/acyclic/scratch/log";
-const SCRATCH_USAGE: &str = "refs/acyclic/scratch/usage";
 
 /// Changed state files as bytes, for a commit.
 fn file_bytes(files: BTreeMap<String, Option<String>>) -> BTreeMap<String, Option<Vec<u8>>> {
@@ -349,10 +338,6 @@ struct Event<'a> {
     actor: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     actor_record: Option<Json>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    run: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    seq: Option<u64>,
     writes: Vec<Write>,
 }
 
@@ -698,14 +683,7 @@ impl Tracker {
         };
         crate::probe::mark("batch: git cat-file for the log");
         for (root, writes) in changes {
-            let event = Event {
-                at,
-                actor: &meta.actor,
-                actor_record: event_actor.clone(),
-                run: meta.run.as_ref().map(|(run, _)| run.as_str()),
-                seq: meta.run.as_ref().map(|(_, seq)| *seq),
-                writes,
-            };
+            let event = Event { at, actor: &meta.actor, actor_record: event_actor.clone(), writes };
             let path = log_path(&root, &day);
             let mut content = existing.get(&path).cloned().unwrap_or_default();
             content.extend(serde_json::to_vec(&event).expect("events serialize"));
@@ -810,126 +788,6 @@ impl Tracker {
         Ok(segments)
     }
 
-    /// Appends usage records to this replica's usage segment for the month they arrive in, `now`, so a record made
-    /// late on a month's last day still lands after the month is sealed. Each goes in its project root's file for the
-    /// day. A record whose id the month's segment already holds is skipped, so of two copies the first stays; reading
-    /// keeps one copy per id in any case. Returns how many were written.
-    ///
-    /// # Errors
-    ///
-    /// Fails on a lock, a lost race or a git failure; nothing is written then.
-    ///
-    /// # Panics
-    ///
-    /// Never: records always serialize.
-    pub fn record_usage(
-        &self,
-        now: Millis,
-        records: &[usage::Record],
-    ) -> Result<usize, StoreError> {
-        let _lock = self.lock()?;
-        let month = month_of(now);
-        let day = day_of(now);
-        let refs = self.git.refs(&format!("refs/heads/usage/{}/{month}/", self.replica))?;
-        let (segment, tip) = self.segment_in(&refs, "usage", &month);
-        let existing = match &tip {
-            Some(tip) => self.git.read_tree(tip)?,
-            None => BTreeMap::new(),
-        };
-        let mut seen: BTreeSet<String> = existing
-            .values()
-            .flat_map(|content| content.split(|b| *b == b'\n'))
-            .filter_map(|line| serde_json::from_slice::<RecordId>(line).ok())
-            .map(|record| record.id)
-            .collect();
-        let mut files: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
-        let mut written = 0;
-        for record in records {
-            if !seen.insert(record.id.clone()) {
-                continue;
-            }
-            let path = log_path(record.root(), &day);
-            let content = files
-                .entry(path.clone())
-                .or_insert_with(|| Some(existing.get(&path).cloned().unwrap_or_default()))
-                .get_or_insert_with(Vec::new);
-            content.extend(serde_json::to_vec(record).expect("records serialize"));
-            content.push(b'\n');
-            written += 1;
-        }
-        if written == 0 {
-            return Ok(0);
-        }
-        let ids = self.git.import_commits(&[NewCommit {
-            scratch: SCRATCH_USAGE,
-            parent: tip.as_deref(),
-            files: &files,
-            replica: self.replica.as_str(),
-            seconds: now.div_euclid(1_000),
-            message: "usage",
-        }])?;
-        let mut transaction = self.git.transaction()?;
-        transaction.update(&segment, &ids[0], tip.as_deref())?;
-        transaction.prepare()?;
-        transaction.commit()?;
-        Ok(written)
-    }
-
-    /// The usage ledger: every record in the highest generation of each writer's monthly segments, this replica's
-    /// own and those fetched with [`Fetch::usage`], one copy per id.
-    ///
-    /// # Errors
-    ///
-    /// Fails when git fails.
-    pub fn usage(&self) -> Result<usage::Ledger, StoreError> {
-        let own = "refs/heads/usage/";
-        let remotes = "refs/acyclic/remotes/";
-        // The highest generation of each writer's month, preferring this clone's own refs to fetched copies of them.
-        let mut segments: BTreeMap<(String, String), (u32, String, String)> = BTreeMap::new();
-        for (name, tip) in self.git.refs_under(&[own, remotes])? {
-            let rest = match name.strip_prefix(own) {
-                Some(rest) => rest,
-                None => match name[remotes.len()..].split_once("/usage/") {
-                    Some((_, rest)) => rest,
-                    None => continue,
-                },
-            };
-            let mut parts = rest.splitn(3, '/');
-            let (Some(writer), Some(month), Some(generation)) =
-                (parts.next(), parts.next(), parts.next())
-            else {
-                continue;
-            };
-            let Ok(generation) = generation.parse::<u32>() else { continue };
-            let local = name.starts_with(own);
-            let key = (writer.to_owned(), month.to_owned());
-            let better = segments.get(&key).is_none_or(|(g, _, existing)| {
-                generation > *g || (generation == *g && local && !existing.starts_with(own))
-            });
-            if better {
-                segments.insert(key, (generation, tip, name));
-            }
-        }
-        let mut copies = Vec::new();
-        let mut unreadable = Vec::new();
-        for ((writer, _), (_, tip, name)) in segments {
-            for (path, content) in self.git.read_tree(&tip)? {
-                for (number, line) in content.split(|b| *b == b'\n').enumerate() {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    match serde_json::from_slice::<usage::Record>(line) {
-                        Ok(record) => {
-                            copies.push(usage::Written { writer: writer.clone(), record });
-                        },
-                        Err(_) => unreadable.push(format!("{name}:{path}:{}", number + 1)),
-                    }
-                }
-            }
-        }
-        Ok(usage::Ledger { records: usage::dedup(copies), unreadable })
-    }
-
     /// Prunes sealed segments: a project root's file is dropped once every event in it is older than its retention
     /// in months (with one month's retention, September's file goes on 1 November), but only where `archived_ok`
     /// confirms the archived subtrees it covers have their records. A segment is replaced by the next generation, a
@@ -998,7 +856,6 @@ impl Tracker {
             transaction.prepare()?;
             transaction.commit()?;
             self.drop_scratch(SCRATCH_LOG);
-            self.drop_scratch(SCRATCH_USAGE);
         }
         Ok(dropped)
     }
@@ -1011,15 +868,6 @@ impl Tracker {
     ///
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
-        self.fetch_with(remote, Fetch::default())
-    }
-
-    /// Fetches as [`Self::fetch`] does, and with [`Fetch::usage`] every writer's usage segments too.
-    ///
-    /// # Errors
-    ///
-    /// Fails when git fails.
-    pub fn fetch_with(&self, remote: &str, options: Fetch) -> Result<(), StoreError> {
         let base = remote_base(remote);
         let mut args: Vec<String> = NETWORK
             .into_iter()
@@ -1027,26 +875,20 @@ impl Tracker {
             .map(str::to_owned)
             .collect();
         args.push(format!("+refs/heads/state/*:{base}state/*"));
-        if options.usage {
-            args.push(format!("+refs/heads/usage/*:{base}usage/*"));
-        }
         for prefix in self.segment_prefixes() {
             let path = &prefix["refs/heads/".len()..];
-            if options.usage && path.starts_with("usage/") {
-                continue;
-            }
             args.push(format!("+{prefix}*:{base}{path}*"));
         }
         self.git.run(args, None, &[])?;
         Ok(())
     }
 
-    /// The prefixes of this replica's log and usage segments.
+    /// The prefixes of this replica's log segments.
     fn segment_prefixes(&self) -> Vec<String> {
         NAMESPACES.iter().map(|ns| format!("refs/heads/{ns}/{}/", self.replica)).collect()
     }
 
-    /// Pushes this replica's refs to `remote` in one atomic push: the state ref, every log and usage segment that is
+    /// Pushes this replica's refs to `remote` in one atomic push: the state ref, every log segment that is
     /// new or has grown, and the deletion of every segment this replica's own prune removed. A segment the remote
     /// holds and this clone doesn't is left alone. A squash rewrites the state ref, so it is pushed with a lease on
     /// the tip this clone last pushed or fetched. Segments only ever fast-forward, so a ruleset refusing forced
@@ -1273,21 +1115,12 @@ impl Tracker {
     /// [`Self::fetch`], [`Self::join_refs`] and [`Self::push`]; a failed push never retries, since right after a
     /// fetch a moved ref means something else writes this replica's refs.
     pub fn sync(&self, remote: &str) -> Result<Synced, StoreError> {
-        self.sync_with(remote, Fetch::default())
-    }
-
-    /// Syncs as [`Self::sync`] does, fetching as `options` say.
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::sync`].
-    pub fn sync_with(&self, remote: &str, options: Fetch) -> Result<Synced, StoreError> {
         let prefix = tracking_prefix(remote);
         let own = format!("{prefix}{}", self.replica);
         let joined_prefix = joined_prefix(&self.replica, remote);
         let mine = state_ref(&self.replica);
         let last_seen = self.git.resolve(&own)?;
-        self.fetch_with(remote, options)?;
+        self.fetch(remote)?;
         crate::probe::mark("sync: fetch");
         // One listing serves the whole sync: what was fetched, what was joined before, and what a push compares.
         let base = remote_base(remote);
@@ -1422,14 +1255,8 @@ impl Tracker {
 const NETWORK: [&str; 6] =
     ["-c", "maintenance.auto=false", "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
 
-/// A usage record's id alone, for skipping copies without parsing the rest.
-#[derive(serde::Deserialize)]
-struct RecordId {
-    id: String,
-}
-
-/// The namespaces holding monthly segments: audit logs and usage records.
-const NAMESPACES: [&str; 2] = ["log", "usage"];
+/// The namespaces holding monthly segments: audit logs.
+const NAMESPACES: [&str; 1] = ["log"];
 
 /// Where prune records the segments it deleted, until a push deletes them from the remote too.
 const PRUNED: &str = "refs/acyclic/pruned/";
@@ -1571,10 +1398,7 @@ mod tests {
         let replica = ReplicaId::new("mac").unwrap();
         assert_eq!(state_ref(&replica), "refs/heads/state/mac");
         assert_eq!(segment_ref("log", &replica, "2026-10", 1), "refs/heads/log/mac/2026-10/0001");
-        assert_eq!(
-            segment_ref("usage", &replica, "2026-10", 12),
-            "refs/heads/usage/mac/2026-10/0012"
-        );
+        assert_eq!(segment_ref("log", &replica, "2026-10", 12), "refs/heads/log/mac/2026-10/0012");
     }
 
     #[test]

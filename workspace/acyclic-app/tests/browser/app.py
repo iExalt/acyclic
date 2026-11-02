@@ -2207,8 +2207,8 @@ def settled_control(page, selector, prop, value):
 
 @timed
 def thread_journey(page, env, plan, thread, name, failures):
-    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level, its
-    project-management flag and the global level, checking the panel and then the tracker."""
+    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level and the global
+    level, checking the panel and then the tracker."""
     panel = page.get_by_test_id("thread-panel")
     # Picking a thread already picked unpicks it.
     pick_thread(page, plan, thread)
@@ -2265,14 +2265,11 @@ def thread_journey(page, env, plan, thread, name, failures):
     first.wait_for(state="detached", timeout=10_000)
     rows.locator("[data-action=drop]").first.click()
     panel.get_by_test_id("proposals").wait_for(state="detached", timeout=10_000)
-    # Its own level, its project-management flag, and the global level.
+    # Its own level, and the global level.
     panel.locator("select[name=level]").select_option("everything")
     settled_control(
         page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
     )
-    # The choice shows the pick at once and saves it in the background; the tracker is checked once both land.
-    panel.locator("select[name=pm]").select_option("apply")
-    settled_control(page, "[data-testid=thread-panel] select[name=pm]", "value", "apply")
 
     def level():
         page.get_by_test_id("global-level").select_option("everything")
@@ -2290,17 +2287,15 @@ def thread_journey(page, env, plan, thread, name, failures):
     deadline = time.monotonic() + 10
     while True:
         after = shown()
-        if (after["approved"], after["level"], after["pm"]) == (True, "everything", True) and json.loads(
+        if (after["approved"], after["level"]) == (True, "everything") and json.loads(
             run(env, "level")
         )["data"]["global"] == "everything":
             break
         if time.monotonic() > deadline:
             break
         page.wait_for_timeout(200)
-    if (after["approved"], after["level"], after["pm"]) != (True, "everything", True):
-        failures.append(
-            f"{name}: the tracker shows {thread} as {after['approved'], after['level'], after['pm']}"
-        )
+    if (after["approved"], after["level"]) != (True, "everything"):
+        failures.append(f"{name}: the tracker shows {thread} as {after['approved'], after['level']}")
     threads_of = {
         id: json.loads(run(env, "show", id))["data"][0]["thread"] for id in outside
     }

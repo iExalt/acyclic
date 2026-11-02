@@ -3,7 +3,7 @@ use crate::state::Key;
 use serde_json::json;
 
 use super::*;
-use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent, start_run};
+use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent};
 use crate::ready::Ancestry;
 use crate::schema::{GLOBAL, item as field, settings, thread};
 use crate::scope::{ScopeEdit, USER, edit};
@@ -20,7 +20,7 @@ impl Ancestry for Unmapped {
 }
 
 fn user(at: Millis) -> By<'static> {
-    By { actor: USER, at, seen: None }
+    By { actor: USER, at }
 }
 
 fn replica(name: &str) -> Replica {
@@ -146,27 +146,24 @@ fn the_state_puts_its_problems_on_the_list() {
     link(&mut a, "z", "dep", LinkKind::Blocks, by).unwrap();
     b.join(&a.state).unwrap();
 
-    // Concurrent: a title conflict, a link cycle, a contest, a resource clash, two runs on one thread.
+    // Concurrent: a title conflict, a link cycle, a contest, a resource clash.
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", LinkKind::Blocks, user(2)).unwrap();
     link(&mut b, "y", "x", LinkKind::Blocks, user(2)).unwrap();
-    claim::claim(&mut a, "tx", "session/a", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut b, "tx", "session/b", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut a, "t1", "session/a", 2, Some(NOW), NOW).unwrap();
-    claim::claim(&mut b, "t2", "session/b", 2, Some(NOW), NOW).unwrap();
-    start_run(&mut a, "r1", "ok", user(2)).unwrap();
-    start_run(&mut b, "r2", "ok", user(2)).unwrap();
+    claim::claim(&mut a, "tx", "session/a", 2, NOW, NOW).unwrap();
+    claim::claim(&mut b, "tx", "session/b", 2, NOW, NOW).unwrap();
+    claim::claim(&mut a, "t1", "session/a", 2, NOW, NOW).unwrap();
+    claim::claim(&mut b, "t2", "session/b", 2, NOW, NOW).unwrap();
     a.join(&b.state).unwrap();
-    // After approval: a new blocker on approved work, an agent's proposal, a claim by an unknown run.
+    // After approval: a new blocker on approved work, an agent's proposal.
     link(&mut a, "work", "x", LinkKind::Blocks, user(3)).unwrap();
     edit(
         &mut a,
         &ScopeEdit::Member { item: "y".into(), thread: Some("ok".into()) },
-        By { actor: "run/r1", at: 3, seen: None },
+        By { actor: "session/r1", at: 3 },
     )
     .unwrap();
-    claim::claim(&mut a, "tk", "run/ghost", 3, None, NOW).unwrap();
 
     let entries = list(&a);
     let has = |want: &Entry| assert!(entries.contains(want), "missing {want:?} in {entries:#?}");
@@ -180,7 +177,6 @@ fn the_state_puts_its_problems_on_the_list() {
         resource: "gpu".into(),
         holders: vec![("t1".into(), "session/a".into()), ("t2".into(), "session/b".into())],
     });
-    has(&Entry::RunClash { thread: "ok".into(), runs: vec!["r1".into(), "r2".into()] });
     has(&Entry::NewBlocker { item: "work".into(), thread: "ok".into(), blocker: "x".into() });
     // Approving the thread again acknowledges it, though its members and approval are unchanged.
     let mut acknowledged = a.clone();
@@ -190,8 +186,7 @@ fn the_state_puts_its_problems_on_the_list() {
         !scope::approve(&mut acknowledged, "ok", true, user(5)).unwrap(),
         "a repeat changes nothing"
     );
-    assert!(entries.iter().any(|e| matches!(e, Entry::Proposal { actor, threads, .. } if actor == "run/r1" && threads == &["ok"])));
-    has(&Entry::UnknownRun { thread: "tk".into(), holder: "run/ghost".into() });
+    assert!(entries.iter().any(|e| matches!(e, Entry::Proposal { actor, threads, .. } if actor == "session/r1" && threads == &["ok"])));
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
     has(&Entry::Dangling {
         kind: "item".into(),
@@ -287,7 +282,7 @@ fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
 
 #[test]
 fn an_agents_member_the_approval_never_saw_is_the_users_to_keep_or_drop() {
-    let agent = By { actor: "session/pi", at: 2, seen: None };
+    let agent = By { actor: "session/pi", at: 2 };
     let unapproved = |r: &Replica| -> Vec<String> {
         list(r)
             .into_iter()

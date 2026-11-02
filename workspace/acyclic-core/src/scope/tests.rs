@@ -2,7 +2,7 @@ use hegel::TestCase;
 use hegel::generators as gs;
 
 use super::*;
-use crate::model::{add_item, start_run};
+use crate::model::add_item;
 use crate::needs;
 use crate::ready::{Ancestry, Readiness};
 use crate::schema::thread;
@@ -13,27 +13,24 @@ fn replica(name: &str) -> Replica {
 }
 
 fn by(actor: &str, at: Millis) -> By<'_> {
-    By { actor, at, seen: None }
+    By { actor, at }
 }
 
 fn thread_key(id: &str) -> Key {
     Key::new(kind::THREAD, id).unwrap()
 }
 
-/// A tracker with items x and y, approved thread `ok` holding x, unapproved thread `draft`, a project-management
-/// thread `pm` with run `boss`, and run `worker` on `ok`.
+/// A tracker with items x and y, approved thread `ok` holding x, unapproved thread `draft`, and approved thread
+/// `also`.
 fn setup() -> Replica {
     let mut r = replica("base");
     let user = by(USER, 1);
     for id in ["x", "y"] {
         add_item(&mut r, id, id, user).unwrap();
     }
-    for (id, approved, pm) in [("ok", true, false), ("draft", false, false), ("pm", true, true)] {
+    for (id, approved) in [("ok", true), ("draft", false), ("also", true)] {
         model::set(&mut r, &thread_key(id), thread::APPROVED, Some(&approved), user).unwrap();
-        model::set(&mut r, &thread_key(id), thread::PM_FLAG, Some(&pm), user).unwrap();
     }
-    start_run(&mut r, "boss", "pm", user).unwrap();
-    start_run(&mut r, "worker", "ok", user).unwrap();
     edit(&mut r, &member("x", Some("ok")), user).unwrap();
     r
 }
@@ -44,19 +41,16 @@ fn member(item: &str, thread: Option<&str>) -> ScopeEdit {
 
 #[test]
 fn only_the_declared_user_is_the_user() {
-    let r = setup();
-    let model = Model::read(&r.state).unwrap();
-    assert_eq!(classify(&model, USER), Actor::User);
-    assert_eq!(classify(&model, "run/boss"), Actor::ProjectManager);
-    for agent in ["run/worker", "run/unknown", "session/mac", "", "user", "actor/user2"] {
-        assert_eq!(classify(&model, agent), Actor::Agent, "{agent:?}");
+    assert_eq!(classify(USER), Actor::User);
+    for agent in ["session/worker", "session/mac", "", "user", "actor/user2"] {
+        assert_eq!(classify(agent), Actor::Agent, "{agent:?}");
     }
 }
 
 #[test]
 fn an_agents_edit_to_approved_scope_waits_and_others_apply() {
     let mut r = setup();
-    let agent = by("run/worker", 5);
+    let agent = by("session/worker", 5);
     // Unapproved scope: applies.
     assert_eq!(edit(&mut r, &member("y", Some("draft")), agent).unwrap(), Outcome::Applied);
     // Into, out of, or across an approved thread: proposed.
@@ -86,11 +80,8 @@ fn an_agents_edit_to_approved_scope_waits_and_others_apply() {
     let other = edit(&mut r, &member("x", None), by("session/mac", 5)).unwrap();
     assert!(matches!(&other, Outcome::Proposed(id) if !first.contains(id)), "{other:?}");
     assert_eq!(proposals(&r.state).unwrap().len(), 6);
-    // The user and a project-management agent apply at once.
-    assert_eq!(
-        edit(&mut r, &member("y", Some("ok")), by("run/boss", 6)).unwrap(),
-        Outcome::Applied
-    );
+    // The user's apply at once.
+    assert_eq!(edit(&mut r, &member("y", Some("ok")), by(USER, 6)).unwrap(), Outcome::Applied);
     assert_eq!(edit(&mut r, &member("x", None), by(USER, 7)).unwrap(), Outcome::Applied);
     assert_eq!(Model::read(&r.state).unwrap().members("ok"), vec!["y"]);
 }
@@ -98,13 +89,9 @@ fn an_agents_edit_to_approved_scope_waits_and_others_apply() {
 #[test]
 fn an_agent_cant_unapprove_its_way_past_a_proposal() {
     let mut r = setup();
-    let agent = by("run/worker", 5);
+    let agent = by("session/worker", 5);
     assert!(matches!(
         model::set(&mut r, &thread_key("ok"), thread::APPROVED, Some(&false), agent),
-        Err(WriteError::UserOnly { .. })
-    ));
-    assert!(matches!(
-        model::set(&mut r, &thread_key("ok"), thread::PM_FLAG, Some(&true), agent),
         Err(WriteError::UserOnly { .. })
     ));
     assert!(matches!(edit(&mut r, &member("x", None), agent).unwrap(), Outcome::Proposed(_)));
@@ -114,7 +101,7 @@ fn an_agent_cant_unapprove_its_way_past_a_proposal() {
 fn the_user_keeps_or_drops_a_proposal_once() {
     let mut r = setup();
     let Outcome::Proposed(kept) =
-        edit(&mut r, &member("y", Some("ok")), by("run/worker", 5)).unwrap()
+        edit(&mut r, &member("y", Some("ok")), by("session/worker", 5)).unwrap()
     else {
         panic!("proposed")
     };
@@ -125,14 +112,14 @@ fn the_user_keeps_or_drops_a_proposal_once() {
             repository: "code".into(),
             present: true,
         },
-        by("run/worker", 5),
+        by("session/worker", 5),
     )
     .unwrap() else {
         panic!("proposed")
     };
     assert_eq!(
-        keep(&mut r, &kept, by("run/boss", 6)),
-        Err(ScopeError::NotTheUser("run/boss".into()))
+        keep(&mut r, &kept, by("session/boss", 6)),
+        Err(ScopeError::NotTheUser("session/boss".into()))
     );
     keep(&mut r, &kept, by(USER, 6)).unwrap();
     drop(&mut r, &dropped, by(USER, 6)).unwrap();
@@ -155,22 +142,17 @@ fn a_member_applied_to_an_approved_thread_joins_its_approval() {
     assert_eq!(seen(&r, "x"), Some(true));
     // Proposed, so not applied and not seen, until it is kept.
     let Outcome::Proposed(id) =
-        edit(&mut r, &member("y", Some("ok")), by("run/worker", 3)).unwrap()
+        edit(&mut r, &member("y", Some("ok")), by("session/worker", 3)).unwrap()
     else {
         panic!("proposed")
     };
     assert_eq!(seen(&r, "y"), Some(false));
     keep(&mut r, &id, by(USER, 4)).unwrap();
     assert_eq!(seen(&r, "y"), Some(true), "keeping extends the approval");
-    // The user's own edit and a project manager's apply at once and extend it too.
-    for (item, actor) in [("a", USER), ("b", "run/boss")] {
-        add_item(&mut r, item, item, by(USER, 5)).unwrap();
-        assert_eq!(
-            edit(&mut r, &member(item, Some("ok")), by(actor, 6)).unwrap(),
-            Outcome::Applied
-        );
-        assert_eq!(seen(&r, item), Some(true), "{actor}");
-    }
+    // The user's own edit applies at once and extends it too.
+    add_item(&mut r, "a", "a", by(USER, 5)).unwrap();
+    assert_eq!(edit(&mut r, &member("a", Some("ok")), by(USER, 6)).unwrap(), Outcome::Applied);
+    assert_eq!(seen(&r, "a"), Some(true));
     // An unapproved thread has no approval to extend.
     edit(&mut r, &member("a", Some("draft")), by(USER, 7)).unwrap();
     assert_eq!(Model::read(&r.state).unwrap().threads["draft"].approved_member("a"), None);
@@ -210,20 +192,20 @@ impl Ancestry for NoAncestry {
 #[derive(Debug, Clone)]
 enum Step {
     Edit { replica: usize, actor: usize, item: usize, thread: Option<usize> },
-    Flag { replica: usize, thread: usize, approved: bool, pm: bool },
+    Flag { replica: usize, thread: usize, approved: bool },
     Decide { replica: usize, keep: bool },
     Join { into: usize, from: usize },
 }
 
-const ACTORS: [&str; 3] = [USER, "run/boss", "run/worker"];
-const THREADS: [&str; 3] = ["ok", "draft", "pm"];
+const ACTORS: [&str; 3] = [USER, "session/boss", "session/worker"];
+const THREADS: [&str; 3] = ["ok", "draft", "also"];
 
 fn below(tc: &TestCase, n: usize) -> usize {
     tc.draw(gs::integers::<usize>().max_value(n - 1))
 }
 
-/// Apply-or-propose under concurrent flag changes: three replicas edit membership as the user, a project-management
-/// run and an agent run while the user flips threads' approved and project-management flags and decides proposals.
+/// Apply-or-propose under concurrent approvals: three replicas edit membership as the user and two agents while the
+/// user flips threads' approval and decides proposals.
 /// Joined in any order they converge on one membership, one set of proposals and one needs-you list, and no edit is
 /// lost: each either applied where it was made or exists as a proposal.
 #[hegel::test(profile = "light")]
@@ -252,7 +234,6 @@ fn apply_or_propose_converges_and_drops_nothing(tc: TestCase) {
                 replica: below(&tc, 3),
                 thread: below(&tc, 3),
                 approved: below(&tc, 2) == 0,
-                pm: below(&tc, 2) == 0,
             },
             2 => Step::Decide { replica: below(&tc, 3), keep: below(&tc, 2) == 0 },
             _ => Step::Join { into: below(&tc, 3), from: below(&tc, 3) },
@@ -274,7 +255,7 @@ fn apply_or_propose_converges_and_drops_nothing(tc: TestCase) {
                     Outcome::Proposed(id) => proposed.push(id),
                 }
             },
-            Step::Flag { replica, thread: t, approved, pm } => {
+            Step::Flag { replica, thread: t, approved } => {
                 let r = &mut replicas[replica];
                 model::set(
                     r,
@@ -284,8 +265,6 @@ fn apply_or_propose_converges_and_drops_nothing(tc: TestCase) {
                     by(USER, at),
                 )
                 .unwrap();
-                model::set(r, &thread_key(THREADS[t]), thread::PM_FLAG, Some(&pm), by(USER, at))
-                    .unwrap();
             },
             Step::Decide { replica, keep: kept } => {
                 let r = &mut replicas[replica];

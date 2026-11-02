@@ -140,9 +140,8 @@ impl View<'_> {
     /// An item in full: its summary and everything else it holds.
     pub fn item(&self, id: &str, item: &Item) -> Result<Json, CliError> {
         let model = self.model;
-        let alive = |holder: &str| model.run_alive(holder);
         // An item's claims are its thread's.
-        let claims = claim::covering(self.state, model, id, self.now, &alive)?;
+        let claims = claim::covering(self.state, model, id, self.now)?;
         let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         Ok(with(
             self.item_row(id)?,
@@ -168,8 +167,7 @@ impl View<'_> {
     /// A thread in full: its summary, its `readiness` and live `claims`, and each member as an item summary that also
     /// says whether its work is `approved` and whether it is `conflicted`, listed under each thread it was put in.
     pub fn thread(&self, id: &str, listed: &[Member<'_>]) -> Result<Json, CliError> {
-        let alive = |holder: &str| self.model.run_alive(holder);
-        let claims = claim::live_with(self.state, &claim::thread_key(id)?, self.now, &alive)?;
+        let claims = claim::live(self.state, &claim::thread_key(id)?, self.now)?;
         let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         let mut members = Vec::new();
         for &Member { item, conflict } in listed {
@@ -186,7 +184,6 @@ impl View<'_> {
                 "claims": claims,
                 "brief": thread.map(|t| &t.brief),
                 "level": thread.map(|t| &t.autonomy),
-                "pm": thread.is_some_and(acyclic_core::model::Thread::is_pm),
                 "repositories": self.model.repository_set(id),
                 "members": members,
             }),
@@ -245,14 +242,8 @@ impl View<'_> {
                 Entry::ClockAhead { thread: id, holder } => {
                     json!({"kind": "clock-ahead", "thread": thread(id), "holder": holder})
                 },
-                Entry::UnknownRun { thread: id, holder } => {
-                    json!({"kind": "unknown-run", "thread": thread(id), "holder": holder})
-                },
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
-                },
-                Entry::RunClash { thread: id, runs } => {
-                    json!({"kind": "run-clash", "thread": thread(id), "runs": runs})
                 },
                 Entry::Proposal { id, .. } => {
                     let proposal = proposals.get(id);
@@ -378,7 +369,6 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
             edit(field, true)
         },
         ("thread", "autonomy") => edit("level", true),
-        ("thread", "pm-flag") => Some(format!("acyclic thread edit {id} --pm|--no-pm --as-user")),
         ("repository", "default-branch") => edit("default-branch", false),
         ("repository", "public") => Some(format!("acyclic repo edit {id} --public|--private")),
         ("item", "evidence") => Some(format!(
@@ -568,7 +558,7 @@ mod tests {
     const NOW: Millis = 1_000;
 
     fn by(actor: &str) -> By<'_> {
-        By { actor, at: NOW, seen: None }
+        By { actor, at: NOW }
     }
 
     fn key(kind: &str, id: &str) -> Key {
@@ -615,7 +605,7 @@ mod tests {
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
-        claim::claim(&mut r, "t", "session/pi", NOW, Some(60_000), 480 * 60_000).unwrap();
+        claim::claim(&mut r, "t", "session/pi", NOW, 60_000, 480 * 60_000).unwrap();
         r
     }
 
@@ -647,7 +637,7 @@ mod tests {
                         assert!(inner.is_u64(), "{here}");
                         continue;
                     }
-                    if ["approved", "archived", "reopened", "public", "conflicted", "pm"]
+                    if ["approved", "archived", "reopened", "public", "conflicted"]
                         .contains(&name.as_str())
                         && !inner.is_object()
                     {
@@ -927,12 +917,8 @@ mod tests {
     }
 
     #[test]
-    fn a_threads_level_and_project_management_flag_are_settled_by_thread_edit() {
+    fn a_threads_level_is_settled_by_thread_edit() {
         let state = tracker();
-        assert_eq!(
-            resolve(state.state(), "thread", "t", "pm-flag").as_deref(),
-            Some("acyclic thread edit t --pm|--no-pm --as-user")
-        );
         assert_eq!(
             resolve(state.state(), "thread", "t", "autonomy").as_deref(),
             Some("acyclic thread edit t --level <LEVEL> (or --no-level)")

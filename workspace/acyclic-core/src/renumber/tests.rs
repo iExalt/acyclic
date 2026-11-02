@@ -4,13 +4,12 @@ use super::*;
 use crate::model::{ItemState, Level, add_item, set_state};
 use crate::needs::{Entry, needs_you};
 use crate::ready::{Ancestry, Readiness};
-use crate::schema::run;
 use crate::state::{ReplicaId, State};
 
 const NOW: Millis = 10_000;
 
 fn user(at: Millis) -> By<'static> {
-    By { actor: USER, at, seen: None }
+    By { actor: USER, at }
 }
 
 fn replica(name: &str) -> Replica {
@@ -95,18 +94,16 @@ fn a_fresh_thread_moves_with_its_fields_and_members_and_its_old_id_is_retired() 
 #[test]
 fn only_the_user_renumbers_and_only_a_fresh_thread_that_clashes() {
     let mut r = with_thread("mac", "t");
-    let agent = By { actor: "session/mac", at: 2, seen: None };
+    let agent = By { actor: "session/mac", at: 2 };
     assert!(matches!(renumber(&mut r, "t", agent), Err(RenumberError::NotTheUser(_))));
     assert!(matches!(renumber(&mut r, "nope", user(2)), Err(RenumberError::NoThread(_))));
-    let run_key = Key::new(kind::RUN, "r1").unwrap();
-    put(&mut r, &run_key, run::THREAD, json!("t"));
     let question = Key::new(kind::QUESTION, "q1").unwrap();
     put(&mut r, &question, question::THREAD, json!("t"));
-    claim::claim(&mut r, "t", "session/s", 2, Some(NOW), NOW).unwrap();
+    claim::claim(&mut r, "t", "session/s", 2, NOW, NOW).unwrap();
     // An agent's membership edit into the approved thread waits as a proposal.
     add_item(&mut r, "c", "c", user(1)).unwrap();
     let edit = ScopeEdit::Member { item: "c".into(), thread: Some("t".into()) };
-    scope::edit(&mut r, &edit, By { actor: "session/s", at: 2, seen: None }).unwrap();
+    scope::edit(&mut r, &edit, By { actor: "session/s", at: 2 }).unwrap();
     // Fields it would carry in conflict: two replicas' briefs, and the members each approval saw.
     let mut other = with_thread("pi", "t");
     put(&mut other, &key("t"), thread::BRIEF, json!("Rake them"));
@@ -114,7 +111,7 @@ fn only_the_user_renumbers_and_only_a_fresh_thread_that_clashes() {
     let before = r.changes();
     assert_eq!(
         why(renumber(&mut r, "t", user(3))),
-        ["no-clash", "had-run", "question", "claimed", "proposal", "conflict", "conflict"]
+        ["no-clash", "question", "claimed", "proposal", "conflict", "conflict"]
     );
     assert_eq!(r.changes(), before, "a refusal writes nothing");
 }
@@ -143,7 +140,7 @@ fn threads_ending_in_one_number_clash_until_a_fresh_one_is_renumbered() {
     assert_eq!(clash_entries(&mac).len(), 2);
     // A clash nothing can resolve stays out of needs, though `clashes` still reports it.
     for thread in ["thread-27", "thread-x-27"] {
-        put(&mut mac, &Key::new(kind::RUN, thread).unwrap(), run::THREAD, json!(thread));
+        put(&mut mac, &Key::new(kind::QUESTION, thread).unwrap(), question::THREAD, json!(thread));
     }
     let entries = clash_entries(&mac);
     assert!(

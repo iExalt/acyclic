@@ -84,12 +84,8 @@ impl From<StateError> for CliError {
             StateError::ClockJump { .. } => ("clock-jump", exit::REFUSED),
             StateError::NotContinuous(_) => ("not-continuous", exit::REFUSED),
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
-            StateError::Gap { .. } => ("sequence-gap", exit::REFUSED),
-            StateError::SeqTaken { .. } => ("seq-taken", exit::REFUSED),
-            StateError::WrongReplica { .. } => ("wrong-replica", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
-            StateError::LeaseRequired(_) => ("lease-required", exit::REFUSED),
             StateError::ResourceHeld { .. } => ("resource-held", exit::REFUSED),
             StateError::Format(_) => ("unreadable", exit::UNREADABLE),
         };
@@ -117,9 +113,6 @@ impl From<WriteError> for CliError {
             WriteError::UserOnly { .. } => Self::refused("user-only", message),
             WriteError::SelfLink(_) => Self::refused("self-link", message),
             WriteError::FollowsRetired => Self::refused("follows-retired", message),
-            WriteError::RunTransition { .. } => Self::refused("run-transition", message),
-            WriteError::RunActive { .. } => Self::refused("run-active", message),
-            WriteError::RunWriter(_) => Self::refused("run-writer", message),
         }
     }
 }

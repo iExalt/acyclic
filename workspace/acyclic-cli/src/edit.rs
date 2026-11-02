@@ -75,8 +75,6 @@ pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
     pub level: Change<Level>,
-    /// Whether its agent is a project-management agent; clearing it leaves an ordinary one.
-    pub pm: Change<bool>,
     pub repositories: Delta,
 }
 
@@ -253,7 +251,7 @@ fn scope_already(
                 return Ok(false);
             }
             thread.is_none()
-                || scope::classify(model, actor) != scope::Actor::User
+                || scope::classify(actor) != scope::Actor::User
                 || !scope::unapproved(state, model)?.iter().any(|u| u.item == *item)
         },
         ScopeEdit::ItemRepository { item, repository, present } => {
@@ -485,7 +483,6 @@ fn write_thread(
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
     write_change(replica, &key, thread_field::AUTONOMY, &fields.level, by)?;
-    write_change(replica, &key, thread_field::PM_FLAG, &fields.pm, by)?;
     let mut written = Written::default();
     for change in thread_scope(id, fields) {
         scope_step(replica, &change, by, &mut written.proposals)?;

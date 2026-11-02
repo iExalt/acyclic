@@ -11,7 +11,7 @@ fn replica() -> Replica {
 }
 
 fn by(actor: &str, at: Millis) -> By<'_> {
-    By { actor, at, seen: None }
+    By { actor, at }
 }
 
 fn imported() -> Replica {
@@ -85,7 +85,7 @@ fn a_changed_title_is_one_write_and_what_the_document_omits_is_kept() {
 
 #[test]
 fn an_invalid_document_or_a_user_only_one_from_an_agent_is_refused() {
-    let agent = by("run/worker", 1);
+    let agent = by("session/worker", 1);
     let mut doc = valid();
     doc.items.push(item("a", Planned::Backlog, None));
     assert!(matches!(apply(&doc, &mut replica(), agent), Err(ApplyError::Invalid(_))));
@@ -114,7 +114,7 @@ fn an_agents_addition_to_approved_scope_is_proposed() {
     let mut doc = valid();
     doc.items.push(item("c", Planned::Backlog, Some("goal")));
     doc.threads[0].items.push("c".to_owned());
-    let report = apply(&doc, &mut r, by("run/worker", 3)).unwrap();
+    let report = apply(&doc, &mut r, by("session/worker", 3)).unwrap();
     assert_eq!((report.items, report.proposals.len()), (1, 1));
     // The new item is created; its place in the approved thread is a proposal of its own.
     let changes = serde_json::to_value(&report.changes).unwrap();
@@ -127,7 +127,7 @@ fn an_agents_addition_to_approved_scope_is_proposed() {
     assert_eq!(Model::read(&r.state).unwrap().thread_of("c"), None);
     // Importing again while the proposal waits files nothing new.
     let before = r.state.clone();
-    assert_eq!(apply(&doc, &mut r, by("run/worker", 4)).unwrap().proposals, report.proposals);
+    assert_eq!(apply(&doc, &mut r, by("session/worker", 4)).unwrap().proposals, report.proposals);
     assert_eq!(r.state, before);
 }
 

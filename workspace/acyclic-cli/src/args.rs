@@ -156,12 +156,7 @@ pub enum Command {
         remote: Option<String>,
     },
     /// Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs.
-    Sync {
-        /// Fetch every writer's usage records too, as a server does for cost totals.
-        #[arg(long)]
-        #[serde(default)]
-        with_usage: bool,
-    },
+    Sync,
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
     /// Lists threads with ready work, the actor's own first, each with its ready items.
@@ -189,7 +184,7 @@ pub enum Command {
     Claim {
         /// The thread.
         thread: String,
-        /// The lease in minutes: 60 by default, 1 to 480. A run's claim has none and lives while the run does.
+        /// The lease in minutes: 60 by default, 1 to 480.
         #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
         /// Claim even when the thread has no ready work.
@@ -353,7 +348,7 @@ pub struct Up {
     pub rotate: bool,
     /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
     /// Give the same --port as the server, if it has one.
-    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale", "runners"])]
+    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
     pub link: bool,
     /// Also serve through `tailscale serve`, to requests carrying the user's Tailscale identity: on a port of 127.0.0.1,
     /// under a secret first path segment derived from the session, or on a Unix socket with --socket. Run the
@@ -380,73 +375,9 @@ pub struct Up {
     /// secret.
     #[arg(long, requires = "tailscale", conflicts_with = "tailscale_port")]
     pub socket: Option<PathBuf>,
-    /// Also listen on this port of 127.0.0.1 for runs, which present their run tokens: they read the tracker and send
-    /// the writes of their own work, applied as the run, and fetch and push their thread's code through mirrors in
-    /// `$XDG_DATA_HOME/acyclic/mirrors`, by default under ~/.local/share. Needs the operator's public key, which the
-    /// operator writes to ~/.config/acyclic/operator/key.pub, and the deny-list in ~/.config/acyclic/deny-list.
-    #[arg(long, value_name = "PORT")]
-    pub runners: Option<u16>,
-}
-
-/// A usage error.
-fn usage(message: impl Into<String>) -> CliError {
-    CliError::new("usage", exit::USAGE, message)
-}
-
-/// Refuses a flag and the one that clears it, given together.
-fn clears(flag: &str, set: bool, clear: bool) -> Result<(), CliError> {
-    if set && clear {
-        return Err(usage(format!("--{flag} and --no-{flag} contradict each other: pass one")));
-    }
-    Ok(())
-}
-
-/// Refuses a set-valued flag and the one that removes from it, naming the same element.
-fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliError> {
-    match add.iter().find(|name| remove.contains(name)) {
-        Some(name) => Err(usage(format!("--{flag} and --no-{flag} both name {name}"))),
-        None => Ok(()),
-    }
 }
 
 impl Command {
-    /// Whether a run may send this command as an operation: the writes of its own work, and nothing that approves,
-    /// configures, reaches outside the tracker or reshapes threads. With no catch-all arm, a new command fails to
-    /// compile until it is placed.
-    #[must_use]
-    pub fn run_may_send(&self) -> bool {
-        match self {
-            Self::Claim { force: false, .. }
-            | Self::Release { .. }
-            | Self::Done { force: false, .. }
-            | Self::Item(
-                ItemCommand::Add { .. } | ItemCommand::Edit(_) | ItemCommand::Reopen { .. },
-            )
-            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. }) => true,
-            // Forcing a claim past readiness, or a finish past its checks, is the user's to do.
-            Self::Claim { force: true, .. }
-            | Self::Done { force: true, .. }
-            | Self::Init { .. }
-            | Self::Sync { .. }
-            | Self::Prime
-            | Self::Ready { .. }
-            | Self::List
-            | Self::Show { .. }
-            | Self::Needs
-            | Self::Level { .. }
-            | Self::Import { .. }
-            | Self::Graph { .. }
-            | Self::Doctor
-            | Self::Item(ItemCommand::Archive { .. } | ItemCommand::Delete { .. })
-            | Self::Thread(_)
-            | Self::Repo(_)
-            | Self::Proposal(_)
-            | Self::Serve(_)
-            | Self::Up(_)
-            | Self::Completions { .. } => false,
-        }
-    }
-
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
     /// that require or exclude each other, and the flags that clear what another sets.
     ///
@@ -488,6 +419,27 @@ impl Command {
             },
             _ => Ok(()),
         }
+    }
+}
+
+/// A usage error.
+fn usage(message: impl Into<String>) -> CliError {
+    CliError::new("usage", exit::USAGE, message)
+}
+
+/// Refuses a flag and the one that clears it, given together.
+fn clears(flag: &str, set: bool, clear: bool) -> Result<(), CliError> {
+    if set && clear {
+        return Err(usage(format!("--{flag} and --no-{flag} contradict each other: pass one")));
+    }
+    Ok(())
+}
+
+/// Refuses a set-valued flag and the one that removes from it, naming the same element.
+fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliError> {
+    match add.iter().find(|name| remove.contains(name)) {
+        Some(name) => Err(usage(format!("--{flag} and --no-{flag} both name {name}"))),
+        None => Ok(()),
     }
 }
 
@@ -794,7 +746,6 @@ pub enum ThreadCommand {
 
 /// What `thread edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
-#[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ThreadEdit {
     /// The thread.
@@ -824,21 +775,12 @@ pub struct ThreadEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_level: bool,
-    /// Make its agent a project-management agent, whose edits to approved scope apply at once (user only).
-    #[arg(long)]
-    #[serde(default)]
-    pub pm: bool,
-    /// Make its agent an ordinary one again, whose edits to approved scope wait as proposals (user only).
-    #[arg(long)]
-    #[serde(default)]
-    pub no_pm: bool,
 }
 
 impl ThreadEdit {
     fn validate(&self) -> Result<(), CliError> {
         clears("brief", self.brief.is_some(), self.no_brief)?;
         clears("level", self.level.is_some(), self.no_level)?;
-        clears("pm", self.pm, self.no_pm)?;
         overlaps("repository", &self.repository, &self.no_repository)
     }
 }

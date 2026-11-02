@@ -9,7 +9,7 @@ use crate::scope::USER;
 use crate::state::{Key, Replica};
 
 fn user() -> By<'static> {
-    By { actor: USER, at: 1, seen: None }
+    By { actor: USER, at: 1 }
 }
 
 fn replica(name: &str) -> Replica {

@@ -472,9 +472,8 @@ impl<'a> Readiness<'a> {
         if let Some(status) = self.unclaimed(id, item) {
             return Ok(Some(status));
         }
-        let alive = |holder: &str| self.model.run_alive(holder);
         let mut holders: Vec<String> = Vec::new();
-        for claim in claim::covering(self.state, self.model, id, self.now, &alive)? {
+        for claim in claim::covering(self.state, self.model, id, self.now)? {
             if !holders.contains(&claim.holder) {
                 holders.push(claim.holder);
             }
@@ -561,10 +560,9 @@ impl<'a> Readiness<'a> {
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
             .map(str::to_owned)
             .collect();
-        let alive = |holder: &str| self.model.run_alive(holder);
         let key = claim::thread_key(thread)?;
         let mut holders: Vec<String> = Vec::new();
-        for claim in claim::live_with(self.state, &key, self.now, &alive)? {
+        for claim in claim::live(self.state, &key, self.now)? {
             if !holders.contains(&claim.holder) {
                 holders.push(claim.holder);
             }
@@ -815,8 +813,7 @@ impl<'a> Readiness<'a> {
         if let Some(winner) = self.winners.borrow().get(thread) {
             return Ok(winner.clone());
         }
-        let alive = |holder: &str| self.model.run_alive(holder);
-        let winner = claim::winner_with(self.state, &claim::thread_key(thread)?, self.now, &alive)?;
+        let winner = claim::winner(self.state, &claim::thread_key(thread)?, self.now)?;
         self.winners.borrow_mut().insert(thread.to_owned(), winner.clone());
         Ok(winner)
     }

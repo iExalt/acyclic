@@ -27,26 +27,13 @@ use crate::scope::{self, ScopeEdit, USER};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The thread fields a renumber carries over; claims stay with the old id as history.
-const CARRIED: [&str; 8] = [
-    thread::TITLE,
-    thread::BRIEF,
-    thread::APPROVED,
-    thread::APPROVED_MEMBERS,
-    thread::PM_FLAG,
-    thread::AUTONOMY,
-    thread::LAUNCH,
-    thread::PLACEMENT,
-];
+const CARRIED: [&str; 5] =
+    [thread::TITLE, thread::BRIEF, thread::APPROVED, thread::APPROVED_MEMBERS, thread::AUTONOMY];
 
 /// Why a thread isn't renumbered.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "why")]
 pub enum Reason {
-    /// A run worked on it.
-    HadRun {
-        /// The run.
-        run: String,
-    },
     /// A question names it.
     Question {
         /// The question.
@@ -78,7 +65,6 @@ pub enum Reason {
 impl fmt::Display for Reason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::HadRun { run } => write!(f, "run {run} worked on it"),
             Self::Question { question } => write!(f, "question {question} names it"),
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
             Self::Proposal { proposal } => write!(f, "proposal {proposal} would change its scope"),
@@ -181,9 +167,6 @@ fn reasons(state: &State, model: &Model, id: &str, now: Millis) -> Result<Vec<Re
             .any(|other| other != id && ids::number(kind::THREAD, other) == number);
     if !clashes {
         found.push(Reason::NoClash);
-    }
-    for run in model.runs.values().filter(|run| run.thread.all().iter().any(|t| *t == id)) {
-        found.push(Reason::HadRun { run: run.id.clone() });
     }
     for (key, _) in state.entities().filter(|(key, _)| key.kind == kind::QUESTION) {
         let asking: model::Value<String> = model::value(state, key, question::THREAD)?;

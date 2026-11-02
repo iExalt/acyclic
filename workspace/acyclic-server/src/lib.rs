@@ -1,21 +1,17 @@
 #![doc = include_str!("../README.md")]
 #![warn(clippy::all, clippy::pedantic, missing_docs)]
 
-use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use acyclic_cli::args::{
     Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, Serve, ThreadCommand, Up,
 };
 use acyclic_cli::error::{CliError, exit};
-use acyclic_cli::{Applied, Env, Operation, Start};
-use acyclic_core::state::{Context, Millis};
-use acyclic_guard::DenyList;
-use acyclic_operator::token::{Claims, Verifier};
+use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
 use axum::http::header::{
@@ -34,7 +30,6 @@ use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::SizeAbove;
 
 pub mod app;
-pub mod code;
 pub mod push;
 pub mod session;
 
@@ -77,17 +72,6 @@ pub enum Access {
         /// The session.
         token: Token,
     },
-    /// Requests from runs, each presenting its run token as `Authorization: Bearer <token>`. `Host` isn't checked:
-    /// a run reaches the server by whatever name its container or pod has for it, and the check guards a browser's
-    /// ambient cookie against a page whose name rebinds to the server, which a token in a header can't be.
-    Run {
-        /// What checks run tokens: the operator's public key.
-        verifier: Verifier,
-        /// The terms no run may write, which every write is scanned for, with Gitleaks besides.
-        deny: DenyList,
-        /// The code repositories runs reach through the server, if it serves them.
-        code: Option<Arc<code::Code>>,
-    },
 }
 
 impl Access {
@@ -129,18 +113,16 @@ impl Access {
                     .iter()
                     .any(|name| sent.eq_ignore_ascii_case(name.as_bytes()))
             }),
-            Self::Run { .. } => true,
         };
         if ok { Ok(()) } else { Err(Refusal::WrongHost) }
     }
 
-    /// Checks that a request comes from the user, or on a runners' listener from a run, by the listener's own means,
-    /// for this server, at `now`, and says how.
+    /// Checks that a request comes from the user, by the listener's own means, for this server, and says how.
     ///
     /// # Errors
     ///
     /// Why the request is refused.
-    pub fn check(&self, headers: &HeaderMap, now: Millis) -> Result<Credential, Refusal> {
+    pub fn check(&self, headers: &HeaderMap) -> Result<Credential, Refusal> {
         match self {
             Self::Tailscale { login, .. } => {
                 match single(headers, IDENTITY) {
@@ -166,11 +148,6 @@ impl Access {
                     return Ok(Credential::Cookie);
                 }
                 Err(Refusal::NoSession)
-            },
-            Self::Run { verifier, .. } => {
-                let token = bearer(headers).and_then(|token| std::str::from_utf8(token).ok());
-                let claims = token.and_then(|token| verifier.verify(token, now).ok());
-                claims.map(Credential::Run).ok_or(Refusal::NoToken)
             },
         }
     }
@@ -209,8 +186,6 @@ impl Access {
             Self::Session { port, .. } => Self::local_hosts(*port)
                 .iter()
                 .any(|name| origin.eq_ignore_ascii_case(format!("http://{name}").as_bytes())),
-            // No browser speaks for a run.
-            Self::Run { .. } => false,
         };
         match single(headers, ORIGIN) {
             Some(origin) if allowed(origin) => Ok(()),
@@ -219,8 +194,8 @@ impl Access {
     }
 }
 
-/// How a request showed it comes from the user, or from a run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How a request showed it comes from the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credential {
     /// Tailscale's identity header.
     Identity,
@@ -228,8 +203,6 @@ pub enum Credential {
     Bearer,
     /// A paired browser's cookie.
     Cookie,
-    /// A run's token, in `Authorization`, and what it says.
-    Run(Claims),
 }
 
 /// The cookie a paired browser holds, named for the listener's port: browsers scope cookies by host and not by port, so
@@ -290,20 +263,6 @@ pub enum Refusal {
     NotJson,
     /// A command the server doesn't run.
     NotAllowed,
-    /// No valid run token.
-    NoToken,
-    /// The token's run isn't under way.
-    Inactive,
-    /// A command a run may not send.
-    NotForRuns,
-    /// A run's write without its operation's number.
-    NoOperation,
-    /// A run's write holding a deny-listed term.
-    DenyListed,
-    /// A run's write holding a secret.
-    Leak,
-    /// A run's write that couldn't be scanned.
-    ScanFailed,
 }
 
 impl Refusal {
@@ -316,13 +275,6 @@ impl Refusal {
             Self::WrongOrigin => "wrong-origin",
             Self::NotJson => "not-json",
             Self::NotAllowed => "not-allowed",
-            Self::NoToken => "no-token",
-            Self::Inactive => "inactive",
-            Self::NotForRuns => "not-for-runs",
-            Self::NoOperation => "no-operation",
-            Self::DenyListed => "deny-listed",
-            Self::Leak => "leak",
-            Self::ScanFailed => "scan-failed",
         }
     }
 
@@ -335,13 +287,6 @@ impl Refusal {
             Self::WrongOrigin => "the request comes from another origin",
             Self::NotJson => "the request's body must be application/json",
             Self::NotAllowed => "the server doesn't run this command",
-            Self::NoToken => "the request carries no valid run token",
-            Self::Inactive => "the token's run isn't under way",
-            Self::NotForRuns => "a run may not send this command",
-            Self::NoOperation => "a run's write carries its number in Acyclic-Operation",
-            Self::DenyListed => "the write holds a term the deny-list forbids",
-            Self::Leak => "the write holds what Gitleaks takes for a secret",
-            Self::ScanFailed => "the write couldn't be scanned; try again shortly",
         }
     }
 }
@@ -351,9 +296,7 @@ impl IntoResponse for Refusal {
         let envelope = json!({"ok": false, "error": {"code": self.code(), "message": self.message(), "details": null}});
         match self {
             Self::NotJson => (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(envelope)).into_response(),
-            Self::NoOperation => (StatusCode::BAD_REQUEST, Json(envelope)).into_response(),
-            Self::ScanFailed => (StatusCode::SERVICE_UNAVAILABLE, Json(envelope)).into_response(),
-            Self::NoSession | Self::NoToken => {
+            Self::NoSession => {
                 (StatusCode::UNAUTHORIZED, [(WWW_AUTHENTICATE, "Bearer")], Json(envelope))
                     .into_response()
             },
@@ -395,7 +338,7 @@ enum Use {
 fn classify(command: &Command) -> Use {
     match command {
         Command::Init { .. }
-        | Command::Sync { .. }
+        | Command::Sync
         | Command::Prime
         | Command::Import { .. }
         | Command::Doctor
@@ -507,11 +450,6 @@ struct Listener {
     server: Arc<Server>,
     access: Access,
     spent: session::Spent,
-    /// On a runners' listener, what the server last served each run to read: the run's writes supersede only what
-    /// that held. It is the whole tracker as of the run's last read, not the parts the run looked at, so a write
-    /// supersedes whatever was there then. Kept in memory: a restart forgets them, and a run's writes then keep
-    /// conflicts until it reads again, which loses nothing.
-    views: Mutex<BTreeMap<String, Context>>,
 }
 
 /// The path a pairing link opens.
@@ -534,7 +472,7 @@ async fn guard(
             Err(refusal) => refusal.into_response(),
         };
     }
-    match access.check(request.headers(), acyclic_cli::now(&listener.server.config.env)) {
+    match access.check(request.headers()) {
         Ok(credential) => {
             request.extensions_mut().insert(credential);
             next.run(request).await
@@ -647,9 +585,6 @@ async fn command(
     if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
         return refusal.into_response();
     }
-    if let Credential::Run(claims) = credential {
-        return run_command(&listener, claims, &headers, body).await;
-    }
     let command: Command = match serde_json::from_slice(&body) {
         Ok(command) => command,
         Err(err) => {
@@ -674,185 +609,8 @@ async fn command(
     (status(code), Json(envelope)).into_response()
 }
 
-/// Runs a command from a run: a read as the run, recording what it served, or a write the run may send, scanned and
-/// applied as the run once, under the run's view. Anything else is refused.
-async fn run_command(
-    listener: &Arc<Listener>,
-    claims: Claims,
-    headers: &HeaderMap,
-    body: Bytes,
-) -> Response {
-    let command: Command = match serde_json::from_slice(&body) {
-        Ok(command) => command,
-        Err(err) => {
-            let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
-            return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
-        },
-    };
-    let write = command.run_may_send();
-    if !write && classify(&command) != Use::Read {
-        return Refusal::NotForRuns.into_response();
-    }
-    let seq = single(headers, "acyclic-operation")
-        .and_then(|value| std::str::from_utf8(value).ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|seq| *seq > 0);
-    let seq = match (write, seq) {
-        (true, None) => return Refusal::NoOperation.into_response(),
-        (true, Some(seq)) => Some(seq),
-        (false, _) => None,
-    };
-    let server = Arc::clone(&listener.server);
-    let lister = Arc::clone(listener);
-    let checked = tokio::task::spawn_blocking(move || {
-        let tracker = &lister.server.config.tracker;
-        if !acyclic_cli::run_active(&claims.run, &claims.thread, tracker).unwrap_or(false) {
-            if let Ok(mut views) = lister.views.lock() {
-                views.remove(&claims.run);
-            }
-            return Err(Refusal::Inactive);
-        }
-        if let (Some(_), Access::Run { deny, .. }) = (seq, &lister.access) {
-            let text =
-                serde_json::from_slice(&body).map(|value| stored(&value)).unwrap_or_default();
-            match acyclic_guard::scan_text(&text, "the write", deny) {
-                Ok(report) if !report.findings.is_empty() => return Err(Refusal::DenyListed),
-                Ok(report) if report.leaks => return Err(Refusal::Leak),
-                Ok(_) => {},
-                Err(_) => return Err(Refusal::ScanFailed),
-            }
-        }
-        Ok(claims)
-    })
-    .await;
-    let claims = match checked {
-        Ok(Ok(claims)) => claims,
-        Ok(Err(refusal)) => return refusal.into_response(),
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-    let Some(seq) = seq else { return run_read(listener, claims, command).await };
-    let turn = match server.turn().await {
-        Ok(turn) => turn,
-        Err(err) => return (status(err.exit), Json(err.envelope())).into_response(),
-    };
-    let lister = Arc::clone(listener);
-    let applied = tokio::task::spawn_blocking(move || {
-        let _turn = turn;
-        let seen = lister.views.lock().ok().and_then(|views| views.get(&claims.run).cloned());
-        let operation = Operation {
-            run: claims.run,
-            thread: claims.thread,
-            seq,
-            seen: seen.unwrap_or_default(),
-        };
-        let config = &lister.server.config;
-        acyclic_cli::apply(operation, command, config.tracker.clone(), &config.env)
-    })
-    .await;
-    match applied {
-        Ok(Ok(Applied::Ran(code, envelope))) => {
-            if code == exit::OK {
-                server.push.look();
-            }
-            (status(code), Json(envelope)).into_response()
-        },
-        Ok(Err((code, envelope))) => (status(code), Json(envelope)).into_response(),
-        Ok(Ok(Applied::Duplicate(outcome))) => {
-            let data = json!({"duplicate": true, "seq": seq, "outcome": outcome});
-            (StatusCode::OK, Json(json!({"ok": true, "data": data}))).into_response()
-        },
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-/// The text a write would store: every string in the request and every key, decoded and one to a line. Scanning the
-/// request as sent would miss a term written with JSON's escapes, which decoding turns back into the term.
-fn stored(value: &Value) -> String {
-    fn collect(value: &Value, text: &mut String) {
-        match value {
-            Value::String(string) => {
-                text.push_str(string);
-                text.push('\n');
-            },
-            Value::Array(values) => values.iter().for_each(|value| collect(value, text)),
-            Value::Object(map) => {
-                for (key, value) in map {
-                    text.push_str(key);
-                    text.push('\n');
-                    collect(value, text);
-                }
-            },
-            Value::Null | Value::Bool(_) | Value::Number(_) => {},
-        }
-    }
-    let mut text = String::new();
-    collect(value, &mut text);
-    text
-}
-
-/// Runs a run's read as the run, and records the tracker as it stood before the read as what the run has seen: never
-/// more than the read showed.
-async fn run_read(listener: &Arc<Listener>, claims: Claims, command: Command) -> Response {
-    let lister = Arc::clone(listener);
-    let read = tokio::task::spawn_blocking(move || {
-        let config = &lister.server.config;
-        let opened = acyclic_core::store::Tracker::open(&config.tracker);
-        let context = opened
-            .ok()
-            .and_then(|(tracker, _)| tracker.load().ok())
-            .map(|(_, state)| state.context);
-        let actor = format!("run/{}", claims.run);
-        let (code, envelope) =
-            acyclic_cli::call_as(command, config.tracker.clone(), &actor, &config.env);
-        if code == exit::OK
-            && let (Some(context), Ok(mut views)) = (context, lister.views.lock())
-        {
-            views.insert(claims.run, context);
-        }
-        (code, envelope)
-    })
-    .await;
-    match read {
-        Ok((code, envelope)) => (status(code), Json(envelope)).into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-/// What a run's client needs to carry on: its run, its thread, and the latest of its operations applied.
-async fn run_status(
-    State(listener): State<Arc<Listener>>,
-    Extension(credential): Extension<Credential>,
-) -> Response {
-    let Credential::Run(claims) = credential else { return Refusal::NotAllowed.into_response() };
-    let lister = Arc::clone(&listener);
-    let found = tokio::task::spawn_blocking(move || {
-        let tracker = &lister.server.config.tracker;
-        if !acyclic_cli::run_active(&claims.run, &claims.thread, tracker).unwrap_or(false) {
-            return Refusal::Inactive.into_response();
-        }
-        match acyclic_cli::applied(&claims.run, tracker) {
-            Ok(applied) => {
-                let data = json!({"run": claims.run, "thread": claims.thread, "applied": applied});
-                Json(json!({"ok": true, "data": data})).into_response()
-            },
-            Err((code, envelope)) => (status(code), Json(envelope)).into_response(),
-        }
-    })
-    .await;
-    match found {
-        Ok(response) => response,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
 /// The server's VAPID public key, which a device subscribes with.
-async fn push_key(
-    State(listener): State<Arc<Listener>>,
-    Extension(credential): Extension<Credential>,
-) -> Response {
-    if let Credential::Run(_) = credential {
-        return Refusal::NotForRuns.into_response();
-    }
+async fn push_key(State(listener): State<Arc<Listener>>) -> Response {
     pushed(listener.server.push.public_key().map(|key| json!({"key": key})))
 }
 
@@ -863,7 +621,7 @@ async fn push_subscribe(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = push_allowed(&listener, &credential, &headers) {
+    if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
         return refusal.into_response();
     }
     match serde_json::from_slice::<push::Subscription>(&body) {
@@ -881,7 +639,7 @@ async fn push_unsubscribe(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = push_allowed(&listener, &credential, &headers) {
+    if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
         return refusal.into_response();
     }
     let endpoint = serde_json::from_slice::<Value>(&body)
@@ -891,18 +649,6 @@ async fn push_unsubscribe(
         Some(endpoint) => pushed(listener.server.push.unsubscribe(&endpoint).map(|()| Value::Null)),
         None => pushed(Err(push::Refused("give the endpoint to forget".into()))),
     }
-}
-
-/// Lets the user's browser change the devices pushed to, from the server's own origin; never a run.
-fn push_allowed(
-    listener: &Listener,
-    credential: &Credential,
-    headers: &HeaderMap,
-) -> Result<(), Refusal> {
-    if let Credential::Run(_) = credential {
-        return Err(Refusal::NotForRuns);
-    }
-    listener.access.same_origin(headers, credential)
 }
 
 /// The envelope for a push request's outcome.
@@ -935,26 +681,14 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
     // The API's answers are compressed when they're worth it: a whole tracker's `show` is megabytes of JSON, and a
     // phone may reach the server through a relay. None of them holds a secret an attacker could guess at through
     // their compressed size: the session travels only in the request. The app's files are compressed already.
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/api/command", post(command))
-        .route("/api/run", get(run_status))
         .route("/api/push/key", get(push_key))
         .route("/api/push/subscribe", post(push_subscribe))
         .route("/api/push/unsubscribe", post(push_unsubscribe))
-        .layer(CompressionLayer::new().compress_when(SizeAbove::new(1024)));
-    // Runs have no use for the app, and get none.
-    if !matches!(access, Access::Run { .. }) {
-        router = router.fallback(files);
-    }
-    if let Access::Run { code: Some(_), .. } = &access {
-        router = router.merge(code::routes());
-    }
-    let listener = Arc::new(Listener {
-        server,
-        access,
-        spent: session::Spent::default(),
-        views: Mutex::default(),
-    });
+        .layer(CompressionLayer::new().compress_when(SizeAbove::new(1024)))
+        .fallback(files);
+    let listener = Arc::new(Listener { server, access, spent: session::Spent::default() });
     router
         .layer(middleware::from_fn_with_state(listener.clone(), guard))
         .layer(middleware::map_response(unframed))
@@ -1064,13 +798,6 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
             ),
         });
     }
-    if let Some(port) = options.runners {
-        extra.push(Extra::Tcp(
-            SocketAddr::from(([127, 0, 0, 1], port)),
-            runners(home.as_ref(), env)?,
-            None,
-        ));
-    }
     let subject = match &tailscale {
         Some(Access::Tailscale { origin, .. }) => Some(origin.clone()),
         _ => None,
@@ -1080,7 +807,6 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
     let link = |port| link(port, &token, env);
     let socket = options.socket.clone();
-    let runners = options.runners.is_some();
     run(config, options.sync_every, bind, extra, |address, bound| {
         let mut started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
         let mut bound = bound.into_iter();
@@ -1096,41 +822,8 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
                 (None, None) => unreachable!("a TCP listener has an address"),
             };
         }
-        if let (true, Some(at)) = (runners, bound.next().flatten()) {
-            started["runners"] = json!(at.to_string());
-        }
         Ok((Access::Session { port: address.port(), token: token.clone() }, started))
     })
-}
-
-/// The runners' listener's access: the operator's public key and the deny-list, both from the home directory `home`,
-/// and the mirrors of code repositories. The key is read once, so a new operator key needs the server restarted.
-fn runners(home: &std::path::Path, env: &Env) -> Result<Access, CliError> {
-    let verifier = Verifier::open(home).map_err(|err| {
-        CliError::new(
-            "no-operator",
-            exit::CONFIG,
-            format!("{err}: start the operator first, which writes its public key"),
-        )
-    })?;
-    let deny = DenyList::load(&acyclic_guard::deny_list::path_under(home)).map_err(|err| {
-        CliError::new(
-            "no-deny-list",
-            exit::CONFIG,
-            format!("the runners' listener needs the deny-list: {err}"),
-        )
-    })?;
-    let executable = std::env::current_exe()
-        .map_err(|err| failed("finding the acyclic executable for the mirrors' hook", err))?;
-    let settings = code::Settings {
-        env: env.clone(),
-        executable,
-        deny: acyclic_guard::deny_list::path_under(home),
-    };
-    let code = code::Code::new(settings).map_err(|err| {
-        CliError::new("no-mirrors", exit::CONFIG, format!("the mirrors can't be kept: {err}"))
-    })?;
-    Ok(Access::Run { verifier, deny, code: Some(Arc::new(code)) })
 }
 
 /// A listener besides the main one.
@@ -1174,10 +867,6 @@ fn run(
                     });
                 },
                 Extra::Tcp(at, access, secret) => {
-                    if let (Access::Run { code: Some(code), .. }, true) = (&access, sync_every > 0)
-                    {
-                        tokio::spawn(refresh(Arc::clone(code), server.config.tracker.clone()));
-                    }
                     let tcp = tokio::net::TcpListener::bind(at)
                         .await
                         .map_err(|err| failed(&format!("listening on {at}"), err))?;
@@ -1301,8 +990,7 @@ fn bind_socket(path: &std::path::Path) -> Result<tokio::net::UnixListener, CliEr
     Ok(listener)
 }
 
-/// Syncs the clone with its `origin` every `every`, fetching every writer's usage records too, each sync after the last
-/// has finished, until the server stops. A failed sync prints its envelope to standard error and the next one tries
+/// Syncs the clone with its `origin` every `every`, each sync after the last has finished, until the server stops. A failed sync prints its envelope to standard error and the next one tries
 /// again; a clone without `origin` stops the loop after saying so.
 async fn sync(server: Arc<Server>, every: Duration) {
     let mut ticks = tokio::time::interval(every);
@@ -1311,7 +999,7 @@ async fn sync(server: Arc<Server>, every: Duration) {
         ticks.tick().await;
         // A sync waits as long as it must: it is the server's own, and the next tick would only queue behind it.
         let turn = server.turns.clone().lock_owned().await;
-        let (code, envelope) = server.call(Command::Sync { with_usage: true }, Some(turn)).await;
+        let (code, envelope) = server.call(Command::Sync, Some(turn)).await;
         if code == exit::OK {
             server.push.look();
             continue;
@@ -1321,19 +1009,6 @@ async fn sync(server: Arc<Server>, every: Duration) {
             return;
         }
         eprintln!("{envelope}");
-    }
-}
-
-/// How often the mirrors are fetched besides runs' fetches, so readiness sees what was merged.
-const REFRESH: Duration = Duration::from_secs(300);
-
-/// Fetches the mirrors every [`REFRESH`].
-async fn refresh(code: Arc<code::Code>, tracker: PathBuf) {
-    let mut ticks = tokio::time::interval(REFRESH);
-    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        ticks.tick().await;
-        code.refresh_all(&tracker).await;
     }
 }
 
