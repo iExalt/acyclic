@@ -55,6 +55,8 @@ export interface NeedView {
   actions: Action[];
   /** Why there is no action here, or how to settle it elsewhere. */
   note: string | null;
+  /** The keys of the entries it stands for besides its own, where several are shown as one (`together`). */
+  merged?: string[];
 }
 
 interface Row {
@@ -388,14 +390,47 @@ function viewOf(
 }
 
 /**
+ * The entries with the merges that can't be confirmed for one cause in one repository as one, at the first's place:
+ * eight entries each repeating the same why read as noise, and one fix settles them all. Its text counts them, its
+ * rows list the first few, and its key is the first's, the others' kept as `merged`.
+ */
+export function together(views: readonly NeedView[]): NeedView[] {
+  const out: NeedView[] = [];
+  const at = new Map<string, number>();
+  for (const view of views) {
+    const repository = view.key.startsWith("unverified:") ? view.key.slice(view.key.lastIndexOf(":") + 1) : null;
+    // One with no item names nothing to count, so it stands alone.
+    const cause = repository === null || view.items.length === 0 ? null : `${repository}\n${view.note ?? ""}`;
+    const first = cause === null ? undefined : at.get(cause);
+    const was = first === undefined ? undefined : out[first];
+    if (cause === null || first === undefined || was === undefined) {
+      if (cause !== null) at.set(cause, out.length);
+      out.push(view);
+      continue;
+    }
+    const items = [...was.items, ...view.items];
+    const all = items.length + was.more;
+    out[first] = {
+      ...was,
+      text: `Can't confirm ${all} items' merges into ${repository}`,
+      detail: null,
+      items: items.slice(0, LISTED),
+      more: all - Math.min(items.length, LISTED),
+      merged: [...(was.merged ?? []), view.key],
+    };
+  }
+  return out;
+}
+
+/**
  * Why a done item's merge couldn't be confirmed, and what fixes it: acyclic looks for the item's commit on the
  * repository's default branch, in this machine's clone of it.
  */
 function unverifiedWhy(repository: string, reason: string): string {
   if (reason === "no clone of the repository is mapped")
-    return `This machine has no clone of ${repository} to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml`;
+    return `This machine has no clone of ${repository} to look for merged commits in: add the clone's path to ~/.config/acyclic/clones.toml`;
   if (reason === "not a commit id") return "Its merge evidence isn't a commit id: record the merged commit on the item";
-  return `Looking for its commit in this machine's clone of ${repository} failed (${reason}): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml`;
+  return `Looking for merged commits in this machine's clone of ${repository} failed (${reason}): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml`;
 }
 
 function shown(value: unknown): string {

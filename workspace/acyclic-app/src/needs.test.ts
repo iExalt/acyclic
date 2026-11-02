@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
 import { approveCommand, dropMemberCommand, keepCommand, keepMemberCommand } from "./forms";
 import { type Line, linesOf } from "./lines";
-import { awaitingApproval, countText, groupOf, needView, threadLabel } from "./needs";
+import { awaitingApproval, countText, groupOf, needView, threadLabel, together } from "./needs";
 import { PALETTES } from "./palette";
 
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
@@ -96,11 +96,32 @@ describe("needView", () => {
       text: "Can't confirm its merge into app",
       detail: "Move in",
       items: ["i1"],
-      note: "This machine has no clone of app to look for its commit in: add the clone's path to ~/.config/acyclic/clones.toml",
+      note: "This machine has no clone of app to look for merged commits in: add the clone's path to ~/.config/acyclic/clones.toml",
     });
     expect(unverified("the clone has no main branch").note).toBe(
-      "Looking for its commit in this machine's clone of app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
+      "Looking for merged commits in this machine's clone of app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
     );
+  });
+
+  it("puts the merges one cause leaves unconfirmed in one repository in one entry, where the first was", () => {
+    const unverified = (id: string, repository: string, reason: string) =>
+      needView({ kind: "unverified", item: { id, title: id }, repository, reason }, none);
+    const views = [
+      unverified("i1", "app", "the clone has no main branch"),
+      unverified("i2", "cli", "the clone has no main branch"),
+      ...["i3", "i4", "i5", "i6", "i7", "i8"].map((id) => unverified(id, "app", "the clone has no main branch")),
+      unverified("i9", "app", "not a commit id"),
+    ];
+    const shown = together(views);
+    expect(shown[0]?.merged).toEqual(["i3", "i4", "i5", "i6", "i7", "i8"].map((id) => `unverified:${id}:app`));
+    // One with no item names nothing to count, so two stay two.
+    const bare = needView({ kind: "unverified", item: null, repository: "app", reason: "x" }, none);
+    expect(together([bare, bare])).toHaveLength(2);
+    expect(shown.map((view) => [view.key, view.text, view.items.length, view.more])).toEqual([
+      ["unverified:i1:app", "Can't confirm 7 items' merges into app", 5, 2],
+      ["unverified:i2:cli", "Can't confirm its merge into cli", 1, 0],
+      ["unverified:i9:app", "Can't confirm its merge into app", 1, 0],
+    ]);
   });
 
   it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {

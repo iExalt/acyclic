@@ -7,7 +7,7 @@ import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
-import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
+import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel, together } from "./needs";
 import { Prose } from "./Prose";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
@@ -57,17 +57,26 @@ export function NeedsList({
   at = null,
   left,
 }: NeedsListProps) {
-  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
-  // Filters for the groups present, only when there are two or more to choose between.
+  const each = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
+  // Same-cause entries as one, which keeps the first's key and so its group.
+  const groupAt = new Map(each.map((entry) => [entry.view.key, entry.group]));
+  const all = together(each.map((entry) => entry.view)).map((view) => ({
+    group: groupAt.get(view.key) ?? groupOf(""),
+    view,
+  }));
+  // Filters for the groups present, only when there are two or more to choose between. Each counts what needs the
+  // user, as the tab's count does, an entry standing for several counting each.
   const groups = GROUPS.map((one) => ({
     ...one,
-    count: all.filter((entry) => entry.group === one.group).length,
+    count: each.filter((entry) => entry.group === one.group).length,
   })).filter((one) => one.count > 0);
   // Read while rendering, before the effect below takes the rest of where the view was left and clears it.
   const [filter, setFilter] = useState<NeedGroup | null>(() => left.current?.filter ?? null);
   // A filter whose entries have all been settled shows everything again.
   const shown = groups.some((one) => one.group === filter) ? filter : null;
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
+  // The entry asked for, or the one it was shown as part of.
+  const target = at === null ? null : (all.find(({ view }) => view.merged?.includes(at))?.view.key ?? at);
   const page = useRef<HTMLElement>(null);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
   // down it; with nothing left to settle, to the page.
@@ -92,11 +101,11 @@ export function NeedsList({
       (entry?.querySelector<HTMLElement>(was.control) ?? entry)?.focus({ preventScroll: true });
       return;
     }
-    if (at === null) return;
-    const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(at)}"]`);
+    if (target === null) return;
+    const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(target)}"]`);
     entry?.scrollIntoView({ block: "start" });
     entry?.focus({ preventScroll: true });
-  }, [at, left]);
+  }, [target, left]);
   /** Keeps where the view is, for the item or thread an entry opens, then opens it. */
   const leave = (entry: string, control: string, open: () => void) => () => {
     left.current = { filter: shown, top: page.current?.scrollTop ?? 0, entry, control };
@@ -109,7 +118,7 @@ export function NeedsList({
       </h1>
       {groups.length < 2 ? null : (
         <fieldset className="filters" aria-label="Show">
-          {[{ group: null, label: "All", count: all.length }, ...groups].map((one) => (
+          {[{ group: null, label: "All", count: each.length }, ...groups].map((one) => (
             <button
               type="button"
               key={one.label}
@@ -129,7 +138,7 @@ export function NeedsList({
           <li
             key={view.key}
             data-need={view.key}
-            data-at={view.key === at || undefined}
+            data-at={view.key === target || undefined}
             // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
             // nothing; Tab reaches its actions.
             data-row

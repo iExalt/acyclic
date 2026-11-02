@@ -400,7 +400,8 @@ export function App() {
    * it, framed, as the Overview's rows do.
    */
   const pickFromOutline = (id: string) => {
-    if (thread === id && view === "map") setThread(null);
+    // With one of its items open over it, the row goes back to the thread, framed, rather than unpicking it.
+    if (thread === id && view === "map" && selected === null) setThread(null);
     else toThread(id);
   };
   /**
@@ -961,6 +962,8 @@ export function App() {
     if (saved && from !== "map" && viewNow.current === from) {
       setCameFrom({ view: from, by: "item" });
       setView("map");
+      // As one picked: on a Map zoomed out past reading, it comes in at a zoom its title reads at.
+      setFocus((was) => ({ id: item.item, pin: null, n: (was?.n ?? 0) + 1 }));
     }
     return saved;
   };
