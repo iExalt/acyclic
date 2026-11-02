@@ -1951,7 +1951,8 @@ def failed_add_journey(page, errors, name, failures):
             else route.fallback()
         ),
     )
-    # Added from the Overview, so the add goes to the Map to show where it landed.
+    # Added from the Overview, so the add goes to the Map to show where it landed: from a Map zoomed far out.
+    page.get_by_test_id("map").evaluate("m => m.cy.zoom(0.3)")
     page.locator("[data-view=overview]").click()
     page.locator("[data-action=add-top]").click()
     form = page.get_by_test_id("add-form")
@@ -1961,10 +1962,13 @@ def failed_add_journey(page, errors, name, failures):
         timeout=10_000
     )
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
-    if not page.locator("[data-view=map][aria-current=page]").count() or not in_open_view(
-        page, "saved-unread"
+    # In view, and at a zoom its title reads at, however far out the Map was left.
+    if (
+        not page.locator("[data-view=map][aria-current=page]").count()
+        or not in_open_view(page, "saved-unread")
+        or page.get_by_test_id("map").evaluate("m => m.cy.zoom()") < 0.85
     ):
-        failures.append(f"{name}: an item added from the Overview wasn't shown on the Map")
+        failures.append(f"{name}: an item added from the Overview wasn't shown on the Map, readable")
     page.unroute("**/api/command")
     form = add(
         "Refused after",

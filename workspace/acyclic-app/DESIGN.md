@@ -182,7 +182,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   its button and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
   (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
   how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
-  words, never a command to type, and names its item once, as its row. A hairline between entries; the filters are tabs,
+  words, never a command to type, and names its item once, as its row. Merges unconfirmed for one cause in one
+  repository are one entry, saying how many, its rows the first five, as the same why eight times read as noise; the
+  filters still count each. A hairline between entries; the filters are tabs,
   the one shown filled, named as nouns (Approvals, Questions, Problems), as "Approve 20" over the entries' Approve
   buttons read as one more of them.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
@@ -212,7 +214,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
   the Map.
 - **A new item shows where it landed.** Added from another view, it opens on the Map once saved, selected and in view,
-  and closing it goes back (the user's ask); a refused add reopens its form where the user was.
+  at a zoom its title reads at, and closing it goes back (the user's ask); a refused add reopens its form where the
+  user was.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`, and
   `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;
@@ -253,7 +256,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
   focused and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the Map,
+- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar (the picked thread's too, while one
+  of its items is open over it), or a link to a thread on the Map,
   goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
   further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
   known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,

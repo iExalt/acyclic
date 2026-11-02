@@ -7,7 +7,7 @@ import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
-import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel } from "./needs";
+import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel, together } from "./needs";
 import { Prose } from "./Prose";
 
 /** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
@@ -57,11 +57,18 @@ export function NeedsList({
   at = null,
   left,
 }: NeedsListProps) {
-  const all = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
-  // Filters for the groups present, only when there are two or more to choose between.
+  const each = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
+  // Same-cause entries as one, which keeps the first's key and so its group.
+  const groupAt = new Map(each.map((entry) => [entry.view.key, entry.group]));
+  const all = together(each.map((entry) => entry.view)).map((view) => ({
+    group: groupAt.get(view.key) ?? groupOf(""),
+    view,
+  }));
+  // Filters for the groups present, only when there are two or more to choose between. Each counts what needs the
+  // user, as the tab's count does, an entry standing for several counting each.
   const groups = GROUPS.map((one) => ({
     ...one,
-    count: all.filter((entry) => entry.group === one.group).length,
+    count: each.filter((entry) => entry.group === one.group).length,
   })).filter((one) => one.count > 0);
   // Read while rendering, before the effect below takes the rest of where the view was left and clears it.
   const [filter, setFilter] = useState<NeedGroup | null>(() => left.current?.filter ?? null);
@@ -109,7 +116,7 @@ export function NeedsList({
       </h1>
       {groups.length < 2 ? null : (
         <fieldset className="filters" aria-label="Show">
-          {[{ group: null, label: "All", count: all.length }, ...groups].map((one) => (
+          {[{ group: null, label: "All", count: each.length }, ...groups].map((one) => (
             <button
               type="button"
               key={one.label}
