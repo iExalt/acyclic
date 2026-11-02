@@ -9,6 +9,7 @@ import {
   type Mode,
   moveCommand,
   pick,
+  redraft,
   told,
   unanswered,
   unlinkCommand,
@@ -172,5 +173,15 @@ describe("a write drawn before the server answers", () => {
   it("knows only a missing or foreign answer leaves the write's outcome unknown", () => {
     expect(["network", "http"].map(unanswered)).toEqual([true, true]);
     expect(["busy", "already-exists", "invalid"].map(unanswered)).toEqual([false, false, false]);
+  });
+});
+
+describe("redraft", () => {
+  it("keeps a failed add's id, unless the tracker retired it as deleted", () => {
+    const item = { id: "01900000-0000-7000-8000-000000000001", title: "Sow", parent: null, thread: "t" };
+    expect(redraft(item, "network")).toBe(item);
+    const again = redraft(item, "deleted");
+    expect(again).toMatchObject({ title: "Sow", parent: null, thread: "t" });
+    expect(again.id).not.toBe(item.id);
   });
 });

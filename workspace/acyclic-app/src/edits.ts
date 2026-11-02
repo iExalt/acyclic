@@ -4,6 +4,7 @@
 import type { Command, Item } from "./api";
 import { changes, draftOf, type ItemDraft } from "./forms";
 import type { Model } from "./map/model";
+import { uuidv7 } from "./uuid";
 
 /** A new item, under the id the app made for it. A thread or parent left out is none. */
 export interface NewItem {
@@ -17,6 +18,14 @@ export function addCommand({ id, title, parent, thread }: NewItem): Command {
   return {
     item: { add: { id, title, ...(parent === null ? {} : { parent }), ...(thread === null ? {} : { thread }) } },
   };
+}
+
+/**
+ * The draft a failed add reopens with. It keeps its id, since an add that went unanswered may have been saved and
+ * sending it again is then the same add; but an id refused as `deleted` is retired for good, so it gets a new one.
+ */
+export function redraft(item: NewItem, code: string): NewItem {
+  return code === "deleted" ? { ...item, id: uuidv7() } : item;
 }
 
 /** Moves an item under a new parent, or to the top level. */

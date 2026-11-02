@@ -118,12 +118,15 @@ fn reading_refuses_newer_formats_and_bad_files() {
     let refused = State::from_files(&newer).unwrap_err();
     assert_eq!(refused, Error::Version(u64::from(FORMAT_VERSION) + 1));
     assert!(refused.to_string().contains("needs a later acyclic"), "{refused}");
-    // An earlier version, such as 2's slug ids, is migrated rather than read.
+    // An earlier version, such as 2's slug ids, isn't read.
     let mut earlier = files.clone();
     let previous = format!("\"format_version\": {}", FORMAT_VERSION - 1);
     earlier.insert(HEADER_PATH.to_owned(), files[HEADER_PATH].replace(&version, &previous));
     let refused = State::from_files(&earlier).unwrap_err();
-    assert!(refused.to_string().contains("must be migrated"), "{refused}");
+    assert!(
+        refused.to_string().contains("is read by that version, or rebuilt with `acyclic import`"),
+        "{refused}"
+    );
 
     let mut moved = files.clone();
     let text = moved.remove("item/27/a1.json").unwrap();

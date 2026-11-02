@@ -381,7 +381,13 @@ fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
     // Every command, doctor too, says what reads it.
     for line in ["item list", "doctor"] {
         let error = refused(line);
-        assert!(error["message"].as_str().unwrap().contains("must be migrated"), "{line}: {error}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("is read by that version, or rebuilt with `acyclic import`"),
+            "{line}: {error}"
+        );
         assert_eq!(
             error["details"]["hint"],
             "written by an earlier acyclic: read it with that version, or rebuild it with `acyclic import` from a \
