@@ -16,23 +16,11 @@ use crate::error::{CliError, exit};
 /// The actor when none is declared: an agent, never the user.
 pub const UNDECLARED: &str = "agent/undeclared";
 
-/// How to print: `--output`, else `ACYCLIC_OUTPUT`, else pretty for a person at a terminal and JSON for whatever
-/// reads a pipe, as an agent's tool does.
-pub fn output(cli: &Cli, env: &Env) -> Result<Format, CliError> {
-    if let Some(format) = cli.output {
-        return Ok(format);
-    }
-    match env.var("ACYCLIC_OUTPUT") {
-        Some("json") => Ok(Format::Json),
-        Some("pretty") => Ok(Format::Pretty),
-        Some(other) => Err(CliError::new(
-            "usage",
-            exit::USAGE,
-            format!("ACYCLIC_OUTPUT is {other}: set it to json or pretty, or unset it"),
-        )),
-        None if env.terminal.is_some() => Ok(Format::Pretty),
-        None => Ok(Format::Json),
-    }
+/// How to print: `--output`, else pretty for a person at a terminal and JSON for whatever reads a pipe, as an agent's
+/// tool does.
+#[must_use]
+pub fn output(cli: &Cli, env: &Env) -> Format {
+    cli.output.unwrap_or(if env.terminal.is_some() { Format::Pretty } else { Format::Json })
 }
 
 /// The actor: `--as-user` or `--actor`, else `ACYCLIC_ACTOR`, else [`UNDECLARED`]. The environment may not name the
@@ -82,28 +70,6 @@ pub fn now(env: &Env) -> Millis {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| Millis::try_from(d.as_millis()).unwrap_or(Millis::MAX))
-}
-
-/// Opens a file in the default application without waiting for it. Debug builds honour `ACYCLIC_OPENER`, a program
-/// run in its place, so tests never open a browser; release builds never do.
-pub fn open(env: &Env, path: &Path) -> std::io::Result<()> {
-    #[cfg(debug_assertions)]
-    if let Some(opener) = env.var("ACYCLIC_OPENER") {
-        return spawn(opener, path);
-    }
-    let _ = env;
-    spawn(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }, path)
-}
-
-fn spawn(program: &str, path: &Path) -> std::io::Result<()> {
-    use std::process::{Command, Stdio};
-    Command::new(program)
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(drop)
 }
 
 fn home(env: &Env) -> Option<PathBuf> {

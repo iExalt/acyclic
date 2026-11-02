@@ -45,9 +45,9 @@ fn with_thread(name: &str, id: &str) -> Replica {
     r
 }
 
-/// Gives `r` an older thread whose id ends in 32 too, which `thread-pi-32` clashes with.
+/// Gives `r` another replica's thread whose id ends in 32 too, which `thread-pi-32` clashes with.
 fn partnered(mut r: Replica) -> Replica {
-    put(&mut r, &key("thread-32"), thread::TITLE, json!("Partner"));
+    put(&mut r, &key("thread-x-32"), thread::TITLE, json!("Partner"));
     r
 }
 
@@ -129,7 +129,7 @@ fn clash_entries(r: &Replica) -> Vec<Entry> {
 fn threads_ending_in_one_number_clash_until_a_fresh_one_is_renumbered() {
     let mut mac = with_thread("mac", "thread-mac-32");
     let pi = with_thread("pi", "thread-pi-32");
-    put(&mut mac, &key("thread-27"), thread::TITLE, json!("Older"));
+    put(&mut mac, &key("thread-y-27"), thread::TITLE, json!("Older"));
     put(&mut mac, &key("thread-x-27"), thread::TITLE, json!("Imported"));
     mac.join(pi.state()).unwrap();
     let found = clashes(mac.state(), &Model::read(mac.state()).unwrap(), NOW).unwrap();
@@ -139,7 +139,7 @@ fn threads_ending_in_one_number_clash_until_a_fresh_one_is_renumbered() {
     );
     assert_eq!(clash_entries(&mac).len(), 2);
     // A clash nothing can resolve stays out of needs, though `clashes` still reports it.
-    for thread in ["thread-27", "thread-x-27"] {
+    for thread in ["thread-y-27", "thread-x-27"] {
         put(&mut mac, &Key::new(kind::QUESTION, thread).unwrap(), question::THREAD, json!(thread));
     }
     let entries = clash_entries(&mac);

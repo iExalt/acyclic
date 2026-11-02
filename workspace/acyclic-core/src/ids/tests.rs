@@ -32,7 +32,8 @@ fn holding(items: &[&str], threads: &[&str]) -> Replica {
 #[test]
 fn numbers_end_the_trackers_own_ids_only() {
     let cases = [
-        ("thread-27", Some(27)),
+        ("thread-27", None),
+        ("thread--27", None),
         ("thread-pi-40", Some(40)),
         ("thread-mac-3fa9c1-32", Some(32)),
         ("thread-", None),
@@ -58,9 +59,11 @@ fn numbers_end_the_trackers_own_ids_only() {
 fn the_next_id_follows_the_highest_number_of_its_kind_wherever_it_came_from() {
     let mac = ReplicaId::new("mac").unwrap();
     assert_eq!(next(&State::new(), "item", &mac), "item-mac-1");
-    // Older ids, other replicas' and deleted ones count; slugs and other kinds don't.
-    let mut r =
-        holding(&["side-5", "spike-2026", "item-pi-7", "item-mac-9", "thread-80"], &["thread-27"]);
+    // Other replicas' and deleted ids count; slugs, ids without a replica and other kinds don't.
+    let mut r = holding(
+        &["side-5", "item-2026", "item-pi-7", "item-mac-9", "thread-mac-80"],
+        &["thread-mac-27"],
+    );
     assert_eq!(next(r.state(), "item", &mac), "item-mac-10");
     delete_item(&mut r, "item-mac-9", user()).unwrap();
     assert_eq!(next(r.state(), "item", &mac), "item-mac-10", "a deleted id is never reused");

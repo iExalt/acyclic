@@ -143,8 +143,7 @@ impl Access {
                 }
                 let browser = token.browser();
                 let own = cookie(*port);
-                let names = [own.as_str(), SHARED_COOKIE];
-                if cookies(headers, &names).any(|value| session::equal(value, browser.as_bytes())) {
+                if cookies(headers, &own).any(|value| session::equal(value, browser.as_bytes())) {
                     return Ok(Credential::Cookie);
                 }
                 Err(Refusal::NoSession)
@@ -211,18 +210,14 @@ fn cookie(port: u16) -> String {
     format!("acyclic-up-{port}")
 }
 
-/// The name every server's cookie had before it carried the port. It is still read, so a browser paired before then
-/// stays paired; another server's cookie of this name can only fail to match, so it does no harm.
-const SHARED_COOKIE: &str = "acyclic-up";
-
-/// The values of every cookie in the request with one of `names`; each is tried.
-fn cookies<'a>(headers: &'a HeaderMap, names: &'a [&str]) -> impl Iterator<Item = &'a [u8]> {
+/// The values of every cookie in the request named `name`; each is tried.
+fn cookies<'a>(headers: &'a HeaderMap, name: &'a str) -> impl Iterator<Item = &'a [u8]> {
     headers.get_all(COOKIE_HEADER).into_iter().flat_map(move |value| {
         value.as_bytes().split(|byte| *byte == b';').filter_map(move |pair| {
-            let (name, value) = pair
+            let (found, value) = pair
                 .trim_ascii()
                 .split_at(pair.trim_ascii().iter().position(|byte| *byte == b'=')?);
-            names.iter().any(|one| name == one.as_bytes()).then_some(&value[1..])
+            (found == name.as_bytes()).then_some(&value[1..])
         })
     })
 }
@@ -342,7 +337,6 @@ fn classify(command: &Command) -> Use {
         | Command::Prime
         | Command::Import { .. }
         | Command::Doctor
-        | Command::Graph { .. }
         | Command::Serve(_)
         | Command::Up(_)
         | Command::Completions { .. } => Use::Refused,
@@ -554,8 +548,7 @@ fn pair(
             );
             // Home, or the address the browser opened before it paired: only a query, so it stays on this server.
             let name = landing(port);
-            let names = [name.as_str()];
-            let kept = cookies(headers, &names)
+            let kept = cookies(headers, &name)
                 .find(|value| landable(value))
                 .and_then(|value| str::from_utf8(value).ok());
             let home = kept.map_or_else(|| "/".to_owned(), |query| format!("/?{query}"));

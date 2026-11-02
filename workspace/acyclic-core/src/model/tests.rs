@@ -146,32 +146,22 @@ fn ordering_links_never_close_a_cycle_locally() {
 }
 
 #[test]
-fn a_stored_after_link_reads_as_relates_once_orders_nothing_and_is_removed_as_relates() {
+fn a_relates_link_orders_nothing_and_is_removed_once() {
     let mut r = replica("a");
     items(&mut r, &["a", "b"]);
-    assert_eq!(link(&mut r, "a", "b", LinkKind::After, by(2)), Err(WriteError::FollowsRetired));
-    store_after_link(&mut r, "a", "b", by(2));
-    let relates = Link { from: "a".into(), to: "b".into(), kind: LinkKind::Relates };
-    assert_eq!(model(&r).links, std::slice::from_ref(&relates));
-    // Alongside a relates link between the same items, it is still one link.
-    link(&mut r, "a", "b", LinkKind::Relates, by(3)).unwrap();
-    assert_eq!(model(&r).links, [relates]);
-    // It orders nothing: the reverse waits-for closes no cycle, and the thread has two heads.
-    link(&mut r, "b", "a", LinkKind::Blocks, by(4)).unwrap();
+    link(&mut r, "a", "b", LinkKind::Relates, by(2)).unwrap();
+    // The reverse waits-for closes no cycle, and the thread has two heads.
+    link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
     assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
-    unlink(&mut r, "b", "a", LinkKind::Blocks, by(5)).unwrap();
+    unlink(&mut r, "b", "a", LinkKind::Blocks, by(4)).unwrap();
     for id in ["a", "b"] {
-        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
+        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(4)).unwrap();
     }
     assert_eq!(model(&r).heads("t"), ["a", "b"]);
-    // Removing the relates link removes both, and removing it again writes nothing.
-    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(6)), Ok(true));
+    // Removing it again writes nothing.
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(5)), Ok(true));
     assert_eq!(model(&r).links, []);
-    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(7)), Ok(false));
-    // An after link stored alone goes the same way.
-    store_after_link(&mut r, "b", "a", by(8));
-    assert_eq!(unlink(&mut r, "b", "a", LinkKind::Relates, by(9)), Ok(true));
-    assert_eq!(model(&r).links, []);
+    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(6)), Ok(false));
 }
 
 #[test]

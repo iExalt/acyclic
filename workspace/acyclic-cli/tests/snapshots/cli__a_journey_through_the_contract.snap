@@ -215,7 +215,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --state done
 # exit 2
 
 # stderr
-error: finish an item with `acyclic done <ITEM>`, which records its evidence
+error: invalid value 'done' for '--state <STATE>'
+  [possible values: backlog, parked, in-progress]
 
 For more information, try '--help'.
 
@@ -1207,88 +1208,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1 --as-user
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic graph --thread t1
-# exit 0
-digraph acyclic {
-  fontname="Helvetica,Arial,sans-serif";
-  node [shape=box, style=rounded, fontname="Helvetica,Arial,sans-serif"];
-  subgraph "cluster_t_t1" {
-    label="t1 · Work";
-    "n_a1" [label="a1 · First", style="rounded,filled", fillcolor="#e8e8e8"];
-  }
-  "n_a2" [label="a2 · Second", style="rounded,dashed", color=gray, fontcolor=gray];
-  "n_a1" -> "n_a2" [style=solid];
-  subgraph "cluster_legend" {
-    label="Legend"; style=dashed; color=gray; fontcolor=gray;
-    node [fontcolor=gray, color=gray];
-    "legend_first" [label="done first"];
-    "legend_waits" [label="waits for it"];
-    "legend_first" -> "legend_waits" [style=solid];
-    "legend_relates" [label="relates to"];
-    "legend_related" [label="related item"];
-    "legend_relates" -> "legend_related" [style=dotted, arrowhead=none];
-    "legend_parent" [label="parent"];
-    "legend_child" [label="child"];
-    "legend_parent" -> "legend_child" [color=gray, arrowhead=none];
-    "legend_done" [label="done", style="rounded,filled", fillcolor="#e8e8e8"];
-    "legend_ghost" [label="outside the view", style="rounded,dashed"];
-  }
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic graph --format mermaid --file graph.mmd
-# exit 0
-{
-  "data": {
-    "counts": {
-      "edges": 1,
-      "ghosts": 0,
-      "items": 2
-    },
-    "format": "mermaid",
-    "opened": false,
-    "path": "[dir]/graph.mmd"
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic graph --root nope
-# exit 3
-{
-  "error": {
-    "code": "not-found",
-    "details": null,
-    "message": "no item nope"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic graph --format html
-# exit 2
-{
-  "error": {
-    "code": "usage",
-    "details": null,
-    "message": "an HTML page is too large for standard output: pass --file <FILE> or --open"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic graph --open --thread t1
-# exit 0
-{
-  "data": {
-    "counts": {
-      "edges": 1,
-      "ghosts": 1,
-      "items": 1
-    },
-    "format": "html",
-    "opened": true,
-    "path": "[dir]/tracker/.git/acyclic/graph/thread-t1.html"
-  },
-  "ok": true
-}
-
 $ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
 # exit 2
 
@@ -1302,7 +1221,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic link add a1 blocks a2
 # exit 2
 
 # stderr
-error: `blocks` is now `waits-for`: use `acyclic link add a1 waits-for a2`
+error: invalid value 'blocks' for '<KIND>'
+  [possible values: waits-for, relates-to]
 
 For more information, try '--help'.
 

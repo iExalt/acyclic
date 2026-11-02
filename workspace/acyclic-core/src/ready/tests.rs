@@ -83,11 +83,11 @@ fn blocked(waits: &[(&str, Wait)]) -> Status {
 }
 
 #[test]
-fn a_hard_dependency_blocks_until_done_and_a_stored_after_link_never_does() {
+fn a_hard_dependency_blocks_until_done_and_a_relates_link_never_does() {
     let mut r = replica("a");
     items(&mut r, &["dep", "soft", "x"]);
     link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
-    model::store_after_link(&mut r, "x", "soft", by(2));
+    link(&mut r, "x", "soft", LinkKind::Relates, by(2)).unwrap();
     let none = Fake::default();
     assert_eq!(status(&r, &none, "x"), blocked(&[("dep", Wait::Open)]));
     // Work with no repository is met when done.
@@ -302,7 +302,7 @@ fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     for id in ["x", "y"] {
         link(&mut r, id, "dep", LinkKind::Blocks, by(2)).unwrap();
     }
-    model::store_after_link(&mut r, "z", "x", by(2));
+    link(&mut r, "z", "x", LinkKind::Relates, by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
     thread(&mut r, "dep", "deps");
     done_with(&mut r, "unrelated", Some("c2"));
@@ -313,7 +313,7 @@ fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
     let ready = flat(&readiness.ready(false, "session/s").unwrap());
-    assert_eq!(ready, ["x", "y", "z"], "an open after link holds nothing back");
+    assert_eq!(ready, ["x", "y", "z"], "an open relates link holds nothing back");
     assert_eq!(
         ancestry.calls.get(),
         1,

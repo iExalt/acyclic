@@ -386,8 +386,11 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
                 found.as_str().map(str::to_owned)
             };
             let (from, to, kind) = (read("from")?, read("to")?, read("kind")?);
-            // A stored after link reads as relates-to, and removing that clears it.
-            let word = if kind == "blocks" { "waits-for" } else { "relates-to" };
+            let word = match kind.as_str() {
+                "blocks" => "waits-for",
+                "relates" => "relates-to",
+                _ => return None,
+            };
             Some(format!("acyclic link add|remove {from} {word} {to}"))
         },
         _ => None,
@@ -403,8 +406,7 @@ fn links(all: &[Link], id: &str) -> Json {
     for link in all {
         let (out, back) = match link.kind {
             LinkKind::Blocks => ("waits_for", "waited_on_by"),
-            // The model reads a stored after link as relates.
-            LinkKind::After | LinkKind::Relates => ("relates_to", "related_from"),
+            LinkKind::Relates => ("relates_to", "related_from"),
         };
         if link.from == id {
             found.entry(out).or_default().push(&link.to);
@@ -575,15 +577,7 @@ mod tests {
             set_parent(&mut r, id, Some("goal"), user).unwrap();
         }
         link(&mut r, "c", "a", LinkKind::Blocks, user).unwrap();
-        let after = model::link_key("c", "b", LinkKind::After).unwrap();
-        for (field, value) in [
-            ("from", json!("c")),
-            ("to", json!("b")),
-            ("kind", json!("after")),
-            ("present", json!(true)),
-        ] {
-            r.write(&after, field, USER, 1, Some(value)).unwrap();
-        }
+        link(&mut r, "c", "b", LinkKind::Relates, user).unwrap();
         let repo = key(kind::REPOSITORY, "r");
         for (field, value) in [
             (repository::OWNER, json!("me")),
@@ -682,10 +676,8 @@ mod tests {
                 view.item("c", &view.model.items["c"]).unwrap()["links"]["waits_for"],
                 json!(["a"])
             );
-            // A stored after link shows as relates-to, and there is no follows key.
             let links = &view.item("c", &view.model.items["c"]).unwrap()["links"];
             assert_eq!(links["relates_to"], json!(["b"]));
-            assert_eq!(links.get("follows"), None);
             assert_eq!(shown["claims"][0]["holder"], "session/pi");
             assert_eq!(
                 (&shown["archived"], &shown["reopened"], &shown["done_at"]),
@@ -922,14 +914,14 @@ mod tests {
     }
 
     #[test]
-    fn a_conflicted_link_that_an_older_version_stored_resolves_as_relates_to() {
+    fn a_conflicted_link_resolves_in_the_command_lines_words() {
         let mut mac = tracker();
-        let link_key = key("link", "after-1-a-b");
-        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "after")] {
+        let link_key = key("link", "relates-1-a-b");
+        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "relates")] {
             mac.write(&link_key, field, USER, 1, Some(json!(value))).unwrap();
         }
         assert_eq!(
-            resolve(mac.state(), "link", "after-1-a-b", "present").as_deref(),
+            resolve(mac.state(), "link", "relates-1-a-b", "present").as_deref(),
             Some("acyclic link add|remove a relates-to b")
         );
     }

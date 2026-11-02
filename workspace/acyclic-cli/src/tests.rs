@@ -42,30 +42,21 @@ fn the_user_is_never_inherited_from_the_environment() {
 #[test]
 fn output_is_pretty_at_a_terminal_and_json_in_a_pipe_unless_said_otherwise() {
     use args::Format::{Json, Pretty};
-    let output = |line: &str, vars: &[(&str, &str)], terminal: Option<u16>| {
+    let output = |line: &str, terminal: Option<u16>| {
         let cli = args::Cli::try_parse_from(line.split(' ')).unwrap();
-        context::output(&cli, &Env { terminal, ..env(vars) }).map_err(|e| e.code)
+        context::output(&cli, &Env { terminal, ..env(&[]) })
     };
     let (tty, pipe) = (Some(80), None);
-    let (json, pretty) = ([("ACYCLIC_OUTPUT", "json")], [("ACYCLIC_OUTPUT", "pretty")]);
     // An agent's tool reads a pipe, so agents get JSON without asking.
-    assert_eq!(output("acyclic list", &[], pipe), Ok(Json));
-    assert_eq!(output("acyclic list", &[], tty), Ok(Pretty));
-    // The environment overrides the terminal, and the flag overrides both.
-    assert_eq!(output("acyclic list", &json, tty), Ok(Json));
-    assert_eq!(output("acyclic list", &pretty, pipe), Ok(Pretty));
-    assert_eq!(output("acyclic list -o json", &pretty, tty), Ok(Json));
-    assert_eq!(output("acyclic list -o pretty", &json, pipe), Ok(Pretty));
-    assert_eq!(output("acyclic list", &[("ACYCLIC_OUTPUT", "yaml")], tty), Err("usage"));
-    // At a terminal, an error is pretty's line on standard error, and a bad setting is still JSON on standard output.
-    let at = |vars: &[(&str, &str)]| {
-        let args = ["acyclic", "show", "a1", "--tracker", "/nonexistent"].map(Into::into);
-        execute(args, &Env { terminal: tty, ..env(vars) })
-    };
-    let out = at(&[]);
+    assert_eq!(output("acyclic list", pipe), Json);
+    assert_eq!(output("acyclic list", tty), Pretty);
+    // The flag overrides the terminal.
+    assert_eq!(output("acyclic list -o json", tty), Json);
+    assert_eq!(output("acyclic list -o pretty", pipe), Pretty);
+    // At a terminal, an error is pretty's line on standard error.
+    let args = ["acyclic", "show", "a1", "--tracker", "/nonexistent"].map(Into::into);
+    let out = execute(args, &Env { terminal: tty, ..env(&[]) });
     assert!(out.stdout.is_empty() && out.stderr.starts_with("error: "), "{out:?}");
-    let out = at(&[("ACYCLIC_OUTPUT", "yaml")]);
-    assert!(out.stdout.contains("ACYCLIC_OUTPUT is yaml") && out.stderr.is_empty(), "{out:?}");
 }
 
 #[test]
@@ -164,8 +155,7 @@ fn every_error_has_a_stable_code_and_exit() {
     // Every code a command can raise is in the table above, so the next one added there must be added here.
     let known: std::collections::BTreeSet<&str> = errors.iter().map(|error| error.code).collect();
     let mut scanned = 0;
-    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs", "hints.rs", "page.rs"]
-    {
+    for file in ["commands.rs", "context.rs", "edit.rs", "lib.rs", "args.rs"] {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
         )
@@ -298,7 +288,6 @@ fn prime_is_text_matched_to_the_version() {
     let Outcome { code, stdout: out, .. } = run("acyclic prime");
     assert_eq!(code, exit::OK);
     assert!(out.contains(&format!("acyclic {})", acyclic_core::VERSION)));
-    insta::assert_snapshot!(out.replace(acyclic_core::VERSION, "[version]"));
 }
 
 #[test]
@@ -546,7 +535,7 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
 }
 
 #[test]
-fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
+fn links_are_named_waits_for_and_relates_to() {
     use acyclic_core::model::LinkKind;
     for (word, kind) in [
         (args::LinkWord::WaitsFor, LinkKind::Blocks),
@@ -560,33 +549,12 @@ fn links_are_named_waits_for_and_relates_to_and_the_old_words_say_so() {
             args::LinkWord::WaitsFor | args::LinkWord::RelatesTo => {},
         }
     }
-    let out = run("acyclic link remove a2 follows a1");
-    assert!(out.stderr.contains("use `acyclic link remove a2 relates-to a1`"), "{out:?}");
-    // Soft links are retired, under either name, with the words to use instead.
-    for retired in ["follows", "after"] {
-        let out = run(&format!("acyclic link add a2 {retired} a1"));
-        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{retired}");
-        assert!(
-            out.stderr.contains(&format!(
-                "`{retired}` links are retired: use `acyclic link add a2 waits-for a1` when a2 can't start until a1 \
-                 is done, or `relates-to` for context"
-            )),
-            "{out:?}"
-        );
+    // Any other word, such as an older name, gets the usual error.
+    for word in ["follows", "after", "blocks", "relates", "sideways"] {
+        let out = run(&format!("acyclic link add a2 {word} a1"));
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{word}");
+        assert!(out.stderr.contains("[possible values: waits-for"), "{out:?}");
     }
-    for (old, new) in [("blocks", "waits-for"), ("relates", "relates-to")] {
-        let out = run(&format!("acyclic link add a2 {old} a1"));
-        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{old}");
-        assert!(
-            out.stderr
-                .contains(&format!("`{old}` is now `{new}`: use `acyclic link add a2 {new} a1`")),
-            "{out:?}"
-        );
-    }
-    // The hint follows a global option, and a word that was never a kind gets the usual error.
-    let out = run("acyclic --actor session/mac link remove a2 blocks a1");
-    assert!(out.stderr.contains("use `acyclic link remove a2 waits-for a1`"), "{out:?}");
-    assert!(run("acyclic link add a2 sideways a1").stderr.contains("[possible values: waits-for"));
     let help = run("acyclic help link add").stdout;
     assert!(help.contains("`<FROM>` waits for or relates to `<TO>`"), "{help}");
     assert!(!help.contains("follows"), "{help}");
@@ -701,55 +669,11 @@ fn every_command_follows_the_input_conventions() {
 }
 
 #[test]
-fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
-    let hint = |line: &str| {
-        let args: Vec<OsString> = line.split(' ').map(Into::into).collect();
-        hints::hint(&args)
-    };
-    for (line, instead) in [
-        ("acyclic item move a1 b1", "acyclic item edit <ITEM> --parent <PARENT>"),
-        ("acyclic item state a1 parked", "acyclic item edit <ITEM> --state <STATE>"),
-        ("acyclic thread set t1 --title T", "acyclic thread add <THREAD> --title <TITLE>"),
-        ("acyclic thread add a1 t1", "acyclic item edit <ITEM> --thread <THREAD>"),
-        ("acyclic --actor x thread remove a1", "acyclic item edit <ITEM> --no-thread"),
-        ("acyclic repo set r1 --name n", "acyclic repo add <REPOSITORY>"),
-        ("acyclic repo attach r1 --item a1", "acyclic item edit <ITEM> --repository <REPOSITORY>"),
-        ("acyclic repo detach r1 --thread t1", "acyclic thread edit <THREAD> --no-repository"),
-        ("acyclic level --thread t1 blockers", "acyclic thread edit <THREAD> --level <LEVEL>"),
-        ("acyclic graph --output graph.dot", "acyclic graph --file <FILE>"),
-        ("acyclic -o pretty item move a1 b1", "acyclic item edit <ITEM> --parent <PARENT>"),
-        ("acyclic item edit a1 --state done", "acyclic done <ITEM>"),
-        ("acyclic item add a1 --title T --state=done", "acyclic done <ITEM>"),
-    ] {
-        assert!(hint(line).is_some_and(|text| text.contains(instead)), "{line}: {:?}", hint(line));
-    }
-    // Commands that kept their names in a new shape get no hint.
-    for line in [
-        "acyclic thread add t1 --title T",
-        "acyclic thread add t1",
-        "acyclic item edit a1 --parent b1",
-        "acyclic item edit a1 --state parked",
-        "acyclic level blockers",
-        "acyclic thread edit t1 --level blockers",
-        "acyclic repo edit r1 --default-branch trunk",
-        // A way to print parses as one, so a graph line failing with it failed for another reason.
-        "acyclic graph --output pretty --bogus",
-        "acyclic --output=json graph --bogus",
-    ] {
-        assert_eq!(hint(line), None, "{line}");
-    }
+fn a_removed_command_is_a_usage_error() {
     let out = run("acyclic thread set t1 --title T");
     assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""));
-    assert!(
-        out.stderr.starts_with("error: `acyclic thread set` is gone: use `acyclic thread add"),
-        "{out:?}"
-    );
-    // The old form of a command that is still there is caught as the failed parse it is.
-    let old_add = run("acyclic thread add a1 t1").stderr;
-    assert!(old_add.starts_with("error: `thread add <ITEM> <THREAD>` is gone: use"), "{old_add}");
-    assert!(old_add.contains("acyclic item edit <ITEM> --thread"));
+    assert!(out.stderr.starts_with("error: "), "{out:?}");
 }
-
 #[test]
 fn flags_that_contradict_each_other_are_usage_errors() {
     let check = |line: &str| {

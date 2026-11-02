@@ -21,8 +21,6 @@ pnpm = "12.15.0"
 
 [tasks.check]
 description = "Routine check: format, Clippy, every crate's unit tests, and the doc fence, Markdown and workflow lints (budget: 60 seconds on a warm cache)"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = [
   # Outside CI, a clone without the pre-push guard fails the check, so it never pushes unguarded.
   '[ -n "${CI:-}" ] || [ "$(git config core.hooksPath)" = .githooks ] || { echo "the pre-push guard is not installed: run mise run hooks:install" >&2; exit 1; }',
@@ -58,8 +56,6 @@ run = "sh scripts/app-dev.sh"
 
 [tasks."check:integration"]
 description = "Integration tests (budget: 3 minutes)"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --test '*' --locked --no-tests=pass'''
 
 [tasks."check:properties"]
@@ -69,25 +65,20 @@ run = '''"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run -p 
 
 [tasks."bench:store"]
 description = "Times the binary against trackers of several sizes; not part of any check"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --bench store --"
 
 [tasks."bench:store:phases"]
 description = "Like bench:store, with timing marks splitting each command into phases"
-depends = ["vendor:graph"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1" }
 run = "cargo bench --quiet --locked -p acyclic --features probe --bench store --"
 
 [tasks."check:browser"]
-description = "Draws graph pages in headless Chromium and WebKit with the network blocked, and drives the app; downloads Playwright's browsers (budget: 3 minutes)"
-depends = ["vendor:graph", "build:app"]
+description = "Drives the app in headless Chromium and WebKit; downloads Playwright's browsers (budget: 3 minutes)"
+depends = ["build:app"]
 # Unbuffered, so each journey's line reaches CI's log as it finishes, and the log's timestamps time it.
-env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
+env = { ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
 run = [
   "cargo build --quiet --locked --profile journeys -p acyclic -p acyclic-fixtures",
   "uv run --no-project --with playwright==1.64.0 python -m playwright install chromium webkit",
-  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-cli/tests/browser/graph.py target/journeys/acyclic target/journeys/acyclic-fixtures",
   "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/journeys/acyclic target/journeys/acyclic-fixtures",
 ]
 
@@ -95,18 +86,14 @@ run = [
 description = "Install the browsers' system libraries with apt, for check:browser on Linux; CI runs it as its own step, so check:browser's time is the tests'"
 run = "uv run --no-project --with playwright==1.64.0 python -m playwright install-deps chromium webkit"
 
-[tasks."vendor:graph"]
-description = "Fetch the graph page's renderers, pinned by SHA-256, into the CLI's git-ignored assets"
-run = "sh scripts/vendor-graph.sh"
-
 [tasks.notices]
 description = "Write the release's third-party notices to the path given: THIRD_PARTY.md and the Rust crates' licences"
 run = "sh scripts/notices.sh"
 
 [tasks.install]
 description = "Install the acyclic CLI, with the app built in, from this checkout into ~/.cargo/bin"
-depends = ["vendor:graph", "build:app"]
-env = { ACYCLIC_REQUIRE_ASSETS = "1", ACYCLIC_REQUIRE_APP = "1" }
+depends = ["build:app"]
+env = { ACYCLIC_REQUIRE_APP = "1" }
 run = "cargo install --locked --path workspace/acyclic"
 
 [tasks."hooks:install"]
