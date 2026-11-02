@@ -16,9 +16,11 @@ const GAP = 64;
 export interface ThreadsViewProps {
   view: WavesView;
   lines: ReadonlyMap<string, Line>;
+  /** The thread picked on the Map, whose tile and arrows stand out. */
   picked: string | null;
   /** Whether there is room for the arrows: columns side by side, rather than waves stacked on a phone. */
   wide: boolean;
+  /** Goes to the Map for the thread. */
   onPick: (id: string) => void;
 }
 
@@ -41,7 +43,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
           className="thread-tile"
           data-thread-tile={one.id}
           data-thread={one.id}
-          aria-pressed={one.id === picked}
+          aria-current={one.id === picked || undefined}
           style={lineStyle(line)}
           onClick={() => onPick(one.id)}
           onPointerEnter={() => setHovered(one.id)}

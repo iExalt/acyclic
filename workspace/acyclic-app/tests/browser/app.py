@@ -1307,7 +1307,7 @@ def outline_journey(page, view, plan, name, failures):
 @timed
 def threads_journey(page, view, env, name, failures):
     """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
-    and none on a phone; picking a tile opens its thread's panel, and the Map comes back as it was."""
+    and none on a phone; picking a tile goes to the Map with its thread's panel open, and closing it comes back."""
     listed = json.loads(run(env, "thread", "list"))["data"]
     want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
     want |= {id: "anytime" for id in listed["anytime"]}
@@ -1334,60 +1334,59 @@ def threads_journey(page, view, env, name, failures):
             page.locator(f"[data-thread-tile='{skips[0][0]}']").hover()
             page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
             page.mouse.move(0, 0)
-    # A thread with work to start, whose panel offers it; picked already, a click would unpick it, so it is unpicked.
+    # A thread with work to start, whose panel offers it. Its tile goes to the Map with the panel open, as a thread's
+    # row anywhere does.
     ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
     picked = ready[0] if ready else next(iter(want))
     tile = page.locator(f"[data-thread-tile='{picked}']")
-    if tile.get_attribute("aria-pressed") == "true":
-        tile.click()
+    panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
     tile.click()
     try:
-        page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
+        page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
+        panel.wait_for(timeout=10_000)
     except PlaywrightTimeout:
-        failures.append(f"{name}: picking {picked}'s tile opened no panel")
-    if tile.get_attribute("aria-pressed") != "true":
-        failures.append(f"{name}: picking {picked}'s tile didn't mark it")
-    # An item chosen from a thread's panel is shown on the Map: the view goes back to it, the item selected.
+        failures.append(f"{name}: picking {picked}'s tile didn't open its panel on the Map")
+    # An item chosen from the panel closes back to the thread, whose own close goes back to the Threads view.
     open_full(page, "thread-panel")
     row = page.locator("[data-testid=thread-panel] [data-select]").first
     if row.count() == 0:
-        failures.append(f"{name}: {picked}'s panel offers no item to start, so going back to the Map went unchecked")
-        page.keyboard.press("Escape")
-        page.locator("[data-view=map]").click()
+        failures.append(f"{name}: {picked}'s panel offers no item to start, so closing back from one went unchecked")
     else:
         chosen = row.get_attribute("data-select")
         row.click()
-        try:
-            page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
-            page.get_by_test_id("inspector").wait_for(timeout=5_000)
-        except PlaywrightTimeout:
-            failures.append(f"{name}: choosing {chosen} from {picked}'s panel left the Threads view over the Map")
-        if page.locator("[data-view=map]").get_attribute("aria-current") != "page":
-            failures.append(f"{name}: choosing {chosen} didn't switch to the Map")
-        # Closing the item goes back to where it was chosen.
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
         page.keyboard.press("Escape")
         try:
-            page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+            panel.wait_for(timeout=5_000)
         except PlaywrightTimeout:
-            failures.append(f"{name}: closing {chosen} didn't go back to the Threads view")
-        page.locator("[data-view=map]").click()
-    page.get_by_test_id("threads-view").wait_for(state="detached")
-    # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; the
-    # thread's panel, still picked, over the view, closes first. The Map is chosen again for the journeys after.
+            failures.append(f"{name}: closing {chosen} didn't go back to {picked}'s panel")
+    page.keyboard.press("Escape")
+    try:
+        page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: closing {picked}'s panel didn't go back to the Threads view")
+    # On a phone, Back from another view goes home, as the system's back gesture would leave the app otherwise; a
+    # thread's panel kept over the view, picked on the Map, closes first.
     if view.get("has_touch"):
+        tile.click()
+        panel.wait_for(timeout=10_000)
         page.locator("[data-view=threads]").click()
         page.get_by_test_id("threads-view").wait_for()
-        if page.get_by_test_id("thread-panel").count():
-            page.go_back()
-            page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
-            if not page.get_by_test_id("threads-view").is_visible():
-                failures.append(f"{name}: Back from a thread's panel over the Threads view left the view too")
+        if tile.get_attribute("aria-current") != "true":
+            failures.append(f"{name}: {picked}'s tile wasn't marked with its thread picked on the Map")
+        page.go_back()
+        try:
+            panel.wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: Back didn't close {picked}'s panel over the Threads view")
+        if not page.get_by_test_id("threads-view").is_visible():
+            failures.append(f"{name}: Back from a thread's panel over the Threads view left the view too")
         page.go_back()
         try:
             page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
-        to_map(page)
+    to_map(page)
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
