@@ -21,7 +21,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
     "changed": true,
     "item": "a1",
     "placed": [],
-    "proposals": [],
     "title": "First"
   },
   "ok": true
@@ -34,7 +33,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
     "changed": true,
     "item": "a2",
     "placed": [],
-    "proposals": [],
     "title": "Second"
   },
   "ok": true
@@ -47,7 +45,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
     "changed": false,
     "item": "a2",
     "placed": [],
-    "proposals": [],
     "title": "Second"
   },
   "ok": true
@@ -94,7 +91,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t0 --title Start
 {
   "data": {
     "changed": true,
-    "proposals": [],
     "thread": "t0",
     "title": "Start"
   },
@@ -107,8 +103,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t0
   "data": {
     "changed": true,
     "item": "a1",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -119,8 +114,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t0
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -131,7 +125,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "data": {
     "ready": [
       {
-        "approved": false,
         "counts": {
           "conflicted": 0,
           "done": 0,
@@ -143,7 +136,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "id": "t0",
         "items": [
           {
-            "approved": false,
             "id": "a1",
             "parent": null,
             "readiness": {
@@ -292,7 +284,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
 {
   "data": [
     {
-      "approved": false,
       "brief": null,
       "claims": [
         {
@@ -311,10 +302,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
         "a2"
       ],
       "id": "t0",
-      "level": null,
       "members": [
         {
-          "approved": false,
           "conflicted": false,
           "id": "a1",
           "parent": null,
@@ -327,7 +316,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
           "title": "First"
         },
         {
-          "approved": false,
           "conflicted": false,
           "id": "a2",
           "parent": null,
@@ -383,7 +371,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
   "data": {
     "ready": [
       {
-        "approved": false,
         "counts": {
           "conflicted": 0,
           "done": 1,
@@ -395,7 +382,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready
         "id": "t0",
         "items": [
           {
-            "approved": false,
             "id": "a2",
             "parent": null,
             "readiness": {
@@ -419,7 +405,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
 {
   "data": {
     "changed": true,
-    "proposals": [],
     "thread": "t1",
     "title": "Work"
   },
@@ -431,7 +416,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
 {
   "data": {
     "changed": false,
-    "proposals": [],
     "thread": "t1",
     "title": "Work"
   },
@@ -521,42 +505,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread approve t1
-# exit 1
-{
-  "error": {
-    "code": "user-only",
-    "details": null,
-    "message": "only the user sets approved, not session/mac"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic thread approve t1 --as-user
-# exit 0
-{
-  "data": {
-    "approved": true,
-    "changed": true,
-    "thread": "t1",
-    "title": "Work"
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic ready --approved
+$ ACYCLIC_ACTOR=session/mac acyclic ready
 # exit 0
 {
   "data": {
     "ready": [
       {
-        "approved": true,
         "counts": {
           "conflicted": 0,
           "done": 0,
@@ -568,7 +527,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic ready --approved
         "id": "t1",
         "items": [
           {
-            "approved": true,
             "id": "a2",
             "parent": null,
             "readiness": {
@@ -593,13 +551,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
   "data": {
     "changed": true,
     "item": "a1",
-    "placed": [],
-    "proposals": [
-      {
-        "field": "thread",
-        "id": "mac-19"
-      }
-    ]
+    "placed": []
   },
   "ok": true
 }
@@ -608,122 +560,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
 # exit 0
 {
   "data": {
-    "needs": [
-      {
-        "item": {
-          "id": "a1",
-          "parent": null,
-          "readiness": {
-            "status": "done"
-          },
-          "stage": "done",
-          "state": "done",
-          "thread": "t0",
-          "title": "First"
-        },
-        "kind": "proposal",
-        "notify": true,
-        "proposal": {
-          "actor": "session/mac",
-          "decision": null,
-          "edit": {
-            "after": "t1",
-            "before": "t0",
-            "field": "thread",
-            "item": "a1",
-            "kind": "member"
-          },
-          "id": "mac-19",
-          "threads": [
-            "t1"
-          ]
-        }
-      }
-    ]
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic proposal show mac-19
-# exit 0
-{
-  "data": [
-    {
-      "actor": "session/mac",
-      "decision": null,
-      "edit": {
-        "after": "t1",
-        "before": "t0",
-        "field": "thread",
-        "item": "a1",
-        "kind": "member"
-      },
-      "id": "mac-19",
-      "threads": [
-        "t1"
-      ]
-    }
-  ],
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic proposal list
-# exit 0
-{
-  "data": {
-    "proposals": [
-      {
-        "actor": "session/mac",
-        "decision": null,
-        "edit": {
-          "after": "t1",
-          "before": "t0",
-          "field": "thread",
-          "item": "a1",
-          "kind": "member"
-        },
-        "id": "mac-19",
-        "item": {
-          "id": "a1",
-          "parent": null,
-          "readiness": {
-            "status": "done"
-          },
-          "stage": "done",
-          "state": "done",
-          "thread": "t0",
-          "title": "First"
-        },
-        "threads": [
-          "t1"
-        ]
-      }
-    ]
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic proposal show nope
-# exit 3
-{
-  "error": {
-    "code": "not-found",
-    "details": null,
-    "message": "no proposal nope; `acyclic proposal list` lists them"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic proposal keep mac-19 --as-user
-# exit 0
-{
-  "data": {
-    "approved": true,
-    "changed": true,
-    "decision": "keep",
-    "item": "a1",
-    "proposal": "mac-19",
-    "thread": "t1"
+    "needs": []
   },
   "ok": true
 }
@@ -769,7 +606,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
     ],
     "threads": [
       {
-        "approved": false,
         "counts": {
           "conflicted": 0,
           "done": 0,
@@ -781,7 +617,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "waits_for": []
       },
       {
-        "approved": true,
         "counts": {
           "conflicted": 0,
           "done": 1,
@@ -808,14 +643,14 @@ a2  Second  backlog  t1      ready
 
 $ ACYCLIC_ACTOR=session/mac acyclic ready -o pretty
 # exit 0
-THREAD   ITEM  TITLE   APPROVED
-t1 Work  a2    Second  yes
+THREAD   ITEM  TITLE
+t1 Work  a2    Second
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread list -o pretty
 # exit 0
-ID  TITLE  APPROVED  MEMBERS  DONE  WAVE  HEADS
-t0  Start  no        0        0
-t1  Work   yes       2        1     any   a2
+ID  TITLE  MEMBERS  DONE  WAVE  HEADS
+t0  Start  0        0
+t1  Work   2        1     any   a2
 
 $ ACYCLIC_ACTOR=session/mac acyclic show a1 -o pretty
 # exit 0
@@ -847,7 +682,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
 {
   "data": [
     {
-      "approved": true,
       "brief": null,
       "claims": [],
       "counts": {
@@ -859,10 +693,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
         "a2"
       ],
       "id": "t1",
-      "level": null,
       "members": [
         {
-          "approved": true,
           "conflicted": false,
           "id": "a1",
           "parent": null,
@@ -875,7 +707,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
           "title": "First"
         },
         {
-          "approved": true,
           "conflicted": false,
           "id": "a2",
           "parent": null,
@@ -999,14 +830,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic show a1 nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread --as-user
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread
 # exit 0
 {
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -1085,8 +915,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --repository r1
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -1116,8 +945,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-repository r1
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -1155,24 +983,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic repo list
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread revoke t1 --as-user
-# exit 0
-{
-  "data": {
-    "approved": false,
-    "changed": true,
-    "thread": "t1",
-    "title": "Work"
-  },
-  "ok": true
-}
-
 $ ACYCLIC_ACTOR=session/mac acyclic thread add --title Spare
 # exit 0
 {
   "data": {
     "changed": true,
-    "proposals": [],
     "thread": "thread-mac-1",
     "title": "Spare"
   },
@@ -1180,17 +995,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add --title Spare
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
-# exit 1
-{
-  "error": {
-    "code": "user-only",
-    "details": null,
-    "message": "only the user renumbers a thread, not session/mac"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1 --as-user
 # exit 1
 {
   "error": {
@@ -1238,23 +1042,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic link remove a2 waits-for a1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=actor/user acyclic ready
-# exit 2
-{
-  "error": {
-    "code": "user-from-environment",
-    "details": null,
-    "message": "ACYCLIC_ACTOR may not name the user, or every agent started from this shell would act as the user; pass --as-user on the command instead"
-  },
-  "ok": false
-}
-
 $ ACYCLIC_ACTOR=session/mac acyclic thread add t2 --title Follow-ups
 # exit 0
 {
   "data": {
     "changed": true,
-    "proposals": [],
     "thread": "t2",
     "title": "Follow-ups"
   },
@@ -1267,8 +1059,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t2
   "data": {
     "changed": true,
     "item": "a2",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -1286,90 +1077,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --parent t2
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic level
-# exit 0
-{
-  "data": {
-    "global": "blockers",
-    "threads": []
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic level everything
-# exit 1
-{
-  "error": {
-    "code": "user-only",
-    "details": null,
-    "message": "only the user sets autonomy, not session/mac"
-  },
-  "ok": false
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic level everything --as-user
-# exit 0
-{
-  "data": {
-    "changed": true,
-    "level": "everything"
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic thread edit t2 --level blockers --as-user
-# exit 0
-{
-  "data": {
-    "changed": true,
-    "proposals": [],
-    "thread": "t2"
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic level
-# exit 0
-{
-  "data": {
-    "global": "everything",
-    "threads": [
-      {
-        "id": "t2",
-        "level": "blockers"
-      }
-    ]
-  },
-  "ok": true
-}
-
 $ ACYCLIC_ACTOR=session/mac acyclic needs
 # exit 0
 {
   "data": {
-    "needs": [
-      {
-        "counts": {
-          "open_members": 1
-        },
-        "kind": "awaiting-approval",
-        "notify": true,
-        "thread": {
-          "approved": false,
-          "counts": {
-            "conflicted": 0,
-            "done": 0,
-            "members": 1
-          },
-          "heads": [
-            "a2"
-          ],
-          "id": "t2",
-          "title": "Follow-ups"
-        },
-        "waits_with": []
-      }
-    ]
+    "needs": []
   },
   "ok": true
 }
@@ -1381,7 +1093,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
     "changed": true,
     "item": "a3",
     "placed": [],
-    "proposals": [],
     "title": "Second-follow-up"
   },
   "ok": true
@@ -1411,12 +1122,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent
     "placed": [
       {
         "item": "a4",
-        "outcome": "applied",
-        "proposal": null,
         "thread": "t2"
       }
     ],
-    "proposals": [],
     "title": "Third-follow-up"
   },
   "ok": true
@@ -1429,7 +1137,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1 --title Goal
     "changed": true,
     "item": "g1",
     "placed": [],
-    "proposals": [],
     "title": "Goal"
   },
   "ok": true
@@ -1442,7 +1149,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
     "changed": true,
     "item": "g1-a",
     "placed": [],
-    "proposals": [],
     "title": "Part"
   },
   "ok": true
@@ -1473,8 +1179,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit g1-a --thread t2
   "data": {
     "changed": true,
     "item": "g1-a",
-    "placed": [],
-    "proposals": []
+    "placed": []
   },
   "ok": true
 }
@@ -1526,7 +1231,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2 --title Goal
     "changed": true,
     "item": "g2",
     "placed": [],
-    "proposals": [],
     "title": "Goal"
   },
   "ok": true
@@ -1539,7 +1243,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
     "changed": true,
     "item": "g2-a",
     "placed": [],
-    "proposals": [],
     "title": "Part"
   },
   "ok": true
@@ -1564,7 +1267,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
     "changed": true,
     "item": "d1",
     "placed": [],
-    "proposals": [],
     "title": "Doomed"
   },
   "ok": true
@@ -1577,7 +1279,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add d1-a --title Part --parent d1
     "changed": true,
     "item": "d1-a",
     "placed": [],
-    "proposals": [],
     "title": "Part"
   },
   "ok": true

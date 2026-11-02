@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use acyclic_core::model::{ItemState, Level, LinkKind, Size};
+use acyclic_core::model::{ItemState, LinkKind, Size};
 use std::fmt::Write as _;
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
@@ -25,12 +25,9 @@ pub struct Cli {
     /// in ~/.config/acyclic/trackers.toml, whose default applies when no prefix matches.
     #[arg(long, global = true, help_heading = GLOBAL_OPTIONS)]
     pub tracker: Option<PathBuf>,
-    /// Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command.
+    /// Who acts, as `kind/id` such as `session/mac`; otherwise `ACYCLIC_ACTOR`, else the user, `actor/user`.
     #[arg(long, global = true, help_heading = GLOBAL_OPTIONS)]
     pub actor: Option<String>,
-    /// Act as the user.
-    #[arg(long, global = true, conflicts_with = "actor", help_heading = GLOBAL_OPTIONS)]
-    pub as_user: bool,
     /// How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error;
     /// otherwise pretty on a terminal and json when piped.
     #[arg(
@@ -64,10 +61,10 @@ impl Format {
 /// The top level's help sections, in order: what every session uses, the groups, then the rest.
 pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Common Commands", &["ready", "list", "show", "claim", "release", "done", "needs"]),
-    ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
+    ("Command Groups", &["item", "link", "thread", "repo"]),
     (
         "Other Commands",
-        &["init", "sync", "prime", "import", "level", "doctor", "serve", "up", "completions"],
+        &["init", "sync", "prime", "import", "doctor", "serve", "up", "completions"],
     ),
 ];
 
@@ -152,10 +149,6 @@ pub enum Command {
         #[arg(long)]
         #[serde(default)]
         include_archived: bool,
-        /// Only items in threads the user approved, with the item among what the approval saw.
-        #[arg(short = 'a', long)]
-        #[serde(default)]
-        approved: bool,
     },
     /// Lists every item, by id.
     List,
@@ -204,12 +197,6 @@ pub enum Command {
     },
     /// Lists what needs the user.
     Needs,
-    /// Prints the autonomy levels; with a level, sets the global one (user only).
-    Level {
-        /// The global level to set; none prints it and every thread's own.
-        #[arg(value_parser = values(&Level::ALL))]
-        level: Option<Level>,
-    },
     /// Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example.
     Import {
         /// The import document.
@@ -232,15 +219,12 @@ pub enum Command {
     /// Adds or removes links between items.
     #[command(subcommand)]
     Link(LinkCommand),
-    /// Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals.
+    /// Adds, edits, lists and shows threads.
     #[command(subcommand)]
     Thread(ThreadCommand),
     /// Adds, edits, lists and shows repository records.
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// Lists and shows proposals; only the user keeps or drops them.
-    #[command(subcommand)]
-    Proposal(ProposalCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip)]
     Serve(Serve),
@@ -353,9 +337,6 @@ impl Command {
             },
             Self::Repo(RepoCommand::Show { repositories }) if repositories.is_empty() => {
                 Err(usage("repo show needs at least one repository"))
-            },
-            Self::Proposal(ProposalCommand::Show { proposals }) if proposals.is_empty() => {
-                Err(usage("proposal show needs at least one proposal"))
             },
             Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
                 Err(usage(format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes")))
@@ -474,13 +455,12 @@ pub enum ItemCommand {
         /// The item.
         item: String,
     },
-    /// Archives a done subtree (user only).
+    /// Archives a done subtree.
     Archive {
         /// The subtree's root.
         item: String,
     },
-    /// Deletes an item nothing refers to: no children, links or evidence, not done, and no one else's live claim; in an
-    /// approved thread, user only.
+    /// Deletes an item nothing refers to: no children, links or evidence, not done, and no one else's live claim.
     Delete {
         /// The item.
         item: String,
@@ -640,7 +620,7 @@ pub enum LinkCommand {
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
-    /// Lists every thread, by id, with its approval, its members and its heads: the open leaves nothing in it orders.
+    /// Lists every thread, by id, with its members and its heads: the open leaves nothing in it orders.
     List,
     /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
     Show {
@@ -663,24 +643,11 @@ pub enum ThreadCommand {
         #[arg(long, value_name = "REPOSITORY")]
         #[serde(default)]
         repository: Vec<String>,
-        /// Its autonomy level (user only).
-        #[arg(long, value_parser = values(&Level::ALL))]
-        level: Option<Level>,
     },
     /// Edits a thread: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ThreadEdit),
-    /// Approves a thread's scope (user only).
-    Approve {
-        /// The thread.
-        thread: String,
-    },
-    /// Revokes a thread's approval (user only).
-    Revoke {
-        /// The thread.
-        thread: String,
-    },
-    /// Moves a thread whose id ends in another's number to a fresh id, with its fields and members (user only); only
-    /// a thread no run, question, claim or open proposal names.
+    /// Moves a thread whose id ends in another's number to a fresh id, with its fields and members; only a thread no
+    /// live claim names.
     Renumber {
         /// The thread.
         thread: String,
@@ -711,19 +678,11 @@ pub struct ThreadEdit {
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,
-    /// Set its autonomy level (user only).
-    #[arg(long, value_parser = values(&Level::ALL))]
-    pub level: Option<Level>,
-    /// Clear its autonomy level, so the global one applies (user only).
-    #[arg(long)]
-    #[serde(default)]
-    pub no_level: bool,
 }
 
 impl ThreadEdit {
     fn validate(&self) -> Result<(), CliError> {
         clears("brief", self.brief.is_some(), self.no_brief)?;
-        clears("level", self.level.is_some(), self.no_level)?;
         overlaps("repository", &self.repository, &self.no_repository)
     }
 }
@@ -769,31 +728,5 @@ pub enum RepoCommand {
         /// A new default branch.
         #[arg(long)]
         default_branch: Option<String>,
-    },
-}
-
-/// The proposal commands; keeping and dropping are the user's alone.
-#[derive(Debug, Subcommand, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
-pub enum ProposalCommand {
-    /// Lists every proposal, open ones first and then decided ones, each by id, with who proposed it, its edit and its
-    /// decision.
-    List,
-    /// Shows proposals with who proposed them, the edit and any decision, as an array in the order given.
-    Show {
-        /// The proposals.
-        #[arg(required = true, value_name = "PROPOSAL")]
-        #[serde(default)]
-        proposals: Vec<String>,
-    },
-    /// Keeps a proposal (user only).
-    Keep {
-        /// The proposal.
-        proposal: String,
-    },
-    /// Drops a proposal (user only).
-    Drop {
-        /// The proposal.
-        proposal: String,
     },
 }

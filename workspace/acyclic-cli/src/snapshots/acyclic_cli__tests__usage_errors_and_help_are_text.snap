@@ -18,16 +18,14 @@ Common Commands:
 Command Groups:
   item         Adds, edits, reopens, archives and deletes items
   link         Adds or removes links between items
-  thread       Adds, edits, lists, shows, approves and revokes threads; agents' edits to approved scope wait as proposals
+  thread       Adds, edits, lists and shows threads
   repo         Adds, edits, lists and shows repository records
-  proposal     Lists and shows proposals; only the user keeps or drops them
 
 Other Commands:
   init         Sets up a tracker clone as a new replica, creating the repository if there is none
   sync         Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
   prime        Prints conventions for agents, matched to this version, as text
   import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
-  level        Prints the autonomy levels; with a level, sets the global one (user only)
   doctor       Lists entities that can't be read
   serve        Serves the JSON API and the app, refusing any request without the user's Tailscale identity
   up           Serves the JSON API and the app on this machine, to whoever holds its session
@@ -39,8 +37,7 @@ Options:
 
 Global options:
       --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else, in a Git repository, the mapping in ~/.config/acyclic/trackers.toml, whose default applies when no prefix matches
-      --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
-      --as-user            Act as the user
+      --actor <ACTOR>      Who acts, as `kind/id` such as `session/mac`; otherwise `ACYCLIC_ACTOR`, else the user, `actor/user`
   -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error; otherwise pretty on a terminal and json when piped [possible values: json, pretty]
 
 Run 'acyclic help <command>' for more information on a command.

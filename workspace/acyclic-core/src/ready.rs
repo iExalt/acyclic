@@ -584,7 +584,7 @@ impl<'a> Readiness<'a> {
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
-    /// unclaimed ones, approved first, then by title in natural order and id. Threads others hold are left out.
+    /// unclaimed ones by title in natural order and id. Threads others hold are left out.
     /// Archived subtrees are left out unless `include_archived` is set, which judges every item as if nothing were
     /// archived.
     ///
@@ -630,13 +630,12 @@ impl<'a> Readiness<'a> {
                 .collect();
             items.sort_by(|a, b| natural::cmp(&a.0, &b.0).then_with(|| a.1.cmp(b.1)));
             let items = items.into_iter().map(|(_, item)| item.clone()).collect();
-            let key = (!own, !thread.is_approved(), title(id, &thread.title));
+            let key = (!own, title(id, &thread.title));
             ready.push((key, ReadyThread { thread: id.clone(), items }));
         }
         ready.sort_by(|(a, x), (b, y)| {
-            (a.0, a.1)
-                .cmp(&(b.0, b.1))
-                .then_with(|| natural::cmp(&a.2, &b.2))
+            a.0.cmp(&b.0)
+                .then_with(|| natural::cmp(&a.1, &b.1))
                 .then_with(|| x.thread.cmp(&y.thread))
         });
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())

@@ -13,17 +13,15 @@
 //! fields.
 //!
 //! Only an item that nothing refers to is deleted, judged against the replica's own view: no children, no link either
-//! way, not done and with no evidence, and no live claim on its thread but the deleter's own. In an approved thread
-//! only the user deletes, as only the user may change its scope.
+//! way, not done and with no evidence, and no live claim on its thread but the deleter's own.
 
 use std::fmt;
 
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{self, By, LinkKind, Model, Thread, Value, WriteError};
+use crate::model::{self, By, LinkKind, Model, Value, WriteError};
 use crate::schema::item as field;
-use crate::scope::USER;
 use crate::state::{Error, Replica};
 
 /// Why an item isn't deleted.
@@ -79,13 +77,6 @@ fn word<S: serde::Serializer>(kind: &LinkKind, serializer: S) -> Result<S::Ok, S
 pub enum DeleteError {
     /// The model layer refused, such as for an item that doesn't exist.
     Write(WriteError),
-    /// Only the user deletes an item in an approved thread.
-    NotAllowed {
-        /// The actor.
-        actor: String,
-        /// The approved thread.
-        thread: String,
-    },
     /// The item is in use.
     InUse {
         /// The item.
@@ -99,9 +90,6 @@ impl fmt::Display for DeleteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::NotAllowed { actor, thread } => {
-                write!(f, "only the user deletes an item in approved thread {thread}, not {actor}")
-            },
             Self::InUse { item, reasons } => {
                 write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
             },
@@ -165,8 +153,7 @@ pub fn reasons(
 ///
 /// # Errors
 ///
-/// Fails when the item doesn't exist, when it is in use, when it is in an approved thread and the actor isn't the
-/// user, or when the state layer refuses.
+/// Fails when the item doesn't exist, when it is in use, or when the state layer refuses.
 pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
     let key = model::item_key(id)?;
     if model::is_deleted(&replica.state, &key) {
@@ -174,16 +161,6 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     }
     model::existing(&replica.state, id)?;
     let model = Model::read(&replica.state)?;
-    if by.actor != USER
-        && let Some(thread) = model
-            .items
-            .get(id)
-            .into_iter()
-            .flat_map(|item| item.thread.all())
-            .find(|thread| model.threads.get(*thread).is_some_and(Thread::is_approved))
-    {
-        return Err(DeleteError::NotAllowed { actor: by.actor.to_owned(), thread: thread.clone() });
-    }
     let reasons = reasons(replica, &model, id, by.actor, by.at)?;
     if !reasons.is_empty() {
         return Err(DeleteError::InUse { item: id.to_owned(), reasons });

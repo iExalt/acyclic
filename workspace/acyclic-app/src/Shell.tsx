@@ -38,8 +38,6 @@ export interface ShellProps {
   wide: boolean;
   /** How many items the plan shows. */
   count: number;
-  /** The global autonomy level, as a label: said at the sidebar's foot; a phone's menu says it. */
-  autonomy: string;
   view: View;
   onView: (view: View) => void;
   /** How many entries Needs you holds, which its tab counts. */
@@ -194,7 +192,6 @@ function SidebarShell(props: ShellProps) {
         <footer className="sidebar-foot">
           <div className="about">
             <Count count={props.count} />
-            <Autonomy level={props.autonomy} />
           </div>
           <Menu up>{props.menu}</Menu>
         </footer>
@@ -204,37 +201,12 @@ function SidebarShell(props: ShellProps) {
   );
 }
 
-/**
- * The level, which a word alone leaves unexplained: pressed, it opens the menu at the setting, which says in words what
- * the level lets reach the user.
- */
-function Autonomy({ level }: { level: string }) {
-  const open = (from: HTMLElement) => {
-    const menu = from.closest(".shell")?.querySelector("summary[data-testid=menu]")?.parentElement;
-    if (!(menu instanceof HTMLDetailsElement)) return;
-    menu.open = true;
-    requestAnimationFrame(() => menu.querySelector<HTMLElement>("[data-testid=global-level]")?.focus());
-  };
-  return (
-    <button
-      type="button"
-      className="autonomy"
-      title="What agents ask you about: change it in the menu"
-      aria-haspopup="true"
-      onClick={(event) => open(event.currentTarget)}
-    >
-      Autonomy: {level}
-    </button>
-  );
-}
-
 /** A phone: the view's name with the outline, adding and the menu on top; the views along the bottom. */
 function PhoneShell(props: ShellProps) {
   const title = VIEWS.find((one) => one.view === props.view)?.label;
   return (
     <div className="shell phone-shell">
       <header className="bar">
-        {/* The view's name alone: the menu's Autonomy says the level, as the sidebar's foot does wide. */}
         <div className="brand">
           <h1>{title}</h1>
         </div>

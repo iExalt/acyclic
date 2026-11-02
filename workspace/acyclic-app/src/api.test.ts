@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  CommandError,
-  command,
-  countsText,
-  failure,
-  globalLevel,
-  items,
-  proposals,
-  settle,
-  thread,
-  threads,
-} from "./api";
+import { CommandError, command, countsText, failure, items, settle, thread, threads } from "./api";
 import { examples } from "./commands.examples.json";
 
 /** The command the server's tests run under this name. */
@@ -106,8 +95,8 @@ describe("threads", () => {
   });
 });
 
-describe("thread, proposals and globalLevel", () => {
-  it("read a thread for its panel, the proposals and the global level, as the server's tests send them", async () => {
+describe("thread", () => {
+  it("reads a thread for its panel, as the server's tests send it", async () => {
     const { fetcher, sent } = server({
       thread: {
         ok: true,
@@ -116,20 +105,14 @@ describe("thread, proposals and globalLevel", () => {
             id: "t",
             title: "T",
             brief: { conflict: ["x", "y"] },
-            approved: false,
-            level: null,
             heads: ["a"],
             members: [{ id: "a", title: "A" }],
           },
         ],
       },
-      proposal: { ok: true, data: { proposals: [] } },
-      level: { ok: true, data: { global: "blockers", threads: [] } },
     });
-    await expect(thread("t", fetcher)).resolves.toMatchObject({ title: "T", brief: null, level: null });
-    await expect(proposals(fetcher)).resolves.toEqual([]);
-    await expect(globalLevel(fetcher)).resolves.toBe("blockers");
-    expect(sent).toEqual([example("a thread"), example("proposals"), example("levels")]);
+    await expect(thread("t", fetcher)).resolves.toMatchObject({ title: "T", brief: null });
+    expect(sent).toEqual([example("a thread")]);
   });
 });
 

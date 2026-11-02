@@ -1,5 +1,5 @@
 // Single-key shortcuts, in Linear's habits: G then a letter goes to a view, C adds, / searches, ? lists the keys, and
-// with an item's panel shown, E, M, W, R and A act on it. No key approves, keeps, drops or deletes anything. Keys are
+// with an item's panel shown, E, M, W, R and A act on it. No key settles a need or deletes anything. Keys are
 // ignored while the user is typing, composing, holding a modifier or a form holds what they typed, and all of them
 // can be turned off from the menu (WCAG 2.1.4). Pure, so the rules are tested without a browser.
 

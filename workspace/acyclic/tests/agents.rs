@@ -179,8 +179,7 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
     });
     let file = dir.path().join("plan.json");
     std::fs::write(&file, plan.to_string()).unwrap();
-    let (code, out) =
-        acyclic(&tracker, "actor/user", &format!("import {} --as-user", file.display()));
+    let (code, out) = acyclic(&tracker, "actor/user", &format!("import {}", file.display()));
     assert_eq!(code, 0, "{out}");
 
     let children: Vec<_> = (0..AGENTS)

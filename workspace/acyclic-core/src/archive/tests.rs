@@ -119,12 +119,8 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
          ago"
     );
     let now = DAY + GATELESS_WAIT;
-    let agent = By { actor: "session/worker", at: now };
-    assert_eq!(
-        archive(&mut r, &ByName, "g", agent),
-        Err(ArchiveError::NotAllowed("session/worker".into()))
-    );
-    archive(&mut r, &ByName, "g", user(now)).unwrap();
+    // An agent archives as the user does.
+    archive(&mut r, &ByName, "g", By { actor: "session/x", at: now }).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(model.is_archived("a"));
     assert_eq!(reasons(&r, "g", now), vec![Reason::Archived]);

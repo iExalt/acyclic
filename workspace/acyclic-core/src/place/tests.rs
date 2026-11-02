@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::model::{ItemState, add_item, item_key, set_parent, set_state};
-use crate::schema::{item as field, kind, thread};
+use crate::schema::item as field;
 use crate::state::{Key, ReplicaId, State};
 
 const USER: By<'static> = By { actor: "actor/user", at: 1 };
@@ -46,28 +46,13 @@ fn place_one(r: &mut Replica, item: &str, actor: &'static str) -> Vec<Inherited>
 }
 
 #[test]
-fn new_work_joins_its_nearest_threaded_ancestor_as_its_actor_may() {
+fn new_work_joins_its_nearest_threaded_ancestor() {
     let mut r = group(1);
-    for (thread, approved) in [("ok", true), ("loose", false)] {
-        let key = Key::new(kind::THREAD, thread).unwrap();
-        write(&mut r, &key, thread::APPROVED, json!(approved));
-    }
     set_thread(&mut r, "g1", "ok");
-    // The user joins approved scope; an agent proposes.
-    for (leaf, actor, proposed) in [("u", "actor/user", false), ("a", "session/mac", true)] {
-        add(&mut r, leaf, Some("g1-00"));
-        let placed = place_one(&mut r, leaf, actor);
-        let [joined] = placed.as_slice() else { panic!("{actor}: {placed:?}") };
-        assert_eq!(
-            (joined.thread.as_str(), joined.proposal.is_some()),
-            ("ok", proposed),
-            "{actor}"
-        );
-    }
-    // Unapproved scope takes anyone's work; a thread an item already has is never changed.
-    set_thread(&mut r, "g1", "loose");
-    add(&mut r, "b", Some("g1"));
-    assert_eq!(place_one(&mut r, "b", "session/mac")[0].proposal, None);
+    add(&mut r, "a", Some("g1-00"));
+    let placed = place_one(&mut r, "a", "session/mac");
+    assert_eq!(placed, [Inherited { item: "a".into(), thread: "ok".into() }]);
+    // A thread an item already has is never changed.
     add(&mut r, "c", Some("g1-00"));
     set_thread(&mut r, "c", "own");
     assert_eq!(place_one(&mut r, "c", "session/mac"), Vec::new());
@@ -127,19 +112,6 @@ fn siblings_pass_their_thread_down_only_when_they_agree() {
     r.write(&key, field::THREAD, USER.actor, 6, Some(json!("w"))).unwrap();
     r.join(other.state()).unwrap();
     assert_eq!(shared(&r), None);
-}
-
-#[test]
-fn an_agents_sibling_join_into_approved_scope_is_a_proposal() {
-    let mut r = group(1);
-    let ok = Key::new(kind::THREAD, "ok").unwrap();
-    write(&mut r, &ok, thread::APPROVED, json!(true));
-    set_thread(&mut r, "g1-00", "ok");
-    add(&mut r, "late", Some("g1"));
-    let agent = By { actor: "session/mac", at: 9 };
-    let placed = place(&mut r, &["late".to_owned()], agent).unwrap();
-    let [joined] = placed.as_slice() else { panic!("{placed:?}") };
-    assert_eq!((joined.thread.as_str(), joined.proposal.is_some()), ("ok", true));
 }
 
 #[test]

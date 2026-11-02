@@ -3,10 +3,7 @@ import type { Item } from "./api";
 import { item } from "./map/fixture";
 import { keep, type Plan, undoOf, unkeep } from "./undo";
 
-const plan = (items: Item[], level = "blockers"): Plan => ({
-  items: new Map(items.map((one) => [one.id, one])),
-  level,
-});
+const plan = (items: Item[]): Plan => ({ items: new Map(items.map((one) => [one.id, one])) });
 const before = plan([
   item("garden", null, [], { title: "Garden" }),
   item("beds", "garden", [], { title: "Beds" }),
@@ -15,10 +12,7 @@ const before = plan([
 ]);
 /** `from` with one item changed as `change` says. */
 const changed = (from: Plan, id: string, change: Partial<Item>) =>
-  plan(
-    [...from.items.values()].map((one) => (one.id === id ? { ...one, ...change } : one)),
-    from.level,
-  );
+  plan([...from.items.values()].map((one) => (one.id === id ? { ...one, ...change } : one)));
 /** The plan after changing one item as `change` says. */
 const after = (id: string, change: Partial<Item>) => changed(before, id, change);
 const links = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
@@ -60,26 +54,8 @@ describe("undo", () => {
     expect([removed?.text, removed?.undone]).toEqual(["Sow no longer waits for Dig", "Sow waits for Dig again"]);
   });
 
-  it("sets the autonomy back, while it is still what was set", () => {
-    const undo = undoOf({ level: { level: "all" } }, before);
-    expect(undo?.command).toEqual({ level: { level: "blockers" } });
-    expect([undo?.holds(plan([], "all")), undo?.holds(plan([], "none"))]).toEqual([true, false]);
-  });
-
   it("names an edited item as it now reads", () => {
     expect(undoOf({ item: { edit: { item: "dig", title: "Dig deep" } } }, before)?.text).toBe("Edited Dig deep");
-  });
-
-  it("takes back a first approval with a revoke, while no agent has started on the thread's work", () => {
-    const threaded = plan(
-      [...before.items.values()].map((one) => ({ ...one, thread: one.id === "beds" ? null : "t" })),
-    );
-    const undo = undoOf({ thread: { approve: { thread: "t" } } }, threaded, undefined, () => "Garden");
-    expect(undo?.command).toEqual({ thread: { revoke: { thread: "t" } } });
-    // Taken back, it names the thread, as what the approval said did.
-    expect(undo?.undone).toBe("Took back the approval of Garden");
-    expect(undo?.holds(changed(threaded, "sow", { stage: "ready" }))).toBe(true);
-    expect(undo?.holds(changed(threaded, "sow", { stage: "in-progress" }))).toBe(false);
   });
 
   it("offers nothing for a write without an exact inverse", () => {
@@ -87,7 +63,7 @@ describe("undo", () => {
       "list",
       { item: { add: { item: "hose", title: "Hose" } } },
       { item: { reopen: { item: "dig" } } },
-      { proposal: { keep: { proposal: "p" } } },
+      { thread: { edit: { thread: "t", title: "T" } } },
       { item: { edit: { item: "gone", title: "X" } } },
       { item: { edit: { item: "dig", parent: "beds", title: "X" } } },
       { item: { edit: { item: "dig", flavour: "X" } } },

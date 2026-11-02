@@ -366,8 +366,7 @@ fn a_held_resource_keeps_another_threads_work_waiting_until_its_claim_is_release
 }
 
 #[test]
-fn ready_lists_the_actors_thread_first_then_approved_ones_by_natural_title_and_leaves_out_others_held()
- {
+fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves_out_others_held() {
     let mut r = replica("a");
     // Thread ids run against their titles, so only the titles can order them.
     for (item, held, title) in [
@@ -383,8 +382,6 @@ fn ready_lists_the_actors_thread_first_then_approved_ones_by_natural_title_and_l
         set(&mut r, &claim::thread_key(held).unwrap(), thread_field::TITLE, Some(&title), by(1))
             .unwrap();
     }
-    set(&mut r, &claim::thread_key("c").unwrap(), thread_field::APPROVED, Some(&true), by(1))
-        .unwrap();
     // Items within a thread sort by title in natural order too, then by id.
     for (item, title) in [("m10", "Part 10"), ("m2", "Part 2"), ("m1", "Part 2")] {
         add_item(&mut r, item, title, by(1)).unwrap();

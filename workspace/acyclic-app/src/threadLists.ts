@@ -8,9 +8,8 @@ export interface ThreadLists {
   /** Threads with work in progress or in review, by id in natural order. */
   working: string[];
   /**
-   * Threads to start: not at work, approved, with an item ready, the Any time ones first (what can start now reads
-   * first, as on the Map), then by wave. A thread waiting for approval is in Needs you instead, and one with every item
-   * blocked can't be started.
+   * Threads to start: not at work, with an item ready, the Any time ones first (what can start now reads first, as on
+   * the Map), then by wave. One with every item blocked can't be started.
    */
   next: string[];
 }
@@ -23,15 +22,11 @@ export function workingThreads(counts: ReadonlyMap<string, Counts>): string[] {
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
-/** The lists, with `awaiting` the threads Needs you asks the user to approve. */
-export function threadLists(
-  counts: ReadonlyMap<string, Counts>,
-  waves: WavesView | null,
-  awaiting: ReadonlySet<string>,
-): ThreadLists {
+/** The lists. */
+export function threadLists(counts: ReadonlyMap<string, Counts>, waves: WavesView | null): ThreadLists {
   const working = workingThreads(counts);
   if (waves === null) return { working, next: [] };
-  const startable = (id: string) => !working.includes(id) && !awaiting.has(id) && (counts.get(id)?.ready ?? 0) > 0;
+  const startable = (id: string) => !working.includes(id) && (counts.get(id)?.ready ?? 0) > 0;
   const next = [...waves.anytime, ...waves.waves.flat()].map((tile) => tile.id).filter(startable);
   return { working, next };
 }

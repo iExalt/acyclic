@@ -14,7 +14,7 @@ fn titled(title: &str) -> ItemFields {
     ItemFields { title: Some(title.to_owned()), ..ItemFields::default() }
 }
 
-fn code(result: Result<Written, CliError>) -> &'static str {
+fn code<T>(result: Result<T, CliError>) -> &'static str {
     result.map_or_else(|err| err.code, |_| "ok")
 }
 
@@ -92,7 +92,7 @@ fn an_edit_refuses_what_is_unknown_and_clears_what_it_is_told_to() {
 }
 
 #[test]
-fn an_agents_membership_and_repository_edits_to_approved_scope_wait_as_proposals() {
+fn an_agents_membership_and_repository_edits_apply_and_a_repeat_writes_nothing() {
     let mut r = replica();
     let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
     add_thread(&mut r, "t", &thread, USER_BY).unwrap();
@@ -100,43 +100,17 @@ fn an_agents_membership_and_repository_edits_to_approved_scope_wait_as_proposals
     crate::edit::add_repository(&mut r, "r", &repository, USER_BY).unwrap();
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
-    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
     let out_of_t = ItemFields {
-        title: Some("Renamed".into()),
         thread: Change::Clear,
         repositories: Delta { add: vec!["r".into()], remove: vec![] },
         ..ItemFields::default()
     };
-    let written = edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
-    let fields: Vec<&str> = written.proposals.iter().map(|p| p.field.as_str()).collect();
-    assert_eq!(fields, ["thread", "repositories"], "membership and repository: {written:?}");
+    edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
     let held = item(&r, "a");
-    assert_eq!(
-        (
-            held.title.one().map(String::as_str),
-            held.thread.one().map(String::as_str),
-            held.repositories.len()
-        ),
-        (Some("Renamed"), Some("t"), 0),
-        "the plain field applies and the scope waits"
-    );
-    // The same agent asking again gets its proposals back; the user's edit applies at once.
+    assert_eq!((held.thread.one(), held.repositories.len()), (None, 1));
     let before = r.changes();
-    let again = edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
-    assert_eq!((again.proposals, r.changes()), (written.proposals, before));
-    let written = edit_item(&mut r, "a", &out_of_t, USER_BY).unwrap();
-    assert_eq!(item(&r, "a").thread.one(), None);
-    assert_eq!(written.proposals, []);
-    // A thread's own repositories are scope too, and an agent's add of one waits.
-    let more = ThreadFields {
-        repositories: Delta { add: vec!["r".into()], remove: vec![] },
-        ..ThreadFields::default()
-    };
-    assert_eq!(edit_thread(&mut r, "t", &more, AGENT).unwrap().proposals.len(), 1);
-    // An agent can't set a level, which is the user's.
-    let level = ThreadFields { level: Change::Set(Level::Everything), ..ThreadFields::default() };
-    assert_eq!(code(edit_thread(&mut r, "t", &level, AGENT)), "user-only");
-    edit_thread(&mut r, "t", &level, USER_BY).unwrap();
+    edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
+    assert_eq!(r.changes(), before);
 }
 
 #[test]
@@ -173,53 +147,16 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
 }
 
 #[test]
-fn every_proposal_a_write_leaves_is_listed_including_the_placement_ones() {
+fn an_item_added_under_a_threads_member_joins_the_thread_and_says_so() {
     let mut r = replica();
     let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
     add_thread(&mut r, "t", &thread, USER_BY).unwrap();
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
-    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
-    // An agent's item under a member of the approved thread would join it, which waits as a proposal.
     let under = ItemFields { parent: Change::Set("a".into()), ..titled("B") };
-    let written = add_item(&mut r, "b", &under, AGENT).unwrap();
-    assert_eq!(written.proposals, [], "no edit of its own proposed anything");
-    let data = written.item("b");
-    let placed = data["placed"][0]["proposal"].as_str().unwrap().to_owned();
-    assert_eq!(
-        (&data["placed"][0]["outcome"], &data["proposals"]),
-        (&json!("proposed"), &json!([{"id": placed, "field": "thread"}]))
-    );
-    // Together with its own edits' proposals, each once and in order.
-    let proposed = |id: &str, field: &str| Proposed { id: id.into(), field: field.into() };
-    assert_eq!(
-        all_proposals(
-            &[proposed("z-1", "repositories"), proposed(&placed, "thread")],
-            &[Inherited { item: "b".into(), thread: "t".into(), proposal: Some(placed.clone()) }]
-        ),
-        [proposed(&placed, "thread"), proposed("z-1", "repositories")]
-    );
-}
-
-#[test]
-fn an_import_that_places_into_an_approved_thread_lists_the_proposal() {
-    let mut r = replica();
-    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
-    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
-    add_item(&mut r, "a", &ItemFields { thread: Change::Set("t".into()), ..titled("A") }, USER_BY)
-        .unwrap();
-    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
-    let plan = json!({"format": "acyclic-import", "version": 2, "items": [
-        {"key": "a", "title": "A", "state": "backlog"},
-        {"key": "c", "title": "C", "state": "backlog", "parent": "a"}]});
-    let doc = acyclic_core::import::Import::from_json(&plan.to_string()).unwrap();
-    // An agent's item under a member of the approved thread would join it, which waits for the user.
-    let report = acyclic_core::import::apply(&doc, &mut r, AGENT).unwrap();
-    let placed =
-        acyclic_core::place::place(&mut r, &["a".to_owned(), "c".to_owned()], AGENT).unwrap();
-    let data = crate::commands::import_json(&report, &placed, false);
-    let proposal = data["placed"][0]["proposal"].as_str().unwrap();
-    assert_eq!(data["proposals"], json!([{"id": proposal, "field": "thread"}]), "{data}");
+    let data = add_item(&mut r, "b", &under, AGENT).unwrap().item("b");
+    assert_eq!(data, json!({"item": "b", "placed": [{"item": "b", "thread": "t"}]}));
+    assert_eq!(item(&r, "b").thread.one().map(String::as_str), Some("t"));
 }
 
 #[test]
@@ -280,17 +217,4 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     for title in ["Weed", "Sow", "Rows"] {
         assert_eq!(new_id(&r, kind::ITEM, None, title).unwrap(), "item-mac-1", "{title}");
     }
-}
-
-#[test]
-fn an_agents_add_without_an_id_into_an_approved_thread_is_assigned_one_and_waits_as_a_proposal() {
-    let mut r = replica();
-    let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
-    add_thread(&mut r, "t", &thread, USER_BY).unwrap();
-    acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
-    let id = new_id(&r, kind::ITEM, None, "A").unwrap();
-    let fields = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
-    let written = add_item(&mut r, &id, &fields, AGENT).unwrap();
-    assert_eq!(id, "item-mac-1");
-    assert_eq!(written.proposals.iter().map(|p| p.field.as_str()).collect::<Vec<_>>(), ["thread"]);
 }

@@ -8,7 +8,6 @@ use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
 use acyclic_core::renumber::RenumberError;
-use acyclic_core::scope::ScopeError;
 use acyclic_core::state::Error as StateError;
 use acyclic_core::store::{BatchError, StoreError};
 use serde_json::{Value as Json, json};
@@ -110,7 +109,6 @@ impl From<WriteError> for CliError {
                 Self::refused("link-cycle", message).with(json!({"items": path}))
             },
             WriteError::Checked { .. } => Self::refused("checked-field", message),
-            WriteError::UserOnly { .. } => Self::refused("user-only", message),
             WriteError::SelfLink(_) => Self::refused("self-link", message),
         }
     }
@@ -142,24 +140,11 @@ impl From<BatchError<CliError>> for CliError {
     }
 }
 
-impl From<ScopeError> for CliError {
-    fn from(err: ScopeError) -> Self {
-        let message = err.to_string();
-        match err {
-            ScopeError::Write(err) => err.into(),
-            ScopeError::NotTheUser(_) => Self::refused("user-only", message),
-            ScopeError::NoProposal(_) => Self::new("not-found", exit::NOT_FOUND, message),
-            ScopeError::Decided(_) => Self::refused("decided", message),
-        }
-    }
-}
-
 impl From<DeleteError> for CliError {
     fn from(err: DeleteError) -> Self {
         let message = err.to_string();
         match err {
             DeleteError::Write(err) => err.into(),
-            DeleteError::NotAllowed { .. } => Self::refused("user-only", message),
             DeleteError::InUse { item, reasons } => {
                 Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
             },
@@ -172,7 +157,6 @@ impl From<RenumberError> for CliError {
         let message = err.to_string();
         match err {
             RenumberError::Write(err) => err.into(),
-            RenumberError::NotTheUser(_) => Self::refused("user-only", message),
             RenumberError::NoThread(_) => Self::new("not-found", exit::NOT_FOUND, message),
             RenumberError::InUse { thread, reasons } => {
                 Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
@@ -190,7 +174,6 @@ impl From<ArchiveError> for CliError {
                 Self::refused("ineligible", message).with(json!({"item": item, "reasons": reasons}))
             },
             ArchiveError::NotDone(_) => Self::refused("not-done", message),
-            ArchiveError::NotAllowed(_) => Self::refused("not-allowed", message),
         }
     }
 }
@@ -210,7 +193,6 @@ impl From<ApplyError> for CliError {
                 let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
                 Self::refused("invalid-import", message).with(json!({"errors": errors}))
             },
-            ApplyError::UserOnly(_) => Self::refused("user-only", message),
             ApplyError::Cycles(cycles) => {
                 Self::refused("import-cycle", message).with(json!({"cycles": cycles}))
             },

@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use acyclic_cli::args::{
-    Command, ItemCommand, LinkCommand, ProposalCommand, RepoCommand, Serve, ThreadCommand, Up,
-};
+use acyclic_cli::args::{Command, ItemCommand, LinkCommand, RepoCommand, Serve, ThreadCommand, Up};
 use acyclic_cli::error::{CliError, exit};
 use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
@@ -344,14 +342,11 @@ fn classify(command: &Command) -> Use {
         | Command::List
         | Command::Show { .. }
         | Command::Needs
-        | Command::Level { level: None }
         | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
-        | Command::Repo(RepoCommand::List | RepoCommand::Show { .. })
-        | Command::Proposal(ProposalCommand::List | ProposalCommand::Show { .. }) => Use::Read,
+        | Command::Repo(RepoCommand::List | RepoCommand::Show { .. }) => Use::Read,
         Command::Claim { .. }
         | Command::Release { .. }
         | Command::Done { .. }
-        | Command::Level { level: Some(_) }
         | Command::Item(
             ItemCommand::Add { .. }
             | ItemCommand::Edit(_)
@@ -361,16 +356,9 @@ fn classify(command: &Command) -> Use {
         )
         | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
         | Command::Thread(
-            ThreadCommand::Add { .. }
-            | ThreadCommand::Edit(_)
-            | ThreadCommand::Approve { .. }
-            | ThreadCommand::Revoke { .. }
-            | ThreadCommand::Renumber { .. },
+            ThreadCommand::Add { .. } | ThreadCommand::Edit(_) | ThreadCommand::Renumber { .. },
         )
-        | Command::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. })
-        | Command::Proposal(ProposalCommand::Keep { .. } | ProposalCommand::Drop { .. }) => {
-            Use::Write
-        },
+        | Command::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. }) => Use::Write,
     }
 }
 
@@ -429,7 +417,7 @@ impl Server {
         let server = Arc::clone(self);
         let run = tokio::task::spawn_blocking(move || {
             let _turn = turn;
-            acyclic_cli::call(command, server.config.tracker.clone(), true, &server.config.env)
+            acyclic_cli::call(command, server.config.tracker.clone(), &server.config.env)
         });
         run.await.unwrap_or_else(|_| {
             let err =

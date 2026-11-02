@@ -1,7 +1,7 @@
 // The sidebar's outline: the plan's projects, the top-level items the Map draws as zones, each opening into the threads
 // at work in it, and the threads in none. Pure, so the rules are tested without a browser.
 
-import { dependencyOrder, topOrder } from "./map/elk";
+import { topOrder } from "./map/elk";
 import type { Model } from "./map/model";
 
 export interface ProjectRow {
@@ -67,23 +67,6 @@ export function currentRows(
   }
   const project = outline.projects.some((one) => one.id === root) ? root : null;
   return { project, thread: model.items.get(selected)?.thread ?? null };
-}
-
-/**
- * A thread's items not archived, which can be selected, each after those in the thread it waits for, ties by id. An
- * approval covers the archived too, which the count of what it covers says.
- */
-export function membersOf(model: Model, thread: string): string[] {
-  const ids = [...model.items.values()]
-    .filter((item) => item.thread === thread && !item.archived)
-    .map((item) => item.id);
-  const inThread = new Set(ids);
-  const edges = ids.flatMap((id) =>
-    (model.items.get(id)?.waitsFor ?? [])
-      .filter((first) => inThread.has(first))
-      .map((first) => ({ source: first, target: id })),
-  );
-  return dependencyOrder(ids, edges);
 }
 
 /**

@@ -50,18 +50,15 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     let env =
         Env { vars: [("HOME".to_owned(), home.display().to_string())].into(), ..Env::default() };
     let run = |command: Value| {
-        let (code, answer) = acyclic_cli::call(
-            serde_json::from_value(command).unwrap(),
-            tracker.clone(),
-            true,
-            &env,
-        );
+        let (code, answer) =
+            acyclic_cli::call(serde_json::from_value(command).unwrap(), tracker.clone(), &env);
         assert_eq!(code, 0, "{answer}");
     };
-    // An agent's edit to an approved thread's scope waits as a proposal: news for the user.
-    let propose = |n: u32| {
+    // An agent reopening finished work: news for the user.
+    let reopen = |n: u32| {
         run(json!({"item": {"add": {"item": format!("p{n}"), "title": format!("P{n}")}}}));
-        let edit = json!({"item": {"edit": {"item": format!("p{n}"), "thread": "t"}}});
+        run(json!({"done": {"item": format!("p{n}"), "note": "n", "force": true}}));
+        let edit = json!({"item": {"reopen": {"item": format!("p{n}")}}});
         let (code, answer) = acyclic_cli::call_as(
             serde_json::from_value(edit).unwrap(),
             tracker.clone(),
@@ -71,9 +68,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         assert_eq!(code, 0, "{answer}");
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
-    run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
-    run(json!({"thread": {"approve": {"thread": "t"}}}));
-    propose(1);
+    reopen(1);
 
     let service =
         Arc::new(Service { answer: StdMutex::new(StatusCode::CREATED), ..Service::default() });
@@ -136,7 +131,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
 
     // Subscribing tells the device what already needs the user, signed for the service by the server's key.
     let (authorization, message) = received(1).await;
-    assert_eq!(message["body"], "A proposal for P1", "{message}");
+    assert_eq!(message["body"], "P1 was reopened", "{message}");
     assert_eq!(message["url"], "/?needs");
     let claimed = claims(&authorization, &public);
     assert_eq!(
@@ -147,32 +142,30 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     // A look with nothing new, as after a sync that brought nothing, tells nothing: the next push names only what is
     // new since.
     server.push.look();
-    propose(2);
+    reopen(2);
     server.push.look();
-    assert_eq!(received(2).await.1["body"], "A proposal for P2");
+    assert_eq!(received(2).await.1["body"], "P2 was reopened");
 
     // The user's own writes through the app bring news of their own doing, which is taken as seen.
     let user = |command: Value| call(&router, Method::POST, "/api/command", command.to_string());
-    assert_eq!(
-        user(json!({"thread": {"add": {"thread": "u", "title": "U"}}})).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        user(json!({"item": {"add": {"item": "m", "title": "M", "thread": "u"}}})).await.0,
-        StatusCode::OK
-    );
+    for command in [
+        json!({"item": {"add": {"item": "m", "title": "M"}}}),
+        json!({"done": {"item": "m", "note": "n", "force": true}}),
+        json!({"item": {"reopen": {"item": "m"}}}),
+    ] {
+        assert_eq!(user(command).await.0, StatusCode::OK);
+    }
     let sent = home.join(".config/acyclic/push/sent.json");
     let read = |file: &std::path::Path| std::fs::read_to_string(file).unwrap();
-    eventually("taking U as seen", || read(&sent).contains("awaiting-approval:u").then_some(()))
-        .await;
-    propose(3);
+    eventually("taking M as seen", || read(&sent).contains("reopened:m").then_some(())).await;
+    reopen(3);
     server.push.look();
-    assert_eq!(received(3).await.1["body"], "A proposal for P3");
+    assert_eq!(received(3).await.1["body"], "P3 was reopened");
 
     // However long the service is down, the device stays, and the news arrives once it is back.
     let devices = home.join(".config/acyclic/push/subscriptions.json");
     *service.answer.lock().unwrap() = StatusCode::SERVICE_UNAVAILABLE;
-    propose(4);
+    reopen(4);
     server.push.look();
     eventually("six refused sends", || (service.sent.lock().unwrap().len() >= 3 + 6).then_some(()))
         .await;
@@ -186,7 +179,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     })
     .await;
     let message: Value = serde_json::from_slice(&decrypt(&delivered, &device, &auth)).unwrap();
-    assert_eq!(message["body"], "A proposal for P4");
+    assert_eq!(message["body"], "P4 was reopened");
     let told = service.sent.lock().unwrap().len();
 
     // A restart on the same files tells nothing again, and a device the service says is gone is dropped.
@@ -195,9 +188,9 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     let server = Arc::new(Server::new(config.clone()));
     *service.answer.lock().unwrap() = StatusCode::GONE;
     server.push.look();
-    propose(5);
+    reopen(5);
     server.push.look();
-    assert_eq!(received(told + 1).await.1["body"], "A proposal for P5");
+    assert_eq!(received(told + 1).await.1["body"], "P5 was reopened");
     eventually("dropping the gone device", || (read(&devices) == "[]").then_some(())).await;
     for file in ["vapid.key", "subscriptions.json", "sent.json"] {
         let mode = std::fs::metadata(home.join(".config/acyclic/push").join(file))

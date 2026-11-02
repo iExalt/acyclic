@@ -120,24 +120,11 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("item edit a2 --title Renamed --parent nope", AGENT), 3);
     assert_eq!(sh.output("show a2", AGENT).1["data"][0]["title"], "Second", "refused as a whole");
     assert_eq!(sh.run("item edit a2 --thread t1", AGENT), 0);
-    assert_eq!(sh.run("thread approve t1", AGENT), 1, "only the user approves");
-    assert_eq!(sh.run("thread approve t1 --as-user", AGENT), 0);
-    let (_, ready) = sh.output("ready --approved", AGENT);
+    let (_, ready) = sh.output("ready", AGENT);
     assert_eq!(ready["data"]["ready"][0]["id"], "t1", "{ready}");
-    let (code, proposed) = sh.output("item edit a1 --thread t1", AGENT);
-    let proposal = proposed["data"]["proposals"][0]["id"].as_str().unwrap();
-    assert_eq!(
-        (code, &proposed["data"]["proposals"][0]["field"]),
-        (0, &json!("thread")),
-        "{proposed}"
-    );
+    assert_eq!(sh.run("item edit a1 --thread t1", AGENT), 0);
     assert_eq!(sh.run("needs", AGENT), 0);
-    assert_eq!(sh.run(&format!("proposal show {proposal}"), AGENT), 0);
-    assert_eq!(sh.run("proposal list", AGENT), 0);
-    assert_eq!(sh.run("proposal show nope", AGENT), 3);
-    assert_eq!(sh.run(&format!("proposal keep {proposal} --as-user"), AGENT), 0);
     assert_eq!(sh.run("list", AGENT), 0);
-    // a1 joined after the approval, so the approval didn't see it.
     assert_eq!(sh.run("thread list", AGENT), 0);
     // JSON stays the default, byte for byte, and `-o pretty` prints the same data for people, an error on stderr.
     for line in ["list", "ready", "thread list", "show a1", "show nope"] {
@@ -160,7 +147,7 @@ fn a_journey_through_the_contract() {
     let (code, shown) = sh.output("show a1 a2", AGENT);
     assert_eq!((code, shown["data"][1]["id"].as_str()), (0, Some("a2")), "in the order given");
     assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
-    let (code, out) = sh.output("item edit a2 --no-thread --as-user", AGENT);
+    let (code, out) = sh.output("item edit a2 --no-thread", AGENT);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)));
     assert_eq!(sh.run("repo add r1 --name code", AGENT), 2, "a new record needs every field");
     let full = "repo add r1 --owner me --name code --default-branch main";
@@ -178,15 +165,12 @@ fn a_journey_through_the_contract() {
         );
     }
     assert_eq!(sh.run("repo list", AGENT), 0);
-    let (code, out) = sh.output("thread revoke t1 --as-user", AGENT);
-    assert_eq!((code, out["data"]["approved"].as_bool()), (0, Some(false)));
-    // The tracker assigns a thread's id when the add leaves it out. Only the user renumbers a thread, and only one
-    // whose number another thread's id shares, which this one's doesn't.
+    // The tracker assigns a thread's id when the add leaves it out. Only a thread whose number another thread's id
+    // shares is renumbered, which this one's doesn't.
     let (code, added) = sh.output("thread add --title Spare", AGENT);
     let spare = added["data"]["thread"].as_str().unwrap().to_owned();
     assert_eq!(code, 0, "{added}");
-    assert_eq!(sh.run(&format!("thread renumber {spare}"), AGENT), 1, "only the user renumbers");
-    let (code, out) = sh.output(&format!("thread renumber {spare} --as-user"), AGENT);
+    let (code, out) = sh.output(&format!("thread renumber {spare}"), AGENT);
     assert_eq!(
         (code, &out["error"]["details"]["reasons"][0]["why"]),
         (1, &json!("no-clash")),
@@ -196,20 +180,13 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("link add a1 blocks a2", AGENT), 2, "the old words are refused");
     let (code, unlinked) = sh.output("link remove a2 waits-for a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
-    assert_eq!(sh.run("ready", &[("ACYCLIC_ACTOR", "actor/user")]), 2);
-    // a2 left t1; an agent groups it into a new thread, which the user then sees awaiting approval.
+    // a2 left t1; an agent groups it into a new thread.
     assert_eq!(sh.run("thread add t2 --title Follow-ups", AGENT), 0);
-    let (code, out) = sh.output("item edit a2 --thread t2", AGENT);
-    assert_eq!((code, &out["data"]["proposals"]), (0, &json!([])), "unapproved scope");
+    assert_eq!(sh.run("item edit a2 --thread t2", AGENT), 0);
     // A thread where an item belongs says which command was meant.
     let (code, out) = sh.output("item edit a2 --parent t2", AGENT);
     let meant = out["error"]["details"]["meant"].as_str();
     assert_eq!((code, meant), (3, Some("acyclic item edit a2 --thread t2")));
-    assert_eq!(sh.run("level", AGENT), 0);
-    assert_eq!(sh.run("level everything", AGENT), 1, "only the user sets the level");
-    assert_eq!(sh.run("level everything --as-user", AGENT), 0);
-    assert_eq!(sh.run("thread edit t2 --level blockers --as-user", AGENT), 0);
-    assert_eq!(sh.run("level", AGENT), 0);
     assert_eq!(sh.run("needs", AGENT), 0);
     assert_eq!(sh.run("item add a3 --title Second-follow-up", AGENT), 0);
     assert_eq!(
@@ -280,7 +257,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     let file = sh.path().join("plan.json");
     std::fs::write(&file, plan.to_json()).unwrap();
     let import = |sh: &mut Shell, extra: &str| {
-        let (code, out) = sh.output(&format!("import plan.json --as-user{extra}"), &[]);
+        let (code, out) = sh.output(&format!("import plan.json{extra}"), &[]);
         assert_eq!(code, 0, "{out}");
         out["data"].clone()
     };
@@ -330,7 +307,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
         (Some(true), Some(1))
     );
     assert_eq!(renamed["changes"][0]["fields"]["title"]["to"], plan.items[0].title);
-    assert_eq!(sh.run("import missing.json --as-user", &[]), 3);
+    assert_eq!(sh.run("import missing.json", &[]), 3);
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -396,12 +373,12 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("item edit a1 --parent a2", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", pi);
-    sh.run("item edit a1 --no-parent --as-user", AGENT);
+    sh.run("item edit a1 --no-parent", AGENT);
     sh.run("item edit a1 --parent b1", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["kind"], "conflict");
-    let (_, out) = sh.output("item edit a1 --no-parent --as-user", AGENT);
+    let (_, out) = sh.output("item edit a1 --no-parent", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
     // Likewise taking an item out of a thread while the other machine puts it in one.
@@ -410,12 +387,12 @@ fn two_machines_sync_through_a_shared_repository() {
     sh.run("item edit a1 --thread t1", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", pi);
-    sh.run("item edit a1 --no-thread --as-user", AGENT);
+    sh.run("item edit a1 --no-thread", AGENT);
     sh.run("item edit a1 --thread t2", pi);
     sh.run("sync", pi);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["field"], "thread");
-    let (_, out) = sh.output("item edit a1 --no-thread --as-user", AGENT);
+    let (_, out) = sh.output("item edit a1 --no-thread", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
     // Threads each machine numbers before seeing the other's clash once a sync brings them together.

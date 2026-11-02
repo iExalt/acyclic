@@ -9,13 +9,12 @@ use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::delete;
 use acyclic_core::import::{self, Import};
-use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField, Value};
+use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::renumber;
-use acyclic_core::schema::{GLOBAL, item as field, kind, link as link_field, settings};
-use acyclic_core::scope;
+use acyclic_core::schema::{item as field, kind, link as link_field};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
@@ -23,8 +22,8 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, ProposalCommand, RepoCommand,
-    StateWord, ThreadCommand,
+    Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepoCommand, StateWord,
+    ThreadCommand,
 };
 use crate::context;
 use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
@@ -99,8 +98,8 @@ impl<'a> Session<'a> {
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
-            Command::Ready { include_archived, approved } => {
-                self.ready(*include_archived, *approved)
+            Command::Ready { include_archived } => {
+                self.ready(*include_archived)
             },
             Command::List => self.list(),
             Command::Show { items } => self.show(items),
@@ -238,26 +237,22 @@ impl<'a> Session<'a> {
             Command::Claim { thread, lease, force } => self.claim(thread, *lease, *force),
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
-            Command::Thread(ThreadCommand::Add { thread, title, brief, repository, level }) => {
+            Command::Thread(ThreadCommand::Add { thread, title, brief, repository }) => {
                 let fields = ThreadFields {
                     title: Some(title.clone()),
                     brief: Change::of(brief.clone(), false),
-                    level: Change::of(*level, false),
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
                     let id = edit::new_id(replica, kind::THREAD, thread.as_deref(), title)?;
-                    let written = edit::add_thread(replica, &id, &fields, by)?;
-                    let mut data = written.thread(&id);
-                    data["title"] = json!(title);
-                    Ok(data)
+                    edit::add_thread(replica, &id, &fields, by)?;
+                    Ok(json!({"thread": id, "title": title}))
                 })
             },
             Command::Thread(ThreadCommand::Edit(edit)) => {
                 let fields = ThreadFields {
                     title: edit.title.clone(),
                     brief: Change::of(edit.brief.clone(), edit.no_brief),
-                    level: Change::of(edit.level, edit.no_level),
                     repositories: Delta {
                         add: edit.repository.clone(),
                         remove: edit.no_repository.clone(),
@@ -265,7 +260,8 @@ impl<'a> Session<'a> {
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
-                    Ok(edit::edit_thread(replica, thread, &fields, by)?.thread(thread))
+                    edit::edit_thread(replica, thread, &fields, by)?;
+                    Ok(json!({"thread": thread}))
                 })
             },
             Command::Repo(RepoCommand::List) => self.repositories(),
@@ -304,29 +300,11 @@ impl<'a> Session<'a> {
                     Ok(json!({"repository": repository}))
                 })
             },
-            Command::Proposal(ProposalCommand::List) => self.proposal_list(),
-            Command::Proposal(ProposalCommand::Show { proposals }) => {
-                self.show_proposals(proposals)
-            },
-            Command::Proposal(ProposalCommand::Keep { proposal }) => {
-                self.decide(proposal, scope::keep, "keep")
-            },
-            Command::Proposal(ProposalCommand::Drop { proposal }) => {
-                self.decide(proposal, scope::drop, "drop")
-            },
-            Command::Thread(ThreadCommand::Approve { thread: id }) => self.approve(id, true),
             Command::Thread(ThreadCommand::Renumber { thread: id }) => self.write(|replica, by| {
                 let done = renumber::renumber(replica, id, by)?;
                 let model = Model::read(replica.state())?;
                 let title = model.threads.get(&done.thread).and_then(|thread| thread.title.one());
                 Ok(json!({"thread": done.thread, "title": title, "from": done.from, "moved": done.moved}))
-            }),
-            Command::Thread(ThreadCommand::Revoke { thread: id }) => self.approve(id, false),
-            Command::Level { level: None } => self.levels(),
-            Command::Level { level: Some(level) } => self.write(|replica, by| {
-                let key = Key::new(kind::SETTINGS, GLOBAL)?;
-                set_if(replica, &key, settings::AUTONOMY, Some(level), by)?;
-                Ok(json!({"level": level}))
             }),
             Command::Import { file: Some(file), dry_run, .. } => self.import(file, *dry_run),
             Command::Item(ItemCommand::Delete { item }) => self.write(|replica, by| {
@@ -415,43 +393,6 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Decides a proposal, and says which member and thread the edit named, and whether that member's work is
-    /// approved afterwards: a kept membership edit into an approved thread extends the approval.
-    fn decide(
-        &self,
-        proposal: &str,
-        decide: fn(&mut Replica, &str, By<'_>) -> Result<(), scope::ScopeError>,
-        decision: &str,
-    ) -> Result<Json, CliError> {
-        self.write(|replica, by| {
-            let edit = scope::proposals(replica.state())?
-                .get(proposal)
-                .and_then(|p| p.edit.one().cloned());
-            decide(replica, proposal, by)?;
-            let (item, thread) = match edit {
-                Some(scope::ScopeEdit::Member { item, thread }) => (Some(item), thread),
-                _ => (None, None),
-            };
-            let approved = match &item {
-                Some(item) => view::approval(&Model::read(replica.state())?, item).1,
-                None => false,
-            };
-            Ok(json!({"proposal": proposal, "decision": decision, "item": item, "thread": thread,
-                      "approved": approved}))
-        })
-    }
-
-    /// Approves a thread's scope, or revokes the approval, naming the thread by its title too, so a wrong id shows. A
-    /// thread only its items name, or whose title is in conflict, has none.
-    fn approve(&self, id: &str, approved: bool) -> Result<Json, CliError> {
-        self.write(|replica, by| {
-            scope::approve(replica, id, approved, by)?;
-            let model = Model::read(replica.state())?;
-            let title = model.threads.get(id).and_then(|thread| thread.title.one());
-            Ok(json!({"thread": id, "title": title, "approved": approved}))
-        })
-    }
-
     /// Reads the tracker and hands `read` a view of it: its items' readiness is judged against the clones' history.
     fn with_view<T>(
         &self,
@@ -463,11 +404,11 @@ impl<'a> Session<'a> {
         read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
     }
 
-    fn ready(&self, include_archived: bool, only_approved: bool) -> Result<Json, CliError> {
+    fn ready(&self, include_archived: bool) -> Result<Json, CliError> {
         self.with_view(|view| {
             let ready = view.readiness.ready(include_archived, &self.actor)?;
             acyclic_core::probe::mark("readiness");
-            Ok(json!({"ready": view.ready_rows(&ready, only_approved)?}))
+            Ok(json!({"ready": view.ready_rows(&ready)?}))
         })
     }
 
@@ -525,17 +466,6 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn levels(&self) -> Result<Json, CliError> {
-        let (_, model) = self.read()?;
-        let own: Vec<Json> = model
-            .threads
-            .iter()
-            .filter(|(_, thread)| thread.autonomy != Value::None)
-            .map(|(id, _)| json!({"id": id, "level": model.level(Some(id))}))
-            .collect();
-        Ok(json!({"global": model.level(None), "threads": own}))
-    }
-
     fn repositories(&self) -> Result<Json, CliError> {
         let (_, model) = self.read()?;
         let records: Vec<Json> = model.repositories.values().map(view::repo_row).collect();
@@ -554,27 +484,6 @@ impl<'a> Session<'a> {
                 )
             })?;
             shown.push(view::repo_show(&model, record));
-        }
-        Ok(Json::Array(shown))
-    }
-
-    fn proposal_list(&self) -> Result<Json, CliError> {
-        self.with_view(|view| Ok(json!({"proposals": view.proposals()?})))
-    }
-
-    fn show_proposals(&self, ids: &[String]) -> Result<Json, CliError> {
-        let (state, model) = self.read()?;
-        let all = scope::proposals(&state)?;
-        let mut shown = Vec::with_capacity(ids.len());
-        for id in ids {
-            let proposal = all.get(id).ok_or_else(|| {
-                CliError::new(
-                    "not-found",
-                    exit::NOT_FOUND,
-                    format!("no proposal {id}; `acyclic proposal list` lists them"),
-                )
-            })?;
-            shown.push(view::proposal_show(&model, proposal));
         }
         Ok(Json::Array(shown))
     }
@@ -752,17 +661,14 @@ pub(crate) fn overwrites(item: &model::Item, evidence: &Evidence) -> bool {
     item.is_done() && !item.evidence.all().is_empty() && item.evidence.one() != Some(evidence)
 }
 
-/// Refuses to let an agent finish an item that isn't ready or that someone else holds; the user may finish anything.
-/// A finished item may be finished again, which changes nothing.
+/// Refuses to finish an item that isn't ready or that someone else holds, unless forced. A finished item may be finished
+/// again, which changes nothing.
 fn check_finish(
     replica: &Replica,
     id: &str,
     by: By<'_>,
     ancestry: &dyn Ancestry,
 ) -> Result<(), CliError> {
-    if by.actor == scope::USER {
-        return Ok(());
-    }
     let model = Model::read(replica.state())?;
     let readiness = Readiness::new(replica.state(), &model, by.at, ancestry);
     let status = readiness.of(id)?;
@@ -788,7 +694,7 @@ fn check_finish(
     .with(json!({"readiness": status})))
 }
 
-/// Whether an agent may finish an item in `status` without forcing: when it may claim it, or it is finished already.
+/// Whether an actor may finish an item in `status` without forcing: when it may claim it, or it is finished already.
 pub(crate) fn may_finish(status: Option<&Status>, actor: &str) -> bool {
     matches!(status, Some(Status::Done | Status::InReview | Status::Unverified { .. }))
         || may_claim(status, actor)
@@ -1054,21 +960,8 @@ fn set_origin(
     Ok(true)
 }
 
-/// The items that joined a thread passed down to them, or asked to, as `{item, thread, outcome, proposal}`: applied at
-/// once, or proposed when the thread's scope is approved and the actor may only propose.
-pub(crate) fn placed(inherited: &[place::Inherited]) -> Json {
-    inherited
-        .iter()
-        .map(|p| {
-            json!({"item": p.item, "thread": p.thread,
-                   "outcome": if p.proposal.is_some() { "proposed" } else { "applied" },
-                   "proposal": p.proposal})
-        })
-        .collect()
-}
-
-/// An import's result: what it changed, in counts and field by field, the proposals it left and the threads items
-/// joined. A dry run changes nothing.
+/// An import's result: what it changed, in counts and field by field, and the threads items joined, as
+/// `{item, thread}`. A dry run changes nothing.
 pub(crate) fn import_json(
     report: &import::Report,
     inherited: &[place::Inherited],
@@ -1084,8 +977,7 @@ pub(crate) fn import_json(
             "fields": report.fields,
         },
         "changes": report.changes,
-        "proposals": crate::edit::all_proposals(&report.proposals, inherited),
-        "placed": placed(inherited),
+        "placed": inherited,
     });
     if dry_run {
         data["changed"] = json!(false);

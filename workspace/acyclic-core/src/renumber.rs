@@ -4,9 +4,8 @@
 //! `thread-mac-32` and `thread-pi-32`. The ids differ, so nothing breaks, but the app draws threads by number, and
 //! `needs` lists the clash. The user resolves it by renumbering one of them.
 //!
-//! A thread's id is named in more places than its members: runs, questions, proposals, claims and the server's
-//! repositories for its runs. So only a thread whose number clashes is renumbered, and only a fresh one: one that has
-//! never had a run and has no question, live claim or open proposal naming it. Its own fields and its explicit
+//! A thread's id is named in more places than its members, such as its claims. So only a thread whose number clashes
+//! is renumbered, and only a fresh one: one with no live claim on it. Its own fields and its explicit
 //! repositories are copied to the new id, its members move there, done ones included, and the old id is deleted: a
 //! tombstone, as for items, so the id is never assigned again and a replica that still adds members under it sees
 //! them dangle in `needs`.
@@ -22,32 +21,20 @@ use serde_json::Value as Json;
 use crate::claim;
 use crate::ids;
 use crate::model::{self, By, Model, WriteError};
-use crate::schema::{item, kind, question, set, thread};
-use crate::scope::{self, ScopeEdit, USER};
+use crate::schema::{item, kind, set, thread};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The thread fields a renumber carries over; claims stay with the old id as history.
-const CARRIED: [&str; 5] =
-    [thread::TITLE, thread::BRIEF, thread::APPROVED, thread::APPROVED_MEMBERS, thread::AUTONOMY];
+const CARRIED: [&str; 2] = [thread::TITLE, thread::BRIEF];
 
 /// Why a thread isn't renumbered.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "why")]
 pub enum Reason {
-    /// A question names it.
-    Question {
-        /// The question.
-        question: String,
-    },
     /// Someone holds a live claim on it.
     Claimed {
         /// The holder.
         holder: String,
-    },
-    /// An undecided proposal would change its scope.
-    Proposal {
-        /// The proposal.
-        proposal: String,
     },
     /// No other thread's id ends in its number, so there is nothing to resolve, and its id stays.
     NoClash,
@@ -65,9 +52,7 @@ pub enum Reason {
 impl fmt::Display for Reason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Question { question } => write!(f, "question {question} names it"),
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on it"),
-            Self::Proposal { proposal } => write!(f, "proposal {proposal} would change its scope"),
             Self::NoClash => write!(f, "no other thread's id ends in its number"),
             Self::Conflict { kind, id, field } => write!(f, "{kind} {id}'s {field} is in conflict"),
         }
@@ -79,8 +64,6 @@ impl fmt::Display for Reason {
 pub enum RenumberError {
     /// The model layer refused.
     Write(WriteError),
-    /// Only the user renumbers a thread.
-    NotTheUser(String),
     /// No such thread, or it was deleted.
     NoThread(String),
     /// The thread isn't fresh.
@@ -96,7 +79,6 @@ impl fmt::Display for RenumberError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::NotTheUser(actor) => write!(f, "only the user renumbers a thread, not {actor}"),
             Self::NoThread(id) => write!(f, "no thread {id}"),
             Self::InUse { thread, reasons } => {
                 write!(f, "{thread} can't be renumbered: {}", crate::say::list(reasons, "; "))
@@ -146,16 +128,6 @@ fn single(state: &State, key: &Key, field: &str) -> Result<Option<Json>, ()> {
     }
 }
 
-/// Whether an undecided proposal's edit would change `id`'s scope.
-fn touches(edit: &ScopeEdit, model: &Model, id: &str) -> bool {
-    let named = match edit {
-        ScopeEdit::Member { thread, .. } => thread.as_deref() == Some(id),
-        ScopeEdit::ThreadRepository { thread, .. } => thread == id,
-        ScopeEdit::ItemRepository { .. } => false,
-    };
-    named || edit.approved_threads(model).iter().any(|thread| thread == id)
-}
-
 /// Why `id` isn't fresh, judged at `now`.
 fn reasons(state: &State, model: &Model, id: &str, now: Millis) -> Result<Vec<Reason>, Error> {
     let mut found = Vec::new();
@@ -168,20 +140,8 @@ fn reasons(state: &State, model: &Model, id: &str, now: Millis) -> Result<Vec<Re
     if !clashes {
         found.push(Reason::NoClash);
     }
-    for (key, _) in state.entities().filter(|(key, _)| key.kind == kind::QUESTION) {
-        let asking: model::Value<String> = model::value(state, key, question::THREAD)?;
-        if asking.all().iter().any(|t| *t == id) {
-            found.push(Reason::Question { question: key.id.clone() });
-        }
-    }
     for held in claim::live(state, &claim::thread_key(id)?, now)? {
         found.push(Reason::Claimed { holder: held.holder });
-    }
-    for proposal in scope::proposals(state)?.into_values() {
-        let open = proposal.decision == model::Value::None;
-        if open && proposal.edit.all().iter().any(|edit| touches(edit, model, id)) {
-            found.push(Reason::Proposal { proposal: proposal.id });
-        }
     }
     let key = claim::thread_key(id)?;
     let names = state.entity(&key).into_iter().flatten().map(|(name, _)| name.as_str());
@@ -212,12 +172,8 @@ fn reasons(state: &State, model: &Model, id: &str, now: Millis) -> Result<Vec<Re
 ///
 /// # Errors
 ///
-/// Fails when the actor isn't the user, when the thread has no record or was deleted, when it isn't fresh, or when
-/// the state layer refuses.
+/// Fails when the thread has no record or was deleted, when it isn't fresh, or when the state layer refuses.
 pub fn renumber(replica: &mut Replica, id: &str, by: By<'_>) -> Result<Renumbered, RenumberError> {
-    if by.actor != USER {
-        return Err(RenumberError::NotTheUser(by.actor.to_owned()));
-    }
     let model = Model::read(replica.state())?;
     if !model.threads.contains_key(id) {
         return Err(RenumberError::NoThread(id.to_owned()));

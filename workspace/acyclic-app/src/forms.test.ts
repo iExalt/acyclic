@@ -1,21 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
-import {
-  approveCommand,
-  changes,
-  draftOf,
-  dropCommand,
-  globalLevelCommand,
-  itemEdit,
-  keepCommand,
-  levelHint,
-  reopenCommand,
-  resolveCommand,
-  revokeCommand,
-  stateHint,
-  threadLevelCommand,
-  unsettledWhy,
-} from "./forms";
+import { changes, draftOf, itemEdit, reopenCommand, resolveCommand, stateHint, unsettledWhy } from "./forms";
 import { item } from "./map/fixture";
 
 const example = (name: string) => {
@@ -38,13 +23,6 @@ describe("form commands", () => {
     expect(resolveCommand("thread", "t", "title", "T")).toEqual(example("settle a thread's title"));
     expect(resolveCommand("thread", "t", "brief", null)).toEqual(example("settle a thread's brief as a clear"));
     expect(reopenCommand("e")).toEqual(example("reopen"));
-    expect(revokeCommand("t")).toEqual(example("revoke"));
-    expect(approveCommand("t")).toEqual(example("approve"));
-    expect(keepCommand("$proposal-1")).toEqual(example("keep"));
-    expect(dropCommand("$proposal-2")).toEqual(example("drop"));
-    expect(threadLevelCommand("t", "everything")).toEqual(example("a thread's own level"));
-    expect(threadLevelCommand("t", null)).toEqual(example("the global level for a thread"));
-    expect(globalLevelCommand("blockers")).toEqual(example("the global level"));
   });
 });
 
@@ -73,16 +51,7 @@ describe("resolveCommand", () => {
     expect(resolveCommand("item", "a", "thread", null)).toEqual({ item: { edit: { item: "a", "no-thread": true } } });
     expect(resolveCommand("item", "a", "state", "done")).toBeNull();
     expect(resolveCommand("item", "a", "title", null)).toBeNull();
-    expect(resolveCommand("thread", "t", "autonomy", "blockers")).toEqual({
-      thread: { edit: { thread: "t", level: "blockers" } },
-    });
-    expect(resolveCommand("thread", "t", "autonomy", "sometimes")).toBeNull();
-    expect(resolveCommand("thread", "t", "approved", false)).toEqual(revokeCommand("t"));
-    expect(resolveCommand("thread", "t", "approved-members", ["a"])).toEqual(approveCommand("t"));
     expect(resolveCommand("thread", "t", "evidence", "x")).toBeNull();
-    // The global level itself can be written apart.
-    expect(resolveCommand("settings", "global", "autonomy", "blockers")).toEqual(example("the global level"));
-    expect(resolveCommand("settings", "global", "autonomy", null)).toBeNull();
     expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic done/);
   });
 });
@@ -97,16 +66,5 @@ describe("stateHint", () => {
     );
     expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
-  });
-});
-
-describe("levelHint", () => {
-  it("says what each level lets reach the user, and nothing for one the app doesn't know", () => {
-    expect(["everything", "scope-and-irreversible", "blockers", "later"].map(levelHint)).toEqual([
-      "Agents ask about everything",
-      "Agents ask about scope changes and irreversible actions",
-      "Agents ask only about blockers",
-      null,
-    ]);
   });
 });

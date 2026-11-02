@@ -148,15 +148,14 @@ describe("told", () => {
       offer: null,
       fixId: true,
     });
-    // A proposal decided elsewhere: the app's view is stale, so it offers a refresh.
-    expect(told({ write: "failed", code: "decided", message: "decided" }).offer).toBe("refresh");
-    expect(told({ write: "saved", proposals: 0, reload: { failed: "offline" } })).toEqual({
+    // Gone elsewhere: the app's view is stale, so it offers a refresh.
+    expect(told({ write: "failed", code: "not-found", message: "gone" }).offer).toBe("refresh");
+    expect(told({ write: "saved", reload: { failed: "offline" } })).toEqual({
       text: "Saved, but the refresh failed: offline",
       offer: "refresh",
       fixId: false,
     });
-    expect(told({ write: "saved", proposals: 1, reload: "done" }).text).toMatch(/proposal/);
-    expect(told({ write: "saved", proposals: 0, reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
+    expect(told({ write: "saved", reload: "done" })).toEqual({ text: null, offer: null, fixId: false });
   });
 });
 

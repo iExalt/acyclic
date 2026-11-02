@@ -161,27 +161,21 @@ fn failed(message: String) -> CliError {
     CliError::new("session", exit::CONFIG, message)
 }
 
-/// The session's own refusal, with how to recover from a file that others could open.
 fn refused(err: &private::Error) -> CliError {
-    match err {
-        private::Error::Open { .. } => {
-            failed(format!("{err}, then rotate the session with acyclic up --rotate"))
-        },
-        _ => failed(err.to_string()),
-    }
+    failed(err.to_string())
 }
 
 /// The session in the home directory `home`, created if there is none and replaced if `rotate` says so, with the
-/// file's path. The directory is created private and the file is written private, and either refused if it isn't.
+/// file's path. The directory is created private and the file is written private.
 ///
 /// # Errors
 ///
-/// When the directory or the file is open to other users, isn't what it should be, or holds no token.
+/// When the directory or the file can't be made or read, or the file holds no token.
 pub fn open(home: &Path, rotate: bool) -> Result<(Token, PathBuf), CliError> {
     let dir = home.join(DIR);
     private::dir(&dir).map_err(|err| refused(&err))?;
     let path = dir.join("session");
-    if !rotate && private::check(&path, false).map_err(|err| refused(&err))? {
+    if !rotate && path.exists() {
         return read(&path).map(|token| (token, path));
     }
     // If another server got there first, its token is the session.
@@ -195,12 +189,10 @@ pub fn open(home: &Path, rotate: bool) -> Result<(Token, PathBuf), CliError> {
 ///
 /// # Errors
 ///
-/// When there is none, or it would be refused as [`open`] refuses it.
+/// When there is none, or it can't be read or holds no token.
 pub fn existing(home: &Path) -> Result<(Token, PathBuf), CliError> {
-    let dir = home.join(DIR);
-    let path = dir.join("session");
-    let exists = |path: &Path, dir| private::check(path, dir).map_err(|err| refused(&err));
-    if !exists(&dir, true)? || !exists(&path, false)? {
+    let path = home.join(DIR).join("session");
+    if !path.exists() {
         return Err(CliError::new(
             "no-session",
             exit::CONFIG,

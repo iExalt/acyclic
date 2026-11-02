@@ -56,10 +56,10 @@ const click = (url: unknown) => ({ notification: { data: { url }, close: () => u
 describe("the service worker", () => {
   it("shows a push as the one notification that opens the needs-you list", async () => {
     const { dispatch, did } = worker([{ answers: true }]);
-    const message = { title: "Needs you", body: "A proposal for B", url: "/?needs" };
+    const message = { title: "Needs you", body: "B was reopened", url: "/?needs" };
     await dispatch("push", { data: { json: () => message } });
     expect(did).toEqual([
-      ["show", "Needs you", { body: "A proposal for B", icon: "/icon.svg", tag: "needs", data: { url: "/?needs" } }],
+      ["show", "Needs you", { body: "B was reopened", icon: "/icon.svg", tag: "needs", data: { url: "/?needs" } }],
     ]);
     // An unreadable message still says something needs the user.
     const unreadable = worker([{ answers: true }]);

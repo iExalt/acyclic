@@ -1,42 +1,16 @@
-//! The needs-you list, computed on read: everything waiting on the user. What the state shows (conflicts, cycles,
-//! contests, clashes, proposals, new blockers on approved work, reopened work, dangling references) always appears;
-//! agents' questions are filtered by the thread's autonomy level, and blockers always pass.
+//! The needs-you list, computed on read: everything waiting on the user, as the state shows it (conflicts, cycles,
+//! contests, clashes, reopened work, dangling references).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::claim;
-use crate::model::{self, Level, Model, Value};
+use crate::model::{self, Model, Value};
 use crate::ready::{Readiness, Status, Wait};
 use crate::renumber;
-use crate::schema::{kind, question, set};
-use crate::scope;
+use crate::schema::{kind, set};
 use crate::state::{Error, Millis, State};
-
-/// What kind of question an agent asks; the exact classes are settled with the app's mockups.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Class {
-    /// The agent can't continue without an answer.
-    Blocker,
-    /// About a change of scope.
-    Scope,
-    /// About an action that can't be undone.
-    Irreversible,
-    /// Anything else.
-    Other,
-}
-
-/// Whether a question of `class` reaches the needs-you list at `level`.
-#[must_use]
-pub fn passes(level: Level, class: Class) -> bool {
-    match level {
-        Level::Everything => true,
-        Level::ScopeAndIrreversible => class != Class::Other,
-        Level::Blockers => class == Class::Blocker,
-    }
-}
 
 /// One entry on the needs-you list.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -50,17 +24,6 @@ pub enum Entry {
         id: String,
         /// The field.
         field: String,
-    },
-    /// A thread with members waits for the user to approve its scope.
-    AwaitingApproval {
-        /// The thread.
-        thread: String,
-        /// How many open, unarchived items it holds.
-        members: usize,
-        /// Threads it waits on in a cycle through `blocks` links, so not all of them can finish as they stand.
-        waits_with: Vec<String>,
-        /// Its heads: two or more say its order is partly unsaid, so approving it says they may run in any order.
-        heads: Vec<String>,
     },
     /// This clone pushes every write, yet holds writes the remote lacks: `acyclic sync` sends them.
     Unpushed {
@@ -76,6 +39,12 @@ pub enum Entry {
     ParentCycle {
         /// The items on it.
         items: Vec<String>,
+    },
+    /// Threads wait on each other through `blocks` links between their open members, so not all of them can finish
+    /// as they stand.
+    ThreadCycle {
+        /// The threads on it.
+        threads: Vec<String>,
     },
     /// Holders that didn't see each other claim one thread.
     Contest {
@@ -104,37 +73,6 @@ pub enum Entry {
         item: String,
         /// The command that puts it in a thread.
         fix: String,
-    },
-    /// An agent's edit to approved scope awaits keep or drop.
-    Proposal {
-        /// The proposal.
-        id: String,
-        /// Who proposed it.
-        actor: String,
-        /// The approved threads it changes.
-        threads: Vec<String>,
-    },
-    /// An agent's member of an approved thread that the approval never saw: its edit raced the approval.
-    Unapproved {
-        /// The item.
-        item: String,
-        /// Its approved thread.
-        thread: String,
-        /// The agent that put it there.
-        actor: String,
-        /// The user's command that keeps it.
-        keep: String,
-        /// The user's command that drops it.
-        drop: String,
-    },
-    /// A blocker added to approved work after its approval.
-    NewBlocker {
-        /// The blocked item.
-        item: String,
-        /// Its approved thread.
-        thread: String,
-        /// The blocking item.
-        blocker: String,
     },
     /// A reopened item, with the items that depend on it.
     Reopened {
@@ -182,17 +120,6 @@ pub enum Entry {
         /// Why not.
         reason: String,
     },
-    /// An agent's question that passes its thread's autonomy level.
-    Question {
-        /// The question.
-        id: String,
-        /// The thread asking.
-        thread: Option<String>,
-        /// Its class.
-        class: Class,
-        /// The question.
-        text: String,
-    },
 }
 
 impl Entry {
@@ -204,17 +131,13 @@ impl Entry {
     pub const fn notifies(&self) -> bool {
         match self {
             Self::Conflict { .. }
-            | Self::AwaitingApproval { .. }
             | Self::LinkCycle { .. }
             | Self::ParentCycle { .. }
+            | Self::ThreadCycle { .. }
             | Self::Contest { .. }
             | Self::ResourceClash { .. }
-            | Self::Proposal { .. }
-            | Self::Unapproved { .. }
-            | Self::NewBlocker { .. }
             | Self::Reopened { .. }
-            | Self::DoneEarly { .. }
-            | Self::Question { .. } => true,
+            | Self::DoneEarly { .. } => true,
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
@@ -244,34 +167,18 @@ pub fn needs_you(
     for items in model.parent_cycles() {
         entries.insert(Entry::ParentCycle { items });
     }
+    for threads in readiness.thread_cycles()? {
+        entries.insert(Entry::ThreadCycle { threads: threads.into_iter().collect() });
+    }
     claims(state, model, now, &mut entries)?;
     for clash in claim::clashes(state, model, now)? {
         entries.insert(Entry::ResourceClash { resource: clash.resource, holders: clash.holders });
     }
-    for proposal in scope::proposals(state)?.into_values() {
-        if proposal.decision == Value::None {
-            let threads =
-                proposal.edit.one().map(|e| e.approved_threads(model)).unwrap_or_default();
-            let actor = proposal.actor.one().cloned().unwrap_or_default();
-            entries.insert(Entry::Proposal { id: proposal.id, actor, threads });
-        }
-    }
-    for found in scope::unapproved(state, model)? {
-        entries.insert(Entry::Unapproved {
-            keep: format!("acyclic item edit {} --thread {}", found.item, found.thread),
-            drop: format!("acyclic item edit {} --no-thread", found.item),
-            item: found.item,
-            thread: found.thread,
-            actor: found.actor,
-        });
-    }
-    new_blockers(state, model, readiness, &mut entries)?;
-    awaiting_approval(model, readiness, &mut entries)?;
     reopened_and_early(model, &mut entries);
     dangling(model, &mut entries);
     for clash in renumber::clashes(state, model, now)? {
         if let Some(first) = clash.fresh.first() {
-            let fix = format!("acyclic thread renumber {first} --as-user");
+            let fix = format!("acyclic thread renumber {first}");
             entries.insert(Entry::NumberClash {
                 number: clash.number,
                 threads: clash.threads,
@@ -293,7 +200,6 @@ pub fn needs_you(
             }
         }
     }
-    questions(state, model, &mut entries)?;
     Ok(entries.into_iter().collect())
 }
 
@@ -311,46 +217,6 @@ fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) 
         fix: format!("acyclic item edit {} --thread <THREAD>", item.id),
         item: item.id.clone(),
     });
-}
-
-/// Unapproved threads with open work, each with the threads it would deadlock with. Finished or archived members
-/// need no decision, since no run will take them.
-fn awaiting_approval(
-    model: &Model,
-    readiness: &Readiness<'_>,
-    entries: &mut BTreeSet<Entry>,
-) -> Result<(), Error> {
-    let mut members: BTreeMap<&str, usize> = BTreeMap::new();
-    for item in model
-        .items
-        .values()
-        .filter(|item| !model.reads_done(&item.id) && !model.is_archived(&item.id))
-    {
-        if let Some(thread) = item.thread.one() {
-            *members.entry(thread).or_default() += 1;
-        }
-    }
-    let cycles = readiness.thread_cycles()?;
-    let heads = model.heads_index();
-    for (id, thread) in &model.threads {
-        let Some(&count) = members.get(id.as_str()) else { continue };
-        if thread.is_approved() {
-            continue;
-        }
-        let waits_with: BTreeSet<&String> = cycles
-            .iter()
-            .filter(|cycle| cycle.contains(id))
-            .flatten()
-            .filter(|other| *other != id)
-            .collect();
-        entries.insert(Entry::AwaitingApproval {
-            thread: id.clone(),
-            members: count,
-            waits_with: waits_with.into_iter().cloned().collect(),
-            heads: heads.of(id).into_iter().map(str::to_owned).collect(),
-        });
-    }
-    Ok(())
 }
 
 /// Fields with differing values, except claims (contests) and set elements (always `true`).
@@ -395,28 +261,6 @@ fn claims(
         }
         if holders.len() > 1 {
             entries.insert(Entry::Contest { thread: id.clone(), holders });
-        }
-    }
-    Ok(())
-}
-
-/// Unmet blocks links from items in approved threads, added after the thread's approval.
-fn new_blockers(
-    state: &State,
-    model: &Model,
-    readiness: &Readiness<'_>,
-    entries: &mut BTreeSet<Entry>,
-) -> Result<(), Error> {
-    for thread in model.threads.keys() {
-        for (item, blocker) in scope::blockers_since_approval(state, model, thread)? {
-            let unmet = matches!(readiness.of(item)?, Some(Status::Blocked { waiting }) if waiting.contains_key(blocker));
-            if unmet {
-                entries.insert(Entry::NewBlocker {
-                    item: item.to_owned(),
-                    thread: thread.clone(),
-                    blocker: blocker.to_owned(),
-                });
-            }
         }
     }
     Ok(())
@@ -481,26 +325,6 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
             add(kind::LINK, &format!("{}-{}", link.from, link.to), "end", end);
         }
     }
-}
-
-fn questions(state: &State, model: &Model, entries: &mut BTreeSet<Entry>) -> Result<(), Error> {
-    for (key, _) in state.entities().filter(|(key, _)| key.kind == kind::QUESTION) {
-        let open: Value<bool> = model::value(state, key, question::OPEN)?;
-        if !open.all().into_iter().any(|open| *open) {
-            continue;
-        }
-        let thread: Value<String> = model::value(state, key, question::THREAD)?;
-        let class: Value<Class> = model::value(state, key, question::CLASS)?;
-        // An unclear class is treated as a blocker, so it is never filtered away.
-        let class = class.one().copied().unwrap_or(Class::Blocker);
-        let thread = thread.one().cloned();
-        if passes(model.level(thread.as_deref()), class) {
-            let text: Value<String> = model::value(state, key, question::TEXT)?;
-            let text = text.all().into_iter().cloned().collect::<Vec<_>>().join(" / ");
-            entries.insert(Entry::Question { id: key.id.clone(), thread, class, text });
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

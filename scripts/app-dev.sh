@@ -16,7 +16,7 @@ trap '[ -z "$server" ] || kill "$server" 2>/dev/null; rm -rf "$home"' EXIT INT T
 export HOME="$home" ACYCLIC_TRACKER="$home/tracker" ACYCLIC_ACTOR=session/app-dev
 "$root/target/debug/acyclic-fixtures" --items "$items" --seed "$seed" >"$home/plan.json"
 "$acyclic" init "$ACYCLIC_TRACKER" --replica dev >/dev/null
-"$acyclic" --as-user import "$home/plan.json" >/dev/null
+"$acyclic" import "$home/plan.json" >/dev/null
 fifo="$home/up"
 mkfifo "$fifo"
 "$acyclic" up --port 0 >"$fifo" &

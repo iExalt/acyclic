@@ -1,8 +1,6 @@
 // Undo: for a write that has an exact inverse, the write that takes it back, with what must still hold for that to be
-// safe. A move, an item's fields but its thread, a link added or removed, the global autonomy level, and a thread's
-// first approval while no agent has started its work undo; nothing else does: an add (the app has no delete), a
-// reopen, an approval again or a revoking (agents act on them), a proposal kept or dropped, a conflict settled, a
-// thread changed (back in an approved thread, an item is a late member waiting for approval again). The guard is
+// safe. A move, an item's fields but its thread, and a link added or removed undo; nothing else does: an add (the app
+// has no delete), a reopen, a conflict settled, a thread changed (an agent may have taken up its work). The guard is
 // checked against a plan read just before the undo is sent; the server has no compare-and-set, so a write landing
 // between that read and the undo isn't caught. Pure, so tested without a browser.
 import type { Command, Item, Stage } from "./api";
@@ -11,7 +9,6 @@ import type { LinkKind } from "./edits";
 /** The plan a write was sent over, or the plan as it is when Undo is pressed. */
 export interface Plan {
   items: ReadonlyMap<string, Item>;
-  level: string;
 }
 
 export interface Undo {
@@ -37,40 +34,10 @@ const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
 /** The undo of `command`, sent over `before`, or null when it has no exact inverse. */
-export function undoOf(
-  command: Command,
-  before: Plan,
-  levelLabel = (level: string) => level,
-  threadName = (thread: string) => thread,
-): Undo | null {
+export function undoOf(command: Command, before: Plan): Undo | null {
   const body = record(command);
   if (body === null) return null;
   const titleOf = (id: string) => before.items.get(id)?.title ?? id;
-
-  const level = record(body.level);
-  if (level !== null && typeof level.level === "string") {
-    const set = level.level;
-    return {
-      text: "Changed the autonomy",
-      // Not "undone": what agents did meanwhile stands.
-      undone: `Autonomy set back to ${levelLabel(before.level)}`,
-      command: { level: { level: before.level } },
-      holds: (now) => now.level === set,
-    };
-  }
-
-  // Sent only for a first approval, which a revoke takes back exactly while no agent has started on what it approved.
-  const approve = record(record(body.thread)?.approve);
-  if (approve !== null && typeof approve.thread === "string") {
-    const thread = approve.thread;
-    const members = [...before.items.values()].filter((one) => one.thread === thread);
-    return {
-      text: `Approved ${threadName(thread)}`,
-      undone: `Took back the approval of ${threadName(thread)}`,
-      command: { thread: { revoke: { thread } } },
-      holds: (now) => members.every((one) => started(now.items.get(one.id)) <= started(one)),
-    };
-  }
 
   const link = record(body.link);
   const linking = record(link?.add) ?? record(link?.remove);
@@ -182,24 +149,21 @@ function started(item: Item | undefined): number {
 export interface Kept {
   command: Command;
   items: Item[];
-  level: string;
   text: string;
   undone: string;
 }
 
 export function keep(command: Command, before: Plan, text: string, undone: string): Kept {
-  return { command, items: neededBy(command, before), level: before.level, text, undone };
+  return { command, items: neededBy(command, before), text, undone };
 }
 
 /**
  * Of `before`, the items the undo of `command` reads, so a large plan isn't written whole after every write: what the
- * write names, the boxes above an edited item and what waits on them, or an approved thread's members.
+ * write names, and the boxes above an edited item and what waits on them.
  */
 function neededBy(command: Command, before: Plan): Item[] {
   const body = record(command);
   const ids = new Set<string>();
-  const thread = record(record(body?.thread)?.approve)?.thread;
-  if (typeof thread === "string") for (const one of before.items.values()) if (one.thread === thread) ids.add(one.id);
   const link = record(body?.link);
   const linking = record(link?.add) ?? record(link?.remove);
   for (const end of [linking?.from, linking?.to]) if (typeof end === "string") ids.add(end);
@@ -214,6 +178,6 @@ function neededBy(command: Command, before: Plan): Item[] {
 
 /** The Undo a kept one offers again, saying what it said, or null when it no longer has one. */
 export function unkeep(kept: Kept): Undo | null {
-  const undo = undoOf(kept.command, { items: new Map(kept.items.map((item) => [item.id, item])), level: kept.level });
+  const undo = undoOf(kept.command, { items: new Map(kept.items.map((item) => [item.id, item])) });
   return undo === null ? null : { ...undo, text: kept.text, undone: kept.undone };
 }

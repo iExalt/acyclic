@@ -1,11 +1,10 @@
 //! Placing new or moved work in threads. Grouping work into threads is the user's or their agents' judgement; acyclic
-//! only follows the grouping they made: work under a parent joins the thread its parent, or else its siblings, hold,
-//! through the scope rules, so an agent only proposes it into approved scope.
+//! only follows the grouping they made: work under a parent joins the thread its parent, or else its siblings, hold.
 
 use serde::Serialize;
 
-use crate::model::{By, Model, Value};
-use crate::scope::{self, ScopeEdit, ScopeError};
+use crate::model::{By, Model, Value, WriteError};
+use crate::scope::{self, ScopeEdit};
 use crate::state::Replica;
 
 /// The thread new work under `id`'s parent joins, as [`passed_down`] says; `None` under a parent in conflict.
@@ -55,20 +54,17 @@ fn shared_by_children<'m>(model: &'m Model, parent: &str) -> Option<&'m str> {
     shared
 }
 
-/// An item that joined the thread passed down to it, or asked to.
+/// An item that joined the thread passed down to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Inherited {
     /// The item.
     pub item: String,
     /// The thread.
     pub thread: String,
-    /// The proposal it waits as, when the thread's scope is approved and the actor may only propose.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<String>,
 }
 
-/// Places `items` after an add, a move or an import: an item with no thread joins the one [`passed_down`] names,
-/// through the scope rules, so an agent only proposes it into approved scope; an item that has a thread keeps it.
+/// Places `items` after an add, a move or an import: an item with no thread joins the one [`passed_down`] names; an
+/// item that has a thread keeps it.
 ///
 /// # Errors
 ///
@@ -77,7 +73,7 @@ pub fn place(
     replica: &mut Replica,
     items: &[String],
     by: By<'_>,
-) -> Result<Vec<Inherited>, ScopeError> {
+) -> Result<Vec<Inherited>, WriteError> {
     let model = Model::read(replica.state())?;
     let mut placed = Vec::new();
     for item in items {
@@ -87,11 +83,8 @@ pub fn place(
         }
         if let Some(thread) = inherited_thread(&model, item) {
             let change = ScopeEdit::Member { item: item.clone(), thread: Some(thread.to_owned()) };
-            let proposal = match scope::edit_in(replica, &model, &change, by)? {
-                scope::Outcome::Applied => None,
-                scope::Outcome::Proposed(id) => Some(id),
-            };
-            placed.push(Inherited { item: item.clone(), thread: thread.to_owned(), proposal });
+            scope::edit(replica, &change, by)?;
+            placed.push(Inherited { item: item.clone(), thread: thread.to_owned() });
         }
     }
     Ok(placed)

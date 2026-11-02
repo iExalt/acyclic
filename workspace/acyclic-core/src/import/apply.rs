@@ -12,7 +12,7 @@ use serde_json::{Value as Json, json};
 use super::{Import, LinkKind, ValidationError};
 use crate::model::{self, By, Model, WriteError};
 use crate::schema::{item as field, kind, link, repository, set, thread};
-use crate::scope::{self, Outcome, ScopeEdit, ScopeError, USER};
+use crate::scope::{self, ScopeEdit};
 use crate::state::{Error, Key, Replica};
 
 /// What an import did.
@@ -28,9 +28,7 @@ pub struct Report {
     pub threads: usize,
     /// Fields written, the created records' included.
     pub fields: usize,
-    /// Proposals for edits to approved scope: made now, or the actor's still pending from before.
-    pub proposals: Vec<crate::scope::Proposed>,
-    /// Each record the import creates or changes, and each edit it proposes, in the order they were met.
+    /// Each record the import creates or changes, in the order they were met.
     pub changes: Vec<Change>,
 }
 
@@ -46,9 +44,6 @@ pub struct Change {
     pub action: Action,
     /// The fields that changed, by name in snake case; none for a link.
     pub fields: BTreeMap<String, Edit>,
-    /// The proposal that holds the edit, for [`Action::Propose`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<String>,
 }
 
 /// How a change names its record: by id, or, for a link, by the items and kind it joins.
@@ -79,8 +74,6 @@ pub enum Action {
     Create,
     /// The record exists, and fields of it changed.
     Update,
-    /// The edit waits as a proposal, since it changes approved scope and the actor may only propose.
-    Propose,
 }
 
 /// A field's value before an import and after it.
@@ -98,8 +91,6 @@ pub struct Edit {
 pub enum ApplyError {
     /// The document breaks these rules.
     Invalid(Vec<ValidationError>),
-    /// Only the user imports approved threads or archived items.
-    UserOnly(String),
     /// With what is already there, the document closes these cycles of parents or ordering links.
     Cycles(Vec<Vec<String>>),
     /// A write was refused.
@@ -112,7 +103,6 @@ impl fmt::Display for ApplyError {
             Self::Invalid(errors) => {
                 write!(f, "the document breaks {}", crate::say::few(errors, "rule", "rules", "; "))
             },
-            Self::UserOnly(what) => write!(f, "only the user imports {what}"),
             Self::Cycles(cycles) => {
                 let cycles: Vec<String> = cycles.iter().map(|cycle| cycle.join(" -> ")).collect();
                 write!(
@@ -140,35 +130,16 @@ impl From<Error> for ApplyError {
     }
 }
 
-impl From<ScopeError> for ApplyError {
-    fn from(err: ScopeError) -> Self {
-        match err {
-            ScopeError::Write(err) => Self::Write(err),
-            other => {
-                unreachable!("a scope edit refuses only through its write, not with {other:?}")
-            },
-        }
-    }
-}
-
 /// Applies `doc` to `replica` as `by`.
 ///
 /// # Errors
 ///
-/// Fails when the document is invalid, when anyone but the user imports approved threads or archived items, when
-/// the result would hold a cycle the tracker didn't, or when a write is refused.
+/// Fails when the document is invalid, when the result would hold a cycle the tracker didn't, or when a write is
+/// refused.
 pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
-    }
-    if by.actor != USER {
-        if doc.threads.iter().any(|t| t.approved) {
-            return Err(ApplyError::UserOnly("approved threads".to_owned()));
-        }
-        if doc.items.iter().any(|i| i.archived) {
-            return Err(ApplyError::UserOnly("archived items".to_owned()));
-        }
     }
     for item in &doc.items {
         if model::is_deleted(&replica.state, &model::item_key(&item.key)?) {
@@ -181,7 +152,7 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     let mut writer =
         Writer { replica, by, before: &before, report: Report::default(), rows: BTreeMap::new() };
     writer.records(doc)?;
-    // Scope last, against the view before the import: membership and repositories go through apply-or-propose.
+    // Scope last, against the view before the import, so each edit reports what it changed.
     writer.scope_edits(doc, &before)?;
 
     let after = Model::read(&writer.replica.state)?;
@@ -222,9 +193,6 @@ impl Writer<'_, '_> {
             self.created(&key, |r| &mut r.threads);
             self.field(&key, thread::TITLE, Some(&record.title))?;
             self.field(&key, thread::BRIEF, record.brief.as_ref())?;
-            if record.approved {
-                self.field(&key, thread::APPROVED, Some(&true))?;
-            }
         }
         for item in &doc.items {
             let key = model::item_key(&item.key)?;
@@ -262,7 +230,6 @@ impl Writer<'_, '_> {
                     },
                     action: Action::Create,
                     fields: BTreeMap::new(),
-                    proposal: None,
                 });
             }
             self.field(&key, link::FROM, Some(&record.from))?;
@@ -273,7 +240,7 @@ impl Writer<'_, '_> {
         Ok(())
     }
 
-    /// Adds repositories and members, applied or proposed as the actor's scope edits are.
+    /// Adds repositories and members.
     fn scope_edits(&mut self, doc: &Import, before: &Model) -> Result<(), ApplyError> {
         for item in &doc.items {
             for name in &item.repositories {
@@ -330,7 +297,6 @@ impl Writer<'_, '_> {
                 name: Name::Id { id: id.to_owned() },
                 action: Action::Update,
                 fields: BTreeMap::new(),
-                proposal: None,
             });
             changes.len() - 1
         });
@@ -421,12 +387,13 @@ impl Writer<'_, '_> {
     }
 
     fn scope(&mut self, before: &Model, change: &ScopeEdit) -> Result<(), ApplyError> {
-        let outcome = scope::edit_in(self.replica, before, change, self.by)?;
+        scope::edit(self.replica, change, self.by)?;
+        self.report.fields += 1;
         let (entity, id, prefix, element, present) = match change {
             ScopeEdit::Member { item, thread } => {
                 let from = before.items.get(item).map_or(Json::Null, |i| json!(i.thread));
                 let edit = Edit { from, to: json!(thread) };
-                self.scope_outcome(&outcome, kind::ITEM, item, "thread", edit);
+                self.row(kind::ITEM, item).fields.insert("thread".to_owned(), edit);
                 return Ok(());
             },
             ScopeEdit::ItemRepository { item, repository, present } => {
@@ -436,62 +403,8 @@ impl Writer<'_, '_> {
                 (kind::THREAD, thread, set::REPOSITORY, repository, *present)
             },
         };
-        let (_, mut after) = self.before_set(entity, id, prefix);
-        let from = json!(after);
-        if present {
-            after.insert(element.clone());
-        } else {
-            after.remove(element);
-        }
-        match outcome {
-            Outcome::Applied => {
-                self.report.fields += 1;
-                self.set_edit(entity, id, prefix, element, present);
-            },
-            Outcome::Proposed(_) => {
-                self.scope_outcome(
-                    &outcome,
-                    entity,
-                    id,
-                    "repositories",
-                    Edit { from, to: json!(after) },
-                );
-            },
-        }
+        self.set_edit(entity, id, prefix, element, present);
         Ok(())
-    }
-
-    /// Notes a scope edit's outcome: a field of the record's row when applied, a row of its own when proposed.
-    fn scope_outcome(
-        &mut self,
-        outcome: &Outcome,
-        entity: &'static str,
-        id: &str,
-        field: &str,
-        edit: Edit,
-    ) {
-        match outcome {
-            Outcome::Applied => {
-                self.report.fields += 1;
-                self.row(entity, id).fields.insert(field.to_owned(), edit);
-            },
-            Outcome::Proposed(proposal) => {
-                self.report
-                    .proposals
-                    .push(crate::scope::Proposed { id: proposal.clone(), field: field.to_owned() });
-                let held =
-                    self.report.changes.iter().any(|c| c.proposal.as_ref() == Some(proposal));
-                if !held {
-                    self.report.changes.push(Change {
-                        entity,
-                        name: Name::Id { id: id.to_owned() },
-                        action: Action::Propose,
-                        fields: BTreeMap::from([(field.to_owned(), edit)]),
-                        proposal: Some(proposal.clone()),
-                    });
-                }
-            },
-        }
     }
 }
 

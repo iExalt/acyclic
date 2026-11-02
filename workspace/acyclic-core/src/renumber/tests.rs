@@ -1,9 +1,10 @@
 use serde_json::json;
 
 use super::*;
-use crate::model::{ItemState, Level, add_item, set_state};
+use crate::model::{ItemState, add_item, set_state};
 use crate::needs::{Entry, needs_you};
 use crate::ready::{Ancestry, Readiness};
+use crate::scope::USER;
 use crate::state::{ReplicaId, State};
 
 const NOW: Millis = 10_000;
@@ -24,17 +25,13 @@ fn put(r: &mut Replica, key: &Key, field: &str, value: Json) {
     r.write(key, field, USER, 1, Some(value)).unwrap();
 }
 
-/// A replica on `name` holding thread `id`, titled and approved at the user's level, with members `<name>-a` (done)
-/// and `<name>-b`.
+/// A replica on `name` holding thread `id`, titled and briefed, with members `<name>-a` (done) and `<name>-b`.
 fn with_thread(name: &str, id: &str) -> Replica {
     let mut r = replica(name);
     let t = key(id);
     put(&mut r, &t, thread::TITLE, json!("Beds"));
     put(&mut r, &t, thread::BRIEF, json!("Dig them"));
-    put(&mut r, &t, thread::APPROVED, json!(true));
     let members = [format!("{name}-a"), format!("{name}-b")];
-    put(&mut r, &t, thread::APPROVED_MEMBERS, json!(members));
-    put(&mut r, &t, thread::AUTONOMY, json!(Level::Everything));
     put(&mut r, &t, &format!("{}code", set::REPOSITORY), json!(true));
     for item in &members {
         add_item(&mut r, item, item, user(1)).unwrap();
@@ -77,10 +74,9 @@ fn a_fresh_thread_moves_with_its_fields_and_members_and_its_old_id_is_retired() 
     assert!(!model.threads.contains_key("thread-pi-32"));
     let moved = &model.threads["thread-mac-33"];
     assert_eq!(
-        (moved.title.one().map(String::as_str), moved.is_approved(), moved.autonomy.one()),
-        (Some("Beds"), true, Some(&Level::Everything))
+        (moved.title.one().map(String::as_str), moved.brief.one().map(String::as_str)),
+        (Some("Beds"), Some("Dig them"))
     );
-    assert_eq!(moved.approved_members.one(), Some(&vec!["mac-a".to_owned(), "mac-b".to_owned()]));
     assert!(moved.repositories.contains("code"));
     for item in ["mac-a", "mac-b"] {
         assert_eq!(model.items[item].thread.one().map(String::as_str), Some("thread-mac-33"));
@@ -92,27 +88,16 @@ fn a_fresh_thread_moves_with_its_fields_and_members_and_its_old_id_is_retired() 
 }
 
 #[test]
-fn only_the_user_renumbers_and_only_a_fresh_thread_that_clashes() {
+fn only_a_fresh_thread_that_clashes_is_renumbered() {
     let mut r = with_thread("mac", "t");
-    let agent = By { actor: "session/mac", at: 2 };
-    assert!(matches!(renumber(&mut r, "t", agent), Err(RenumberError::NotTheUser(_))));
     assert!(matches!(renumber(&mut r, "nope", user(2)), Err(RenumberError::NoThread(_))));
-    let question = Key::new(kind::QUESTION, "q1").unwrap();
-    put(&mut r, &question, question::THREAD, json!("t"));
     claim::claim(&mut r, "t", "session/s", 2, NOW, NOW).unwrap();
-    // An agent's membership edit into the approved thread waits as a proposal.
-    add_item(&mut r, "c", "c", user(1)).unwrap();
-    let edit = ScopeEdit::Member { item: "c".into(), thread: Some("t".into()) };
-    scope::edit(&mut r, &edit, By { actor: "session/s", at: 2 }).unwrap();
-    // Fields it would carry in conflict: two replicas' briefs, and the members each approval saw.
+    // A field it would carry in conflict: two replicas' briefs.
     let mut other = with_thread("pi", "t");
     put(&mut other, &key("t"), thread::BRIEF, json!("Rake them"));
     r.join(other.state()).unwrap();
     let before = r.changes();
-    assert_eq!(
-        why(renumber(&mut r, "t", user(3))),
-        ["no-clash", "question", "claimed", "proposal", "conflict", "conflict"]
-    );
+    assert_eq!(why(renumber(&mut r, "t", user(3))), ["no-clash", "claimed", "conflict"]);
     assert_eq!(r.changes(), before, "a refusal writes nothing");
 }
 
@@ -140,11 +125,11 @@ fn threads_ending_in_one_number_clash_until_a_fresh_one_is_renumbered() {
     assert_eq!(clash_entries(&mac).len(), 2);
     // A clash nothing can resolve stays out of needs, though `clashes` still reports it.
     for thread in ["thread-y-27", "thread-x-27"] {
-        put(&mut mac, &Key::new(kind::QUESTION, thread).unwrap(), question::THREAD, json!(thread));
+        claim::claim(&mut mac, thread, "session/s", 2, NOW, NOW).unwrap();
     }
     let entries = clash_entries(&mac);
     assert!(
-        matches!(&entries[..], [Entry::NumberClash { number: 32, fix, .. }] if fix == "acyclic thread renumber thread-mac-32 --as-user"),
+        matches!(&entries[..], [Entry::NumberClash { number: 32, fix, .. }] if fix == "acyclic thread renumber thread-mac-32"),
         "{entries:?}"
     );
     renumber(&mut mac, "thread-pi-32", user(2)).unwrap();

@@ -6,7 +6,7 @@ import type { Counts, Item } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { ChevronRight, Icon } from "./icons";
 import type { Line } from "./lines";
-import { awaitingApproval, countText, type Need, needView } from "./needs";
+import { countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
@@ -54,7 +54,7 @@ export function Overview({
   onSelectProject,
   onView,
 }: OverviewProps) {
-  const { working, next } = threadLists(counts, waves, awaitingApproval(needs));
+  const { working, next } = threadLists(counts, waves);
   const needsShown = useWide(COLUMNS) ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
   // In three columns, an Up next half as long as the longest list beside it stacks under In progress, and the projects
   // take its column, rather than leave most of it empty and start below the first view.
@@ -119,11 +119,11 @@ export function Overview({
           )}
         </header>
         {needs.length === 0 ? (
-          <p className="empty">Nothing needs you. New approvals and blockers show here.</p>
+          <p className="empty">Nothing needs you. Conflicts, cycles and reopened work show here.</p>
         ) : (
           <ul className="rows">
             {needs.slice(0, needsShown).map((need) => {
-              const view = needView(need, lines, undefined, titleOf);
+              const view = needView(need, lines, titleOf);
               return (
                 <li key={view.key}>
                   <button
@@ -174,7 +174,7 @@ export function Overview({
             </button>
           </header>
           {next.length === 0 ? (
-            <p className="empty">No approved thread has work ready to start.</p>
+            <p className="empty">No thread has work ready to start.</p>
           ) : (
             <ul className="rows">{next.slice(0, THREADS_SHOWN).map(thread)}</ul>
           )}

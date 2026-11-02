@@ -2,19 +2,18 @@
 //! unknown one, `add` creates one, and adding it again with what it already holds changes nothing while adding it with
 //! other values is refused. Each runs inside a batch, so a refusal anywhere writes nothing at all.
 //!
-//! Membership and repositories of items and threads go through the scope rules, as every other write to them does: an
-//! agent's change to approved scope waits as a proposal, which the result lists.
+//! Membership and repositories of items and threads are scope edits, as every other write to them is.
 
 use acyclic_core::ids;
-use acyclic_core::model::{self, By, ItemState, Level, Model, SetField, Size, Value};
+use acyclic_core::model::{self, By, ItemState, Model, SetField, Size};
 use acyclic_core::place::{self, Inherited};
 use acyclic_core::schema::{item as field, kind, repository as repo_field, thread as thread_field};
-use acyclic_core::scope::{self, Outcome, Proposed, ScopeEdit};
+use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Key, Replica, State};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use crate::commands::{element_if, existing, holds_only, placed, set_if};
+use crate::commands::{element_if, existing, holds_only, set_if};
 use crate::error::{CliError, exit};
 
 /// A single-valued field's change: `--field` sets it, `--no-field` clears it, and neither leaves it.
@@ -74,7 +73,6 @@ pub(crate) struct ItemFields {
 pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
-    pub level: Change<Level>,
     pub repositories: Delta,
 }
 
@@ -86,36 +84,17 @@ pub(crate) struct RepositoryFields {
     pub default_branch: Option<String>,
 }
 
-/// What a write did beyond writing: the proposals it left for the user, and the threads items inherited.
+/// What a write did beyond writing: the threads items inherited.
 #[derive(Debug, Default)]
 pub(crate) struct Written {
-    pub proposals: Vec<Proposed>,
     pub inherited: Vec<Inherited>,
 }
 
 impl Written {
-    /// An item's data: the item, the proposals its scope changes left, and the threads items joined.
+    /// An item's data: the item, and the threads items joined as `{item, thread}`.
     pub fn item(self, id: &str) -> Json {
-        json!({"item": id, "proposals": all_proposals(&self.proposals, &self.inherited),
-               "placed": placed(&self.inherited)})
+        json!({"item": id, "placed": self.inherited})
     }
-
-    /// A thread's data: the thread and the proposals its scope changes left.
-    pub fn thread(self, id: &str) -> Json {
-        json!({"thread": id, "proposals": self.proposals})
-    }
-}
-
-/// Every proposal a write left, each with the field it would change: those of its own edits and those that hold the
-/// placements it made, each once.
-pub(crate) fn all_proposals(direct: &[Proposed], placed: &[Inherited]) -> Vec<Proposed> {
-    let held = placed
-        .iter()
-        .filter_map(|p| p.proposal.clone().map(|id| Proposed { id, field: "thread".to_owned() }));
-    let mut all: Vec<Proposed> = direct.iter().cloned().chain(held).collect();
-    all.sort();
-    all.dedup();
-    all
 }
 
 /// An add that names other values than the entity holds, which `edit` is for.
@@ -232,26 +211,14 @@ fn thread_scope(id: &str, fields: &ThreadFields) -> Vec<ScopeEdit> {
     edits
 }
 
-/// Whether a scope edit would change nothing. The user putting an unapproved member in its thread again keeps it, so
-/// that writes; an agent's repeat changes nothing.
-fn scope_already(
-    state: &State,
-    model: &Model,
-    actor: &str,
-    change: &ScopeEdit,
-) -> Result<bool, CliError> {
+/// Whether a scope edit would change nothing.
+fn scope_already(state: &State, model: &Model, change: &ScopeEdit) -> Result<bool, CliError> {
     Ok(match change {
         ScopeEdit::Member { item, thread } => {
             // Read the register itself: a conflict reads as no single thread, which a clear must still settle.
             let key = model::item_key(item)?;
-            if !model.items.contains_key(item)
-                || !holds_only(state.field(&key, field::THREAD), thread.as_ref().map(|t| json!(t)))
-            {
-                return Ok(false);
-            }
-            thread.is_none()
-                || scope::classify(actor) != scope::Actor::User
-                || !scope::unapproved(state, model)?.iter().any(|u| u.item == *item)
+            model.items.contains_key(item)
+                && holds_only(state.field(&key, field::THREAD), thread.as_ref().map(|t| json!(t)))
         },
         ScopeEdit::ItemRepository { item, repository, present } => {
             model.items.get(item).is_some_and(|i| i.repositories.contains(repository)) == *present
@@ -263,31 +230,11 @@ fn scope_already(
     })
 }
 
-/// The actor's own undecided proposal of the same edit, if any.
-fn pending(state: &State, change: &ScopeEdit, actor: &str) -> Result<Option<String>, CliError> {
-    Ok(scope::proposals(state)?
-        .into_values()
-        .find(|p| {
-            p.decision == Value::None
-                && p.edit.one() == Some(change)
-                && p.actor.one().map(String::as_str) == Some(actor)
-        })
-        .map(|p| p.id))
-}
-
-/// Applies one scope edit unless it is so already, noting the proposal when it only proposes.
-fn scope_step(
-    replica: &mut Replica,
-    change: &ScopeEdit,
-    by: By<'_>,
-    proposals: &mut Vec<Proposed>,
-) -> Result<(), CliError> {
+/// Applies one scope edit unless it is so already.
+fn scope_step(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), CliError> {
     let model = Model::read(replica.state())?;
-    if scope_already(replica.state(), &model, by.actor, change)? {
-        return Ok(());
-    }
-    if let Outcome::Proposed(id) = scope::edit(replica, change, by)? {
-        proposals.push(Proposed { id, field: change.field().to_owned() });
+    if !scope_already(replica.state(), &model, change)? {
+        scope::edit(replica, change, by)?;
     }
     Ok(())
 }
@@ -330,7 +277,7 @@ pub(crate) fn edit_item(
     }
     let mut written = Written::default();
     for change in item_scope(id, fields) {
-        scope_step(replica, &change, by, &mut written.proposals)?;
+        scope_step(replica, &change, by)?;
     }
     // An explicit thread, or none, is the answer; otherwise a moved item joins the one its parent passes down.
     if moved && fields.thread == Change::Keep {
@@ -408,7 +355,7 @@ pub(crate) fn add_item(
         return Err(model::WriteError::Deleted(id.to_owned()).into());
     }
     if replica.state().entity(&key).is_some() {
-        return repeat_item(replica.state(), id, fields, by);
+        return repeat_item(replica.state(), id, fields);
     }
     // Everything that can be refused is, before the item exists.
     check_targets(replica.state(), fields.thread.value(), &fields.repositories.add)?;
@@ -417,12 +364,7 @@ pub(crate) fn add_item(
 }
 
 /// An add of an item that exists: it changes nothing when it names what the item holds, and is refused otherwise.
-fn repeat_item(
-    state: &State,
-    id: &str,
-    fields: &ItemFields,
-    by: By<'_>,
-) -> Result<Written, CliError> {
+fn repeat_item(state: &State, id: &str, fields: &ItemFields) -> Result<Written, CliError> {
     let model = Model::read(state)?;
     let item = model.items.get(id).ok_or_else(|| not_found(format!("no item {id}")))?;
     let mut differs: Vec<&str> = Vec::new();
@@ -447,24 +389,14 @@ fn repeat_item(
         let satisfied = changes
             .iter()
             .filter(|change| matches!(change, ScopeEdit::Member { .. }) == wanted)
-            .map(|change| {
-                Ok(scope_already(state, &model, by.actor, change)?
-                    || pending(state, change, by.actor)?.is_some())
-            })
+            .map(|change| scope_already(state, &model, change))
             .collect::<Result<Vec<bool>, CliError>>()?;
         check(flag, satisfied.into_iter().all(|same| same));
     }
     if !differs.is_empty() {
         return Err(already_exists("item", "item edit", id, &differs));
     }
-    // The same proposal again is reported again, and nothing is written.
-    let mut written = Written::default();
-    for change in &changes {
-        if let Some(id) = pending(state, change, by.actor)? {
-            written.proposals.push(Proposed { id, field: change.field().to_owned() });
-        }
-    }
-    Ok(written)
+    Ok(Written::default())
 }
 
 fn thread_key(id: &str) -> Result<Key, CliError> {
@@ -476,17 +408,15 @@ fn write_thread(
     id: &str,
     fields: &ThreadFields,
     by: By<'_>,
-) -> Result<Written, CliError> {
+) -> Result<(), CliError> {
     check_targets(replica.state(), None, &fields.repositories.add)?;
     let key = thread_key(id)?;
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
-    write_change(replica, &key, thread_field::AUTONOMY, &fields.level, by)?;
-    let mut written = Written::default();
     for change in thread_scope(id, fields) {
-        scope_step(replica, &change, by, &mut written.proposals)?;
+        scope_step(replica, &change, by)?;
     }
-    Ok(written)
+    Ok(())
 }
 
 /// Edits a thread, which exists when it has fields of its own or an item names it.
@@ -495,7 +425,7 @@ pub(crate) fn edit_thread(
     id: &str,
     fields: &ThreadFields,
     by: By<'_>,
-) -> Result<Written, CliError> {
+) -> Result<(), CliError> {
     if !thread_exists(replica.state(), &Model::read(replica.state())?, id) {
         return Err(not_found(format!("no thread {id}; `acyclic thread list` lists them")));
     }
@@ -508,7 +438,7 @@ pub(crate) fn add_thread(
     id: &str,
     fields: &ThreadFields,
     by: By<'_>,
-) -> Result<Written, CliError> {
+) -> Result<(), CliError> {
     let key = thread_key(id)?;
     if model::is_deleted(replica.state(), &key) {
         return Err(model::WriteError::Deleted(id.to_owned()).into());
@@ -529,28 +459,15 @@ pub(crate) fn add_thread(
     if fields.brief.value().is_some_and(|b| thread.brief.one() != Some(b)) {
         differs.push("--brief");
     }
-    if fields.level.value().is_some_and(|l| thread.autonomy.one() != Some(l)) {
-        differs.push("--level");
-    }
-    let changes = thread_scope(id, fields);
-    for change in &changes {
-        if !scope_already(state, &model, by.actor, change)?
-            && pending(state, change, by.actor)?.is_none()
-            && !differs.contains(&"--repository")
-        {
+    for change in &thread_scope(id, fields) {
+        if !scope_already(state, &model, change)? && !differs.contains(&"--repository") {
             differs.push("--repository");
         }
     }
     if !differs.is_empty() {
         return Err(already_exists("thread", "thread edit", id, &differs));
     }
-    let mut written = Written::default();
-    for change in &changes {
-        if let Some(id) = pending(state, change, by.actor)? {
-            written.proposals.push(Proposed { id, field: change.field().to_owned() });
-        }
-    }
-    Ok(written)
+    Ok(())
 }
 
 /// Edits a repository record, which must exist; any subset of its fields.
