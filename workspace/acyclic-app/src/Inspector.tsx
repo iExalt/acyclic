@@ -213,7 +213,8 @@ export function Inspector({
         {editing ? null : (
           <>
             <dt>Status</dt>
-            <dd data-testid="state" className="status-value">
+            {/* An item's main thing to see at the sheet's first height: its status. */}
+            <dd data-testid="state" className="status-value" data-main>
               <ItemStatus item={item} />
             </dd>
             <dt>Thread</dt>

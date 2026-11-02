@@ -2239,7 +2239,18 @@ def thread_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
     approve.click()
     panel.locator("[data-action=revoke]").wait_for(timeout=10_000)
-    # Its main action showed at the panel's first height; its proposals and settings are below it.
+    # Its main action shows at the panel's first height; its proposals and settings are below it.
+    try:
+        page.wait_for_function(
+            """() => {
+                const p = document.querySelector("[data-testid=thread-panel]");
+                const m = p?.querySelector("[data-main]");
+                return !!m && m.getBoundingClientRect().bottom <= p.getBoundingClientRect().bottom + 0.5;
+            }""",
+            timeout=3_000,
+        )
+    except PlaywrightTimeout:
+        failures.append(f"{name}: the thread's main action is below its panel's first height")
     open_full(page, "thread-panel")
     # An agent proposes two items join the approved thread: one is kept, one dropped.
     outside = sorted(id for id, row in plan.items.items() if row["thread"] != thread)[

@@ -18,8 +18,8 @@ export interface SheetDrag {
 
 /**
  * The sheet in `panel`, opening at its first height, which is short for a panel and `half` the room for the outline (as
- * app.css sets them); `onClose` closes it as Escape does, and may refuse. A panel's main action, marked `data-main`,
- * shows at the first height however its title and status wrap: the sheet measures where it ends, for app.css (as
+ * app.css sets them); `onClose` closes it as Escape does, and may refuse. A panel's main action or status, marked
+ * `data-main`, shows at the first height however its title and status wrap: the sheet measures where it ends, for app.css (as
  * `--first`) and for where a drag lands.
  */
 export function useSheet(panel: RefObject<HTMLElement | null>, onClose: () => void, half = false): SheetDrag {
@@ -31,14 +31,15 @@ export function useSheet(panel: RefObject<HTMLElement | null>, onClose: () => vo
     const sheet = panel.current;
     if (sheet === null || half) return;
     const measure = () => {
-      const main = sheet.querySelector<HTMLElement>(":scope > [data-main]");
+      const main = sheet.querySelector<HTMLElement>("[data-main]");
+      // From the sheet's top, as if unscrolled, wherever in it the main thing sits.
       const measured =
         main === null
           ? 0
           : Math.ceil(
-              sheet.clientTop +
-                main.offsetTop +
-                main.offsetHeight +
+              main.getBoundingClientRect().bottom -
+                sheet.getBoundingClientRect().top +
+                sheet.scrollTop +
                 Number.parseFloat(getComputedStyle(sheet).paddingBottom),
             );
       // Written only when it changes: the sheet's rise to it is a transition, which a write each render would hold back.

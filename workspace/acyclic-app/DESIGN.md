@@ -89,7 +89,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   called Outline; its projects carry no count, as opening one shows its threads.
 - **Sheets, on a phone:** two heights. A panel's first is 144 px: its title, its status and its main action, so the Map
   keeps most of the screen beside it (the user: "This hurts especially when browsing half the map and half an item"),
-  taller only where a long title or status pushes the main action further down; the outline's, a list to pick from,
+  taller only where a long title or status pushes the main action, or an item's status, further down; while it loads,
+  200 px, more than it will need, so what the Map frames above it stays clear. The outline's, a list to pick from,
   half, at least 320 px. Full reaches the bar. The handle, a button in a strip at the top of the header, which stays in
   view as the sheet scrolls, switches them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would
   push every panel down or lie over its buttons, and the title starts below it. A drag on it or on the header's free
