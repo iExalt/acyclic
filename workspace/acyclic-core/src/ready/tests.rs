@@ -1,10 +1,9 @@
-use crate::model::SetField;
 use hegel::TestCase;
 use hegel::generators as gs;
 use std::cell::Cell;
 
 use super::*;
-use crate::model::{self, By, add_item, item_key, link, set, set_element, set_parent, set_state};
+use crate::model::{self, By, ProgressState, add_item, item_key, link, set, set_parent, set_state};
 use crate::schema::{item as field, kind, repository, thread as thread_field};
 use crate::state::{Key, Replica, ReplicaId};
 
@@ -83,17 +82,14 @@ fn blocked(waits: &[(&str, Wait)]) -> Status {
 }
 
 #[test]
-fn a_hard_dependency_blocks_until_done_and_a_relates_link_never_does() {
+fn a_hard_dependency_blocks_until_done() {
     let mut r = replica("a");
-    items(&mut r, &["dep", "soft", "x"]);
-    link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "x", "soft", LinkKind::Relates, by(2)).unwrap();
+    items(&mut r, &["dep", "x"]);
+    link(&mut r, "x", "dep", by(2)).unwrap();
     let none = Fake::default();
     assert_eq!(status(&r, &none, "x"), blocked(&[("dep", Wait::Open)]));
     // Work with no repository is met when done.
     done_with(&mut r, "dep", None);
-    assert_eq!(status(&r, &none, "x"), Status::Ready);
-    done_with(&mut r, "soft", None);
     assert_eq!(status(&r, &none, "x"), Status::Ready);
 }
 
@@ -102,7 +98,7 @@ fn done_inside_a_thread_merged_across() {
     let mut r = replica("a");
     items(&mut r, &["dep", "same", "other", "loose"]);
     for id in ["same", "other", "loose"] {
-        link(&mut r, id, "dep", LinkKind::Blocks, by(2)).unwrap();
+        link(&mut r, id, "dep", by(2)).unwrap();
     }
     done_with(&mut r, "dep", Some("c1"));
     thread(&mut r, "dep", "t1");
@@ -124,7 +120,7 @@ fn done_inside_a_thread_merged_across() {
 fn an_unverifiable_merge_says_why() {
     let mut r = replica("a");
     items(&mut r, &["dep", "x", "dep2", "y"]);
-    link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "x", "dep", by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
     // Across threads, so the merge matters.
     for id in ["dep", "dep2"] {
@@ -137,7 +133,7 @@ fn an_unverifiable_merge_says_why() {
     };
     assert_eq!(status(&r, &broken, "x"), blocked(&[("dep", unverified)]));
     // Evidence naming a repository with no record.
-    link(&mut r, "y", "dep2", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "y", "dep2", by(2)).unwrap();
     set_state(&mut r, "dep2", ItemState::Done, by(3)).unwrap();
     let evidence =
         Evidence { repository: Some("gone".into()), commit: Some("c2".into()), note: None };
@@ -153,7 +149,7 @@ fn an_archived_dependency_is_met() {
     let mut r = replica("a");
     items(&mut r, &["goal", "dep", "x"]);
     set_parent(&mut r, "dep", Some("goal"), by(2)).unwrap();
-    link(&mut r, "x", "dep", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "x", "dep", by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     let unmerged = Fake::with(&[("c1", Ok(false))]);
@@ -166,8 +162,8 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_me
     let mut r = replica("a");
     items(&mut r, &["goal", "child", "dep", "after-goal"]);
     set_parent(&mut r, "child", Some("goal"), by(2)).unwrap();
-    link(&mut r, "goal", "dep", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "after-goal", "goal", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "goal", "dep", by(2)).unwrap();
+    link(&mut r, "after-goal", "goal", by(2)).unwrap();
     let none = Fake::default();
     assert_eq!(status(&r, &none, "child"), blocked(&[("dep", Wait::Open)]));
     assert_eq!(status(&r, &none, "goal"), Status::Parent);
@@ -195,9 +191,9 @@ fn cycles_conflicts_and_parked_items_are_not_ready() {
     items(&mut a, &["x", "y", "p", "c"]);
     let mut b = replica("b");
     b.join(&a.state).unwrap();
-    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::Blocks, by(2)).unwrap();
-    set_state(&mut a, "c", ItemState::InProgress, by(2)).unwrap();
+    link(&mut a, "x", "y", by(2)).unwrap();
+    link(&mut b, "y", "x", by(2)).unwrap();
+    set_state(&mut a, "c", ItemState::Parked, by(2)).unwrap();
     set_state(&mut b, "c", ItemState::Done, by(2)).unwrap();
     thread(&mut a, "p", "t1");
     thread(&mut b, "p", "t2");
@@ -237,7 +233,7 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     // A thread named but with no record holds nothing.
     model::put(&mut r, &item_key("ghostly").unwrap(), field::THREAD, Some(&"ghost"), by(2))
         .unwrap();
-    link(&mut r, "waiting", "dep", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut r, "waiting", "dep", by(2)).unwrap();
     let none = Fake::default();
     for id in ["loose", "ghostly"] {
         assert_eq!(status(&r, &none, id), Status::Unthreaded, "{id}");
@@ -253,7 +249,7 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
 fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     let mut a = replica("a");
     items(&mut a, &["x", "blocked", "dep"]);
-    link(&mut a, "blocked", "dep", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut a, "blocked", "dep", by(2)).unwrap();
     for (id, held) in [("y", "other"), ("idle", "quiet")] {
         add_item(&mut a, id, id, by(1)).unwrap();
         thread(&mut a, id, held);
@@ -300,20 +296,18 @@ fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     let mut r = replica("a");
     items(&mut r, &["dep", "x", "y", "z", "unrelated", "goal", "archived-leaf"]);
     for id in ["x", "y"] {
-        link(&mut r, id, "dep", LinkKind::Blocks, by(2)).unwrap();
+        link(&mut r, id, "dep", by(2)).unwrap();
     }
-    link(&mut r, "z", "x", LinkKind::Relates, by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
     thread(&mut r, "dep", "deps");
     done_with(&mut r, "unrelated", Some("c2"));
     set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
-    set_element(&mut r, &item_key("x").unwrap(), SetField::Area, "ui", true, by(2)).unwrap();
     let ancestry = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     let model = Model::read(&r.state).unwrap();
     let readiness = Readiness::new(&r.state, &model, NOW, &ancestry);
     let ready = flat(&readiness.ready(false, "session/s").unwrap());
-    assert_eq!(ready, ["x", "y", "z"], "an open relates link holds nothing back");
+    assert_eq!(ready, ["x", "y", "z"]);
     assert_eq!(
         ancestry.calls.get(),
         1,
@@ -334,35 +328,23 @@ fn git_ancestry_takes_only_commit_ids() {
 }
 
 #[test]
-fn a_held_resource_keeps_another_threads_work_waiting_until_its_claim_is_released() {
+fn two_threads_whose_items_once_named_one_resource_are_both_ready() {
     let mut r = replica("a");
     items(&mut r, &["x"]);
     add_item(&mut r, "y", "y", by(1)).unwrap();
     thread(&mut r, "y", "other");
+    // Resources older versions stored are ignored, so a claim on one thread holds nothing the other needs.
     for id in ["x", "y"] {
-        set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
-            .unwrap();
+        let gpu = Some(serde_json::json!(true));
+        r.write(&item_key(id).unwrap(), "resource/gpu", "actor/user", 2, gpu).unwrap();
     }
     claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
-    let none = Fake::default();
-    let busy = Status::ResourceBusy {
-        resource: "gpu".into(),
-        thread: "main".into(),
-        holder: "session/one".into(),
-    };
-    assert_eq!(status(&r, &none, "y"), busy);
     let model = Model::read(&r.state).unwrap();
-    assert_eq!(
-        Readiness::new(&r.state, &model, NOW, &none).thread("other").unwrap(),
-        ThreadStatus::ResourceBusy {
-            resource: "gpu".into(),
-            thread: "main".into(),
-            holder: "session/one".into()
-        }
-    );
-    claim::release(&mut r, &claim::thread_key("main").unwrap(), "session/one");
-    assert_eq!(status(&r, &none, "x"), Status::Ready);
-    assert_eq!(status(&r, &none, "y"), Status::Ready);
+    let none = Fake::default();
+    let readiness = Readiness::new(&r.state, &model, NOW, &none);
+    assert_eq!(readiness.of("y").unwrap(), Some(Status::Ready));
+    assert_eq!(readiness.thread("other").unwrap(), ThreadStatus::Ready { items: vec!["y".into()] });
+    assert_eq!(flat(&readiness.ready(false, "session/two").unwrap()), ["y"]);
 }
 
 #[test]
@@ -409,31 +391,6 @@ fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves
 }
 
 #[test]
-fn an_item_is_busy_whenever_its_thread_is_even_through_another_members_resource() {
-    let mut r = replica("a");
-    items(&mut r, &["free", "parked"]);
-    set_state(&mut r, "parked", ItemState::Parked, by(2)).unwrap();
-    add_item(&mut r, "theirs", "theirs", by(1)).unwrap();
-    thread(&mut r, "theirs", "other");
-    for id in ["parked", "theirs"] {
-        set_element(&mut r, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by(2))
-            .unwrap();
-    }
-    claim::claim(&mut r, "other", "session/other", 900, 500, 1_000).unwrap();
-    let none = Fake::default();
-    let busy = Status::ResourceBusy {
-        resource: "gpu".into(),
-        thread: "other".into(),
-        holder: "session/other".into(),
-    };
-    assert_eq!(status(&r, &none, "free"), busy, "show agrees with the thread");
-    let model = Model::read(&r.state).unwrap();
-    let readiness = Readiness::new(&r.state, &model, NOW, &none);
-    assert!(matches!(readiness.thread("main").unwrap(), ThreadStatus::ResourceBusy { .. }));
-    assert_eq!(readiness.ready(false, "session/me").unwrap(), []);
-}
-
-#[test]
 fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() {
     let mut r = replica("a");
     items(&mut r, &["goal", "mid", "a", "b", "old", "same", "other"]);
@@ -445,7 +402,7 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     }
     thread(&mut r, "other", "t2");
     for id in ["same", "other"] {
-        link(&mut r, id, "goal", LinkKind::Blocks, by(2)).unwrap();
+        link(&mut r, id, "goal", by(2)).unwrap();
     }
     // An archived leaf is met already; an open one, however deep, holds the dependency.
     model::put(&mut r, &item_key("old").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
@@ -459,7 +416,7 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     let merged = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     assert_eq!(status(&r, &merged, "other"), Status::Ready);
     // A part closed by hand counts as closed, whatever is open under it.
-    set_state(&mut r, "a", ItemState::InProgress, by(3)).unwrap();
+    set_state(&mut r, "a", ItemState::Backlog, by(3)).unwrap();
     assert_eq!(status(&r, &merged, "same"), blocked(&[("goal", Wait::Open)]));
     set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
     assert_eq!(status(&r, &merged, "same"), Status::Ready);
@@ -486,17 +443,17 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
             .progress
             .state
     };
-    assert_eq!(state(&r, NOW), ItemState::Backlog);
+    assert_eq!(state(&r, NOW), ProgressState::Backlog);
     // A claim lasts its lease: the parent reads in progress while it lives, and backlog once it lapses.
     claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
-    assert_eq!(state(&r, NOW), ItemState::InProgress);
-    assert_eq!(state(&r, 2_000), ItemState::Backlog);
+    assert_eq!(state(&r, NOW), ProgressState::InProgress);
+    assert_eq!(state(&r, 2_000), ProgressState::Backlog);
     // Parked work isn't being worked, though its thread is claimed.
     set_state(&mut r, "x", ItemState::Parked, by(3)).unwrap();
-    assert_eq!(state(&r, NOW), ItemState::Backlog);
+    assert_eq!(state(&r, NOW), ProgressState::Backlog);
     // A state set by hand holds.
     set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
-    assert_eq!(state(&r, NOW), ItemState::Parked);
+    assert_eq!(state(&r, NOW), ProgressState::Parked);
 }
 
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
@@ -510,19 +467,14 @@ fn rollup(r: &Replica, id: &str) -> Rollup {
 }
 
 #[test]
-fn a_leaf_started_by_hand_reads_in_progress_whatever_holds_it_and_a_claim_starts_the_rest() {
+fn a_leaf_in_a_claimed_thread_reads_in_progress_unless_it_waits() {
     let mut r = replica("a");
-    items(&mut r, &["dep", "x", "y", "parent", "kid"]);
+    items(&mut r, &["dep", "y", "parent", "kid"]);
     set_parent(&mut r, "kid", Some("parent"), by(2)).unwrap();
-    assert_eq!(stage(&r, "x"), Some(Stage::Ready));
+    assert_eq!(stage(&r, "y"), Some(Stage::Ready));
     assert_eq!(stage(&r, "parent"), None);
-    // Started with nothing holding it, and still so once a link is added after it started.
-    set_state(&mut r, "x", ItemState::InProgress, by(3)).unwrap();
-    assert_eq!(stage(&r, "x"), Some(Stage::InProgress));
-    link(&mut r, "x", "dep", LinkKind::Blocks, by(4)).unwrap();
-    assert_eq!(stage(&r, "x"), Some(Stage::InProgress));
     // A backlog leaf in a claimed thread is in progress; one that waits is still blocked.
-    link(&mut r, "y", "dep", LinkKind::Blocks, by(4)).unwrap();
+    link(&mut r, "y", "dep", by(4)).unwrap();
     claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     assert_eq!(stage(&r, "dep"), Some(Stage::InProgress));
     assert_eq!(stage(&r, "y"), Some(Stage::Blocked));
@@ -530,9 +482,7 @@ fn a_leaf_started_by_hand_reads_in_progress_whatever_holds_it_and_a_claim_starts
     assert_eq!(stage(&r, "y"), Some(Stage::Parked));
     done_with(&mut r, "dep", Some("c1"));
     assert_eq!(stage(&r, "dep"), Some(Stage::InReview));
-    // Out of every thread, started work is still in progress, and work not started is in no thread.
-    model::put::<String>(&mut r, &item_key("x").unwrap(), field::THREAD, None, by(6)).unwrap();
-    assert_eq!(stage(&r, "x"), Some(Stage::InProgress));
+    // Work in no thread is unthreaded.
     add_item(&mut r, "loose", "loose", by(6)).unwrap();
     assert_eq!(stage(&r, "loose"), Some(Stage::Unthreaded));
 }
@@ -559,11 +509,10 @@ fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() 
         set_parent(&mut r, kid, Some(parent), by(2)).unwrap();
     }
     // A part closed by hand counts every leaf as done; under a part parked by hand only the open ones park, so a done
-    // leaf stays done and a started one neither counts as in progress nor moves the parent.
+    // leaf stays done.
     set_state(&mut r, "closed", ItemState::Done, by(3)).unwrap();
     set_state(&mut r, "parked", ItemState::Parked, by(3)).unwrap();
     done_with(&mut r, "p1", None);
-    set_state(&mut r, "p2", ItemState::InProgress, by(3)).unwrap();
     model::put(&mut r, &item_key("gone").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     let rolled = rollup(&r, "goal");
     assert_eq!(
@@ -572,10 +521,10 @@ fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() 
         "the archived part counts for nothing"
     );
     assert_eq!((rolled.progress.done, rolled.progress.total), (3, 6));
-    assert_eq!(rolled.progress.state, ItemState::InProgress, "done work under it moves it");
+    assert_eq!(rolled.progress.state, ProgressState::InProgress, "done work under it moves it");
     let rolled = rollup(&r, "parked");
     assert_eq!(rolled.stages, Stages { done: 1, parked: 2, ..Stages::default() });
-    assert_eq!(rolled.progress.state, ItemState::Parked);
+    assert_eq!(rolled.progress.state, ProgressState::Parked);
 }
 
 #[test]
@@ -604,12 +553,12 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves(
     items(&mut r, &["first", "box", "x", "y"]);
     for leaf in ["x", "y"] {
         set_parent(&mut r, leaf, Some("box"), by(2)).unwrap();
-        link(&mut r, leaf, "first", LinkKind::Blocks, by(2)).unwrap();
+        link(&mut r, leaf, "first", by(2)).unwrap();
     }
-    assert_eq!(rollup(&r, "box").progress.state, ItemState::Backlog);
+    assert_eq!(rollup(&r, "box").progress.state, ProgressState::Backlog);
     claim::claim(&mut r, "main", "session/one", 900, 500, 1_000).unwrap();
     let rolled = rollup(&r, "box");
-    assert_eq!(rolled.progress.state, ItemState::InProgress);
+    assert_eq!(rolled.progress.state, ProgressState::InProgress);
     assert_eq!(rolled.stages, Stages { blocked: 2, ..Stages::default() }, "the counts stay honest");
 }
 
@@ -630,7 +579,6 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
     }
     for id in &ids {
         match below(5) {
-            0 => set_state(&mut r, id, ItemState::InProgress, by(3)).unwrap(),
             1 => done_with(&mut r, id, None),
             2 => done_with(&mut r, id, Some(["merged", "open"][below(2)])),
             3 if parks => set_state(&mut r, id, ItemState::Parked, by(3)).unwrap(),
@@ -638,7 +586,7 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
         }
         // A link the model refuses, such as one closing a cycle, is just left out.
         if below(5) == 0 {
-            link(&mut r, id, &ids[below(n)], LinkKind::Blocks, by(3)).ok();
+            link(&mut r, id, &ids[below(n)], by(3)).ok();
         }
         if below(8) == 0 {
             model::put(&mut r, &item_key(id).unwrap(), field::ARCHIVED, Some(&true), by(3))
@@ -693,7 +641,7 @@ fn waits(r: &mut Replica, leaf: (&str, &str), on: (&str, &str)) {
         }
         thread(r, id, in_thread);
     }
-    link(r, leaf.0, on.0, LinkKind::Blocks, by(2)).unwrap();
+    link(r, leaf.0, on.0, by(2)).unwrap();
 }
 
 #[test]
@@ -764,8 +712,8 @@ fn threads_wait_on_each_other_in_a_cycle_while_work_in_review_holds_one_back() {
     for id in ["z", "z2"] {
         model::put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"loose"), by(3)).unwrap();
     }
-    link(&mut r, "x", "z", LinkKind::Blocks, by(3)).unwrap();
-    link(&mut r, "z2", "x2", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut r, "x", "z", by(3)).unwrap();
+    link(&mut r, "z2", "x2", by(3)).unwrap();
     assert!(cycles(&r, &Fake::default()).is_empty(), "a thread with no record is in no cycle");
 }
 

@@ -7,7 +7,6 @@ import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, tar
 import {
   addCommand,
   type Edited,
-  type LinkKind,
   landed,
   type Mode,
   type NewItem,
@@ -943,7 +942,7 @@ export function App() {
     if (action === "edit") setEditAsked((was) => was + 1);
     else if (action === "add-inside") startAdd(chosen.id);
     else {
-      setMode(action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id, link: action });
+      setMode(action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id });
       setShortcutsOnly(false);
       setShowCommand(true);
     }
@@ -962,7 +961,7 @@ export function App() {
       setShowCommand(true);
     } else if (action.kind === "edit") onItem("edit");
     else if (action.kind === "move") onItem("move");
-    else if (action.kind === "link") onItem(action.link);
+    else if (action.kind === "link") onItem("waits-for");
     else if (action.kind === "addInside") onItem("add-inside");
     else moveRow(action.by);
   };
@@ -979,7 +978,7 @@ export function App() {
             ? "Search the plan, or type a command"
             : picking.kind === "move"
               ? `Find where to put ${titleOf(picking.item)}`
-              : `Find what ${titleOf(picking.item)} ${picking.link === "waits-for" ? "waits for" : "relates to"}`
+              : `Find what ${titleOf(picking.item)} waits for`
       }
       working={working}
       lines={lines}
@@ -991,8 +990,8 @@ export function App() {
       onDismiss={() => closeTop.current(1)}
     />
   ) : null;
-  const unlink = (from: string, kind: LinkKind, to: string) =>
-    send(unlinkCommand(from, kind, to), { select: selected ?? from, pin: selected, undo: true });
+  const unlink = (from: string, to: string) =>
+    send(unlinkCommand(from, to), { select: selected ?? from, pin: selected, undo: true });
   /** A refusal or failure, shown in the form or item it is about, else over the Map. */
 
   const noticeView =
@@ -1073,7 +1072,7 @@ export function App() {
     mode.kind === "move"
       ? `Choose the box to put ${titleOf(mode.item)} in`
       : mode.kind === "link"
-        ? `Choose the item that ${titleOf(mode.item)} ${mode.link === "waits-for" ? "waits for" : "relates to"}`
+        ? `Choose the item that ${titleOf(mode.item)} waits for`
         : null;
   const menu = (
     <>
@@ -1279,7 +1278,7 @@ export function App() {
             }}
             onUnlink={unlink}
             onMove={() => setMode({ kind: "move", item: chosen.id })}
-            onLink={(link) => setMode({ kind: "link", item: chosen.id, link })}
+            onLink={() => setMode({ kind: "link", item: chosen.id })}
             onAdd={() => startAdd(chosen.id)}
             onClose={closeItem}
             onDismiss={() => closeTop.current(1)}

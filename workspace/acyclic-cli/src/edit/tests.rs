@@ -29,13 +29,15 @@ fn an_add_repeated_changes_nothing_and_one_that_differs_is_refused() {
         notes: Change::Set("n".into()),
         size: Change::Set(Size::M),
         state: Some(ItemState::Parked),
-        areas: Delta { add: vec!["x".into()], remove: vec![] },
+        waits_for: Delta { add: vec!["x".into()], remove: vec![] },
         ..titled("A")
     };
+    add_item(&mut r, "x", &titled("X"), AGENT).unwrap();
     assert_eq!(code(add_item(&mut r, "a", &full, AGENT)), "ok");
     let held = item(&r, "a");
+    let waits = Model::read(r.state()).unwrap().links.len();
     assert_eq!(
-        (held.notes.one().map(String::as_str), held.state.one(), held.areas.len()),
+        (held.notes.one().map(String::as_str), held.state.one(), waits),
         (Some("n"), Some(&ItemState::Parked), 1),
         "add takes every field edit does"
     );
@@ -48,8 +50,11 @@ fn an_add_repeated_changes_nothing_and_one_that_differs_is_refused() {
         ("notes", ItemFields { notes: Change::Set("m".into()), ..titled("A") }),
         ("state", ItemFields { state: Some(ItemState::Backlog), ..titled("A") }),
         (
-            "area",
-            ItemFields { areas: Delta { add: vec!["y".into()], remove: vec![] }, ..titled("A") },
+            "waits-for",
+            ItemFields {
+                waits_for: Delta { add: vec!["y".into()], remove: vec![] },
+                ..titled("A")
+            },
         ),
     ] {
         assert_eq!(code(add_item(&mut r, "a", &other, AGENT)), "already-exists", "{what}");
@@ -111,6 +116,94 @@ fn an_agents_membership_and_repository_edits_apply_and_a_repeat_writes_nothing()
     let before = r.changes();
     edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
     assert_eq!(r.changes(), before);
+}
+
+#[test]
+fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() {
+    use acyclic_core::needs::{Entry, needs_you};
+    use acyclic_core::ready::{Ancestry, Readiness};
+    struct NoClones;
+    impl Ancestry for NoClones {
+        fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
+            Err("no clone".into())
+        }
+    }
+    let dangling = |r: &Replica| -> Vec<Entry> {
+        let model = Model::read(r.state()).unwrap();
+        let readiness = Readiness::new(r.state(), &model, 3, &NoClones);
+        let needs = needs_you(r.state(), &model, &readiness, 3).unwrap();
+        needs.into_iter().filter(|entry| matches!(entry, Entry::Dangling { .. })).collect()
+    };
+    let mut mac = replica();
+    for id in ["a", "b"] {
+        add_item(&mut mac, id, &titled(id), USER_BY).unwrap();
+    }
+    // One replica deletes b while another makes a wait for it.
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+    acyclic_core::delete::delete_item(&mut pi, "b", AGENT).unwrap();
+    let waits = ItemFields {
+        waits_for: Delta { add: vec!["b".into()], remove: vec![] },
+        ..ItemFields::default()
+    };
+    edit_item(&mut mac, "a", &waits, AGENT).unwrap();
+    mac.join(pi.state()).unwrap();
+    assert_eq!(
+        dangling(&mac),
+        [Entry::Dangling {
+            kind: "item".into(),
+            id: "a".into(),
+            field: "waits-for".into(),
+            target: "b".into(),
+            fix: Some("acyclic item edit a --no-waits-for b".into()),
+        }]
+    );
+    let let_go = ItemFields {
+        waits_for: Delta { add: vec![], remove: vec!["b".into()] },
+        ..ItemFields::default()
+    };
+    edit_item(&mut mac, "a", &let_go, AGENT).unwrap();
+    assert_eq!(dangling(&mac), []);
+}
+
+#[test]
+fn a_repository_with_no_record_is_removed_by_the_id_it_is_held_by() {
+    let mut r = replica();
+    add_item(&mut r, "a", &titled("A"), USER_BY).unwrap();
+    add_thread(
+        &mut r,
+        "t",
+        &ThreadFields { title: Some("T".into()), ..ThreadFields::default() },
+        USER_BY,
+    )
+    .unwrap();
+    // Held as if written by another replica whose record this one never got.
+    let item_held =
+        ScopeEdit::ItemRepository { item: "a".into(), repository: "gone".into(), present: true };
+    let thread_held = ScopeEdit::ThreadRepository {
+        thread: "t".into(),
+        repository: "gone".into(),
+        present: true,
+    };
+    for held in [&item_held, &thread_held] {
+        acyclic_core::scope::edit(&mut r, held, USER_BY).unwrap();
+    }
+    let gone = Delta { add: vec![], remove: vec!["gone".into()] };
+    edit_item(
+        &mut r,
+        "a",
+        &ItemFields { repositories: gone.clone(), ..ItemFields::default() },
+        AGENT,
+    )
+    .unwrap();
+    edit_thread(
+        &mut r,
+        "t",
+        &ThreadFields { repositories: gone, ..ThreadFields::default() },
+        AGENT,
+    )
+    .unwrap();
+    let model = Model::read(r.state()).unwrap();
+    assert!(model.items["a"].repositories.is_empty() && model.threads["t"].repositories.is_empty());
 }
 
 #[test]

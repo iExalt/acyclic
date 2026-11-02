@@ -218,15 +218,6 @@ pub enum Error {
     Claimed(Key),
     /// Only threads are claimed, and this one has no record.
     NoThread(String),
-    /// Another holder's live claim on another thread holds a named resource this thread's open work needs.
-    ResourceHeld {
-        /// The resource.
-        resource: String,
-        /// The thread holding it.
-        thread: String,
-        /// Its holder.
-        holder: String,
-    },
     /// A state file that couldn't be read.
     Format(String),
 }
@@ -251,9 +242,6 @@ impl fmt::Display for Error {
             ),
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
             Self::NoThread(thread) => write!(f, "no thread {thread}; claim a thread, not an item"),
-            Self::ResourceHeld { resource, thread, holder } => {
-                write!(f, "{holder} holds {resource} through thread {thread}")
-            },
             Self::Format(message) => write!(f, "unreadable state: {message}"),
         }
     }

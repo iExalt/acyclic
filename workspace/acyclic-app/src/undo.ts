@@ -1,10 +1,9 @@
 // Undo: for a write that has an exact inverse, the write that takes it back, with what must still hold for that to be
-// safe. A move, an item's fields but its thread, and a link added or removed undo; nothing else does: an add (the app
+// safe. A move, an item's fields but its thread, and a waits-for added or removed undo; nothing else does: an add (the app
 // has no delete), a reopen, a conflict settled, a thread changed (an agent may have taken up its work). The guard is
 // checked against a plan read just before the undo is sent; the server has no compare-and-set, so a write landing
 // between that read and the undo isn't caught. Pure, so tested without a browser.
 import type { Command, Item, Stage } from "./api";
-import type { LinkKind } from "./edits";
 
 /** The plan a write was sent over, or the plan as it is when Undo is pressed. */
 export interface Plan {
@@ -24,11 +23,9 @@ export interface Undo {
 }
 
 /** An item's fields an edit can set and an undo set back, with the value each holds; an empty one is null. */
-const FIELDS = ["title", "state", "notes", "gate", "size"] as const;
+const FIELDS = ["title", "state", "notes", "size"] as const;
 type Field = (typeof FIELDS)[number];
 const held = (item: Item | undefined, field: Field): string | null => (item === undefined ? null : item[field]);
-
-const LINKS: Record<LinkKind, "waits_for" | "relates_to"> = { "waits-for": "waits_for", "relates-to": "relates_to" };
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -39,33 +36,34 @@ export function undoOf(command: Command, before: Plan): Undo | null {
   if (body === null) return null;
   const titleOf = (id: string) => before.items.get(id)?.title ?? id;
 
-  const link = record(body.link);
-  const linking = record(link?.add) ?? record(link?.remove);
-  if (link !== null && linking !== null) {
-    const { from, kind, to } = linking as { from: string; kind: LinkKind; to: string };
-    const added = record(link.add) !== null;
-    const linked = (now: Plan) => now.items.get(from)?.links[LINKS[kind]].includes(to) === true;
-    // Unwaited, an item may become ready and be started; waiting again wouldn't stop that, so only undo while the
-    // work under it is no further along than it was.
-    const unstarted = (now: Plan) =>
-      added || kind !== "waits-for" || started(now.items.get(from)) <= started(before.items.get(from));
-    // Said as the link reads, so which waits for which is plain.
-    const [a, b, verb] = [titleOf(from), titleOf(to), kind === "waits-for" ? "waits for" : "relates to"];
-    const [now, longer, again] = [`${a} now ${verb} ${b}`, `${a} no longer ${verb} ${b}`, `${a} ${verb} ${b} again`];
-    return {
-      text: added ? now : longer,
-      undone: added ? longer : again,
-      command: { link: { [added ? "remove" : "add"]: { from, kind, to } } },
-      holds: (now) => linked(now) === added && unstarted(now),
-    };
-  }
-
   const edit = record(record(body.item)?.edit);
   if (edit === null || typeof edit.item !== "string") return null;
   const id = edit.item;
   const was = before.items.get(id);
   if (was === undefined) return null;
   const keys = Object.keys(edit).filter((key) => key !== "item");
+
+  const waits = keys.length === 1 ? waitEnd(edit, keys[0] ?? "") : null;
+  if (waits !== null) {
+    const added = keys[0] === "waits-for";
+    const waiting = (now: Plan) => now.items.get(id)?.links.waits_for.includes(waits) === true;
+    // Unwaited, an item may become ready and be started; waiting again wouldn't stop that, so only undo while the
+    // work under it is no further along than it was.
+    const unstarted = (now: Plan) => added || started(now.items.get(id)) <= started(was);
+    // Said as the link reads, so which waits for which is plain.
+    const [a, b] = [titleOf(id), titleOf(waits)];
+    const [now, longer, again] = [
+      `${a} now waits for ${b}`,
+      `${a} no longer waits for ${b}`,
+      `${a} waits for ${b} again`,
+    ];
+    return {
+      text: added ? now : longer,
+      undone: added ? longer : again,
+      command: { item: { edit: { item: id, [added ? "no-waits-for" : "waits-for"]: [waits] } } },
+      holds: (now) => waiting(now) === added && unstarted(now),
+    };
+  }
 
   if (keys.length === 1 && (keys[0] === "parent" || keys[0] === "no-parent")) {
     const to = keys[0] === "parent" ? String(edit.parent) : null;
@@ -112,6 +110,13 @@ export function undoOf(command: Command, before: Plan): Undo | null {
       (!set.has("state") ||
         waitersOf(before, id).every((one) => started(now.items.get(one)) <= started(before.items.get(one)))),
   };
+}
+
+/** The one item an edit's `waits-for` or `no-waits-for` key names, or null for any other key or list. */
+function waitEnd(edit: Record<string, unknown>, key: string): string | null {
+  const ends = edit[key];
+  if ((key !== "waits-for" && key !== "no-waits-for") || !Array.isArray(ends) || ends.length !== 1) return null;
+  return typeof ends[0] === "string" ? ends[0] : null;
 }
 
 /**
@@ -164,13 +169,14 @@ export function keep(command: Command, before: Plan, text: string, undone: strin
 function neededBy(command: Command, before: Plan): Item[] {
   const body = record(command);
   const ids = new Set<string>();
-  const link = record(body?.link);
-  const linking = record(link?.add) ?? record(link?.remove);
-  for (const end of [linking?.from, linking?.to]) if (typeof end === "string") ids.add(end);
   const edit = record(record(body?.item)?.edit);
   if (typeof edit?.item === "string") {
     const id = edit.item;
     if (typeof edit.parent === "string") ids.add(edit.parent);
+    for (const key of ["waits-for", "no-waits-for"]) {
+      const end = waitEnd(edit, key);
+      if (end !== null) ids.add(end);
+    }
     for (const one of [...above(before, id), ...waitersOf(before, id)]) ids.add(one);
   }
   return [...ids].flatMap((id) => before.items.get(id) ?? []);

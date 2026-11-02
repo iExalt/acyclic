@@ -14,10 +14,9 @@ function raw(id: string) {
     thread: null,
     state: "backlog",
     notes: null,
-    gate: null,
     size: null,
     archived: false,
-    links: { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] },
+    links: { waits_for: [], waited_on_by: [] },
   };
 }
 

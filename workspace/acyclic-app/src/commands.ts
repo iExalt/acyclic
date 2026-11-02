@@ -19,7 +19,7 @@ export type Run =
   /** The target of a move or link waiting for one: an item, or the top level for a move. */
   | { kind: "target"; id: string | null };
 
-export type OnItem = "edit" | "move" | "waits-for" | "relates-to" | "add-inside";
+export type OnItem = "edit" | "move" | "waits-for" | "add-inside";
 
 export type Group = "Actions" | "Threads" | "Projects" | "Items";
 /** The order groups list in, and break ties in. */
@@ -100,7 +100,6 @@ export function entries(plan: Plan): Entry[] {
             ["edit", `Edit ${item.title}`],
             ["move", `Move ${item.title}…`],
             ["waits-for", `${item.title} waits for…`],
-            ["relates-to", `${item.title} relates to…`],
             ["add-inside", `Add inside ${item.title}`],
           ] as const
         ).map(([action, title]) =>

@@ -26,6 +26,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "a2",
+    "placed": [],
+    "title": "Second"
+  },
+  "ok": true
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 6
 {
@@ -34,7 +46,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
     "details": {
       "hint": "run acyclic doctor"
     },
-    "message": "unreadable state: unreadable state on item a1: unknown variant `from-the-future`, expected one of `backlog`, `parked`, `in-progress`, `done`"
+    "message": "unreadable state: unreadable state on item a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`"
   },
   "ok": false
 }
@@ -44,7 +56,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
 {
   "data": {
     "counts": {
-      "items": 0,
+      "items": 1,
       "links": 0,
       "threads": 0
     },
@@ -52,8 +64,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "unreadable": [
       {
         "entity": "item",
-        "error": "unreadable state: unreadable state on item a1: unknown variant `from-the-future`, expected one of `backlog`, `parked`, `in-progress`, `done`",
+        "error": "unreadable state: unreadable state on item a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`",
         "id": "a1"
+      },
+      {
+        "entity": "link",
+        "error": "unreadable state: unreadable kind on link relates-2-a2-a1: unknown variant `relates`, expected `blocks`",
+        "id": "relates-2-a2-a1"
       }
     ]
   },

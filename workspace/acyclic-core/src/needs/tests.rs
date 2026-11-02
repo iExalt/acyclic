@@ -1,9 +1,8 @@
-use crate::model::SetField;
 use crate::state::Key;
 use serde_json::json;
 
 use super::*;
-use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent};
+use crate::model::{By, ItemState, add_item, item_key, link, set_parent};
 use crate::ready::Ancestry;
 use crate::schema::{item as field, thread};
 use crate::scope::{ScopeEdit, USER, edit};
@@ -37,15 +36,11 @@ fn list(r: &Replica) -> Vec<Entry> {
 fn the_state_puts_its_problems_on_the_list() {
     let (mut a, mut b) = (replica("a"), replica("b"));
     let by = user(1);
-    for id in ["x", "y", "z", "p", "kid", "dep", "gpu1", "gpu2", "orphan"] {
+    for id in ["x", "y", "z", "p", "kid", "dep", "orphan"] {
         add_item(&mut a, id, id, by).unwrap();
     }
-    for id in ["gpu1", "gpu2"] {
-        model::set_element(&mut a, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by)
-            .unwrap();
-    }
-    // Threads to claim: one each for x, the two gpu items and kid.
-    for (item, held) in [("x", "tx"), ("gpu1", "t1"), ("gpu2", "t2"), ("kid", "tk")] {
+    // Threads to claim: one each for x and kid.
+    for (item, held) in [("x", "tx"), ("kid", "tk")] {
         model::set(&mut a, &Key::new(kind::THREAD, held).unwrap(), thread::TITLE, Some(&held), by)
             .unwrap();
         edit(&mut a, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
@@ -73,18 +68,16 @@ fn the_state_puts_its_problems_on_the_list() {
         note: None,
     };
     model::set(&mut a, &item_key("dep").unwrap(), field::EVIDENCE, Some(&evidence), by).unwrap();
-    link(&mut a, "z", "dep", LinkKind::Blocks, by).unwrap();
+    link(&mut a, "z", "dep", by).unwrap();
     b.join(&a.state).unwrap();
 
-    // Concurrent: a title conflict, a link cycle, a contest, a resource clash, a clock ahead.
+    // Concurrent: a title conflict, a link cycle, a contest, a clock ahead.
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
-    link(&mut a, "x", "y", LinkKind::Blocks, user(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::Blocks, user(2)).unwrap();
+    link(&mut a, "x", "y", user(2)).unwrap();
+    link(&mut b, "y", "x", user(2)).unwrap();
     claim::claim(&mut a, "tx", "session/a", 2, NOW, NOW).unwrap();
     claim::claim(&mut b, "tx", "session/b", 2, NOW, NOW).unwrap();
-    claim::claim(&mut a, "t1", "session/a", 2, NOW, NOW).unwrap();
-    claim::claim(&mut b, "t2", "session/b", 2, NOW, NOW).unwrap();
     // A claim from a clock running ahead of the reader's by more than the skew.
     claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, NOW, NOW).unwrap();
     a.join(&b.state).unwrap();
@@ -97,10 +90,6 @@ fn the_state_puts_its_problems_on_the_list() {
         thread: "tx".into(),
         holders: vec!["session/a".into(), "session/b".into()],
     });
-    has(&Entry::ResourceClash {
-        resource: "gpu".into(),
-        holders: vec![("t1".into(), "session/a".into()), ("t2".into(), "session/b".into())],
-    });
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
     has(&Entry::ClockAhead { thread: "tk".into(), holder: "session/b".into() });
     has(&Entry::Dangling {
@@ -108,12 +97,14 @@ fn the_state_puts_its_problems_on_the_list() {
         id: "orphan".into(),
         field: "parent".into(),
         target: "gone".into(),
+        fix: None,
     });
     has(&Entry::Dangling {
         kind: "item".into(),
         id: "orphan".into(),
         field: "repository".into(),
         target: "nowhere".into(),
+        fix: None,
     });
     assert!(entries.iter().any(|e| matches!(e, Entry::Unverified { item, repository, .. } if item == "dep" && repository == "nowhere")));
 }
@@ -131,7 +122,7 @@ fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
         edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
             .unwrap();
     }
-    link(&mut r, "waiting", "loose", LinkKind::Blocks, by).unwrap();
+    link(&mut r, "waiting", "loose", by).unwrap();
     model::set_state(&mut r, "parked", ItemState::Parked, by).unwrap();
     model::set_state(&mut r, "done", ItemState::Done, by).unwrap();
     set_parent(&mut r, "kid", Some("goal"), by).unwrap();
@@ -161,9 +152,9 @@ fn threads_that_wait_on_each_other_are_one_thread_cycle() {
         model::set(&mut r, &key, thread::TITLE, Some(&thread), by).unwrap();
     }
     // `t` waits on `u` and `u` on `t`; `v` only waits on `t`, so it is on no cycle.
-    link(&mut r, "x", "y", LinkKind::Blocks, by).unwrap();
-    link(&mut r, "y2", "x2", LinkKind::Blocks, by).unwrap();
-    link(&mut r, "z", "x", LinkKind::Blocks, by).unwrap();
+    link(&mut r, "x", "y", by).unwrap();
+    link(&mut r, "y2", "x2", by).unwrap();
+    link(&mut r, "z", "x", by).unwrap();
     let cycles: Vec<Entry> =
         list(&r).into_iter().filter(|e| matches!(e, Entry::ThreadCycle { .. })).collect();
     assert_eq!(cycles, [Entry::ThreadCycle { threads: vec!["t".into(), "u".into()] }]);

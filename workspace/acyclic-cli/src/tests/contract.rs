@@ -75,7 +75,7 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0);
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("item add a2 --title Other", AGENT), 1);
-    assert_eq!(sh.run("link add a2 waits-for a1", AGENT), 0);
+    assert_eq!(sh.run("item edit a2 --waits-for a1", AGENT), 0);
     let (_, ready) = sh.output("thread ready", AGENT);
     assert_eq!(ready["data"]["ready"], json!([]), "nothing is ready outside a thread");
     assert_eq!(sh.run("thread add t0 --title Start", AGENT), 0);
@@ -195,10 +195,17 @@ fn a_journey_through_the_contract() {
         (1, &json!("no-clash")),
         "{out}"
     );
-    assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
-    assert_eq!(sh.run("link add a1 blocks a2", AGENT), 2, "the old words are refused");
-    let (code, unlinked) = sh.output("link remove a2 waits-for a1", AGENT);
+    let (code, out) = sh.output("item edit a1 --title Renamed --waits-for a2", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("link-cycle")), "{out}");
+    assert_eq!(
+        sh.output("item show a1", AGENT).1["data"][0]["title"],
+        "First",
+        "refused as a whole"
+    );
+    let (code, unlinked) = sh.output("item edit a2 --no-waits-for a1", AGENT);
     assert_eq!((code, unlinked["data"]["changed"].as_bool()), (0, Some(true)), "a clear changes");
+    let links = &sh.output("item show a2", AGENT).1["data"][0]["links"];
+    assert_eq!(links, &json!({"waits_for": [], "waited_on_by": []}));
     // a2 left t1; an agent groups it into a new thread.
     assert_eq!(sh.run("thread add t2 --title Follow-ups", AGENT), 0);
     assert_eq!(sh.run("item edit a2 --thread t2", AGENT), 0);
@@ -252,15 +259,25 @@ fn an_unreadable_state_points_to_doctor() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
     sh.run("item add a1 --title First", AGENT);
-    // A value from a newer version: an item state this build doesn't know.
+    sh.run("item add a2 --title Second", AGENT);
+    // What this build no longer reads: the stored in-progress state and a relates link older versions wrote.
     let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
     let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
-    let key = acyclic_core::model::item_key("a1").unwrap();
+    let item = acyclic_core::model::item_key("a1").unwrap();
+    let link = acyclic_core::state::Key::new("link", "relates-2-a2-a1").unwrap();
+    let fields = [
+        (&item, "state", json!("in-progress")),
+        (&link, "from", json!("a2")),
+        (&link, "to", json!("a1")),
+        (&link, "kind", json!("relates")),
+        (&link, "present", json!(true)),
+    ];
     tracker
         .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
-            replica
-                .write(&key, "state", "actor/user", at, Some(serde_json::json!("from-the-future")))
-                .map(|_| ())
+            for (key, name, value) in &fields {
+                replica.write(key, name, "actor/user", at, Some(value.clone()))?;
+            }
+            Ok::<(), acyclic_core::state::Error>(())
         })
         .unwrap();
     assert_eq!(sh.run("thread ready", AGENT), 6);

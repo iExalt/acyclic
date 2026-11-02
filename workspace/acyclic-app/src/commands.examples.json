@@ -82,23 +82,10 @@
     {
       "name": "c waits for d",
       "command": {
-        "link": {
-          "add": {
-            "from": "c",
-            "kind": "waits-for",
-            "to": "d"
-          }
-        }
-      }
-    },
-    {
-      "name": "c relates to b",
-      "command": {
-        "link": {
-          "add": {
-            "from": "c",
-            "kind": "relates-to",
-            "to": "b"
+        "item": {
+          "edit": {
+            "item": "c",
+            "waits-for": ["d"]
           }
         }
       }
@@ -106,11 +93,10 @@
     {
       "name": "c no longer waits for d",
       "command": {
-        "link": {
-          "remove": {
-            "from": "c",
-            "kind": "waits-for",
-            "to": "d"
+        "item": {
+          "edit": {
+            "item": "c",
+            "no-waits-for": ["d"]
           }
         }
       }
@@ -122,10 +108,9 @@
           "edit": {
             "item": "c",
             "title": "C2",
-            "state": "in-progress",
+            "state": "parked",
             "thread": "t",
             "notes": "n",
-            "gate": "g",
             "size": "m"
           }
         }
@@ -139,7 +124,6 @@
             "item": "c",
             "no-thread": true,
             "no-notes": true,
-            "no-gate": true,
             "no-size": true
           }
         }

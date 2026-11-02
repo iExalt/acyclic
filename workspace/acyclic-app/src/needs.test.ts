@@ -86,22 +86,6 @@ describe("needView", () => {
       lines,
     );
     expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "thread-7", title: "7. Build it" }] });
-    const clash = needView(
-      {
-        kind: "resource-clash",
-        resource: "gpu",
-        holders: [
-          { thread: { id: "thread-3", title: "3. Ship it now" } },
-          { thread: { id: "thread-7", title: "7. Build it" } },
-        ],
-      },
-      lines,
-    );
-    expect(clash).toMatchObject({
-      line: undefined,
-      thread: null,
-      text: "Threads held by different holders need gpu: 3. Ship it now, 7. Build it",
-    });
   });
 
   it("settles a conflict with each value it can keep, and says why for one it can't", () => {
@@ -135,6 +119,27 @@ describe("needView", () => {
     expect(gone.text).toBe("A: its parent names q, which doesn't exist");
   });
 
+  it("says a dangling waits-for as the plan reads, with the CLI's fix, and any other dangling field as before", () => {
+    const titles = (id: string) => id.toUpperCase();
+    const waits = needView(
+      {
+        kind: "dangling",
+        entity: "item",
+        id: "a",
+        field: "waits-for",
+        target: "q",
+        fix: "acyclic item edit a --no-waits-for q",
+      },
+      none,
+      titles,
+    );
+    expect(waits.text).toBe("A waits for q, which doesn't exist");
+    expect(waits.note).toBe("acyclic item edit a --no-waits-for q");
+    // The waiting item itself gone leaves the older shape, kept as it was.
+    const orphan = needView({ kind: "dangling", entity: "link", id: "x", field: "end", target: "q" }, none, titles);
+    expect(orphan.text).toBe("x: its end names q, which doesn't exist");
+  });
+
   it("shows a kind it has no command for with what it names and the CLI's hint", () => {
     const cycle = needView({ kind: "parent-cycle", items: [item("a"), item("b")] }, none);
     expect(cycle).toMatchObject({ text: "Parents form a cycle: A, B", items: ["a", "b"], actions: [] });
@@ -149,7 +154,7 @@ describe("needView", () => {
     expect(needView({ kind: "contest", thread: thread("t") }, none).key).toBe("contest:t");
   });
 
-  it("names the threads a cycle or a resource clash holds, and a title written apart as its first value", () => {
+  it("names the threads a cycle holds, and a title written apart as its first value", () => {
     const cycle = needView({ kind: "thread-cycle", threads: [thread("t"), thread("u")], notify: true }, none);
     expect(cycle).toMatchObject({
       key: "thread-cycle:t:u",
@@ -161,19 +166,6 @@ describe("needView", () => {
       thread: null,
       actions: [],
     });
-    // A resource clash names each holder's thread, to select.
-    const clash = needView(
-      {
-        kind: "resource-clash",
-        resource: "gpu",
-        holders: [
-          { thread: thread("t"), holder: "x" },
-          { thread: thread("u"), holder: "y" },
-        ],
-      },
-      none,
-    );
-    expect(clash).toMatchObject({ threads: cycle.threads, key: "resource-clash:gpu" });
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
     expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");

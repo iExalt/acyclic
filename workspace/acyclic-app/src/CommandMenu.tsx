@@ -16,7 +16,6 @@ import {
   Icon,
   Inbox,
   LayoutDashboard,
-  Link2,
   ListTree,
   MapIcon,
   Pencil,
@@ -250,7 +249,7 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, kindOf: (id: strin
     return <Icon of={of[run.view]} size={16} />;
   }
   if (run.kind === "on-item") {
-    const of = { edit: Pencil, move: FolderInput, "waits-for": ArrowUpLeft, "relates-to": Link2, "add-inside": Plus };
+    const of = { edit: Pencil, move: FolderInput, "waits-for": ArrowUpLeft, "add-inside": Plus };
     return <Icon of={of[run.action]} size={16} />;
   }
   if (run.kind === "add") return <Icon of={Plus} size={16} />;

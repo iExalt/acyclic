@@ -9,30 +9,17 @@ coherent pieces of it, plus the app and the agent runs that carry that work out.
 One unit of tracked work, from a single task to a whole project; items nest to any depth.
 _Avoid_: issue, task, ticket, battle
 
-**Goal**:
-An item with children and a gate.
-_Avoid_: milestone, epic, campaign
-
 **Group**:
-An item with children and no gate, such as a side track that is never finished by design.
-_Avoid_: epic, category
+An item with children under another item.
+_Avoid_: epic, category, goal
 
 **Project**:
-A top-level item with children; a top-level item is a project even when it also has a gate.
-_Avoid_: theatre, repository, phase
-
-**Gate**:
-The exit check an item must pass to be done. Not enforced yet: `item done` doesn't check it. Today it is free text that
-sets the item's role and delays archiving a finished subtree.
-_Avoid_: acceptance criteria (as a separate concept), exit criteria
+A top-level item with children.
+_Avoid_: theatre, repository, phase, milestone, campaign
 
 **Evidence**:
 What `item done` records to show an item was finished: the commit that completed it, or a line of text.
 _Avoid_: note (that is the item's own notes field)
-
-**Area**:
-A long-lived topic tag on items, independent of the outcome tree.
-_Avoid_: track, front, sector, component
 
 **Spike**:
 An item whose output is evidence for a decision rather than a deliverable.
@@ -41,7 +28,7 @@ _Avoid_: recon, research task
 ## Execution
 
 **Readiness**:
-Whether an item or thread can start now, given its dependencies, claims and resources.
+Whether an item or thread can start now, given its dependencies and claims.
 _Avoid_: status (for readiness alone), unblocked
 
 **Blocker**:
@@ -49,7 +36,7 @@ Something that stops work going ahead, which the user must clear.
 _Avoid_: blocking issue
 
 **Placement**:
-Choosing where a new item belongs: its parent, its links and its thread.
+Choosing where a new item belongs: its parent, what it waits for and its thread.
 _Avoid_: triage, filing
 
 **Split**:
@@ -75,12 +62,11 @@ continuing the same conversation.
 _Avoid_: session, job, deployment
 
 **Brief**:
-What an agent receives when a thread is deployed: the work, its context and its gates.
+What an agent receives when a thread is deployed: the work and its context.
 _Avoid_: orders, prompt (for the whole brief)
 
 **Claim**:
-An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member, and the
-claim holds the resources the thread's open members name.
+An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member.
 _Avoid_: lock, assignment
 
 **Dispatcher**:
@@ -95,10 +81,6 @@ _Avoid_: triage, inbox
 An agent conversation that belongs to no thread yet; filing it makes it an item.
 _Avoid_: loose chat, orphan
 
-**Resource**:
-Something only one holder may use at a time, such as a file area, a GPU, a host or the user's attention.
-_Avoid_: mutex, exclusion
-
 **Archived**:
 A finished subtree hidden from the graph, readiness and the dispatcher by default; archiving hides, never deletes.
 _Avoid_: closed, deleted
@@ -108,7 +90,7 @@ The state of finished code work whose commit is not yet on its repository's defa
 
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, reopened work,
-resources or numbers two holders clash over, references to what doesn't exist, merges that can't be confirmed, and
+claims or numbers two holders clash over, references to what doesn't exist, merges that can't be confirmed, and
 items in no thread. The app
 calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
@@ -156,15 +138,12 @@ The threads in no wave: they wait on no thread and none waits on them.
 
 ## Relationships between items
 
-**Hard dependency**:
-A dependency that blocks the dependent item until the prerequisite is met; link kind `waits-for`.
-_Avoid_: blocker link, depends_on, blocks (in prose)
+**Waits for**:
+An item waits for another when it can't start until that one is done: `item edit --waits-for`. It is the only
+relationship between items besides their parents.
+_Avoid_: blocker link, depends_on, blocks (in prose), hard dependency, relates to
 
-**Related**:
-A link that carries context only; link kind `relates-to`.
-_Avoid_: relates_to, relates (in prose), see also
-
-Stored data keeps the older kind names: `blocks` for `waits-for` and `relates` for `relates-to`.
+Stored data keeps the older kind name `blocks` for a waits-for link.
 
 ## Where the data lives
 
@@ -190,8 +169,8 @@ _Avoid_: instance, node
 **Conflict**:
 A field holding two values that replicas wrote without seeing each other's, kept side by side until someone writes
 the field again. Clearing a field counts as a value, so a clear and a set made apart conflict too: moving an item to
-the top level while an agent moves it elsewhere asks which move stands. Sets of things, such as links and areas, don't
-conflict: an add the remover never saw survives.
+the top level while an agent moves it elsewhere asks which move stands. Sets of things, such as waits-for and
+repositories, don't conflict: an add the remover never saw survives.
 _Avoid_: merge conflict (nothing blocks a sync)
 
 ## Relationships
@@ -201,13 +180,12 @@ _Avoid_: merge conflict (nothing blocks a sync)
 - A **Thread** may hold **Items** from different branches of the outcome tree
 - A **Thread** has one **Run** at a time; each **Run** continues the thread's conversation
 - A **Thread** is the unit of work: one agent holds a **Claim** on it, and an item in no thread is never ready
-- A **Goal** is an **Item** whose **Gate** must pass before it is done
-- **Hard dependencies** (`waits-for`) never form a cycle
+- **Waits for** never forms a cycle
 
 ## Flagged ambiguities
 
 - "campaign": the planning skills use it for a whole planned effort ending at a final gate. Resolved: in acyclic that
-  is a **Goal**; "campaign" stays the skills' word.
+  is a **Project**; "campaign" stays the skills' word.
 - "project": a top-level **Item** in acyclic, but a registered checkout in Paseo. Resolved: "project" means the
   acyclic sense here; say "Paseo project" for the other.
 - "thread" and "workstream": earlier drafts said workstream. Resolved: **Thread**, the planning skills' word too.

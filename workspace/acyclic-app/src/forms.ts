@@ -4,7 +4,7 @@
 import type { Command, Item } from "./api";
 
 /** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
-export const STATES = ["backlog", "parked", "in-progress"] as const;
+export const STATES = ["backlog", "parked"] as const;
 export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
 /**
  * How a state the editor shows reads elsewhere, where that differs from its word: a leaf in the backlog shows as Ready
@@ -24,7 +24,6 @@ export interface ItemDraft {
   state: string;
   thread: string;
   notes: string;
-  gate: string;
   size: string;
 }
 
@@ -34,7 +33,6 @@ export function draftOf(item: Item): ItemDraft {
     state: item.state,
     thread: item.thread ?? "",
     notes: item.notes ?? "",
-    gate: item.gate ?? "",
     size: item.size ?? "",
   };
 }
@@ -49,8 +47,7 @@ export function changes(base: ItemDraft, draft: ItemDraft): Partial<ItemDraft> {
   const title = draft.title.trim();
   if (title !== "" && title !== base.title) out.title = title;
   if (draft.state !== base.state && (STATES as readonly string[]).includes(draft.state)) out.state = draft.state;
-  for (const field of ["thread", "notes", "gate", "size"] as const)
-    if (draft[field] !== base[field]) out[field] = draft[field];
+  for (const field of ["thread", "notes", "size"] as const) if (draft[field] !== base[field]) out[field] = draft[field];
   return out;
 }
 
@@ -79,7 +76,7 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
     if (field === "title") return text === null ? null : edit({ title: text });
     if (field === "state")
       return text !== null && (STATES as readonly string[]).includes(text) ? edit({ state: text }) : null;
-    if (["notes", "gate", "size", "parent", "thread"].includes(field)) {
+    if (["notes", "size", "parent", "thread"].includes(field)) {
       if (value === null) return edit({ [`no-${field}`]: true });
       return text === null ? null : edit({ [field]: text });
     }

@@ -65,14 +65,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic link add a2 waits-for a1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --waits-for a1
 # exit 0
 {
   "data": {
     "changed": true,
-    "from": "a2",
-    "kind": "waits-for",
-    "to": "a1"
+    "item": "a2",
+    "placed": []
   },
   "ok": true
 }
@@ -208,7 +207,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --state done
 
 # stderr
 error: invalid value 'done' for '--state <STATE>'
-  [possible values: backlog, parked, in-progress]
+  [possible values: backlog, parked]
 
 For more information, try '--help'.
 
@@ -465,16 +464,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
   "data": [
     {
       "archived": false,
-      "areas": [],
       "children": [],
       "claims": [],
       "done_at": null,
       "evidence": null,
-      "gate": null,
       "id": "a2",
       "links": {
-        "related_from": [],
-        "relates_to": [],
         "waited_on_by": [],
         "waits_for": [
           "a1"
@@ -487,7 +482,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
       },
       "reopened": false,
       "repositories": [],
-      "resources": [],
       "role": "item",
       "size": null,
       "stage": "ready",
@@ -749,7 +743,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
   "data": [
     {
       "archived": false,
-      "areas": [],
       "children": [],
       "claims": [],
       "done_at": "2026-10-15T00:00:00Z",
@@ -758,11 +751,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
         "note": "shipped",
         "repository": null
       },
-      "gate": null,
       "id": "a1",
       "links": {
-        "related_from": [],
-        "relates_to": [],
         "waited_on_by": [
           "a2"
         ],
@@ -775,7 +765,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       },
       "reopened": false,
       "repositories": [],
-      "resources": [],
       "role": "item",
       "size": null,
       "stage": "done",
@@ -785,16 +774,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
     },
     {
       "archived": false,
-      "areas": [],
       "children": [],
       "claims": [],
       "done_at": null,
       "evidence": null,
-      "gate": null,
       "id": "a2",
       "links": {
-        "related_from": [],
-        "relates_to": [],
         "waited_on_by": [],
         "waits_for": [
           "a1"
@@ -807,7 +792,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       },
       "reopened": false,
       "repositories": [],
-      "resources": [],
       "role": "item",
       "size": null,
       "stage": "ready",
@@ -1012,33 +996,102 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic link add a1 sideways a2
-# exit 2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --title Renamed --waits-for a2
+# exit 1
+{
+  "error": {
+    "code": "link-cycle",
+    "details": {
+      "items": [
+        "a2",
+        "a1"
+      ]
+    },
+    "message": "the link would close a cycle through a2, a1"
+  },
+  "ok": false
+}
 
-# stderr
-error: invalid value 'sideways' for '<KIND>'
-  [possible values: waits-for, relates-to]
+$ ACYCLIC_ACTOR=session/mac acyclic item show a1
+# exit 0
+{
+  "data": [
+    {
+      "archived": false,
+      "children": [],
+      "claims": [],
+      "done_at": "2026-10-15T00:00:00Z",
+      "evidence": {
+        "commit": null,
+        "note": "shipped",
+        "repository": null
+      },
+      "id": "a1",
+      "links": {
+        "waited_on_by": [
+          "a2"
+        ],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": null,
+      "readiness": {
+        "status": "done"
+      },
+      "reopened": false,
+      "repositories": [],
+      "role": "item",
+      "size": null,
+      "stage": "done",
+      "state": "done",
+      "thread": "t1",
+      "title": "First"
+    }
+  ],
+  "ok": true
+}
 
-For more information, try '--help'.
-
-$ ACYCLIC_ACTOR=session/mac acyclic link add a1 blocks a2
-# exit 2
-
-# stderr
-error: invalid value 'blocks' for '<KIND>'
-  [possible values: waits-for, relates-to]
-
-For more information, try '--help'.
-
-$ ACYCLIC_ACTOR=session/mac acyclic link remove a2 waits-for a1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-waits-for a1
 # exit 0
 {
   "data": {
     "changed": true,
-    "from": "a2",
-    "kind": "waits-for",
-    "to": "a1"
+    "item": "a2",
+    "placed": []
   },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item show a2
+# exit 0
+{
+  "data": [
+    {
+      "archived": false,
+      "children": [],
+      "claims": [],
+      "done_at": null,
+      "evidence": null,
+      "id": "a2",
+      "links": {
+        "waited_on_by": [],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": null,
+      "readiness": {
+        "status": "unthreaded"
+      },
+      "reopened": false,
+      "repositories": [],
+      "role": "item",
+      "size": null,
+      "stage": "unthreaded",
+      "state": "backlog",
+      "thread": null,
+      "title": "Second"
+    }
+  ],
   "ok": true
 }
 

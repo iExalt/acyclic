@@ -173,8 +173,11 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
     let plan = json!({
         "format": "acyclic-import",
         "version": 2,
-        "items": items().iter().map(|key| json!({"key": key, "title": key})).collect::<Vec<_>>(),
-        "links": WAITS.iter().map(|(from, to)| json!({"from": from, "to": to, "kind": "waits-for"})).collect::<Vec<_>>(),
+        "items": items().iter().map(|key| {
+            let waits_for: Vec<&str> =
+                WAITS.iter().filter(|(from, _)| from == key).map(|(_, to)| *to).collect();
+            json!({"key": key, "title": key, "waits_for": waits_for})
+        }).collect::<Vec<_>>(),
         "threads": threads.iter().map(|(key, items)| json!({"key": key, "title": key, "items": items})).collect::<Vec<_>>(),
     });
     let file = dir.path().join("plan.json");

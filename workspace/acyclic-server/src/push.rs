@@ -601,7 +601,7 @@ pub fn check_endpoint(endpoint: &str, transport: Transport) -> Result<(), Refuse
 #[must_use]
 pub fn key(entry: &Value) -> String {
     let mut parts = vec![entry["kind"].as_str().unwrap_or_default().to_owned()];
-    for field in ["id", "entity", "field", "resource"] {
+    for field in ["id", "entity", "field"] {
         if let Some(text) = entry[field].as_str() {
             parts.push(text.to_owned());
         }
@@ -638,9 +638,6 @@ pub fn line(entry: &Value) -> String {
         "done-early" => format!("{} is done with work in it open", title(&entry["item"])),
         "contest" => {
             format!("{} has a claim to sort out", title(&entry["thread"]))
-        },
-        "resource-clash" => {
-            format!("Two threads need {}", entry["resource"].as_str().unwrap_or_default())
         },
         "link-cycle" | "parent-cycle" => "Items form a cycle".to_owned(),
         "thread-cycle" => {

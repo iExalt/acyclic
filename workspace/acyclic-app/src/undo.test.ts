@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Item } from "./api";
+import { linkCommand, unlinkCommand } from "./edits";
 import { item } from "./map/fixture";
 import { keep, type Plan, undoOf, unkeep } from "./undo";
 
@@ -7,7 +8,7 @@ const plan = (items: Item[]): Plan => ({ items: new Map(items.map((one) => [one.
 const before = plan([
   item("garden", null, [], { title: "Garden" }),
   item("beds", "garden", [], { title: "Beds" }),
-  item("dig", "garden", [], { title: "Dig", notes: "deep", gate: null }),
+  item("dig", "garden", [], { title: "Dig", notes: "deep" }),
   item("sow", "beds", ["dig"], { title: "Sow" }),
 ]);
 /** `from` with one item changed as `change` says. */
@@ -15,7 +16,7 @@ const changed = (from: Plan, id: string, change: Partial<Item>) =>
   plan([...from.items.values()].map((one) => (one.id === id ? { ...one, ...change } : one)));
 /** The plan after changing one item as `change` says. */
 const after = (id: string, change: Partial<Item>) => changed(before, id, change);
-const links = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
+const links = { waits_for: [], waited_on_by: [] };
 
 describe("undo", () => {
   it("moves an item back where it was, while it is still where it went", () => {
@@ -34,22 +35,24 @@ describe("undo", () => {
   });
 
   it("sets an item's fields back, clearing one that was empty, while each still holds what was set", () => {
-    const undo = undoOf({ item: { edit: { item: "dig", title: "Dig deep", "no-notes": true, gate: "soil" } } }, before);
-    expect(undo?.command).toEqual({ item: { edit: { item: "dig", title: "Dig", notes: "deep", "no-gate": true } } });
-    expect(undo?.holds(after("dig", { title: "Dig deep", notes: null, gate: "soil" }))).toBe(true);
+    const undo = undoOf({ item: { edit: { item: "dig", title: "Dig deep", "no-notes": true, size: "m" } } }, before);
+    expect(undo?.command).toEqual({ item: { edit: { item: "dig", title: "Dig", notes: "deep", "no-size": true } } });
+    expect(undo?.holds(after("dig", { title: "Dig deep", notes: null, size: "m" }))).toBe(true);
     // Someone else changed one of them since: the undo would take back their change too.
-    expect(undo?.holds(after("dig", { title: "Dig deeper", notes: null, gate: "soil" }))).toBe(false);
+    expect(undo?.holds(after("dig", { title: "Dig deeper", notes: null, size: "m" }))).toBe(false);
   });
 
-  it("takes back a link added or removed, while it is still so", () => {
-    const added = undoOf({ link: { add: { from: "sow", kind: "relates-to", to: "garden" } } }, before);
-    expect(added?.command).toEqual({ link: { remove: { from: "sow", kind: "relates-to", to: "garden" } } });
+  it("takes back a waits-for added or removed, as item edits, while it is still so", () => {
+    const added = undoOf(linkCommand("sow", "garden"), before);
+    expect(added?.command).toEqual(unlinkCommand("sow", "garden"));
+    expect(added?.holds(before)).toBe(false);
+    expect(added?.holds(after("sow", { links: { ...links, waits_for: ["dig", "garden"] } }))).toBe(true);
     // Said as the link reads, so which way it runs is plain.
-    expect([added?.text, added?.undone]).toEqual(["Sow now relates to Garden", "Sow no longer relates to Garden"]);
-    const removed = undoOf({ link: { remove: { from: "sow", kind: "waits-for", to: "dig" } } }, before);
-    expect(removed?.command).toEqual({ link: { add: { from: "sow", kind: "waits-for", to: "dig" } } });
+    expect([added?.text, added?.undone]).toEqual(["Sow now waits for Garden", "Sow no longer waits for Garden"]);
+    const removed = undoOf(unlinkCommand("sow", "dig"), before);
+    expect(removed?.command).toEqual(linkCommand("sow", "dig"));
     expect(removed?.holds(before)).toBe(false);
-    const gone = after("sow", { links: { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] } });
+    const gone = after("sow", { links });
     expect(removed?.holds(gone)).toBe(true);
     expect([removed?.text, removed?.undone]).toEqual(["Sow no longer waits for Dig", "Sow waits for Dig again"]);
   });
@@ -79,10 +82,9 @@ describe("undo", () => {
   });
 
   it("puts back a wait only while the work it held back hasn't started", () => {
-    const removed = undoOf({ link: { remove: { from: "sow", kind: "waits-for", to: "dig" } } }, before);
-    const unlinked = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
-    expect(removed?.holds(after("sow", { links: unlinked, stage: "ready" }))).toBe(true);
-    expect(removed?.holds(after("sow", { links: unlinked, stage: "in-progress" }))).toBe(false);
+    const removed = undoOf(unlinkCommand("sow", "dig"), before);
+    expect(removed?.holds(after("sow", { links, stage: "ready" }))).toBe(true);
+    expect(removed?.holds(after("sow", { links, stage: "in-progress" }))).toBe(false);
   });
 
   it("sets a state back only while nothing waiting on the item, or on a box above it, has started since", () => {
@@ -97,6 +99,11 @@ describe("undo", () => {
     const boxDone = changed(boxed, "dig", { state: "done" });
     expect(outer?.holds(boxDone)).toBe(true);
     expect(outer?.holds(changed(boxDone, "sow", { stage: "in-progress" }))).toBe(false);
+  });
+
+  it("keeps the other end of a waits-for over a reload", () => {
+    const kept = keep(linkCommand("sow", "garden"), before, "", "");
+    expect(kept.items.map((one) => one.id).sort()).toEqual(["beds", "garden", "sow"]);
   });
 
   it("offers the same Undo after a reload, saying what it said, with its guard against the plan as it is then", () => {

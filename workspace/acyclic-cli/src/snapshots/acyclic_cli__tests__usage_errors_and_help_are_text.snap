@@ -8,7 +8,6 @@ Usage: acyclic [OPTIONS] <COMMAND>
 
 Command Groups:
   item         Adds, edits, shows, lists, finishes, reopens, archives and deletes items
-  link         Adds or removes links between items
   thread       Adds, edits, shows and lists threads, and finds, claims and releases ready work
   repository   Adds, edits, shows and lists repository records
 

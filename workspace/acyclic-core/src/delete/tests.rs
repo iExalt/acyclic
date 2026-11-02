@@ -43,7 +43,7 @@ fn refusal(r: &mut Replica, id: &str, by: By<'_>) -> Vec<String> {
 fn only_an_item_nothing_refers_to_is_deleted() {
     let mut r = with_items(&["parent", "kid", "a", "b", "done", "claimed", "mine", "free"]);
     set_parent(&mut r, "kid", Some("parent"), user(2)).unwrap();
-    link(&mut r, "a", "b", crate::model::LinkKind::Blocks, user(2)).unwrap();
+    link(&mut r, "a", "b", user(2)).unwrap();
     set_state(&mut r, "done", ItemState::Done, user(2)).unwrap();
     let held = Key::new(kind::THREAD, "held").unwrap();
     crate::model::set(&mut r, &held, crate::schema::thread::TITLE, Some(&"Held"), user(2)).unwrap();
@@ -104,9 +104,8 @@ fn a_deleted_item_is_missing_to_every_checked_write_and_its_id_is_retired() {
     assert!(r.state().entity(&key).is_some(), "the tombstone is state, so it joins");
     assert!(!Model::read(r.state()).unwrap().items.contains_key("gone"));
     let missing = |result: Result<(), WriteError>| matches!(result, Err(WriteError::NoItem(_)));
-    let kind = crate::model::LinkKind::Blocks;
-    assert!(missing(link(&mut r, "gone", "other", kind, user(3)).map(|_| ())));
-    assert!(missing(link(&mut r, "other", "gone", kind, user(3)).map(|_| ())));
+    assert!(missing(link(&mut r, "gone", "other", user(3)).map(|_| ())));
+    assert!(missing(link(&mut r, "other", "gone", user(3)).map(|_| ())));
     assert!(missing(set_parent(&mut r, "gone", Some("other"), user(3))));
     assert!(missing(set_parent(&mut r, "other", Some("gone"), user(3))));
     assert!(missing(set_state(&mut r, "gone", ItemState::Parked, user(3))));
@@ -154,7 +153,7 @@ fn delete_wins_a_join_and_what_was_attached_meanwhile_reads_as_dangling() {
     assert_eq!(delete_item(&mut mac, "gone", user(2)), Ok(true));
     add_item(&mut pi, "kid", "Kid", user(2)).unwrap();
     set_parent(&mut pi, "kid", Some("gone"), user(2)).unwrap();
-    link(&mut pi, "other", "gone", crate::model::LinkKind::Blocks, user(2)).unwrap();
+    link(&mut pi, "other", "gone", user(2)).unwrap();
     let mut one = Replica::open(ReplicaId::new("a").unwrap(), mac.state().clone());
     one.join(pi.state()).unwrap();
     let mut other = Replica::open(ReplicaId::new("b").unwrap(), pi.state().clone());
@@ -165,22 +164,23 @@ fn delete_wins_a_join_and_what_was_attached_meanwhile_reads_as_dangling() {
         let ids: Vec<&str> = model.items.keys().map(String::as_str).collect();
         assert_eq!(ids, ["kid", "other"]);
         // ...and what refers to it surfaces for the user.
-        let dangling: Vec<(String, String, String)> = needs_of(joined)
+        let dangling: Vec<(String, String, Option<String>)> = needs_of(joined)
             .into_iter()
             .filter_map(|entry| match entry {
-                Entry::Dangling { id, field, target, .. } if target == "gone" => {
-                    Some((id, field, target))
+                Entry::Dangling { id, field, target, fix, .. } if target == "gone" => {
+                    Some((id, field, fix))
                 },
                 _ => None,
             })
             .collect();
+        let fix = "acyclic item edit other --no-waits-for gone".to_owned();
         assert_eq!(
             dangling,
             [
-                ("kid".to_owned(), "parent".to_owned(), "gone".to_owned()),
-                ("other-gone".to_owned(), "end".to_owned(), "gone".to_owned()),
+                ("kid".to_owned(), "parent".to_owned(), None),
+                ("other".to_owned(), "waits-for".to_owned(), Some(fix)),
             ],
-            "the child's parent and the link's end"
+            "the child's parent, and what the other item waits for with the fix that lets go of it"
         );
     }
     // The same state in either order.

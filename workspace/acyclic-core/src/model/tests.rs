@@ -31,24 +31,17 @@ fn pair(ids: &[&str]) -> (Replica, Replica) {
 }
 
 #[test]
-fn roles_follow_children_gates_and_the_top_level() {
+fn roles_follow_children_and_the_top_level() {
     let mut r = replica("a");
-    items(&mut r, &["top", "gated", "plain", "leaf", "leaf2", "gated-top", "under-gated-top"]);
-    set_parent(&mut r, "gated", Some("top"), by(2)).unwrap();
+    items(&mut r, &["top", "plain", "leaf"]);
     set_parent(&mut r, "plain", Some("top"), by(2)).unwrap();
-    set_parent(&mut r, "leaf", Some("gated"), by(2)).unwrap();
-    set_parent(&mut r, "leaf2", Some("plain"), by(2)).unwrap();
-    set_parent(&mut r, "under-gated-top", Some("gated-top"), by(2)).unwrap();
-    for id in ["gated", "gated-top"] {
-        set(&mut r, &item_key(id).unwrap(), field::GATE, Some(&"ships"), by(3)).unwrap();
-    }
+    set_parent(&mut r, "leaf", Some("plain"), by(2)).unwrap();
+    // A gate older versions stored is ignored, so it makes no other role.
+    r.write(&item_key("plain").unwrap(), "gate", "actor/user", 3, Some(json!("ships"))).unwrap();
     let m = model(&r);
     assert_eq!(m.role("top"), Role::Project);
-    assert_eq!(m.role("gated"), Role::Goal);
     assert_eq!(m.role("plain"), Role::Group);
     assert_eq!(m.role("leaf"), Role::Item);
-    // A top-level parent is a project even with a gate.
-    assert_eq!(m.role("gated-top"), Role::Project);
     // An unplaced leaf is an item, not a project.
     let mut r = replica("b");
     items(&mut r, &["alone"]);
@@ -133,54 +126,58 @@ fn a_clear_racing_a_set_conflicts_while_clears_agree_and_an_old_empty_clear_read
 fn ordering_links_never_close_a_cycle_locally() {
     let mut r = replica("a");
     items(&mut r, &["a", "b", "c"]);
-    link(&mut r, "a", "b", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut r, "b", "c", LinkKind::Blocks, by(2)).unwrap();
-    let err = link(&mut r, "c", "a", LinkKind::Blocks, by(3)).unwrap_err();
+    link(&mut r, "a", "b", by(2)).unwrap();
+    link(&mut r, "b", "c", by(2)).unwrap();
+    let err = link(&mut r, "c", "a", by(3)).unwrap_err();
     assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
-    for kind in [LinkKind::Blocks, LinkKind::Relates] {
-        assert_eq!(link(&mut r, "a", "a", kind, by(3)), Err(WriteError::SelfLink("a".into())));
-    }
-    // Context links don't order anything.
-    link(&mut r, "c", "a", LinkKind::Relates, by(3)).unwrap();
-    assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
+    assert_eq!(link(&mut r, "a", "a", by(3)), Err(WriteError::SelfLink("a".into())));
 }
 
 #[test]
-fn a_stored_after_link_is_skipped() {
+fn a_link_of_a_removed_kind_is_refused_on_read_and_listed_by_a_lenient_read() {
+    for kind in ["relates", "after"] {
+        let mut r = replica("a");
+        items(&mut r, &["a", "b"]);
+        let key = Key::new(kind::LINK, &format!("{kind}-1-a-b")).unwrap();
+        for (name, value) in [("from", "a"), ("to", "b"), ("kind", kind)] {
+            r.write(&key, name, "actor/user", 2, Some(json!(value))).unwrap();
+        }
+        r.write(&key, "present", "actor/user", 2, Some(json!(true))).unwrap();
+        let err = Model::read(&r.state).unwrap_err().to_string();
+        assert!(err.contains(&format!("kind on link {kind}-1-a-b")), "{err}");
+        assert!(err.contains(&format!("`{kind}`")), "{err}");
+        let (lenient, unreadable) = Model::read_lenient(&r.state);
+        assert_eq!(unreadable.into_iter().map(|(key, _)| key).collect::<Vec<_>>(), [key]);
+        assert_eq!(lenient.items.len(), 2);
+    }
+}
+
+#[test]
+fn a_stored_in_progress_state_is_refused_on_read() {
+    let mut r = replica("a");
+    items(&mut r, &["a"]);
+    let key = item_key("a").unwrap();
+    r.write(&key, field::STATE, "actor/user", 2, Some(json!("in-progress"))).unwrap();
+    let err = Model::read(&r.state).unwrap_err().to_string();
+    assert!(err.contains("state on item a") && err.contains("`in-progress`"), "{err}");
+}
+
+#[test]
+fn a_link_is_removed_once() {
     let mut r = replica("a");
     items(&mut r, &["a", "b"]);
-    let key = Key::new(kind::LINK, "after-1-a-b").unwrap();
-    for (name, value) in [("from", "a"), ("to", "b"), ("kind", "after")] {
-        r.write(&key, name, "actor/user", 2, Some(json!(value))).unwrap();
-    }
-    r.write(&key, "present", "actor/user", 2, Some(json!(true))).unwrap();
+    link(&mut r, "a", "b", by(2)).unwrap();
+    assert_eq!(unlink(&mut r, "a", "b", by(3)), Ok(true));
     assert_eq!(model(&r).links, []);
-}
-
-#[test]
-fn a_relates_link_orders_nothing_and_is_removed_once() {
-    let mut r = replica("a");
-    items(&mut r, &["a", "b"]);
-    link(&mut r, "a", "b", LinkKind::Relates, by(2)).unwrap();
-    // The reverse waits-for closes no cycle, and the thread has two heads.
-    link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
-    assert_eq!(model(&r).link_cycles(), Vec::<Vec<String>>::new());
-    unlink(&mut r, "b", "a", LinkKind::Blocks, by(4)).unwrap();
-    for id in ["a", "b"] {
-        put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(4)).unwrap();
-    }
-    assert_eq!(model(&r).heads_index().of("t"), ["a", "b"]);
     // Removing it again writes nothing.
-    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(5)), Ok(true));
-    assert_eq!(model(&r).links, []);
-    assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(6)), Ok(false));
+    assert_eq!(unlink(&mut r, "a", "b", by(4)), Ok(false));
 }
 
 #[test]
 fn a_link_cycle_made_by_a_join_is_derived() {
     let (mut a, mut b) = pair(&["x", "y"]);
-    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut b, "y", "x", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut a, "x", "y", by(2)).unwrap();
+    link(&mut b, "y", "x", by(2)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).link_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
 }
@@ -188,22 +185,22 @@ fn a_link_cycle_made_by_a_join_is_derived() {
 #[test]
 fn one_link_added_twice_is_one_link_and_a_re_add_beats_a_removal() {
     let (mut a, mut b) = pair(&["x", "y"]);
-    link(&mut a, "x", "y", LinkKind::Blocks, by(2)).unwrap();
-    link(&mut b, "x", "y", LinkKind::Blocks, by(2)).unwrap();
+    link(&mut a, "x", "y", by(2)).unwrap();
+    link(&mut b, "x", "y", by(2)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).links.len(), 1);
     b.join(&a.state).unwrap();
-    unlink(&mut a, "x", "y", LinkKind::Blocks, by(3)).unwrap();
+    unlink(&mut a, "x", "y", by(3)).unwrap();
     assert_eq!(model(&a).links, Vec::new());
-    link(&mut b, "x", "y", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut b, "x", "y", by(3)).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(model(&a).links.len(), 1, "the concurrent re-add wins");
 }
 
 #[test]
 fn link_ids_are_unambiguous() {
-    let one = link_key("a-b", "c", LinkKind::Blocks).unwrap();
-    let two = link_key("a", "b-c", LinkKind::Blocks).unwrap();
+    let one = link_key("a-b", "c").unwrap();
+    let two = link_key("a", "b-c").unwrap();
     assert_ne!(one, two);
 }
 
@@ -211,15 +208,15 @@ fn link_ids_are_unambiguous() {
 fn set_elements_merge_and_a_concurrent_add_beats_a_removal() {
     let (mut a, mut b) = pair(&["x"]);
     let key = item_key("x").unwrap();
-    set_element(&mut a, &key, SetField::Area, "ui", true, by(2)).unwrap();
-    set_element(&mut b, &key, SetField::Area, "core", true, by(2)).unwrap();
+    put_element(&mut a, &key, set::REPOSITORY, "ui", true, by(2)).unwrap();
+    put_element(&mut b, &key, set::REPOSITORY, "core", true, by(2)).unwrap();
     a.join(&b.state).unwrap();
     b.join(&a.state).unwrap();
-    assert_eq!(model(&a).items["x"].areas, BTreeSet::from(["core".into(), "ui".into()]));
-    set_element(&mut a, &key, SetField::Area, "ui", false, by(3)).unwrap();
-    set_element(&mut b, &key, SetField::Area, "ui", true, by(3)).unwrap();
+    assert_eq!(model(&a).items["x"].repositories, BTreeSet::from(["core".into(), "ui".into()]));
+    put_element(&mut a, &key, set::REPOSITORY, "ui", false, by(3)).unwrap();
+    put_element(&mut b, &key, set::REPOSITORY, "ui", true, by(3)).unwrap();
     a.join(&b.state).unwrap();
-    assert!(model(&a).items["x"].areas.contains("ui"));
+    assert!(model(&a).items["x"].repositories.contains("ui"));
 }
 
 #[test]
@@ -229,7 +226,7 @@ fn names_follow_the_id_rule() {
     let key = item_key("x").unwrap();
     for bad in ["a/b", "Engine", "", ".hidden"] {
         assert_eq!(
-            set_element(&mut r, &key, SetField::Resource, bad, true, by(2)),
+            put_element(&mut r, &key, set::REPOSITORY, bad, true, by(2)),
             Err(WriteError::InvalidName(bad.to_owned()))
         );
     }
@@ -269,21 +266,20 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
         model(r).heads_index().of("t").into_iter().map(str::to_owned).collect::<Vec<_>>()
     };
     assert_eq!(heads(&r), ["a", "b", "c", "d"], "membership alone orders nothing");
-    link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
-    link(&mut r, "a", "d", LinkKind::Relates, by(3)).unwrap();
+    link(&mut r, "b", "a", by(3)).unwrap();
     // Through an item outside the thread, a link orders too.
-    link(&mut r, "c", "x", LinkKind::Blocks, by(3)).unwrap();
-    link(&mut r, "x", "a", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut r, "c", "x", by(3)).unwrap();
+    link(&mut r, "x", "a", by(3)).unwrap();
     // A parent's links order what is under it.
     set_parent(&mut r, "d", Some("p"), by(3)).unwrap();
-    link(&mut r, "p", "a", LinkKind::Blocks, by(3)).unwrap();
+    link(&mut r, "p", "a", by(3)).unwrap();
     assert_eq!(heads(&r), ["a"]);
     set_state(&mut r, "a", ItemState::Done, by(4)).unwrap();
     assert_eq!(heads(&r), ["b", "c", "d"], "a done member orders nothing");
     put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(5)).unwrap();
     // A parent in the thread is never a head, and following it follows what is under it.
     put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
-    link(&mut r, "b", "p", LinkKind::Blocks, by(5)).unwrap();
+    link(&mut r, "b", "p", by(5)).unwrap();
     assert_eq!(heads(&r), ["d"]);
 }
 
@@ -302,7 +298,7 @@ fn heads_by_definition<'a>(m: &'a Model, thread: &str) -> Vec<&'a str> {
         let mut seen: BTreeSet<&str> = lift(leaf).collect();
         let mut frontier: Vec<&str> = seen.iter().copied().collect();
         while let Some(node) = frontier.pop() {
-            for link in m.links.iter().filter(|link| link.kind.orders() && link.from == node) {
+            for link in m.links.iter().filter(|link| link.from == node) {
                 if others.contains(link.to.as_str()) {
                     return true;
                 }
@@ -341,7 +337,7 @@ fn heads_match_their_definition(tc: hegel::TestCase) {
     for _ in 0..below(9) {
         let (from, to) = (below(n), below(n));
         // A link that would close a cycle is refused, as it is for anyone.
-        let _ = link(&mut r, &ids[from], &ids[to], LinkKind::Blocks, by(4));
+        let _ = link(&mut r, &ids[from], &ids[to], by(4));
     }
     let m = model(&r);
     for thread in ["t", "u"] {
@@ -368,7 +364,7 @@ fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
     let before = a.state.clone();
     set_state(&mut a, "x", ItemState::Done, by(30)).unwrap();
     assert_eq!(a.state, before);
-    set_state(&mut a, "x", ItemState::InProgress, by(40)).unwrap();
+    set_state(&mut a, "x", ItemState::Backlog, by(40)).unwrap();
     assert_eq!(model(&a).items["x"].done_at, None);
 }
 
@@ -395,26 +391,11 @@ fn fields_with_invariants_need_their_checked_writes() {
             Err(WriteError::Checked { .. })
         ));
     }
-    let link = link_key("x", "y", LinkKind::Blocks).unwrap();
+    let link = link_key("x", "y").unwrap();
     assert!(matches!(
         set(&mut r, &link, link::FROM, Some(&"x"), by(2)),
         Err(WriteError::Checked { .. })
     ));
-    let thread = Key::new(kind::THREAD, "t").unwrap();
-    for key in [&x, &thread] {
-        assert!(matches!(
-            set_element(&mut r, key, SetField::Repository, "code", true, by(2)),
-            Err(WriteError::Checked { .. })
-        ));
-    }
-    // Only the set fields can be formed, so no element reaches another field.
-    set_element(&mut r, &x, SetField::Area, "state", true, by(2)).unwrap();
-    set_element(&mut r, &x, SetField::Resource, "approved", true, by(2)).unwrap();
-    let read = Model::read(&r.state).unwrap();
-    assert_eq!(read.items["x"].state, Value::One(ItemState::Backlog));
-    assert!(
-        read.items["x"].areas.contains("state") && read.items["x"].resources.contains("approved")
-    );
     assert!(matches!(
         set(&mut r, &x, field::THREAD, Some(&"t"), by(2)),
         Err(WriteError::Checked { .. })
@@ -447,8 +428,17 @@ fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debu
 #[test]
 fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
     listed_in_all();
-    let states = [ItemState::Backlog, ItemState::Parked, ItemState::InProgress, ItemState::Done];
-    assert_eq!(names(&states), ["backlog", "parked", "in-progress", "done"]);
+    let states = [ItemState::Backlog, ItemState::Parked, ItemState::Done];
+    assert_eq!(names(&states), ["backlog", "parked", "done"]);
+    let progress = [
+        ProgressState::Backlog,
+        ProgressState::Parked,
+        ProgressState::InProgress,
+        ProgressState::Done,
+    ];
+    let progress: Vec<Json> =
+        progress.iter().map(|state| serde_json::to_value(state).unwrap()).collect();
+    assert_eq!(progress, [json!("backlog"), json!("parked"), json!("in-progress"), json!("done")]);
     assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
 }
 
@@ -465,34 +455,34 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_or_done_by_hand() {
     let progress = |r: &Replica, id: &str| model(r).progress(id).unwrap();
     let reads = |state, done, total| Progress { state, done, total };
     // Leaves count at every depth, archived ones aside, and a leaf has no progress.
-    assert_eq!(progress(&r, "top"), reads(ItemState::Backlog, 0, 3));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Backlog, 0, 3));
     assert_eq!(model(&r).progress("a"), None);
-    set_state(&mut r, "a", ItemState::InProgress, by(3)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::InProgress, 0, 3));
-    for leaf in ["a", "b", "c"] {
+    set_state(&mut r, "a", ItemState::Done, by(3)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 1, 3));
+    for leaf in ["b", "c"] {
         set_state(&mut r, leaf, ItemState::Done, by(4)).unwrap();
     }
-    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 3, 3));
-    assert_eq!(progress(&r, "mid"), reads(ItemState::Done, 2, 2));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 3, 3));
+    assert_eq!(progress(&r, "mid"), reads(ProgressState::Done, 2, 2));
     assert!(model(&r).reads_done("top") && !model(&r).items["top"].is_done());
     // Reopening a leaf brings its parents back; a state reopening left on a parent counts for nothing.
-    set_state(&mut r, "b", ItemState::InProgress, by(5)).unwrap();
-    set_state(&mut r, "mid", ItemState::InProgress, by(5)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::InProgress, 2, 3));
+    set_state(&mut r, "b", ItemState::Backlog, by(5)).unwrap();
+    set_state(&mut r, "mid", ItemState::Backlog, by(5)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 2, 3));
     // Parked or done by hand, a parent's own state holds.
     set_state(&mut r, "top", ItemState::Parked, by(6)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::Parked, 2, 3));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Parked, 2, 3));
     set_state(&mut r, "top", ItemState::Done, by(7)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 2, 3));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 2, 3));
     // A part closed by hand reads closed from above, whatever is open under it.
     set_state(&mut r, "top", ItemState::Backlog, by(7)).unwrap();
     set_state(&mut r, "mid", ItemState::Done, by(7)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 3, 3));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 3, 3));
     // A parent whose leaves are all archived is done.
     put(&mut r, &item_key("mid").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
     put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
     set_state(&mut r, "top", ItemState::Backlog, by(9)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ItemState::Done, 0, 0));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 0, 0));
 }
 
 #[test]
@@ -510,7 +500,7 @@ fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its
     assert!(model(&a).items["y"].state.is_conflict());
     assert_eq!(
         model(&a).progress("p").map(|p| (p.state, p.done)),
-        Some((ItemState::InProgress, 1))
+        Some((ProgressState::InProgress, 1))
     );
     // A parent reads as done once its leaves are.
     assert!(!model(&a).reads_done("p"));

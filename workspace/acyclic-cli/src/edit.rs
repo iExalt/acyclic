@@ -2,18 +2,21 @@
 //! unknown one, `add` creates one, and adding it again with what it already holds changes nothing while adding it with
 //! other values is refused. Each runs inside a batch, so a refusal anywhere writes nothing at all.
 //!
-//! Membership and repositories of items and threads are scope edits, as every other write to them is.
+//! Membership and repositories of items and threads are scope edits, as every other write to them is. What an item
+//! waits for is a link entity, written by the model's checked link and unlink.
 
 use acyclic_core::ids;
-use acyclic_core::model::{self, By, ItemState, Model, SetField, Size};
+use acyclic_core::model::{self, By, ItemState, Model, Size};
 use acyclic_core::place::{self, Inherited};
-use acyclic_core::schema::{item as field, kind, repository as repo_field, thread as thread_field};
+use acyclic_core::schema::{
+    item as field, kind, link, repository as repo_field, thread as thread_field,
+};
 use acyclic_core::scope::{self, ScopeEdit};
 use acyclic_core::state::{Key, Replica, State};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use crate::commands::{element_if, existing, holds_only, set_if};
+use crate::commands::{existing, holds_only, set_if};
 use crate::error::{CliError, exit};
 
 /// A single-valued field's change: `--field` sets it, `--no-field` clears it, and neither leaves it.
@@ -61,11 +64,9 @@ pub(crate) struct ItemFields {
     pub thread: Change<String>,
     pub state: Option<ItemState>,
     pub notes: Change<String>,
-    pub gate: Change<String>,
     pub size: Change<Size>,
-    pub areas: Delta,
-    pub resources: Delta,
     pub repositories: Delta,
+    pub waits_for: Delta,
 }
 
 /// What a thread's `add` or `edit` sets.
@@ -251,15 +252,7 @@ pub(crate) fn edit_item(
     check_targets(replica.state(), fields.thread.value(), &fields.repositories.add)?;
     set_if(replica, &key, field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, field::NOTES, &fields.notes, by)?;
-    write_change(replica, &key, field::GATE, &fields.gate, by)?;
     write_change(replica, &key, field::SIZE, &fields.size, by)?;
-    for (set, delta) in [(SetField::Area, &fields.areas), (SetField::Resource, &fields.resources)] {
-        for (names, present) in [(&delta.add, true), (&delta.remove, false)] {
-            for name in names {
-                element_if(replica, &key, set, name, present, by)?;
-            }
-        }
-    }
     let parent = match &fields.parent {
         Change::Keep => None,
         Change::Set(parent) => Some(Some(parent.as_str())),
@@ -274,6 +267,15 @@ pub(crate) fn edit_item(
     }
     if let Some(state) = fields.state {
         model::set_state(replica, id, state, by)?;
+    }
+    // A removal names a link the item holds by its exact ids, so it lets go of one whose other end is gone.
+    for to in &fields.waits_for.remove {
+        model::unlink(replica, id, to, by)?;
+    }
+    for to in &fields.waits_for.add {
+        if !waits_for(replica.state(), id, to)? {
+            model::link(replica, id, to, by)?;
+        }
     }
     let mut written = Written::default();
     for change in item_scope(id, fields) {
@@ -376,14 +378,16 @@ fn repeat_item(state: &State, id: &str, fields: &ItemFields) -> Result<Written, 
     check("--title", fields.title.as_ref() == item.title.one());
     check("--parent", fields.parent.value().is_none_or(|p| item.parent.one() == Some(p)));
     check("--notes", fields.notes.value().is_none_or(|n| item.notes.one() == Some(n)));
-    check("--gate", fields.gate.value().is_none_or(|g| item.gate.one() == Some(g)));
     check("--size", fields.size.value().is_none_or(|s| item.size.one() == Some(s)));
     check(
         "--state",
         fields.state.is_none_or(|s| item.state.one().copied().unwrap_or(ItemState::Backlog) == s),
     );
-    check("--area", fields.areas.add.iter().all(|a| item.areas.contains(a)));
-    check("--resource", fields.resources.add.iter().all(|r| item.resources.contains(r)));
+    let mut waits = true;
+    for to in &fields.waits_for.add {
+        waits &= waits_for(state, id, to)?;
+    }
+    check("--waits-for", waits);
     let changes = item_scope(id, fields);
     for (flag, wanted) in [("--thread", true), ("--repository", false)] {
         let satisfied = changes
@@ -397,6 +401,11 @@ fn repeat_item(state: &State, id: &str, fields: &ItemFields) -> Result<Written, 
         return Err(already_exists("item", "item edit", id, &differs));
     }
     Ok(Written::default())
+}
+
+/// Whether `from` waits for `to`: the link between them is present.
+fn waits_for(state: &State, from: &str, to: &str) -> Result<bool, CliError> {
+    Ok(state.field(&model::link_key(from, to)?, link::PRESENT).is_some())
 }
 
 fn thread_key(id: &str) -> Result<Key, CliError> {

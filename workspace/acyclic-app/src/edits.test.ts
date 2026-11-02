@@ -40,9 +40,8 @@ describe("commands", () => {
       ["add at the top level", addCommand({ item: "d", title: "D", parent: null, thread: null })],
       ["move to the top level", moveCommand("c", null)],
       ["move under a parent", moveCommand("d", "a")],
-      ["c waits for d", linkCommand("c", "waits-for", "d")],
-      ["c relates to b", linkCommand("c", "relates-to", "b")],
-      ["c no longer waits for d", unlinkCommand("c", "waits-for", "d")],
+      ["c waits for d", linkCommand("c", "d")],
+      ["c no longer waits for d", unlinkCommand("c", "d")],
     ];
     const named = new Map(examples.map((one) => [one.name, one.command]));
     expect(built).toEqual(built.map(([name]) => [name, named.get(name as string)]));
@@ -91,9 +90,9 @@ describe("pick", () => {
   });
 
   it("links the selected item to the one tapped, which comes first, and refuses links the Map couldn't draw", () => {
-    const link: Mode = { kind: "link", item: "sow", link: "waits-for" };
+    const link: Mode = { kind: "link", item: "sow" };
     expect(pick(model, link, { kind: "item", id: "dig" }).command).toEqual({
-      link: { add: { from: "sow", kind: "waits-for", to: "dig" } },
+      item: { edit: { item: "sow", "waits-for": ["dig"] } },
     });
     for (const id of ["sow", "plant", "garden"]) expect(pick(model, link, { kind: "item", id }).command).toBeNull();
     expect(linkRefusal(model, "garden", "dig")).toMatch(/holds/);
@@ -101,7 +100,7 @@ describe("pick", () => {
   });
 
   it("returns to idle on cancel from every mode", () => {
-    const modes: Mode[] = [{ kind: "idle" }, move, { kind: "link", item: "sow", link: "relates-to" }];
+    const modes: Mode[] = [{ kind: "idle" }, move, { kind: "link", item: "sow" }];
     for (const mode of modes)
       expect(pick(model, mode, { kind: "cancel" })).toEqual({
         mode: { kind: "idle" },

@@ -162,9 +162,10 @@ class Plan:
 def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
+    # A seed whose threads come in many waves with only small cycles among them, so arrows skip waves.
     plan.write_text(
         subprocess.run(
-            [FIXTURES, "--items", str(items), "--seed", "7"],
+            [FIXTURES, "--items", str(items), "--seed", "3"],
             capture_output=True,
             text=True,
             check=True,
@@ -633,7 +634,16 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         # entries scroll.
         size = page.viewport_size
         page.set_viewport_size({"width": size["width"], "height": 480})
-        top = needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
+        # On to the next item's row when none shows there, as when a long thread cycle's threads fill the view.
+        top = needs.evaluate(
+            """n => { n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight);
+                const box = n.getBoundingClientRect();
+                const rows = [...n.querySelectorAll('[data-select]')].map(r => r.getBoundingClientRect());
+                const shown = rows.some(b => b.height > 0 && b.top >= box.top && b.bottom <= box.bottom);
+                const below = rows.find(b => b.height > 0 && b.bottom > box.bottom);
+                if (!shown && below) n.scrollTop += below.bottom - box.bottom;
+                return n.scrollTop; }"""
+        )
         # A row already in view, so the click doesn't scroll the list first.
         picked = needs.evaluate(
             """n => { const box = n.getBoundingClientRect();
@@ -966,7 +976,7 @@ def stages_drawn(page, plan, name, failures):
     # A parent drawn as a tile, everything under it archived, has no stage of its own: its state says what it can.
     told = {
         id: plan.items[id].get("stage")
-        or (state if (state := plan.items[id]["state"]) in ("done", "parked", "in-progress") else None)
+        or (state if (state := plan.items[id]["state"]) in ("done", "parked") else None)
         for id in drawn_stages
     }
     if not any(told.values()):
@@ -1719,12 +1729,12 @@ def edit_journey(page, view, env, plan, box, name, failures):
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
-    run(env, "link", "add", added, "waits-for", first)
+    run(env, "item", "edit", added, "--waits-for", first)
     # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
     sent = []
     listen = lambda request: (
         request.url.endswith("/api/command")
-        and (request.post_data or "").startswith('{"link"')
+        and '"waits-for"' in (request.post_data or "")
         and sent.append(request.post_data)
     )
     page.on("request", listen)
@@ -2025,8 +2035,8 @@ def form_journey(page, view, env, remote, id, name, failures):
             failures.append(
                 f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach"
             )
-    # Meanwhile, an agent sets the gate, and coming back to the app reads it: saving sends only what the user changed.
-    run(env, "item", "edit", id, "--gate", "Set elsewhere")
+    # Meanwhile, an agent parks the item, and coming back to the app reads it: saving sends only what the user changed.
+    run(env, "item", "edit", id, "--state", "parked")
     reads = int(page.locator("main.stage").get_attribute("data-reads"))
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     page.wait_for_function(
@@ -2043,10 +2053,10 @@ def form_journey(page, view, env, remote, id, name, failures):
         env,
         id,
         lambda row: (
-            (row["title"], row["size"], row["notes"], row["gate"])
-            == ("Edited in the app", "m", "Plain notes", "Set elsewhere")
+            (row["title"], row["size"], row["notes"], row["state"])
+            == ("Edited in the app", "m", "Plain notes", "parked")
         ),
-        f"{id}'s new fields, and the gate set while the editor was open",
+        f"{id}'s new fields, and the state set while the editor was open",
         failures,
         name,
     )

@@ -1,6 +1,5 @@
 use super::*;
-use crate::model::SetField;
-use crate::model::{By, ItemState, add_item, item_key, put, set, set_element, set_state};
+use crate::model::{By, add_item, item_key, put, set};
 use crate::schema::{item as field, thread as thread_field};
 use crate::state::ReplicaId;
 
@@ -21,11 +20,6 @@ fn thread(r: &mut Replica, id: &str, members: &[&str]) {
         add_item(r, member, member, by("actor/user", 1)).unwrap();
         put(r, &item_key(member).unwrap(), field::THREAD, Some(&id), by("actor/user", 1)).unwrap();
     }
-}
-
-fn holds(r: &mut Replica, id: &str, resource: &str) {
-    set_element(r, &item_key(id).unwrap(), SetField::Resource, resource, true, by("actor/user", 1))
-        .unwrap();
 }
 
 fn holder(r: &Replica, thread: &str, now: Millis) -> Option<String> {
@@ -82,38 +76,16 @@ fn claims_older_versions_kept_on_items_are_never_read() {
 }
 
 #[test]
-fn a_named_resource_is_held_by_one_thread_at_a_time_through_its_open_members() {
+fn a_resource_older_versions_stored_on_items_holds_nothing() {
     let mut r = replica("a");
-    thread(&mut r, "one", &["x", "x2"]);
+    thread(&mut r, "one", &["x"]);
     thread(&mut r, "two", &["y"]);
-    thread(&mut r, "three", &["z"]);
-    // Members of one thread share a resource freely.
-    for id in ["x", "x2", "y"] {
-        holds(&mut r, id, "gpu");
+    for id in ["x", "y"] {
+        let key = item_key(id).unwrap();
+        r.write(&key, "resource/gpu", "actor/user", 1, Some(serde_json::json!(true))).unwrap();
     }
     claim(&mut r, "one", "session/one", 10, LEASE, LEASE).unwrap();
-    assert_eq!(
-        claim(&mut r, "two", "session/two", 20, LEASE, LEASE),
-        Err(Error::ResourceHeld {
-            resource: "gpu".into(),
-            thread: "one".into(),
-            holder: "session/one".into()
-        })
-    );
-    // The same holder may take both, and anyone may once the lease ends.
-    claim(&mut r, "two", "session/one", 20, LEASE, LEASE).unwrap();
-    claim(&mut r, "three", "session/two", 20, LEASE, LEASE).unwrap();
-    let mut later = replica("b");
-    later.join(&r.state).unwrap();
-    claim(&mut later, "two", "session/two", 2_000, LEASE, LEASE).unwrap();
-    // Finished work holds nothing: once one's members are done, its claim holds no resource.
-    let mut done = replica("c");
-    done.join(&r.state).unwrap();
-    for id in ["x", "x2"] {
-        set_state(&mut done, id, ItemState::Done, by("session/one", 30)).unwrap();
-    }
-    release(&mut done, &thread_key("two").unwrap(), "session/one");
-    claim(&mut done, "two", "session/two", 40, LEASE, LEASE).unwrap();
+    claim(&mut r, "two", "session/two", 20, LEASE, LEASE).unwrap();
 }
 
 #[test]
@@ -166,33 +138,6 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
     // A renewed claim is still its holder's to release, though the replica wrote it.
     assert!(release(&mut a, &busy, "session/busy"));
     assert!(winner(&a.state, &busy, 1_500).unwrap().is_none());
-}
-
-#[test]
-fn claims_made_apart_on_one_resource_are_a_clash() {
-    let mut a = replica("a");
-    thread(&mut a, "one", &["x"]);
-    thread(&mut a, "two", &["y"]);
-    for id in ["x", "y"] {
-        holds(&mut a, id, "gpu");
-    }
-    let mut b = replica("b");
-    b.join(&a.state).unwrap();
-    claim(&mut a, "one", "session/one", 10, LEASE, LEASE).unwrap();
-    claim(&mut b, "two", "session/two", 10, LEASE, LEASE).unwrap();
-    a.join(&b.state).unwrap();
-    let model = Model::read(&a.state).unwrap();
-    assert_eq!(
-        clashes(&a.state, &model, 20).unwrap(),
-        vec![Clash {
-            resource: "gpu".into(),
-            holders: vec![
-                ("one".into(), "session/one".into()),
-                ("two".into(), "session/two".into())
-            ]
-        }]
-    );
-    assert!(clashes(&a.state, &model, 2_000).unwrap().is_empty(), "gone when the leases end");
 }
 
 #[test]

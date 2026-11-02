@@ -1,5 +1,4 @@
-// The selected item's fields as a form. Save sends only what changed; sets of areas, resources and repositories stay
-// with the CLI.
+// The selected item's fields as a form. Save sends only what changed; waits-for links are set from the Inspector.
 
 import { type FormEvent, useRef, useState } from "react";
 import type { Command, Item } from "./api";
@@ -92,13 +91,6 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
             </option>
           ))}
         </select>
-      </label>
-      <label>
-        Gate
-        <input name="gate" value={draft.gate} onChange={set("gate")} aria-describedby="gate-hint" />
-        <span className="hint" id="gate-hint">
-          What must pass for it to be done
-        </span>
       </label>
       <label>
         Size

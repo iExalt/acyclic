@@ -81,9 +81,21 @@ pub enum ItemState {
     Backlog,
     /// Set aside on purpose.
     Parked,
-    /// Being worked on.
-    InProgress,
     /// Finished.
+    Done,
+}
+
+/// What a parent reads as, from the leaves under it: an item's states, and in progress once work under it has started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressState {
+    /// Nothing under it has started.
+    Backlog,
+    /// Set aside on purpose.
+    Parked,
+    /// Work under it has started.
+    InProgress,
+    /// Every leaf under it is finished.
     Done,
 }
 
@@ -123,38 +135,13 @@ pub struct Evidence {
     pub note: Option<String>,
 }
 
-/// A link's kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// A link's stored kind. Only one is left: `from` waits for `to`. A link stored with any other kind, such as the
+/// `relates` or `after` of older versions, can't be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum LinkKind {
+enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     Blocks,
-    /// Context only.
-    Relates,
-}
-
-impl LinkKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Blocks => "blocks",
-            Self::Relates => "relates",
-        }
-    }
-
-    /// The word a command line and its output use for the kind: `waits-for` or `relates-to`.
-    #[must_use]
-    pub fn word(self) -> &'static str {
-        match self {
-            Self::Blocks => "waits-for",
-            Self::Relates => "relates-to",
-        }
-    }
-
-    /// Whether the kind orders work, so it counts in cycle checks.
-    #[must_use]
-    pub fn orders(self) -> bool {
-        self == Self::Blocks
-    }
 }
 
 /// What reopening recorded on an item.
@@ -171,11 +158,9 @@ pub struct Reopened {
 pub enum Role {
     /// No children.
     Item,
-    /// Children and a gate.
-    Goal,
-    /// Children and no gate.
+    /// Children, under a parent.
     Group,
-    /// Top level with children, gate or not.
+    /// Top level with children.
     Project,
 }
 
@@ -188,8 +173,6 @@ pub struct Item {
     pub title: Value<String>,
     /// Design notes.
     pub notes: Value<String>,
-    /// The exit check.
-    pub gate: Value<String>,
     /// The item's state; unset reads as backlog.
     pub state: Value<ItemState>,
     /// When the item was marked done: the earliest of its current done values.
@@ -204,14 +187,10 @@ pub struct Item {
     pub evidence: Value<Evidence>,
     /// The thread the item belongs to.
     pub thread: Value<String>,
-    /// Area tags.
-    pub areas: BTreeSet<String>,
     /// Ids of the repositories the item touches.
     pub repositories: BTreeSet<String>,
     /// Set while a reopened item is open again.
     pub reopened: Value<Reopened>,
-    /// Named resources the item holds while worked on.
-    pub resources: BTreeSet<String>,
 }
 
 impl Item {
@@ -234,8 +213,8 @@ impl Item {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
     /// The state it reads as: its own when parked or done by hand, else done when every leaf under it is finished, in
-    /// progress once any leaf is started or done, and backlog until then.
-    pub state: ItemState,
+    /// progress once any leaf is done, and backlog until then; [`crate::ready`] also counts claimed work as started.
+    pub state: ProgressState,
     /// Its leaves that are done, archived ones aside.
     pub done: usize,
     /// Its leaves, archived ones aside: none when every one is archived, and it then reads as done.
@@ -247,18 +226,15 @@ pub struct Progress {
 struct Tally {
     done: usize,
     total: usize,
-    started: bool,
 }
 
-/// A link as read.
+/// A link as read: `from` waits for `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
     /// The dependent item's id.
     pub from: String,
     /// The id of the item it depends on.
     pub to: String,
-    /// The link's kind.
-    pub kind: LinkKind,
 }
 
 /// A thread as read.
@@ -358,20 +334,17 @@ impl Model {
                 self.items.insert(key.id.clone(), item);
             },
             kind::LINK => {
-                // A soft dependency older versions stored is skipped: such links no longer order or relate anything.
-                if state.field(key, link::PRESENT).is_none()
-                    || value::<String>(state, key, link::KIND)? == Value::One("after".to_owned())
-                {
+                if state.field(key, link::PRESENT).is_none() {
                     return Ok(());
                 }
-                let (Value::One(from), Value::One(to), Value::One(kind)) = (
+                let (Value::One(from), Value::One(to), Value::One(LinkKind::Blocks)) = (
                     value::<String>(state, key, link::FROM)?,
                     value::<String>(state, key, link::TO)?,
                     value::<LinkKind>(state, key, link::KIND)?,
                 ) else {
                     return Err(Error::Format(format!("link {} lacks its ends or kind", key.id)));
                 };
-                self.links.push(Link { from, to, kind });
+                self.links.push(Link { from, to });
             },
             kind::THREAD => {
                 let thread = Thread {
@@ -437,8 +410,7 @@ impl Model {
         found
     }
 
-    /// An item's role. A top-level item with children is a project even with a gate; a conflicted parent isn't top
-    /// level, and a conflicted gate counts as a gate.
+    /// An item's role. A conflicted parent isn't top level.
     #[must_use]
     pub fn role(&self, id: &str) -> Role {
         let Some(item) = self.items.get(id) else { return Role::Item };
@@ -446,10 +418,8 @@ impl Model {
             Role::Item
         } else if item.parent == Value::None {
             Role::Project
-        } else if item.gate == Value::None {
-            Role::Group
         } else {
-            Role::Goal
+            Role::Group
         }
     }
 
@@ -465,13 +435,13 @@ impl Model {
         let mut tally = Tally::default();
         self.tally(id, &mut BTreeSet::from([id]), &mut tally);
         let state = if item.state == Value::One(ItemState::Parked) {
-            ItemState::Parked
+            ProgressState::Parked
         } else if item.is_done() || tally.done == tally.total {
-            ItemState::Done
-        } else if tally.started || tally.done > 0 {
-            ItemState::InProgress
+            ProgressState::Done
+        } else if tally.done > 0 {
+            ProgressState::InProgress
         } else {
-            ItemState::Backlog
+            ProgressState::Backlog
         };
         Some(Progress { state, done: tally.done, total: tally.total })
     }
@@ -486,7 +456,6 @@ impl Model {
             if self.children(child).is_empty() {
                 tally.total += 1;
                 tally.done += usize::from(item.is_done());
-                tally.started |= item.state == Value::One(ItemState::InProgress);
             } else if item.is_done() {
                 let mut closed = Tally::default();
                 self.tally(child, seen, &mut closed);
@@ -502,7 +471,7 @@ impl Model {
     #[must_use]
     pub fn reads_done(&self, id: &str) -> bool {
         match self.progress(id) {
-            Some(progress) => progress.state == ItemState::Done,
+            Some(progress) => progress.state == ProgressState::Done,
             None => self.items.get(id).is_some_and(Item::is_done),
         }
     }
@@ -546,12 +515,8 @@ impl Model {
     /// The cycles among blocks links, each sorted.
     #[must_use]
     pub fn link_cycles(&self) -> Vec<Vec<String>> {
-        let edges: Vec<(String, String)> = self
-            .links
-            .iter()
-            .filter(|link| link.kind.orders())
-            .map(|link| (link.from.clone(), link.to.clone()))
-            .collect();
+        let edges: Vec<(String, String)> =
+            self.links.iter().map(|link| (link.from.clone(), link.to.clone())).collect();
         graph::cycles(&edges)
     }
 
@@ -559,7 +524,7 @@ impl Model {
     #[must_use]
     pub fn ordering_path(&self, from: &str, to: &str) -> Option<Vec<String>> {
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for link in self.links.iter().filter(|link| link.kind.orders()) {
+        for link in &self.links {
             next.entry(link.from.as_str()).or_default().push(link.to.as_str());
         }
         let mut came_from: BTreeMap<&str, &str> = BTreeMap::from([(from, from)]);
@@ -599,7 +564,7 @@ impl Model {
         }
         let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         let mut prev: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for link in self.links.iter().filter(|link| link.kind.orders()) {
+        for link in &self.links {
             next.entry(link.from.as_str()).or_default().push(link.to.as_str());
             for reached in std::iter::once(link.to.as_str()).chain(self.ancestors(&link.to)) {
                 prev.entry(reached).or_default().push(link.from.as_str());
@@ -708,9 +673,9 @@ pub fn item_key(id: &str) -> Result<Key, WriteError> {
 /// # Errors
 ///
 /// Fails on an invalid or overlong item id.
-pub fn link_key(from: &str, to: &str, kind: LinkKind) -> Result<Key, WriteError> {
+pub fn link_key(from: &str, to: &str) -> Result<Key, WriteError> {
     let (from, to) = (name(from)?, name(to)?);
-    Ok(Key::new(kind::LINK, &format!("{}-{}-{from}-{to}", kind.as_str(), from.len()))?)
+    Ok(Key::new(kind::LINK, &format!("{}-{}-{from}-{to}", link::BLOCKS, from.len()))?)
 }
 
 fn to_json<T: Serialize>(value: &T) -> Json {
@@ -763,52 +728,8 @@ pub(crate) fn put<T: Serialize>(
     Ok(())
 }
 
-/// A set field, stored a field per element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetField {
-    /// Area tags.
-    Area,
-    /// Repositories; on items and threads they are scope edits, made through `scope::edit`.
-    Repository,
-    /// Named resources.
-    Resource,
-}
-
-impl SetField {
-    /// The prefix of the set's fields.
-    #[must_use]
-    pub fn prefix(self) -> &'static str {
-        match self {
-            Self::Area => set::AREA,
-            Self::Repository => set::REPOSITORY,
-            Self::Resource => set::RESOURCE,
-        }
-    }
-}
-
-/// Adds an element to a set field, or removes it. Repositories on items and threads are scope edits: use
+/// Adds an element to a set field, or removes it. Repositories on items and threads are scope edits, made through
 /// `scope::edit`.
-///
-/// # Errors
-///
-/// Fails on a repository of an item or thread, an invalid element name, or when the state layer refuses.
-pub fn set_element(
-    replica: &mut Replica,
-    key: &Key,
-    set: SetField,
-    element: &str,
-    present: bool,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    if set == SetField::Repository && [kind::ITEM, kind::THREAD].contains(&key.kind.as_str()) {
-        return Err(WriteError::Checked {
-            field: format!("{}{element}", set.prefix()),
-            write: "scope::edit",
-        });
-    }
-    put_element(replica, key, set.prefix(), element, present, by)
-}
-
 pub(crate) fn put_element(
     replica: &mut Replica,
     key: &Key,
@@ -887,34 +808,25 @@ pub fn set_parent(
     put(replica, &key, field::PARENT, parent.map(str::to_owned).as_ref(), by)
 }
 
-/// Adds a link from `from` to `to`.
+/// Makes `from` wait for `to`.
 ///
 /// # Errors
 ///
-/// Fails when either item doesn't exist, when a blocks link would close a cycle,
-/// or when the state layer refuses.
-pub fn link(
-    replica: &mut Replica,
-    from: &str,
-    to: &str,
-    kind: LinkKind,
-    by: By<'_>,
-) -> Result<Key, WriteError> {
+/// Fails when either item doesn't exist, when the link would close a cycle, or when the state layer refuses.
+pub fn link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<Key, WriteError> {
     existing(&replica.state, from)?;
     existing(&replica.state, to)?;
     if from == to {
         return Err(WriteError::SelfLink(from.to_owned()));
     }
-    let key = link_key(from, to, kind)?;
-    if kind.orders()
-        && let Some(path) = Model::read(&replica.state)?.ordering_path(to, from)
-    {
+    let key = link_key(from, to)?;
+    if let Some(path) = Model::read(&replica.state)?.ordering_path(to, from) {
         return Err(WriteError::LinkCycle(path));
     }
     if replica.state.field(&key, link::FROM).is_none() {
         put(replica, &key, link::FROM, Some(&from), by)?;
         put(replica, &key, link::TO, Some(&to), by)?;
-        put(replica, &key, link::KIND, Some(&kind), by)?;
+        put(replica, &key, link::KIND, Some(&link::BLOCKS), by)?;
     }
     put(replica, &key, link::PRESENT, Some(&true), by)?;
     Ok(key)
@@ -925,14 +837,8 @@ pub fn link(
 /// # Errors
 ///
 /// Fails on an invalid id or when the state layer refuses.
-pub fn unlink(
-    replica: &mut Replica,
-    from: &str,
-    to: &str,
-    kind: LinkKind,
-    by: By<'_>,
-) -> Result<bool, WriteError> {
-    let key = link_key(from, to, kind)?;
+pub fn unlink(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<bool, WriteError> {
+    let key = link_key(from, to)?;
     if replica.state.field(&key, link::PRESENT).is_none() {
         return Ok(false);
     }
@@ -974,7 +880,6 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         id: key.id.clone(),
         title: value(state, key, field::TITLE)?,
         notes: value(state, key, field::NOTES)?,
-        gate: value(state, key, field::GATE)?,
         state: value(state, key, field::STATE)?,
         done_at,
         parent: value(state, key, field::PARENT)?,
@@ -982,9 +887,7 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         archived: value(state, key, field::ARCHIVED)?,
         evidence: value(state, key, field::EVIDENCE)?,
         thread: value(state, key, field::THREAD)?,
-        areas: elements(state, key, set::AREA),
         repositories: elements(state, key, set::REPOSITORY),
-        resources: elements(state, key, set::RESOURCE),
         reopened: value(state, key, field::REOPENED)?,
     })
 }

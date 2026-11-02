@@ -211,20 +211,20 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     }
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
-            let sample = tracker.time(&format!("link add {item} waits-for bench-target"), false);
-            tracker.run(&format!("link remove {item} waits-for bench-target"), false);
+            let sample = tracker.time(&format!("item edit {item} --waits-for bench-target"), false);
+            tracker.run(&format!("item edit {item} --no-waits-for bench-target"), false);
             sample
         })
         .collect();
-    record(&mut row, "link", &links);
+    record(&mut row, "waits-for", &links);
     // A new top-level item in a thread of its own: an add under it joins that thread.
     let mut tops = Vec::new();
     let plain: Vec<Sample> = (0..runs)
         .map(|n| {
-            tops.push(tracker.time(&format!("item add goal-{n} --title Goal"), false));
+            tops.push(tracker.time(&format!("item add top-{n} --title Top"), false));
             tracker.run(&format!("thread add bench-{n} --title Bench"), false);
-            tracker.run(&format!("item edit goal-{n} --thread bench-{n}"), false);
-            let line = format!("item add goal-{n}-leaf --title Leaf --parent goal-{n}");
+            tracker.run(&format!("item edit top-{n} --thread bench-{n}"), false);
+            let line = format!("item add top-{n}-leaf --title Leaf --parent top-{n}");
             let (out, plain) = tracker.run(&line, false);
             assert!(
                 out["data"]["placed"].as_array().is_some_and(|placed| !placed.is_empty()),
@@ -398,7 +398,7 @@ fn print_table(rows: &[Row], batches: usize) {
         "edit",
         "claim",
         "claim again",
-        "link",
+        "waits-for",
         "add at top",
         "add",
         "sync, first",

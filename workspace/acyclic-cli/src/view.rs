@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
-use acyclic_core::model::{Heads, Item, ItemState, Link, LinkKind, Model, Value};
+use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{Readiness, ReadyThread};
 use acyclic_core::state::{Key, Millis, State};
@@ -121,10 +121,7 @@ impl View<'_> {
             json!({
                 "role": model.role(id),
                 "notes": item.notes,
-                "gate": item.gate,
                 "size": item.size,
-                "areas": item.areas,
-                "resources": item.resources,
                 "repositories": item.repositories,
                 "children": model.children(id),
                 "links": links(&model.links, id),
@@ -199,13 +196,6 @@ impl View<'_> {
                 Entry::Contest { thread: id, holders } => {
                     json!({"kind": "contest", "thread": thread(id), "holders": holders})
                 },
-                Entry::ResourceClash { resource, holders } => {
-                    let holders: Vec<Json> = holders
-                        .iter()
-                        .map(|(id, holder)| json!({"thread": thread(id), "holder": holder}))
-                        .collect();
-                    json!({"kind": "resource-clash", "resource": resource, "holders": holders})
-                },
                 Entry::ClockAhead { thread: id, holder } => {
                     json!({"kind": "clock-ahead", "thread": thread(id), "holder": holder})
                 },
@@ -218,9 +208,15 @@ impl View<'_> {
                 Entry::DoneEarly { item, open } => {
                     json!({"kind": "done-early", "item": self.item_row(item)?, "open": items(open)?})
                 },
-                Entry::Dangling { kind, id, field, target } => json!({
-                    "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
-                }),
+                Entry::Dangling { kind, id, field, target, fix } => {
+                    let mut shown = json!({
+                        "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
+                    });
+                    if let Some(fix) = fix {
+                        shown["fix"] = json!(fix);
+                    }
+                    shown
+                },
                 Entry::NumberClash { number, threads, fresh, fix } => json!({
                     "kind": "number-clash", "number": number,
                     "threads": threads.iter().map(|id| thread(id)).collect::<Vec<_>>(),
@@ -284,9 +280,7 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
     match (entity, field) {
         ("item" | "thread", "title") | ("repository", "owner" | "name") => edit(field, false),
         ("item", "state") => edit("state", false),
-        ("item", "notes" | "gate" | "size" | "parent" | "thread") | ("thread", "brief") => {
-            edit(field, true)
-        },
+        ("item", "notes" | "size" | "parent" | "thread") | ("thread", "brief") => edit(field, true),
         ("repository", "default-branch") => edit("default-branch", false),
         ("item", "evidence") => Some(format!(
             "acyclic item done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --evidence <TEXT>)"
@@ -299,29 +293,21 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
                 let found = state.field(&key, name)?.iter().next()?.1.value.clone();
                 found.as_str().map(str::to_owned)
             };
-            let (from, to, kind) = (read("from")?, read("to")?, read("kind")?);
-            let word = match kind.as_str() {
-                "blocks" => "waits-for",
-                "relates" => "relates-to",
-                _ => return None,
-            };
-            Some(format!("acyclic link add|remove {from} {word} {to}"))
+            let (from, to) = (read("from")?, read("to")?);
+            Some(format!("acyclic item edit {from} --waits-for|--no-waits-for {to}"))
         },
         _ => None,
     }
 }
 
-/// An item's links to and from other items, by the words the commands use.
+/// What an item waits for and what waits for it.
 fn links(all: &[Link], id: &str) -> Json {
     let mut found: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for kind in ["waits_for", "relates_to", "waited_on_by", "related_from"] {
+    let (out, back) = ("waits_for", "waited_on_by");
+    for kind in [out, back] {
         found.insert(kind, Vec::new());
     }
     for link in all {
-        let (out, back) = match link.kind {
-            LinkKind::Blocks => ("waits_for", "waited_on_by"),
-            LinkKind::Relates => ("relates_to", "related_from"),
-        };
         if link.from == id {
             found.entry(out).or_default().push(&link.to);
         }
@@ -421,8 +407,8 @@ mod tests {
         Key::new(kind, id).unwrap()
     }
 
-    /// Items `goal` > `a` and `b` in thread `t`, `late` an agent's add to it, `c` waiting for `a`
-    /// and relating to `b` through an after link as older versions stored one, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
+    /// Items `goal` > `a` and `b` in thread `t`, `late` an agent's add to it, `c` waiting for `a`, `d` done with
+    /// evidence and archived, and a repository `r` on `a`; `a` is claimed.
     fn tracker() -> Replica {
         let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
         let user = by(USER);
@@ -432,8 +418,7 @@ mod tests {
         for id in ["a", "b"] {
             set_parent(&mut r, id, Some("goal"), user).unwrap();
         }
-        link(&mut r, "c", "a", LinkKind::Blocks, user).unwrap();
-        link(&mut r, "c", "b", LinkKind::Relates, user).unwrap();
+        link(&mut r, "c", "a", user).unwrap();
         let repo = key(kind::REPOSITORY, "r");
         for (field, value) in [
             (repository::OWNER, json!("me")),
@@ -538,7 +523,7 @@ mod tests {
                 json!(["a"])
             );
             let links = &view.item("c", &view.model.items["c"]).unwrap()["links"];
-            assert_eq!(links["relates_to"], json!(["b"]));
+            assert_eq!(links, &json!({"waits_for": ["a"], "waited_on_by": []}));
             assert_eq!(shown["claims"][0]["holder"], "session/pi");
             assert_eq!(
                 (&shown["archived"], &shown["reopened"], &shown["done_at"]),
@@ -604,7 +589,7 @@ mod tests {
         scope::edit(&mut mac, &member("c", Some("u")), user).unwrap();
         add_item(&mut mac, "e", "E", user).unwrap();
         scope::edit(&mut mac, &member("e", Some("t")), user).unwrap();
-        link(&mut mac, "e", "c", LinkKind::Blocks, user).unwrap();
+        link(&mut mac, "e", "c", user).unwrap();
         // Two replicas disagree about an item's parent.
         let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
         set_parent(&mut mac, "b", None, user).unwrap();
@@ -641,13 +626,13 @@ mod tests {
     #[test]
     fn a_conflicted_link_resolves_in_the_command_lines_words() {
         let mut mac = tracker();
-        let link_key = key("link", "relates-1-a-b");
-        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "relates")] {
+        let link_key = key("link", "blocks-1-a-b");
+        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "blocks")] {
             mac.write(&link_key, field, USER, 1, Some(json!(value))).unwrap();
         }
         assert_eq!(
-            resolve(mac.state(), "link", "relates-1-a-b", "present").as_deref(),
-            Some("acyclic link add|remove a relates-to b")
+            resolve(mac.state(), "link", "blocks-1-a-b", "present").as_deref(),
+            Some("acyclic item edit a --waits-for|--no-waits-for b")
         );
     }
 

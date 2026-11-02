@@ -33,14 +33,13 @@ machines recorded and pushes yours.
   sharing a name share claims, and both would work the same thread. Without it, or `--actor`, your writes are
   labelled as the user's, `actor/user`.
 
-## Links
+## Waits for
 
-`acyclic link add plant waits-for beds` means plant can't start until beds is done. Links read left to right:
+`acyclic item edit plant --waits-for beds` means plant waits for beds: it can't start until beds is done.
+`--no-waits-for beds` undoes it, and `acyclic item add` takes `--waits-for` too. An edit that would make items wait
+for each other in a circle is refused.
 
-- `waits-for` holds work back.
-- `relates-to` is context only.
-
-Only `waits-for` orders work: ids, numbering and thread membership never do, so link every dependency you mean.
+Only waits-for orders work: ids, numbering and thread membership never do, so say every dependency you mean.
 
 ## Shaping the plan
 
@@ -50,9 +49,11 @@ Only `waits-for` orders work: ids, numbering and thread membership never do, so 
 - `--no-field` clears a scalar field and takes no value. `--no-field <VALUE>` removes from a set; repeat it for more.
 - Naming `--field` and `--no-field` together is a usage error.
 
-For example, `acyclic item edit beds --thread garden --no-notes --area soil --no-area clay` moves `beds` into the
-`garden` thread, clears its notes, adds the area `soil` and removes the area `clay`. Thread membership is
-`acyclic item edit --thread` (`--no-thread` takes the item out of its thread).
+For example, `acyclic item edit beds --thread garden --no-notes --waits-for soil --no-waits-for clay` moves `beds`
+into the `garden` thread, clears its notes, makes it wait for `soil` and no longer for `clay`. Thread membership is
+`acyclic item edit --thread` (`--no-thread` takes the item out of its thread). `--state` sets `backlog` or `parked`;
+`item done` sets `done`, and `item reopen` puts a done item back in the backlog. What is under way shows in an item's
+`stage`, from its thread's claim, not in its state.
 
 Leave out the id in `acyclic item add` and `acyclic thread add`: the tracker assigns one, such as `item-mac-143`, and
 prints it. A new id of your own starting `item-` or `thread-` is refused; those are the tracker's to give. If an add
@@ -60,13 +61,13 @@ without an id fails `already-exists`, a thread (for `thread add`) or an open ite
 likely from an earlier try; the error's details give its id. Give an id only to add a second record with the same title.
 Never put counters in titles.
 
-`acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence, a
-done state or someone else's live claim on its thread. `acyclic link` has `add` and `remove`. `acyclic import <file>`
+`acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, anything it waits
+for or that waits for it, evidence, a done state or someone else's live claim on its thread. `acyclic import <file>`
 applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the plan
 format.
 
 Before adding work, read the plan with `acyclic item list` and `acyclic thread list`, and give the item the parent,
-links and thread it belongs with.
+waits-for and thread it belongs with.
 
 ## Output
 
@@ -98,26 +99,25 @@ links and thread it belongs with.
    has written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take
    someone else's work. If `thread claim` or `acyclic thread show <thread>` says another holder wins a contest for your
    thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
-   only your claim. A claim refused with readiness `resource-busy` means another thread's claim holds a resource one of
-   your thread's open items names: wait for that work, and don't force it. A lapsed lease frees your thread and its
-   resources, so before work that needs a resource after a pause, check that `acyclic thread show <thread>` still names
-   you as holder.
+   only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>` still
+   names you as holder.
 3. `acyclic item done <item> --repository <record> --commit <id>` when an item is finished, or `--evidence` when the
    result isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are
    done; don't use `--force` to finish someone else's work. A parent needs no `item done`: its `progress` reads done
-   once every leaf under it is, and work waiting on it waits on those leaves. Finished items hold no resources.
+   once every leaf under it is, and work waiting on it waits on those leaves.
    `acyclic thread release <thread>` once none of its items is left ready.
 4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread and repositories are
    set with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts,
    and `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
    open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
-   link them. `thread list` also puts the threads with work left in `waves`, first to last, each after the threads its
-   work waits on (a row's `waits_for`), with those that wait on none and that none waits on under `anytime`.
+   make it wait for that one. `thread list` also puts the threads with work left in `waves`, first to last, each after
+   the threads its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under
+   `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, and give each a title and brief. New or moved work joins the thread its parent passes down, or else the
    one its siblings share; an add, a move under another parent or an import reports it as `placed`. Threads whose
-   work waits on each other can't all finish: `acyclic needs` lists them as a `thread-cycle`, and a link or a member
-   should move.
+   work waits on each other can't all finish: `acyclic needs` lists them as a `thread-cycle`, and a waits-for or a
+   member should move.
 6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With

@@ -5,8 +5,6 @@ import type { Command, Item } from "./api";
 import { changes, draftOf, type ItemDraft } from "./forms";
 import type { Model } from "./map/model";
 
-export type LinkKind = "waits-for" | "relates-to";
-
 /** The longest id the tracker takes. */
 const MAX_ID = 64;
 
@@ -29,13 +27,14 @@ export function moveCommand(item: string, parent: string | null): Command {
   return { item: { edit: parent === null ? { item, "no-parent": true } : { item, parent } } };
 }
 
-/** `from` waits for or relates to `to`: with "waits-for", `to` comes first. */
-export function linkCommand(from: string, kind: LinkKind, to: string): Command {
-  return { link: { add: { from, kind, to } } };
+/** `from` waits for `to`: an edit of `from`. */
+export function linkCommand(from: string, to: string): Command {
+  return { item: { edit: { item: from, "waits-for": [to] } } };
 }
 
-export function unlinkCommand(from: string, kind: LinkKind, to: string): Command {
-  return { link: { remove: { from, kind, to } } };
+/** `from` no longer waits for `to`. */
+export function unlinkCommand(from: string, to: string): Command {
+  return { item: { edit: { item: from, "no-waits-for": [to] } } };
 }
 
 /**
@@ -107,7 +106,7 @@ export function expandTo(
 }
 
 /** What a tap on the Map picks while a mode waits for a target. */
-export type Mode = { kind: "idle" } | { kind: "move"; item: string } | { kind: "link"; item: string; link: LinkKind };
+export type Mode = { kind: "idle" } | { kind: "move"; item: string } | { kind: "link"; item: string };
 
 /** A target: an item on the Map, the "Top level" button (null), or the Map's background. */
 export type Pick = { kind: "item"; id: string } | { kind: "top" } | { kind: "background" } | { kind: "cancel" };
@@ -133,7 +132,7 @@ export function pick(model: Model, mode: Mode, target: Pick): Step {
   if (target.kind !== "item") return refuse("Choose the item to link to");
   const refusal = linkRefusal(model, mode.item, target.id);
   if (refusal !== null) return refuse(refusal);
-  return { mode: idle, command: linkCommand(mode.item, mode.link, target.id), refusal: null };
+  return { mode: idle, command: linkCommand(mode.item, target.id), refusal: null };
 }
 
 /** How an edit went: the write, then, if it was saved, reading the plan again. */
@@ -192,7 +191,7 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
   if (pending.kind === "add") {
     const { item: id, title, parent, thread } = pending.item;
     if (items.some((one) => one.id === id)) return items;
-    const links = { waits_for: [], waited_on_by: [], relates_to: [], related_from: [] };
+    const links = { waits_for: [], waited_on_by: [] };
     const added: Item = {
       id,
       title,
@@ -200,7 +199,6 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
       thread,
       state: "backlog",
       notes: null,
-      gate: null,
       size: null,
       archived: false,
       links,
@@ -222,7 +220,6 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
           state: one.state === "done" ? one.state : (changed.state ?? one.state),
           thread: or(changed.thread, one.thread),
           notes: or(changed.notes, one.notes),
-          gate: or(changed.gate, one.gate),
           size: or(changed.size, one.size),
         },
   );

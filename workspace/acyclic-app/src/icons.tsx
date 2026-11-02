@@ -12,7 +12,6 @@ export {
   Inbox,
   LayoutDashboard,
   Link as LinkIcon,
-  Link2,
   ListTree,
   Map as MapIcon,
   MoreHorizontal,

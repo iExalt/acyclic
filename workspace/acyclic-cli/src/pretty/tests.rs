@@ -49,8 +49,8 @@ fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
 
 #[test]
 fn records_are_blocks_and_writes_are_one_line() {
-    let shown = json!([{"id": "plant", "title": "Plant", "notes": null, "areas": [], "archived": false,
-        "links": {"waits_for": ["beds"], "relates_to": []},
+    let shown = json!([{"id": "plant", "title": "Plant", "notes": null, "repositories": [], "archived": false,
+        "links": {"waits_for": ["beds"], "waited_on_by": []},
         "claims": [{"holder": "session/s", "replica": "mac", "lease_started_at": "2026-10-15T00:00:00Z",
                     "lease_expires_at": "2026-10-15T01:00:00Z"}]}]);
     let edited =
@@ -76,7 +76,7 @@ fn an_error_is_one_line_naming_its_code() {
 }
 
 #[test]
-fn an_import_and_a_link_say_what_they_wrote() {
+fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
     let counts = |items: u64, links: u64| json!({"items": items, "threads": 1, "links": links, "repositories": 0, "fields": 14});
     let import = |dry_run: bool, counts: Json| {
         let line = if dry_run { "import plan.json -n" } else { "import plan.json" };
@@ -85,17 +85,18 @@ fn an_import_and_a_link_say_what_they_wrote() {
         render(&command(line), &data, None)
     };
     let none = json!({"items": 0, "threads": 0, "links": 0, "repositories": 0, "fields": 0});
-    let link = json!({"changed": true, "from": "a2", "kind": "relates-to", "to": "b1"});
+    let edited = |changed: bool| json!({"changed": changed, "item": "a2", "placed": []});
     insta::assert_snapshot!(format!(
-        "{}{}{}{}{}",
+        "{}{}{}{}{}{}{}",
         import(false, counts(3, 1)),
         import(true, counts(1, 2)),
         import(false, none),
-        render(&command("link add a2 relates-to b1"), &link, None),
+        render(&command("item edit a2 --waits-for b1 --waits-for b2"), &edited(true), None),
+        render(&command("item edit a2 --no-waits-for b1"), &edited(true), None),
+        render(&command("item edit a2 --no-waits-for b1"), &edited(false), None),
         render(
-            &command("link remove a2 relates-to b1"),
-            &json!({"changed": false, "from": "a2",
-            "kind": "relates-to", "to": "b1"}),
+            &command("item add a3 --title Sow --waits-for b1"),
+            &json!({"changed": true, "item": "a3", "title": "Sow", "placed": []}),
             None
         )
     ));
@@ -141,14 +142,6 @@ fn every_readiness_reads_as_a_phrase() {
         (
             json!(Status::Contested { holders: vec![s("session/1"), s("session/2")] }),
             "contested by session/1, session/2",
-        ),
-        (
-            json!(Status::ResourceBusy {
-                resource: s("gpu"),
-                thread: s("t"),
-                holder: s("session/1")
-            }),
-            "waiting for gpu, held by thread t (session/1)",
         ),
         (json!(Status::InCycle), "in a cycle"),
         (

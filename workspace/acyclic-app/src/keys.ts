@@ -3,7 +3,6 @@
 // ignored while the user is typing, composing, holding a modifier or a form holds what they typed, and all of them
 // can be turned off from the menu (WCAG 2.1.4). Pure, so the rules are tested without a browser.
 
-import type { LinkKind } from "./edits";
 import type { Layer } from "./layers";
 import type { View } from "./Shell";
 
@@ -14,7 +13,7 @@ export type KeyAction =
   | { kind: "help" }
   | { kind: "edit" }
   | { kind: "move" }
-  | { kind: "link"; link: LinkKind }
+  | { kind: "link" }
   | { kind: "addInside" }
   | { kind: "row"; by: 1 | -1 };
 
@@ -61,8 +60,7 @@ const GO: Record<string, KeyAction> = {
 const ON_ITEM: Record<string, KeyAction> = {
   e: { kind: "edit" },
   m: { kind: "move" },
-  w: { kind: "link", link: "waits-for" },
-  r: { kind: "link", link: "relates-to" },
+  w: { kind: "link" },
   a: { kind: "addInside" },
 };
 
@@ -141,7 +139,6 @@ export const SHORTCUTS: Record<string, string> = {
   "on-item:edit": "E",
   "on-item:move": "M",
   "on-item:waits-for": "W",
-  "on-item:relates-to": "R",
   "on-item:add-inside": "A",
 };
 
@@ -150,7 +147,6 @@ const ON_ITEM_WORDS: Record<string, string> = {
   "on-item:edit": "edit",
   "on-item:move": "move",
   "on-item:waits-for": "waits for",
-  "on-item:relates-to": "relates to",
   "on-item:add-inside": "add inside",
 };
 
