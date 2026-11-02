@@ -211,6 +211,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   another view closes the item, which it doesn't show, and going to the Overview or Needs you closes the thread too, as
   its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
   the Map.
+- **A new item shows where it landed.** Added from another view, it opens on the Map once saved, selected and in view,
+  and closing it goes back (the user's ask); a refused add reopens its form where the user was.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`, and
   `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;
@@ -319,8 +321,9 @@ before what went wrong.
   at a glance (the user's ask).
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as
   the boxes allow (the user's ask: no gaps between rows), each box after those it waits on: below one, or level with
-  it or lower on its right. Boxes that wait on nothing fill the gaps wherever they fit. The sidebar's and the
-  Overview's projects come in dependency order (`topOrder`), which the Map keeps wherever one box waits on another.
+  it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
+  and the Overview's projects come in dependency order (`topOrder`), which the Map keeps wherever one box waits on
+  another.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same

@@ -11,6 +11,8 @@ const PAD = 12;
 const GAP = 24;
 /** How many widths are tried, from the widest box's to every box in one row. */
 const TRIES = 24;
+/** Past this many boxes, one order is tried rather than three. */
+const MANY = 40;
 
 interface Placed {
   x: number;
@@ -35,7 +37,8 @@ export function pack(
   const widths = new Set([widest, row, Math.round(Math.sqrt(area * aspect))]);
   for (let n = 1; n < TRIES; n++) widths.add(Math.round(widest + ((row - widest) * n) / TRIES));
   let best: { score: number; laid: BoxLayout } | null = null;
-  const orders = KEYS.map((key) => placing(children, waits, key));
+  // Each try is cubic in the boxes: a plan with many at the top tries one order, which is enough to fill its gaps.
+  const orders = (children.length > MANY ? KEYS.slice(0, 1) : KEYS).map((key) => placing(children, waits, key));
   for (const width of [...widths].sort((a, b) => a - b))
     for (const order of orders) {
       const laid = packTo(order, waits, Math.max(widest, width));

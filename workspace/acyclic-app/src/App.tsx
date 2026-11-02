@@ -951,14 +951,18 @@ export function App() {
     setMode({ kind: "idle" });
     setAdding({ parent, idRefused: false, draft: null });
   };
-  /** Adds an item and shows it on the Map, selected where it landed; closing it goes back to the view it was added from. */
-  const add = (item: NewItem) => {
+  /**
+   * Adds an item and, once saved, shows it on the Map, selected where it landed; closing it goes back to the view it was
+   * added from. A refused add reopens its form where the user was.
+   */
+  const add = async (item: NewItem) => {
     const from = viewNow.current;
-    if (from !== "map") {
+    const saved = await send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
+    if (saved && from !== "map" && viewNow.current === from) {
       setCameFrom({ view: from, by: "item" });
       setView("map");
     }
-    return send(addCommand(item), { select: item.item, pin: item.parent }, { kind: "add", item });
+    return saved;
   };
   /**
    * Runs what the command menu chose, once it has closed. Going somewhere never closes a form holding what the user

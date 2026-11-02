@@ -109,7 +109,7 @@ export function typingIn(target: EventTarget | null): boolean {
 /**
  * Whether a key press came from a physical keyboard, so key hints are worth showing. Outside a field no on-screen
  * keyboard is up, so any key but a composing one counts; in a field only the keys an on-screen keyboard lacks do:
- * Escape, Tab, the up and down arrows, and a chord with Ctrl or ⌘.
+ * Escape, Tab and a chord with Ctrl or ⌘ (some on-screen keyboards send arrows).
  */
 export function fromKeyboard(
   press: Pick<KeyPress, "key" | "keyCode" | "isComposing" | "ctrlKey" | "metaKey">,
@@ -117,7 +117,7 @@ export function fromKeyboard(
 ): boolean {
   if (press.isComposing || press.keyCode === 229 || press.key === "Unidentified") return false;
   if (press.ctrlKey || press.metaKey) return true;
-  if (["Escape", "Tab", "ArrowUp", "ArrowDown"].includes(press.key)) return true;
+  if (["Escape", "Tab"].includes(press.key)) return true;
   return !typing && (press.key.length === 1 || press.key.startsWith("Arrow") || press.key === "Enter");
 }
 
