@@ -243,6 +243,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             .as_array()
             .into_iter()
             .flatten()
+            .flat_map(|thread| thread["items"].as_array().into_iter().flatten())
             .filter_map(|leaf| leaf["id"].as_str().map(str::to_owned))
             .collect();
         items.push(item.clone());
