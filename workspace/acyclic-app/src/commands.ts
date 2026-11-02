@@ -8,7 +8,6 @@ import type { View } from "./Shell";
 
 export type Run =
   | { kind: "view"; view: View }
-  | { kind: "needs" }
   | { kind: "add" }
   | { kind: "archived" }
   | { kind: "refresh" }
@@ -59,20 +58,21 @@ export interface Plan {
   item?: { id: string; title: string } | null;
 }
 
+const VIEW_NAMES: Record<View, string> = { overview: "Overview", map: "Map", threads: "Threads", needs: "Needs you" };
+
 /** Every entry the menu can find in `plan`: actions, threads, projects, then items, archived ones only while shown. */
 export function entries(plan: Plan): Entry[] {
   const actions: Entry[] = [
-    ...(["overview", "map", "threads"] as const).map((view) =>
+    ...(["overview", "map", "threads", "needs"] as const).map((view) =>
       entry({
         key: `view:${view}`,
         group: "Actions",
-        title: `Go to ${view === "overview" ? "Overview" : view === "map" ? "Map" : "Threads"}`,
+        title: `Go to ${VIEW_NAMES[view]}`,
         detail: null,
         also: "",
         run: { kind: "view", view },
       }),
     ),
-    entry({ key: "needs", group: "Actions", title: "Open Needs you", detail: null, also: "", run: { kind: "needs" } }),
     entry({ key: "add", group: "Actions", title: "New item", detail: null, also: "add", run: { kind: "add" } }),
     entry({
       key: "archived",

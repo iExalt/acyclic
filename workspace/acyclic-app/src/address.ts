@@ -1,5 +1,5 @@
 // The app's address: what is open, in the query, so the address bar always says it and a link opens it again. Only
-// what a link should bring back is in it: the view, an item, a thread and Needs you, at an entry. The add form, the
+// what a link should bring back is in it: the view (Needs you at an entry), an item and a thread. The add form, the
 // outline's sheet and a move waiting for its target are passing states, left out. Pure, so tested without a browser.
 
 import { HOME, type View } from "./Shell";
@@ -8,14 +8,13 @@ export interface Wanted {
   view: View;
   item: string | null;
   thread: string | null;
-  /** Needs you open, at the entry `needsAt` names if any. */
-  needs: boolean;
+  /** The entry Needs you's view opens at, if any. */
   needsAt: string | null;
 }
 
-export const NOTHING: Wanted = { view: HOME, item: null, thread: null, needs: false, needsAt: null };
+export const NOTHING: Wanted = { view: HOME, item: null, thread: null, needsAt: null };
 
-const VIEWS: readonly View[] = ["overview", "map", "threads"];
+const VIEWS: readonly View[] = ["overview", "map", "threads", "needs"];
 const OWNED = ["view", "item", "thread", "needs"];
 
 /**
@@ -30,24 +29,25 @@ export function addressOf(wanted: Wanted, search = ""): string {
   if (wanted.item === null ? wanted.view !== HOME : wanted.view !== "map") query.set("view", wanted.view);
   if (wanted.item !== null) query.set("item", wanted.item);
   if (wanted.thread !== null) query.set("thread", wanted.thread);
-  if (wanted.needs) query.set("needs", wanted.needsAt ?? "");
-  // A bare `needs`, as notifications send it, rather than `needs=`.
-  const text = query.toString().replace(/(^|&)needs=(&|$)/, "$1needs$2");
+  if (wanted.view === "needs" && wanted.needsAt !== null) query.set("needs", wanted.needsAt);
+  const text = query.toString();
   return text === "" ? "/" : `/?${text}`;
 }
 
-/** What a query asks to open: what it doesn't name, or names wrongly, stays as at home. */
+/**
+ * What a query asks to open: what it doesn't name, or names wrongly, stays as at home. `needs`, bare or naming an
+ * entry, is Needs you's view, as notifications and addresses from when it opened over the others still say.
+ */
 export function parse(search: string): Wanted {
   const query = new URLSearchParams(search);
   const named = query.get("view");
   const item = query.get("item") || null;
-  const view = VIEWS.find((one) => one === named) ?? (item !== null ? "map" : HOME);
+  const view = VIEWS.find((one) => one === named) ?? (query.has("needs") ? "needs" : item !== null ? "map" : HOME);
   return {
     view,
     item,
     thread: query.get("thread") || null,
-    needs: query.has("needs"),
-    needsAt: query.get("needs") || null,
+    needsAt: view === "needs" ? query.get("needs") || null : null,
   };
 }
 

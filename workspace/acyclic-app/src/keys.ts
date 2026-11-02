@@ -9,7 +9,6 @@ import type { View } from "./Shell";
 
 export type KeyAction =
   | { kind: "go"; view: View }
-  | { kind: "needs" }
   | { kind: "add" }
   | { kind: "search" }
   | { kind: "help" }
@@ -56,7 +55,7 @@ const GO: Record<string, KeyAction> = {
   o: { kind: "go", view: "overview" },
   m: { kind: "go", view: "map" },
   t: { kind: "go", view: "threads" },
-  n: { kind: "needs" },
+  n: { kind: "go", view: "needs" },
 };
 
 const ON_ITEM: Record<string, KeyAction> = {
@@ -122,7 +121,7 @@ export const SHORTCUTS: Record<string, string> = {
   "view:overview": "G then O",
   "view:map": "G then M",
   "view:threads": "G then T",
-  needs: "G then N",
+  "view:needs": "G then N",
   add: "C",
   "on-item:edit": "E",
   "on-item:move": "M",
@@ -145,7 +144,7 @@ const OTHER_WORDS: Record<string, string> = {
   "view:overview": "Go to Overview",
   "view:map": "Go to Map",
   "view:threads": "Go to Threads",
-  needs: "Open Needs you",
+  "view:needs": "Go to Needs you",
   add: "New item",
 };
 

@@ -245,13 +245,14 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, kindOf: (id: strin
     if (kind === "box") return <Icon of={ListTree} size={16} />;
     return kind === undefined ? null : <StageIcon stage={kind} />;
   }
-  if (run.kind === "view")
-    return <Icon of={run.view === "overview" ? LayoutDashboard : run.view === "map" ? MapIcon : Waypoints} size={16} />;
+  if (run.kind === "view") {
+    const of = { overview: LayoutDashboard, map: MapIcon, threads: Waypoints, needs: Inbox };
+    return <Icon of={of[run.view]} size={16} />;
+  }
   if (run.kind === "on-item") {
     const of = { edit: Pencil, move: FolderInput, "waits-for": ArrowUpLeft, "relates-to": Link2, "add-inside": Plus };
     return <Icon of={of[run.action]} size={16} />;
   }
-  if (run.kind === "needs") return <Icon of={Inbox} size={16} />;
   if (run.kind === "add") return <Icon of={Plus} size={16} />;
   if (run.kind === "archived") return <Icon of={Archive} size={16} />;
   return <Icon of={RotateCw} size={16} />;

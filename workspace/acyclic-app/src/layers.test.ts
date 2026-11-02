@@ -6,54 +6,26 @@ const none = {
   mode: false,
   adding: false,
   item: false,
-  needs: false,
   projects: false,
   thread: false,
   away: false,
-  threadOverNeeds: false,
-  needsOverItem: false,
 };
 
 describe("topLayer", () => {
-  it("puts the command menu over all, a waiting move over a form, a form over the projects, those over an item, that over the needs list, and those over a thread", () => {
-    const all = {
-      command: false,
-      mode: true,
-      adding: true,
-      item: true,
-      needs: true,
-      projects: true,
-      thread: true,
-      away: true,
-      threadOverNeeds: false,
-      needsOverItem: false,
-    };
+  it("puts the command menu over all, a waiting move over a form, a form over the projects, those over an item, and that over a thread", () => {
+    const all = { command: false, mode: true, adding: true, item: true, projects: true, thread: true, away: true };
     expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
     expect(topLayer({ ...all, mode: false })).toBe("add");
     expect(topLayer({ ...all, mode: false, adding: false })).toBe("projects");
     expect(topLayer({ ...all, mode: false, adding: false, projects: false })).toBe("item");
-    expect(topLayer({ ...none, needs: true, thread: true })).toBe("needs");
     expect(topLayer({ ...none, thread: true })).toBe("thread");
     expect(topLayer(none)).toBeNull();
     expect(openLayers({ ...none, thread: true, item: true })).toEqual(["item", "thread"]);
-    // Away from home, on a phone, is under everything: Back closes what's over the view before it goes home.
+    // Away from home, on a phone, is under everything: Back closes what's over the view before it goes home, Needs
+    // you's view as any other.
     expect(openLayers({ ...none, away: true, item: true, thread: true })).toEqual(["item", "thread", "away"]);
     expect(topLayer({ ...none, away: true })).toBe("away");
-  });
-
-  it("puts a thread over Needs you when it was opened there, without counting the order as a layer", () => {
-    const both = { ...none, needs: true, thread: true, threadOverNeeds: true };
-    expect(openLayers({ ...both, item: true })).toEqual(["item", "thread", "needs"]);
-    expect(depth(both)).toBe(2);
-    expect(depth({ ...none, threadOverNeeds: true })).toBe(0);
-  });
-
-  it("puts Needs you over the item it was opened over, so closing it shows the item again", () => {
-    expect(openLayers({ ...none, item: true, needs: true, needsOverItem: true })).toEqual(["needs", "item"]);
-    // Needs you over an item, then a thread from the command menu over Needs you: each over the one it was opened on.
-    const all = { ...none, item: true, needs: true, thread: true, needsOverItem: true, threadOverNeeds: true };
-    expect(openLayers(all)).toEqual(["thread", "needs", "item"]);
   });
 });
 
@@ -97,7 +69,7 @@ describe("the history of layers", () => {
     // Fewer, as the command menu has no address, or a link's item is gone: the entry says so, and Back goes on from it.
     expect(follow(forward.entries, 1)).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
     expect(follow(forward.entries, 0)).toEqual({ entries: at(0), action: { kind: "relabel", layers: 0 } });
-    // More, as Needs you named with a thread opens a layer each: the one more takes its own entry.
+    // More, as a thread named with an item opens a layer each: the one more takes its own entry.
     expect(follow(forward.entries, 3)).toEqual({ entries: at(3), action: { kind: "push", from: 2, to: 3 } });
     // Held behind a form holding typing: the entry stands for what is open meanwhile, so no later move goes back.
     const held = restored(forward.entries, 1);

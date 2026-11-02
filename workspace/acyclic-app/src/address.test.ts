@@ -7,8 +7,8 @@ describe("the address", () => {
     const open: Wanted[] = [
       { ...NOTHING, view: "threads", thread: "t-3" },
       { ...NOTHING, view: "map", item: "a b/c&d" },
-      { ...NOTHING, needs: true, needsAt: "unapproved:t-3:ready" },
-      { ...NOTHING, view: "map", needs: true },
+      { ...NOTHING, view: "needs" },
+      { ...NOTHING, view: "needs", needsAt: "unapproved:t-3:ready" },
       // An item left open over another view, as going there with it open leaves it.
       { ...NOTHING, view: "threads", item: "x" },
       { ...NOTHING, view: "overview", item: "x" },
@@ -16,10 +16,21 @@ describe("the address", () => {
     for (const wanted of open) expect(parse(addressOf(wanted).slice(1))).toEqual(wanted);
   });
 
-  it("writes Needs you without an entry bare, as notifications do, and an item without the Map it implies", () => {
-    expect(addressOf({ ...NOTHING, needs: true })).toBe("/?needs");
-    expect(addressOf({ ...NOTHING, view: "map", item: "x", needs: true })).toBe("/?item=x&needs");
+  it("writes Needs you as a view, the entry it opens at beside it, and an item without the Map it implies", () => {
+    expect(addressOf({ ...NOTHING, view: "needs" })).toBe("/?view=needs");
+    expect(addressOf({ ...NOTHING, view: "needs", needsAt: "a:b" })).toBe("/?view=needs&needs=a%3Ab");
+    // An entry is Needs you's alone: on another view, the address leaves it out.
+    expect(addressOf({ ...NOTHING, view: "map", needsAt: "a:b" })).toBe("/?view=map");
     expect(parse("?item=x").view).toBe("map");
+  });
+
+  it("opens Needs you's view at an old address, as notifications and bookmarks still send it", () => {
+    expect(parse("?needs")).toEqual({ ...NOTHING, view: "needs" });
+    expect(parse("?needs=a:b")).toEqual({ ...NOTHING, view: "needs", needsAt: "a:b" });
+    // Once opened over an item, the list is now the view, the item left open over it.
+    expect(parse("?item=x&needs")).toEqual({ ...NOTHING, view: "needs", item: "x" });
+    // A view named wins, and an entry on any other view is dropped.
+    expect(parse("?view=threads&needs=a")).toEqual({ ...NOTHING, view: "threads" });
   });
 
   it("keeps what else the address says, such as a test run's switch, and changes only what is open", () => {
@@ -51,8 +62,8 @@ describe("landing", () => {
   });
 
   it("drops an item or thread the plan no longer holds, and says which, keeping the rest", () => {
-    expect(landing({ ...NOTHING, view: "map", item: "gone", needs: true }, plan)).toEqual({
-      wanted: { ...NOTHING, view: "map", needs: true },
+    expect(landing({ ...NOTHING, view: "needs", item: "gone" }, plan)).toEqual({
+      wanted: { ...NOTHING, view: "needs" },
       archived: false,
       missing: ["item"],
     });

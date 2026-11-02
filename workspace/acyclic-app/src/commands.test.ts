@@ -29,7 +29,7 @@ describe("the command menu", () => {
       "Go to Overview",
       "Go to Map",
       "Go to Threads",
-      "Open Needs you",
+      "Go to Needs you",
       "New item",
       "Show archived items",
       "Refresh",
