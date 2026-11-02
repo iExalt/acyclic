@@ -266,8 +266,7 @@ pub struct Clash {
     pub fresh: Vec<String>,
 }
 
-/// Every number two or more threads' ids end in, in the tracker's id form, judged at `now`. Legacy ids such as
-/// `thread-27` clash with assigned ones such as `thread-pi-27` too.
+/// Every number two or more threads' ids end in, in the tracker's id form, judged at `now`.
 ///
 /// # Errors
 ///

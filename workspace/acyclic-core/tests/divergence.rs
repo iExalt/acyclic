@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use acyclic_core::claim;
-use acyclic_core::export::{self, Scope};
 use acyclic_core::model::{self, By, ItemState, LinkKind, Model, SetField};
 use acyclic_core::needs::{self, Entry};
 use acyclic_core::place;
@@ -275,7 +274,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     pair.exchange();
     let state = pair.assert_settled();
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
-    // Every walk up the tree ends: inheritance, readiness, the graph and placing new work under the cycle.
+    // Every walk up the tree ends: inheritance, readiness and placing new work under the cycle.
     let model = Model::read(&state).unwrap();
     assert_eq!(place::inherited_thread(&model, "c"), None);
     let readiness = Readiness::new(&state, &model, NOW, &Unmapped);
@@ -284,8 +283,6 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
         Vec::<std::collections::BTreeSet<String>>::new()
     );
     readiness.ready(false, "session/mac").unwrap();
-    let view = export::view(&model, &Scope::default()).unwrap();
-    assert!(!export::dot(&model, &view).is_empty());
     Pair::edit(&pair.mac, "session/mac", NOW, &|r, by| {
         add(r, by, "d", Some("c"))?;
         assert_eq!(place::place(r, &["d".to_owned()], by)?, Vec::new(), "nothing to inherit");

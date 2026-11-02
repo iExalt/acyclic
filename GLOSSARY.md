@@ -179,8 +179,7 @@ _Avoid_: blocker link, depends_on, blocks (in prose)
 A link that carries context only; link kind `relates-to`.
 _Avoid_: relates_to, relates (in prose), see also
 
-Stored data keeps the older kind names: `blocks` for `waits-for` and `relates` for `relates-to`. Soft dependencies
-(`follows`, stored as `after`) are retired: no write adds one, and a stored one reads as `relates-to`.
+Stored data keeps the older kind names: `blocks` for `waits-for` and `relates` for `relates-to`.
 
 ## Where the data lives
 

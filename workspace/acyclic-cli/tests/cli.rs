@@ -192,19 +192,6 @@ fn a_journey_through_the_contract() {
         (1, &json!("no-clash")),
         "{out}"
     );
-    assert_eq!(sh.run("graph --thread t1", AGENT), 0, "DOT on standard output");
-    let (code, out) = sh.output("graph --format mermaid --file graph.mmd", AGENT);
-    assert_eq!((code, out["data"]["counts"]["items"].as_u64()), (0, Some(2)));
-    let mermaid = std::fs::read_to_string(sh.path().join("graph.mmd")).unwrap();
-    assert!(mermaid.starts_with("flowchart TB\n"), "{mermaid}");
-    assert_eq!(sh.run("graph --root nope", AGENT), 3);
-    assert_eq!(sh.run("graph --format html", AGENT), 2, "a page never goes to standard output");
-    let opener = [("ACYCLIC_ACTOR", "session/mac"), ("ACYCLIC_OPENER", "true")];
-    let (code, out) = sh.output("graph --open --thread t1", &opener);
-    assert_eq!((code, out["data"]["opened"].as_bool()), (0, Some(true)), "{out}");
-    let path = out["data"]["path"].as_str().unwrap().replace("[dir]", sh.path().to_str().unwrap());
-    let page = std::fs::read_to_string(path).unwrap();
-    assert!(page.contains("data-renderer=\"graphviz\""));
     assert_eq!(sh.run("link add a1 sideways a2", AGENT), 2);
     assert_eq!(sh.run("link add a1 blocks a2", AGENT), 2, "the old words are refused");
     let (code, unlinked) = sh.output("link remove a2 waits-for a1", AGENT);
@@ -283,36 +270,6 @@ fn an_unreadable_state_points_to_doctor() {
     assert_eq!(sh.run("ready", AGENT), 6);
     assert_eq!(sh.run("doctor", AGENT), 0);
     insta::assert_snapshot!(sh.transcript);
-}
-
-#[test]
-fn a_follows_link_an_older_version_stored_is_removed_as_relates_to() {
-    let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
-    for id in ["x", "z"] {
-        sh.run(&format!("item add {id} --title {id}"), AGENT);
-    }
-    let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
-    let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
-    let key =
-        acyclic_core::model::link_key("z", "x", acyclic_core::model::LinkKind::After).unwrap();
-    tracker
-        .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
-            for (field, value) in [
-                ("from", json!("z")),
-                ("to", json!("x")),
-                ("kind", json!("after")),
-                ("present", json!(true)),
-            ] {
-                replica.write(&key, field, "actor/user", at, Some(value))?;
-            }
-            Ok::<(), acyclic_core::state::Error>(())
-        })
-        .unwrap();
-    assert_eq!(sh.output("show z", AGENT).1["data"][0]["links"]["relates_to"], json!(["x"]));
-    let (code, removed) = sh.output("link remove z relates-to x", AGENT);
-    assert_eq!((code, &removed["data"]["changed"]), (0, &json!(true)), "{removed}");
-    assert_eq!(sh.output("show z", AGENT).1["data"][0]["links"]["relates_to"], json!([]));
 }
 
 #[test]

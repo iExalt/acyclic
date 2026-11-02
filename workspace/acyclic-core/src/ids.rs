@@ -1,10 +1,9 @@
 //! Ids the tracker assigns, so that agents stop guessing the next number.
 //!
 //! An assigned id is `<kind>-<replica>-<n>`, such as `item-mac-143` or `thread-mac-32`. `n` is one more than the
-//! highest number that ends an id of that kind starting with `<kind>-`: assigned ids, and older ones such as
-//! `thread-27`, deleted ones included, so no number is ever handed out twice on one replica. Other ids, such as
-//! `side-5`, don't count, so a year in a name can't push the count up. An imported or older id such as `item-2026`
-//! still does; new explicit ids starting with `<kind>-` are refused, so only those can.
+//! highest number that ends an id of that form, other replicas' and deleted ones included, so no number is ever
+//! handed out twice on one replica. Other ids, such as `side-5` or `item-2026`, don't count, so a year in a name
+//! can't push the count up; new explicit ids starting with `<kind>-` are refused.
 //!
 //! The replica's own id keeps two replicas' assignments apart, so concurrent adds on two clones never collide, though
 //! they can end in the same number.
@@ -15,16 +14,15 @@
 use crate::schema::{item, kind};
 use crate::state::{ReplicaId, State};
 
-/// The number that ends an id of `kind` in the tracker's own form, `<kind>-<n>` or `<kind>-<replica>-<n>`, if it is
-/// one.
+/// The number that ends an id of `kind` in the tracker's own form, `<kind>-<replica>-<n>`, if it is one.
 #[must_use]
 pub fn number(kind: &str, id: &str) -> Option<u64> {
     let rest = id.strip_prefix(kind)?.strip_prefix('-')?;
     if !rest.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
         return None;
     }
-    let digits = rest.rsplit('-').next()?;
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    let (replica, digits) = rest.rsplit_once('-')?;
+    if replica.is_empty() || digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     digits.parse().ok()

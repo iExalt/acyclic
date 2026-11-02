@@ -344,7 +344,6 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!("prime"),
         json!({"import": {"file": "/etc/passwd"}}),
         json!("doctor"),
-        json!({"graph": {"file": "/tmp/graph.dot"}}),
     ] {
         assert_eq!(classify(refused.clone()), Use::Refused, "{refused}");
     }
@@ -487,13 +486,9 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     // The tracker clone is missing, so a request let in fails as the CLI would.
     let ran = |(status, _): (StatusCode, String)| status.is_server_error();
     assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478")])));
-    // Each server on the host has a cookie of its own, and a browser paired before the cookies carried their port
-    // keeps the shared one.
-    let others = format!("acyclic-up=forged; acyclic-up-7479=forged; {browser}");
-    let shared = format!("acyclic-up={credential}");
-    for cookie in [&others, &shared] {
-        assert!(ran(post(&[host, json, ("cookie", cookie), ("origin", "http://localhost:7478")])));
-    }
+    // Each server on the host has a cookie of its own.
+    let others = format!("acyclic-up-7479=forged; {browser}");
+    assert!(ran(post(&[host, json, ("cookie", &others), ("origin", "http://localhost:7478")])));
     let same = ("sec-fetch-site", "same-origin");
     assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478"), same])));
     // The cookie reaches every port on the machine, so a page on another one, or one that hides its origin, is refused.
@@ -514,10 +509,12 @@ fn a_paired_browser_writes_only_from_the_listeners_own_page() {
     // A wrong cookie, or a wrong session beside a right cookie, lets nothing in.
     let forged = ("cookie", "acyclic-up=forged");
     let elsewhere = format!("acyclic-up-7479={credential}");
+    let unported = format!("acyclic-up={credential}");
     let wrong = ("authorization", "Bearer forged");
     for refused in [
         vec![host, json, forged],
         vec![host, json, ("cookie", &elsewhere)],
+        vec![host, json, ("cookie", &unported)],
         vec![host, json, paired, wrong],
     ] {
         assert_eq!(post(&refused), (StatusCode::UNAUTHORIZED, "no-session".into()), "{refused:?}");

@@ -12,15 +12,11 @@ clap_complete.workspace = true
 comfy-table.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 terminal_size.workspace = true
 toml.workspace = true
 
 [features]
 probe = ["acyclic-core/probe"]
-
-[build-dependencies]
-sha2.workspace = true
 
 [dev-dependencies]
 acyclic-fixtures.workspace = true

@@ -15,9 +15,7 @@ pub use apply::{ApplyError, Report, apply};
 /// The value of the document's `format` field.
 pub const FORMAT: &str = "acyclic-import";
 
-/// The newest version this build reads. Version 2 names link kinds `waits-for` and `relates-to`; version 1, still
-/// read, names them `blocks` and `relates` (and takes the new names too). Both versions refuse the retired soft link,
-/// `follows` in version 2 and `after` in version 1.
+/// The one version this build reads.
 pub const VERSION: u32 = 2;
 
 /// An annotated version 2 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
@@ -25,7 +23,6 @@ pub const VERSION: u32 = 2;
 pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its records named by keys you choose.
 // Importing adds and updates what it names and never deletes, so importing it again changes nothing.
 // JSON has no comments: remove the lines that start with //.
-// Version 1 documents are still read: they name the link kinds blocks and relates.
 {
   "format": "acyclic-import",
   "version": 2,
@@ -180,15 +177,9 @@ pub struct Item {
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     WaitsFor,
-    /// A retired soft dependency, read only so validation can refuse it with the words to use instead.
-    Follows,
     /// Context only.
     RelatesTo,
 }
-
-/// The names version 1 gave link kinds, with the ones that replaced them.
-pub const RENAMED_LINK_KINDS: [(&str, &str); 3] =
-    [("blocks", "waits-for"), ("after", "follows"), ("relates", "relates-to")];
 
 /// A link between two items: `from` depends on or relates to `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -230,7 +221,7 @@ pub enum ParseError {
     Json(serde_json::Error),
     /// The `format` field is missing or wrong.
     NotAnImport,
-    /// Version 0, or written by a newer version than this build reads.
+    /// Any version but [`VERSION`].
     UnsupportedVersion {
         /// The document's version.
         found: u64,
@@ -251,7 +242,7 @@ impl fmt::Display for ParseError {
             Self::UnsupportedVersion { found } => {
                 write!(
                     f,
-                    "import version {found} is not supported; this build reads up to {VERSION}"
+                    "import version {found} is not supported; this build reads version {VERSION}"
                 )
             },
         }
@@ -305,8 +296,6 @@ pub enum ValidationError {
     DependencyCycle(Vec<String>),
     /// The same link appears twice.
     DuplicateLink(Link),
-    /// A follows link, which is retired.
-    FollowsRetired(Link),
     /// An item is a member of several threads.
     ItemInSeveralThreads {
         /// The item.
@@ -350,12 +339,6 @@ impl fmt::Display for ValidationError {
             Self::DuplicateLink(link) => {
                 write!(f, "link {:?} to {:?} ({:?}) appears twice", link.from, link.to, link.kind)
             },
-            Self::FollowsRetired(link) => write!(
-                f,
-                "link {:?} to {:?}: follows links are retired; use waits-for when {:?} can't start before {:?} is \
-                 done, or relates-to for context",
-                link.from, link.to, link.from, link.to
-            ),
             Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
             Self::InvalidName { at, name } => write!(
                 f,
@@ -385,28 +368,16 @@ impl Import {
     ///
     /// # Errors
     ///
-    /// Fails when the text isn't JSON, isn't an import, is from a newer version, or has unknown or missing fields.
+    /// Fails when the text isn't JSON, isn't an import, is another version, or has unknown or missing fields.
     pub fn from_json(text: &str) -> Result<Self, ParseError> {
         let value: serde_json::Value = serde_json::from_str(text).map_err(ParseError::Json)?;
         if value.get("format").and_then(serde_json::Value::as_str) != Some(FORMAT) {
             return Err(ParseError::NotAnImport);
         }
         if let Some(found) = value.get("version").and_then(serde_json::Value::as_u64)
-            && (found == 0 || found > u64::from(VERSION))
+            && found != u64::from(VERSION)
         {
             return Err(ParseError::UnsupportedVersion { found });
-        }
-        let mut value = value;
-        if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
-            for link in value.get_mut("links").and_then(|l| l.as_array_mut()).into_iter().flatten()
-            {
-                let renamed = link.get("kind").and_then(|k| k.as_str()).and_then(|old| {
-                    RENAMED_LINK_KINDS.iter().find(|(name, _)| *name == old).map(|(_, new)| *new)
-                });
-                if let Some(new) = renamed {
-                    link["kind"] = new.into();
-                }
-            }
         }
         serde_json::from_value(value).map_err(ParseError::Json)
     }
@@ -532,9 +503,6 @@ impl Import {
         for link in &self.links {
             if !seen.insert((&link.from, &link.to, link.kind)) {
                 errors.push(ValidationError::DuplicateLink(link.clone()));
-            }
-            if link.kind == LinkKind::Follows {
-                errors.push(ValidationError::FollowsRetired(link.clone()));
             }
             if link.from == link.to {
                 errors.push(ValidationError::SelfLink(link.from.clone()));
@@ -701,48 +669,32 @@ mod tests {
             Import::from_json(&zero),
             Err(ParseError::UnsupportedVersion { found: 0 })
         ));
-        let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":1,\"itmes\":[]}}");
+        let older = format!("{{\"format\":\"{FORMAT}\",\"version\":1}}");
+        assert!(matches!(
+            Import::from_json(&older),
+            Err(ParseError::UnsupportedVersion { found: 1 })
+        ));
+        let unknown = format!("{{\"format\":\"{FORMAT}\",\"version\":2,\"itmes\":[]}}");
         assert!(matches!(Import::from_json(&unknown), Err(ParseError::Json(_))));
         let minimal = format!("{{\"format\":\"{FORMAT}\",\"version\":2}}");
         assert_eq!(Import::from_json(&minimal).unwrap(), Import::new());
     }
 
     #[test]
-    fn version_1_names_links_as_it_did_and_version_2_as_it_does() {
-        let read = |version: u32, kind: &str| {
+    fn links_are_waits_for_or_relates_to() {
+        let read = |kind: &str| {
             Import::from_json(&format!(
-                "{{\"format\":\"{FORMAT}\",\"version\":{version},\"items\":[{{\"key\":\"a\",\"title\":\"A\"}},\
+                "{{\"format\":\"{FORMAT}\",\"version\":2,\"items\":[{{\"key\":\"a\",\"title\":\"A\"}},\
                  {{\"key\":\"b\",\"title\":\"B\"}}],\"links\":[{{\"from\":\"a\",\"to\":\"b\",\"kind\":\"{kind}\"}}]}}"
             ))
         };
-        for (old, new, expected) in [
-            ("blocks", "waits-for", LinkKind::WaitsFor),
-            ("after", "follows", LinkKind::Follows),
-            ("relates", "relates-to", LinkKind::RelatesTo),
-        ] {
-            if expected == LinkKind::Follows {
-                // Read, so validation can name the words to use instead.
-                for (version, word) in [(1, old), (2, new)] {
-                    let doc = read(version, word).unwrap();
-                    assert_eq!(
-                        doc.validate(),
-                        vec![ValidationError::FollowsRetired(doc.links[0].clone())],
-                        "{word}"
-                    );
-                    let message = doc.validate()[0].to_string();
-                    assert!(
-                        message.contains("waits-for") && message.contains("relates-to"),
-                        "{message}"
-                    );
-                }
-            }
-            assert_eq!(read(1, old).unwrap().links[0].kind, expected, "{old}");
-            assert_eq!(read(2, new).unwrap().links[0].kind, expected, "{new}");
-            assert_eq!(read(1, new).unwrap().links[0].kind, expected, "version 1 takes {new} too");
-            assert!(matches!(read(2, old), Err(ParseError::Json(_))), "{old} is version 1's");
+        assert_eq!(read("waits-for").unwrap().links[0].kind, LinkKind::WaitsFor);
+        assert_eq!(read("relates-to").unwrap().links[0].kind, LinkKind::RelatesTo);
+        for retired in ["follows", "blocks", "after", "relates"] {
+            assert!(matches!(read(retired), Err(ParseError::Json(_))), "{retired}");
         }
-        // A left-out state is the backlog, in either version.
-        assert_eq!(read(2, "waits-for").unwrap().items[0].state, State::Backlog);
+        // A left-out state is the backlog.
+        assert_eq!(read("waits-for").unwrap().items[0].state, State::Backlog);
     }
 
     #[test]

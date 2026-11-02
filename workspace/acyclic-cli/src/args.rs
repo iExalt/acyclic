@@ -8,7 +8,6 @@ use std::fmt::Write as _;
 use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{CommandFactory, Parser, Subcommand};
 
-pub use crate::page::Renderer;
 use serde::Deserialize;
 
 use crate::error::{CliError, exit};
@@ -18,8 +17,7 @@ use serde::Serialize;
 const GLOBAL_OPTIONS: &str = "Global options";
 
 /// The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o`
-/// chooses), except `prime`, `completions`, `graph` without `--file` or `--open`, `import --schema` and help and
-/// version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says.
+/// chooses), except `prime`, `completions`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -34,7 +32,7 @@ pub struct Cli {
     #[arg(long, global = true, conflicts_with = "actor", help_heading = GLOBAL_OPTIONS)]
     pub as_user: bool,
     /// How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error;
-    /// otherwise `ACYCLIC_OUTPUT`, else pretty on a terminal and json when piped.
+    /// otherwise pretty on a terminal and json when piped.
     #[arg(
         short = 'o',
         long,
@@ -69,18 +67,7 @@ pub const SECTIONS: [(&str, &[&str]); 3] = [
     ("Command Groups", &["item", "link", "thread", "repo", "proposal"]),
     (
         "Other Commands",
-        &[
-            "init",
-            "sync",
-            "prime",
-            "import",
-            "graph",
-            "level",
-            "doctor",
-            "serve",
-            "up",
-            "completions",
-        ],
+        &["init", "sync", "prime", "import", "level", "doctor", "serve", "up", "completions"],
     ),
 ];
 
@@ -239,32 +226,6 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
-    /// Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser.
-    Graph {
-        /// The document's format: DOT by default, HTML with `--open`. HTML needs `--file` or `--open`.
-        #[arg(long, value_enum)]
-        format: Option<GraphFormat>,
-        /// What lays out the HTML page: Graphviz by default.
-        #[arg(long, value_enum)]
-        renderer: Option<Renderer>,
-        /// Write the HTML page into the clone's acyclic directory and open it in the default browser.
-        #[arg(long)]
-        #[serde(default)]
-        open: bool,
-        /// Only this item and its descendants.
-        #[arg(long)]
-        root: Option<String>,
-        /// Only this thread's members; with `--root`, the items in both.
-        #[arg(long)]
-        thread: Option<String>,
-        /// Draw archived items too.
-        #[arg(long)]
-        #[serde(default)]
-        include_archived: bool,
-        /// Write the document here and print a JSON summary instead.
-        #[arg(long)]
-        file: Option<PathBuf>,
-    },
     /// Adds, edits, reopens, archives and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
@@ -435,18 +396,6 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
         Some(name) => Err(usage(format!("--{flag} and --no-{flag} both name {name}"))),
         None => Ok(()),
     }
-}
-
-/// A graph document's format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GraphFormat {
-    /// Graphviz DOT.
-    Dot,
-    /// A Mermaid flowchart.
-    Mermaid,
-    /// A self-contained HTML page that draws it.
-    Html,
 }
 
 /// The states a command may set: not `done`, which `acyclic done` sets with its evidence.

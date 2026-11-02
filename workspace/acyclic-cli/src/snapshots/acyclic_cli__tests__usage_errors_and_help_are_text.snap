@@ -2,7 +2,7 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `graph` without `--file` or `--open`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says
+The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
@@ -27,7 +27,6 @@ Other Commands:
   sync         Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
   prime        Prints conventions for agents, matched to this version, as text
   import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
-  graph        Draws the graph with threads as clusters: DOT or Mermaid, or an HTML page to open in a browser
   level        Prints the autonomy levels; with a level, sets the global one (user only)
   doctor       Lists entities that can't be read
   serve        Serves the JSON API and the app, refusing any request without the user's Tailscale identity
@@ -42,6 +41,6 @@ Global options:
       --tracker <TRACKER>  The tracker clone; otherwise `ACYCLIC_TRACKER`, else the clone you are in, else, in a Git repository, the mapping in ~/.config/acyclic/trackers.toml, whose default applies when no prefix matches
       --actor <ACTOR>      Who acts; otherwise `ACYCLIC_ACTOR`, else `agent/undeclared`. The user must say so on the command
       --as-user            Act as the user
-  -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error; otherwise `ACYCLIC_OUTPUT`, else pretty on a terminal and json when piped [possible values: json, pretty]
+  -o, --output <OUTPUT>    How to print: the JSON envelope, or tables and summaries for people, with errors as text on standard error; otherwise pretty on a terminal and json when piped [possible values: json, pretty]
 
 Run 'acyclic help <command>' for more information on a command.

@@ -68,16 +68,12 @@ would change. `acyclic import --schema` prints the plan format.
 Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
 and thread it belongs with.
 
-`acyclic graph --file <FILE>` writes the graph as DOT or Mermaid; on a large tracker, read the file rather than
-standard output.
-
 ## Output
 
-- `prime`, `completions`, `import --schema`, help and version text, and `graph` without `--file` or `--open`, print
-  documents or text. Every other command prints one JSON document when its output is piped, as a tool's is:
-  `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on
-  `error.code`, not on the message. At a terminal it prints text for people instead; if your commands run in one,
-  set `ACYCLIC_OUTPUT=json`.
+- `prime`, `completions`, `import --schema`, and help and version text print documents or text. Every other command
+  prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
+  `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on `error.code`, not on the message.
+  At a terminal it prints text for people instead; if your commands run in one, pass `-o json`.
 - A bare group such as `acyclic item` prints its help.
 - A command line that doesn't parse prints its error as text on standard error, with exit code 2; run
   `acyclic <command> --help` to see the command's arguments. `acyclic help <command>` shows them too.

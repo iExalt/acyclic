@@ -1,6 +1,5 @@
 use crate::archive;
 use crate::claim;
-use crate::export;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_state};
 use crate::needs::{Entry, needs_you};
 use crate::ready::{Ancestry, Readiness};
@@ -157,8 +156,6 @@ fn needs_of(r: &Replica) -> Vec<Entry> {
         let _ = readiness.of(id).unwrap();
         let _ = (model.role(id), model.ancestors(id));
     }
-    let view = export::view(&model, &export::Scope::default()).unwrap();
-    let _ = (export::dot(&model, &view), export::mermaid(&model, &view));
     let (lenient, unreadable) = Model::read_lenient(r.state());
     assert_eq!((lenient.items.len(), unreadable.len()), (model.items.len(), 0));
     needs_you(r.state(), &model, &readiness, NOW).unwrap()

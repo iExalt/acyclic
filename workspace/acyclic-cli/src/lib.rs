@@ -7,8 +7,6 @@ pub mod args;
 mod commands;
 mod context;
 mod edit;
-mod hints;
-mod page;
 mod pretty;
 mod view;
 
@@ -116,8 +114,7 @@ impl Outcome {
 /// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
 /// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Pretty output, the default
 /// at a terminal, prints the same data as text for people instead, and an error as a line on standard error with the
-/// same exit code. Help and
-/// version text, `prime`, `completions`, `graph` without `--file` and `import --schema` print text instead, and a
+/// same exit code. Help and version text, `prime`, `completions` and `import --schema` print text instead, and a
 /// command line that doesn't parse prints its error and usage as text to standard error, with exit code 2, as other
 /// command-line tools do.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
@@ -150,18 +147,10 @@ fn execute_with(
             return Outcome::out(exit::OK, err.to_string());
         },
         Err(err) => {
-            let stderr = match hints::hint(&args) {
-                Some(hint) => format!("error: {hint}\n\nFor more information, try '--help'.\n"),
-                None => err.to_string(),
-            };
-            return Outcome { code: exit::USAGE, stdout: String::new(), stderr };
+            return Outcome { code: exit::USAGE, stdout: String::new(), stderr: err.to_string() };
         },
     };
-    // An unreadable `ACYCLIC_OUTPUT` is reported as JSON, which every reader can take.
-    let output = match context::output(&cli, env) {
-        Ok(output) => output,
-        Err(err) => return Outcome::out(err.exit, render(&err.envelope())),
-    };
+    let output = context::output(&cli, env);
     let failed = |err: CliError| match output {
         Format::Json => Outcome::out(err.exit, render(&err.envelope())),
         Format::Pretty => Outcome {
