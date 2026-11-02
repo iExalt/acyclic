@@ -30,7 +30,7 @@ export interface NeedView {
   text: string;
   /** What it names besides its text, for a list that shows the entry without its rows, such as an item's title. */
   detail: string | null;
-  /** The line of the one thread its text names, for its badge, which carries the number the text leaves out. */
+  /** The line of the one thread its text names, for its badge, which the text leaves out. */
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
@@ -44,6 +44,8 @@ export interface NeedView {
   note: string | null;
   /** The keys of the entries it stands for besides its own, where several are shown as one (`together`). */
   merged?: string[];
+  /** An unconfirmed merge's repository as people name it: its `owner/name`, or its id when it has no record. */
+  repository?: string;
 }
 
 interface Row {
@@ -97,7 +99,7 @@ function viewOf(
   const item = row(need.item);
   const thread = row(need.thread);
   const threads =
-    need.kind === "number-clash" || need.kind === "thread-cycle"
+    need.kind === "thread-cycle"
       ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
       : thread === null
         ? []
@@ -171,13 +173,6 @@ function viewOf(
         text: `Threads wait on each other in a cycle: ${threads.map(lineName).join(", ")}`,
         note: IN_A_TERMINAL,
       };
-    case "number-clash":
-      return {
-        ...base,
-        key: `number-clash:${shown(need.number)}`,
-        text: `Threads two machines numbered alike share ${shown(need.number)}: ${threads.map(lineName).join(", ")}`,
-        note: str(need.fix) || IN_A_TERMINAL,
-      };
     case "dangling": {
       const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`;
       const name = nameOf(str(need.entity), str(need.id));
@@ -197,12 +192,14 @@ function viewOf(
       };
     }
     case "unverified": {
-      const repository = str(need.repository);
+      const id = str(need.repository);
+      const repository = str(need.repository_name) || id;
       const reason = str(need.reason);
       // The item is its row, so the text doesn't name it twice; the Overview, which shows no rows, gives it as detail.
       return {
         ...base,
-        key: `unverified:${item?.id ?? ""}:${repository}`,
+        key: `unverified:${item?.id ?? ""}:${id}`,
+        repository,
         text: `Can't confirm ${item === null ? "an item" : "its"} merge into ${repository}`,
         detail: item === null ? null : titled(item),
         note: unverifiedWhy(repository, reason),
@@ -261,7 +258,7 @@ export function together(views: readonly NeedView[]): NeedView[] {
     const all = items.length + was.more;
     out[first] = {
       ...was,
-      text: `Can't confirm ${all} items' merges into ${repository}`,
+      text: `Can't confirm ${all} items' merges into ${was.repository ?? repository}`,
       detail: null,
       items: items.slice(0, LISTED),
       more: all - Math.min(items.length, LISTED),

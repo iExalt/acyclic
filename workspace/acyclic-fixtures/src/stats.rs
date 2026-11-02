@@ -36,7 +36,7 @@ impl Stats {
     #[must_use]
     pub fn of(import: &Import) -> Self {
         let index: HashMap<&str, usize> =
-            import.items.iter().enumerate().map(|(i, item)| (item.key.as_str(), i)).collect();
+            import.items.iter().enumerate().map(|(i, item)| (item.id.as_str(), i)).collect();
         let parent: Vec<Option<usize>> =
             import.items.iter().map(|item| item.parent.as_deref().map(|p| index[p])).collect();
         let root = |mut i: usize| {
@@ -54,32 +54,36 @@ impl Stats {
         }
         let mut threaded = BTreeSet::new();
         let (mut cross_goal_threads, mut multi_repository_threads) = (0, 0);
+        let mut thread_sizes = Vec::new();
         for thread in &import.threads {
-            let members: Vec<usize> = thread.items.iter().map(|k| index[k.as_str()]).collect();
+            let members: Vec<usize> = (0..import.items.len())
+                .filter(|&i| import.items[i].thread.as_ref() == Some(&thread.id))
+                .collect();
+            thread_sizes.push(members.len());
             threaded.extend(members.iter().copied());
             let goals: BTreeSet<usize> = members.iter().map(|&i| root(i).0).collect();
             let repositories: BTreeSet<&str> = members
                 .iter()
-                .flat_map(|&i| import.items[i].repositories.iter().map(String::as_str))
-                .chain(thread.repositories.iter().map(String::as_str))
+                .flat_map(|&i| import.items[i].repositories.iter().flatten().map(String::as_str))
+                .chain(thread.repositories.iter().flatten().map(String::as_str))
                 .collect();
             cross_goal_threads += usize::from(goals.len() > 1);
             multi_repository_threads += usize::from(repositories.len() > 1);
         }
         let mut states = BTreeMap::new();
         for item in &import.items {
-            *states.entry(format!("{:?}", item.state)).or_default() += 1;
+            *states.entry(format!("{:?}", item.state.unwrap_or(State::Backlog))).or_default() += 1;
         }
         Self {
             items: import.items.len(),
             depths,
-            thread_sizes: import.threads.iter().map(|t| t.items.len()).collect(),
+            thread_sizes,
             unthreaded: import.items.len() - threaded.len(),
             cross_goal_threads,
             multi_repository_threads,
             states,
             archived: import.items.iter().filter(|i| i.archived).count(),
-            links: import.items.iter().map(|i| i.waits_for.len()).sum(),
+            links: import.items.iter().map(|i| i.waits_for.as_ref().map_or(0, Vec::len)).sum(),
         }
     }
 

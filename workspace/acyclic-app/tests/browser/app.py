@@ -120,6 +120,10 @@ class Plan:
         rows = json.loads(run(env, "item", "show", *ids))["data"]
         self.items = {row["id"]: row for row in rows}
         self.parent = {id: row["parent"] for id, row in self.items.items()}
+        # The fixture's first thread: its ids rise in the order its records were made.
+        self.first_thread = min(
+            row["id"] for row in json.loads(run(env, "thread", "list"))["data"]["threads"]
+        )
 
     def chain(self, id):
         """The item and its ancestors, nearest first."""
@@ -587,7 +591,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     # A link to an item gone says so, and opens the rest it names: Needs you's view, from an address of when it opened
     # over the others, and a thread over it. Two layers, a phone's view away from home one of them, closed quicker than
     # the history moves, leave the address saying what's open.
-    page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
+    page.goto(f"{origin}/?item=no-such-item&thread={plan.first_thread}&needs")
     notice = page.get_by_test_id("notice")
     notice.wait_for(timeout=10_000)
     if "isn't in the plan" not in notice.inner_text():
@@ -880,11 +884,13 @@ def pairing_journey(context, page, origin, env, name, failures):
         failures.append(f"{name}: the paired browser holds the cookies {held}")
     if "acyclic-up" in page.evaluate("document.cookie"):
         failures.append(f"{name}: the page's script can read the session's cookie")
-    form, fetched = f"cross-port-{name.replace(' ', '-')}", f"cross-port-fetch-{name.replace(' ', '-')}"
+    # Ids of this view's own, so a write that got through is found.
+    tag = name.encode().hex()[:10].ljust(10, "0")
+    form, fetched = f"01900000-0000-7000-8000-{tag}0f", f"01900000-0000-7000-8000-{tag}1f"
     # A text/plain form's body is its field's name, '=' and its value: together, a command that would add an item.
-    body = json.dumps({"item": {"add": {"item": form, "title": "Cross-port", "notes": "="}}})
+    body = json.dumps({"item": {"add": {"id": form, "title": "Cross-port", "notes": "="}}})
     field, value = body.split("=", 1)
-    write = json.dumps({"item": {"add": {"item": fetched, "title": "Cross-port"}}})
+    write = json.dumps({"item": {"add": {"id": fetched, "title": "Cross-port"}}})
     pages = {
         "/form": f"""<form method=post action="{origin}/api/command" enctype=text/plain>
             <input type=hidden name='{field}' value='{value}'></form>""",
@@ -1565,7 +1571,6 @@ def edit_journey(page, view, env, plan, box, name, failures):
     open_full(page, "inspector", full=False)
 
     # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
-    added = "journey-added"
     before = settled_corner(page, first)
     item_action(page, "add-child")
     form = page.get_by_test_id("add-form")
@@ -1587,6 +1592,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     wait_drawn(page, base + 1)
     if len(waiting) != 1 or form.count():
         failures.append(f"{name}: an add wasn't drawn until the server answered")
+        return None
+    # The app made the new item's id.
+    added = json.loads(waiting[0].request.post_data)["item"]["add"]["id"]
     # Drawn, its panel takes the focus the form had, and says it is saving rather than the state core hasn't placed.
     drawn = page.evaluate(
         """() => {
@@ -1750,6 +1758,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     print(
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
     )
+    return added
 
 
 @timed
@@ -1768,11 +1777,14 @@ def failed_add_journey(page, errors, name, failures):
         }
     )
 
+    # The ids the app made for the items it added, last last.
+    sent = []
+
     def add(title, answer):
         page.route(
             "**/api/command",
             lambda route: (
-                answer(route)
+                (sent.append(json.loads(route.request.post_data)["item"]["add"]["id"]), answer(route))
                 if '"add"' in (route.request.post_data or "")
                 else route.fallback()
             ),
@@ -1826,7 +1838,7 @@ def failed_add_journey(page, errors, name, failures):
         not form.count()
         or form.locator("input[name=title]").input_value() != "Refused add"
         or page.get_by_test_id("map").evaluate(
-            "m => m.cy.getElementById('refused-add').nonempty()"
+            "(m, id) => m.cy.getElementById(id).nonempty()", sent[-1] if sent else ""
         )
         or page.get_by_test_id("inspector").count()
     ):
@@ -1849,7 +1861,7 @@ def failed_add_journey(page, errors, name, failures):
         arg=nodes + 1,
     )
     if form.count() or not page.get_by_test_id("map").evaluate(
-        "m => m.cy.getElementById('lost-answer').nonempty()"
+        "(m, id) => m.cy.getElementById(id).nonempty()", sent[-1] if sent else ""
     ):
         failures.append(
             f"{name}: an add saved without an answer opened its form again, or wasn't drawn"
@@ -1888,12 +1900,13 @@ def failed_add_journey(page, errors, name, failures):
     if editor.count():
         editor.get_by_role("button", name="Cancel").click()
     # A saved add whose read back failed stays drawn through a later add the server refuses.
+    sent = []
     page.route(
         "**/api/command",
         lambda route: (
             route.fulfill(status=500, body="")
             if route.request.post_data == '{"item":"list"}'
-            else route.fallback()
+            else (sent.append(route.request.post_data or ""), route.fallback())
         ),
     )
     # Added from the Overview, so the add goes to the Map to show where it landed: from a Map zoomed far out.
@@ -1907,10 +1920,14 @@ def failed_add_journey(page, errors, name, failures):
         timeout=10_000
     )
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    # The id the app made for it.
+    saved = next(
+        (json.loads(body)["item"]["add"]["id"] for body in sent if '"add"' in body), ""
+    )
     # In view, and at a zoom its title reads at, however far out the Map was left.
     if (
         not page.locator("[data-view=map][aria-current=page]").count()
-        or not in_open_view(page, "saved-unread")
+        or not in_open_view(page, saved)
         or page.get_by_test_id("map").evaluate("m => m.cy.zoom()") < 0.85
     ):
         failures.append(f"{name}: an item added from the Overview wasn't shown on the Map, readable")
@@ -1926,7 +1943,7 @@ def failed_add_journey(page, errors, name, failures):
     page.unroute("**/api/command")
     if (
         not page.get_by_test_id("map").evaluate(
-            "m => m.cy.getElementById('saved-unread').nonempty()"
+            "(m, id) => m.cy.getElementById(id).nonempty()", saved
         )
         or form.locator("input[name=title]").input_value() != "Refused after"
     ):
@@ -2489,13 +2506,12 @@ def main():
                     )
                     # Read by the reload edit_journey starts with.
                     run(env, "item", "edit", leaf, "--notes", HOSTILE)
-                    edit_journey(page, view, env, plan, hint, name, failures)
-                    form_journey(
-                        page, view, env, remote, "journey-added", name, failures
-                    )
+                    added = edit_journey(page, view, env, plan, hint, name, failures)
+                    if added is not None:
+                        form_journey(page, view, env, remote, added, name, failures)
                     failed_add_journey(page, errors, name, failures)
-                    thread_journey(page, env, plan, "thread-0", name, failures)
-                    needs_journey(page, env, plan, "thread-0", name, failures)
+                    thread_journey(page, env, plan, plan.first_thread, name, failures)
+                    needs_journey(page, env, plan, plan.first_thread, name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:

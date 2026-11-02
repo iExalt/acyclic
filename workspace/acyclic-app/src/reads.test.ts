@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { item } from "./map/fixture";
 import { answered, drawn, NO_READS, type Reads, show, start } from "./reads";
 
-const pond = { kind: "add" as const, item: { item: "pond", title: "Pond", parent: null, thread: null } };
+const pond = { kind: "add" as const, item: { id: "pond", title: "Pond", parent: null, thread: null } };
 const garden = [item("garden")];
 
 /** Shows read `n` with `items`, failing if it's overtaken. */

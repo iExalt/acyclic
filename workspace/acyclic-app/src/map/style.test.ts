@@ -69,13 +69,13 @@ describe("a scheme's drawing", () => {
     const drawing = (p: Palette) => {
       const lines = linesOf(
         [
-          { id: "thread-3", title: "Numbered" },
-          { id: "thread-40", title: "Another" },
-          { id: "loose", title: "Dotted" },
+          { id: "t3", title: "One" },
+          { id: "t40", title: "Another" },
+          { id: "loose", title: "Third" },
         ],
         p,
       );
-      const threads = [...lines.values()].map((line) => ({ colour: line.colour, number: line.number, ink: line.ink }));
+      const threads = [...lines.values()].map((line) => ({ colour: line.colour, ink: line.ink }));
       const marks = [null, ...threads].flatMap((thread) =>
         [null, ...stages].map((stage) => decodeURIComponent(markOf(stage, thread, 200, 48, p))),
       );

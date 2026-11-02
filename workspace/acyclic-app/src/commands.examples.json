@@ -1,5 +1,5 @@
 {
-  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which its form always gives), in an order that succeeds on a tracker holding item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
+  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which the app always gives), in an order that succeeds on a tracker holding item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
   "examples": [
     {
       "name": "list",
@@ -12,7 +12,7 @@
       "command": {
         "item": {
           "show": {
-            "items": ["a", "b"]
+            "items": ["01900000-0000-7000-8000-0000000000a1", "01900000-0000-7000-8000-0000000000b1"]
           }
         }
       }
@@ -28,10 +28,10 @@
       "command": {
         "item": {
           "add": {
-            "item": "c",
+            "id": "01900000-0000-7000-8000-0000000000c1",
             "title": "C",
-            "parent": "a",
-            "thread": "t"
+            "parent": "01900000-0000-7000-8000-0000000000a1",
+            "thread": "01900000-0000-7000-8000-0000000000f1"
           }
         }
       }
@@ -41,7 +41,7 @@
       "command": {
         "item": {
           "add": {
-            "item": "d",
+            "id": "01900000-0000-7000-8000-0000000000d1",
             "title": "D"
           }
         }
@@ -62,7 +62,7 @@
       "command": {
         "item": {
           "edit": {
-            "item": "c",
+            "item": "01900000-0000-7000-8000-0000000000c1",
             "no-parent": true
           }
         }
@@ -73,8 +73,8 @@
       "command": {
         "item": {
           "edit": {
-            "item": "d",
-            "parent": "a"
+            "item": "01900000-0000-7000-8000-0000000000d1",
+            "parent": "01900000-0000-7000-8000-0000000000a1"
           }
         }
       }
@@ -84,8 +84,8 @@
       "command": {
         "item": {
           "edit": {
-            "item": "c",
-            "waits-for": ["d"]
+            "item": "01900000-0000-7000-8000-0000000000c1",
+            "waits-for": ["01900000-0000-7000-8000-0000000000d1"]
           }
         }
       }
@@ -95,8 +95,8 @@
       "command": {
         "item": {
           "edit": {
-            "item": "c",
-            "no-waits-for": ["d"]
+            "item": "01900000-0000-7000-8000-0000000000c1",
+            "no-waits-for": ["01900000-0000-7000-8000-0000000000d1"]
           }
         }
       }
@@ -106,10 +106,10 @@
       "command": {
         "item": {
           "edit": {
-            "item": "c",
+            "item": "01900000-0000-7000-8000-0000000000c1",
             "title": "C2",
             "state": "parked",
-            "thread": "t",
+            "thread": "01900000-0000-7000-8000-0000000000f1",
             "notes": "n",
             "size": "m"
           }
@@ -121,7 +121,7 @@
       "command": {
         "item": {
           "edit": {
-            "item": "c",
+            "item": "01900000-0000-7000-8000-0000000000c1",
             "no-thread": true,
             "no-notes": true,
             "no-size": true
@@ -134,7 +134,7 @@
       "command": {
         "item": {
           "edit": {
-            "item": "d",
+            "item": "01900000-0000-7000-8000-0000000000d1",
             "no-parent": true
           }
         }
@@ -145,7 +145,7 @@
       "command": {
         "thread": {
           "edit": {
-            "thread": "t",
+            "thread": "01900000-0000-7000-8000-0000000000f1",
             "title": "T"
           }
         }
@@ -156,7 +156,7 @@
       "command": {
         "thread": {
           "edit": {
-            "thread": "t",
+            "thread": "01900000-0000-7000-8000-0000000000f1",
             "no-brief": true
           }
         }
@@ -167,7 +167,7 @@
       "command": {
         "item": {
           "reopen": {
-            "item": "e"
+            "item": "01900000-0000-7000-8000-0000000000e1"
           }
         }
       }
@@ -177,7 +177,7 @@
       "command": {
         "thread": {
           "show": {
-            "threads": ["t"]
+            "threads": ["01900000-0000-7000-8000-0000000000f1"]
           }
         }
       }

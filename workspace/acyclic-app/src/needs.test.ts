@@ -8,23 +8,32 @@ const none = new Map<string, Line>();
 const thread = (id: string, heads: string[] = []) => ({ id, title: id.toUpperCase(), heads });
 
 describe("needView", () => {
-  it("says which merge it can't confirm, and what to do about it", () => {
-    const unverified = (reason: string) =>
-      needView({ kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "app", reason }, none);
+  it("says which merge it can't confirm, in which repository by its owner/name, and what to do about it", () => {
+    const unverified = (reason: string, name: string | null = "me/app") =>
+      needView(
+        { kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "r1", repository_name: name, reason },
+        none,
+      );
     expect(unverified("no clone of the repository is mapped")).toMatchObject({
-      text: "Can't confirm its merge into app",
+      key: "unverified:i1:r1",
+      text: "Can't confirm its merge into me/app",
       detail: "Move in",
       items: ["i1"],
-      note: "This machine has no clone of app to look for merged commits in: add the clone's path to ~/.config/acyclic/clones.toml",
+      note: "This machine has no clone of me/app to look for merged commits in: add the clone's path to ~/.config/acyclic/clones.toml",
     });
     expect(unverified("the clone has no main branch").note).toBe(
-      "Looking for merged commits in this machine's clone of app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
+      "Looking for merged commits in this machine's clone of me/app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
     );
+    // A repository with no record is named by its id.
+    expect(unverified("x", null).text).toBe("Can't confirm its merge into r1");
   });
 
   it("puts the merges one cause leaves unconfirmed in one repository in one entry, where the first was", () => {
     const unverified = (id: string, repository: string, reason: string) =>
-      needView({ kind: "unverified", item: { id, title: id }, repository, reason }, none);
+      needView(
+        { kind: "unverified", item: { id, title: id }, repository, repository_name: `me/${repository}`, reason },
+        none,
+      );
     const views = [
       unverified("i1", "app", "the clone has no main branch"),
       unverified("i2", "cli", "the clone has no main branch"),
@@ -37,17 +46,17 @@ describe("needView", () => {
     const bare = needView({ kind: "unverified", item: null, repository: "app", reason: "x" }, none);
     expect(together([bare, bare])).toHaveLength(2);
     expect(shown.map((view) => [view.key, view.text, view.items.length, view.more])).toEqual([
-      ["unverified:i1:app", "Can't confirm 7 items' merges into app", 5, 2],
-      ["unverified:i2:cli", "Can't confirm its merge into cli", 1, 0],
-      ["unverified:i9:app", "Can't confirm its merge into app", 1, 0],
+      ["unverified:i1:app", "Can't confirm 7 items' merges into me/app", 5, 2],
+      ["unverified:i2:cli", "Can't confirm its merge into me/cli", 1, 0],
+      ["unverified:i9:app", "Can't confirm its merge into me/app", 1, 0],
     ]);
   });
 
-  it("leaves a thread's number out of the text only beside its badge, naming it as the thread list does", () => {
+  it("names a thread as the thread list does, with its badge, and as the entry gives it where the list lacks it", () => {
     const lines = linesOf(
       [
-        { id: "thread-3", title: "3. Ship it now" },
-        { id: "thread-7", title: "7. Build it" },
+        { id: "t3", title: "Ship it now" },
+        { id: "t7", title: "Build it" },
       ],
       PALETTES.dark,
     );
@@ -55,22 +64,22 @@ describe("needView", () => {
       needView({ kind: "contest", thread: { id, title, heads: [] } }, lines);
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
-    expect(waiting("thread-3", "3. Ship it")).toMatchObject({
+    expect(waiting("t3", "Ship it")).toMatchObject({
       text: "Two holders claim one thread: Ship it now",
-      line: lines.get("thread-3"),
-      thread: "thread-3",
+      line: lines.get("t3"),
+      thread: "t3",
       threads: [],
     });
-    // A thread the list lacks has no badge, so it keeps its number, and its row the title the entry gives.
-    expect(waiting("thread-9", "9. Gone")).toMatchObject({
-      text: "Two holders claim one thread: 9. Gone",
+    // A thread the list lacks has no badge, and its row the title the entry gives.
+    expect(waiting("t9", "Gone")).toMatchObject({
+      text: "Two holders claim one thread: Gone",
       line: undefined,
       thread: null,
-      threads: [{ id: "thread-9", title: "9. Gone" }],
+      threads: [{ id: "t9", title: "Gone" }],
     });
-    expect(threadLabel({ id: "thread-9", title: "9. Gone" }, lines)).toEqual({ line: undefined, text: "9. Gone" });
-    expect(threadLabel({ id: "thread-3", title: "3. Ship it" }, lines)).toEqual({
-      line: lines.get("thread-3"),
+    expect(threadLabel({ id: "t9", title: "Gone" }, lines)).toEqual({ line: undefined, text: "Gone" });
+    expect(threadLabel({ id: "t3", title: "Ship it" }, lines)).toEqual({
+      line: lines.get("t3"),
       text: "Ship it now",
     });
     // Text that doesn't name its thread has no badge: the thread's row below already shows it.
@@ -78,14 +87,14 @@ describe("needView", () => {
       {
         kind: "conflict",
         entity: "thread",
-        id: "thread-7",
+        id: "t7",
         field: "brief",
         values: ["x", "y"],
-        thread: { id: "thread-7", title: "7. Build it" },
+        thread: { id: "t7", title: "Build it" },
       },
       lines,
     );
-    expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "thread-7", title: "7. Build it" }] });
+    expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "t7", title: "Build it" }] });
   });
 
   it("settles a conflict with each value it can keep, and says why for one it can't", () => {
@@ -169,24 +178,6 @@ describe("needView", () => {
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
     expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");
-  });
-
-  it("names the threads two machines numbered alike, with the command that renumbers one", () => {
-    const clash = needView(
-      {
-        kind: "number-clash",
-        number: 32,
-        threads: [thread("thread-mac-32"), thread("thread-pi-32")],
-        fresh: ["thread-pi-32"],
-        fix: "acyclic thread renumber thread-pi-32",
-      },
-      none,
-    );
-    expect(clash).toMatchObject({
-      key: "number-clash:32",
-      threads: [{ id: "thread-mac-32" }, { id: "thread-pi-32" }],
-      note: "acyclic thread renumber thread-pi-32",
-    });
   });
 });
 

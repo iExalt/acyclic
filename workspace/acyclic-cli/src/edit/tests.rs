@@ -101,7 +101,7 @@ fn an_agents_membership_and_repository_edits_apply_and_a_repeat_writes_nothing()
     let mut r = replica();
     let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
     add_thread(&mut r, "t", &thread, USER_BY).unwrap();
-    let repository = RepositoryFields { owner: Some("o".into()), ..RepositoryFields::default() };
+    let repository = RepositoryFields { name: Some("o/r".into()), ..RepositoryFields::default() };
     crate::edit::add_repository(&mut r, "r", &repository, USER_BY).unwrap();
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
@@ -135,33 +135,38 @@ fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() 
         needs.into_iter().filter(|entry| matches!(entry, Entry::Dangling { .. })).collect()
     };
     let mut mac = replica();
-    for id in ["a", "b"] {
+    let (a, b) = (id(0xa1), id(0xb1));
+    for id in [&a, &b] {
         add_item(&mut mac, id, &titled(id), USER_BY).unwrap();
     }
     // One replica deletes b while another makes a wait for it.
     let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
-    acyclic_core::delete::delete_item(&mut pi, "b", AGENT).unwrap();
+    acyclic_core::delete::delete_item(&mut pi, &b, AGENT).unwrap();
     let waits = ItemFields {
-        waits_for: Delta { add: vec!["b".into()], remove: vec![] },
+        waits_for: Delta { add: vec![b.clone()], remove: vec![] },
         ..ItemFields::default()
     };
-    edit_item(&mut mac, "a", &waits, AGENT).unwrap();
+    edit_item(&mut mac, &a, &waits, AGENT).unwrap();
     mac.join(pi.state()).unwrap();
     assert_eq!(
         dangling(&mac),
         [Entry::Dangling {
             kind: "item".into(),
-            id: "a".into(),
+            id: a.clone(),
             field: "waits-for".into(),
-            target: "b".into(),
-            fix: Some("acyclic item edit a --no-waits-for b".into()),
+            target: b.clone(),
+            fix: Some(format!("acyclic item edit {a} --no-waits-for {b}")),
         }]
     );
+    // Named by 6 characters of its id, in upper case: no record has that id now, but the item holds it.
     let let_go = ItemFields {
-        waits_for: Delta { add: vec![], remove: vec!["b".into()] },
+        waits_for: Delta { add: vec![], remove: vec!["0000B1".into()] },
         ..ItemFields::default()
-    };
-    edit_item(&mut mac, "a", &let_go, AGENT).unwrap();
+    }
+    .resolve(&Model::read(mac.state()).unwrap(), Some(&a))
+    .unwrap();
+    assert_eq!(let_go.waits_for.remove, [b]);
+    edit_item(&mut mac, &a, &let_go, AGENT).unwrap();
     assert_eq!(dangling(&mac), []);
 }
 
@@ -221,11 +226,7 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
     let other = ThreadFields { title: Some("Other".into()), ..ThreadFields::default() };
     assert_eq!(code(add_thread(&mut r, "t", &other, AGENT)), "already-exists");
     assert_eq!(code(edit_thread(&mut r, "ghost", &other, AGENT)), "not-found");
-    let repo = RepositoryFields {
-        owner: Some("o".into()),
-        name: Some("n".into()),
-        default_branch: Some("main".into()),
-    };
+    let repo = RepositoryFields { name: Some("o/n".into()), default_branch: Some("main".into()) };
     add_repository(&mut r, "r", &repo, AGENT).unwrap();
     let before = r.changes();
     add_repository(&mut r, "r", &repo, AGENT).unwrap();
@@ -237,6 +238,11 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
         edit_repository(&mut r, "ghost", &trunk, AGENT).map_err(|e| e.code),
         Err("not-found")
     );
+    // Another record may not take its owner/name, in any case, and a name must be one.
+    let same = RepositoryFields { name: Some("O/N".into()), default_branch: Some("main".into()) };
+    assert_eq!(add_repository(&mut r, "s", &same, AGENT).unwrap_err().code, "already-exists");
+    let bare = RepositoryFields { name: Some("n".into()), default_branch: Some("main".into()) };
+    assert_eq!(add_repository(&mut r, "s", &bare, AGENT).unwrap_err().code, "usage");
 }
 
 #[test]
@@ -272,29 +278,33 @@ fn an_edit_naming_a_missing_thread_or_repository_writes_nothing() {
     assert_eq!((r.changes(), item(&r, "a").title.one().cloned()), (before, Some("Before".into())));
 }
 
+/// A fixed `UUIDv7` told apart by `n`.
+fn id(n: u16) -> String {
+    format!("01900000-0000-7000-8000-{n:012x}")
+}
+
 #[test]
-fn an_add_without_an_id_is_given_the_next_and_a_retry_names_the_first() {
+fn an_add_without_an_id_is_given_a_new_one_and_a_retry_names_the_first() {
     let mut r = replica();
-    let id = |r: &Replica, of: &str, given: Option<&str>, title: &str| {
+    let new = |r: &Replica, of: &str, given: Option<&str>, title: &str| {
         new_id(r, of, given, title).map_err(|err| (err.code, err.details))
     };
-    assert_eq!(id(&r, kind::ITEM, None, "Sow"), Ok("item-mac-1".to_owned()));
-    add_item(&mut r, "item-mac-1", &titled("Sow"), AGENT).unwrap();
-    // A retry of the same add is refused, naming the item it made; an explicit id adds a second.
-    assert_eq!(
-        id(&r, kind::ITEM, None, "Sow"),
-        Err(("already-exists", json!({"id": "item-mac-1"})))
-    );
-    assert_eq!(id(&r, kind::ITEM, Some("sow-again"), "Sow"), Ok("sow-again".to_owned()));
-    // A new id in the tracker's form is refused; repeating the add of one that exists isn't.
-    assert_eq!(id(&r, kind::ITEM, Some("item-x"), "X").unwrap_err().0, "reserved-id");
-    assert_eq!(id(&r, kind::ITEM, Some("item-mac-1"), "Sow"), Ok("item-mac-1".to_owned()));
-    // Threads match on title too, and number apart from items.
-    assert_eq!(id(&r, kind::THREAD, None, "Sow"), Ok("thread-mac-1".to_owned()));
+    let made = new(&r, kind::ITEM, None, "Sow").unwrap();
+    assert_eq!(acyclic_core::ids::v7(&made), Some(made.clone()));
+    add_item(&mut r, &made, &titled("Sow"), AGENT).unwrap();
+    // A retry of the same add is refused, naming the item it made, with an id of its own or none.
+    let named = Err(("already-exists", json!({"id": made})));
+    assert_eq!(new(&r, kind::ITEM, None, "Sow"), named);
+    assert_eq!(new(&r, kind::ITEM, Some(&id(2)), "Sow"), named);
+    // An id that exists is looked up before the title, in any case, so the add is a repeat.
+    assert_eq!(new(&r, kind::ITEM, Some(&made.to_uppercase()), "Sow"), Ok(made.clone()));
+    assert_eq!(new(&r, kind::ITEM, Some("plant"), "Plant").unwrap_err().0, "invalid-id");
+    // Threads match on title too, apart from items.
+    assert!(new(&r, kind::THREAD, None, "Sow").is_ok());
     let fields = ThreadFields { title: Some("Beds".into()), ..ThreadFields::default() };
-    add_thread(&mut r, "thread-mac-1", &fields, USER_BY).unwrap();
-    assert_eq!(id(&r, kind::THREAD, None, "Beds").unwrap_err().0, "already-exists");
-    assert_eq!(id(&r, kind::THREAD, None, "Rows"), Ok("thread-mac-2".to_owned()));
+    add_thread(&mut r, &id(3), &fields, USER_BY).unwrap();
+    assert_eq!(new(&r, kind::THREAD, None, "Beds").unwrap_err().0, "already-exists");
+    assert_eq!(new(&r, kind::THREAD, Some(&id(3)), "Beds"), Ok(id(3)));
 }
 
 #[test]
@@ -308,6 +318,6 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
     for title in ["Weed", "Sow", "Rows"] {
-        assert_eq!(new_id(&r, kind::ITEM, None, title).unwrap(), "item-mac-1", "{title}");
+        assert!(new_id(&r, kind::ITEM, None, title).is_ok(), "{title}");
     }
 }

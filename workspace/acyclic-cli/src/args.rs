@@ -62,7 +62,7 @@ pub const SECTIONS: [(&str, &[&str]); 2] = [
     ("Command Groups", &["item", "thread", "repository"]),
     (
         "Other Commands",
-        &["needs", "init", "sync", "prime", "import", "doctor", "serve", "up", "completions"],
+        &["needs", "init", "sync", "prime", "id", "import", "doctor", "serve", "up", "completions"],
     ),
 ];
 
@@ -111,6 +111,21 @@ where
     })
 }
 
+/// The most ids `acyclic id` prints at once.
+pub const ID_MAX: u32 = 1000;
+
+/// Reads how many ids to print, refusing a count outside 1 to [`ID_MAX`] in plain words.
+fn id_count(text: &str) -> Result<u32, String> {
+    text.parse::<u32>()
+        .ok()
+        .filter(|count| (1..=ID_MAX).contains(count))
+        .ok_or_else(|| format!("acyclic id prints 1 to {ID_MAX} ids"))
+}
+
+fn one() -> u32 {
+    1
+}
+
 /// The longest lease, in minutes.
 pub const LEASE_MAX_MINUTES: u32 = 480;
 
@@ -141,6 +156,13 @@ pub enum Command {
     Sync,
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
+    /// Prints new `UUIDv7` ids, one per line, as text, to name records with in `--id` or an import document.
+    Id {
+        /// How many: 1 to 1000.
+        #[arg(default_value_t = 1, value_parser = id_count)]
+        #[serde(default = "one")]
+        count: u32,
+    },
     /// Lists what needs the user.
     Needs,
     /// Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example.
@@ -268,7 +290,7 @@ pub struct Up {
 /// What a command needs and does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
-    /// Needs no tracker: `init`, `prime`, `completions` and `import --schema`.
+    /// Needs no tracker: `init`, `prime`, `id`, `completions` and `import --schema`.
     Standalone,
     /// Starts a server: `serve` and `up`.
     Server,
@@ -288,6 +310,7 @@ impl Command {
         match self {
             Self::Init { .. }
             | Self::Prime
+            | Self::Id { .. }
             | Self::Completions { .. }
             | Self::Import { schema: true, .. } => Class::Standalone,
             Self::Serve(_) | Self::Up(_) => Class::Server,
@@ -313,7 +336,7 @@ impl Command {
                 | ThreadCommand::Edit(_)
                 | ThreadCommand::Claim { .. }
                 | ThreadCommand::Release { .. }
-                | ThreadCommand::Renumber { .. },
+                | ThreadCommand::Delete { .. },
             )
             | Self::Repository(RepositoryCommand::Add { .. } | RepositoryCommand::Edit { .. }) => {
                 Class::Write
@@ -345,12 +368,8 @@ impl Command {
             {
                 Err(usage(format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes")))
             },
-            Self::Item(ItemCommand::Done { repository, commit, .. })
-                if repository.is_some() != commit.is_some() =>
-            {
-                Err(usage(
-                    "item done takes --repository and --commit together, or --evidence alone",
-                ))
+            Self::Id { count } if !(1..=ID_MAX).contains(count) => {
+                Err(usage(format!("acyclic id prints 1 to {ID_MAX} ids")))
             },
             Self::Import { file: None, schema: false, .. } => {
                 Err(usage("import needs a file, or --schema for an example of one"))
@@ -416,10 +435,12 @@ impl StateWord {
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ItemCommand {
-    /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused.
+    /// Adds an item; adding it again with the same fields changes nothing, and with other fields is refused. An add
+    /// whose title is an open item's is refused.
     Add {
-        /// The new item's id; leave it out for the tracker to assign one, such as `item-mac-143`.
-        item: Option<String>,
+        /// The new item's id, a `UUIDv7` (`acyclic id` prints one); left out, the tracker makes one.
+        #[arg(long)]
+        id: Option<String>,
         /// Its title.
         #[arg(short = 't', long)]
         title: String,
@@ -463,11 +484,8 @@ pub enum ItemCommand {
     Done {
         /// The item.
         item: String,
-        /// The repository record holding the commit.
-        #[arg(short = 'r', long, requires = "commit")]
-        repository: Option<String>,
-        /// The commit that completed it.
-        #[arg(short = 'c', long, requires = "repository")]
+        /// The commit that completed it, after the repository that holds it, such as `owner/name@1a2b3c4`.
+        #[arg(short = 'c', long, value_name = "REPOSITORY@SHA")]
         commit: Option<String>,
         /// Evidence in words, such as where a record lives.
         #[arg(short = 'e', long)]
@@ -540,7 +558,7 @@ pub struct ItemEdit {
     #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
-    /// Remove a repository it touches, by the id it holds, even one with no record; repeat for more.
+    /// Remove a repository it touches, even one whose record is gone; repeat for more.
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,
@@ -548,7 +566,7 @@ pub struct ItemEdit {
     #[arg(long, value_name = "ITEM")]
     #[serde(default)]
     pub waits_for: Vec<String>,
-    /// Stop it waiting for an item, by the id it holds, even one that no longer exists; repeat for more.
+    /// Stop it waiting for an item, even one that no longer exists; repeat for more.
     #[arg(long, value_name = "ITEM")]
     #[serde(default)]
     pub no_waits_for: Vec<String>,
@@ -569,10 +587,12 @@ impl ItemEdit {
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
-    /// Adds a thread; adding it again with the same fields changes nothing, and with other fields is refused.
+    /// Adds a thread; adding it again with the same fields changes nothing, and with other fields is refused. An add
+    /// whose title is another thread's is refused.
     Add {
-        /// The new thread's id; leave it out for the tracker to assign one, such as `thread-mac-32`.
-        thread: Option<String>,
+        /// The new thread's id, a `UUIDv7` (`acyclic id` prints one); left out, the tracker makes one.
+        #[arg(long)]
+        id: Option<String>,
         /// Its title.
         #[arg(short = 't', long)]
         title: String,
@@ -620,9 +640,8 @@ pub enum ThreadCommand {
         /// The thread.
         thread: String,
     },
-    /// Moves a thread whose id ends in another's number to a fresh id, with its fields and members; only a thread no
-    /// live claim names.
-    Renumber {
+    /// Deletes a thread that no item is in and no one holds a live claim on.
+    Delete {
         /// The thread.
         thread: String,
     },
@@ -648,7 +667,7 @@ pub struct ThreadEdit {
     #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
-    /// Remove a repository, by the id it holds, even one with no record; repeat for more.
+    /// Remove a repository, even one whose record is gone; repeat for more.
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,
@@ -668,13 +687,11 @@ pub enum RepositoryCommand {
     /// Adds a repository record; adding it again with the same fields changes nothing, and with other fields is
     /// refused.
     Add {
-        /// The new record.
-        repository: String,
-        /// The owner.
+        /// The new record's id, a `UUIDv7` (`acyclic id` prints one); left out, the tracker makes one.
         #[arg(long)]
-        owner: String,
-        /// The repository's name.
-        #[arg(long)]
+        id: Option<String>,
+        /// Its `owner/name`, which no other record has.
+        #[arg(long, value_name = "OWNER/NAME")]
         name: String,
         /// The default branch.
         #[arg(long)]
@@ -684,11 +701,8 @@ pub enum RepositoryCommand {
     Edit {
         /// The record.
         repository: String,
-        /// A new owner.
-        #[arg(long)]
-        owner: Option<String>,
-        /// A new name.
-        #[arg(long)]
+        /// A new `owner/name`, which no other record has.
+        #[arg(long, value_name = "OWNER/NAME")]
         name: Option<String>,
         /// A new default branch.
         #[arg(long)]

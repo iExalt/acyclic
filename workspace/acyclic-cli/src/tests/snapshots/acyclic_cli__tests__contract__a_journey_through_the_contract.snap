@@ -14,43 +14,43 @@ $ acyclic init tracker --replica mac
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a1 --title First
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "placed": [],
     "title": "First"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a2 --title Second
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": [],
     "title": "Second"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Second
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a2 --title Second
 # exit 0
 {
   "data": {
     "changed": false,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": [],
     "title": "Second"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a2 --title Other
 # exit 1
 {
   "error": {
@@ -60,17 +60,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a2 --title Other
         "title"
       ]
     },
-    "message": "item a2 exists with other --title; change it with `acyclic item edit a2 --title …`"
+    "message": "item 01900000-0000-7000-8000-0000000000a2 exists with other --title; change it with `acyclic item edit 01900000-0000-7000-8000-0000000000a2 --title …`"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --waits-for a1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --waits-for First
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
@@ -85,34 +85,34 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t0 --title Start
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f0 --title Start
 # exit 0
 {
   "data": {
     "changed": true,
-    "thread": "t0",
+    "thread": "01900000-0000-7000-8000-0000000000f0",
     "title": "Start"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t0
+$ ACYCLIC_ACTOR=session/mac acyclic item edit 0000a1 --thread Start
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t0
+$ ACYCLIC_ACTOR=session/mac acyclic item edit 0000a2 --thread Start
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
@@ -130,19 +130,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           "members": 2
         },
         "heads": [
-          "a1"
+          "01900000-0000-7000-8000-0000000000a1"
         ],
-        "id": "t0",
+        "id": "01900000-0000-7000-8000-0000000000f0",
         "items": [
           {
-            "id": "a1",
+            "id": "01900000-0000-7000-8000-0000000000a1",
             "parent": null,
             "readiness": {
               "status": "ready"
             },
             "stage": "ready",
             "state": "backlog",
-            "thread": "t0",
+            "thread": "01900000-0000-7000-8000-0000000000f0",
             "title": "First"
           }
         ],
@@ -153,20 +153,20 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread claim a1
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim First
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": {
-      "thread": "t0"
+      "thread": "01900000-0000-7000-8000-0000000000f0"
     },
-    "message": "no thread a1; claim a thread, not an item"
+    "message": "no thread First; `acyclic thread list` lists them, and `acyclic thread add --title <TITLE>` adds one"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread claim t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim Start
 # exit 0
 {
   "data": {
@@ -177,12 +177,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread claim t0
       "lease_started_at": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
-    "thread": "t0"
+    "thread": "01900000-0000-7000-8000-0000000000f0"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done a2
+$ ACYCLIC_ACTOR=session/mac acyclic item done Second
 # exit 1
 {
   "error": {
@@ -191,18 +191,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done a2
       "readiness": {
         "status": "blocked",
         "waiting": {
-          "a1": {
+          "01900000-0000-7000-8000-0000000000a1": {
             "why": "open"
           }
         }
       }
     },
-    "message": "item a2 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show a2` says which"
+    "message": "item 01900000-0000-7000-8000-0000000000a2 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show 01900000-0000-7000-8000-0000000000a2` says which"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --state done
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --state done
 # exit 2
 
 # stderr
@@ -211,7 +211,7 @@ error: invalid value 'done' for '--state <STATE>'
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/pi acyclic thread claim t0
+$ ACYCLIC_ACTOR=session/pi acyclic thread claim Start
 # exit 1
 {
   "error": {
@@ -220,17 +220,17 @@ $ ACYCLIC_ACTOR=session/pi acyclic thread claim t0
       "readiness": {
         "holder": "session/mac",
         "items": [
-          "a1"
+          "01900000-0000-7000-8000-0000000000a1"
         ],
         "status": "claimed"
       }
     },
-    "message": "thread t0 isn't ready to claim: it has no ready work, or someone else holds it or a resource it needs; `acyclic thread show t0` says why"
+    "message": "thread 01900000-0000-7000-8000-0000000000f0 isn't ready to claim: it has no ready work, or someone else holds it or a resource it needs; `acyclic thread show 01900000-0000-7000-8000-0000000000f0` says why"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/pi acyclic item done a1
+$ ACYCLIC_ACTOR=session/pi acyclic item done First
 # exit 1
 {
   "error": {
@@ -241,44 +241,42 @@ $ ACYCLIC_ACTOR=session/pi acyclic item done a1
         "status": "claimed"
       }
     },
-    "message": "item a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show a1` says which"
+    "message": "item 01900000-0000-7000-8000-0000000000a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show 01900000-0000-7000-8000-0000000000a1` says which"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done a1 -e shipped
+$ ACYCLIC_ACTOR=session/mac acyclic item done First -e shipped
 # exit 0
 {
   "data": {
     "changed": true,
     "evidence": {
       "commit": null,
-      "note": "shipped",
-      "repository": null
+      "text": "shipped"
     },
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "state": "done"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done a1 --evidence shipped
+$ ACYCLIC_ACTOR=session/mac acyclic item done First --evidence shipped
 # exit 0
 {
   "data": {
     "changed": false,
     "evidence": {
       "commit": null,
-      "note": "shipped",
-      "repository": null
+      "text": "shipped"
     },
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "state": "done"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread show t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread show Start
 # exit 0
 {
   "data": [
@@ -298,25 +296,25 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
         "members": 2
       },
       "heads": [
-        "a2"
+        "01900000-0000-7000-8000-0000000000a2"
       ],
-      "id": "t0",
+      "id": "01900000-0000-7000-8000-0000000000f0",
       "members": [
         {
           "conflicted": false,
-          "id": "a1",
+          "id": "01900000-0000-7000-8000-0000000000a1",
           "parent": null,
           "readiness": {
             "status": "done"
           },
           "stage": "done",
           "state": "done",
-          "thread": "t0",
+          "thread": "01900000-0000-7000-8000-0000000000f0",
           "title": "First"
         },
         {
           "conflicted": false,
-          "id": "a2",
+          "id": "01900000-0000-7000-8000-0000000000a2",
           "parent": null,
           "readiness": {
             "holder": "session/mac",
@@ -324,14 +322,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
           },
           "stage": "in-progress",
           "state": "backlog",
-          "thread": "t0",
+          "thread": "01900000-0000-7000-8000-0000000000f0",
           "title": "Second"
         }
       ],
       "readiness": {
         "holder": "session/mac",
         "items": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
         "status": "claimed"
       },
@@ -342,24 +340,24 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t0
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread release t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread release Start
 # exit 0
 {
   "data": {
     "changed": true,
     "released": true,
-    "thread": "t0"
+    "thread": "01900000-0000-7000-8000-0000000000f0"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread release t0
+$ ACYCLIC_ACTOR=session/mac acyclic thread release Start
 # exit 0
 {
   "data": {
     "changed": false,
     "released": false,
-    "thread": "t0"
+    "thread": "01900000-0000-7000-8000-0000000000f0"
   },
   "ok": true
 }
@@ -376,19 +374,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           "members": 2
         },
         "heads": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
-        "id": "t0",
+        "id": "01900000-0000-7000-8000-0000000000f0",
         "items": [
           {
-            "id": "a2",
+            "id": "01900000-0000-7000-8000-0000000000a2",
             "parent": null,
             "readiness": {
               "status": "ready"
             },
             "stage": "ready",
             "state": "backlog",
-            "thread": "t0",
+            "thread": "01900000-0000-7000-8000-0000000000f0",
             "title": "Second"
           }
         ],
@@ -399,29 +397,29 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f1 --title Work
 # exit 0
 {
   "data": {
     "changed": true,
-    "thread": "t1",
+    "thread": "01900000-0000-7000-8000-0000000000f1",
     "title": "Work"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Work
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f1 --title Work
 # exit 0
 {
   "data": {
     "changed": false,
-    "thread": "t1",
+    "thread": "01900000-0000-7000-8000-0000000000f1",
     "title": "Work"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Other
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f1 --title Other
 # exit 1
 {
   "error": {
@@ -431,23 +429,36 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add t1 --title Other
         "title"
       ]
     },
-    "message": "thread t1 exists with other --title; change it with `acyclic thread edit t1 --title …`"
+    "message": "thread 01900000-0000-7000-8000-0000000000f1 exists with other --title; change it with `acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --title …`"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread nope
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --title Work
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "id": "01900000-0000-7000-8000-0000000000f1"
+    },
+    "message": "thread 01900000-0000-7000-8000-0000000000f1 has this title, so the add would make a second; change that one with `acyclic thread edit 01900000-0000-7000-8000-0000000000f1`, or give this one another title"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --thread nope
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no thread nope; add it with `acyclic thread add nope --title <TITLE>`"
+    "message": "no thread nope; `acyclic thread list` lists them, and `acyclic thread add --title <TITLE>` adds one"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --title Renamed --parent nope
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --title Renamed --parent nope
 # exit 3
 {
   "error": {
@@ -458,7 +469,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --title Renamed --parent nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a2
+$ ACYCLIC_ACTOR=session/mac acyclic item show Second
 # exit 0
 {
   "data": [
@@ -468,11 +479,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
       "claims": [],
       "done_at": null,
       "evidence": null,
-      "id": "a2",
+      "id": "01900000-0000-7000-8000-0000000000a2",
       "links": {
         "waited_on_by": [],
         "waits_for": [
-          "a1"
+          "01900000-0000-7000-8000-0000000000a1"
         ]
       },
       "notes": null,
@@ -486,19 +497,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
       "size": null,
       "stage": "ready",
       "state": "backlog",
-      "thread": "t0",
+      "thread": "01900000-0000-7000-8000-0000000000f0",
       "title": "Second"
     }
   ],
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --thread Work
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
@@ -516,19 +527,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           "members": 1
         },
         "heads": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
-        "id": "t1",
+        "id": "01900000-0000-7000-8000-0000000000f1",
         "items": [
           {
-            "id": "a2",
+            "id": "01900000-0000-7000-8000-0000000000a2",
             "parent": null,
             "readiness": {
               "status": "ready"
             },
             "stage": "ready",
             "state": "backlog",
-            "thread": "t1",
+            "thread": "01900000-0000-7000-8000-0000000000f1",
             "title": "Second"
           }
         ],
@@ -539,12 +550,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --thread t1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit First --thread Work
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a1",
+    "item": "01900000-0000-7000-8000-0000000000a1",
     "placed": []
   },
   "ok": true
@@ -565,25 +576,25 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
   "data": {
     "items": [
       {
-        "id": "a1",
+        "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": null,
         "readiness": {
           "status": "done"
         },
         "stage": "done",
         "state": "done",
-        "thread": "t1",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "First"
       },
       {
-        "id": "a2",
+        "id": "01900000-0000-7000-8000-0000000000a2",
         "parent": null,
         "readiness": {
           "status": "ready"
         },
         "stage": "ready",
         "state": "backlog",
-        "thread": "t1",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "Second"
       }
     ]
@@ -596,7 +607,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
 {
   "data": {
     "anytime": [
-      "t1"
+      "01900000-0000-7000-8000-0000000000f1"
     ],
     "threads": [
       {
@@ -606,7 +617,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
           "members": 0
         },
         "heads": [],
-        "id": "t0",
+        "id": "01900000-0000-7000-8000-0000000000f0",
         "title": "Start",
         "waits_for": []
       },
@@ -617,9 +628,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
           "members": 2
         },
         "heads": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
-        "id": "t1",
+        "id": "01900000-0000-7000-8000-0000000000f1",
         "title": "Work",
         "waits_for": []
       }
@@ -631,39 +642,39 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
 
 $ ACYCLIC_ACTOR=session/mac acyclic item list -o pretty
 # exit 0
-ID  TITLE   STATE    THREAD  READINESS
-a1  First   done     t1      done
-a2  Second  backlog  t1      ready
+ID      TITLE   STATE    THREAD  READINESS
+0000a1  First   done     0000f1  done
+0000a2  Second  backlog  0000f1  ready
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread ready -o pretty
 # exit 0
-THREAD   ITEM  TITLE
-t1 Work  a2    Second
+THREAD       ITEM    TITLE
+0000f1 Work  0000a2  Second
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread list -o pretty
 # exit 0
-ID  TITLE  MEMBERS  DONE  WAVE  HEADS
-t0  Start  0        0
-t1  Work   2        1     any   a2
+ID      TITLE  MEMBERS  DONE  WAVE  HEADS
+0000f0  Start  0        0
+0000f1  Work   2        1     any   0000a2
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a1 -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic item show First -o pretty
 # exit 0
-id         a1
+id         0000a1
 title      First
 archived   no
 done_at    2026-10-15T00:00:00Z
-evidence   note shipped
-links      waited_on_by a2
+evidence   text shipped
+links      waited_on_by 0000a2
 readiness  done
 reopened   no
 role       item
 stage      done
 state      done
-thread     t1
+thread     0000f1
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a1 --title First -o pretty
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a1 --title First -o pretty
 # exit 0
-no change to item a1 "First"
+no change to item 0000a1 "First"
 
 $ ACYCLIC_ACTOR=session/mac acyclic item show nope -o pretty
 # exit 3
@@ -671,7 +682,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show nope -o pretty
 # stderr
 error: no item nope [not-found]
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread show t1
+$ ACYCLIC_ACTOR=session/mac acyclic thread show Work
 # exit 0
 {
   "data": [
@@ -684,38 +695,38 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
         "members": 2
       },
       "heads": [
-        "a2"
+        "01900000-0000-7000-8000-0000000000a2"
       ],
-      "id": "t1",
+      "id": "01900000-0000-7000-8000-0000000000f1",
       "members": [
         {
           "conflicted": false,
-          "id": "a1",
+          "id": "01900000-0000-7000-8000-0000000000a1",
           "parent": null,
           "readiness": {
             "status": "done"
           },
           "stage": "done",
           "state": "done",
-          "thread": "t1",
+          "thread": "01900000-0000-7000-8000-0000000000f1",
           "title": "First"
         },
         {
           "conflicted": false,
-          "id": "a2",
+          "id": "01900000-0000-7000-8000-0000000000a2",
           "parent": null,
           "readiness": {
             "status": "ready"
           },
           "stage": "ready",
           "state": "backlog",
-          "thread": "t1",
+          "thread": "01900000-0000-7000-8000-0000000000f1",
           "title": "Second"
         }
       ],
       "readiness": {
         "items": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
         "status": "ready"
       },
@@ -726,18 +737,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show t1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread show t1 nope
+$ ACYCLIC_ACTOR=session/mac acyclic thread show Work nope
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no thread nope; `acyclic thread list` lists them"
+    "message": "no thread nope; `acyclic thread list` lists them, and `acyclic thread add --title <TITLE>` adds one"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
+$ ACYCLIC_ACTOR=session/mac acyclic item show First Second
 # exit 0
 {
   "data": [
@@ -748,13 +759,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       "done_at": "2026-10-15T00:00:00Z",
       "evidence": {
         "commit": null,
-        "note": "shipped",
-        "repository": null
+        "text": "shipped"
       },
-      "id": "a1",
+      "id": "01900000-0000-7000-8000-0000000000a1",
       "links": {
         "waited_on_by": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
         "waits_for": []
       },
@@ -769,7 +779,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       "size": null,
       "stage": "done",
       "state": "done",
-      "thread": "t1",
+      "thread": "01900000-0000-7000-8000-0000000000f1",
       "title": "First"
     },
     {
@@ -778,11 +788,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       "claims": [],
       "done_at": null,
       "evidence": null,
-      "id": "a2",
+      "id": "01900000-0000-7000-8000-0000000000a2",
       "links": {
         "waited_on_by": [],
         "waits_for": [
-          "a1"
+          "01900000-0000-7000-8000-0000000000a1"
         ]
       },
       "notes": null,
@@ -796,14 +806,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 a2
       "size": null,
       "stage": "ready",
       "state": "backlog",
-      "thread": "t1",
+      "thread": "01900000-0000-7000-8000-0000000000f1",
       "title": "Second"
     }
   ],
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a1 nope
+$ ACYCLIC_ACTOR=session/mac acyclic item show First nope
 # exit 3
 {
   "error": {
@@ -814,50 +824,49 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1 nope
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-thread
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --no-thread
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --name code
+$ ACYCLIC_ACTOR=session/mac acyclic repository add --name me/code
 # exit 2
 
 # stderr
 error: the following required arguments were not provided:
-  --owner <OWNER>
   --default-branch <DEFAULT_BRANCH>
 
-Usage: acyclic repository add --owner <OWNER> --name <NAME> --default-branch <DEFAULT_BRANCH> <REPOSITORY>
+Usage: acyclic repository add --name <OWNER/NAME> --default-branch <DEFAULT_BRANCH>
 
 For more information, try '--help'.
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repository add --id 01900000-0000-7000-8000-0000000000e1 --name me/code --default-branch main
 # exit 0
 {
   "data": {
     "changed": true,
-    "repository": "r1"
+    "repository": "01900000-0000-7000-8000-0000000000e1"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch main
+$ ACYCLIC_ACTOR=session/mac acyclic repository add --id 01900000-0000-7000-8000-0000000000e1 --name me/code --default-branch main
 # exit 0
 {
   "data": {
     "changed": false,
-    "repository": "r1"
+    "repository": "01900000-0000-7000-8000-0000000000e1"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --default-branch trunk
+$ ACYCLIC_ACTOR=session/mac acyclic repository add --id 01900000-0000-7000-8000-0000000000e1 --name me/code --default-branch trunk
 # exit 1
 {
   "error": {
@@ -867,17 +876,30 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository add r1 --owner me --name code --d
         "default_branch"
       ]
     },
-    "message": "repository record r1 exists with other --default-branch; change it with `acyclic repository edit r1 --default-branch …`"
+    "message": "repository record 01900000-0000-7000-8000-0000000000e1 exists with other --default-branch; change it with `acyclic repository edit 01900000-0000-7000-8000-0000000000e1 --default-branch …`"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository edit r1 --default-branch trunk
+$ ACYCLIC_ACTOR=session/mac acyclic repository add --name ME/Code --default-branch main
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "id": "01900000-0000-7000-8000-0000000000e1"
+    },
+    "message": "repository 01900000-0000-7000-8000-0000000000e1 is named ME/Code already"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic repository edit me/code --default-branch trunk
 # exit 0
 {
   "data": {
     "changed": true,
-    "repository": "r1"
+    "repository": "01900000-0000-7000-8000-0000000000e1"
   },
   "ok": true
 }
@@ -888,32 +910,50 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository edit nope --default-branch main
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no repository record nope; `acyclic repository list` lists them"
+    "message": "no repository nope; `acyclic repository list` lists them, and `acyclic repository add --name <OWNER/NAME> --default-branch <BRANCH>` adds one"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --repository r1
+$ ACYCLIC_ACTOR=session/mac acyclic repository show code
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": {
+      "candidates": [
+        {
+          "id": "01900000-0000-7000-8000-0000000000e1",
+          "name": "me/code"
+        }
+      ]
+    },
+    "message": "no repository code: a repository is named by its owner/name, such as 01900000-0000-7000-8000-0000000000e1 (me/code)"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --repository ME/CODE
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository show r1
+$ ACYCLIC_ACTOR=session/mac acyclic repository show me/code
 # exit 0
 {
   "data": [
     {
       "default_branch": "trunk",
-      "id": "r1",
+      "id": "01900000-0000-7000-8000-0000000000e1",
       "installation": null,
       "items": [
-        "a2"
+        "01900000-0000-7000-8000-0000000000a2"
       ],
       "name": "code",
       "owner": "me",
@@ -923,24 +963,24 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository show r1
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-repository r1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --no-repository me/code
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic repository show r1
+$ ACYCLIC_ACTOR=session/mac acyclic repository show me/code
 # exit 0
 {
   "data": [
     {
       "default_branch": "trunk",
-      "id": "r1",
+      "id": "01900000-0000-7000-8000-0000000000e1",
       "installation": null,
       "items": [],
       "name": "code",
@@ -958,7 +998,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository list
     "repositories": [
       {
         "default_branch": "trunk",
-        "id": "r1",
+        "id": "01900000-0000-7000-8000-0000000000e1",
         "name": "code",
         "owner": "me"
       }
@@ -967,18 +1007,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository list
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add --title Spare
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f3 --title Spare
 # exit 0
 {
   "data": {
     "changed": true,
-    "thread": "thread-mac-1",
+    "thread": "01900000-0000-7000-8000-0000000000f3",
     "title": "Spare"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
+$ ACYCLIC_ACTOR=session/mac acyclic thread delete Work
 # exit 1
 {
   "error": {
@@ -986,33 +1026,67 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread renumber thread-mac-1
     "details": {
       "reasons": [
         {
-          "why": "no-clash"
+          "members": [
+            "01900000-0000-7000-8000-0000000000a1"
+          ],
+          "why": "has-members"
         }
       ],
-      "thread": "thread-mac-1"
+      "thread": "01900000-0000-7000-8000-0000000000f1"
     },
-    "message": "thread-mac-1 can't be renumbered: no other thread's id ends in its number"
+    "message": "01900000-0000-7000-8000-0000000000f1 can't be deleted: items are in it (01900000-0000-7000-8000-0000000000a1)"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a1 --title Renamed --waits-for a2
+$ ACYCLIC_ACTOR=session/mac acyclic thread delete Spare
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "thread": "01900000-0000-7000-8000-0000000000f3"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread delete 01900000-0000-7000-8000-0000000000f3
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "thread": "01900000-0000-7000-8000-0000000000f3"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread show Spare
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no thread Spare; `acyclic thread list` lists them, and `acyclic thread add --title <TITLE>` adds one"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit First --title Renamed --waits-for Second
 # exit 1
 {
   "error": {
     "code": "link-cycle",
     "details": {
       "items": [
-        "a2",
-        "a1"
+        "01900000-0000-7000-8000-0000000000a2",
+        "01900000-0000-7000-8000-0000000000a1"
       ]
     },
-    "message": "the link would close a cycle through a2, a1"
+    "message": "the link would close a cycle through 01900000-0000-7000-8000-0000000000a2, 01900000-0000-7000-8000-0000000000a1"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a1
+$ ACYCLIC_ACTOR=session/mac acyclic item show First
 # exit 0
 {
   "data": [
@@ -1023,13 +1097,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1
       "done_at": "2026-10-15T00:00:00Z",
       "evidence": {
         "commit": null,
-        "note": "shipped",
-        "repository": null
+        "text": "shipped"
       },
-      "id": "a1",
+      "id": "01900000-0000-7000-8000-0000000000a1",
       "links": {
         "waited_on_by": [
-          "a2"
+          "01900000-0000-7000-8000-0000000000a2"
         ],
         "waits_for": []
       },
@@ -1044,25 +1117,25 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a1
       "size": null,
       "stage": "done",
       "state": "done",
-      "thread": "t1",
+      "thread": "01900000-0000-7000-8000-0000000000f1",
       "title": "First"
     }
   ],
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --no-waits-for a1
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --no-waits-for 0000a1
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show a2
+$ ACYCLIC_ACTOR=session/mac acyclic item show Second
 # exit 0
 {
   "data": [
@@ -1072,7 +1145,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
       "claims": [],
       "done_at": null,
       "evidence": null,
-      "id": "a2",
+      "id": "01900000-0000-7000-8000-0000000000a2",
       "links": {
         "waited_on_by": [],
         "waits_for": []
@@ -1095,37 +1168,37 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show a2
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread add t2 --title Follow-ups
+$ ACYCLIC_ACTOR=session/mac acyclic thread add --id 01900000-0000-7000-8000-0000000000f2 --title Follow-ups
 # exit 0
 {
   "data": {
     "changed": true,
-    "thread": "t2",
+    "thread": "01900000-0000-7000-8000-0000000000f2",
     "title": "Follow-ups"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --thread t2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --thread Follow-ups
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a2",
+    "item": "01900000-0000-7000-8000-0000000000a2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit a2 --parent t2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --parent Follow-ups
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": {
-      "meant": "acyclic item edit a2 --thread t2"
+      "meant": "acyclic item edit Second --thread Follow-ups"
     },
-    "message": "no item t2: t2 is a thread; did you mean `acyclic item edit a2 --thread t2`?"
+    "message": "no item Follow-ups: Follow-ups is a thread; did you mean `acyclic item edit Second --thread Follow-ups`?"
   },
   "ok": false
 }
@@ -1139,19 +1212,19 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a3 --title Second-follow-up
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a3",
+    "item": "01900000-0000-7000-8000-0000000000a3",
     "placed": [],
     "title": "Second-follow-up"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --parent a2
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a3 --title Second-follow-up --parent Second
 # exit 1
 {
   "error": {
@@ -1161,21 +1234,21 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a3 --title Second-follow-up --paren
         "parent"
       ]
     },
-    "message": "item a3 exists with other --parent; change it with `acyclic item edit a3 --parent …`"
+    "message": "item 01900000-0000-7000-8000-0000000000a3 exists with other --parent; change it with `acyclic item edit 01900000-0000-7000-8000-0000000000a3 --parent …`"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent a2
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a4 --title Third-follow-up --parent Second
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "a4",
+    "item": "01900000-0000-7000-8000-0000000000a4",
     "placed": [
       {
-        "item": "a4",
-        "thread": "t2"
+        "item": "01900000-0000-7000-8000-0000000000a4",
+        "thread": "01900000-0000-7000-8000-0000000000f2"
       }
     ],
     "title": "Third-follow-up"
@@ -1183,31 +1256,31 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add a4 --title Third-follow-up --parent
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add g1 --title Goal
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c1 --title Goal
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "g1",
+    "item": "01900000-0000-7000-8000-0000000000c1",
     "placed": [],
     "title": "Goal"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add g1-a --title Part --parent g1
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c2 --title Part --parent Goal
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "g1-a",
+    "item": "01900000-0000-7000-8000-0000000000c2",
     "placed": [],
     "title": "Part"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done g1
+$ ACYCLIC_ACTOR=session/mac acyclic item done Goal
 # exit 1
 {
   "error": {
@@ -1215,29 +1288,29 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done g1
     "details": {
       "held": null,
       "open": [
-        "g1-a"
+        "01900000-0000-7000-8000-0000000000c2"
       ],
       "readiness": {
         "status": "parent"
       }
     },
-    "message": "item g1 can't be finished yet: it has open children or is held back; `acyclic item show g1` says which"
+    "message": "item 01900000-0000-7000-8000-0000000000c1 can't be finished yet: it has open children or is held back; `acyclic item show 01900000-0000-7000-8000-0000000000c1` says which"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit g1-a --thread t2
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Part --thread Follow-ups
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "g1-a",
+    "item": "01900000-0000-7000-8000-0000000000c2",
     "placed": []
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic thread claim t2
+$ ACYCLIC_ACTOR=session/mac acyclic thread claim Follow-ups
 # exit 0
 {
   "data": {
@@ -1248,182 +1321,204 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread claim t2
       "lease_started_at": "2026-10-15T00:00:00Z",
       "replica": "mac"
     },
-    "thread": "t2"
+    "thread": "01900000-0000-7000-8000-0000000000f2"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done g1-a
+$ ACYCLIC_ACTOR=session/mac acyclic item done Part
 # exit 0
 {
   "data": {
     "changed": true,
     "evidence": null,
-    "item": "g1-a",
+    "item": "01900000-0000-7000-8000-0000000000c2",
     "state": "done"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done g1
+$ ACYCLIC_ACTOR=session/mac acyclic item done Goal
 # exit 0
 {
   "data": {
     "changed": true,
     "evidence": null,
-    "item": "g1",
+    "item": "01900000-0000-7000-8000-0000000000c1",
     "state": "done"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add g2 --title Goal
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c3 --title Goal
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "g2",
+    "item": "01900000-0000-7000-8000-0000000000c3",
     "placed": [],
     "title": "Goal"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add g2-a --title Part --parent g2
+$ ACYCLIC_ACTOR=session/mac acyclic item show Goal
+# exit 2
+{
+  "error": {
+    "code": "ambiguous",
+    "details": {
+      "candidates": [
+        {
+          "id": "01900000-0000-7000-8000-0000000000c1",
+          "title": "Goal"
+        },
+        {
+          "id": "01900000-0000-7000-8000-0000000000c3",
+          "title": "Goal"
+        }
+      ]
+    },
+    "message": "\"Goal\" is the title of 2 items: 01900000-0000-7000-8000-0000000000c1 (Goal), 01900000-0000-7000-8000-0000000000c3 (Goal); name one by its full id or a longer ending"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c4 --title Part --parent 0000c3
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "g2-a",
+    "item": "01900000-0000-7000-8000-0000000000c4",
     "placed": [],
     "title": "Part"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done g2 --force
+$ ACYCLIC_ACTOR=session/mac acyclic item done 0000c3 --force
 # exit 0
 {
   "data": {
     "changed": true,
     "evidence": null,
-    "item": "g2",
+    "item": "01900000-0000-7000-8000-0000000000c3",
     "state": "done"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000d1 --title Doomed
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "d1",
+    "item": "01900000-0000-7000-8000-0000000000d1",
     "placed": [],
     "title": "Doomed"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add d1-a --title Part --parent d1
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000d2 --title Doomed-part --parent Doomed
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "d1-a",
+    "item": "01900000-0000-7000-8000-0000000000d2",
     "placed": [],
-    "title": "Part"
+    "title": "Doomed-part"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+$ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed
 # exit 1
 {
   "error": {
     "code": "in-use",
     "details": {
-      "item": "d1",
+      "item": "01900000-0000-7000-8000-0000000000d1",
       "reasons": [
         {
           "children": [
-            "d1-a"
+            "01900000-0000-7000-8000-0000000000d2"
           ],
           "why": "has-children"
         }
       ]
     },
-    "message": "d1 can't be deleted: it has children (d1-a)"
+    "message": "01900000-0000-7000-8000-0000000000d1 can't be deleted: it has children (01900000-0000-7000-8000-0000000000d2)"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item delete a1
+$ ACYCLIC_ACTOR=session/mac acyclic item delete First
 # exit 1
 {
   "error": {
     "code": "in-use",
     "details": {
-      "item": "a1",
+      "item": "01900000-0000-7000-8000-0000000000a1",
       "reasons": [
         {
           "why": "finished"
         }
       ]
     },
-    "message": "a1 can't be deleted: it is done, or holds evidence of it, and finished work stays"
+    "message": "01900000-0000-7000-8000-0000000000a1 can't be deleted: it is done, or holds evidence of it, and finished work stays"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item delete d1-a
+$ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed-part
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "d1-a"
+    "item": "01900000-0000-7000-8000-0000000000d2"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+$ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed
 # exit 0
 {
   "data": {
     "changed": true,
-    "item": "d1"
+    "item": "01900000-0000-7000-8000-0000000000d1"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item delete d1
+$ ACYCLIC_ACTOR=session/mac acyclic item delete 01900000-0000-7000-8000-0000000000d1
 # exit 0
 {
   "data": {
     "changed": false,
-    "item": "d1"
+    "item": "01900000-0000-7000-8000-0000000000d1"
   },
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item show d1
+$ ACYCLIC_ACTOR=session/mac acyclic item show Doomed
 # exit 3
 {
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no item d1"
+    "message": "no item Doomed"
   },
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item add d1 --title Doomed
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000d1 --title Doomed
 # exit 1
 {
   "error": {
     "code": "deleted",
     "details": null,
-    "message": "item d1 was deleted, and its id isn't used again"
+    "message": "item 01900000-0000-7000-8000-0000000000d1 was deleted, and its id isn't used again"
   },
   "ok": false
 }

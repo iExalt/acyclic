@@ -1,24 +1,21 @@
-// Edits made on the Map: the commands they send, the ids new items get, which targets a move or a link may take,
+// Edits made on the Map: the commands they send, which targets a move or a link may take,
 // and what a tap does in each mode. Pure, so every rule is tested without a browser.
 
 import type { Command, Item } from "./api";
 import { changes, draftOf, type ItemDraft } from "./forms";
 import type { Model } from "./map/model";
 
-/** The longest id the tracker takes. */
-const MAX_ID = 64;
-
-/** A new item. A thread or parent left out is none. */
+/** A new item, under the id the app made for it. A thread or parent left out is none. */
 export interface NewItem {
-  item: string;
+  id: string;
   title: string;
   parent: string | null;
   thread: string | null;
 }
 
-export function addCommand({ item, title, parent, thread }: NewItem): Command {
+export function addCommand({ id, title, parent, thread }: NewItem): Command {
   return {
-    item: { add: { item, title, ...(parent === null ? {} : { parent }), ...(thread === null ? {} : { thread }) } },
+    item: { add: { id, title, ...(parent === null ? {} : { parent }), ...(thread === null ? {} : { thread }) } },
   };
 }
 
@@ -35,30 +32,6 @@ export function linkCommand(from: string, to: string): Command {
 /** `from` no longer waits for `to`. */
 export function unlinkCommand(from: string, to: string): Command {
   return { item: { edit: { item: from, "no-waits-for": [to] } } };
-}
-
-/**
- * An id for a new item, from its title: lowercase ASCII letters and digits joined by '-', or `untitled` for a title
- * with none, with -2, -3… when the id is taken. The client can't see every id taken, such as a deleted item's or one in a
- * replica not yet synced, so the user can still change it.
- */
-export function newId(title: string, taken: ReadonlySet<string>): string {
-  const words = title
-    .normalize("NFKD")
-    // Accents come apart from their letters, and go.
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(" ")
-    .filter((word) => word !== "");
-  // "item-" starts the ids the tracker assigns, which it refuses from anyone else.
-  const base = words.length === 0 ? "untitled" : words.join("-").replace(/^item(-|$)/, "items$1");
-  const trimmed = (stem: string, suffix: string) =>
-    `${stem.slice(0, MAX_ID - suffix.length).replace(/-+$/, "")}${suffix}`;
-  let id = trimmed(base, "");
-  for (let n = 2; taken.has(id); n++) id = trimmed(base, `-${n}`);
-  return id;
 }
 
 /** The item and its ancestors, nearest first, stopping where parents form a cycle. */
@@ -144,33 +117,17 @@ export type Sent =
 export interface Told {
   text: string | null;
   offer: "retry" | "refresh" | null;
-  /** The new item's id was refused: the user should change it. */
-  fixId: boolean;
 }
 
 export function told(sent: Sent): Told {
   if (sent.write === "failed") {
-    const { retry, fixId } = recovery(sent.code);
-    // Gone elsewhere: what the app shows is out of date.
+    // A busy server may simply be sent the same command again; gone elsewhere, what the app shows is out of date.
     const stale = sent.code === "not-found";
-    return { text: sent.message, offer: retry ? "retry" : stale ? "refresh" : null, fixId };
+    return { text: sent.message, offer: sent.code === "busy" ? "retry" : stale ? "refresh" : null };
   }
   // Saved is saved: a failed refresh is offered again, never the write.
-  if (sent.reload !== "done")
-    return { text: `Saved, but the refresh failed: ${sent.reload.failed}`, offer: "refresh", fixId: false };
-  return { text: null, offer: null, fixId: false };
-}
-
-/** What the app offers after a refusal or failure, by the envelope's code. */
-export interface Recovery {
-  /** The server was busy: the same command may simply be sent again. */
-  retry: boolean;
-  /** The new item's id was refused: the user should change it. */
-  fixId: boolean;
-}
-
-export function recovery(code: string): Recovery {
-  return { retry: code === "busy", fixId: ["already-exists", "deleted", "invalid-name"].includes(code) };
+  if (sent.reload !== "done") return { text: `Saved, but the refresh failed: ${sent.reload.failed}`, offer: "refresh" };
+  return { text: null, offer: null };
 }
 
 /**
@@ -189,7 +146,7 @@ export interface Edited {
 export function withPending(items: Item[], pending: Pending | null): Item[] {
   if (pending === null) return items;
   if (pending.kind === "add") {
-    const { item: id, title, parent, thread } = pending.item;
+    const { id, title, parent, thread } = pending.item;
     if (items.some((one) => one.id === id)) return items;
     const links = { waits_for: [], waited_on_by: [] };
     const added: Item = {
@@ -227,7 +184,7 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
 
 /** Whether `items`, read from the server, hold `pending`: the item added, or every field the user changed. */
 export function landed(pending: Pending, items: Item[]): boolean {
-  if (pending.kind === "add") return items.some((one) => one.id === pending.item.item);
+  if (pending.kind === "add") return items.some((one) => one.id === pending.item.id);
   const item = items.find((one) => one.id === pending.id);
   if (item === undefined) return false;
   const now = draftOf(item);

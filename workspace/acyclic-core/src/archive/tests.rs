@@ -47,7 +47,7 @@ fn done(r: &mut Replica, id: &str, commit: Option<&str>, at: Millis) {
     let evidence = Evidence {
         repository: commit.map(|_| "code".into()),
         commit: commit.map(str::to_owned),
-        note: None,
+        text: None,
     };
     model::set(r, &item_key(id).unwrap(), field::EVIDENCE, Some(&evidence), user(at)).unwrap();
 }

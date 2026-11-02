@@ -9,6 +9,7 @@ expression: table
 1 claimed
 3 not-found
 6 unreadable
+6 unreadable
 2 invalid-name
 3 not-found
 1 deleted
@@ -32,7 +33,10 @@ expression: table
 1 invalid-import
 1 invalid-import
 1 invalid-import
+2 invalid-id
 1 import-cycle
+1 in-use
+3 not-found
 1 not-ready
 1 already-exists
 1 already-done
@@ -40,7 +44,8 @@ expression: table
 3 not-found
 2 usage
 2 invalid-commit
-2 reserved-id
+2 invalid-id
+2 ambiguous
 2 invalid-actor
 5 config
 5 no-remote

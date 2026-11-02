@@ -15,10 +15,10 @@ const model = buildModel([
 const plan: Plan = {
   model,
   threads: [
-    { id: "thread-1", number: "1", name: "Spring beds" },
-    { id: "thread-2", number: "2", name: "Autumn" },
+    { id: "spring", name: "Spring beds" },
+    { id: "autumn", name: "Autumn" },
   ],
-  working: new Set(["thread-1"]),
+  working: new Set(["spring"]),
   showArchived: false,
 };
 const titles = (query: string, over: Plan = plan) => rank(query, entries(over), over.working).map((one) => one.title);
@@ -66,8 +66,7 @@ describe("the command menu", () => {
     expect(titles("archived", shown)).toEqual(["Hide archived items"]);
   });
 
-  it("finds a thread by its number, and stops at the most a list should hold, quickly in a large plan", () => {
-    expect(titles("2")).toContain("Autumn");
+  it("stops at the most a list should hold, quickly in a large plan", () => {
     // A plan the size of the largest the app is timed with: a key typed ranks it in a few passes over its titles.
     const many = buildModel(
       Array.from({ length: 3500 }, (_, n) => item(`item-${n}`, null, [], { title: `Item ${n} of the résumé batch` })),

@@ -11,15 +11,24 @@ Set `ACYCLIC_ACTOR` first (see "Who you are"), then:
 acyclic thread ready
 acyclic thread claim <thread>
 # ...work its ready items in order, finishing each:
-acyclic item done <item> --repository <record> --commit <id>
-acyclic item done <item> --evidence "what was done"
+acyclic item done <item> --commit <owner/name>@<sha>
+acyclic item done <item> --evidence 'what was done'
 # ...and when none of its items is left ready:
 acyclic thread release <thread>
 ```
 
 A thread is the unit of work: you claim a whole thread, and you and your subagents work every member without
 claiming items. `thread ready` lists threads with ready work, best first, each with its ready `items` in order. Finish
-with the `--repository` and `--commit` form, or with `--evidence` when the result isn't a commit.
+with `--commit`, naming the repository that holds the commit and the commit, or with `--evidence` when the result isn't
+a commit.
+
+## Naming records
+
+Every item, thread and repository record has a UUIDv7 id. Wherever a command takes one record, name it by its full id,
+by its exact title (an item's or a thread's) or `owner/name` (a repository's, in any case), or by the last 6 or more
+characters of its id, as text output prints it. A reference that names several records, or none, is refused, and the
+error's details list the candidates. Put a title in single quotes, as `'Plant the seeds'`, so the shell leaves its
+quotes and backticks alone, or use an id ending.
 
 ## Setting up a clone
 
@@ -35,8 +44,8 @@ machines recorded and pushes yours.
 
 ## Waits for
 
-`acyclic item edit plant --waits-for beds` means plant waits for beds: it can't start until beds is done.
-`--no-waits-for beds` undoes it, and `acyclic item add` takes `--waits-for` too. An edit that would make items wait
+`acyclic item edit 'Plant' --waits-for 'Beds'` means Plant waits for Beds: it can't start until Beds is done.
+`--no-waits-for 'Beds'` undoes it, and `acyclic item add` takes `--waits-for` too. An edit that would make items wait
 for each other in a circle is refused.
 
 Only waits-for orders work: ids, numbering and thread membership never do, so say every dependency you mean.
@@ -49,30 +58,32 @@ Only waits-for orders work: ids, numbering and thread membership never do, so sa
 - `--no-field` clears a scalar field and takes no value. `--no-field <VALUE>` removes from a set; repeat it for more.
 - Naming `--field` and `--no-field` together is a usage error.
 
-For example, `acyclic item edit beds --thread garden --no-notes --waits-for soil --no-waits-for clay` moves `beds`
-into the `garden` thread, clears its notes, makes it wait for `soil` and no longer for `clay`. Thread membership is
+For example, `acyclic item edit 'Beds' --thread 'Garden' --no-notes --waits-for 'Soil' --no-waits-for 'Clay'` moves
+Beds into the Garden thread, clears its notes, makes it wait for Soil and no longer for Clay. Thread membership is
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread). `--state` sets `backlog` or `parked`;
 `item done` sets `done`, and `item reopen` puts a done item back in the backlog. What is under way shows in an item's
 `stage`, from its thread's claim, not in its state.
 
-Leave out the id in `acyclic item add` and `acyclic thread add`: the tracker assigns one, such as `item-mac-143`, and
-prints it. A new id of your own starting `item-` or `thread-` is refused; those are the tracker's to give. If an add
-without an id fails `already-exists`, a thread (for `thread add`) or an open item (for `item add`) has that title, most
-likely from an earlier try; the error's details give its id. Give an id only to add a second record with the same title.
+Leave out `--id` in `acyclic item add`, `acyclic thread add` and `acyclic repository add`: the tracker makes a UUIDv7
+and prints it. To know an id before adding, as a plan written ahead does, take new ones from `acyclic id [N]`, which
+prints N of them and needs no tracker, and pass each as `--id`; any other id is refused. If an add fails
+`already-exists`, a thread (for `thread add`) or an open item (for `item add`) has that title, most likely from an
+earlier try; the error's details give its id. Titles are how people find work, so two open items never share one.
 Never put counters in titles.
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, anything it waits
 for or that waits for it, evidence, a done state or someone else's live claim on its thread. `acyclic import <file>`
-applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the plan
-format.
+applies a whole plan document, its records named by ids from `acyclic id`, and `--dry-run` reports what it would
+change. `acyclic import --schema` prints the plan format. `acyclic thread delete` deletes a thread no item is in and
+no one holds a live claim on.
 
 Before adding work, read the plan with `acyclic item list` and `acyclic thread list`, and give the item the parent,
 waits-for and thread it belongs with.
 
 ## Output
 
-- `prime`, `completions`, `import --schema`, and help and version text print documents or text. Every other command
-  prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
+- `prime`, `id`, `completions`, `import --schema`, and help and version text print documents or text. Every other
+  command prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
   `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on `error.code`, not on the message.
   At a terminal it prints text for people instead; if your commands run in one, pass `-o json`.
 - A bare group such as `acyclic item` prints its help.
@@ -101,7 +112,7 @@ waits-for and thread it belongs with.
    thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
    only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>` still
    names you as holder.
-3. `acyclic item done <item> --repository <record> --commit <id>` when an item is finished, or `--evidence` when the
+3. `acyclic item done <item> --commit <owner/name>@<sha>` when an item is finished, or `--evidence` when the
    result isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are
    done; don't use `--force` to finish someone else's work. A parent needs no `item done`: its `progress` reads done
    once every leaf under it is, and work waiting on it waits on those leaves.
@@ -128,6 +139,7 @@ waits-for and thread it belongs with.
 
 A done item counts for what waits on it from another thread, or outside any thread, only once each commit in its
 evidence is on that repository's default branch, as last fetched in your clone (named in
-`~/.config/acyclic/clones.toml`). Until then they wait on it as `in-review`; run `git fetch` there before
-`acyclic thread ready`. They wait as `unverified`, with a reason, when the commit can't be checked, such as with no
-clone mapped: fix the mapping, since fetching won't help. Work finished without a commit counts at once.
+`~/.config/acyclic/clones.toml`, by the repository's `owner/name`). Until then they wait on it as `in-review`; run
+`git fetch` there before `acyclic thread ready`. They wait as `unverified`, with a reason, when the commit can't be
+checked, such as with no clone mapped: fix the mapping, since fetching won't help. Work finished without a commit counts
+at once.

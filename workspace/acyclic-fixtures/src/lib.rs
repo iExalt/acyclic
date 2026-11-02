@@ -15,6 +15,10 @@ pub use rng::SplitMix64;
 /// The item count the shape's rates are measured at.
 pub const BASE_ITEMS: usize = 350;
 
+/// The clock fixture ids are made at: 2026-01-01T00:00:00Z, a millisecond later for each record, so ids sort in the
+/// order the records were made.
+const CLOCK: u64 = 1_767_225_600_000;
+
 /// e^-1.3, for a Poisson draw of 1.3 hard links from each item below the top level, before those that would repeat or
 /// break a rule are skipped. A constant rather than `exp`, whose last bit varies by platform.
 const EXP_MINUS_1_3: f64 = 0.272_531_793_034_012_6;
@@ -69,6 +73,14 @@ pub fn generate(items: usize, seed: u64) -> Import {
 
 struct Generator {
     rng: SplitMix64,
+    /// The ids' random bits, apart from `rng`, so a plan's structure doesn't depend on how many ids it makes.
+    ids: SplitMix64,
+    /// Records made so far, each a millisecond after the last.
+    made: u64,
+    /// Each item's id.
+    item_ids: Vec<String>,
+    /// Each repository's id: the product, deploy and website repositories.
+    repository_ids: Vec<String>,
     total: usize,
     scale: f64,
     import: Import,
@@ -85,6 +97,10 @@ impl Generator {
         let scale = total as f64 / BASE_ITEMS as f64;
         Self {
             rng: SplitMix64::new(seed),
+            ids: SplitMix64::new(seed ^ 0x6964_735f_7365_6564),
+            made: 0,
+            item_ids: Vec::new(),
+            repository_ids: Vec::new(),
             total,
             scale,
             import: Import::new(),
@@ -108,12 +124,24 @@ impl Generator {
         self.import
     }
 
+    /// A new `UUIDv7` from the seed, a millisecond after the last.
+    fn id(&mut self) -> String {
+        let random = self.ids.next_u64().to_le_bytes();
+        let more = self.ids.next_u64().to_le_bytes();
+        let mut bytes = [0; 10];
+        bytes[..8].copy_from_slice(&random);
+        bytes[8..].copy_from_slice(&more[..2]);
+        self.made += 1;
+        acyclic_core::ids::at(CLOCK + self.made, bytes)
+    }
+
     fn repositories(&mut self) {
-        for (key, name) in [("main", "product"), ("infra", "deploy"), ("site", "website")] {
+        for name in ["product", "deploy", "website"] {
+            let id = self.id();
+            self.repository_ids.push(id.clone());
             self.import.repositories.push(Repository {
-                key: key.to_owned(),
-                owner: "example".to_owned(),
-                name: name.to_owned(),
+                id,
+                name: format!("example/{name}"),
                 default_branch: "main".to_owned(),
             });
         }
@@ -135,11 +163,11 @@ impl Generator {
         let title = self.title();
         let roll = self.rng.unit();
         let repository = if roll < 0.85 {
-            "main"
+            0
         } else if roll < 0.95 {
-            "infra"
+            1
         } else {
-            "site"
+            2
         };
         let size = match depth {
             1 | 2 => Size::Xl,
@@ -147,14 +175,17 @@ impl Generator {
         };
         // A resource draw plans no longer carry, kept so each seed keeps its structure.
         let _ = depth >= 3 && self.rng.chance(0.01);
+        let id = self.id();
+        self.item_ids.push(id.clone());
         self.import.items.push(Item {
-            key: format!("i{index}"),
+            id,
             title,
             notes: self.rng.chance(0.3).then(|| "Synthetic design notes.".to_owned()),
-            state: State::Backlog,
-            parent: parent.map(|p| format!("i{p}")),
-            repositories: if depth == 1 { Vec::new() } else { vec![repository.to_owned()] },
-            waits_for: Vec::new(),
+            state: Some(State::Backlog),
+            parent: parent.map(|p| self.item_ids[p].clone()),
+            thread: None,
+            repositories: (depth > 1).then(|| vec![self.repository_ids[repository].clone()]),
+            waits_for: None,
             size: Some(size),
             archived: false,
             evidence: None,
@@ -214,7 +245,7 @@ impl Generator {
         let mut index = 0;
         while done < done_target && index < self.total {
             if self.depth[index] >= 3 {
-                self.import.items[index].state = State::Done;
+                self.import.items[index].state = Some(State::Done);
                 done += 1;
             }
             index += 1;
@@ -225,11 +256,11 @@ impl Generator {
             let subtree_end =
                 (umbrella + 1..self.total).find(|&i| self.depth[i] <= 2).unwrap_or(self.total);
             if subtree_end <= prefix_end {
-                self.import.items[umbrella].state = State::Done;
+                self.import.items[umbrella].state = Some(State::Done);
             }
         }
         let done_umbrellas: Vec<usize> = (0..prefix_end)
-            .filter(|&i| self.depth[i] == 2 && self.import.items[i].state == State::Done)
+            .filter(|&i| self.depth[i] == 2 && self.import.items[i].state == Some(State::Done))
             .collect();
         let archive = self.scaled(1.0).min(done_umbrellas.len());
         for &umbrella in &done_umbrellas[..archive] {
@@ -237,20 +268,21 @@ impl Generator {
         }
         for index in 0..self.total {
             let item = &mut self.import.items[index];
-            if item.state == State::Done {
+            if item.state == Some(State::Done) {
                 if self.rng.chance(0.5) {
                     let (a, b, c) = (self.rng.next_u64(), self.rng.next_u64(), self.rng.next_u64());
-                    let commit = format!("{a:016x}{b:016x}{:08x}", c >> 32);
+                    let sha = format!("{a:016x}{b:016x}{:08x}", c >> 32);
+                    // Only items under a goal are done, and each touches a repository.
+                    let repository = item.repositories.iter().flatten().next();
                     item.evidence = Some(Evidence {
-                        commit: Some(commit),
-                        repository: item.repositories.first().cloned(),
-                        note: None,
+                        commit: repository.map(|repository| format!("{repository}@{sha}")),
+                        text: None,
                     });
                 }
             } else if self.depth[index] >= 3 {
                 // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays in the backlog.
                 if self.rng.unit() < 0.04 {
-                    item.state = State::Parked;
+                    item.state = Some(State::Parked);
                 }
             }
         }
@@ -323,13 +355,16 @@ impl Generator {
         let extras = self.scaled(2.0);
         for (thread, run) in members.iter_mut().enumerate() {
             run.sort_unstable();
-            let repositories = if thread < extras { vec!["site".to_owned()] } else { Vec::new() };
+            let repositories = (thread < extras).then(|| vec![self.repository_ids[2].clone()]);
             let title = self.title();
+            let id = self.id();
+            for &member in run.iter() {
+                self.import.items[member].thread = Some(id.clone());
+            }
             self.import.threads.push(Thread {
-                key: format!("thread-{thread}"),
+                id,
                 title,
                 brief: Some("A synthetic thread.".to_owned()),
-                items: run.iter().map(|&i| format!("i{i}")).collect(),
                 repositories,
             });
         }
@@ -380,15 +415,16 @@ impl Generator {
                     }
                     let to = earlier[self.rng.below(earlier.len())];
                     // Done items depend only on done items; skip links that would break that.
-                    if self.import.items[from].state == State::Done
-                        && self.import.items[to].state != State::Done
+                    if self.import.items[from].state == Some(State::Done)
+                        && self.import.items[to].state != Some(State::Done)
                     {
                         continue;
                     }
                     if !seen.insert((from, to, waits)) || !waits {
                         continue;
                     }
-                    self.import.items[from].waits_for.push(format!("i{to}"));
+                    let to = self.item_ids[to].clone();
+                    self.import.items[from].waits_for.get_or_insert_with(Vec::new).push(to);
                 }
             }
         }
@@ -500,7 +536,16 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (97_620, 3_386_700_490_988_360_194));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_249, 6_123_376_084_847_002_964));
+    }
+
+    #[test]
+    fn ids_sort_in_the_order_records_were_made() {
+        let plan = generate(BASE_ITEMS, 1);
+        let ids: Vec<&String> = plan.items.iter().map(|item| &item.id).collect();
+        assert!(ids.is_sorted(), "items in the order they were made");
+        assert!(plan.repositories.last().unwrap().id < *ids[0], "repositories first");
+        assert!(ids.iter().all(|id| acyclic_core::ids::v7(id).as_deref() == Some(id.as_str())));
     }
 
     #[test]

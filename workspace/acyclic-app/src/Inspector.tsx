@@ -11,7 +11,7 @@ import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
-import { type Line, lineLabel } from "./lines";
+import type { Line } from "./lines";
 import { Menu } from "./Menu";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
@@ -246,7 +246,7 @@ export function Inspector({
       {editing ? (
         <ItemEditor
           item={item}
-          threads={threads.map((one) => ({ id: one.id, label: lineLabel(lines.get(one.id), one.title) }))}
+          threads={threads.map((one) => ({ id: one.id, label: one.title }))}
           initial={reopened}
           busy={busy}
           onSave={(edit, edited) => {

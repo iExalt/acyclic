@@ -11,8 +11,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-/// The newest state format this build reads.
-pub const FORMAT_VERSION: u32 = 2;
+/// The one state format this build reads. Version 3 names records by `UUIDv7`; a tracker written in an earlier format
+/// is migrated, not read.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// How far a writer's clock may step back before a write is refused, in milliseconds.
 pub const CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
@@ -220,6 +221,8 @@ pub enum Error {
     NoThread(String),
     /// A state file that couldn't be read.
     Format(String),
+    /// A state another format version wrote, which this build doesn't read.
+    Version(u64),
 }
 
 impl fmt::Display for Error {
@@ -243,6 +246,16 @@ impl fmt::Display for Error {
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
             Self::NoThread(thread) => write!(f, "no thread {thread}; claim a thread, not an item"),
             Self::Format(message) => write!(f, "unreadable state: {message}"),
+            Self::Version(version) => write!(
+                f,
+                "unreadable state: format version {version} is not supported; this build reads only \
+                 {FORMAT_VERSION}, so {}",
+                if *version < u64::from(FORMAT_VERSION) {
+                    "a tracker written by an earlier version must be migrated"
+                } else {
+                    "a tracker written by a later version needs a later acyclic"
+                }
+            ),
         }
     }
 }
@@ -688,23 +701,11 @@ impl State {
     ///
     /// # Errors
     ///
-    /// Fails on a missing or newer header, a malformed file, a file at the wrong path, a dot beyond the context, or a
+    /// Fails on a missing header or one of another version, a malformed file, a file at the wrong path, a dot beyond the context, or a
     /// file not in canonical form.
     pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
         let state = Self::from_own_files(files)?;
-        let mut expected = state.to_files();
-        // An older version's header stays canonical under its own number until the next write rewrites it.
-        let version = files
-            .get(HEADER_PATH)
-            .and_then(|text| serde_json::from_str::<Json>(text).ok())
-            .and_then(|header| header.get("format_version").and_then(Json::as_u64))
-            .and_then(|version| u32::try_from(version).ok())
-            .unwrap_or(FORMAT_VERSION);
-        expected.insert(
-            HEADER_PATH.to_owned(),
-            canonical(&Header { format_version: version, context: state.context.clone() }),
-        );
-        if expected != *files {
+        if state.to_files() != *files {
             return Err(Error::Format("files are not in canonical form".to_owned()));
         }
         Ok(state)
@@ -715,7 +716,7 @@ impl State {
     ///
     /// # Errors
     ///
-    /// Fails on a missing or newer header, a malformed file, a file at the wrong path, or a dot beyond the context.
+    /// Fails on a missing header or one of another version, a malformed file, a file at the wrong path, or a dot beyond the context.
     pub fn from_own_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
         let header =
             files.get(HEADER_PATH).ok_or_else(|| Error::Format("no state.json".to_owned()))?;
@@ -861,10 +862,8 @@ fn read_entity(path: Option<&str>, file: EntityFile) -> Result<(Key, Entity), Er
 
 fn check_version(header: &Json) -> Result<(), Error> {
     let version = header.get("format_version").and_then(Json::as_u64).unwrap_or(0);
-    if version == 0 || version > u64::from(FORMAT_VERSION) {
-        return Err(Error::Format(format!(
-            "format version {version} is not supported; this build reads 1 to {FORMAT_VERSION}"
-        )));
+    if version != u64::from(FORMAT_VERSION) {
+        return Err(Error::Version(version));
     }
     Ok(())
 }

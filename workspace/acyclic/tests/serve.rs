@@ -150,29 +150,32 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
-    cli(&tracker, "item add a --title A");
+    cli(&tracker, "item add --id 01900000-0000-7000-8000-0000000000a1 --title A");
     let (_server, address) = serve(&tracker, &[]);
 
     let anonymous = [("Host", HOST), ("Content-Type", "application/json")];
     let (status, refused) = request(&address, &anonymous, r#"{"item": "list"}"#);
     assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
 
-    let (status, shown) = command(&address, r#"{"item": {"show": {"items": ["a"]}}}"#);
+    let (status, shown) = command(
+        &address,
+        r#"{"item": {"show": {"items": ["01900000-0000-7000-8000-0000000000a1"]}}}"#,
+    );
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "item show a"));
+    assert_eq!(shown, cli(&tracker, "item show A"));
 }
 
 #[test]
 fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
-    cli(&tracker, "item add a --title A");
+    cli(&tracker, "item add --id 01900000-0000-7000-8000-0000000000a1 --title A");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     let (server, address, session, _) = up(&tracker, &home, &[]);
     let token = std::fs::read_to_string(&session).unwrap();
     let bearer = format!("Bearer {}", token.trim_end());
-    let show = r#"{"item": {"show": {"items": ["a"]}}}"#;
+    let show = r#"{"item": {"show": {"items": ["01900000-0000-7000-8000-0000000000a1"]}}}"#;
     let json = ("Content-Type", "application/json");
 
     let (status, refused) = request(&address, &[("Host", &address), json], show);
@@ -180,7 +183,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let (status, shown) =
         request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "item show a"));
+    assert_eq!(shown, cli(&tracker, "item show A"));
 
     // A link from `--link` pairs a browser, whose cookie then writes from the server's own page.
     let port = address.rsplit_once(':').unwrap().1;
@@ -197,7 +200,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let cookie = head.lines().find_map(|line| line.strip_prefix("set-cookie: ")).unwrap();
     let cookie = cookie.split_once(';').unwrap().0;
     let origin = format!("http://{address}");
-    let add = r#"{"item": {"add": {"item": "b", "title": "B"}}}"#;
+    let add = r#"{"item": {"add": {"id": "01900000-0000-7000-8000-0000000000b1", "title": "B"}}}"#;
     let (status, added) = request(
         &address,
         &[("Host", &address), ("Cookie", cookie), ("Origin", &origin), json],
@@ -252,7 +255,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     };
     let (status, shown) = through(&format!("/{secret}/api/command"), &identity);
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "item show a"));
+    assert_eq!(shown, cli(&tracker, "item show A"));
     assert_eq!(through("/api/command", &identity), (404, Value::Null));
     let (status, refused) = through(
         &format!("/{secret}/api/command"),
@@ -271,22 +274,30 @@ fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
     let (_server, address) = serve(&server, &["--sync-every", "1"]);
 
     // A write through the server is the user's, and reaches the shared repository at once.
-    let (status, added) = command(&address, r#"{"item": {"add": {"item": "a", "title": "A"}}}"#);
+    let (status, added) = command(
+        &address,
+        r#"{"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "A"}}}"#,
+    );
     assert_eq!(status, 200, "{added}");
     let shared = dir.path().join("shared.git");
     let logs = git(&shared, &["for-each-ref", "--format=%(refname)", "refs/heads/log/server/"]);
     let log = logs.lines().next().expect("the server's log was pushed");
     let events = git(&shared, &["log", "-p", "--format=", log]);
-    let event =
-        events.lines().find(|line| line.contains(r#""id":"a""#)).expect("the add is logged");
+    let event = events
+        .lines()
+        .find(|line| line.contains(r#""id":"01900000-0000-7000-8000-0000000000a1""#))
+        .expect("the add is logged");
     assert!(event.contains(r#""actor":"actor/user""#), "{event}");
 
     // Another replica's write reaches the server's API through its sync loop.
-    cli(&phone, "item add b --title B");
+    cli(&phone, "item add --id 01900000-0000-7000-8000-0000000000b1 --title B");
     cli(&phone, "sync");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (status, shown) = command(&address, r#"{"item": {"show": {"items": ["b"]}}}"#);
+        let (status, shown) = command(
+            &address,
+            r#"{"item": {"show": {"items": ["01900000-0000-7000-8000-0000000000b1"]}}}"#,
+        );
         if status == 200 {
             break;
         }

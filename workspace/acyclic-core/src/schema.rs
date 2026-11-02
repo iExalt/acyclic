@@ -77,6 +77,6 @@ pub mod thread {
     pub const TITLE: &str = "title";
     /// The brief.
     pub const BRIEF: &str = "brief";
-    /// Set when a renumber retired the thread's id; the same field as an item's, read by `model::is_deleted`.
+    /// Set when the thread is deleted; the same field as an item's, read by `model::is_deleted`.
     pub const DELETED: &str = super::item::DELETED;
 }

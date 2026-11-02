@@ -8,12 +8,12 @@ use std::path::Path;
 use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::delete;
+use acyclic_core::ids;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
-use acyclic_core::renumber;
 use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -28,6 +28,7 @@ use crate::args::{
 use crate::context;
 use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
 use crate::error::{CliError, exit};
+use crate::resolve::Records;
 use crate::view::{self, View};
 
 /// What a command prints.
@@ -51,6 +52,9 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
             init(&env.cwd.join(path), replica, remote.as_deref()).map(Output::Json)
         },
         (Class::Standalone, Command::Prime) => Ok(Output::Text(prime())),
+        (Class::Standalone, Command::Id { count }) => {
+            Ok(Output::Text((0..*count).map(|_| ids::new() + "\n").collect()))
+        },
         (Class::Standalone, Command::Completions { shell }) => {
             Ok(Output::Text(completions(*shell)))
         },
@@ -60,8 +64,41 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
             Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
         },
         (Class::Clone | Class::Read | Class::Write, command) => {
-            Session::open(cli, env)?.dispatch(command).map(Output::Json)
+            let result = Session::open(cli, env).and_then(|session| session.dispatch(command));
+            result.map(Output::Json).map_err(|mut error| {
+                // Doctor doesn't point at itself.
+                if matches!(command, Command::Doctor)
+                    && error.details == json!({"hint": crate::error::DOCTOR_HINT})
+                {
+                    error.details = Json::Null;
+                }
+                error
+            })
         },
+    }
+}
+
+/// What pretty output calls each record, by id: items and threads by the shortest ending of their ids that names them,
+/// and repositories by `owner/name`. Read after the command, so a record it added is named too; empty for a command
+/// with no tracker, or one that can't be read.
+pub fn names(cli: &Cli, env: &Env) -> BTreeMap<String, String> {
+    let read = || -> Result<BTreeMap<String, String>, CliError> {
+        let (tracker, _) = Tracker::open(&context::tracker(cli, env)?)?;
+        let (_, state) = tracker.load()?;
+        let model = Model::read(&state)?;
+        let records = Records::of(&model);
+        let mut names = records.endings(true);
+        names.extend(records.endings(false));
+        for record in model.repositories.values() {
+            if let Some(name) = crate::resolve::repository_name(record) {
+                names.insert(record.id.clone(), name);
+            }
+        }
+        Ok(names)
+    };
+    match cli.command.class() {
+        Class::Clone | Class::Read | Class::Write => read().unwrap_or_default(),
+        Class::Standalone | Class::Server => BTreeMap::new(),
     }
 }
 
@@ -89,6 +126,7 @@ impl<'a> Session<'a> {
         match command {
             Command::Init { .. }
             | Command::Prime
+            | Command::Id { .. }
             | Command::Import { file: None, .. }
             | Command::Serve(_)
             | Command::Up(_)
@@ -104,7 +142,7 @@ impl<'a> Session<'a> {
             Command::Sync => self.sync(),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add {
-                item,
+                id: given,
                 title,
                 parent,
                 thread,
@@ -125,16 +163,18 @@ impl<'a> Session<'a> {
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let id = edit::new_id(replica, kind::ITEM, item.as_deref(), title)?;
+                    let id = edit::new_id(replica, kind::ITEM, given.as_deref(), title)?;
+                    let fields = fields.clone().resolve(&Model::read(replica.state())?, None)?;
                     let mut data = edit::add_item(replica, &id, &fields, by)?.item(&id);
                     data["title"] = json!(title);
                     Ok(data)
                 })
                 .map_err(|error| {
                     self.misplaced(error, parent.as_deref(), || {
-                        let item = item.as_deref().map(|id| format!(" {id}")).unwrap_or_default();
+                        let id =
+                            given.as_deref().map(|id| format!(" --id {id}")).unwrap_or_default();
                         format!(
-                            "acyclic item add{item} --title <TITLE> --thread {}",
+                            "acyclic item add{id} --title <TITLE> --thread {}",
                             parent.as_deref().unwrap_or_default()
                         )
                     })
@@ -158,9 +198,12 @@ impl<'a> Session<'a> {
                     },
                 };
                 let item = &edit.item;
-                self.write(
-                    |replica, by| Ok(edit::edit_item(replica, item, &fields, by)?.item(item)),
-                )
+                self.write(|replica, by| {
+                    let model = Model::read(replica.state())?;
+                    let id = Records::of(&model).item(item)?;
+                    let fields = fields.clone().resolve(&model, Some(&id))?;
+                    Ok(edit::edit_item(replica, &id, &fields, by)?.item(&id))
+                })
                 .map_err(|error| {
                     self.misplaced(error, edit.parent.as_deref(), || {
                         format!(
@@ -170,56 +213,64 @@ impl<'a> Session<'a> {
                     })
                 })
             },
-            Command::Item(ItemCommand::Done { item: id, repository, commit, evidence: note, force }) => {
+            Command::Item(ItemCommand::Done { item, commit, evidence: text, force }) => {
                 let ancestry = GitAncestry::new(context::clones(self.env)?);
+                let commit = commit.as_deref().map(split_commit).transpose()?;
                 self.write(|replica, by| {
+                    let model = Model::read(replica.state())?;
+                    let records = Records::of(&model);
+                    let id = &records.item(item)?;
                     let key = existing(replica, id)?;
                     if !force {
                         check_finish(replica, id, by, &ancestry)?;
                     }
-                    if repository.is_some() || note.is_some() {
+                    if commit.is_some() || text.is_some() {
+                        let repository = commit.map(|(r, _)| records.repository(r)).transpose()?;
                         let evidence = Evidence {
-                            repository: repository.clone(),
-                            commit: commit.clone(),
-                            note: note.clone(),
+                            repository,
+                            commit: commit.map(|(_, sha)| sha.to_owned()),
+                            text: text.clone(),
                         };
-                        let model = Model::read(replica.state())?;
                         check_evidence(&model, &evidence)?;
                         if !force && overwrites(&model.items[id], &evidence) {
                             return Err(CliError::refused(
                                 "already-done",
                                 format!("item {id} is done with other evidence; pass --force to replace it"),
                             )
-                            .with(json!({"evidence": view::evidence(&model.items[id].evidence)})));
+                            .with(json!({"evidence": view::evidence(&model, &model.items[id].evidence)})));
                         }
                         set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
                     }
                     model::set_state(replica, id, ItemState::Done, by)?;
                     // The evidence it holds now, so a caller sees what was recorded.
                     let model = Model::read(replica.state())?;
-                    let evidence = view::evidence(&model.items[id].evidence);
+                    let evidence = view::evidence(&model, &model.items[id].evidence);
                     Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
                 })
             },
             Command::Thread(ThreadCommand::Release { thread }) => self.write(|replica, by| {
-                let key = existing_thread(replica, thread)?;
-                Ok(json!({"thread": thread, "released": claim::release(replica, &key, by.actor)}))
+                let (id, key) = existing_thread(replica, thread)?;
+                Ok(json!({"thread": id, "released": claim::release(replica, &key, by.actor)}))
             }),
-            Command::Item(ItemCommand::Reopen { item: id }) => self.write(|replica, by| {
-                archive::reopen(replica, id, by)?;
+            Command::Item(ItemCommand::Reopen { item }) => self.write(|replica, by| {
+                let id = Records::of(&Model::read(replica.state())?).item(item)?;
+                archive::reopen(replica, &id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Thread(ThreadCommand::Claim { thread, lease, force }) => self.claim(thread, *lease, *force),
+            Command::Thread(ThreadCommand::Claim { thread, lease, force }) => {
+                self.claim(thread, *lease, *force)
+            },
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
-            Command::Thread(ThreadCommand::Add { thread, title, brief, repository }) => {
+            Command::Thread(ThreadCommand::Add { id: given, title, brief, repository }) => {
                 let fields = ThreadFields {
                     title: Some(title.clone()),
                     brief: Change::of(brief.clone(), false),
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let id = edit::new_id(replica, kind::THREAD, thread.as_deref(), title)?;
+                    let id = edit::new_id(replica, kind::THREAD, given.as_deref(), title)?;
+                    let fields = fields.clone().resolve(&Model::read(replica.state())?, None)?;
                     edit::add_thread(replica, &id, &fields, by)?;
                     Ok(json!({"thread": id, "title": title}))
                 })
@@ -235,65 +286,58 @@ impl<'a> Session<'a> {
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
-                    edit::edit_thread(replica, thread, &fields, by)?;
-                    Ok(json!({"thread": thread}))
+                    let model = Model::read(replica.state())?;
+                    let id = Records::of(&model).thread(thread)?;
+                    let fields = fields.clone().resolve(&model, Some(&id))?;
+                    edit::edit_thread(replica, &id, &fields, by)?;
+                    Ok(json!({"thread": id}))
                 })
             },
             Command::Repository(RepositoryCommand::List) => self.repositories(),
             Command::Repository(RepositoryCommand::Show { repositories }) => {
                 self.show_repositories(repositories)
             },
-            Command::Repository(RepositoryCommand::Add {
-                repository,
-                owner,
-                name,
-                default_branch,
-            }) => {
+            Command::Repository(RepositoryCommand::Add { id: given, name, default_branch }) => {
                 let fields = RepositoryFields {
-                    owner: Some(owner.clone()),
                     name: Some(name.clone()),
                     default_branch: Some(default_branch.clone()),
                 };
                 self.write(|replica, by| {
-                    edit::add_repository(replica, repository, &fields, by)?;
-                    Ok(json!({"repository": repository}))
+                    let id = edit::new_repository_id(given.as_deref())?;
+                    edit::add_repository(replica, &id, &fields, by)?;
+                    Ok(json!({"repository": id}))
                 })
             },
-            Command::Repository(RepositoryCommand::Edit {
-                repository,
-                owner,
-                name,
-                default_branch,
-            }) => {
-                let fields = RepositoryFields {
-                    owner: owner.clone(),
-                    name: name.clone(),
-                    default_branch: default_branch.clone(),
-                };
+            Command::Repository(RepositoryCommand::Edit { repository, name, default_branch }) => {
+                let fields =
+                    RepositoryFields { name: name.clone(), default_branch: default_branch.clone() };
                 self.write(|replica, by| {
-                    edit::edit_repository(replica, repository, &fields, by)?;
-                    Ok(json!({"repository": repository}))
+                    let id = Records::of(&Model::read(replica.state())?).repository(repository)?;
+                    edit::edit_repository(replica, &id, &fields, by)?;
+                    Ok(json!({"repository": id}))
                 })
             },
-            Command::Thread(ThreadCommand::Renumber { thread: id }) => self.write(|replica, by| {
-                let done = renumber::renumber(replica, id, by)?;
-                let model = Model::read(replica.state())?;
-                let title = model.threads.get(&done.thread).and_then(|thread| thread.title.one());
-                Ok(json!({"thread": done.thread, "title": title, "from": done.from, "moved": done.moved}))
+            Command::Thread(ThreadCommand::Delete { thread }) => self.write(|replica, by| {
+                let found = Records::of(&Model::read(replica.state())?).thread(thread);
+                let id = deletable(found, thread, replica.state(), kind::THREAD)?;
+                delete::delete_thread(replica, &id, by)?;
+                Ok(json!({"thread": id}))
             }),
             Command::Import { file: Some(file), dry_run, .. } => self.import(file, *dry_run),
             Command::Item(ItemCommand::Delete { item }) => self.write(|replica, by| {
-                delete::delete_item(replica, item, by)?;
-                Ok(json!({"item": item}))
+                let found = Records::of(&Model::read(replica.state())?).item(item);
+                let id = deletable(found, item, replica.state(), kind::ITEM)?;
+                delete::delete_item(replica, &id, by)?;
+                Ok(json!({"item": id}))
             }),
-            Command::Item(ItemCommand::Archive { item: id }) => {
+            Command::Item(ItemCommand::Archive { item }) => {
                 let clones = context::clones(self.env)?;
                 let ancestry = GitAncestry::new(clones);
                 self.write(|replica, by| {
                     let model = Model::read(replica.state())?;
-                    let item = model.items.get(id).ok_or_else(|| not_found(id))?;
-                    if !item.is_archived_root() {
-                        archive::archive(replica, &ancestry, id, by)?;
+                    let id = Records::of(&model).item(item)?;
+                    if !model.items[&id].is_archived_root() {
+                        archive::archive(replica, &ancestry, &id, by)?;
                     }
                     Ok(json!({"item": id}))
                 })
@@ -355,7 +399,7 @@ impl<'a> Session<'a> {
             return error;
         }
         match self.read() {
-            Ok((_, model)) if model.threads.contains_key(named) => {
+            Ok((_, model)) if Records::of(&model).thread(named).is_ok() => {
                 let meant = meant();
                 CliError::new(
                     error.code,
@@ -401,10 +445,11 @@ impl<'a> Session<'a> {
 
     fn show(&self, ids: &[String]) -> Result<Json, CliError> {
         self.with_view(|view| {
+            let records = Records::of(view.model);
             let mut shown = Vec::with_capacity(ids.len());
-            for id in ids {
-                let item = view.model.items.get(id).ok_or_else(|| not_found(id))?;
-                shown.push(view.item(id, item)?);
+            for reference in ids {
+                let id = records.item(reference)?;
+                shown.push(view.item(&id, &view.model.items[&id])?);
             }
             Ok(Json::Array(shown))
         })
@@ -426,16 +471,11 @@ impl<'a> Session<'a> {
     fn show_threads(&self, ids: &[String]) -> Result<Json, CliError> {
         self.with_view(|view| {
             let known = thread_members(view.model);
+            let records = Records::of(view.model);
             let mut shown = Vec::with_capacity(ids.len());
-            for id in ids {
-                let Some(listed) = known.get(id.as_str()) else {
-                    return Err(CliError::new(
-                        "not-found",
-                        exit::NOT_FOUND,
-                        format!("no thread {id}; `acyclic thread list` lists them"),
-                    ));
-                };
-                shown.push(view.thread(id, listed)?);
+            for reference in ids {
+                let id = records.thread(reference)?;
+                shown.push(view.thread(&id, &known[id.as_str()])?);
             }
             Ok(Json::Array(shown))
         })
@@ -449,16 +489,11 @@ impl<'a> Session<'a> {
 
     fn show_repositories(&self, ids: &[String]) -> Result<Json, CliError> {
         let (_, model) = self.read()?;
+        let records = Records::of(&model);
         let mut shown = Vec::with_capacity(ids.len());
-        for id in ids {
-            let record = model.repositories.get(id).ok_or_else(|| {
-                CliError::new(
-                    "not-found",
-                    exit::NOT_FOUND,
-                    format!("no repository record {id}; `acyclic repository list` lists them"),
-                )
-            })?;
-            shown.push(view::repo_show(&model, record));
+        for reference in ids {
+            let id = records.repository(reference)?;
+            shown.push(view::repo_show(&model, &model.repositories[&id]));
         }
         Ok(Json::Array(shown))
     }
@@ -481,16 +516,12 @@ impl<'a> Session<'a> {
     fn sync(&self) -> Result<Json, CliError> {
         let remote = self.remote()?;
         let synced = self.tracker.sync(remote)?;
-        // Threads two clones numbered alike, which only a sync brings together; `needs` lists those one can renumber.
-        let (state, model) = self.read()?;
-        let clashes = renumber::clashes(&state, &model, self.now)?;
         Ok(json!({
             "remote": remote,
             "fetched": synced.fetched,
             "joined": synced.joined,
             "pushed": synced.pushed,
             "changed": synced.joined,
-            "number_clashes": clashes,
         }))
     }
 
@@ -534,7 +565,7 @@ impl<'a> Session<'a> {
         })?;
         let doc = Import::from_json(&text)?;
         // Imported work with no thread of its own joins the one passed down to it, as an add's does.
-        let keys: Vec<String> = doc.items.iter().map(|item| item.key.clone()).collect();
+        let keys: Vec<String> = doc.items.iter().map(|item| item.id.clone()).collect();
         if dry_run {
             let (_, state) = self.tracker.load()?;
             let mut replica = Replica::open(self.tracker.replica().clone(), state);
@@ -551,12 +582,13 @@ impl<'a> Session<'a> {
         })
     }
 
-    fn claim(&self, thread: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
+    fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
         let lease = lease.map_or(LEASE, |minutes| Millis::from(minutes) * MINUTE);
         let clones = context::clones(self.env)?;
         let ancestry = GitAncestry::new(clones);
         self.write(|replica, by| {
-            let key = existing_thread(replica, thread)?;
+            let (id, key) = existing_thread(replica, reference)?;
+            let thread = id.as_str();
             if !force {
                 let model = Model::read(replica.state())?;
                 let status = Readiness::new(replica.state(), &model, by.at, &ancestry).thread(thread)?;
@@ -589,13 +621,39 @@ pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
     }
 }
 
+/// The record a delete names: the one the resolver `found`, or, named by its full id, one deleted already, which
+/// deleting again changes nothing.
+fn deletable(
+    found: Result<String, CliError>,
+    reference: &str,
+    state: &State,
+    of: &str,
+) -> Result<String, CliError> {
+    found.or_else(|error| match ids::v7(reference) {
+        Some(id) if Key::new(of, &id).is_ok_and(|key| model::is_deleted(state, &key)) => Ok(id),
+        _ => Err(error),
+    })
+}
+
+/// Splits `--commit <REPOSITORY>@<SHA>` at its last `@`, refusing a commit with no repository.
+fn split_commit(commit: &str) -> Result<(&str, &str), CliError> {
+    match commit.rsplit_once('@') {
+        Some((repository, sha)) if !repository.is_empty() => Ok((repository, sha)),
+        _ => Err(CliError::new(
+            "invalid-commit",
+            exit::USAGE,
+            format!(
+                "--commit names the repository and the commit, as --commit <OWNER/NAME>@{commit}: a SHA alone \
+                 doesn't say which repository holds it"
+            ),
+        )),
+    }
+}
+
 /// Refuses evidence that could never verify, without asking the network: the commit must look like an object id and
 /// name a complete repository record.
 pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), CliError> {
-    let looks_like_object_id = |commit: &String| {
-        (7..=64).contains(&commit.len()) && commit.bytes().all(|b| b.is_ascii_hexdigit())
-    };
-    if evidence.commit.as_ref().is_some_and(|commit| !looks_like_object_id(commit)) {
+    if evidence.commit.as_ref().is_some_and(|commit| !acyclic_core::import::is_object_id(commit)) {
         return Err(CliError::new(
             "invalid-commit",
             exit::USAGE,
@@ -607,7 +665,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
         return Err(CliError::new(
             "not-found",
             exit::NOT_FOUND,
-            format!("no repository record {id}; `acyclic repository list` lists them"),
+            format!("no repository {id}; `acyclic repository list` lists them"),
         ));
     };
     let missing: Vec<&str> = [
@@ -624,7 +682,7 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     Err(CliError::refused(
         "incomplete-repository",
         format!(
-            "repository record {id} is missing {}; set it with `acyclic repository edit {id}`",
+            "repository {id} is missing {}; set it with `acyclic repository edit {id}`",
             missing.join(", ")
         ),
     )
@@ -761,26 +819,37 @@ fn run_order<'a>(
     order
 }
 
-pub(crate) fn not_found(id: &str) -> CliError {
-    CliError::new("not-found", exit::NOT_FOUND, format!("no item {id}"))
-}
-
 /// An item's key, refusing one that doesn't exist or was deleted.
 pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
     Ok(model::existing(replica.state(), id)?)
 }
 
-/// A thread's key, when the thread has a record; naming an item in a thread says which thread was meant.
-pub(crate) fn existing_thread(replica: &Replica, thread: &str) -> Result<Key, CliError> {
+/// The thread a reference names, and its key, when the thread has a record; naming an item in a thread says which
+/// thread was meant.
+pub(crate) fn existing_thread(
+    replica: &Replica,
+    reference: &str,
+) -> Result<(String, Key), CliError> {
     let model = Model::read(replica.state())?;
-    if !model.threads.contains_key(thread) {
-        let error: CliError = acyclic_core::state::Error::NoThread(thread.to_owned()).into();
-        return Err(match model.thread_of(thread) {
-            Some(meant) => error.with(json!({"thread": meant})),
-            None => error,
-        });
+    let records = Records::of(&model);
+    match records.thread(reference) {
+        Ok(id) if model.threads.contains_key(&id) => {
+            let key = claim::thread_key(&id)?;
+            Ok((id, key))
+        },
+        Ok(id) => Err(acyclic_core::state::Error::NoThread(id).into()),
+        Err(error) if error.code == "not-found" => {
+            let meant = records
+                .item(reference)
+                .ok()
+                .and_then(|item| model.thread_of(&item).map(str::to_owned));
+            Err(match meant {
+                Some(meant) => error.with(json!({"thread": meant})),
+                None => error,
+            })
+        },
+        Err(error) => Err(error),
     }
-    Ok(claim::thread_key(thread)?)
 }
 
 /// A field's value when it holds exactly one; a clear holds none.

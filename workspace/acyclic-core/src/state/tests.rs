@@ -115,16 +115,15 @@ fn reading_refuses_newer_formats_and_bad_files() {
     let mut newer = files.clone();
     let next = format!("\"format_version\": {}", FORMAT_VERSION + 1);
     newer.insert(HEADER_PATH.to_owned(), files[HEADER_PATH].replace(&version, &next));
-    assert!(
-        matches!(State::from_files(&newer), Err(Error::Format(m)) if m.contains("not supported"))
-    );
-    // Version 1, from before clears were values, still reads.
-    let mut first = files.clone();
-    first.insert(
-        HEADER_PATH.to_owned(),
-        files[HEADER_PATH].replace(&version, "\"format_version\": 1"),
-    );
-    assert_eq!(State::from_files(&first).unwrap(), a.state);
+    let refused = State::from_files(&newer).unwrap_err();
+    assert_eq!(refused, Error::Version(u64::from(FORMAT_VERSION) + 1));
+    assert!(refused.to_string().contains("needs a later acyclic"), "{refused}");
+    // An earlier version, such as 2's slug ids, is migrated rather than read.
+    let mut earlier = files.clone();
+    let previous = format!("\"format_version\": {}", FORMAT_VERSION - 1);
+    earlier.insert(HEADER_PATH.to_owned(), files[HEADER_PATH].replace(&version, &previous));
+    let refused = State::from_files(&earlier).unwrap_err();
+    assert!(refused.to_string().contains("must be migrated"), "{refused}");
 
     let mut moved = files.clone();
     let text = moved.remove("item/27/a1.json").unwrap();
@@ -134,7 +133,7 @@ fn reading_refuses_newer_formats_and_bad_files() {
     let mut ahead = files;
     ahead.insert(
         HEADER_PATH.to_owned(),
-        "{\"format_version\":2,\"context\":{\"seen\":{},\"clocks\":{}}}".to_owned(),
+        "{\"format_version\":3,\"context\":{\"seen\":{},\"clocks\":{}}}".to_owned(),
     );
     assert!(State::from_files(&ahead).is_err(), "a dot beyond the context");
 }

@@ -72,6 +72,8 @@ fn git(dir: &Path, args: &[&str]) {
         // stalls each call by seconds on a machine with a slow resolver.
         .env("GIT_COMMITTER_NAME", "acyclic test")
         .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .env("GIT_AUTHOR_NAME", "acyclic test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
         .status()
         .unwrap();
     assert!(status.success(), "git {args:?}");
@@ -89,11 +91,11 @@ fn shared() -> Shell {
     sh
 }
 
-/// Two machines syncing through `shared.git`: `mac`, which added a1, and `pi`, which has synced it.
+/// Two machines syncing through `shared.git`: `mac`, which added First, and `pi`, which has synced it.
 fn two_machines() -> Shell {
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
-    sh.run("item add a1 --title First", AGENT);
+    sh.run("item add --title First", AGENT);
     sh.run("sync", AGENT);
     assert_eq!(sh.run("init pi --replica pi --remote ../shared.git", &[]), 0);
     sh.run("sync", PI);
@@ -115,7 +117,7 @@ fn two_machines_sync_through_a_shared_repository() {
     assert_eq!((code, out["error"]["code"].as_str()), (5, Some("no-remote")));
     let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "a remote added later");
-    sh.run("item add a1 --title First", AGENT);
+    sh.run("item add --title First", AGENT);
     let (code, out) = sh.output("sync", AGENT);
     assert_eq!((code, out["data"]["pushed"].as_u64().is_some_and(|n| n > 0)), (0, true));
     // A second machine starts from the shared repository and sees the first's work.
@@ -125,12 +127,12 @@ fn two_machines_sync_through_a_shared_repository() {
         (code, &out["data"]["fetched"], out["data"]["joined"].as_bool()),
         (0, &serde_json::json!(["mac"]), Some(true))
     );
-    assert_eq!(sh.output("item show a1", PI).0, 0);
-    sh.run("item add b1 --title Second", PI);
+    assert_eq!(sh.output("item show First", PI).0, 0);
+    sh.run("item add --title Second", PI);
     sh.run("sync", PI);
     let (_, out) = sh.output("sync", AGENT);
     assert_eq!(out["data"]["fetched"], serde_json::json!(["mac", "pi"]));
-    assert_eq!(sh.output("item show b1", AGENT).0, 0, "and the first sees the second's");
+    assert_eq!(sh.output("item show Second", AGENT).0, 0, "and the first sees the second's");
 }
 
 #[test]
@@ -138,10 +140,10 @@ fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_syn
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
     git(&sh.path().join("tracker"), &["config", "acyclic.pushAfterWrite", "true"]);
-    let (_, out) = sh.output("item add a2 --title Pushed", AGENT);
+    let (_, out) = sh.output("item add --title Pushed", AGENT);
     assert_eq!(out["data"]["push"]["ok"].as_bool(), Some(true), "{out}");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../nowhere.git"]);
-    let (code, out) = sh.output("item add a3 --title Stranded", AGENT);
+    let (code, out) = sh.output("item add --title Stranded", AGENT);
     assert_eq!((code, out["data"]["push"]["ok"].as_bool()), (0, Some(false)), "the write stands");
     assert_eq!(needs(&mut sh)[0]["kind"], "unpushed");
     git(&sh.path().join("tracker"), &["remote", "set-url", "origin", "../shared.git"]);
@@ -152,17 +154,17 @@ fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_syn
 #[test]
 fn a_move_to_the_top_racing_another_machines_move_is_a_conflict_until_moved_again() {
     let mut sh = two_machines();
-    sh.run("item add a2 --title Parent", AGENT);
-    sh.run("item edit a1 --parent a2", AGENT);
+    sh.run("item add --title Parent", AGENT);
+    sh.run("item edit First --parent Parent", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", PI);
-    sh.run("item edit a1 --no-parent", AGENT);
-    sh.run("item add b1 --title Other", PI);
-    sh.run("item edit a1 --parent b1", PI);
+    sh.run("item edit First --no-parent", AGENT);
+    sh.run("item add --title Other", PI);
+    sh.run("item edit First --parent Other", PI);
     sh.run("sync", PI);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["kind"], "conflict");
-    let (_, out) = sh.output("item edit a1 --no-parent", AGENT);
+    let (_, out) = sh.output("item edit First --no-parent", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
 }
@@ -171,38 +173,57 @@ fn a_move_to_the_top_racing_another_machines_move_is_a_conflict_until_moved_agai
 fn taking_an_item_out_of_a_thread_racing_another_machine_threading_it_is_a_conflict_until_taken_out_again()
  {
     let mut sh = two_machines();
-    sh.run("thread add t1 --title One", AGENT);
-    sh.run("thread add t2 --title Two", AGENT);
-    sh.run("item edit a1 --thread t1", AGENT);
+    sh.run("thread add --title One", AGENT);
+    sh.run("thread add --title Two", AGENT);
+    sh.run("item edit First --thread One", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", PI);
-    sh.run("item edit a1 --no-thread", AGENT);
-    sh.run("item edit a1 --thread t2", PI);
+    sh.run("item edit First --no-thread", AGENT);
+    sh.run("item edit First --thread Two", PI);
     sh.run("sync", PI);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["field"], "thread");
-    let (_, out) = sh.output("item edit a1 --no-thread", AGENT);
+    let (_, out) = sh.output("item edit First --no-thread", AGENT);
     assert_eq!(out["data"]["changed"].as_bool(), Some(true), "taking it out again resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
 }
 
 #[test]
-fn threads_each_machine_numbers_alike_clash_once_a_sync_brings_them_together() {
-    let mut sh = two_machines();
-    sh.run("thread add --title Beds", AGENT);
-    sh.run("thread add --title Rows", PI);
-    sh.run("sync", PI);
-    let (_, out) = sh.output("sync", AGENT);
-    let clash = &out["data"]["number_clashes"][0];
-    assert_eq!(
-        (clash["number"].as_u64(), clash["threads"].as_array().map(Vec::len)),
-        (Some(1), Some(2)),
-        "{out}"
-    );
-    let listed = needs(&mut sh);
-    assert_eq!(
-        (listed.len(), &listed[0]["kind"]),
-        (1, &serde_json::json!("number-clash")),
-        "{listed:?}"
-    );
+fn a_merged_commit_counts_done_from_another_thread_through_the_clone_mapped_by_owner_and_name() {
+    let mut sh = Shell::new();
+    // A code clone whose main holds one commit, mapped in clones.toml by the repository's owner/name.
+    let code = sh.path().join("code");
+    git(sh.path(), &["init", "-q", "-b", "main", "code"]);
+    git(&code, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    let head = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&code)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let sha = String::from_utf8(head.stdout).unwrap();
+    let home = sh.path().join("home");
+    std::fs::create_dir_all(home.join(".config/acyclic")).unwrap();
+    let mapping = format!("[clones]\n\"Me/Code\" = {:?}\n", code.to_str().unwrap());
+    std::fs::write(home.join(".config/acyclic/clones.toml"), mapping).unwrap();
+    let home = home.to_str().unwrap().to_owned();
+    let at_home = [("HOME", home.as_str()), ("ACYCLIC_ACTOR", "session/mac")];
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    for line in [
+        "repository add --name me/code --default-branch main",
+        "thread add --title Build",
+        "thread add --title Use",
+        "item add --title Made --thread Build",
+        "item add --title Used --thread Use --waits-for Made",
+        "thread claim Build",
+    ] {
+        assert_eq!(sh.run(line, &at_home), 0, "{line}");
+    }
+    let done = format!("item done Made --commit me/code@{}", sha.trim());
+    let (code, out) = sh.output(&done, &at_home);
+    assert_eq!(code, 0, "{out}");
+    let (_, made) = sh.output("item show Made", &at_home);
+    assert_eq!(made["data"][0]["readiness"]["status"], "done", "merged, not in review: {made}");
+    let (_, used) = sh.output("item show Used", &at_home);
+    assert_eq!(used["data"][0]["readiness"]["status"], "ready", "{used}");
 }

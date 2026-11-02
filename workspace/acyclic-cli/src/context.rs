@@ -80,7 +80,7 @@ pub fn tracker(cli: &Cli, env: &Env) -> Result<PathBuf, CliError> {
     Ok(Trackers::load(&home)?.for_remotes(&settings.remotes, &home)?)
 }
 
-/// The machine's code clones, by repository record id, from `~/.config/acyclic/clones.toml`.
+/// The machine's code clones, by repository `owner/name`, from `~/.config/acyclic/clones.toml`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Clones {
@@ -88,7 +88,8 @@ struct Clones {
     clones: BTreeMap<String, String>,
 }
 
-/// Where each repository record's clone is on this machine: the one `clones.toml` maps.
+/// Where each repository record's clone is on this machine: the one `clones.toml` maps its `owner/name` to, in any
+/// case. A key that isn't an `owner/name` is refused, rather than leaving a merge unchecked.
 pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use<>, CliError> {
     let home = home(env);
     let mapping = match &home {
@@ -111,8 +112,21 @@ pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use
         },
         None => BTreeMap::new(),
     };
+    if let Some(key) = mapping.keys().find(|key| acyclic_core::import::owner_name(key).is_none()) {
+        return Err(CliError::new(
+            "config",
+            exit::CONFIG,
+            format!(
+                "~/.config/acyclic/clones.toml: {key:?} isn't a repository's owner/name; key each clone by owner/name, \
+                 such as \"me/garden\" = \"~/code/garden\""
+            ),
+        ));
+    }
+    let mapping: BTreeMap<String, String> =
+        mapping.into_iter().map(|(key, path)| (key.to_ascii_lowercase(), path)).collect();
     Ok(move |record: &Repository| {
-        mapping.get(&record.id).map(|path| match (path.strip_prefix("~/"), &home) {
+        let name = crate::resolve::repository_name(record)?.to_ascii_lowercase();
+        mapping.get(&name).map(|path| match (path.strip_prefix("~/"), &home) {
             (Some(rest), Some(home)) => home.join(rest),
             _ => Path::new(path).to_path_buf(),
         })

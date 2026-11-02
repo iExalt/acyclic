@@ -15,21 +15,18 @@ import { STRIP, TITLE } from "./chevron";
 const STRIPE = 6;
 const BADGE_AT = 14;
 const BADGE = 20;
-/** The widest a badge is drawn for a two-digit number; a clone's initial ("32m") may run a little past it. */
+/** The room a badge takes, a little more than its own width. */
 const BADGE_ROOM = 22;
 const ICON = 16;
 /** The room the marks take from a tile's title: the stripe and badge at its left, the icon at its right. */
 export const MARKS_LEFT = BADGE_AT + BADGE_ROOM + 8;
 export const MARKS_RIGHT = ICON + 14;
 
-/** A tile's thread as its marks show it: the line's colour, its badge's text (a number, or none for a dot) and ink. */
+/** A tile's thread as its marks show it: the line's colour and ink. */
 export interface Thread {
   colour: string;
-  number: string | null;
   ink: string;
 }
-
-const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** The marks' image for a tile `width` by `height`, as SVG markup. */
 export function markSvg(
@@ -48,15 +45,8 @@ export function markSvg(
     parts.push(
       `<circle cx="${left + BADGE / 2}" cy="${middle}" r="${BADGE / 2 - 1}" fill="none" stroke="${palette.muted}" stroke-width="1.5" stroke-dasharray="3 2.4"/>`,
     );
-  } else if (thread.number === null) {
-    parts.push(`<circle cx="${left + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
   } else {
-    // A pill wide enough for a clone's initial, such as "32m".
-    const wide = Math.max(BADGE, 8 + 7 * thread.number.length);
-    parts.push(
-      `<rect x="${left}" y="${middle - BADGE / 2}" width="${wide}" height="${BADGE}" rx="${BADGE / 2}" fill="${thread.colour}"/>`,
-      `<text x="${left + wide / 2}" y="${middle}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="${thread.ink}">${xml(thread.number)}</text>`,
-    );
+    parts.push(`<circle cx="${left + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
   }
   // With no thread, the ring at its left already says what its stage would repeat.
   if (stage !== null && !(stage === "unthreaded" && thread === null))

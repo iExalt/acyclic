@@ -8,6 +8,7 @@ mod commands;
 mod context;
 mod edit;
 mod pretty;
+mod resolve;
 mod view;
 
 use std::collections::BTreeMap;
@@ -173,7 +174,9 @@ fn execute_with(
         Ok(commands::Output::Json(data)) => {
             let output = match output {
                 Format::Json => render(&json!({"ok": true, "data": data})),
-                Format::Pretty => pretty::render(&cli.command, &data, env.terminal),
+                Format::Pretty => {
+                    pretty::render(&cli.command, &data, env.terminal, &commands::names(&cli, env))
+                },
             };
             acyclic_core::probe::mark("render output");
             Outcome::out(exit::OK, output)

@@ -4,8 +4,12 @@
 //!
 //! Membership and repositories of items and threads are scope edits, as every other write to them is. What an item
 //! waits for is a link entity, written by the model's checked link and unlink.
+//!
+//! The fields hold what the command line named until [`ItemFields::resolve`] or [`ThreadFields::resolve`] turns each
+//! reference into the id of the record it names; the writes take ids.
 
 use acyclic_core::ids;
+use acyclic_core::import::owner_name;
 use acyclic_core::model::{self, By, ItemState, Model, Size};
 use acyclic_core::place::{self, Inherited};
 use acyclic_core::schema::{
@@ -18,6 +22,7 @@ use serde_json::{Value as Json, json};
 
 use crate::commands::{existing, holds_only, set_if};
 use crate::error::{CliError, exit};
+use crate::resolve::{self, Records};
 
 /// A single-valued field's change: `--field` sets it, `--no-field` clears it, and neither leaves it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -57,7 +62,7 @@ pub(crate) struct Delta {
 }
 
 /// What an item's `add` or `edit` sets.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ItemFields {
     pub title: Option<String>,
     pub parent: Change<String>,
@@ -70,7 +75,7 @@ pub(crate) struct ItemFields {
 }
 
 /// What a thread's `add` or `edit` sets.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
@@ -80,9 +85,95 @@ pub(crate) struct ThreadFields {
 /// What a repository record's `add` or `edit` sets.
 #[derive(Debug, Default)]
 pub(crate) struct RepositoryFields {
-    pub owner: Option<String>,
+    /// Its `owner/name`.
     pub name: Option<String>,
     pub default_branch: Option<String>,
+}
+
+/// The repositories a removal names: each element `held` that it names by id or ending, else the record the resolver
+/// finds.
+fn removals(
+    records: &Records<'_>,
+    held: &[String],
+    named: &[String],
+) -> Result<Vec<String>, CliError> {
+    named
+        .iter()
+        .map(|name| match resolve::held(held, name) {
+            Some(id) => Ok(id),
+            None => records.repository(name),
+        })
+        .collect()
+}
+
+impl ItemFields {
+    /// The fields with every reference resolved to the id of the record it names. `item` is the item they are for,
+    /// when it exists: a removal looks among what it holds first, so it finds an element whose record is gone.
+    pub fn resolve(self, model: &Model, item: Option<&str>) -> Result<Self, CliError> {
+        let records = Records::of(model);
+        let parent = match self.parent {
+            Change::Set(parent) => Change::Set(records.item(&parent)?),
+            other => other,
+        };
+        let thread = match self.thread {
+            Change::Set(thread) => Change::Set(records.thread(&thread)?),
+            other => other,
+        };
+        let held_repositories: Vec<String> = item
+            .and_then(|id| model.items.get(id))
+            .map(|item| item.repositories.iter().cloned().collect())
+            .unwrap_or_default();
+        let held_waits: Vec<String> = model
+            .links
+            .iter()
+            .filter(|link| Some(link.from.as_str()) == item)
+            .map(|link| link.to.clone())
+            .collect();
+        let repositories = Delta {
+            add: self
+                .repositories
+                .add
+                .iter()
+                .map(|r| records.repository(r))
+                .collect::<Result<_, _>>()?,
+            remove: removals(&records, &held_repositories, &self.repositories.remove)?,
+        };
+        let waits_for = Delta {
+            add: self.waits_for.add.iter().map(|i| records.item(i)).collect::<Result<_, _>>()?,
+            remove: self
+                .waits_for
+                .remove
+                .iter()
+                .map(|name| match resolve::held(&held_waits, name) {
+                    Some(id) => Ok(id),
+                    None => records.item(name),
+                })
+                .collect::<Result<_, _>>()?,
+        };
+        Ok(Self { parent, thread, repositories, waits_for, ..self })
+    }
+}
+
+impl ThreadFields {
+    /// The fields with every repository resolved to the id of its record, a removal looking among what `thread`
+    /// holds first.
+    pub fn resolve(self, model: &Model, thread: Option<&str>) -> Result<Self, CliError> {
+        let records = Records::of(model);
+        let held: Vec<String> = thread
+            .and_then(|id| model.threads.get(id))
+            .map(|thread| thread.repositories.iter().cloned().collect())
+            .unwrap_or_default();
+        let repositories = Delta {
+            add: self
+                .repositories
+                .add
+                .iter()
+                .map(|r| records.repository(r))
+                .collect::<Result<_, _>>()?,
+            remove: removals(&records, &held, &self.repositories.remove)?,
+        };
+        Ok(Self { repositories, ..self })
+    }
 }
 
 /// What a write did beyond writing: the threads items inherited.
@@ -170,12 +261,12 @@ fn check_targets(
     let model = Model::read(state)?;
     if let Some(thread) = thread.filter(|thread| !thread_exists(state, &model, thread)) {
         return Err(not_found(format!(
-            "no thread {thread}; add it with `acyclic thread add {thread} --title <TITLE>`"
+            "no thread {thread}; `acyclic thread add --title <TITLE>` adds one"
         )));
     }
     match repositories.iter().find(|id| !model.repositories.contains_key(*id)) {
         Some(id) => Err(not_found(format!(
-            "no repository record {id}; add it with `acyclic repository add {id}`"
+            "no repository {id}; `acyclic repository add --name <OWNER/NAME> --default-branch <BRANCH>` adds one"
         ))),
         None => Ok(()),
     }
@@ -288,33 +379,37 @@ pub(crate) fn edit_item(
     Ok(written)
 }
 
-/// The id an add writes: the one given, unless it is new and the tracker's to assign, or else the next the tracker
-/// assigns. An add without an id whose title is already a thread's, or an open item's, is refused naming that record,
-/// so a retried add doesn't make a second one; give an id to add another with the same title. A done item's title is
-/// free again, since titles recur once work is finished.
+/// A given id as stored: a `UUIDv7` in any case, lowercased; any other is refused.
+pub(crate) fn given_id(id: &str) -> Result<String, CliError> {
+    ids::v7(id).ok_or_else(|| {
+        CliError::new(
+            "invalid-id",
+            exit::USAGE,
+            format!("{id:?} isn't a UUIDv7: leave --id out for the tracker to make one, or take one from `acyclic id`"),
+        )
+    })
+}
+
+/// The id an add writes: the one given, else a new one. An add of an id that exists is a repeat, for the add to
+/// accept or refuse. Otherwise an add whose title is already a thread's, or an open item's, is refused naming that
+/// record, so a retried add doesn't make a second one. A done item's title is free again, since titles recur once
+/// work is finished.
 pub(crate) fn new_id(
     replica: &Replica,
     of: &str,
     given: Option<&str>,
     title: &str,
 ) -> Result<String, CliError> {
-    if let Some(id) = given {
+    let given = given.map(given_id).transpose()?;
+    if let Some(id) = &given {
         let exists = if of == kind::THREAD {
             replica.state().entity(&thread_key(id)?).is_some()
-                || thread_exists(replica.state(), &Model::read(replica.state())?, id)
         } else {
             replica.state().entity(&model::item_key(id)?).is_some()
         };
-        if !exists && ids::reserved(of, id) {
-            return Err(CliError::new(
-                "reserved-id",
-                exit::USAGE,
-                format!(
-                    "ids starting with {of}- are the tracker's to assign: leave out the id, or choose another"
-                ),
-            ));
+        if exists {
+            return Ok(id.clone());
         }
-        return Ok(id.to_owned());
     }
     let model = Model::read(replica.state())?;
     let same = if of == kind::THREAD {
@@ -337,11 +432,14 @@ pub(crate) fn new_id(
     if let Some(id) = same {
         return Err(CliError::refused(
             "already-exists",
-            format!("{of} {id} has this title; give an id to add another with the same title"),
+            format!(
+                "{of} {id} has this title, so the add would make a second; change that one with `acyclic {of} edit \
+                 {id}`, or give this one another title"
+            ),
         )
         .with(json!({"id": id})));
     }
-    Ok(ids::next(replica.state(), of, replica.id()))
+    Ok(given.unwrap_or_else(ids::new))
 }
 
 /// Adds an item, or accepts the same add again.
@@ -488,11 +586,32 @@ pub(crate) fn edit_repository(
 ) -> Result<(), CliError> {
     let key = Key::new(kind::REPOSITORY, id)?;
     if replica.state().entity(&key).is_none() {
-        return Err(not_found(format!(
-            "no repository record {id}; `acyclic repository list` lists them"
-        )));
+        return Err(not_found(format!("no repository {id}; `acyclic repository list` lists them")));
     }
     write_repository(replica, &key, fields, by)
+}
+
+/// Refuses an `owner/name` that isn't one, or that another record has, compared in any case.
+fn check_name(model: &Model, id: &str, name: &str) -> Result<(String, String), CliError> {
+    let Some((owner, short)) = owner_name(name) else {
+        return Err(CliError::new(
+            "usage",
+            exit::USAGE,
+            format!("--name takes the repository's owner/name, such as me/garden, not {name:?}"),
+        ));
+    };
+    let taken = model.repositories.values().find(|record| {
+        record.id != id
+            && resolve::repository_name(record).is_some_and(|held| held.eq_ignore_ascii_case(name))
+    });
+    if let Some(record) = taken {
+        return Err(CliError::refused(
+            "already-exists",
+            format!("repository {} is named {name} already", record.id),
+        )
+        .with(json!({"id": record.id})));
+    }
+    Ok((owner.to_owned(), short.to_owned()))
 }
 
 fn write_repository(
@@ -501,9 +620,17 @@ fn write_repository(
     fields: &RepositoryFields,
     by: By<'_>,
 ) -> Result<(), CliError> {
-    set_if(replica, key, repo_field::OWNER, fields.owner.as_ref(), by)?;
-    set_if(replica, key, repo_field::NAME, fields.name.as_ref(), by)?;
+    if let Some(name) = &fields.name {
+        let (owner, short) = check_name(&Model::read(replica.state())?, &key.id, name)?;
+        set_if(replica, key, repo_field::OWNER, Some(&owner), by)?;
+        set_if(replica, key, repo_field::NAME, Some(&short), by)?;
+    }
     set_if(replica, key, repo_field::DEFAULT_BRANCH, fields.default_branch.as_ref(), by)
+}
+
+/// The id a repository add writes: the one given, else a new one.
+pub(crate) fn new_repository_id(given: Option<&str>) -> Result<String, CliError> {
+    Ok(given.map(given_id).transpose()?.unwrap_or_else(ids::new))
 }
 
 /// Adds a repository record, or accepts the same add again.
@@ -519,12 +646,12 @@ pub(crate) fn add_repository(
     }
     let model = Model::read(replica.state())?;
     let record = model.repositories.get(id).ok_or_else(|| {
-        not_found(format!("no repository record {id}; `acyclic repository list` lists them"))
+        not_found(format!("no repository {id}; `acyclic repository list` lists them"))
     })?;
+    let held = resolve::repository_name(record);
     let mut differs: Vec<&str> = Vec::new();
     for (flag, same) in [
-        ("--owner", fields.owner.as_ref() == record.owner.one()),
-        ("--name", fields.name.as_ref() == record.name.one()),
+        ("--name", fields.name.as_ref() == held.as_ref()),
         ("--default-branch", fields.default_branch.as_ref() == record.default_branch.one()),
     ] {
         if !same {

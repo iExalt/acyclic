@@ -4,13 +4,19 @@ use std::fmt;
 
 use acyclic_core::archive::ArchiveError;
 use acyclic_core::delete::DeleteError;
-use acyclic_core::import::{ApplyError, ParseError};
+use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
-use acyclic_core::renumber::RenumberError;
-use acyclic_core::state::Error as StateError;
+use acyclic_core::state::{Error as StateError, FORMAT_VERSION};
 use acyclic_core::store::{BatchError, StoreError};
 use serde_json::{Value as Json, json};
+
+/// What an unreadable state hints at, except from `doctor` itself.
+pub(crate) const DOCTOR_HINT: &str = "run acyclic doctor";
+/// What a state an earlier format version wrote hints at, from every command.
+const MIGRATE_HINT: &str = "written by an earlier acyclic: migrate the tracker";
+/// What a state a later format version wrote hints at.
+const LATER_HINT: &str = "written by a later acyclic: run that version";
 
 /// Exit codes. Stable: agents branch on them.
 pub mod exit {
@@ -84,13 +90,17 @@ impl From<StateError> for CliError {
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
-            StateError::Format(_) => ("unreadable", exit::UNREADABLE),
+            StateError::Format(_) | StateError::Version(_) => ("unreadable", exit::UNREADABLE),
         };
-        let mut error = Self::new(code, exit, message);
-        if code == "unreadable" {
-            error = error.with(json!({"hint": "run acyclic doctor"}));
+        let error = Self::new(code, exit, message);
+        match err {
+            StateError::Version(version) if version < u64::from(FORMAT_VERSION) => {
+                error.with(json!({"hint": MIGRATE_HINT}))
+            },
+            StateError::Version(_) => error.with(json!({"hint": LATER_HINT})),
+            StateError::Format(_) => error.with(json!({"hint": DOCTOR_HINT})),
+            _ => error,
         }
-        error
     }
 }
 
@@ -145,17 +155,8 @@ impl From<DeleteError> for CliError {
             DeleteError::InUse { item, reasons } => {
                 Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
             },
-        }
-    }
-}
-
-impl From<RenumberError> for CliError {
-    fn from(err: RenumberError) -> Self {
-        let message = err.to_string();
-        match err {
-            RenumberError::Write(err) => err.into(),
-            RenumberError::NoThread(_) => Self::new("not-found", exit::NOT_FOUND, message),
-            RenumberError::InUse { thread, reasons } => {
+            DeleteError::NoThread(_) => Self::new("not-found", exit::NOT_FOUND, message),
+            DeleteError::ThreadInUse { thread, reasons } => {
                 Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
             },
         }
@@ -186,6 +187,11 @@ impl From<ApplyError> for CliError {
         let message = err.to_string();
         match err {
             ApplyError::Write(err) => err.into(),
+            // Ids are judged first, and alone: an agent branching on the code sees the real reason.
+            ApplyError::Invalid(errors) if errors.iter().any(ValidationError::is_invalid_id) => {
+                let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
+                Self::new("invalid-id", exit::USAGE, message).with(json!({"errors": errors}))
+            },
             ApplyError::Invalid(errors) => {
                 let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
                 Self::refused("invalid-import", message).with(json!({"errors": errors}))

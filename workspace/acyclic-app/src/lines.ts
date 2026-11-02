@@ -1,7 +1,6 @@
-// Threads drawn as the lines of a transit map: each has a colour, and a badge with its number wherever the thread is
-// named. Colours spiral round the hue wheel by number, so neighbouring threads look alike, and each lap of 27
-// threads is a quarter of the band lighter than the last: thread 7 and thread 34 share a hue and differ only a little
-// in lightness, nearly alike. After 108 threads the spiral starts again. That is safe only because the Map lights one
+// Threads drawn as the lines of a transit map: each has a colour, and a badge, a dot in that colour, wherever the thread
+// is named. Colours spiral round the hue wheel by a hash of the thread's id, and each lap of 27 positions is a quarter
+// of the band lighter than the last: positions 7 and 34 share a hue and differ only a little in lightness, nearly alike. After 108 positions the spiral starts again. That is safe only because the Map lights one
 // thread at a time and every list names the thread: never ask anyone to tell two threads apart by colour alone.
 
 import type { Thread } from "./api";
@@ -17,7 +16,7 @@ const LAP = 27;
 const LAPS = 4;
 /** How colourful every line is: in Okhsl, a share of the most each hue holds at its lightness, so all are alike. */
 const SATURATION = 0.9;
-/** Where the walk starts: thread 0 a yellow green. */
+/** Where the walk starts: position 0 a yellow green. */
 const START = 110;
 
 /**
@@ -35,79 +34,27 @@ export function lineColour(at: number, palette: Palette): string {
 }
 
 export interface Line {
-  /**
-   * The thread's number, from its id, or null when its id has none. Two clones can give threads the same number, so
-   * while they clash each badge also carries its clone's initial, such as "32m".
-   */
-  number: string | null;
-  /** The title, without a number it starts with that is the thread's own. */
+  /** The thread's title. */
   name: string;
   colour: string;
   /** The badge's text colour, whichever of the two reads better on `colour`. */
   ink: string;
 }
 
-/** A thread as text where no badge stands beside it: its number, then its name ("4. CLI features"), else `title`. */
-export function lineLabel(line: Line | undefined, title: string): string {
-  if (line === undefined) return title;
-  return line.number === null ? line.name : `${line.number}. ${line.name}`;
+/** The line for a thread, coloured by its id, so colours hold still as threads come and go. */
+export function lineOf(thread: Named, palette: Palette): Line {
+  const colour = lineColour(hash(thread.id), palette);
+  return { name: thread.title, colour, ink: inkOn(colour, palette) };
 }
 
-/**
- * The tracker's thread ids: `thread-<n>`, or `thread-<clone>-<n>` for one a clone assigned, where the clone's id may
- * hold dashes itself.
- */
-const ID = /^thread-(?:([a-z0-9-]+)-)?(\d+)$/;
-
-/**
- * A number a title starts with, from before threads took theirs from their ids: "7. Build it" or "Thread 7: Build
- * it". "2.8 Draw the Map" starts with a step's, which isn't one.
- */
-const NUMBERED = /^\s*(?:thread\s+)?(\d+)\s*[.:](?!\d)\s*/i;
-
-/** A thread's number and clone, from its id. */
-function parts(id: string): { number: number; clone: string | null } | null {
-  const found = ID.exec(id);
-  return found === null ? null : { number: Number(found[2]), clone: found[1] ?? null };
-}
-
-/**
- * The line for a thread: numbered and coloured by the number its id ends in, so colours hold still as threads come
- * and go, else coloured by its id and badged with a dot. A title that starts with that same number has it taken off
- * its name, so the number shows once.
- */
-export function lineOf(thread: Named, palette: Palette, clone = ""): Line {
-  const own = parts(thread.id);
-  const numbered = NUMBERED.exec(thread.title);
-  const rest = numbered === null ? "" : thread.title.slice(numbered[0].length);
-  const name = own !== null && rest !== "" && Number(numbered?.[1]) === own.number ? rest : thread.title;
-  const colour = lineColour(own === null ? hash(thread.id) : own.number, palette);
-  return { number: own === null ? null : `${own.number}${clone}`, name, colour, ink: inkOn(colour, palette) };
-}
-
-/**
- * Each thread's line, by id. Threads whose numbers clash are told apart by their clones' initials, or by their whole
- * clone ids when two initials match; an older id, with no clone, keeps its bare number.
- */
+/** Each thread's line, by id. */
 export function linesOf(threads: Named[], palette: Palette): Map<string, Line> {
-  const owned = threads.map((thread) => ({ thread, own: parts(thread.id) }));
-  const sharing = (number: number) => owned.filter(({ own }) => own?.number === number);
-  return new Map(
-    owned.map(({ thread, own }) => {
-      const others = own === null ? [] : sharing(own.number);
-      if (own?.clone == null || others.length < 2) return [thread.id, lineOf(thread, palette)];
-      const initial = own.clone.slice(0, 1);
-      const alike = others.filter((one) => one.own?.clone?.slice(0, 1) === initial).length;
-      return [thread.id, lineOf(thread, palette, alike > 1 ? own.clone : initial)];
-    }),
-  );
+  return new Map(threads.map((thread) => [thread.id, lineOf(thread, palette)]));
 }
 
-/** Threads in the order they are listed: by number, then by title, with those without a number last. */
-export function byNumber(a: Named, b: Named): number {
-  const [x, y] = [parts(a.id)?.number ?? null, parts(b.id)?.number ?? null];
-  if (x !== y) return x === null ? 1 : y === null ? -1 : x - y;
-  return a.title.localeCompare(b.title, undefined, { numeric: true });
+/** Threads in the order they are listed: by title, then by id. */
+export function byTitle(a: Named, b: Named): number {
+  return a.title.localeCompare(b.title, undefined, { numeric: true }) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** The badge ink with the higher contrast on `colour`. */

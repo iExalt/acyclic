@@ -187,3 +187,30 @@ fn delete_wins_a_join_and_what_was_attached_meanwhile_reads_as_dangling() {
     assert_eq!(one.state().to_files(), other.state().to_files());
     assert_eq!(needs_of(&one), needs_of(&other));
 }
+
+#[test]
+fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
+    let mut r = with_items(&["a"]);
+    for id in ["t", "u"] {
+        let key = Key::new(kind::THREAD, id).unwrap();
+        crate::model::set(&mut r, &key, crate::schema::thread::TITLE, Some(&id), user(2)).unwrap();
+    }
+    edit(&mut r, &ScopeEdit::Member { item: "a".into(), thread: Some("t".into()) }, user(2))
+        .unwrap();
+    claim::claim(&mut r, "u", USER, NOW, 60_000, 480 * 60_000).unwrap();
+    let why = |r: &mut Replica, id: &str| match delete_thread(r, id, user(NOW)) {
+        Err(DeleteError::ThreadInUse { reasons, .. }) => reasons
+            .into_iter()
+            .map(|reason| serde_json::to_value(reason).unwrap()["why"].as_str().unwrap().to_owned())
+            .collect(),
+        other => vec![format!("{other:?}")],
+    };
+    assert_eq!(why(&mut r, "t"), ["has-members"]);
+    // Even the deleter's own claim keeps it.
+    assert_eq!(why(&mut r, "u"), ["claimed"]);
+    claim::release(&mut r, &claim::thread_key("u").unwrap(), USER);
+    assert_eq!(delete_thread(&mut r, "u", user(NOW)), Ok(true));
+    assert!(!Model::read(&r.state).unwrap().threads.contains_key("u"));
+    assert_eq!(delete_thread(&mut r, "u", user(NOW)), Ok(false), "deleting again writes nothing");
+    assert_eq!(delete_thread(&mut r, "v", user(NOW)), Err(DeleteError::NoThread("v".into())));
+}

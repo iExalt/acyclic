@@ -56,7 +56,7 @@ fn done_with(r: &mut Replica, id: &str, commit: Option<&str>) {
     let evidence = Evidence {
         repository: commit.map(|_| "code".to_owned()),
         commit: commit.map(str::to_owned),
-        note: None,
+        text: None,
     };
     set(r, &item_key(id).unwrap(), field::EVIDENCE, Some(&evidence), by(2)).unwrap();
 }
@@ -136,7 +136,7 @@ fn an_unverifiable_merge_says_why() {
     link(&mut r, "y", "dep2", by(2)).unwrap();
     set_state(&mut r, "dep2", ItemState::Done, by(3)).unwrap();
     let evidence =
-        Evidence { repository: Some("gone".into()), commit: Some("c2".into()), note: None };
+        Evidence { repository: Some("gone".into()), commit: Some("c2".into()), text: None };
     set(&mut r, &item_key("dep2").unwrap(), field::EVIDENCE, Some(&evidence), by(3)).unwrap();
     assert!(matches!(
         status(&r, &broken, "y"),

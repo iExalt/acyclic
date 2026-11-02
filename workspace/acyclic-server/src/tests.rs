@@ -276,7 +276,10 @@ fn the_server_runs_only_the_commands_it_allows() {
     let (status, code) = post(&pass, r#"{"item": {"show": {"items": ["a"]}}}"#);
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     // So does a write.
-    let (status, code) = post(&pass, r#"{"item": {"add": {"item": "a", "title": "A"}}}"#);
+    let (status, code) = post(
+        &pass,
+        r#"{"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "A"}}}"#,
+    );
     assert!(status.is_server_error() && !code.is_empty(), "{status} {code}");
     assert_eq!(post(&pass, r#""sync""#), (StatusCode::FORBIDDEN, "not-allowed".into()));
     assert_eq!(
@@ -289,7 +292,8 @@ fn the_server_runs_only_the_commands_it_allows() {
     for old in [
         r#"{"thread": {"set": {"id": "t", "title": "T"}}}"#,
         r#"{"item": {"move": {"id": "a", "parent": "b"}}}"#,
-        r#"{"item": {"add": {"id": "a", "title": "A"}}}"#,
+        r#"{"item": {"add": {"item": "a", "title": "A"}}}"#,
+        r#"{"thread": {"renumber": {"thread": "t"}}}"#,
     ] {
         assert_eq!(post(&pass, old), (StatusCode::BAD_REQUEST, "usage".into()), "{old}");
     }
@@ -323,14 +327,15 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"thread": {"claim": {"thread": "t"}}}),
         json!({"thread": {"release": {"thread": "t"}}}),
         json!({"item": {"done": {"item": "a", "evidence": "n"}}}),
-        json!({"item": {"add": {"item": "a", "title": "A"}}}),
+        json!({"item": {"add": {"id": "a", "title": "A"}}}),
         json!({"item": {"edit": {"item": "a", "no-thread": true, "waits-for": ["b"]}}}),
         json!({"item": {"archive": {"item": "a"}}}),
         json!({"item": {"delete": {"item": "a"}}}),
         json!({"item": {"edit": {"item": "a", "no-waits-for": ["b"]}}}),
-        json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
+        json!({"thread": {"add": {"title": "T"}}}),
+        json!({"thread": {"delete": {"thread": "t"}}}),
         json!({"thread": {"edit": {"thread": "t", "no-brief": true}}}),
-        json!({"repository": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
+        json!({"repository": {"add": {"name": "o/n", "default-branch": "main"}}}),
         json!({"repository": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
     ] {
         assert_eq!(classify(write.clone()), Class::Write, "{write}");
@@ -359,7 +364,7 @@ fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
         Method::POST,
         "/api/command",
         &pass,
-        r#"{"item": {"add": {"item": "a", "title": "A"}}}"#,
+        r#"{"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "A"}}}"#,
     );
     assert_eq!((status, code(&body)), (StatusCode::SERVICE_UNAVAILABLE, "busy".into()));
     // Reads don't wait for it.
@@ -613,7 +618,9 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
         assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
-    run(json!({"item": {"add": {"item": "a", "title": "a long title ".repeat(200)}}}));
+    run(
+        json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "a long title ".repeat(200)}}}),
+    );
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
     // The encodings a response was sent in, one per `Content-Encoding` value.
@@ -635,7 +642,7 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
             (response.status(), sent, response.headers().get("etag").cloned())
         })
     };
-    let show = r#"{"item": {"show": {"items": ["a"]}}}"#;
+    let show = r#"{"item": {"show": {"items": ["01900000-0000-7000-8000-0000000000a1"]}}}"#;
     let api = |accept: &str, body: &str| {
         encodings(Method::POST, "/api/command", &[("accept-encoding", accept)], body).1
     };
@@ -672,11 +679,15 @@ fn every_command_the_app_sends_runs_through_the_api() {
         assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
-    run(json!({"item": {"add": {"item": "a", "title": "A"}}}));
-    run(json!({"item": {"add": {"item": "b", "title": "B", "parent": "a"}}}));
-    run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
-    run(json!({"item": {"add": {"item": "e", "title": "E"}}}));
-    run(json!({"item": {"done": {"item": "e", "evidence": "n", "force": true}}}));
+    run(json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "A"}}}));
+    run(
+        json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000b1", "title": "B", "parent": "01900000-0000-7000-8000-0000000000a1"}}}),
+    );
+    run(json!({"thread": {"add": {"id": "01900000-0000-7000-8000-0000000000f1", "title": "T"}}}));
+    run(json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000e1", "title": "E"}}}));
+    run(
+        json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000e1", "evidence": "n", "force": true}}}),
+    );
     let examples: Value = serde_json::from_str(&examples).unwrap();
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
