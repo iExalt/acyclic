@@ -77,7 +77,7 @@ const MACOS_STUB: &str = "/usr/bin/git";
 /// asked of `xcrun` once per process, since a command runs git several times.
 fn git_program() -> &'static std::ffi::OsStr {
     static PROGRAM: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
-    PROGRAM.get_or_init(|| {
+    still_there(PROGRAM.get_or_init(|| {
         let path = std::env::var_os("PATH").unwrap_or_default();
         cfg!(target_os = "macos")
             .then(|| first_git(&path))
@@ -95,7 +95,13 @@ fn git_program() -> &'static std::ffi::OsStr {
                 found.is_file().then(|| found.into_os_string())
             })
             .unwrap_or_else(|| "git".into())
-    })
+    }))
+}
+
+/// `found`, a git found once, or `git` from `PATH` once it is gone, as when a long-running server outlives the
+/// developer tools it found it in. A stat per call, against a spawn's milliseconds.
+fn still_there(found: &std::ffi::OsStr) -> &std::ffi::OsStr {
+    if found == "git" || Path::new(found).is_file() { found } else { std::ffi::OsStr::new("git") }
 }
 
 /// The first `git` among the directories of `path`, a `PATH` value, as a command named `git` would find it.
@@ -1441,6 +1447,11 @@ mod tests {
         let path = std::env::join_paths([&none, &folder, &file, &later]).unwrap();
         assert_eq!(first_git(&path), Some(file.join("git")));
         assert_eq!(first_git(&std::env::join_paths([&none]).unwrap()), None);
+        // A git found once and since removed gives way to the one on `PATH`.
+        let kept = file.join("git").into_os_string();
+        assert_eq!(still_there(&kept), kept);
+        std::fs::remove_file(file.join("git")).unwrap();
+        assert_eq!(still_there(&kept), "git");
     }
 
     #[test]
