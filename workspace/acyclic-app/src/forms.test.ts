@@ -52,7 +52,7 @@ describe("resolveCommand", () => {
     expect(resolveCommand("item", "a", "state", "done")).toBeNull();
     expect(resolveCommand("item", "a", "title", null)).toBeNull();
     expect(resolveCommand("thread", "t", "evidence", "x")).toBeNull();
-    expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic done/);
+    expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic item done/);
   });
 });
 

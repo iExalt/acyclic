@@ -116,8 +116,8 @@ class Plan:
     """The tracker's items, and what the Map's views of them must show."""
 
     def __init__(self, env):
-        ids = [row["id"] for row in json.loads(run(env, "list"))["data"]["items"]]
-        rows = json.loads(run(env, "show", *ids))["data"]
+        ids = [row["id"] for row in json.loads(run(env, "item", "list"))["data"]["items"]]
+        rows = json.loads(run(env, "item", "show", *ids))["data"]
         self.items = {row["id"]: row for row in rows}
         self.parent = {id: row["parent"] for id, row in self.items.items()}
 
@@ -931,7 +931,7 @@ def pairing_journey(context, page, origin, env, name, failures):
     other.close()
     server.shutdown()
     server.server_close()
-    listed = {row["id"] for row in json.loads(run(env, "list"))["data"]["items"]}
+    listed = {row["id"] for row in json.loads(run(env, "item", "list"))["data"]["items"]}
     if landed := listed & {form, fetched}:
         failures.append(f"{name}: another port's writes reached the tracker: {sorted(landed)}")
     if framed:
@@ -1342,7 +1342,7 @@ def threads_journey(page, view, env, name, failures):
             page.mouse.move(0, 0)
     # A thread with work to start, whose panel offers it. Its tile goes to the Map with the panel open, as a thread's
     # row anywhere does.
-    ready = [row["id"] for row in json.loads(run(env, "ready"))["data"]["ready"] if row["id"] in want]
+    ready = [row["id"] for row in json.loads(run(env, "thread", "ready"))["data"]["ready"] if row["id"] in want]
     picked = ready[0] if ready else next(iter(want))
     tile = page.locator(f"[data-thread-tile='{picked}']")
     panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
@@ -1448,7 +1448,7 @@ def arrows_clear(page, want, name, failures):
 def item(env, id):
     """The item as the tracker shows it, or None while there is no such item."""
     out = subprocess.run(
-        [ACYCLIC, "show", id], env=env, capture_output=True, text=True, check=False
+        [ACYCLIC, "item", "show", id], env=env, capture_output=True, text=True, check=False
     )
     return json.loads(out.stdout)["data"][0] if out.returncode == 0 else None
 
@@ -1882,7 +1882,7 @@ def failed_add_journey(page, errors, name, failures):
         "**/api/command",
         lambda route: (
             route.fulfill(status=500, body="")
-            if route.request.post_data == '"list"'
+            if route.request.post_data == '{"item":"list"}'
             else route.fallback()
         ),
     )
@@ -1931,7 +1931,7 @@ def failed_add_journey(page, errors, name, failures):
         "**/api/command",
         lambda route: (
             route.fulfill(status=500, body="")
-            if route.request.post_data == '"list"'
+            if route.request.post_data == '{"item":"list"}'
             else route.fallback()
         ),
     )
@@ -2095,7 +2095,7 @@ def form_journey(page, view, env, remote, id, name, failures):
         )
 
     # Reopen: finished elsewhere, reopened here.
-    run(env, "done", id, "--force", "--note", "finished for the journey")
+    run(env, "item", "done", id, "--force", "--evidence", "finished for the journey")
     refresh(page)
     item_action(page, "reopen")
     page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
@@ -2239,7 +2239,7 @@ def needs_journey(page, env, plan, thread, name, failures):
         )
     if int(count.inner_text()) != before:
         failures.append(f"{name}: the needs count is {count.inner_text()}, not {before}, once the conflict was settled")
-    if json.loads(run(env, "show", outside))["data"][0]["title"] != "Needs you's title from the other clone":
+    if json.loads(run(env, "item", "show", outside))["data"][0]["title"] != "Needs you's title from the other clone":
         failures.append(f"{name}: settling the conflict from the list didn't keep the other clone's title")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
     picker = needs.locator("[data-need] [data-pick-thread]").first

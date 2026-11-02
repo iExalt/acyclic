@@ -5,7 +5,7 @@ import { examples } from "./commands.examples.json";
 /** The command the server's tests run under this name. */
 const example = (name: string) => examples.find((one) => one.name === name)?.command;
 
-/** An item as `show` returns it, unconflicted. */
+/** An item as `item show` returns it, unconflicted. */
 function raw(id: string) {
   return {
     id,
@@ -21,13 +21,14 @@ function raw(id: string) {
   };
 }
 
-/** A server that answers each command from a table, recording what it was sent. */
+/** A server that answers each command from a table by its name, such as `item show`, recording what it was sent. */
 function server(answers: Record<string, unknown>) {
   const sent: unknown[] = [];
   const fetcher = async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as unknown;
     sent.push(body);
-    const name = typeof body === "string" ? body : (Object.keys(body as object)[0] ?? "");
+    const [group, verb] = typeof body === "string" ? [body, null] : (Object.entries(body as object)[0] ?? ["", null]);
+    const name = verb === null ? group : `${group} ${typeof verb === "string" ? verb : Object.keys(verb as object)[0]}`;
     return new Response(JSON.stringify(answers[name]), { status: 200 });
   };
   return { fetcher, sent };
@@ -36,18 +37,18 @@ function server(answers: Record<string, unknown>) {
 describe("command", () => {
   it("returns the envelope's data and throws its error code", async () => {
     const { fetcher } = server({
-      list: { ok: true, data: [] },
-      show: { ok: false, error: { code: "not-found", message: "no item a", details: null } },
+      "item list": { ok: true, data: [] },
+      "item show": { ok: false, error: { code: "not-found", message: "no item a", details: null } },
     });
-    await expect(command("list", fetcher)).resolves.toEqual([]);
-    await expect(command({ show: { items: ["a"] } }, fetcher)).rejects.toEqual(
+    await expect(command({ item: "list" }, fetcher)).resolves.toEqual([]);
+    await expect(command({ item: { show: { items: ["a"] } } }, fetcher)).rejects.toEqual(
       new CommandError("not-found", "no item a"),
     );
   });
 
   it("names the status when the answer isn't an envelope", async () => {
     const fetcher = async () => new Response("unpaired", { status: 401 });
-    await expect(command("list", fetcher)).rejects.toMatchObject({ code: "http" });
+    await expect(command({ item: "list" }, fetcher)).rejects.toMatchObject({ code: "http" });
   });
 });
 
@@ -55,14 +56,14 @@ describe("items", () => {
   it("shows every listed id in one request, and sends none for an empty tracker", async () => {
     const shown = [raw("a"), raw("b")];
     const full = server({
-      list: { ok: true, data: { items: [{ id: "a" }, { id: "b" }] } },
-      show: { ok: true, data: shown },
+      "item list": { ok: true, data: { items: [{ id: "a" }, { id: "b" }] } },
+      "item show": { ok: true, data: shown },
     });
     await expect(items(full.fetcher)).resolves.toEqual(shown.map(settle));
-    // A command without arguments goes as its bare name, as the server parses it.
+    // A command without arguments goes as its bare name inside its group, as the server parses it.
     expect(full.sent).toEqual([example("list"), example("show")]);
 
-    const empty = server({ list: { ok: true, data: { items: [] } } });
+    const empty = server({ "item list": { ok: true, data: { items: [] } } });
     await expect(items(empty.fetcher)).resolves.toEqual([]);
     expect(empty.sent).toHaveLength(1);
   });
@@ -71,7 +72,7 @@ describe("items", () => {
 describe("threads", () => {
   it("lists threads, titling one with a conflicted title by its first value", async () => {
     const { fetcher, sent } = server({
-      thread: {
+      "thread list": {
         ok: true,
         data: {
           threads: [
@@ -98,7 +99,7 @@ describe("threads", () => {
 describe("thread", () => {
   it("reads a thread for its panel, as the server's tests send it", async () => {
     const { fetcher, sent } = server({
-      thread: {
+      "thread show": {
         ok: true,
         data: [
           {
@@ -145,7 +146,7 @@ describe("failure", () => {
     const lost = async () => {
       throw new TypeError("Load failed");
     };
-    const told = await command("list", lost).catch(failure);
+    const told = await command({ item: "list" }, lost).catch(failure);
     expect(told).toEqual({ code: "network", message: "Can't reach the server" });
     // A bug in reading an answer isn't a lost connection.
     const malformed = async () => Response.json({ ok: true, data: null });

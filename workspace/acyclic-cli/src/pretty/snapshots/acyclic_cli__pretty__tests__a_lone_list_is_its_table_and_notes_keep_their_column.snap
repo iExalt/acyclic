@@ -1,6 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/pretty/tests.rs
-expression: "format!(\"{}{}{}\", render(&command(\"needs\"), &needs, None),\nrender(&command(\"repo list\"), &empty, None),\nrender(&command(\"show a1\"), &noted, None))"
+expression: "format!(\"{}{}{}\", render(&command(\"needs\"), &needs, None),\nrender(&command(\"repository list\"), &empty, None),\nrender(&command(\"item show a1\"), &noted, None))"
 ---
 KIND          THREADS         FIX                                     ITEM
 thread-cycle  t1 (T), t2 (U)

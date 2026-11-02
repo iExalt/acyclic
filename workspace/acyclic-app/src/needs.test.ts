@@ -117,7 +117,7 @@ describe("needView", () => {
       none,
     );
     expect(conflict.actions.map((one) => one.label)).toEqual(["Use parked"]);
-    expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic done/);
+    expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
     expect(conflict.key).toBe("conflict:item:a:state");
     // Named, and its values too where they are ids, while the command keeps the id.
     const titles = (id: string) => id.toUpperCase();

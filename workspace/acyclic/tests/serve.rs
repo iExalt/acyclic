@@ -154,12 +154,12 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let (_server, address) = serve(&tracker, &[]);
 
     let anonymous = [("Host", HOST), ("Content-Type", "application/json")];
-    let (status, refused) = request(&address, &anonymous, r#""list""#);
+    let (status, refused) = request(&address, &anonymous, r#"{"item": "list"}"#);
     assert_eq!((status, &refused["error"]["code"]), (403, &Value::from("no-identity")));
 
-    let (status, shown) = command(&address, r#"{"show": {"items": ["a"]}}"#);
+    let (status, shown) = command(&address, r#"{"item": {"show": {"items": ["a"]}}}"#);
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "show a"));
+    assert_eq!(shown, cli(&tracker, "item show a"));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let (server, address, session, _) = up(&tracker, &home, &[]);
     let token = std::fs::read_to_string(&session).unwrap();
     let bearer = format!("Bearer {}", token.trim_end());
-    let show = r#"{"show": {"items": ["a"]}}"#;
+    let show = r#"{"item": {"show": {"items": ["a"]}}}"#;
     let json = ("Content-Type", "application/json");
 
     let (status, refused) = request(&address, &[("Host", &address), json], show);
@@ -180,7 +180,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let (status, shown) =
         request(&address, &[("Host", &address), ("Authorization", &bearer), json], show);
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "show a"));
+    assert_eq!(shown, cli(&tracker, "item show a"));
 
     // A link from `--link` pairs a browser, whose cookie then writes from the server's own page.
     let port = address.rsplit_once(':').unwrap().1;
@@ -252,7 +252,7 @@ fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     };
     let (status, shown) = through(&format!("/{secret}/api/command"), &identity);
     assert_eq!(status, 200, "{shown}");
-    assert_eq!(shown, cli(&tracker, "show a"));
+    assert_eq!(shown, cli(&tracker, "item show a"));
     assert_eq!(through("/api/command", &identity), (404, Value::Null));
     let (status, refused) = through(
         &format!("/{secret}/api/command"),
@@ -286,7 +286,7 @@ fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
     cli(&phone, "sync");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (status, shown) = command(&address, r#"{"show": {"items": ["b"]}}"#);
+        let (status, shown) = command(&address, r#"{"item": {"show": {"items": ["b"]}}}"#);
         if status == 200 {
             break;
         }

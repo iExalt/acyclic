@@ -143,7 +143,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         record(
             &mut row,
             "ready",
-            &(0..runs).map(|_| tracker.time("ready", false)).collect::<Vec<_>>(),
+            &(0..runs).map(|_| tracker.time("thread ready", false)).collect::<Vec<_>>(),
         );
         let adds: Vec<Sample> = (0..runs)
             .map(|n| tracker.time(&format!("item add z{n} --title First"), false))
@@ -174,26 +174,26 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     let times = |line: &dyn Fn(usize) -> String, agent| {
         (0..runs).map(|n| tracker.time(&line(n), agent)).collect::<Vec<_>>()
     };
-    record(&mut row, "ready", &times(&|_| "ready".into(), false));
+    record(&mut row, "ready", &times(&|_| "thread ready".into(), false));
     let cache = tracker.repo().join(".git/acyclic/cache");
     let cold: Vec<Sample> = (0..runs)
         .map(|_| {
             let _ = std::fs::remove_dir_all(&cache);
-            tracker.time("ready", false)
+            tracker.time("thread ready", false)
         })
         .collect();
     record(&mut row, "ready, no cache", &cold);
-    record(&mut row, "show", &times(&|_| format!("show {item}"), false));
+    record(&mut row, "show", &times(&|_| format!("item show {item}"), false));
     record(&mut row, "needs", &times(&|_| "needs".into(), false));
     record(&mut row, "edit", &times(&|n| format!("item edit {item} --notes edit-{n}"), false));
     let fresh: Vec<Sample> = (0..runs)
         .map(|n| {
             tracker.run(&format!("item edit {item} --notes fresh-{n}"), false);
-            tracker.time(&format!("show {item}"), false)
+            tracker.time(&format!("item show {item}"), false)
         })
         .collect();
     record(&mut row, "show after edit", &fresh);
-    let (ready, _) = tracker.run("ready", false);
+    let (ready, _) = tracker.run("thread ready", false);
     let threads: Vec<String> = ready["data"]["ready"]
         .as_array()
         .expect("a ready list")
@@ -202,10 +202,12 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
         .map(|thread| thread["id"].as_str().expect("a thread id").to_owned())
         .collect();
     if let Some(first) = threads.first() {
-        let claims: Vec<Sample> =
-            threads.iter().map(|thread| tracker.time(&format!("claim {thread}"), true)).collect();
+        let claims: Vec<Sample> = threads
+            .iter()
+            .map(|thread| tracker.time(&format!("thread claim {thread}"), true))
+            .collect();
         record(&mut row, "claim", &claims);
-        record(&mut row, "claim again", &times(&|_| format!("claim {first}"), true));
+        record(&mut row, "claim again", &times(&|_| format!("thread claim {first}"), true));
     }
     let links: Vec<Sample> = (0..runs)
         .map(|_| {
@@ -236,7 +238,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
     sync(&tracker, &mut row, runs);
     if batches > 0 {
         // Distinct items, so the cache's delta grows as an agent's day of edits would grow it.
-        let (ready, _) = tracker.run("ready", false);
+        let (ready, _) = tracker.run("thread ready", false);
         let mut items: Vec<String> = ready["data"]["ready"]
             .as_array()
             .into_iter()
@@ -253,7 +255,7 @@ fn bench(size: usize, runs: usize, batches: usize) -> Row {
             "edit after batches",
             &times(&|n| format!("item edit {item} --notes late-{n}"), false),
         );
-        record(&mut row, "show after batches", &times(&|_| format!("show {item}"), false));
+        record(&mut row, "show after batches", &times(&|_| format!("item show {item}"), false));
     }
     row
 }

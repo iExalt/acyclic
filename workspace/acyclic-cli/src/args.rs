@@ -57,13 +57,12 @@ pub enum Format {
     Pretty,
 }
 
-/// The top level's help sections, in order: what every session uses, the groups, then the rest.
-pub const SECTIONS: [(&str, &[&str]); 3] = [
-    ("Common Commands", &["ready", "list", "show", "claim", "release", "done", "needs"]),
-    ("Command Groups", &["item", "link", "thread", "repo"]),
+/// The top level's help sections, in order: the groups, then the commands that act on the tracker or the tool.
+pub const SECTIONS: [(&str, &[&str]); 2] = [
+    ("Command Groups", &["item", "link", "thread", "repository"]),
     (
         "Other Commands",
-        &["init", "sync", "prime", "import", "doctor", "serve", "up", "completions"],
+        &["needs", "init", "sync", "prime", "import", "doctor", "serve", "up", "completions"],
     ),
 ];
 
@@ -123,7 +122,7 @@ fn lease_minutes(text: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes"))
 }
 
-/// The commands: the ones every session uses at the top, the rest grouped by what they act on.
+/// The commands: one group per kind of record, and at the top the ones that act on the tracker or the tool.
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum Command {
@@ -142,59 +141,6 @@ pub enum Command {
     Sync,
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
-    /// Lists threads with ready work, the actor's own first, each with its ready items.
-    Ready {
-        /// Judge archived work as if it weren't archived.
-        #[arg(long)]
-        #[serde(default)]
-        include_archived: bool,
-    },
-    /// Lists every item, by id.
-    List,
-    /// Shows items with their role, readiness and claims, and a parent's progress from its leaves, as an array in the
-    /// order given.
-    Show {
-        /// The items.
-        #[arg(required = true, value_name = "ITEM")]
-        #[serde(default)]
-        items: Vec<String>,
-    },
-    /// Claims a thread with ready work, or renews the actor's claim on it.
-    Claim {
-        /// The thread.
-        thread: String,
-        /// The lease in minutes: 60 by default, 1 to 480.
-        #[arg(short = 'l', long, value_parser = lease_minutes)]
-        lease: Option<u32>,
-        /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim
-        /// on it, or on a resource it needs, still refuses.
-        #[arg(short = 'f', long)]
-        #[serde(default)]
-        force: bool,
-    },
-    /// Releases the actor's claim on a thread, leaving anyone else's.
-    Release {
-        /// The thread.
-        thread: String,
-    },
-    /// Marks an item done, with evidence.
-    Done {
-        /// The item.
-        item: String,
-        /// The repository record holding the commit.
-        #[arg(short = 'r', long, requires = "commit")]
-        repository: Option<String>,
-        /// The commit that completed it.
-        #[arg(short = 'c', long, requires = "repository")]
-        commit: Option<String>,
-        /// A note, such as where a record lives.
-        #[arg(short = 'n', long)]
-        note: Option<String>,
-        /// Finish it although it isn't ready or someone else holds it, or replace the evidence it was finished with.
-        #[arg(short = 'f', long)]
-        #[serde(default)]
-        force: bool,
-    },
     /// Lists what needs the user.
     Needs,
     /// Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example.
@@ -213,18 +159,18 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
-    /// Adds, edits, reopens, archives and deletes items.
+    /// Adds, edits, shows, lists, finishes, reopens, archives and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
     /// Adds or removes links between items.
     #[command(subcommand)]
     Link(LinkCommand),
-    /// Adds, edits, lists and shows threads.
+    /// Adds, edits, shows and lists threads, and finds, claims and releases ready work.
     #[command(subcommand)]
     Thread(ThreadCommand),
-    /// Adds, edits, lists and shows repository records.
+    /// Adds, edits, shows and lists repository records.
     #[command(subcommand)]
-    Repo(RepoCommand),
+    Repository(RepositoryCommand),
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip)]
     Serve(Serve),
@@ -349,27 +295,33 @@ impl Command {
             | Self::Import { schema: true, .. } => Class::Standalone,
             Self::Serve(_) | Self::Up(_) => Class::Server,
             Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
-            Self::Ready { .. }
-            | Self::List
-            | Self::Show { .. }
-            | Self::Needs
-            | Self::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
-            | Self::Repo(RepoCommand::List | RepoCommand::Show { .. }) => Class::Read,
-            Self::Claim { .. }
-            | Self::Release { .. }
-            | Self::Done { .. }
-            | Self::Item(
+            Self::Needs
+            | Self::Item(ItemCommand::List | ItemCommand::Show { .. })
+            | Self::Thread(
+                ThreadCommand::List | ThreadCommand::Show { .. } | ThreadCommand::Ready { .. },
+            )
+            | Self::Repository(RepositoryCommand::List | RepositoryCommand::Show { .. }) => {
+                Class::Read
+            },
+            Self::Item(
                 ItemCommand::Add { .. }
                 | ItemCommand::Edit(_)
+                | ItemCommand::Done { .. }
                 | ItemCommand::Reopen { .. }
                 | ItemCommand::Archive { .. }
                 | ItemCommand::Delete { .. },
             )
             | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
             | Self::Thread(
-                ThreadCommand::Add { .. } | ThreadCommand::Edit(_) | ThreadCommand::Renumber { .. },
+                ThreadCommand::Add { .. }
+                | ThreadCommand::Edit(_)
+                | ThreadCommand::Claim { .. }
+                | ThreadCommand::Release { .. }
+                | ThreadCommand::Renumber { .. },
             )
-            | Self::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. }) => Class::Write,
+            | Self::Repository(RepositoryCommand::Add { .. } | RepositoryCommand::Edit { .. }) => {
+                Class::Write
+            },
         }
     }
 
@@ -381,18 +333,28 @@ impl Command {
     /// A usage error naming the missing or clashing arguments.
     pub fn validate(&self) -> Result<(), CliError> {
         match self {
-            Self::Show { items } if items.is_empty() => Err(usage("show needs at least one item")),
+            Self::Item(ItemCommand::Show { items }) if items.is_empty() => {
+                Err(usage("item show needs at least one item"))
+            },
             Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
                 Err(usage("thread show needs at least one thread"))
             },
-            Self::Repo(RepoCommand::Show { repositories }) if repositories.is_empty() => {
-                Err(usage("repo show needs at least one repository"))
+            Self::Repository(RepositoryCommand::Show { repositories })
+                if repositories.is_empty() =>
+            {
+                Err(usage("repository show needs at least one repository"))
             },
-            Self::Claim { lease: Some(lease), .. } if !(1..=LEASE_MAX_MINUTES).contains(lease) => {
+            Self::Thread(ThreadCommand::Claim { lease: Some(lease), .. })
+                if !(1..=LEASE_MAX_MINUTES).contains(lease) =>
+            {
                 Err(usage(format!("--lease takes 1 to {LEASE_MAX_MINUTES} minutes")))
             },
-            Self::Done { repository, commit, .. } if repository.is_some() != commit.is_some() => {
-                Err(usage("done takes --repository and --commit together, or --note alone"))
+            Self::Item(ItemCommand::Done { repository, commit, .. })
+                if repository.is_some() != commit.is_some() =>
+            {
+                Err(usage(
+                    "item done takes --repository and --commit together, or --evidence alone",
+                ))
             },
             Self::Import { file: None, schema: false, .. } => {
                 Err(usage("import needs a file, or --schema for an example of one"))
@@ -429,7 +391,7 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
     }
 }
 
-/// The states a command may set: not `done`, which `acyclic done` sets with its evidence.
+/// The states a command may set: not `done`, which `acyclic item done` sets with its evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 #[expect(
@@ -495,12 +457,40 @@ pub enum ItemCommand {
         #[serde(default)]
         resource: Vec<String>,
         /// A repository it touches; repeat for more.
-        #[arg(long, value_name = "REPOSITORY")]
+        #[arg(short = 'r', long, value_name = "REPOSITORY")]
         #[serde(default)]
         repository: Vec<String>,
     },
     /// Edits an item: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ItemEdit),
+    /// Shows items with their role, readiness and claims, and a parent's progress from its leaves, as an array in the
+    /// order given.
+    Show {
+        /// The items.
+        #[arg(required = true, value_name = "ITEM")]
+        #[serde(default)]
+        items: Vec<String>,
+    },
+    /// Lists every item, by id.
+    List,
+    /// Marks an item done, with evidence.
+    Done {
+        /// The item.
+        item: String,
+        /// The repository record holding the commit.
+        #[arg(short = 'r', long, requires = "commit")]
+        repository: Option<String>,
+        /// The commit that completed it.
+        #[arg(short = 'c', long, requires = "repository")]
+        commit: Option<String>,
+        /// Evidence in words, such as where a record lives.
+        #[arg(short = 'e', long)]
+        evidence: Option<String>,
+        /// Finish it although it isn't ready or someone else holds it, or replace the evidence it was finished with.
+        #[arg(short = 'f', long)]
+        #[serde(default)]
+        force: bool,
+    },
     /// Reopens a done item.
     Reopen {
         /// The item.
@@ -542,7 +532,7 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_thread: bool,
-    /// Set its state: not `done`, which `acyclic done` sets.
+    /// Set its state: not `done`, which `acyclic item done` sets.
     #[arg(short = 's', long, value_enum)]
     pub state: Option<StateWord>,
     /// New notes.
@@ -583,7 +573,7 @@ pub struct ItemEdit {
     #[serde(default)]
     pub no_resource: Vec<String>,
     /// Add a repository it touches; repeat for more.
-    #[arg(long, value_name = "REPOSITORY")]
+    #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
     /// Remove a repository it touches; repeat for more.
@@ -672,15 +662,6 @@ pub enum LinkCommand {
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
 pub enum ThreadCommand {
-    /// Lists every thread, by id, with its members and its heads: the open leaves nothing in it orders.
-    List,
-    /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
-    Show {
-        /// The threads.
-        #[arg(required = true, value_name = "THREAD")]
-        #[serde(default)]
-        threads: Vec<String>,
-    },
     /// Adds a thread; adding it again with the same fields changes nothing, and with other fields is refused.
     Add {
         /// The new thread's id; leave it out for the tracker to assign one, such as `thread-mac-32`.
@@ -692,12 +673,46 @@ pub enum ThreadCommand {
         #[arg(short = 'b', long)]
         brief: Option<String>,
         /// A repository it touches beyond its items'; repeat for more.
-        #[arg(long, value_name = "REPOSITORY")]
+        #[arg(short = 'r', long, value_name = "REPOSITORY")]
         #[serde(default)]
         repository: Vec<String>,
     },
     /// Edits a thread: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ThreadEdit),
+    /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
+    Show {
+        /// The threads.
+        #[arg(required = true, value_name = "THREAD")]
+        #[serde(default)]
+        threads: Vec<String>,
+    },
+    /// Lists every thread, by id, with its members and its heads: the open leaves nothing in it orders.
+    List,
+    /// Lists threads with ready work, the actor's own first, each with its ready items.
+    Ready {
+        /// Judge archived work as if it weren't archived.
+        #[arg(long)]
+        #[serde(default)]
+        include_archived: bool,
+    },
+    /// Claims a thread with ready work, or renews the actor's claim on it.
+    Claim {
+        /// The thread.
+        thread: String,
+        /// The lease in minutes: 60 by default, 1 to 480.
+        #[arg(short = 'l', long, value_parser = lease_minutes)]
+        lease: Option<u32>,
+        /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim
+        /// on it, or on a resource it needs, still refuses.
+        #[arg(short = 'f', long)]
+        #[serde(default)]
+        force: bool,
+    },
+    /// Releases the actor's claim on a thread, leaving anyone else's.
+    Release {
+        /// The thread.
+        thread: String,
+    },
     /// Moves a thread whose id ends in another's number to a fresh id, with its fields and members; only a thread no
     /// live claim names.
     Renumber {
@@ -723,7 +738,7 @@ pub struct ThreadEdit {
     #[serde(default)]
     pub no_brief: bool,
     /// Add a repository it touches beyond its items'; repeat for more.
-    #[arg(long, value_name = "REPOSITORY")]
+    #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
     /// Remove a repository; repeat for more.
@@ -742,16 +757,7 @@ impl ThreadEdit {
 /// The repository commands.
 #[derive(Debug, Subcommand, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
-pub enum RepoCommand {
-    /// Lists every repository record, by id.
-    List,
-    /// Shows repository records with the items and threads that name them, as an array in the order given.
-    Show {
-        /// The repositories.
-        #[arg(required = true, value_name = "REPOSITORY")]
-        #[serde(default)]
-        repositories: Vec<String>,
-    },
+pub enum RepositoryCommand {
     /// Adds a repository record; adding it again with the same fields changes nothing, and with other fields is
     /// refused.
     Add {
@@ -781,4 +787,13 @@ pub enum RepoCommand {
         #[arg(long)]
         default_branch: Option<String>,
     },
+    /// Shows repository records with the items and threads that name them, as an array in the order given.
+    Show {
+        /// The repositories.
+        #[arg(required = true, value_name = "REPOSITORY")]
+        #[serde(default)]
+        repositories: Vec<String>,
+    },
+    /// Lists every repository record, by id.
+    List,
 }

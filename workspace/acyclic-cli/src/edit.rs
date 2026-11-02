@@ -174,7 +174,7 @@ fn check_targets(
     }
     match repositories.iter().find(|id| !model.repositories.contains_key(*id)) {
         Some(id) => Err(not_found(format!(
-            "no repository record {id}; add it with `acyclic repo add {id}`"
+            "no repository record {id}; add it with `acyclic repository add {id}`"
         ))),
         None => Ok(()),
     }
@@ -480,7 +480,7 @@ pub(crate) fn edit_repository(
     let key = Key::new(kind::REPOSITORY, id)?;
     if replica.state().entity(&key).is_none() {
         return Err(not_found(format!(
-            "no repository record {id}; `acyclic repo list` lists them"
+            "no repository record {id}; `acyclic repository list` lists them"
         )));
     }
     write_repository(replica, &key, fields, by)
@@ -510,7 +510,7 @@ pub(crate) fn add_repository(
     }
     let model = Model::read(replica.state())?;
     let record = model.repositories.get(id).ok_or_else(|| {
-        not_found(format!("no repository record {id}; `acyclic repo list` lists them"))
+        not_found(format!("no repository record {id}; `acyclic repository list` lists them"))
     })?;
     let mut differs: Vec<&str> = Vec::new();
     for (flag, same) in [
@@ -525,7 +525,7 @@ pub(crate) fn add_repository(
     if differs.is_empty() {
         return Ok(());
     }
-    Err(already_exists("repository record", "repo edit", id, &differs))
+    Err(already_exists("repository record", "repository edit", id, &differs))
 }
 
 #[cfg(test)]

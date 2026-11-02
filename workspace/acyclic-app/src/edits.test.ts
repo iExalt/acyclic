@@ -33,8 +33,8 @@ const model = buildModel([
 describe("commands", () => {
   it("builds exactly the commands the server's tests run", () => {
     const built = [
-      ["list", "list"],
-      ["show", { show: { items: ["a", "b"] } }],
+      ["list", { item: "list" }],
+      ["show", { item: { show: { items: ["a", "b"] } } }],
       ["threads", { thread: "list" }],
       ["add under a parent, in a thread", addCommand({ item: "c", title: "C", parent: "a", thread: "t" })],
       ["add at the top level", addCommand({ item: "d", title: "D", parent: null, thread: null })],

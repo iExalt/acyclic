@@ -60,7 +60,7 @@ describe("undo", () => {
 
   it("offers nothing for a write without an exact inverse", () => {
     for (const command of [
-      "list",
+      { item: "list" },
       { item: { add: { item: "hose", title: "Hose" } } },
       { item: { reopen: { item: "dig" } } },
       { thread: { edit: { thread: "t", title: "T" } } },

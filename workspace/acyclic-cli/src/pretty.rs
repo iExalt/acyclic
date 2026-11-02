@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use comfy_table::{ContentArrangement, LineStyle, Table, TableStyle, presets};
 use serde_json::Value as Json;
 
-use crate::args::{Command, LinkCommand, ThreadCommand};
+use crate::args::{Command, ItemCommand, LinkCommand, ThreadCommand};
 
 /// A terminal's table: a rule under the header and nothing else, so a wrapped cell still reads as one row.
 const RULED: TableStyle =
@@ -21,12 +21,12 @@ const ENTITIES: [&str; 3] = ["item", "thread", "repository"];
 pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> String {
     let columns = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
     let text = match command {
-        Command::List => table(
+        Command::Item(ItemCommand::List) => table(
             rows(&data["items"]),
             &columns(&["id", "title", "state", "thread", "readiness"]),
             width,
         ),
-        Command::Ready { .. } => ready(data, width),
+        Command::Thread(ThreadCommand::Ready { .. }) => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
         Command::Link(link) => {
@@ -140,7 +140,7 @@ fn table(rows: Vec<&Json>, columns: &[String], width: Option<u16>) -> String {
     text
 }
 
-/// `ready`: one row per ready item, under its thread, the thread named on its first row.
+/// `thread ready`: one row per ready item, under its thread, the thread named on its first row.
 fn ready(data: &Json, width: Option<u16>) -> String {
     let mut lines = Vec::new();
     for thread in rows(&data["ready"]) {

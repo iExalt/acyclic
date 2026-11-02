@@ -76,32 +76,36 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("item add a2 --title Second", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("item add a2 --title Other", AGENT), 1);
     assert_eq!(sh.run("link add a2 waits-for a1", AGENT), 0);
-    let (_, ready) = sh.output("ready", AGENT);
+    let (_, ready) = sh.output("thread ready", AGENT);
     assert_eq!(ready["data"]["ready"], json!([]), "nothing is ready outside a thread");
     assert_eq!(sh.run("thread add t0 --title Start", AGENT), 0);
     for id in ["a1", "a2"] {
         assert_eq!(sh.run(&format!("item edit {id} --thread t0"), AGENT), 0);
     }
-    assert_eq!(sh.run("ready", AGENT), 0);
-    let (code, out) = sh.output("claim a1", AGENT);
+    assert_eq!(sh.run("thread ready", AGENT), 0);
+    let (code, out) = sh.output("thread claim a1", AGENT);
     assert_eq!(
         (code, &out["error"]["details"]["thread"]),
         (3, &json!("t0")),
         "threads are claimed, not items"
     );
-    assert_eq!(sh.run("claim t0", AGENT), 0);
-    assert_eq!(sh.run("done a2", AGENT), 1, "a2 waits on a1");
-    assert_eq!(sh.run("item edit a2 --state done", AGENT), 2, "done finishes items");
+    assert_eq!(sh.run("thread claim t0", AGENT), 0);
+    assert_eq!(sh.run("item done a2", AGENT), 1, "a2 waits on a1");
+    assert_eq!(sh.run("item edit a2 --state done", AGENT), 2, "item done finishes items");
     let pi = [("ACYCLIC_ACTOR", "session/pi")];
-    assert_eq!(sh.run("claim t0", &pi), 1, "another agent's claim");
-    assert_eq!(sh.run("done a1", &pi), 1, "and its items");
-    let (code, done) = sh.output("done a1 -n shipped", AGENT);
+    assert_eq!(sh.run("thread claim t0", &pi), 1, "another agent's claim");
+    assert_eq!(sh.run("item done a1", &pi), 1, "and its items");
+    let (code, done) = sh.output("item done a1 -e shipped", AGENT);
     assert_eq!(
         (code, &done["data"]["evidence"]),
         (0, &json!({"repository": null, "commit": null, "note": "shipped"})),
         "done echoes what it recorded: {done}"
     );
-    assert_eq!(sh.run("done a1 --note shipped", AGENT), 0, "finishing again changes nothing");
+    assert_eq!(
+        sh.run("item done a1 --evidence shipped", AGENT),
+        0,
+        "finishing again changes nothing"
+    );
     let (code, shown) = sh.output("thread show t0", AGENT);
     assert_eq!(
         (code, &shown["data"][0]["claims"][0]["holder"]),
@@ -109,67 +113,77 @@ fn a_journey_through_the_contract() {
         "done releases nothing"
     );
     for (released, changed) in [(true, true), (false, false)] {
-        let (code, out) = sh.output("release t0", AGENT);
+        let (code, out) = sh.output("thread release t0", AGENT);
         assert_eq!(
             (code, out["data"]["released"].as_bool(), out["data"]["changed"].as_bool()),
             (0, Some(released), Some(changed)),
             "releasing nothing isn't an error"
         );
     }
-    assert_eq!(sh.run("ready", AGENT), 0);
+    assert_eq!(sh.run("thread ready", AGENT), 0);
     assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0);
     assert_eq!(sh.run("thread add t1 --title Work", AGENT), 0, "a repeat changes nothing");
     assert_eq!(sh.run("thread add t1 --title Other", AGENT), 1, "a conflicting add is refused");
     assert_eq!(sh.run("item edit a2 --thread nope", AGENT), 3, "a thread that isn't there");
     // An edit refused in part writes nothing: the title is kept when the parent it came with is missing.
     assert_eq!(sh.run("item edit a2 --title Renamed --parent nope", AGENT), 3);
-    assert_eq!(sh.output("show a2", AGENT).1["data"][0]["title"], "Second", "refused as a whole");
+    assert_eq!(
+        sh.output("item show a2", AGENT).1["data"][0]["title"],
+        "Second",
+        "refused as a whole"
+    );
     assert_eq!(sh.run("item edit a2 --thread t1", AGENT), 0);
-    let (_, ready) = sh.output("ready", AGENT);
+    let (_, ready) = sh.output("thread ready", AGENT);
     assert_eq!(ready["data"]["ready"][0]["id"], "t1", "{ready}");
     assert_eq!(sh.run("item edit a1 --thread t1", AGENT), 0);
     assert_eq!(sh.run("needs", AGENT), 0);
-    assert_eq!(sh.run("list", AGENT), 0);
+    assert_eq!(sh.run("item list", AGENT), 0);
     assert_eq!(sh.run("thread list", AGENT), 0);
     // JSON stays the default, byte for byte, and `-o pretty` prints the same data for people, an error on stderr.
-    for line in ["list", "ready", "thread list", "show a1", "show nope"] {
+    for line in ["item list", "thread ready", "thread list", "item show a1", "item show nope"] {
         let stdout = |line: String| {
             let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
             execute(args, &sh.env(AGENT)).stdout
         };
         assert_eq!(stdout(format!("{line} -o json")), stdout(line.to_owned()), "{line}");
     }
-    for line in ["list", "ready", "thread list", "show a1", "item add a1 --title First"] {
+    for line in
+        ["item list", "thread ready", "thread list", "item show a1", "item add a1 --title First"]
+    {
         assert_eq!(sh.run(&format!("{line} -o pretty"), AGENT), 0, "{line}");
     }
-    assert_eq!(sh.run("show nope -o pretty", AGENT), 3);
+    assert_eq!(sh.run("item show nope -o pretty", AGENT), 3);
     assert_eq!(sh.run("thread show t1", AGENT), 0);
     assert_eq!(
         sh.run("thread show t1 nope", AGENT),
         3,
         "one missing thread fails the whole command"
     );
-    let (code, shown) = sh.output("show a1 a2", AGENT);
+    let (code, shown) = sh.output("item show a1 a2", AGENT);
     assert_eq!((code, shown["data"][1]["id"].as_str()), (0, Some("a2")), "in the order given");
-    assert_eq!(sh.run("show a1 nope", AGENT), 3, "one missing item fails the whole command");
+    assert_eq!(sh.run("item show a1 nope", AGENT), 3, "one missing item fails the whole command");
     let (code, out) = sh.output("item edit a2 --no-thread", AGENT);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)));
-    assert_eq!(sh.run("repo add r1 --name code", AGENT), 2, "a new record needs every field");
-    let full = "repo add r1 --owner me --name code --default-branch main";
+    assert_eq!(sh.run("repository add r1 --name code", AGENT), 2, "a new record needs every field");
+    let full = "repository add r1 --owner me --name code --default-branch main";
     assert_eq!(sh.run(full, AGENT), 0);
     assert_eq!(sh.run(full, AGENT), 0, "a repeat changes nothing");
-    assert_eq!(sh.run("repo add r1 --owner me --name code --default-branch trunk", AGENT), 1);
-    assert_eq!(sh.run("repo edit r1 --default-branch trunk", AGENT), 0, "an edit takes any subset");
-    assert_eq!(sh.run("repo edit nope --default-branch main", AGENT), 3);
+    assert_eq!(sh.run("repository add r1 --owner me --name code --default-branch trunk", AGENT), 1);
+    assert_eq!(
+        sh.run("repository edit r1 --default-branch trunk", AGENT),
+        0,
+        "an edit takes any subset"
+    );
+    assert_eq!(sh.run("repository edit nope --default-branch main", AGENT), 3);
     for (flag, present) in [("--repository", true), ("--no-repository", false)] {
         let (code, out) = sh.output(&format!("item edit a2 {flag} r1"), AGENT);
         assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "{flag}");
         assert_eq!(
-            sh.output("repo show r1", AGENT).1["data"][0]["items"],
+            sh.output("repository show r1", AGENT).1["data"][0]["items"],
             json!(present.then_some("a2").into_iter().collect::<Vec<_>>())
         );
     }
-    assert_eq!(sh.run("repo list", AGENT), 0);
+    assert_eq!(sh.run("repository list", AGENT), 0);
     // The tracker assigns a thread's id when the add leaves it out. Only a thread whose number another thread's id
     // shares is renumbered, which this one's doesn't.
     let (code, added) = sh.output("thread add --title Spare", AGENT);
@@ -204,21 +218,21 @@ fn a_journey_through_the_contract() {
     // A parent is finished once its children are.
     sh.run("item add g1 --title Goal", AGENT);
     sh.run("item add g1-a --title Part --parent g1", AGENT);
-    let (code, out) = sh.output("done g1", AGENT);
+    let (code, out) = sh.output("item done g1", AGENT);
     assert_eq!((code, &out["error"]["details"]["open"]), (1, &serde_json::json!(["g1-a"])));
     sh.run("item edit g1-a --thread t2", AGENT);
-    sh.run("claim t2", AGENT);
-    sh.run("done g1-a", AGENT);
-    assert_eq!(sh.run("done g1", AGENT), 0, "a parent is finished once its children are");
+    sh.run("thread claim t2", AGENT);
+    sh.run("item done g1-a", AGENT);
+    assert_eq!(sh.run("item done g1", AGENT), 0, "a parent is finished once its children are");
     sh.run("item add g2 --title Goal", AGENT);
     sh.run("item add g2-a --title Part --parent g2", AGENT);
-    assert_eq!(sh.run("done g2 --force", AGENT), 0, "or when forced");
+    assert_eq!(sh.run("item done g2 --force", AGENT), 0, "or when forced");
     // Only an item nothing refers to is deleted, and it is gone for good.
     assert_eq!(sh.run("item add d1 --title Doomed", AGENT), 0);
     assert_eq!(sh.run("item add d1-a --title Part --parent d1", AGENT), 0);
     let (code, out) = sh.output("item delete d1", AGENT);
     assert_eq!((code, &out["error"]["details"]["reasons"][0]["why"]), (1, &json!("has-children")));
-    assert_eq!(sh.run("item delete a1", AGENT), 1, "done work stays");
+    assert_eq!(sh.run("item delete a1", AGENT), 1, "item done work stays");
     assert_eq!(sh.run("item delete d1-a", AGENT), 0);
     assert_eq!(sh.run("item delete d1", AGENT), 0);
     let (code, out) = sh.output("item delete d1", AGENT);
@@ -227,7 +241,7 @@ fn a_journey_through_the_contract() {
         (0, Some(false)),
         "a repeat changes nothing"
     );
-    assert_eq!(sh.run("show d1", AGENT), 3);
+    assert_eq!(sh.run("item show d1", AGENT), 3);
     assert_eq!(sh.run("item add d1 --title Doomed", AGENT), 1, "its id is retired");
     assert_eq!(sh.run("item delete nope", AGENT), 3);
     insta::assert_snapshot!(sh.transcript);
@@ -249,7 +263,7 @@ fn an_unreadable_state_points_to_doctor() {
                 .map(|_| ())
         })
         .unwrap();
-    assert_eq!(sh.run("ready", AGENT), 6);
+    assert_eq!(sh.run("thread ready", AGENT), 6);
     assert_eq!(sh.run("doctor", AGENT), 0);
     insta::assert_snapshot!(sh.transcript);
 }

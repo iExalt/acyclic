@@ -9,7 +9,7 @@ export type Envelope<T> =
 /** A scalar field as the tracker reports it: unset, one value, or concurrent writes that conflict. */
 export type Raw<T> = T | null | { conflict: (T | null)[] };
 
-/** An item as `show` returns it, with the fields the app reads. */
+/** An item as `item show` returns it, with the fields the app reads. */
 interface RawItem {
   id: string;
   title: Raw<string>;
@@ -162,7 +162,10 @@ export function pairAgain(port: string): string {
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
-/** A CLI command as the API takes it: a bare name for one without arguments, such as `"list"`, else `{name: args}`. */
+/**
+ * A CLI command as the API takes it: a bare name for one without arguments, such as `"needs"`, else `{name: args}`,
+ * nested under its group, such as `{item: "list"}`.
+ */
 export type Command = string | Record<string, unknown>;
 
 /** Runs one command as the paired browser's user; the session cookie rides along, since the page is same-origin. */
@@ -182,11 +185,11 @@ export async function command<T>(body: Command, fetcher: Fetch = fetch): Promise
   return envelope.data;
 }
 
-/** Every item with its links: `list` for the ids, then one `show` for all of them. */
+/** Every item with its links: `item list` for the ids, then one `item show` for all of them. */
 export async function items(fetcher: Fetch = fetch): Promise<Item[]> {
-  const { items: rows } = await command<{ items: { id: string }[] }>("list", fetcher);
+  const { items: rows } = await command<{ items: { id: string }[] }>({ item: "list" }, fetcher);
   if (rows.length === 0) return [];
-  const shown = await command<RawItem[]>({ show: { items: rows.map((row) => row.id) } }, fetcher);
+  const shown = await command<RawItem[]>({ item: { show: { items: rows.map((row) => row.id) } } }, fetcher);
   return shown.map(settle);
 }
 
