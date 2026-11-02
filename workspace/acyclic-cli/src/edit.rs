@@ -8,6 +8,7 @@
 //! The fields hold what the command line named until [`ItemFields::resolve`] or [`ThreadFields::resolve`] turns each
 //! reference into the id of the record it names; the writes take ids.
 
+use acyclic_core::archive;
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
 use acyclic_core::model::{self, By, ItemState, Model, Size};
@@ -383,6 +384,12 @@ pub(crate) fn edit_item(
         moved = true;
     }
     if let Some(state) = fields.state {
+        // Work set back from done is reopened, as `item reopen` does: out of any archived subtree, and flagged so its
+        // dependents are listed.
+        let done = Model::read(replica.state())?.items.get(id).is_some_and(model::Item::is_done);
+        if done && state != ItemState::Done {
+            archive::reopen(replica, id, by)?;
+        }
         model::set_state(replica, id, state, by)?;
     }
     // A removal names a link the item holds by its exact ids, so it lets go of one whose other end is gone.

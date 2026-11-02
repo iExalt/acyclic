@@ -136,6 +136,23 @@ fn every_printed_ending_names_its_own_record() {
 }
 
 #[test]
+fn an_ending_another_records_title_holds_grows_until_it_names_its_own() {
+    let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    add_item(&mut r, &id("c0ffee"), "Brew", BY).unwrap();
+    // Titled as the other's ending, and as its own.
+    add_item(&mut r, &id("abcdef"), "c0ffee", BY).unwrap();
+    add_item(&mut r, &id("123456"), "123456", BY).unwrap();
+    let model = Model::read(r.state()).unwrap();
+    let records = Records::of(&model);
+    let endings = records.endings(true);
+    assert_eq!(endings[&id("c0ffee")], "0c0ffee");
+    assert_eq!(endings[&id("123456")], "123456", "its own title names it too");
+    for (full, ending) in &endings {
+        assert_eq!(&records.item(ending).unwrap(), full, "{ending}");
+    }
+}
+
+#[test]
 fn an_id_shorter_than_an_ending_is_its_own_name() {
     let endings = endings(["t", "abc", "0abc"]);
     assert_eq!(

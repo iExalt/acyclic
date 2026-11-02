@@ -264,3 +264,55 @@ fn a_repository_name_another_record_would_share_is_refused_in_any_case() {
     doc.repositories = vec![repository(1, "example/old"), repository(2, "example/code")];
     apply(&doc, &mut r, by(USER, 5)).unwrap();
 }
+
+#[test]
+fn open_work_left_under_an_archived_root_is_refused_naming_the_root_once() {
+    let mut r = imported();
+    // 10 and its subtree done, then archived.
+    for n in [10, 11] {
+        model::set_state(&mut r, &id(n), ItemState::Done, by(USER, 2)).unwrap();
+    }
+    model::put(
+        &mut r,
+        &model::item_key(&id(10)).unwrap(),
+        field::ARCHIVED,
+        Some(&true),
+        by(USER, 3),
+    )
+    .unwrap();
+    let mut doc = Import::new();
+    doc.items =
+        vec![item(11, Some(Planned::Backlog), None), item(12, Some(Planned::Backlog), None)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
+        panic!("open work under an archived root accepted")
+    };
+    assert_eq!(errors, [ValidationError::ArchivedNotDone(id(10))]);
+}
+
+#[test]
+fn a_deleted_thread_items_still_name_is_unknown_to_an_import() {
+    let mut r = imported();
+    // 20 emptied and deleted, while another replica's write still puts 11 in it.
+    for n in [11, 12] {
+        let out = ScopeEdit::Member { item: id(n), thread: None };
+        crate::scope::edit(&mut r, &out, by(USER, 2)).unwrap();
+    }
+    assert!(crate::delete::delete_thread(&mut r, &id(20), by(USER, 3)).unwrap());
+    let key = model::item_key(&id(11)).unwrap();
+    r.write(&key, field::THREAD, USER, 4, Some(json!(id(20)))).unwrap();
+    let mut doc = Import::new();
+    let mut next = item(30, None, None);
+    next.thread = Some(id(20));
+    doc.items.push(next);
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 5)) else {
+        panic!("a deleted thread accepted")
+    };
+    assert_eq!(
+        errors,
+        [ValidationError::UnknownReference {
+            at: format!("item {}, thread", id(30)),
+            kind: KeyKind::Thread,
+            id: id(20)
+        }]
+    );
+}

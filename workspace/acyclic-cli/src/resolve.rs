@@ -14,9 +14,13 @@
 //! a candidate, except a thread items still name: like a thread with no record, it stays one so that `thread show`
 //! finds its members and pretty output can name it, and a write that would move an item into it refuses it as missing.
 //!
-//! Pretty output names items and threads by [`endings`] over the same candidates, so every ending it prints names its
-//! record, and repositories by their `owner/name`. The exception is an id shorter than [`MIN_ENDING`], which no
-//! command makes: it prints whole, and names nothing.
+//! A removal (`--no-waits-for`, `--no-repository`) first looks among the ids the record holds, by exact id or an
+//! ending, with [`held`], so it lets go of an element whose record is gone; only when none matches do these rules
+//! apply.
+//!
+//! Pretty output names items and threads by [`endings`] over the same candidates, lengthened past any other record's
+//! title, so every ending it prints names its record, and repositories by their `owner/name`. The exception is an id
+//! shorter than [`MIN_ENDING`], which no command makes: it prints whole, and names nothing.
 
 use std::collections::BTreeMap;
 
@@ -122,7 +126,18 @@ impl<'a> Records<'a> {
     /// The items, or with `items` false the threads, each by the shortest ending of its id that names it.
     pub(crate) fn endings(&self, items: bool) -> BTreeMap<String, String> {
         let candidates = if items { &self.items } else { &self.threads };
-        endings(candidates.iter().map(|c| c.id))
+        let mut found = endings(candidates.iter().map(|c| c.id));
+        // An ending that is another record's title would resolve as ambiguous: it grows until it isn't, at the
+        // latest to the whole id.
+        let titled = |id: &str, ending: &str| {
+            candidates.iter().any(|c| c.id != id && c.names.iter().any(|name| name == ending))
+        };
+        for (id, ending) in &mut found {
+            while ending.len() < id.len() && titled(id, ending) {
+                id[id.len() - ending.len() - 1..].clone_into(ending);
+            }
+        }
+        found
     }
 }
 
