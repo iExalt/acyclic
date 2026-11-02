@@ -96,15 +96,12 @@ function viewOf(
 ): Omit<NeedView, "thread"> {
   const item = row(need.item);
   const thread = row(need.thread);
-  const holders = Array.isArray(need.holders) ? need.holders : [];
   const threads =
-    need.kind === "resource-clash"
-      ? holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null)
-      : need.kind === "number-clash" || need.kind === "thread-cycle"
-        ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
-        : thread === null
-          ? []
-          : [thread];
+    need.kind === "number-clash" || need.kind === "thread-cycle"
+      ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
+      : thread === null
+        ? []
+        : [thread];
   // A badge only for an entry naming one thread, and a thread named by its line's name only beside that badge.
   const line = threads.length === 1 ? lines.get(threads[0]?.id ?? "") : undefined;
   const lineName = (one: Row) => {
@@ -167,14 +164,6 @@ function viewOf(
         note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
       };
     }
-    case "resource-clash": {
-      return {
-        ...base,
-        key: `resource-clash:${str(need.resource)}`,
-        text: `Threads held by different holders need ${str(need.resource)}: ${threads.map(lineName).join(", ")}`,
-        note: IN_A_TERMINAL,
-      };
-    }
     case "thread-cycle":
       return {
         ...base,
@@ -189,13 +178,24 @@ function viewOf(
         text: `Threads two machines numbered alike share ${shown(need.number)}: ${threads.map(lineName).join(", ")}`,
         note: str(need.fix) || IN_A_TERMINAL,
       };
-    case "dangling":
+    case "dangling": {
+      const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`;
+      const name = nameOf(str(need.entity), str(need.id));
+      // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.
+      if (str(need.entity) === "item" && str(need.field) === "waits-for")
+        return {
+          ...base,
+          key,
+          text: `${name} waits for ${shown(need.target)}, which doesn't exist`,
+          note: str(need.fix) || IN_A_TERMINAL,
+        };
       return {
         ...base,
-        key: `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`,
-        text: `${nameOf(str(need.entity), str(need.id))}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
+        key,
+        text: `${name}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
         note: IN_A_TERMINAL,
       };
+    }
     case "unverified": {
       const repository = str(need.repository);
       const reason = str(need.reason);

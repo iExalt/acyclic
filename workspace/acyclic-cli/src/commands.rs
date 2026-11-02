@@ -9,12 +9,12 @@ use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::delete;
 use acyclic_core::import::{self, Import};
-use acyclic_core::model::{self, By, Evidence, ItemState, LinkKind, Model, SetField};
+use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::renumber;
-use acyclic_core::schema::{item as field, kind, link as link_field};
+use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use serde::Serialize;
@@ -22,7 +22,7 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepositoryCommand, StateWord,
+    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, RepositoryCommand, StateWord,
     ThreadCommand,
 };
 use crate::context;
@@ -110,11 +110,9 @@ impl<'a> Session<'a> {
                 thread,
                 state,
                 notes,
-                gate,
                 size,
-                area,
-                resource,
                 repository,
+                waits_for,
             }) => {
                 let fields = ItemFields {
                     title: Some(title.clone()),
@@ -122,11 +120,9 @@ impl<'a> Session<'a> {
                     thread: Change::of(thread.clone(), false),
                     state: state.map(StateWord::state),
                     notes: Change::of(notes.clone(), false),
-                    gate: Change::of(gate.clone(), false),
                     size: Change::of(*size, false),
-                    areas: Delta { add: area.clone(), remove: Vec::new() },
-                    resources: Delta { add: resource.clone(), remove: Vec::new() },
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
+                    waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
                     let id = edit::new_id(replica, kind::ITEM, item.as_deref(), title)?;
@@ -151,16 +147,14 @@ impl<'a> Session<'a> {
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
                     notes: Change::of(edit.notes.clone(), edit.no_notes),
-                    gate: Change::of(edit.gate.clone(), edit.no_gate),
                     size: Change::of(edit.size, edit.no_size),
-                    areas: Delta { add: edit.area.clone(), remove: edit.no_area.clone() },
-                    resources: Delta {
-                        add: edit.resource.clone(),
-                        remove: edit.no_resource.clone(),
-                    },
                     repositories: Delta {
                         add: edit.repository.clone(),
                         remove: edit.no_repository.clone(),
+                    },
+                    waits_for: Delta {
+                        add: edit.waits_for.clone(),
+                        remove: edit.no_waits_for.clone(),
                     },
                 };
                 let item = &edit.item;
@@ -174,22 +168,6 @@ impl<'a> Session<'a> {
                             edit.parent.as_deref().unwrap_or_default()
                         )
                     })
-                })
-            },
-            Command::Link(LinkCommand::Add { from, kind: word, to }) => {
-                self.write(|replica, by| {
-                    let kind = word.kind();
-                    let key = model::link_key(from, to, kind)?;
-                    if replica.state().field(&key, link_field::PRESENT).is_none() {
-                        model::link(replica, from, to, kind, by)?;
-                    }
-                    Ok(json!({"from": from, "kind": word, "to": to}))
-                })
-            },
-            Command::Link(LinkCommand::Remove { from, kind: word, to }) => {
-                self.write(|replica, by| {
-                    model::unlink(replica, from, to, word.kind(), by)?;
-                    Ok(json!({"from": from, "kind": word, "to": to}))
                 })
             },
             Command::Item(ItemCommand::Done { item: id, repository, commit, evidence: note, force }) => {
@@ -601,11 +579,11 @@ impl<'a> Session<'a> {
 }
 
 /// Whether `actor` may work on an item in `status` without forcing: when it's ready, or when what stands in the way is
-/// the actor's own claim on its thread, as winner of a contest, or on the thread holding a resource it needs.
+/// the actor's own claim on its thread, alone or as winner of a contest.
 pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
     match status {
         Some(Status::Ready) => true,
-        Some(Status::Claimed { holder } | Status::ResourceBusy { holder, .. }) => holder == actor,
+        Some(Status::Claimed { holder }) => holder == actor,
         Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
         _ => false,
     }
@@ -735,7 +713,7 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
     let mut links: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
     let threads_of =
         |id: &str| model.items.get(id).map(|item| item.thread.all()).unwrap_or_default();
-    for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+    for link in &model.links {
         let to = threads_of(&link.to);
         for thread in threads_of(&link.from).into_iter().filter(|thread| to.contains(thread)) {
             links.entry(thread.as_str()).or_default().push((&link.from, &link.to));
@@ -841,22 +819,6 @@ pub(crate) fn set_if<T: Serialize>(
     let json = serde_json::to_value(value).expect("model values serialize");
     if single(replica.state().field(key, name)) != Some(json) {
         model::set(replica, key, name, Some(value), by)?;
-    }
-    Ok(())
-}
-
-/// Adds or removes a set element unless it already is so.
-pub(crate) fn element_if(
-    replica: &mut Replica,
-    key: &Key,
-    set: SetField,
-    name: &str,
-    present: bool,
-    by: By<'_>,
-) -> Result<(), CliError> {
-    let field = format!("{}{name}", set.prefix());
-    if replica.state().field(key, &field).is_some() != present {
-        model::set_element(replica, key, set, name, present, by)?;
     }
     Ok(())
 }

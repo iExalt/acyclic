@@ -13,14 +13,13 @@ pub mod kind {
     pub const REPOSITORY: &str = "repository";
 }
 
-/// Item fields. Areas, repositories and resources are sets stored a field per element: see [`set`].
+/// Item fields. Repositories are a set stored a field per element: see [`set`]. Fields older versions wrote and no
+/// longer read, such as `gate` and the `area/` and `resource/` sets, are ignored like any unknown field.
 pub mod item {
     /// A short title.
     pub const TITLE: &str = "title";
     /// Design notes.
     pub const NOTES: &str = "notes";
-    /// The exit check.
-    pub const GATE: &str = "gate";
     /// The item's state.
     pub const STATE: &str = "state";
     /// The parent item's id.
@@ -45,8 +44,10 @@ pub mod link {
     pub const FROM: &str = "from";
     /// The id of the item it depends on.
     pub const TO: &str = "to";
-    /// The link's kind.
+    /// The link's kind: always `blocks`, as `from` waits for `to`.
     pub const KIND: &str = "kind";
+    /// The one kind's stored value: `from` waits for `to`. A link stored with any other kind can't be read.
+    pub const BLOCKS: &str = "blocks";
     /// Whether the link exists; cleared to remove it, and a concurrent re-add wins.
     pub const PRESENT: &str = "present";
 }
@@ -66,12 +67,8 @@ pub mod repository {
 /// Prefixes of the fields that hold a set, one field per element with the value `true`. A concurrent add and remove
 /// keeps the add.
 pub mod set {
-    /// Area tags, on items.
-    pub const AREA: &str = "area/";
     /// Repositories, on items and threads (those added explicitly).
     pub const REPOSITORY: &str = "repository/";
-    /// Named resources, on items.
-    pub const RESOURCE: &str = "resource/";
 }
 
 /// Thread fields.

@@ -31,15 +31,11 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
     {"key": "code", "owner": "me", "name": "garden", "default_branch": "main"}
   ],
   "items": [
-    // Required: key and title. "state" is backlog, parked, in-progress or done, and defaults to backlog.
-    // Optional: parent (an item's key), notes, gate, size (xs, s, m, l, xl), areas, resources, repositories,
-    // archived, and evidence on done items.
+    // Required: key and title. "state" is backlog, parked or done, and defaults to backlog.
+    // Optional: parent (an item's key), notes, size (xs, s, m, l, xl), repositories, waits_for (the keys of items
+    // it can't start before they are done), archived, and evidence on done items.
     {"key": "beds", "title": "Build the beds", "size": "m", "repositories": ["code"]},
-    {"key": "plant", "title": "Plant the seeds", "areas": ["garden"]}
-  ],
-  // "from" waits-for or relates-to "to": plant can't start until beds is done.
-  "links": [
-    {"from": "plant", "kind": "waits-for", "to": "beds"}
+    {"key": "plant", "title": "Plant the seeds", "waits_for": ["beds"]}
   ],
   // A thread groups items for one continuing agent conversation; "items" lists its members' keys. Optional: brief,
   // repositories (keys, beyond those of its items).
@@ -63,9 +59,6 @@ pub struct Import {
     /// Items, in any order.
     #[serde(default)]
     pub items: Vec<Item>,
-    /// Links between items.
-    #[serde(default)]
-    pub links: Vec<Link>,
     /// Threads grouping items.
     #[serde(default)]
     pub threads: Vec<Thread>,
@@ -94,8 +87,6 @@ pub enum State {
     Backlog,
     /// Set aside on purpose.
     Parked,
-    /// Being worked on.
-    InProgress,
     /// Finished.
     Done,
 }
@@ -135,31 +126,25 @@ pub struct Evidence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
-    /// The symbolic key links, parents and threads use.
+    /// The symbolic key parents, waits-for and threads use.
     pub key: String,
     /// A short title.
     pub title: String,
     /// Design notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// The exit check.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<String>,
     /// The item's state; backlog when left out.
     #[serde(default)]
     pub state: State,
     /// The parent item's key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// Area tags.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub areas: Vec<String>,
     /// Keys of the repositories the item touches.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repositories: Vec<String>,
-    /// Named resources the item holds while worked on, so items sharing one never run at once.
+    /// Keys of the items it waits for: it can't start until they are done.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub resources: Vec<String>,
+    pub waits_for: Vec<String>,
     /// A rough size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
@@ -169,28 +154,6 @@ pub struct Item {
     /// Evidence of completion, for done items only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,
-}
-
-/// A link's kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum LinkKind {
-    /// A hard dependency: `from` waits for `to`.
-    WaitsFor,
-    /// Context only.
-    RelatesTo,
-}
-
-/// A link between two items: `from` depends on or relates to `to`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Link {
-    /// The dependent item's key.
-    pub from: String,
-    /// The key of the item it depends on.
-    pub to: String,
-    /// The link's kind.
-    pub kind: LinkKind,
 }
 
 /// A thread: items for one continuing agent conversation.
@@ -285,10 +248,15 @@ pub enum ValidationError {
         /// The missing key.
         key: String,
     },
-    /// A link joins an item to itself.
+    /// An item waits for itself.
     SelfLink(String),
-    /// The same link appears twice.
-    DuplicateLink(Link),
+    /// An item names the same item twice in its waits-for.
+    DuplicateLink {
+        /// The waiting item.
+        item: String,
+        /// The item it names twice.
+        waits_for: String,
+    },
     /// An item is a member of several threads.
     ItemInSeveralThreads {
         /// The item.
@@ -303,7 +271,7 @@ pub enum ValidationError {
     /// A key or name that isn't a valid id: at most 64 lowercase letters, digits, `-`, `_` or `.`, not starting
     /// with `.`.
     InvalidName {
-        /// Where it is, such as `item a1, areas`.
+        /// Where it is, such as `item key`.
         at: String,
         /// The name.
         name: String,
@@ -318,15 +286,15 @@ impl fmt::Display for ValidationError {
             Self::UnknownReference { at, kind, key } => {
                 write!(f, "{at} names unknown {kind} {key:?}")
             },
-            Self::SelfLink(item) => write!(f, "item {item:?} links to itself"),
+            Self::SelfLink(item) => write!(f, "item {item:?} waits for itself"),
             Self::ItemInSeveralThreads { item, threads } => {
                 write!(f, "item {item:?} is in several threads: {}", threads.join(", "))
             },
             Self::ArchivedNotDone(item) => {
                 write!(f, "item {item:?} is archived but it or a descendant isn't done")
             },
-            Self::DuplicateLink(link) => {
-                write!(f, "link {:?} to {:?} ({:?}) appears twice", link.from, link.to, link.kind)
+            Self::DuplicateLink { item, waits_for } => {
+                write!(f, "item {item:?} names {waits_for:?} twice in waits_for")
             },
             Self::EvidenceNotDone(item) => write!(f, "item {item:?} has evidence but isn't done"),
             Self::InvalidName { at, name } => write!(
@@ -348,7 +316,6 @@ impl Import {
             version: VERSION,
             repositories: Vec::new(),
             items: Vec::new(),
-            links: Vec::new(),
             threads: Vec::new(),
         }
     }
@@ -407,20 +374,9 @@ impl Import {
                 let at = format!("item {:?}, evidence", item.key);
                 check(at, KeyKind::Repository, repository, &repositories);
             }
-        }
-        for link in &self.links {
-            check(
-                format!("link {:?} to {:?}", link.from, link.to),
-                KeyKind::Item,
-                &link.from,
-                &items,
-            );
-            check(
-                format!("link {:?} to {:?}", link.from, link.to),
-                KeyKind::Item,
-                &link.to,
-                &items,
-            );
+            for to in &item.waits_for {
+                check(format!("item {:?}, waits_for", item.key), KeyKind::Item, to, &items);
+            }
         }
         for thread in &self.threads {
             for item in &thread.items {
@@ -452,26 +408,26 @@ impl Import {
         }
         for item in &self.items {
             check("item key".to_owned(), &item.key);
-            for (field, names) in [("areas", &item.areas), ("resources", &item.resources)] {
-                for name in names {
-                    check(format!("item {:?}, {field}", item.key), name);
-                }
-            }
         }
         for thread in &self.threads {
             check("thread key".to_owned(), &thread.key);
         }
     }
 
-    /// Cycles, among parents or links, are left to the import, which judges them with what the tracker holds.
+    /// Cycles, among parents or waits-for, are left to the import, which judges them with what the tracker holds.
     fn check_links(&self, errors: &mut Vec<ValidationError>) {
-        let mut seen = HashSet::new();
-        for link in &self.links {
-            if !seen.insert((&link.from, &link.to, link.kind)) {
-                errors.push(ValidationError::DuplicateLink(link.clone()));
-            }
-            if link.from == link.to {
-                errors.push(ValidationError::SelfLink(link.from.clone()));
+        for item in &self.items {
+            let mut seen = HashSet::new();
+            for to in &item.waits_for {
+                if !seen.insert(to) {
+                    errors.push(ValidationError::DuplicateLink {
+                        item: item.key.clone(),
+                        waits_for: to.clone(),
+                    });
+                }
+                if *to == item.key {
+                    errors.push(ValidationError::SelfLink(item.key.clone()));
+                }
             }
         }
     }
@@ -551,20 +507,14 @@ mod tests {
             key: key.to_owned(),
             title: format!("Item {key}"),
             notes: None,
-            gate: None,
             state,
             parent: parent.map(str::to_owned),
-            areas: Vec::new(),
             repositories: Vec::new(),
-            resources: Vec::new(),
+            waits_for: Vec::new(),
             size: None,
             archived: false,
             evidence: None,
         }
-    }
-
-    pub(super) fn link(from: &str, to: &str, kind: LinkKind) -> Link {
-        Link { from: from.to_owned(), to: to.to_owned(), kind }
     }
 
     pub(super) fn thread(key: &str, items: &[&str]) -> Thread {
@@ -586,9 +536,9 @@ mod tests {
             default_branch: "main".to_owned(),
         });
         import.items = vec![
-            item("goal", State::Backlog, None),
-            item("a", State::Backlog, Some("goal")),
-            item("b", State::Done, Some("goal")),
+            item("top", State::Backlog, None),
+            item("a", State::Backlog, Some("top")),
+            item("b", State::Done, Some("top")),
         ];
         import.items[1].repositories.push("r".to_owned());
         import.items[2].evidence = Some(Evidence {
@@ -596,8 +546,7 @@ mod tests {
             repository: Some("r".to_owned()),
             note: None,
         });
-        import.links =
-            vec![link("a", "b", LinkKind::WaitsFor), link("b", "a", LinkKind::RelatesTo)];
+        import.items[1].waits_for.push("b".to_owned());
         import.threads = vec![thread("t", &["a", "b"])];
         import
     }
@@ -639,20 +588,25 @@ mod tests {
     }
 
     #[test]
-    fn links_are_waits_for_or_relates_to() {
-        let read = |kind: &str| {
+    fn removed_fields_and_states_are_refused() {
+        let read = |item: &str, rest: &str| {
             Import::from_json(&format!(
-                "{{\"format\":\"{FORMAT}\",\"version\":2,\"items\":[{{\"key\":\"a\",\"title\":\"A\"}},\
-                 {{\"key\":\"b\",\"title\":\"B\"}}],\"links\":[{{\"from\":\"a\",\"to\":\"b\",\"kind\":\"{kind}\"}}]}}"
+                "{{\"format\":\"{FORMAT}\",\"version\":2,\"items\":[{{\"key\":\"a\",\"title\":\"A\"{item}}}]{rest}}}"
             ))
         };
-        assert_eq!(read("waits-for").unwrap().links[0].kind, LinkKind::WaitsFor);
-        assert_eq!(read("relates-to").unwrap().links[0].kind, LinkKind::RelatesTo);
-        for retired in ["follows", "blocks", "after", "relates"] {
-            assert!(matches!(read(retired), Err(ParseError::Json(_))), "{retired}");
-        }
         // A left-out state is the backlog.
-        assert_eq!(read("waits-for").unwrap().items[0].state, State::Backlog);
+        assert_eq!(read("", "").unwrap().items[0].state, State::Backlog);
+        for removed in [
+            r#","areas":["x"]"#,
+            r#","resources":["x"]"#,
+            r#","gate":"x""#,
+            r#","relates":["a"]"#,
+            r#","state":"in-progress""#,
+        ] {
+            assert!(matches!(read(removed, ""), Err(ParseError::Json(_))), "{removed}");
+        }
+        let links = r#","links":[{"from":"a","to":"a","kind":"waits-for"}]"#;
+        assert!(matches!(read("", links), Err(ParseError::Json(_))));
     }
 
     #[test]
@@ -671,7 +625,7 @@ mod tests {
         import.items.push(item("a", State::Backlog, Some("nowhere")));
         import.items.push(item("", State::Backlog, None));
         import.threads.push(thread("t", &["ghost"]));
-        import.links.push(link("a", "missing", LinkKind::RelatesTo));
+        import.items[0].waits_for.push("missing".to_owned());
         let errors = import.validate();
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Item, "a".to_owned())));
         assert!(errors.contains(&ValidationError::DuplicateKey(KeyKind::Thread, "t".to_owned())));
@@ -688,19 +642,22 @@ mod tests {
     }
 
     #[test]
-    fn a_link_from_an_item_to_itself_is_refused() {
+    fn an_item_waiting_for_itself_is_refused() {
         let mut import = valid();
-        import.links.push(link("a", "a", LinkKind::RelatesTo));
+        import.items[1].waits_for.push("a".to_owned());
         assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
     }
 
     #[test]
-    fn a_repeated_link_is_refused() {
+    fn a_repeated_waits_for_is_refused() {
         let mut import = valid();
-        import.links.push(link("b", "a", LinkKind::RelatesTo));
+        import.items[1].waits_for.push("b".to_owned());
         assert_eq!(
             import.validate(),
-            vec![ValidationError::DuplicateLink(link("b", "a", LinkKind::RelatesTo))]
+            vec![ValidationError::DuplicateLink {
+                item: "a".to_owned(),
+                waits_for: "b".to_owned()
+            }]
         );
     }
 

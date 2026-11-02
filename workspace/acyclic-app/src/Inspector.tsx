@@ -6,11 +6,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
-import type { Edited, LinkKind } from "./edits";
+import type { Edited } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
 import { ItemEditor } from "./ItemEditor";
-import { ArrowUpLeft, FolderInput, Icon, Link2, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
+import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
 import { type Line, lineLabel } from "./lines";
 import { Menu } from "./Menu";
 import { Prose } from "./Prose";
@@ -30,9 +30,9 @@ export interface InspectorProps {
   shortcuts: boolean;
   /** Picks the item's thread, which closes the item to show the thread's panel. */
   onPickThread: (id: string) => void;
-  onUnlink: (from: string, kind: LinkKind, to: string) => void;
+  onUnlink: (from: string, to: string) => void;
   onMove: () => void;
-  onLink: (kind: LinkKind) => void;
+  onLink: () => void;
   onAdd: () => void;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
@@ -195,8 +195,7 @@ export function Inspector({
               ? action("reopen", "Reopen", RotateCcw, () => onCommand(reopenCommand(item.id)))
               : null}
             {action("add-child", "Add inside", Plus, onAdd, "A")}
-            {action("waits-for", "Waits for…", ArrowUpLeft, () => onLink("waits-for"), "W")}
-            {action("relates-to", "Relates to…", Link2, () => onLink("relates-to"), "R")}
+            {action("waits-for", "Waits for…", ArrowUpLeft, onLink, "W")}
             {/* In the menu rather than beside it, so the title keeps the header's width. */}
             {action("copy-link", "Copy link", LinkIcon, onCopyLink)}
           </Menu>
@@ -261,10 +260,8 @@ export function Inspector({
           }}
         />
       ) : null}
-      {links("Waits for", item.links.waits_for, (id) => onUnlink(item.id, "waits-for", id), "waits-for")}
-      {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, "waits-for", item.id), "waited-on-by")}
-      {links("Relates to", item.links.relates_to, (id) => onUnlink(item.id, "relates-to", id), "relates-to")}
-      {links("Related from", item.links.related_from, (id) => onUnlink(id, "relates-to", item.id), "related-from")}
+      {links("Waits for", item.links.waits_for, (id) => onUnlink(item.id, id), "waits-for")}
+      {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, item.id), "waited-on-by")}
       {/* While editing, the form's Notes field holds them. */}
       {item.notes === null || editing ? null : (
         <div className="notes-block">

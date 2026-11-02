@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use acyclic_core::import::{Import, LinkKind, State};
+use acyclic_core::import::{Import, State};
 
 /// A plan's shape.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,12 +15,6 @@ pub struct Stats {
     pub thread_sizes: Vec<usize>,
     /// Items in no thread.
     pub unthreaded: usize,
-    /// Distinct areas.
-    pub areas: usize,
-    /// Items with no area, roots excepted.
-    pub without_area: usize,
-    /// Threads whose items span several areas.
-    pub cross_area_threads: usize,
     /// Threads whose items span several roots.
     pub cross_goal_threads: usize,
     /// Threads whose repository set has several repositories.
@@ -29,8 +23,8 @@ pub struct Stats {
     pub states: BTreeMap<String, usize>,
     /// Archived items.
     pub archived: usize,
-    /// Links per kind.
-    pub links: BTreeMap<String, usize>,
+    /// Waits-for links.
+    pub links: usize,
 }
 
 impl Stats {
@@ -59,22 +53,16 @@ impl Stats {
             *depths.entry(root(i).1).or_default() += 1;
         }
         let mut threaded = BTreeSet::new();
-        let (mut cross_area_threads, mut cross_goal_threads, mut multi_repository_threads) =
-            (0, 0, 0);
+        let (mut cross_goal_threads, mut multi_repository_threads) = (0, 0);
         for thread in &import.threads {
             let members: Vec<usize> = thread.items.iter().map(|k| index[k.as_str()]).collect();
             threaded.extend(members.iter().copied());
-            let areas: BTreeSet<&str> = members
-                .iter()
-                .flat_map(|&i| import.items[i].areas.iter().map(String::as_str))
-                .collect();
             let goals: BTreeSet<usize> = members.iter().map(|&i| root(i).0).collect();
             let repositories: BTreeSet<&str> = members
                 .iter()
                 .flat_map(|&i| import.items[i].repositories.iter().map(String::as_str))
                 .chain(thread.repositories.iter().map(String::as_str))
                 .collect();
-            cross_area_threads += usize::from(areas.len() > 1);
             cross_goal_threads += usize::from(goals.len() > 1);
             multi_repository_threads += usize::from(repositories.len() > 1);
         }
@@ -82,27 +70,16 @@ impl Stats {
         for item in &import.items {
             *states.entry(format!("{:?}", item.state)).or_default() += 1;
         }
-        let mut links = BTreeMap::new();
-        for link in &import.links {
-            *links.entry(format!("{:?}", link.kind)).or_default() += 1;
-        }
         Self {
             items: import.items.len(),
             depths,
             thread_sizes: import.threads.iter().map(|t| t.items.len()).collect(),
             unthreaded: import.items.len() - threaded.len(),
-            areas: import.items.iter().flat_map(|i| &i.areas).collect::<BTreeSet<_>>().len(),
-            without_area: import
-                .items
-                .iter()
-                .filter(|i| i.parent.is_some() && i.areas.is_empty())
-                .count(),
-            cross_area_threads,
             cross_goal_threads,
             multi_repository_threads,
             states,
             archived: import.items.iter().filter(|i| i.archived).count(),
-            links,
+            links: import.items.iter().map(|i| i.waits_for.len()).sum(),
         }
     }
 
@@ -112,9 +89,9 @@ impl Stats {
         self.states.get(&format!("{state:?}")).copied().unwrap_or(0) as f64 / self.items as f64
     }
 
-    /// Links of a kind per item.
+    /// Waits-for links per item.
     #[must_use]
-    pub fn link_rate(&self, kind: LinkKind) -> f64 {
-        self.links.get(&format!("{kind:?}")).copied().unwrap_or(0) as f64 / self.items as f64
+    pub fn link_rate(&self) -> f64 {
+        self.links as f64 / self.items as f64
     }
 }

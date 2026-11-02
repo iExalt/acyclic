@@ -88,12 +88,6 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::IdReused { replica: id(), mine: 1, theirs: 2 }.into(),
         StateError::Claimed(key.clone()).into(),
         StateError::NoThread("t".into()).into(),
-        StateError::ResourceHeld {
-            resource: "gpu".into(),
-            thread: "t".into(),
-            holder: "session/s".into(),
-        }
-        .into(),
         StateError::Format("bad".into()).into(),
         WriteError::InvalidName("A".into()).into(),
         WriteError::NoItem("a1".into()).into(),
@@ -169,7 +163,7 @@ fn run(line: &str) -> Outcome {
 #[test]
 fn usage_errors_and_help_are_text() {
     // A command line that doesn't parse explains itself on standard error, as other tools do.
-    for line in ["acyclic nonsense", "acyclic item show", "acyclic link add a1 sideways a2"] {
+    for line in ["acyclic nonsense", "acyclic item show", "acyclic item edit a1 --state started"] {
         let out = run(line);
         assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
         assert!(
@@ -223,11 +217,6 @@ fn an_actor_may_claim_past_its_own_claims_only() {
     use commands::may_claim;
     let me = "session/mac";
     let claimed = |holder: &str| Status::Claimed { holder: holder.into() };
-    let busy = |holder: &str| Status::ResourceBusy {
-        resource: "gpu".into(),
-        thread: "other".into(),
-        holder: holder.into(),
-    };
     let contested = |first: &str, second: &str| Status::Contested {
         holders: vec![first.into(), second.into()],
     };
@@ -237,8 +226,6 @@ fn an_actor_may_claim_past_its_own_claims_only() {
         (claimed("session/r1"), false),
         (contested(me, "session/r1"), true),
         (contested("session/r1", me), false),
-        (busy(me), true),
-        (busy("session/r1"), false),
         (Status::Parent, false),
     ] {
         assert_eq!(may_claim(Some(&status), me), may, "{status:?}");
@@ -265,7 +252,7 @@ fn prime_is_text_matched_to_the_version() {
 
 #[test]
 fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() {
-    use acyclic_core::model::{By, LinkKind, Model, add_item, link};
+    use acyclic_core::model::{By, Model, add_item, link};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
     use acyclic_core::state::{Replica, State};
     let user = By { actor: USER, at: 1 };
@@ -279,12 +266,12 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
         join(&mut mac, id, "t");
     }
     // By id, s-10 would come before s-2; its links run it last.
-    link(&mut mac, "s-2", "s-1", LinkKind::Blocks, user).unwrap();
-    link(&mut mac, "s-10", "s-2", LinkKind::Blocks, user).unwrap();
+    link(&mut mac, "s-2", "s-1", user).unwrap();
+    link(&mut mac, "s-10", "s-2", user).unwrap();
     // Each replica closes half of a cycle, and each puts the raced item in another thread.
     let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
-    link(&mut mac, "c-1", "c-2", LinkKind::Blocks, user).unwrap();
-    link(&mut pi, "c-2", "c-1", LinkKind::Blocks, user).unwrap();
+    link(&mut mac, "c-1", "c-2", user).unwrap();
+    link(&mut pi, "c-2", "c-1", user).unwrap();
     join(&mut mac, "raced", "u");
     join(&mut pi, "raced", "v");
     // One replica moves it on while the other takes it out of every thread.
@@ -474,27 +461,6 @@ fn a_lease_outside_its_range_is_a_usage_error_naming_the_range() {
 }
 
 #[test]
-fn links_are_named_waits_for_and_relates_to() {
-    use acyclic_core::model::LinkKind;
-    for (word, kind) in [
-        (args::LinkWord::WaitsFor, LinkKind::Blocks),
-        (args::LinkWord::RelatesTo, LinkKind::Relates),
-    ] {
-        assert_eq!(word.kind(), kind);
-    }
-    // Any other word, such as an older name, gets the usual error.
-    for word in ["follows", "after", "blocks", "relates", "sideways"] {
-        let out = run(&format!("acyclic link add a2 {word} a1"));
-        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{word}");
-        assert!(out.stderr.contains("[possible values: waits-for"), "{out:?}");
-    }
-    let help = run("acyclic help link add").stdout;
-    assert!(help.contains("`<FROM>` waits for or relates to `<TO>`"), "{help}");
-    assert!(!help.contains("follows"), "{help}");
-    assert!(help.contains("acyclic link add plant waits-for beds"), "{help}");
-}
-
-#[test]
 fn completions_are_text_that_reaches_nested_commands_and_short_flags() {
     for (shell, nested, short) in [
         ("bash", "subcmd__item__subcmd__edit", "-t"),
@@ -538,17 +504,7 @@ fn every_command_follows_the_input_conventions() {
     let mut commands = Vec::new();
     walk(&root, "", &mut commands);
     // Positionals are the subject's id, named for the entity; these are the only others.
-    let exceptions = [
-        ("init", "path"),
-        ("completions", "shell"),
-        ("import", "file"),
-        ("link add", "from"),
-        ("link add", "kind"),
-        ("link add", "to"),
-        ("link remove", "from"),
-        ("link remove", "kind"),
-        ("link remove", "to"),
-    ];
+    let exceptions = [("init", "path"), ("completions", "shell"), ("import", "file")];
     let entities = ["ITEM", "THREAD", "REPOSITORY"];
     // A long flag has the same short form, or none, in every command that takes it.
     let mut shorts = std::collections::BTreeMap::new();
@@ -632,6 +588,23 @@ fn a_removed_or_moved_command_is_a_usage_error_at_its_old_place() {
 }
 
 #[test]
+fn removed_fields_the_link_group_and_the_in_progress_state_are_refused_as_unknown() {
+    for line in [
+        "acyclic item add -t T --area x",
+        "acyclic item add -t T --resource x",
+        "acyclic item add -t T --gate x",
+        "acyclic item edit a --no-gate",
+        "acyclic link add a waits-for b",
+        "acyclic item edit a --state in-progress",
+    ] {
+        let out = run(line);
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
+        let unknown = ["unexpected argument", "unrecognized subcommand", "invalid value"];
+        assert!(unknown.iter().any(|said| out.stderr.contains(said)), "{line}: {out:?}");
+    }
+}
+
+#[test]
 fn flags_that_contradict_each_other_are_usage_errors() {
     let check = |line: &str| {
         let cli = args::Cli::try_parse_from(line.split(' ')).unwrap();
@@ -642,8 +615,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --parent b --no-parent",
         "acyclic item edit a --thread t --no-thread",
         "acyclic item edit a --size m --no-size",
-        "acyclic item edit a --gate g --no-gate",
-        "acyclic item edit a --area x --no-area x",
+        "acyclic item edit a --waits-for b --no-waits-for b",
         "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
         "acyclic thread edit t --repository r --no-repository r",
@@ -651,7 +623,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         assert_eq!(check(line), Err("usage"), "{line}");
     }
     for line in [
-        "acyclic item edit a --area x --no-area y --no-notes --parent b",
+        "acyclic item edit a --waits-for b --no-waits-for c --no-notes --parent b",
         "acyclic repository add r --owner o --name n --default-branch main",
         "acyclic repository edit r --default-branch trunk",
     ] {

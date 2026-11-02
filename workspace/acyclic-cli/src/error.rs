@@ -84,7 +84,6 @@ impl From<StateError> for CliError {
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
-            StateError::ResourceHeld { .. } => ("resource-held", exit::REFUSED),
             StateError::Format(_) => ("unreadable", exit::UNREADABLE),
         };
         let mut error = Self::new(code, exit, message);

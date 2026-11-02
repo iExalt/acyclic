@@ -1,5 +1,5 @@
 //! The needs-you list, computed on read: everything waiting on the user, as the state shows it (conflicts, cycles,
-//! contests, clashes, reopened work, dangling references).
+//! contests, reopened work, dangling references).
 
 use std::collections::BTreeSet;
 
@@ -53,13 +53,6 @@ pub enum Entry {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// Claims on threads whose open members name one resource belong to different holders.
-    ResourceClash {
-        /// The resource.
-        resource: String,
-        /// Each thread and its holder.
-        holders: Vec<(String, String)>,
-    },
     /// A claim's lease starts in the reader's future: the writer's clock ran ahead.
     ClockAhead {
         /// The thread.
@@ -98,6 +91,9 @@ pub enum Entry {
         field: String,
         /// The missing target.
         target: String,
+        /// The command that removes the reference, when one can.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fix: Option<String>,
     },
     /// Threads whose ids end in the same number, so the app draws them alike; renumbering a fresh one resolves it.
     /// Listed only while one is fresh, since only then is there something to do.
@@ -135,7 +131,6 @@ impl Entry {
             | Self::ParentCycle { .. }
             | Self::ThreadCycle { .. }
             | Self::Contest { .. }
-            | Self::ResourceClash { .. }
             | Self::Reopened { .. }
             | Self::DoneEarly { .. } => true,
             Self::Unpushed { .. }
@@ -171,9 +166,6 @@ pub fn needs_you(
         entries.insert(Entry::ThreadCycle { threads: threads.into_iter().collect() });
     }
     claims(state, model, now, &mut entries)?;
-    for clash in claim::clashes(state, model, now)? {
-        entries.insert(Entry::ResourceClash { resource: clash.resource, holders: clash.holders });
-    }
     reopened_and_early(model, &mut entries);
     dangling(model, &mut entries);
     for clash in renumber::clashes(state, model, now)? {
@@ -223,9 +215,7 @@ fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) 
 fn conflicts(state: &State, entries: &mut BTreeSet<Entry>) {
     for (key, entity) in state.entities() {
         for (name, register) in entity {
-            if name == claim::FIELD
-                || [set::AREA, set::REPOSITORY, set::RESOURCE].iter().any(|p| name.starts_with(p))
-            {
+            if name == claim::FIELD || name.starts_with(set::REPOSITORY) {
                 continue;
             }
             let distinct: BTreeSet<String> =
@@ -269,7 +259,7 @@ fn reopened_and_early(model: &Model, entries: &mut BTreeSet<Entry>) {
             let dependents: Vec<String> = model
                 .links
                 .iter()
-                .filter(|l| l.to == *id && l.kind.orders() && !model.is_archived(&l.from))
+                .filter(|l| l.to == *id && !model.is_archived(&l.from))
                 .map(|l| l.from.clone())
                 .collect();
             entries.insert(Entry::Reopened { item: id.clone(), dependents });
@@ -289,37 +279,46 @@ fn reopened_and_early(model: &Model, entries: &mut BTreeSet<Entry>) {
 }
 
 fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
-    let mut add = |kind: &str, id: &str, field: &str, target: &str| {
+    let mut add = |kind: &str, id: &str, field: &str, target: &str, fix: Option<String>| {
         entries.insert(Entry::Dangling {
             kind: kind.to_owned(),
             id: id.to_owned(),
             field: field.to_owned(),
             target: target.to_owned(),
+            fix,
         });
     };
     for (id, item) in &model.items {
         for parent in item.parent.all().into_iter().filter(|p| !model.items.contains_key(*p)) {
-            add(kind::ITEM, id, "parent", parent);
+            add(kind::ITEM, id, "parent", parent, None);
         }
         for thread in item.thread.all().into_iter().filter(|t| !model.threads.contains_key(*t)) {
-            add(kind::ITEM, id, "thread", thread);
+            add(kind::ITEM, id, "thread", thread, None);
         }
         for repository in item.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
         {
-            add(kind::ITEM, id, "repository", repository);
+            add(kind::ITEM, id, "repository", repository, None);
         }
     }
     for (id, thread) in &model.threads {
         for repository in
             thread.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
         {
-            add(kind::THREAD, id, "repository", repository);
+            add(kind::THREAD, id, "repository", repository, None);
         }
     }
+    // A waiting item names what it waits for, and can let go of it; a link from an item that is gone is the link's.
     for link in &model.links {
-        for end in [&link.from, &link.to].into_iter().filter(|end| !model.items.contains_key(*end))
-        {
-            add(kind::LINK, &format!("{}-{}", link.from, link.to), "end", end);
+        if !model.items.contains_key(&link.from) {
+            add(kind::LINK, &format!("{}-{}", link.from, link.to), "end", &link.from, None);
+        }
+        if !model.items.contains_key(&link.to) {
+            if model.items.contains_key(&link.from) {
+                let fix = format!("acyclic item edit {} --no-waits-for {}", link.from, link.to);
+                add(kind::ITEM, &link.from, "waits-for", &link.to, Some(fix));
+            } else {
+                add(kind::LINK, &format!("{}-{}", link.from, link.to), "end", &link.to, None);
+            }
         }
     }
 }

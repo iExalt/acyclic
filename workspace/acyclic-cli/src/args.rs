@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use acyclic_core::model::{ItemState, LinkKind, Size};
+use acyclic_core::model::{ItemState, Size};
 use std::fmt::Write as _;
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
@@ -59,7 +59,7 @@ pub enum Format {
 
 /// The top level's help sections, in order: the groups, then the commands that act on the tracker or the tool.
 pub const SECTIONS: [(&str, &[&str]); 2] = [
-    ("Command Groups", &["item", "link", "thread", "repository"]),
+    ("Command Groups", &["item", "thread", "repository"]),
     (
         "Other Commands",
         &["needs", "init", "sync", "prime", "import", "doctor", "serve", "up", "completions"],
@@ -162,9 +162,6 @@ pub enum Command {
     /// Adds, edits, shows, lists, finishes, reopens, archives and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
-    /// Adds or removes links between items.
-    #[command(subcommand)]
-    Link(LinkCommand),
     /// Adds, edits, shows and lists threads, and finds, claims and releases ready work.
     #[command(subcommand)]
     Thread(ThreadCommand),
@@ -311,7 +308,6 @@ impl Command {
                 | ItemCommand::Archive { .. }
                 | ItemCommand::Delete { .. },
             )
-            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
             | Self::Thread(
                 ThreadCommand::Add { .. }
                 | ThreadCommand::Edit(_)
@@ -403,8 +399,6 @@ pub enum StateWord {
     Backlog,
     // Set aside on purpose.
     Parked,
-    // Being worked on.
-    InProgress,
 }
 
 impl StateWord {
@@ -414,7 +408,6 @@ impl StateWord {
         match self {
             Self::Backlog => ItemState::Backlog,
             Self::Parked => ItemState::Parked,
-            Self::InProgress => ItemState::InProgress,
         }
     }
 }
@@ -442,24 +435,17 @@ pub enum ItemCommand {
         /// Its notes.
         #[arg(long)]
         notes: Option<String>,
-        /// Its gate.
-        #[arg(long)]
-        gate: Option<String>,
         /// Its size.
         #[arg(long, value_parser = values(&Size::ALL))]
         size: Option<Size>,
-        /// An area it is in; repeat for more.
-        #[arg(long, value_name = "AREA")]
-        #[serde(default)]
-        area: Vec<String>,
-        /// A named resource it holds while worked on; repeat for more.
-        #[arg(long, value_name = "RESOURCE")]
-        #[serde(default)]
-        resource: Vec<String>,
         /// A repository it touches; repeat for more.
         #[arg(short = 'r', long, value_name = "REPOSITORY")]
         #[serde(default)]
         repository: Vec<String>,
+        /// An item it waits for: it can't start until that one is done; repeat for more.
+        #[arg(long, value_name = "ITEM")]
+        #[serde(default)]
+        waits_for: Vec<String>,
     },
     /// Edits an item: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ItemEdit),
@@ -501,7 +487,8 @@ pub enum ItemCommand {
         /// The subtree's root.
         item: String,
     },
-    /// Deletes an item nothing refers to: no children, links or evidence, not done, and no one else's live claim.
+    /// Deletes an item nothing refers to: no children, nothing waiting for it or that it waits for, no evidence, not
+    /// done, and no one else's live claim.
     Delete {
         /// The item.
         item: String,
@@ -542,13 +529,6 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_notes: bool,
-    /// A new gate.
-    #[arg(long)]
-    pub gate: Option<String>,
-    /// Clear its gate.
-    #[arg(long)]
-    #[serde(default)]
-    pub no_gate: bool,
     /// A new size.
     #[arg(long, value_parser = values(&Size::ALL))]
     pub size: Option<Size>,
@@ -556,30 +536,22 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_size: bool,
-    /// Add an area; repeat for more.
-    #[arg(long, value_name = "AREA")]
-    #[serde(default)]
-    pub area: Vec<String>,
-    /// Remove an area; repeat for more.
-    #[arg(long, value_name = "AREA")]
-    #[serde(default)]
-    pub no_area: Vec<String>,
-    /// Add a named resource; repeat for more.
-    #[arg(long, value_name = "RESOURCE")]
-    #[serde(default)]
-    pub resource: Vec<String>,
-    /// Remove a named resource; repeat for more.
-    #[arg(long, value_name = "RESOURCE")]
-    #[serde(default)]
-    pub no_resource: Vec<String>,
     /// Add a repository it touches; repeat for more.
     #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
-    /// Remove a repository it touches; repeat for more.
+    /// Remove a repository it touches, by the id it holds, even one with no record; repeat for more.
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,
+    /// Make it wait for an item: it can't start until that one is done; repeat for more.
+    #[arg(long, value_name = "ITEM")]
+    #[serde(default)]
+    pub waits_for: Vec<String>,
+    /// Stop it waiting for an item, by the id it holds, even one that no longer exists; repeat for more.
+    #[arg(long, value_name = "ITEM")]
+    #[serde(default)]
+    pub no_waits_for: Vec<String>,
 }
 
 impl ItemEdit {
@@ -587,75 +559,10 @@ impl ItemEdit {
         clears("parent", self.parent.is_some(), self.no_parent)?;
         clears("thread", self.thread.is_some(), self.no_thread)?;
         clears("notes", self.notes.is_some(), self.no_notes)?;
-        clears("gate", self.gate.is_some(), self.no_gate)?;
         clears("size", self.size.is_some(), self.no_size)?;
-        overlaps("area", &self.area, &self.no_area)?;
-        overlaps("resource", &self.resource, &self.no_resource)?;
-        overlaps("repository", &self.repository, &self.no_repository)
+        overlaps("repository", &self.repository, &self.no_repository)?;
+        overlaps("waits-for", &self.waits_for, &self.no_waits_for)
     }
-}
-
-/// A link's kind as the command line names it. The stored names are the model's [`LinkKind`], which are kept as they
-/// are on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[serde(rename_all = "kebab-case")]
-#[expect(
-    missing_docs,
-    reason = "clap prints a value's doc as its help, which switches help to its long layout"
-)]
-pub enum LinkWord {
-    // `<FROM>` can't start until `<TO>` is done.
-    WaitsFor,
-    // Context only: neither orders the other.
-    RelatesTo,
-}
-
-impl LinkWord {
-    /// The model's kind for the word.
-    #[must_use]
-    pub fn kind(self) -> LinkKind {
-        match self {
-            Self::WaitsFor => LinkKind::Blocks,
-            Self::RelatesTo => LinkKind::Relates,
-        }
-    }
-}
-
-/// What the link commands' help shows beside their arguments.
-const LINK_EXAMPLE: &str = concat!(
-    "Kinds:\n",
-    "  waits-for   <FROM> can't start until <TO> is done\n",
-    "  relates-to  context only: neither orders the other\n",
-    "\n",
-    "Example: acyclic link add plant waits-for beds (plant can't start until beds is done)"
-);
-
-/// The link commands.
-#[derive(Debug, Subcommand, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
-pub enum LinkCommand {
-    /// Links two items: `<FROM>` waits for or relates to `<TO>`.
-    #[command(after_help = LINK_EXAMPLE)]
-    Add {
-        /// The item that waits or relates.
-        from: String,
-        /// How `<FROM>` stands to `<TO>`.
-        #[arg(value_enum)]
-        kind: LinkWord,
-        /// The item it stands to.
-        to: String,
-    },
-    /// Removes a link: `<FROM>` no longer waits for or relates to `<TO>`.
-    #[command(after_help = LINK_EXAMPLE)]
-    Remove {
-        /// The item that waits or relates.
-        from: String,
-        /// How `<FROM>` stands to `<TO>`.
-        #[arg(value_enum)]
-        kind: LinkWord,
-        /// The item it stands to.
-        to: String,
-    },
 }
 
 /// The thread commands.
@@ -703,7 +610,7 @@ pub enum ThreadCommand {
         #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
         /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim
-        /// on it, or on a resource it needs, still refuses.
+        /// on it still refuses.
         #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
@@ -741,7 +648,7 @@ pub struct ThreadEdit {
     #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub repository: Vec<String>,
-    /// Remove a repository; repeat for more.
+    /// Remove a repository, by the id it holds, even one with no record; repeat for more.
     #[arg(long, value_name = "REPOSITORY")]
     #[serde(default)]
     pub no_repository: Vec<String>,

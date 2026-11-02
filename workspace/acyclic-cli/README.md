@@ -8,15 +8,16 @@ Every command's inputs follow these rules, so you can guess a command from its n
 
 1. **Verbs.** A command that acts on one kind of record sits in its group, as `acyclic <noun> <verb>`:
    `item add|edit|show|list|done|reopen|archive|delete`, `thread add|edit|show|list|ready|claim|release|renumber`,
-   `repository add|edit|show|list` and `link add|remove`. Only commands that act on the tracker or the tool sit at the
+   and `repository add|edit|show|list`. Only commands that act on the tracker or the tool sit at the
    top: `needs`, `init`, `sync`, `import`, `doctor`, `prime`, `serve`, `up` and `completions`. Actions that aren't a
    field's value are verbs: `item reopen`, `item archive`, `item delete`, `thread renumber`.
 2. **Positionals** are only the subject's ids, named for the entity: `<ITEM>`, `<THREAD>`, `<REPOSITORY>`. Read
    commands take one or more and answer as an array in the order given; write commands take one. The exceptions are
-   the path of `init <PATH>`, the file of `import <FILE>`, and `link add|remove <FROM> <KIND> <TO>`.
+   the path of `init <PATH>` and the file of `import <FILE>`.
 3. **Every other input is a long flag named for the field it sets.** A scalar field takes `--field <VALUE>` to set it
    and `--no-field` to clear it. A set takes `--field <VALUE>`, repeatable, to add elements and `--no-field <VALUE>`,
-   repeatable, to remove them. Naming a field and its `--no-` form together is a usage error. The common flags also
+   repeatable, to remove them; a removal names an element by the exact id the record holds, so it also removes one
+   whose record is gone. Naming a field and its `--no-` form together is a usage error. The common flags also
    take a short form, their initial, and the same one in every command that takes them: `-t` for `--title`, `-r` for
    `--repository`, `-e` for `--evidence`, and `-n` for `--dry-run` as other tools have it; `-o` is `--output`.
 4. **`add` and `edit`** take the same fields. `add` creates; adding what exists again with the same values changes
@@ -26,8 +27,8 @@ Every command's inputs follow these rules, so you can guess a command from its n
    `<kind>-<replica>-<n>`, one past the highest `n` among that kind's ids starting `<kind>-`, and refuses a retry
    whose title matches a thread's, for a thread, or an open item's, for an item, as `already-exists` with that record's
    `id` in its details. A new explicit id starting `item-` or `thread-` is refused as `reserved-id`.
-5. **Relations are fields.** An item has `--parent`, `--thread`, `--repository` and `--state`; a thread has
-   `--repository`. Every actor's change applies at once; the actor, `--actor` or `ACYCLIC_ACTOR` and else
+5. **Relations are fields.** An item has `--parent`, `--thread`, `--repository`, `--waits-for` and `--state`; a
+   thread has `--repository`. Every actor's change applies at once; the actor, `--actor` or `ACYCLIC_ACTOR` and else
    `actor/user`, only labels the write.
 6. **Global options** (`--tracker`, `--actor`, `--output`) are listed under their own heading on every help page.
    `acyclic help` and `acyclic help <command> [<subcommand>]` show a command's help.
@@ -35,8 +36,9 @@ Every command's inputs follow these rules, so you can guess a command from its n
 8. **Completions.** `acyclic completions <SHELL>` prints a script for bash, zsh, fish, elvish or PowerShell; for zsh,
    `acyclic completions zsh > ~/.zfunc/_acyclic` with `~/.zfunc` on `fpath`.
 
-Links read left to right: `acyclic link add plant waits-for beds` says plant can't start until beds is done. The kinds
-are `waits-for`, which holds work back, and `relates-to`, which is context only.
+Waits-for reads left to right: `acyclic item edit plant --waits-for beds` says plant can't start until beds is done,
+and `--no-waits-for beds` undoes it. An item's states are `backlog`, `parked` and `done`; what is under way is its
+derived `stage`.
 
 ### Output
 
@@ -53,8 +55,8 @@ Every command's output follows these rules, so you can guess a key from the inpu
 2. **Naming.** A record carries its own id as `id`. A reference is named for the entity it points to, in the plural for
    a list: `parent`, `thread`, `item`, `repository`, `repositories`. Keys match the input flags, in snake
    case; enum values are kebab-case. A reference that can name several kinds of entity is `{entity, id}`, as in a
-   conflict, a dangling reference or an unreadable record. Links read `waits_for` and `relates_to` from an item and
-   `waited_on_by` and `related_from` towards it.
+   conflict, a dangling reference or an unreadable record. An item's `links` read `waits_for`, what it waits for, and
+   `waited_on_by`, what waits for it.
 3. **One summary per entity**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`;
    `thread ready` lists thread summaries, each with its ready `items`. A thread is `{id, title, heads, counts}` and a
    repository record `{id, owner, name, default_branch}`. `list` returns the summaries and `show` returns the same
@@ -66,8 +68,8 @@ Every command's output follows these rules, so you can guess a key from the inpu
 5. **Writes** return `{changed, <entity>: id, …}`; `item done` adds the `evidence` it recorded. An item add, edit or
    import returns `placed`: the items that joined a thread passed down to them, as `{item, thread}`.
 6. **`import`** returns `counts` and `changes`, the records it creates or updates, each with the `fields` that change
-   as `{from, to}`: `{entity, id, action, fields}`, where `action` is `create` or `update`. A link is named by `from`,
-   `kind` and `to`. `--dry-run` reports the same without writing.
+   as `{from, to}`: `{entity, id, action, fields}`, where `action` is `create` or `update`. A waits-for is a `link`
+   named by `from`, `kind` (`waits-for`) and `to`. `--dry-run` reports the same without writing.
 7. **`needs`** entries are `{kind, …}`. An entry that is about an item embeds it as its `item list` row under `item`,
    and one about a thread embeds its summary under `thread`; one about several, such as a `thread-cycle`, embeds them
    as a list under `items` or `threads`.

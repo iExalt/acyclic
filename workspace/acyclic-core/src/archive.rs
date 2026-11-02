@@ -1,20 +1,20 @@
 //! Archiving done subtrees and reopening them. Archived is a field on a subtree's root that `ready` and
 //! the graph filter on; links into archived items count as satisfied. A root is eligible once its whole subtree is
-//! done and merged and no open item outside it links into it; a root without a gate also waits 30 days from its
-//! last item's done. Reopening an archived item only flags its dependents; reopening any other done item blocks them
+//! done and merged and no open item outside it waits for it, and [`ARCHIVE_GRACE`] has passed since its last item was
+//! done. Reopening an archived item only flags its dependents; reopening any other done item blocks them
 //! again and flags them.
 
 use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::model::{self, By, ItemState, LinkKind, Model, Reopened, Value, WriteError};
+use crate::model::{self, By, ItemState, Model, Reopened, Value, WriteError};
 use crate::ready::{Ancestry, Readiness, Status};
 use crate::schema::item as field;
 use crate::state::{Error, Millis, Replica};
 
-/// How long a root without a gate waits after its last item is done.
-pub const GATELESS_WAIT: Millis = 30 * 24 * 60 * 60 * 1000;
+/// How long every root waits after its last item is done before it can be archived.
+pub const ARCHIVE_GRACE: Millis = 30 * 24 * 60 * 60 * 1000;
 
 /// Why a root isn't eligible to archive.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -32,14 +32,14 @@ pub enum Reason {
         /// The item.
         item: String,
     },
-    /// An open item outside the subtree links into it.
+    /// An open item outside the subtree waits for an item in it.
     LiveDependent {
         /// The open item.
         from: String,
         /// The item in the subtree it depends on.
         to: String,
     },
-    /// A root without a gate waits after its last item is done.
+    /// The root waits [`ARCHIVE_GRACE`] after its last item is done.
     Waiting {
         /// When it becomes eligible.
         #[serde(rename = "eligible_at", serialize_with = "crate::time::serialize_rfc3339")]
@@ -57,7 +57,7 @@ impl std::fmt::Display for Reason {
             },
             Self::LiveDependent { from, to } => write!(f, "{from}, still open, depends on {to}"),
             Self::Waiting { .. } => {
-                write!(f, "it has no gate, and its last item was done less than 30 days ago")
+                write!(f, "its last item was done less than 30 days ago")
             },
         }
     }
@@ -95,7 +95,7 @@ pub fn eligibility(
             reasons.insert(Reason::Unmerged { item: (*id).to_owned() });
         }
     }
-    for link in model.links.iter().filter(|l| l.kind != LinkKind::Relates) {
+    for link in &model.links {
         let open = model.items.contains_key(&link.from)
             && !model.reads_done(&link.from)
             && !model.is_archived(&link.from);
@@ -103,9 +103,8 @@ pub fn eligibility(
             reasons.insert(Reason::LiveDependent { from: link.from.clone(), to: link.to.clone() });
         }
     }
-    let waits = model.items.get(root).is_some_and(|i| i.gate == Value::None);
-    if waits && reasons.is_empty() && now < last_done.saturating_add(GATELESS_WAIT) {
-        reasons.insert(Reason::Waiting { until: last_done.saturating_add(GATELESS_WAIT) });
+    if reasons.is_empty() && now < last_done.saturating_add(ARCHIVE_GRACE) {
+        reasons.insert(Reason::Waiting { until: last_done.saturating_add(ARCHIVE_GRACE) });
     }
     Ok(reasons.into_iter().collect())
 }
@@ -186,7 +185,7 @@ pub fn archive(
     Ok(())
 }
 
-/// Reopens a done item: back in progress, and flagged so its dependents are listed. An item in an archived subtree
+/// Reopens a done item: back in the backlog, and flagged so its dependents are listed. An item in an archived subtree
 /// clears the archived root above it and leaves its dependents unblocked.
 ///
 /// # Errors
@@ -204,7 +203,7 @@ pub fn reopen(replica: &mut Replica, id: &str, by: By<'_>) -> Result<(), Archive
             model::put::<bool>(replica, &model::item_key(root)?, field::ARCHIVED, None, by)?;
         }
     }
-    model::set_state(replica, id, ItemState::InProgress, by)?;
+    model::set_state(replica, id, ItemState::Backlog, by)?;
     model::put(replica, &model::item_key(id)?, field::REOPENED, Some(&Reopened { archived }), by)?;
     Ok(())
 }

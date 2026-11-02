@@ -9,9 +9,9 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use super::{Import, LinkKind, ValidationError};
+use super::{Import, ValidationError};
 use crate::model::{self, By, Model, WriteError};
-use crate::schema::{item as field, kind, link, repository, set, thread};
+use crate::schema::{item as field, kind, link, repository, thread};
 use crate::scope::{self, ScopeEdit};
 use crate::state::{Error, Key, Replica};
 
@@ -59,7 +59,7 @@ pub enum Name {
     Link {
         /// The dependent item.
         from: String,
-        /// The kind, as the command line names it.
+        /// The kind as the command line names it: always `waits-for`.
         kind: &'static str,
         /// The item it depends on.
         to: String,
@@ -199,7 +199,6 @@ impl Writer<'_, '_> {
             self.created(&key, |r| &mut r.items);
             self.field(&key, field::TITLE, Some(&item.title))?;
             self.field(&key, field::NOTES, item.notes.as_ref())?;
-            self.field(&key, field::GATE, item.gate.as_ref())?;
             self.field(&key, field::STATE, Some(&item.state))?;
             self.field(&key, field::PARENT, item.parent.as_ref())?;
             self.field(&key, field::SIZE, item.size.as_ref())?;
@@ -207,36 +206,31 @@ impl Writer<'_, '_> {
             if item.archived {
                 self.field(&key, field::ARCHIVED, Some(&true))?;
             }
-            for (prefix, names) in [(set::AREA, &item.areas), (set::RESOURCE, &item.resources)] {
-                for name in names {
-                    self.element(&key, prefix, name)?;
-                }
+        }
+        for item in &doc.items {
+            for to in &item.waits_for {
+                self.link(&item.key, to)?;
             }
         }
-        for record in &doc.links {
-            let kind = match record.kind {
-                LinkKind::WaitsFor => model::LinkKind::Blocks,
-                LinkKind::RelatesTo => model::LinkKind::Relates,
-            };
-            let key = model::link_key(&record.from, &record.to, kind)?;
-            if self.replica.state.field(&key, link::PRESENT).is_none() {
-                self.report.links += 1;
-                self.report.changes.push(Change {
-                    entity: kind::LINK,
-                    name: Name::Link {
-                        from: record.from.clone(),
-                        kind: kind.word(),
-                        to: record.to.clone(),
-                    },
-                    action: Action::Create,
-                    fields: BTreeMap::new(),
-                });
-            }
-            self.field(&key, link::FROM, Some(&record.from))?;
-            self.field(&key, link::TO, Some(&record.to))?;
-            self.field(&key, link::KIND, Some(&kind))?;
-            self.field(&key, link::PRESENT, Some(&true))?;
+        Ok(())
+    }
+
+    /// Makes `from` wait for `to`, as one link entity.
+    fn link(&mut self, from: &str, to: &str) -> Result<(), ApplyError> {
+        let key = model::link_key(from, to)?;
+        if self.replica.state.field(&key, link::PRESENT).is_none() {
+            self.report.links += 1;
+            self.report.changes.push(Change {
+                entity: kind::LINK,
+                name: Name::Link { from: from.to_owned(), kind: "waits-for", to: to.to_owned() },
+                action: Action::Create,
+                fields: BTreeMap::new(),
+            });
         }
+        self.field(&key, link::FROM, Some(&from))?;
+        self.field(&key, link::TO, Some(&to))?;
+        self.field(&key, link::KIND, Some(&link::BLOCKS))?;
+        self.field(&key, link::PRESENT, Some(&true))?;
         Ok(())
     }
 
@@ -336,29 +330,13 @@ impl Writer<'_, '_> {
         Ok(())
     }
 
-    fn element(&mut self, key: &Key, prefix: &str, name: &str) -> Result<(), ApplyError> {
-        if self.replica.state.field(key, &format!("{prefix}{name}")).is_none() {
-            model::put_element(self.replica, key, prefix, name, true, self.by)?;
-            self.report.fields += 1;
-            self.set_edit(entity(&key.kind), &key.id, prefix, name, true);
-        }
-        Ok(())
-    }
-
-    /// Notes an element added to or removed from a set on a record's row, with the whole set before and after.
-    fn set_edit(
-        &mut self,
-        entity: &'static str,
-        id: &str,
-        prefix: &str,
-        element: &str,
-        present: bool,
-    ) {
-        let (field, current) = self.before_set(entity, id, prefix);
+    /// Notes a repository added to or removed from a record's set on its row, with the whole set before and after.
+    fn set_edit(&mut self, entity: &'static str, id: &str, element: &str, present: bool) {
+        let current = self.before_set(entity, id);
         let row = self.row(entity, id);
         let edit = row
             .fields
-            .entry(field.to_owned())
+            .entry("repositories".to_owned())
             .or_insert_with(|| Edit { from: json!(current), to: json!(current) });
         let mut to: BTreeSet<String> =
             serde_json::from_value(edit.to.clone()).expect("a set of names");
@@ -370,26 +348,19 @@ impl Writer<'_, '_> {
         edit.to = json!(to);
     }
 
-    /// A set field's name in the output and its members before the import.
-    fn before_set(&self, entity: &str, id: &str, prefix: &str) -> (&'static str, BTreeSet<String>) {
-        let name = match prefix {
-            set::AREA => "areas",
-            set::RESOURCE => "resources",
-            _ => "repositories",
-        };
-        let before = match (entity, prefix) {
-            (kind::THREAD, _) => self.before.threads.get(id).map(|t| t.repositories.clone()),
-            (_, set::AREA) => self.before.items.get(id).map(|i| i.areas.clone()),
-            (_, set::RESOURCE) => self.before.items.get(id).map(|i| i.resources.clone()),
+    /// A repository set's members before the import.
+    fn before_set(&self, entity: &str, id: &str) -> BTreeSet<String> {
+        let before = match entity {
+            kind::THREAD => self.before.threads.get(id).map(|t| t.repositories.clone()),
             _ => self.before.items.get(id).map(|i| i.repositories.clone()),
         };
-        (name, before.unwrap_or_default())
+        before.unwrap_or_default()
     }
 
     fn scope(&mut self, before: &Model, change: &ScopeEdit) -> Result<(), ApplyError> {
         scope::edit(self.replica, change, self.by)?;
         self.report.fields += 1;
-        let (entity, id, prefix, element, present) = match change {
+        let (entity, id, element, present) = match change {
             ScopeEdit::Member { item, thread } => {
                 let from = before.items.get(item).map_or(Json::Null, |i| json!(i.thread));
                 let edit = Edit { from, to: json!(thread) };
@@ -397,13 +368,13 @@ impl Writer<'_, '_> {
                 return Ok(());
             },
             ScopeEdit::ItemRepository { item, repository, present } => {
-                (kind::ITEM, item, set::REPOSITORY, repository, *present)
+                (kind::ITEM, item, repository, *present)
             },
             ScopeEdit::ThreadRepository { thread, repository, present } => {
-                (kind::THREAD, thread, set::REPOSITORY, repository, *present)
+                (kind::THREAD, thread, repository, *present)
             },
         };
-        self.set_edit(entity, id, prefix, element, present);
+        self.set_edit(entity, id, element, present);
         Ok(())
     }
 }

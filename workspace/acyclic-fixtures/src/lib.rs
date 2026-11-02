@@ -8,9 +8,7 @@ pub mod stats;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use acyclic_core::import::{
-    Evidence, Import, Item, Link, LinkKind, Repository, Size, State, Thread,
-};
+use acyclic_core::import::{Evidence, Import, Item, Repository, Size, State, Thread};
 
 pub use rng::SplitMix64;
 
@@ -21,6 +19,7 @@ pub const BASE_ITEMS: usize = 350;
 /// break a rule are skipped. A constant rather than `exp`, whose last bit varies by platform.
 const EXP_MINUS_1_3: f64 = 0.272_531_793_034_012_6;
 
+/// Areas the generator still draws, so each seed keeps its plan's structure, though plans no longer carry them.
 const AREAS: [&str; 7] = ["core", "api", "storage", "interface", "infra", "research", "docs"];
 const VERBS: [&str; 12] = [
     "Add", "Build", "Measure", "Split", "Wire", "Document", "Harden", "Port", "Profile", "Design",
@@ -127,7 +126,7 @@ impl Generator {
         format!("{verb} the {noun} {qualifier}")
     }
 
-    fn push_item(&mut self, parent: Option<usize>, area: Option<&str>) -> usize {
+    fn push_item(&mut self, parent: Option<usize>) -> usize {
         let index = self.import.items.len();
         let (depth, goal) = match parent {
             Some(p) => (self.depth[p] + 1, self.goal[p]),
@@ -146,21 +145,16 @@ impl Generator {
             1 | 2 => Size::Xl,
             _ => [Size::Xs, Size::S, Size::S, Size::M, Size::M, Size::L][self.rng.below(6)],
         };
-        let resources = if depth >= 3 && self.rng.chance(0.01) {
-            vec!["gpu-pool".to_owned()]
-        } else {
-            Vec::new()
-        };
+        // A resource draw plans no longer carry, kept so each seed keeps its structure.
+        let _ = depth >= 3 && self.rng.chance(0.01);
         self.import.items.push(Item {
             key: format!("i{index}"),
             title,
             notes: self.rng.chance(0.3).then(|| "Synthetic design notes.".to_owned()),
-            gate: (depth <= 2).then(|| "Its children are done and checked.".to_owned()),
             state: State::Backlog,
             parent: parent.map(|p| format!("i{p}")),
-            areas: area.map(|a| vec![a.to_owned()]).unwrap_or_default(),
             repositories: if depth == 1 { Vec::new() } else { vec![repository.to_owned()] },
-            resources,
+            waits_for: Vec::new(),
             size: Some(size),
             archived: false,
             evidence: None,
@@ -181,25 +175,22 @@ impl Generator {
         let per_goal = self.shares(umbrellas, goals);
         let mut umbrella_leaves = self.shares(leaves, umbrellas).into_iter();
         for umbrella_count in per_goal {
-            let goal = self.push_item(None, None);
+            let goal = self.push_item(None);
             for _ in 0..umbrella_count {
-                let area = AREAS[self.rng.below(AREAS.len())];
-                let umbrella = self.push_item(Some(goal), Some(area));
+                // The areas' draws, kept so each seed keeps its structure.
+                let _ = self.rng.below(AREAS.len());
+                let umbrella = self.push_item(Some(goal));
                 let mut last_leaf = None;
                 for _ in 0..umbrella_leaves.next().unwrap_or(0) {
-                    let leaf_area = if self.rng.chance(0.005) {
-                        None
-                    } else if self.rng.chance(0.85) {
-                        Some(area)
-                    } else {
-                        Some(AREAS[self.rng.below(AREAS.len())])
-                    };
+                    if !self.rng.chance(0.005) && !self.rng.chance(0.85) {
+                        let _ = self.rng.below(AREAS.len());
+                    }
                     // About one leaf in twenty is a sub-item of the previous leaf.
                     let parent = match last_leaf {
                         Some(leaf) if self.depth[leaf] == 3 && self.rng.chance(0.05) => leaf,
                         _ => umbrella,
                     };
-                    let index = self.push_item(Some(parent), leaf_area);
+                    let index = self.push_item(Some(parent));
                     if self.depth[index] == 3 {
                         last_leaf = Some(index);
                     }
@@ -257,18 +248,16 @@ impl Generator {
                     });
                 }
             } else if self.depth[index] >= 3 {
-                let roll = self.rng.unit();
-                if roll < 0.04 {
+                // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays in the backlog.
+                if self.rng.unit() < 0.04 {
                     item.state = State::Parked;
-                } else if roll < 0.05 {
-                    item.state = State::InProgress;
                 }
             }
         }
     }
 
-    /// Threads take contiguous runs of non-goal items in depth-first order, so most stay within one area; a few
-    /// swaps make some cross areas and goals. About an eighth of the items stay unthreaded.
+    /// Threads take contiguous runs of non-goal items in depth-first order, so most stay within one umbrella; a few
+    /// swaps make some cross goals. About an eighth of the items stay unthreaded.
     fn threads(&mut self) -> Vec<Option<usize>> {
         let count = self.scaled(21.0);
         let small = self.scaled(6.0).min(count - 1);
@@ -343,8 +332,6 @@ impl Generator {
                 items: run.iter().map(|&i| format!("i{i}")).collect(),
                 repositories,
             });
-            // A draw the generator no longer uses, kept so each seed still gives the plan it gave.
-            let _ = self.rng.chance(0.5);
         }
         owner
     }
@@ -362,8 +349,9 @@ impl Generator {
         ancestor_of(a, b) || ancestor_of(b, a)
     }
 
-    /// Hard links average about 1.2 per item, always from a later item to an earlier one, so they never form a
-    /// cycle; related links 0.05. No link joins an item to its ancestor or descendant.
+    /// Waits-for links average about 1.2 per item, always from a later item to an earlier one, so they never form a
+    /// cycle. No link joins an item to its ancestor or descendant. The related links once drawn at 0.05 per item are
+    /// still drawn, so each seed keeps its structure, and written nowhere.
     fn links(&mut self, owner: &[Option<usize>]) {
         let mut by_thread: HashMap<usize, Vec<usize>> = HashMap::new();
         for (item, thread) in owner.iter().enumerate() {
@@ -376,7 +364,7 @@ impl Generator {
         for &from in &candidates {
             let hard = self.rng.poisson(EXP_MINUS_1_3);
             let related = usize::from(self.rng.chance(0.05));
-            for (kind, n) in [(LinkKind::WaitsFor, hard), (LinkKind::RelatesTo, related)] {
+            for (waits, n) in [(true, hard), (false, related)] {
                 for _ in 0..n {
                     let pool: &[usize] = match owner[from] {
                         Some(thread) if self.rng.chance(0.75) => &by_thread[&thread],
@@ -397,14 +385,10 @@ impl Generator {
                     {
                         continue;
                     }
-                    if !seen.insert((from, to, kind)) {
+                    if !seen.insert((from, to, waits)) || !waits {
                         continue;
                     }
-                    self.import.links.push(Link {
-                        from: format!("i{from}"),
-                        to: format!("i{to}"),
-                        kind,
-                    });
+                    self.import.items[from].waits_for.push(format!("i{to}"));
                 }
             }
         }
@@ -473,20 +457,16 @@ mod tests {
         let unthreaded = stats.unthreaded as f64 / items as f64;
         assert!((0.085..=0.165).contains(&unthreaded), "unthreaded share {unthreaded}: {at}");
 
-        assert_eq!(stats.areas, 7, "{at}");
-        assert!(stats.without_area > 0, "{at}");
-        assert!(stats.cross_area_threads > 0 && stats.cross_goal_threads > 0, "{at}");
+        assert!(stats.cross_goal_threads > 0, "{at}");
         assert!(stats.multi_repository_threads > 0, "{at}");
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
         assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
-        assert!(stats.state_share(State::InProgress) > 0.0, "{at}");
         assert!(stats.archived > 0, "{at}");
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;
-        assert!(near(stats.link_rate(LinkKind::WaitsFor), 1.2, 0.3), "{at}");
-        assert!(near(stats.link_rate(LinkKind::RelatesTo), 0.05, 0.5), "{at}");
+        assert!(near(stats.link_rate(), 1.2, 0.3), "{at}");
         stats
     }
 
@@ -519,7 +499,8 @@ mod tests {
     fn a_seed_gives_the_same_plan_everywhere() {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_239, 5_338_418_017_208_892_038));
+        assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (97_620, 3_386_700_490_988_360_194));
     }
 
     #[test]

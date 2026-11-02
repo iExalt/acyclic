@@ -12,11 +12,11 @@ const example = (name: string) => {
 describe("form commands", () => {
   it("build exactly the commands the server's tests run", () => {
     const c = { ...item("c"), title: "C" };
-    expect(
-      itemEdit("c", draftOf(c), { title: "C2", state: "in-progress", thread: "t", notes: "n", gate: "g", size: "m" }),
-    ).toEqual(example("edit an item's fields"));
-    const filled = { ...c, thread: "t", notes: "n", gate: "g", size: "m" };
-    expect(itemEdit("c", draftOf(filled), { ...draftOf(filled), thread: "", notes: "", gate: "", size: "" })).toEqual(
+    expect(itemEdit("c", draftOf(c), { title: "C2", state: "parked", thread: "t", notes: "n", size: "m" })).toEqual(
+      example("edit an item's fields"),
+    );
+    const filled = { ...c, thread: "t", notes: "n", size: "m" };
+    expect(itemEdit("c", draftOf(filled), { ...draftOf(filled), thread: "", notes: "", size: "" })).toEqual(
       example("clear an item's fields"),
     );
     expect(resolveCommand("item", "d", "parent", null)).toEqual(example("settle an item's parent as a clear"));
@@ -30,8 +30,8 @@ describe("itemEdit", () => {
   it("sends nothing when nothing changed, and leaves a conflicted field the user didn't touch", () => {
     const a = { ...item("a"), conflicts: { title: ["A", "B"] } };
     expect(itemEdit("a", draftOf(a), draftOf(a))).toBeNull();
-    expect(itemEdit("a", draftOf(a), { ...draftOf(a), gate: "g" })).toEqual({
-      item: { edit: { item: "a", gate: "g" } },
+    expect(itemEdit("a", draftOf(a), { ...draftOf(a), size: "m" })).toEqual({
+      item: { edit: { item: "a", size: "m" } },
     });
     // A blank title or a state only `done` sets is never sent.
     expect(itemEdit("a", draftOf(a), { ...draftOf(a), title: " ", state: "done" })).toBeNull();

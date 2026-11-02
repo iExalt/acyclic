@@ -20,7 +20,7 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{self, By, LinkKind, Model, Value, WriteError};
+use crate::model::{self, By, Model, Value, WriteError};
 use crate::schema::item as field;
 use crate::state::{Error, Replica};
 
@@ -39,9 +39,8 @@ pub enum Reason {
         from: String,
         /// The item it depends on.
         to: String,
-        /// The link's kind, as the command line names it.
-        #[serde(serialize_with = "word")]
-        kind: LinkKind,
+        /// The link's kind as the command line names it: always `waits-for`.
+        kind: &'static str,
     },
     /// It is done, or holds evidence of it.
     Finished,
@@ -58,18 +57,13 @@ impl fmt::Display for Reason {
             Self::HasChildren { children } => {
                 write!(f, "it has children ({})", crate::say::list(children, ", "))
             },
-            Self::Linked { from, to, kind } => write!(f, "{from} {} {to}", kind.word()),
+            Self::Linked { from, to, kind } => write!(f, "{from} {kind} {to}"),
             Self::Finished => {
                 write!(f, "it is done, or holds evidence of it, and finished work stays")
             },
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on its thread"),
         }
     }
-}
-
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde passes a reference")]
-fn word<S: serde::Serializer>(kind: &LinkKind, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(kind.word())
 }
 
 /// A refused deletion.
@@ -133,7 +127,7 @@ pub fn reasons(
         found.push(Reason::Linked {
             from: link.from.clone(),
             to: link.to.clone(),
-            kind: link.kind,
+            kind: "waits-for",
         });
     }
     if let Some(item) = model.items.get(id)

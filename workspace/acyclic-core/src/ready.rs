@@ -17,7 +17,7 @@ use std::process::Stdio;
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{Evidence, Item, ItemState, LinkKind, Model, Progress, Repository, Value};
+use crate::model::{Evidence, Item, ItemState, Model, Progress, ProgressState, Repository, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
 
@@ -230,16 +230,6 @@ pub enum Status {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// Its thread is unclaimed, but another thread's winning claim holds a resource one of its thread's open members
-    /// names.
-    ResourceBusy {
-        /// The resource.
-        resource: String,
-        /// The thread holding it.
-        thread: String,
-        /// That thread's holder.
-        holder: String,
-    },
     /// On a cycle of links or parents, which pauses it.
     InCycle,
     /// Its state or thread holds conflicting values.
@@ -293,15 +283,6 @@ pub enum ThreadStatus {
         /// The members ready to work on, by id.
         items: Vec<String>,
     },
-    /// Unclaimed, but another thread's winning claim holds a resource one of its open members names.
-    ResourceBusy {
-        /// The resource.
-        resource: String,
-        /// The thread holding it.
-        thread: String,
-        /// That thread's holder.
-        holder: String,
-    },
 }
 
 impl ThreadStatus {
@@ -338,7 +319,7 @@ pub struct ReadyThread {
 }
 
 /// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
-/// each parent. In progress means started, or ready in a thread someone holds.
+/// each parent. In progress means ready in a thread someone holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Stage {
@@ -346,11 +327,11 @@ pub enum Stage {
     Done,
     /// Done, but its commit isn't on the default branch yet, or that can't be checked.
     InReview,
-    /// Started, or ready in a claimed thread.
+    /// Ready in a claimed thread.
     InProgress,
     /// Ready to start.
     Ready,
-    /// Waiting on something: a dependency, a cycle, a conflict, or a resource another thread holds.
+    /// Waiting on something: a dependency, a cycle or a conflict.
     Blocked,
     /// Set aside on purpose, or under a part that is.
     Parked,
@@ -420,12 +401,8 @@ pub struct Readiness<'a> {
     archived: RefCell<BTreeMap<String, bool>>,
     /// Each thread's members, built on first use.
     members: OnceCell<BTreeMap<&'a str, Vec<&'a str>>>,
-    /// The resources each thread's claim holds, built on first use.
-    resources: OnceCell<BTreeMap<&'a str, BTreeSet<&'a str>>>,
     /// Each thread's winning claim, memoized.
     winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
-    /// Whether another thread holds a resource each thread needs, memoized.
-    busy: RefCell<BTreeMap<String, Option<claim::Held>>>,
     /// Each item's stage, memoized, since a rollup counts every leaf under every parent.
     stages: RefCell<BTreeMap<String, Option<Stage>>>,
 }
@@ -442,7 +419,7 @@ impl<'a> Readiness<'a> {
         let cyclic =
             model.link_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
         let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for link in model.links.iter().filter(|link| link.kind == LinkKind::Blocks) {
+        for link in &model.links {
             links_from.entry(link.from.clone()).or_default().push(link.to.clone());
         }
         Self {
@@ -455,9 +432,7 @@ impl<'a> Readiness<'a> {
             links_from,
             archived: RefCell::default(),
             members: OnceCell::new(),
-            resources: OnceCell::new(),
             winners: RefCell::default(),
-            busy: RefCell::default(),
             stages: RefCell::default(),
         }
     }
@@ -473,12 +448,6 @@ impl<'a> Readiness<'a> {
             return Ok(Some(status));
         }
         let mut holders = claim::holders(&claim::covering(self.state, self.model, id, self.now)?);
-        if holders.is_empty()
-            && let Some(thread) = item.thread.one()
-            && let Some((resource, thread, holder)) = self.thread_busy(thread)?
-        {
-            return Ok(Some(Status::ResourceBusy { resource, thread, holder }));
-        }
         Ok(Some(match holders.len() {
             0 => Status::Ready,
             1 => Status::Claimed { holder: holders.remove(0) },
@@ -563,9 +532,6 @@ impl<'a> Readiness<'a> {
         if let Some(holder) = holders.pop() {
             return Ok(ThreadStatus::Claimed { holder, items });
         }
-        if let Some((resource, thread, holder)) = self.thread_busy(thread)? {
-            return Ok(ThreadStatus::ResourceBusy { resource, thread, holder });
-        }
         Ok(if items.is_empty() {
             ThreadStatus::NothingReady
         } else {
@@ -616,8 +582,8 @@ impl<'a> Readiness<'a> {
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
     }
 
-    /// A leaf's stage, or `None` for a parent, an archived item or an unknown one. A leaf started by hand reads in
-    /// progress whatever else holds it, such as a link added since; otherwise its readiness decides.
+    /// A leaf's stage, or `None` for a parent, an archived item or an unknown one: its readiness decides, and a claim
+    /// on its thread reads as in progress.
     ///
     /// # Errors
     ///
@@ -633,20 +599,17 @@ impl<'a> Readiness<'a> {
         let stage = if finished {
             Some(if self.own_wait(item).is_none() { Stage::Done } else { Stage::InReview })
         } else {
-            let started = item.state == Value::One(ItemState::InProgress);
             self.of(id)?.and_then(|status| match status {
                 Status::Archived | Status::Parent => None,
                 Status::Done => Some(Stage::Done),
                 Status::InReview | Status::Unverified { .. } => Some(Stage::InReview),
                 Status::Parked => Some(Stage::Parked),
-                _ if started => Some(Stage::InProgress),
                 Status::Claimed { .. } | Status::Contested { .. } => Some(Stage::InProgress),
                 Status::Ready => Some(Stage::Ready),
                 Status::Unthreaded => Some(Stage::Unthreaded),
-                Status::Blocked { .. }
-                | Status::ResourceBusy { .. }
-                | Status::InCycle
-                | Status::Conflicted { .. } => Some(Stage::Blocked),
+                Status::Blocked { .. } | Status::InCycle | Status::Conflicted { .. } => {
+                    Some(Stage::Blocked)
+                },
             })
         };
         self.stages.borrow_mut().insert(id.to_owned(), stage);
@@ -665,13 +628,14 @@ impl<'a> Readiness<'a> {
     pub fn progress(&self, id: &str) -> Result<Option<Rollup>, Error> {
         let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
         let mut stages = Stages::default();
-        let parked = progress.state == ItemState::Parked;
+        let parked = progress.state == ProgressState::Parked;
         self.tally(id, parked, &mut BTreeSet::from([id]), &mut stages)?;
-        if progress.state == ItemState::InProgress || progress.state == ItemState::Backlog {
+        if progress.state == ProgressState::InProgress || progress.state == ProgressState::Backlog {
             let moving = stages.in_progress > 0
                 || progress.done > 0
                 || self.claimed_under(id, &mut BTreeSet::from([id]))?;
-            progress.state = if moving { ItemState::InProgress } else { ItemState::Backlog };
+            progress.state =
+                if moving { ProgressState::InProgress } else { ProgressState::Backlog };
         }
         Ok(Some(Rollup { progress, stages }))
     }
@@ -790,18 +754,6 @@ impl<'a> Readiness<'a> {
         let winner = claim::winner(self.state, &claim::thread_key(thread)?, self.now)?;
         self.winners.borrow_mut().insert(thread.to_owned(), winner.clone());
         Ok(winner)
-    }
-
-    /// A resource the thread's open members name that another thread's winning claim holds, with that thread and its
-    /// holder, memoized. Any member's resource counts, so a thread and each of its items agree.
-    fn thread_busy(&self, thread: &str) -> Result<Option<claim::Held>, Error> {
-        if let Some(busy) = self.busy.borrow().get(thread) {
-            return Ok(busy.clone());
-        }
-        let held = self.resources.get_or_init(|| claim::resources(self.model));
-        let busy = claim::resource_held(held, thread, None, |other| self.winner(other))?;
-        self.busy.borrow_mut().insert(thread.to_owned(), busy.clone());
-        Ok(busy)
     }
 
     /// Whether an item is archived, memoized.

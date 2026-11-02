@@ -59,10 +59,10 @@ fn reasons(r: &Replica, root: &str, now: Millis) -> Vec<Reason> {
 }
 
 #[test]
-fn a_gateless_group_waits_thirty_days_after_its_last_done() {
+fn a_root_waits_thirty_days_after_its_last_done() {
     let r = setup();
-    assert_eq!(reasons(&r, "g", 2 * DAY), vec![Reason::Waiting { until: DAY + GATELESS_WAIT }]);
-    assert_eq!(reasons(&r, "g", DAY + GATELESS_WAIT), Vec::<Reason>::new());
+    assert_eq!(reasons(&r, "g", 2 * DAY), vec![Reason::Waiting { until: DAY + ARCHIVE_GRACE }]);
+    assert_eq!(reasons(&r, "g", DAY + ARCHIVE_GRACE), Vec::<Reason>::new());
     // Output carries the time as every time is printed.
     assert_eq!(
         serde_json::to_value(Reason::Waiting { until: DAY }).unwrap(),
@@ -71,23 +71,22 @@ fn a_gateless_group_waits_thirty_days_after_its_last_done() {
 }
 
 #[test]
-fn a_gated_goal_is_eligible_once_done_and_merged() {
+fn a_root_with_a_gate_older_versions_stored_waits_the_same_grace() {
     let mut r = setup();
-    model::set(&mut r, &item_key("g").unwrap(), field::GATE, Some(&"ships"), user(2)).unwrap();
-    add_item(&mut r, "top", "top", user(2)).unwrap();
-    set_parent(&mut r, "g", Some("top"), user(2)).unwrap();
-    assert_eq!(reasons(&r, "g", 2 * DAY), Vec::<Reason>::new());
+    let gate = Some(serde_json::json!("ships"));
+    r.write(&item_key("g").unwrap(), "gate", "actor/user", 2, gate).unwrap();
+    assert_eq!(reasons(&r, "g", 2 * DAY), vec![Reason::Waiting { until: DAY + ARCHIVE_GRACE }]);
 }
 
 #[test]
 fn a_parent_done_by_its_leaves_archives_on_their_merges_and_times() {
     let mut r = setup();
     model::set_state(&mut r, "g", ItemState::Backlog, user(2 * DAY)).unwrap();
-    assert_eq!(reasons(&r, "g", 4 * DAY), vec![Reason::Waiting { until: DAY + GATELESS_WAIT }]);
+    assert_eq!(reasons(&r, "g", 4 * DAY), vec![Reason::Waiting { until: DAY + ARCHIVE_GRACE }]);
     done(&mut r, "a", Some("bbbb222"), 4 * DAY);
     assert_eq!(reasons(&r, "g", 5 * DAY), vec![Reason::Unmerged { item: "a".into() }]);
     done(&mut r, "a", Some("aaaa111"), 4 * DAY);
-    model::set_state(&mut r, "b", ItemState::InProgress, user(4 * DAY)).unwrap();
+    model::set_state(&mut r, "b", ItemState::Backlog, user(4 * DAY)).unwrap();
     assert_eq!(
         reasons(&r, "g", 5 * DAY),
         vec![Reason::Open { item: "b".into() }, Reason::Open { item: "g".into() }]
@@ -97,11 +96,10 @@ fn a_parent_done_by_its_leaves_archives_on_their_merges_and_times() {
 #[test]
 fn open_unmerged_and_depended_on_subtrees_say_why() {
     let mut r = setup();
-    model::set(&mut r, &item_key("g").unwrap(), field::GATE, Some(&"ships"), user(2)).unwrap();
     add_item(&mut r, "c", "c", user(2)).unwrap();
     set_parent(&mut r, "c", Some("g"), user(2)).unwrap();
     done(&mut r, "a", Some("bbbb222"), 2 * DAY);
-    link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
+    link(&mut r, "outside", "b", user(2)).unwrap();
     assert_eq!(
         reasons(&r, "g", 3 * DAY),
         vec![
@@ -120,10 +118,9 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
     // One line, with the date the wait ends.
     assert_eq!(
         refused.to_string(),
-        "g can't be archived until 1970-02-01: it has no gate, and its last item was done less than 30 days \
-         ago"
+        "g can't be archived until 1970-02-01: its last item was done less than 30 days ago"
     );
-    let now = DAY + GATELESS_WAIT;
+    let now = DAY + ARCHIVE_GRACE;
     // An agent archives as the user does.
     archive(&mut r, &ByName, "g", By { actor: "session/x", at: now }).unwrap();
     let model = Model::read(&r.state).unwrap();
@@ -145,7 +142,7 @@ fn status(r: &Replica, id: &str, now: Millis) -> Status {
 #[test]
 fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
     let mut r = setup();
-    link(&mut r, "outside", "a", LinkKind::Blocks, user(2)).unwrap();
+    link(&mut r, "outside", "a", user(2)).unwrap();
     model::put(&mut r, &item_key("g").unwrap(), field::ARCHIVED, Some(&true), user(3)).unwrap();
     let now = 40 * DAY;
     reopen(&mut r, "a", user(now)).unwrap();
@@ -164,10 +161,12 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
 #[test]
 fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     let mut r = setup();
-    link(&mut r, "outside", "b", LinkKind::Blocks, user(2)).unwrap();
+    link(&mut r, "outside", "b", user(2)).unwrap();
     assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready);
     // Any actor may reopen: an agent may find a defect in finished work.
     reopen(&mut r, "b", By { actor: "session/worker", at: 2 * DAY }).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    assert_eq!(model.items["b"].state, Value::One(ItemState::Backlog), "reopen sets backlog");
     assert!(
         matches!(status(&r, "outside", 2 * DAY), Status::Blocked { waiting } if waiting["b"] == Wait::Open)
     );

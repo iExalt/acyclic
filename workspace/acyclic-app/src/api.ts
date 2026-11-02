@@ -17,10 +17,9 @@ interface RawItem {
   thread: Raw<string>;
   state: Raw<string>;
   notes: Raw<string>;
-  gate: Raw<string>;
   size: Raw<string>;
   archived: boolean;
-  links: { waits_for: string[]; waited_on_by: string[]; relates_to: string[]; related_from: string[] };
+  links: { waits_for: string[]; waited_on_by: string[] };
   /** A leaf's stage, as core tells it; a parent or an archived item has none. */
   stage?: Stage;
   /** A parent's state as the work under it makes it, and its leaves counted by stage; a leaf has none. */
@@ -59,7 +58,7 @@ export function countsText(counts: Counts): string {
 }
 
 /** The fields whose conflicts the app settles for display. */
-export type Settled = "title" | "parent" | "thread" | "state" | "notes" | "gate" | "size";
+export type Settled = "title" | "parent" | "thread" | "state" | "notes" | "size";
 
 /**
  * An item with every field ready to draw: a conflicted field reads as its first value in the tracker's order, and
@@ -71,7 +70,6 @@ export interface Item extends Omit<RawItem, Settled> {
   thread: string | null;
   state: string;
   notes: string | null;
-  gate: string | null;
   size: string | null;
   conflicts: Partial<Record<Settled, (string | null)[]>>;
 }
@@ -106,7 +104,6 @@ export function settle(raw: RawItem): Item {
     thread: pick("thread"),
     state,
     notes: pick("notes"),
-    gate: pick("gate"),
     size: pick("size"),
     conflicts,
   };

@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use comfy_table::{ContentArrangement, LineStyle, Table, TableStyle, presets};
 use serde_json::Value as Json;
 
-use crate::args::{Command, ItemCommand, LinkCommand, ThreadCommand};
+use crate::args::{Command, ItemCommand, ThreadCommand};
 
 /// A terminal's table: a rule under the header and nothing else, so a wrapped cell still reads as one row.
 const RULED: TableStyle =
@@ -29,19 +29,9 @@ pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> Stri
         Command::Thread(ThreadCommand::Ready { .. }) => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
-        Command::Link(link) => {
-            let [from, kind, to] = ["from", "kind", "to"].map(|key| compact(&data[key]));
-            let changed = data["changed"] == true;
-            match (link, changed) {
-                (LinkCommand::Add { .. }, true) => format!("added link {from} {kind} {to}"),
-                (LinkCommand::Add { .. }, false) => {
-                    format!("link {from} {kind} {to} is already there")
-                },
-                (LinkCommand::Remove { .. }, true) => format!("removed link {from} {kind} {to}"),
-                (LinkCommand::Remove { .. }, false) => {
-                    format!("no link {from} {kind} {to} to remove")
-                },
-            }
+        Command::Item(ItemCommand::Add { waits_for, .. }) => waits(write(data), waits_for, &[]),
+        Command::Item(ItemCommand::Edit(edit)) => {
+            waits(write(data), &edit.waits_for, &edit.no_waits_for)
         },
         _ => match data {
             Json::Array(records) => {
@@ -72,16 +62,16 @@ pub(crate) fn error(envelope: &Json) -> String {
 fn import(data: &Json) -> String {
     let counts = &data["counts"];
     let kinds = [
-        ("items", "item"),
-        ("threads", "thread"),
-        ("links", "link"),
-        ("repositories", "repository"),
+        ("items", "item", "items"),
+        ("threads", "thread", "threads"),
+        ("links", "waits-for", "waits-for"),
+        ("repositories", "repository", "repositories"),
     ];
     let written: Vec<String> = kinds
         .iter()
-        .filter_map(|(key, one)| {
+        .filter_map(|(key, one, many)| {
             let n = counts[*key].as_u64().filter(|n| *n > 0)?;
-            Some(if n == 1 { format!("1 {one}") } else { format!("{n} {key}") })
+            Some(if n == 1 { format!("1 {one}") } else { format!("{n} {many}") })
         })
         .collect();
     let mut line = match (written.is_empty(), data["dry_run"] == true) {
@@ -220,6 +210,18 @@ fn write(data: &Json) -> String {
     parts.join(" · ")
 }
 
+/// An item write's line, with what it now waits for and no longer waits for, as the command named them.
+fn waits(line: String, waits_for: &[String], no_waits_for: &[String]) -> String {
+    let mut parts = vec![line];
+    if !waits_for.is_empty() {
+        parts.push(format!("waits for {}", waits_for.join(", ")));
+    }
+    if !no_waits_for.is_empty() {
+        parts.push(format!("no longer waits for {}", no_waits_for.join(", ")));
+    }
+    parts.join(" · ")
+}
+
 /// A record as one field per line, its names aligned, leaving out what is empty. A list of records inside it is a
 /// table under its name.
 fn block(record: &Json, width: Option<u16>) -> String {
@@ -323,12 +325,6 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
         "ready" => format!("ready: {}", compact(&fields["items"])),
         "claimed" => format!("claimed by {}{ready}", text("holder")),
         "contested" => format!("contested by {}{ready}", text("holders")),
-        "resource-busy" => format!(
-            "waiting for {}, held by thread {} ({})",
-            text("resource"),
-            text("thread"),
-            text("holder")
-        ),
         "conflicted" => format!("conflicted: {}", text("fields")),
         "unverified" => {
             format!("done, merge unverified: {} ({})", text("reason"), text("repository"))

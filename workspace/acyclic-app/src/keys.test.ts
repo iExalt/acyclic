@@ -85,11 +85,10 @@ describe("single-key shortcuts", () => {
 
   it("act on an item only while its panel shows, and never approve, keep or drop anything", () => {
     const item = { ...free, panel: "item" as const };
-    expect(["e", "m", "w", "r", "a"].map((key) => act(key, {}, item))).toEqual([
+    expect(["e", "m", "w", "a"].map((key) => act(key, {}, item))).toEqual([
       { kind: "edit" },
       { kind: "move" },
-      { kind: "link", link: "waits-for" },
-      { kind: "link", link: "relates-to" },
+      { kind: "link" },
       { kind: "addInside" },
     ]);
     expect(act("e")).toBeNull();
@@ -140,7 +139,7 @@ describe("keyReference", () => {
       expect(runnable.has(key) || keys.some((one) => one === chord || one.startsWith(`${chord} `))).toBe(true);
     expect(rows[0]).toEqual({
       what: "With an item open",
-      keys: "E edit, M move, W waits for, R relates to, A add inside",
+      keys: "E edit, M move, W waits for, A add inside",
     });
     expect(said).toContain("⌘K");
     expect(
