@@ -1,8 +1,9 @@
 use serde_json::json;
 
 use super::*;
+use crate::import::LinkKind;
 use crate::import::State as Planned;
-use crate::import::tests::{item, valid};
+use crate::import::tests::{item, link, valid};
 use crate::model::{ItemState, Value};
 use crate::scope::USER;
 use crate::state::{Millis, ReplicaId, State};
@@ -86,6 +87,27 @@ fn an_invalid_document_is_refused() {
     let mut doc = valid();
     doc.items.push(item("a", Planned::Backlog, None));
     assert!(matches!(apply(&doc, &mut replica(), by(USER, 1)), Err(ApplyError::Invalid(_))));
+}
+
+#[test]
+fn a_document_closing_cycles_of_its_own_is_refused_naming_each_once() {
+    let mut doc = valid();
+    for id in ["c", "d", "e"] {
+        doc.items.push(item(id, Planned::Backlog, None));
+    }
+    // goal and a under each other; a and b waiting for each other, which c only reaches; d and e likewise. The
+    // valid document's relates-to link from b to a orders nothing, so closes none.
+    doc.items[0].parent = Some("a".to_owned());
+    doc.links.push(link("b", "a", LinkKind::WaitsFor));
+    doc.links.push(link("c", "a", LinkKind::WaitsFor));
+    doc.links.push(link("d", "e", LinkKind::WaitsFor));
+    doc.links.push(link("e", "d", LinkKind::WaitsFor));
+    let mut r = replica();
+    let Err(ApplyError::Cycles(mut cycles)) = apply(&doc, &mut r, by(USER, 1)) else {
+        panic!("cycles accepted")
+    };
+    cycles.sort();
+    assert_eq!(cycles, [["a", "b"], ["a", "goal"], ["d", "e"]]);
 }
 
 #[test]

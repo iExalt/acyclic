@@ -167,35 +167,8 @@ fn the_clock_guard_allows_idle_time_and_refuses_backward_steps() {
 }
 
 #[test]
-fn a_rebuilt_replica_never_reuses_its_dots() {
-    let item = key("item", "a1");
-    let mut a = replica("a");
-    for n in 0..3 {
-        a.write(&item, "f", "user", n, Some(json!(n))).unwrap();
-    }
-    let mut peer = replica("b");
-    peer.join(&a.state).unwrap();
-
-    let mut rebuilt = Replica::rebuilt(id("a"), State::new());
-    assert_eq!(
-        rebuilt.write(&item, "f", "user", 9, Some(json!(9))),
-        Err(Error::NotContinuous(id("a")))
-    );
-    rebuilt.join(&peer.state).unwrap();
-    assert_eq!(
-        rebuilt.write(&item, "f", "user", 9, Some(json!(9))),
-        Err(Error::NotContinuous(id("a"))),
-        "a peer's entry alone doesn't restore it"
-    );
-    // Only after joining every state ref from the remote may the caller restore it.
-    rebuilt.mark_restored();
-    let dot = rebuilt.write(&item, "f", "user", 9, Some(json!(9))).unwrap();
-    assert_eq!(dot, Some(Dot(id("a"), 4)));
-}
-
-#[test]
 fn a_join_refuses_a_state_that_saw_more_of_my_writes() {
-    // A stale rebuild, or a second clone writing under the same id: each would reuse dots.
+    // A stale copy, or a second clone writing under the same id: each would reuse dots.
     let item = key("item", "a1");
     let mut a = replica("a");
     a.write(&item, "f", "user", 1, Some(json!(1))).unwrap();
@@ -207,12 +180,11 @@ fn a_join_refuses_a_state_that_saw_more_of_my_writes() {
     let mut fresh = replica("p2");
     fresh.join(&a.state).unwrap();
 
-    let mut rebuilt = Replica::rebuilt(id("a"), State::new());
-    rebuilt.join(&stale.state).unwrap();
-    rebuilt.mark_restored(); // wrongly, from a stale peer
-    rebuilt.write(&key("item", "new"), "f", "user", 5, Some(json!("new"))).unwrap();
+    // A copy of `a` restored from a stale peer, writing on as `a`.
+    let mut copy = Replica::open(id("a"), stale.state.clone());
+    copy.write(&key("item", "new"), "f", "user", 5, Some(json!("new"))).unwrap();
     assert_eq!(
-        rebuilt.join(&fresh.state),
+        copy.join(&fresh.state),
         Err(Error::IdReused { replica: id("a"), mine: 2, theirs: 4 })
     );
 }

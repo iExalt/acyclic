@@ -87,11 +87,6 @@ pub enum ItemState {
     Done,
 }
 
-impl ItemState {
-    /// Every state, in order.
-    pub const ALL: [Self; 4] = [Self::Backlog, Self::Parked, Self::InProgress, Self::Done];
-}
-
 /// A rough size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -588,12 +583,6 @@ impl Model {
             }
         }
         None
-    }
-
-    /// A thread's heads; see [`Heads`]. To list many threads' heads, build [`Model::heads_index`] once.
-    #[must_use]
-    pub fn heads(&self, thread: &str) -> Vec<&str> {
-        self.heads_index().of(thread)
     }
 
     /// What finding heads reads, gathered in one pass over the items and links, for every thread at once.

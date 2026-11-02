@@ -249,16 +249,13 @@ fn claims(
 ) -> Result<(), Error> {
     for id in model.threads.keys() {
         let live = claim::live(state, &claim::thread_key(id)?, now)?;
-        let mut holders: Vec<String> = Vec::new();
         for held in &live {
-            if !holders.contains(&held.holder) {
-                holders.push(held.holder.clone());
-            }
             if held.starts_in_future(now) {
                 entries
                     .insert(Entry::ClockAhead { thread: id.clone(), holder: held.holder.clone() });
             }
         }
+        let holders = claim::holders(&live);
         if holders.len() > 1 {
             entries.insert(Entry::Contest { thread: id.clone(), holders });
         }

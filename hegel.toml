@@ -1,4 +1,4 @@
-# Property tests run 256 cases in the routine check, locally and on CI, or 128 for a test whose cases cost more;
+# Property tests run 256 cases in the routine check, locally and on CI;
 # `mise run check:properties` runs them at scale through HEGEL_TEST_CASES, which overrides every profile here.
 
 [profiles.common]
@@ -10,7 +10,3 @@ extends = "common"
 
 [profiles.ci]
 extends = "common"
-
-# For a test whose cases cost more.
-[profiles.light]
-test_cases = 128

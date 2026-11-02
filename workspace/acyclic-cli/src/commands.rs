@@ -22,7 +22,7 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepoCommand, StateWord,
+    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, LinkCommand, RepoCommand, StateWord,
     ThreadCommand,
 };
 use crate::context;
@@ -46,26 +46,23 @@ const MAX_LEASE: Millis = LEASE_MAX_MINUTES as Millis * MINUTE;
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
-    if let Command::Init { path, replica, remote } = &cli.command {
-        return init(&env.cwd.join(path), replica, remote.as_deref()).map(Output::Json);
+    match (cli.command.class(), &cli.command) {
+        (Class::Standalone, Command::Init { path, replica, remote }) => {
+            init(&env.cwd.join(path), replica, remote.as_deref()).map(Output::Json)
+        },
+        (Class::Standalone, Command::Prime) => Ok(Output::Text(prime())),
+        (Class::Standalone, Command::Completions { shell }) => {
+            Ok(Output::Text(completions(*shell)))
+        },
+        // `import --schema`, the only other command needing no tracker.
+        (Class::Standalone, _) => Ok(Output::Text(import::SCHEMA.to_owned())),
+        (Class::Server, _) => {
+            Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
+        },
+        (Class::Clone | Class::Read | Class::Write, command) => {
+            Session::open(cli, env)?.dispatch(command).map(Output::Json)
+        },
     }
-    if let Command::Prime = &cli.command {
-        return Ok(Output::Text(prime()));
-    }
-    if let Command::Completions { shell } = &cli.command {
-        return Ok(Output::Text(completions(*shell)));
-    }
-    if let Command::Import { schema: true, .. } = &cli.command {
-        return Ok(Output::Text(import::SCHEMA.to_owned()));
-    }
-    if let Command::Serve(_) | Command::Up(_) = &cli.command {
-        return Err(CliError::new(
-            "no-server",
-            exit::CONFIG,
-            "this build of acyclic has no server",
-        ));
-    }
-    Session::open(cli, env)?.dispatch(&cli.command).map(Output::Json)
 }
 
 struct Session<'a> {

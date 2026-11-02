@@ -9,7 +9,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use super::StoreError;
 
-/// A repository addressed by its path, with an optional private index for building trees.
+/// A repository addressed by its path.
 #[derive(Debug, Clone)]
 pub(crate) struct Git {
     pub(crate) repo: PathBuf,
@@ -151,28 +151,12 @@ impl Git {
             let _ = writeln!(out, "{id}");
             out
         });
-        let output = self.run(["cat-file", "--batch"], Some(request.as_bytes()), &[])?;
-        let mut rest = &output[..];
-        let mut files = BTreeMap::new();
-        for (path, _) in entries {
-            let newline = rest
-                .iter()
-                .position(|&b| b == b'\n')
-                .ok_or_else(|| StoreError::Git("bad cat-file".into()))?;
-            let header = String::from_utf8_lossy(&rest[..newline]).into_owned();
-            let size: usize = header
-                .split_whitespace()
-                .nth(2)
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| StoreError::Git(format!("bad cat-file header: {header}")))?;
-            let start = newline + 1;
-            let content = rest
-                .get(start..start + size)
-                .ok_or_else(|| StoreError::Git("short cat-file".into()))?;
-            files.insert(path, content.to_vec());
-            rest = &rest[(start + size + 1).min(rest.len())..];
-        }
-        Ok(files)
+        let contents = self.cat_file(&request, entries.len())?;
+        Ok(entries
+            .into_iter()
+            .zip(contents)
+            .filter_map(|((path, _), content)| Some((path, content?)))
+            .collect())
     }
 
     /// The contents of the given paths in a commit's tree; missing paths are left out.
@@ -188,10 +172,21 @@ impl Git {
             let _ = writeln!(out, "{commit}:{path}");
             out
         });
+        let contents = self.cat_file(&request, paths.len())?;
+        Ok(paths
+            .iter()
+            .zip(contents)
+            .filter_map(|(path, content)| Some((path.clone(), content?)))
+            .collect())
+    }
+
+    /// The objects `request` names, one per line, through one `git cat-file --batch`: `count` of them in order, `None`
+    /// for one that is missing.
+    fn cat_file(&self, request: &str, count: usize) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
         let output = self.run(["cat-file", "--batch"], Some(request.as_bytes()), &[])?;
         let mut rest = &output[..];
-        let mut files = BTreeMap::new();
-        for path in paths {
+        let mut contents = Vec::with_capacity(count);
+        for _ in 0..count {
             let newline = rest
                 .iter()
                 .position(|&b| b == b'\n')
@@ -199,6 +194,7 @@ impl Git {
             let header = String::from_utf8_lossy(&rest[..newline]).into_owned();
             if header.ends_with(" missing") {
                 rest = &rest[newline + 1..];
+                contents.push(None);
                 continue;
             }
             let size: usize = header
@@ -210,10 +206,10 @@ impl Git {
             let content = rest
                 .get(start..start + size)
                 .ok_or_else(|| StoreError::Git("short cat-file".into()))?;
-            files.insert(path.clone(), content.to_vec());
+            contents.push(Some(content.to_vec()));
             rest = &rest[(start + size + 1).min(rest.len())..];
         }
-        Ok(files)
+        Ok(contents)
     }
 
     /// Writes a tree from `base` (a commit, or none) with `changes` applied: `Some` content adds or replaces a file and

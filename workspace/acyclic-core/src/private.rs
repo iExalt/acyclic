@@ -1,8 +1,9 @@
-//! Files only the user can read or write, for the secrets acyclic keeps under `~/.config/acyclic/`: the session `acyclic
-//! up` issues. It lives in core, beside [`crate::locate`], which also decides paths there. Like
+//! Files made for the user alone, for the secrets acyclic keeps under `~/.config/acyclic/`: the session `acyclic up`
+//! issues. It lives in core, beside [`crate::locate`], which also decides paths there. Like
 //! every acyclic build target, it is Unix only.
 //!
-//! A directory is created with no access for others, and a file is written with none.
+//! A directory is created with no access for others, and a file is written with none; one that already exists is used
+//! as it is, whoever else can reach it.
 
 use std::fmt;
 use std::fs;

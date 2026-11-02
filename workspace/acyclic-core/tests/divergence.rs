@@ -4,20 +4,19 @@
 //! join's algebra itself is the state layer's properties'.
 //!
 //! Left out on purpose:
-//! - a run's claim and the run's record travel in one replica's state, so no sync can separate them, and an unknown
-//!   run is a single-replica case that needs' own tests cover;
+//! - what each kind of problem lists, which needs' own tests cover on replicas joined in memory: the rows here are
+//!   the ones a sync could get wrong, such as values held in conflict, a cleared value and rewritten tips;
 //! - a property over random histories: each takes seconds here, as every step spawns git, while the state layer's
 //!   properties already cover the join and each row below checks the cached load against a full read.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use acyclic_core::claim;
-use acyclic_core::model::{self, By, ItemState, LinkKind, Model, SetField};
+use acyclic_core::model::{self, By, Model};
 use acyclic_core::needs::{self, Entry};
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, Readiness};
-use acyclic_core::schema::{item as field, kind, thread};
+use acyclic_core::schema::{item as field, kind};
 
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -25,7 +24,6 @@ use tempfile::TempDir;
 
 /// 2026-10-15T00:00:00Z.
 const NOW: Millis = 1_792_022_400_000;
-const MINUTE: Millis = 60_000;
 const USER: &str = "actor/user";
 
 type Edit<'a> = &'a dyn Fn(&mut Replica, By<'_>) -> Result<(), Box<dyn std::error::Error>>;
@@ -151,20 +149,6 @@ fn item(id: &str) -> Key {
     model::item_key(id).unwrap()
 }
 
-/// A thread record holding `item`.
-fn threaded(
-    replica: &mut Replica,
-    by: By<'_>,
-    thread: &str,
-    item: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    model::set(replica, &Key::new(kind::THREAD, thread)?, thread::TITLE, Some(&thread), by)?;
-    let member =
-        acyclic_core::scope::ScopeEdit::Member { item: item.into(), thread: Some(thread.into()) };
-    acyclic_core::scope::edit(replica, &member, by)?;
-    Ok(())
-}
-
 fn add(
     replica: &mut Replica,
     by: By<'_>,
@@ -241,26 +225,6 @@ fn a_move_to_the_top_racing_another_move_conflicts_until_one_is_chosen() {
 }
 
 #[test]
-fn links_joined_into_a_cycle_are_listed_and_unlinking_clears_it() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        add(r, by, "x", None)?;
-        add(r, by, "y", None)
-    });
-    pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| Ok(model::link(r, "x", "y", LinkKind::Blocks, by).map(|_| ())?));
-    pair.user(&pair.pi, &|r, by| Ok(model::link(r, "y", "x", LinkKind::Blocks, by).map(|_| ())?));
-    pair.exchange();
-    pair.assert_settled();
-    let cycle = Entry::LinkCycle { items: vec!["x".into(), "y".into()] };
-    assert!(pair.needs(NOW).contains(&cycle));
-    pair.user(&pair.pi, &|r, by| Ok(model::unlink(r, "y", "x", LinkKind::Blocks, by).map(|_| ())?));
-    pair.spread(&pair.pi);
-    pair.assert_settled();
-    assert!(!pair.needs(NOW).contains(&cycle));
-}
-
-#[test]
 fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| {
@@ -274,9 +238,8 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     pair.exchange();
     let state = pair.assert_settled();
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
-    // Every walk up the tree ends: inheritance, readiness and placing new work under the cycle.
+    // Every walk up the tree ends: readiness and placing new work under the cycle.
     let model = Model::read(&state).unwrap();
-    assert_eq!(place::inherited_thread(&model, "c"), None);
     let readiness = Readiness::new(&state, &model, NOW, &Unmapped);
     assert_eq!(
         readiness.thread_cycles().unwrap(),
@@ -292,113 +255,6 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     pair.exchange();
     pair.assert_settled();
     assert!(!pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
-}
-
-#[test]
-fn claims_that_never_saw_each_other_contest_alike_on_both_until_the_loser_steps_aside() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        add(r, by, "x", None)?;
-        threaded(r, by, "t", "x")
-    });
-    pair.spread(&pair.mac);
-    for (tracker, holder) in [(&pair.mac, "session/mac"), (&pair.pi, "session/pi")] {
-        Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, "t", by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
-        });
-    }
-    pair.exchange();
-    pair.assert_settled();
-    let contests: Vec<Entry> =
-        pair.needs(NOW).into_iter().filter(|e| matches!(e, Entry::Contest { .. })).collect();
-    let [Entry::Contest { thread: contested, holders }] = contests.as_slice() else {
-        panic!("{contests:?}")
-    };
-    assert_eq!((contested.as_str(), holders.len()), ("t", 2));
-    let loser = holders[1].clone();
-    let (tracker, winner) =
-        if loser == "session/mac" { (&pair.mac, "session/pi") } else { (&pair.pi, "session/mac") };
-    Pair::edit(tracker, &loser, NOW + MINUTE, &|r, by| {
-        assert!(claim::release(r, &claim::thread_key("t")?, by.actor));
-        Ok(())
-    });
-    pair.exchange();
-    let state = pair.assert_settled();
-    assert!(!pair.needs(NOW + MINUTE).iter().any(|e| matches!(e, Entry::Contest { .. })));
-    let held =
-        claim::winner(&state, &claim::thread_key("t").unwrap(), NOW + MINUTE).unwrap().unwrap();
-    assert_eq!(held.holder, winner, "the winner's claim stands");
-}
-
-#[test]
-fn claims_on_one_resource_clash_on_both() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        for id in ["gpu1", "gpu2"] {
-            add(r, by, id, None)?;
-            model::set_element(r, &item(id), SetField::Resource, "gpu", true, by)?;
-            threaded(r, by, id, id)?;
-        }
-        Ok(())
-    });
-    pair.spread(&pair.mac);
-    for (tracker, holder, id) in
-        [(&pair.mac, "session/mac", "gpu1"), (&pair.pi, "session/pi", "gpu2")]
-    {
-        Pair::edit(tracker, holder, NOW, &|r, by| {
-            Ok(claim::claim(r, id, by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
-        });
-    }
-    pair.exchange();
-    pair.assert_settled();
-    assert!(
-        pair.needs(NOW)
-            .iter()
-            .any(|e| matches!(e, Entry::ResourceClash { resource, .. } if resource == "gpu"))
-    );
-    assert!(
-        !pair.needs(NOW + 61 * MINUTE).iter().any(|e| matches!(e, Entry::ResourceClash { .. }))
-    );
-}
-
-#[test]
-fn a_claim_from_a_clock_running_ahead_is_listed_until_time_catches_up() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        add(r, by, "x", None)?;
-        threaded(r, by, "t", "x")
-    });
-    pair.spread(&pair.mac);
-    let ahead = NOW + 30 * MINUTE;
-    Pair::edit(&pair.pi, "session/pi", ahead, &|r, by| {
-        Ok(claim::claim(r, "t", by.actor, by.at, 60 * MINUTE, 480 * MINUTE).map(|_| ())?)
-    });
-    pair.exchange();
-    pair.assert_settled();
-    let entry = Entry::ClockAhead { thread: "t".into(), holder: "session/pi".into() };
-    assert!(pair.needs(NOW).contains(&entry));
-    assert!(!pair.needs(ahead).contains(&entry));
-}
-
-#[test]
-fn a_parent_finished_while_a_child_arrives_is_done_early_until_reopened() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        add(r, by, "p", None)?;
-        add(r, by, "a", Some("p"))?;
-        Ok(model::set_state(r, "a", ItemState::Done, by)?)
-    });
-    pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| Ok(model::set_state(r, "p", ItemState::Done, by)?));
-    pair.user(&pair.pi, &|r, by| add(r, by, "late", Some("p")));
-    pair.exchange();
-    pair.assert_settled();
-    let early = Entry::DoneEarly { item: "p".into(), open: vec!["late".into()] };
-    assert!(pair.needs(NOW).contains(&early));
-    pair.user(&pair.pi, &|r, by| Ok(model::set_state(r, "p", ItemState::Backlog, by)?));
-    pair.spread(&pair.pi);
-    pair.assert_settled();
-    assert!(!pair.needs(NOW).contains(&early));
 }
 
 #[test]

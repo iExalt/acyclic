@@ -80,7 +80,7 @@ and thread it belongs with.
 - Records carry their own id as `id`. `list` and `show` return the same rows, and `show` adds details. Entries in
   `needs` embed the rows they are about.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
-- Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
+- Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
 - Writes report `changed`. A repeated command changes nothing, except `claim`, which writes its lease again; any
   write can also commit a lease renewal that its own `changed` leaves out.
@@ -92,7 +92,7 @@ and thread it belongs with.
    `unthreaded`. `acyclic list` lists every item. `acyclic show <item>...` explains items, as an array in the order
    given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
    `unverified`.
-2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
+2. `acyclic claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
    through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
    written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take

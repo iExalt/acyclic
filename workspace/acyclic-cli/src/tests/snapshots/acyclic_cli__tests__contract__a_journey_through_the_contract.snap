@@ -1,5 +1,5 @@
 ---
-source: workspace/acyclic-cli/tests/cli.rs
+source: workspace/acyclic-cli/src/tests/contract.rs
 expression: sh.transcript
 ---
 $ acyclic init tracker --replica mac

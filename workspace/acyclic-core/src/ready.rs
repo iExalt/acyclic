@@ -472,12 +472,7 @@ impl<'a> Readiness<'a> {
         if let Some(status) = self.unclaimed(id, item) {
             return Ok(Some(status));
         }
-        let mut holders: Vec<String> = Vec::new();
-        for claim in claim::covering(self.state, self.model, id, self.now)? {
-            if !holders.contains(&claim.holder) {
-                holders.push(claim.holder);
-            }
-        }
+        let mut holders = claim::holders(&claim::covering(self.state, self.model, id, self.now)?);
         if holders.is_empty()
             && let Some(thread) = item.thread.one()
             && let Some((resource, thread, holder)) = self.thread_busy(thread)?
@@ -561,12 +556,7 @@ impl<'a> Readiness<'a> {
             .map(str::to_owned)
             .collect();
         let key = claim::thread_key(thread)?;
-        let mut holders: Vec<String> = Vec::new();
-        for claim in claim::live(self.state, &key, self.now)? {
-            if !holders.contains(&claim.holder) {
-                holders.push(claim.holder);
-            }
-        }
+        let mut holders = claim::holders(&claim::live(self.state, &key, self.now)?);
         if holders.len() > 1 {
             return Ok(ThreadStatus::Contested { holders, items });
         }
@@ -584,9 +574,8 @@ impl<'a> Readiness<'a> {
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
-    /// unclaimed ones by title in natural order and id. Threads others hold are left out.
-    /// Archived subtrees are left out unless `include_archived` is set, which judges every item as if nothing were
-    /// archived.
+    /// unclaimed ones by title in natural order and id. Threads others hold are left out, and so are archived subtrees
+    /// unless `include_archived` is set, which judges every item as if nothing were archived.
     ///
     /// # Errors
     ///
@@ -597,21 +586,7 @@ impl<'a> Readiness<'a> {
             for item in model.items.values_mut() {
                 item.archived = Value::None;
             }
-            let unarchived = Readiness {
-                state: self.state,
-                model: &model,
-                now: self.now,
-                ancestry: self.ancestry,
-                merged: RefCell::new(self.merged.borrow().clone()),
-                cyclic: self.cyclic.clone(),
-                links_from: self.links_from.clone(),
-                archived: RefCell::default(),
-                members: OnceCell::new(),
-                resources: OnceCell::new(),
-                winners: RefCell::new(self.winners.borrow().clone()),
-                busy: RefCell::default(),
-                stages: RefCell::default(),
-            };
+            let unarchived = Readiness::new(self.state, &model, self.now, self.ancestry);
             return unarchived.ready(false, actor);
         }
         let title =

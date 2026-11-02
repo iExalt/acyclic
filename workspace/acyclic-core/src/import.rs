@@ -285,12 +285,8 @@ pub enum ValidationError {
         /// The missing key.
         key: String,
     },
-    /// Following parents from this item leads back to it.
-    ParentCycle(String),
     /// A link joins an item to itself.
     SelfLink(String),
-    /// Dependencies among exactly these items form a cycle.
-    DependencyCycle(Vec<String>),
     /// The same link appears twice.
     DuplicateLink(Link),
     /// An item is a member of several threads.
@@ -322,11 +318,7 @@ impl fmt::Display for ValidationError {
             Self::UnknownReference { at, kind, key } => {
                 write!(f, "{at} names unknown {kind} {key:?}")
             },
-            Self::ParentCycle(item) => write!(f, "item {item:?} is its own ancestor"),
             Self::SelfLink(item) => write!(f, "item {item:?} links to itself"),
-            Self::DependencyCycle(items) => {
-                write!(f, "dependencies form a cycle through {}", items.join(", "))
-            },
             Self::ItemInSeveralThreads { item, threads } => {
                 write!(f, "item {item:?} is in several threads: {}", threads.join(", "))
             },
@@ -441,7 +433,6 @@ impl Import {
         }
 
         self.check_names(&mut errors);
-        self.check_parents(&mut errors);
         self.check_links(&mut errors);
         self.check_threads(&mut errors);
         self.check_done(&mut errors);
@@ -472,30 +463,8 @@ impl Import {
         }
     }
 
-    fn check_parents(&self, errors: &mut Vec<ValidationError>) {
-        let parents: HashMap<&str, &str> = self
-            .items
-            .iter()
-            .filter_map(|item| item.parent.as_deref().map(|parent| (item.key.as_str(), parent)))
-            .collect();
-        for item in &self.items {
-            let mut seen = HashSet::new();
-            let mut current = item.key.as_str();
-            while let Some(&parent) = parents.get(current) {
-                if parent == item.key {
-                    errors.push(ValidationError::ParentCycle(item.key.clone()));
-                    break;
-                }
-                if !seen.insert(parent) {
-                    break; // A cycle above this item, reported for its members.
-                }
-                current = parent;
-            }
-        }
-    }
-
+    /// Cycles, among parents or links, are left to the import, which judges them with what the tracker holds.
     fn check_links(&self, errors: &mut Vec<ValidationError>) {
-        let mut edges = Vec::new();
         let mut seen = HashSet::new();
         for link in &self.links {
             if !seen.insert((&link.from, &link.to, link.kind)) {
@@ -503,14 +472,7 @@ impl Import {
             }
             if link.from == link.to {
                 errors.push(ValidationError::SelfLink(link.from.clone()));
-            } else if link.kind == LinkKind::WaitsFor {
-                edges.push((link.from.as_str(), link.to.as_str()));
             }
-        }
-        for cycle in crate::graph::cycles(&edges) {
-            errors.push(ValidationError::DependencyCycle(
-                cycle.into_iter().map(str::to_owned).collect(),
-            ));
         }
     }
 
@@ -726,51 +688,10 @@ mod tests {
     }
 
     #[test]
-    fn parent_cycles_are_refused() {
+    fn a_link_from_an_item_to_itself_is_refused() {
         let mut import = valid();
-        import.items[0].parent = Some("a".to_owned());
-        let errors = import.validate();
-        assert!(errors.contains(&ValidationError::ParentCycle("goal".to_owned())));
-        assert!(errors.contains(&ValidationError::ParentCycle("a".to_owned())));
-        assert!(
-            !errors.contains(&ValidationError::ParentCycle("b".to_owned())),
-            "b is below the cycle"
-        );
-    }
-
-    #[test]
-    fn waits_for_links_must_be_acyclic_and_relates_to_links_never_close_a_cycle() {
-        let mut import = valid();
-        import.links.push(link("b", "a", LinkKind::WaitsFor));
-        assert_eq!(
-            import.validate(),
-            vec![ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()])]
-        );
-        // The valid document's relates-to link from b to a closes none.
-        import.links.pop();
         import.links.push(link("a", "a", LinkKind::RelatesTo));
         assert_eq!(import.validate(), vec![ValidationError::SelfLink("a".to_owned())]);
-    }
-
-    #[test]
-    fn a_cycle_names_only_its_members_and_each_cycle_is_reported() {
-        let mut import = valid();
-        import.items.push(item("c", State::Backlog, None));
-        import.items.push(item("d", State::Backlog, None));
-        import.items.push(item("e", State::Backlog, None));
-        // a blocks on b already; b waiting for a closes a cycle that c and d only reach.
-        import.links.push(link("b", "a", LinkKind::WaitsFor));
-        import.links.push(link("c", "a", LinkKind::WaitsFor));
-        import.links.push(link("a", "e", LinkKind::WaitsFor));
-        import.links.push(link("d", "e", LinkKind::WaitsFor));
-        import.links.push(link("e", "d", LinkKind::WaitsFor));
-        assert_eq!(
-            import.validate(),
-            vec![
-                ValidationError::DependencyCycle(vec!["a".to_owned(), "b".to_owned()]),
-                ValidationError::DependencyCycle(vec!["d".to_owned(), "e".to_owned()]),
-            ]
-        );
     }
 
     #[test]

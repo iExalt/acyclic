@@ -3,8 +3,9 @@
 //!
 //! A batch reads the replica's state, applies a pure closure, writes the changed files and the day's events with one
 //! `git fast-import` into a single pack, and moves the state ref and the month's log ref in one
-//! `git update-ref --stdin` transaction with compare-and-swap, so both move or neither does. Losing a race re-reads
-//! and re-runs the closure. Only plumbing is used; nothing is checked out.
+//! `git update-ref --stdin` transaction with compare-and-swap, so both move or neither does. Writers queue on a lock,
+//! so a lost race means something outside acyclic moved a ref, and the batch fails. Only plumbing is used; nothing is
+//! checked out.
 //!
 //! Reads come from a cache of the parsed state kept beside the repository for the state ref's current tip, and the
 //! store repacks itself once packs pile up, so git's share of a command stays small and steady; parsing and
@@ -18,7 +19,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value as Json;
@@ -109,9 +109,6 @@ fn first_git(path: &std::ffi::OsStr) -> Option<PathBuf> {
     std::env::split_paths(path).map(|dir| dir.join("git")).find(|git| git.is_file())
 }
 
-/// How long a batch keeps retrying lost races.
-const RETRY_DEADLINE: Duration = Duration::from_secs(30);
-
 /// The git config key holding this clone's replica id.
 pub const REPLICA_CONFIG: &str = "acyclic.replica";
 
@@ -123,7 +120,7 @@ pub const NO_PROJECT: &str = "_";
 pub enum StoreError {
     /// A git command failed.
     Git(String),
-    /// Another writer moved a ref first; retried internally until the deadline.
+    /// Something moved a ref between its read and its update, though writers hold the batch lock.
     Conflict,
     /// A ref lock is held. Locks are never removed automatically: a stalled git process could still finish.
     Locked {
@@ -132,8 +129,6 @@ pub enum StoreError {
         /// How old it is, when known.
         age_seconds: Option<u64>,
     },
-    /// Lost races until the deadline.
-    Timeout,
     /// The state layer refused.
     State(state::Error),
     /// The tracker isn't set up.
@@ -163,9 +158,6 @@ impl fmt::Display for StoreError {
                     write!(f, " ({age} s old)")?;
                 }
                 write!(f, "; if no git process holds it, delete that file")
-            },
-            Self::Timeout => {
-                write!(f, "gave up after losing races to other writers for {RETRY_DEADLINE:?}")
             },
             Self::State(err) => err.fmt(f),
             Self::Config(message) => write!(f, "tracker not set up: {message}"),
@@ -236,8 +228,6 @@ pub type RootOf<'a> = &'a dyn Fn(&State, &Key) -> Option<String>;
 #[doc(hidden)]
 #[derive(Default)]
 pub struct Hooks {
-    /// Runs after every object is written, before the transaction starts.
-    pub after_objects: Option<Box<dyn Fn()>>,
     /// Runs after the transaction is prepared, before it commits.
     pub after_prepare: Option<Box<dyn Fn()>>,
 }
@@ -247,12 +237,10 @@ pub struct Hooks {
 pub enum Outcome {
     /// The closure changed nothing.
     Unchanged,
-    /// Committed as this state commit, after this many lost races.
+    /// Committed as this state commit.
     Committed {
         /// The new state commit.
         commit: String,
-        /// Races lost before it committed.
-        retries: u32,
     },
 }
 
@@ -464,8 +452,9 @@ impl Tracker {
     /// A replica id is only trusted while this clone holds its state ref, or while the id is still marked unused by
     /// [`init_replica`]. Otherwise this clone may be a fresh or rebuilt copy of a replica that wrote before, and
     /// reusing its id could reuse its dots, which peers would silently drop. So it takes a new id, `<id>-<random>`,
-    /// records it and reports the change. The check reads only the state refs this clone holds, so an id given to
-    /// [`init_replica`] that another clone wrote under is trusted while this clone hasn't fetched that clone's state.
+    /// records it and reports the change. Whether an id was used is judged only from the state refs under
+    /// `refs/heads/state/`, which a sync never fills (it keeps what it fetches under `refs/acyclic/`), so an id
+    /// marked unused by [`init_replica`] is trusted even when another clone has written under it.
     ///
     /// # Errors
     ///
@@ -628,20 +617,20 @@ impl Tracker {
         Ok(Cache::new(&self.git.common_dir()?, &self.replica))
     }
 
-    /// Runs a batch: `apply` receives the replica's current state and must be pure, since a lost race runs it again
-    /// on the newer state. `now` is stamped through the clock guard.
+    /// Runs a batch: `apply` receives the replica's current state, under the batch lock. `now` is stamped through the
+    /// clock guard.
     ///
     /// # Errors
     ///
-    /// Fails when the closure or the clock guard refuses, a lock is held, git fails, or races are lost until the
-    /// deadline.
+    /// Fails when the closure or the clock guard refuses, a ref lock is held, git fails, or something outside the
+    /// batch lock moved a ref ([`StoreError::Conflict`]).
     pub fn batch<E>(
         &self,
         meta: &Meta,
         now: Millis,
         allow_clock_step: bool,
         root_of: RootOf<'_>,
-        apply: impl Fn(&mut Replica, Millis) -> Result<(), E>,
+        apply: impl FnOnce(&mut Replica, Millis) -> Result<(), E>,
     ) -> Result<Outcome, BatchError<E>> {
         self.batch_with(meta, now, allow_clock_step, root_of, apply, &Hooks::default())
     }
@@ -654,40 +643,11 @@ impl Tracker {
         now: Millis,
         allow_clock_step: bool,
         root_of: RootOf<'_>,
-        apply: impl Fn(&mut Replica, Millis) -> Result<(), E>,
+        apply: impl FnOnce(&mut Replica, Millis) -> Result<(), E>,
         hooks: &Hooks,
     ) -> Result<Outcome, BatchError<E>> {
         crate::probe::mark("before the batch");
         let _lock = self.lock()?;
-        let started = Instant::now();
-        let mut retries = 0;
-        loop {
-            match self.try_batch(meta, now, allow_clock_step, root_of, &apply, hooks) {
-                Ok(Some(commit)) => return Ok(Outcome::Committed { commit, retries }),
-                Ok(None) => return Ok(Outcome::Unchanged),
-                Err(BatchError::Store(StoreError::Conflict))
-                    if started.elapsed() < RETRY_DEADLINE =>
-                {
-                    retries += 1;
-                    std::thread::sleep(backoff(retries));
-                },
-                Err(BatchError::Store(StoreError::Conflict)) => {
-                    return Err(BatchError::Store(StoreError::Timeout));
-                },
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
-    fn try_batch<E>(
-        &self,
-        meta: &Meta,
-        now: Millis,
-        allow_clock_step: bool,
-        root_of: RootOf<'_>,
-        apply: &impl Fn(&mut Replica, Millis) -> Result<(), E>,
-        hooks: &Hooks,
-    ) -> Result<Option<String>, BatchError<E>> {
         // The state's tip and the log's segments in one process.
         let state_name = state_ref(&self.replica);
         crate::probe::mark("batch: lock");
@@ -704,7 +664,7 @@ impl Tracker {
         let mut state = replica.into_state();
         let mut journal = state.take_journal().expect("the batch records");
         if state.unchanged_since(&journal) {
-            return Ok(None);
+            return Ok(Outcome::Unchanged);
         }
         let state_files = file_bytes(state.changed_files_since(&journal));
         crate::probe::mark("batch: changed files");
@@ -746,9 +706,6 @@ impl Tracker {
         let [commit, log_commit] = [&ids[0], &ids[1]].map(String::clone);
         crate::probe::mark("batch: git fast-import");
 
-        if let Some(hook) = &hooks.after_objects {
-            hook();
-        }
         let mut transaction = self.git.transaction()?;
         transaction.update(&state_name, &commit, tip.as_deref())?;
         transaction.update(&segment, &log_commit, segment_tip.as_deref())?;
@@ -765,7 +722,7 @@ impl Tracker {
             // Another worktree may have cleared it already; the state ref now vouches for the id either way.
             let _ = self.git.run(["config", "--unset", UNUSED_CONFIG], None, &[]);
         }
-        Ok(Some(commit))
+        Ok(Outcome::Committed { commit })
     }
 
     /// Serializes this clone's writers, across its worktrees and processes, so they queue instead of racing; the
@@ -785,28 +742,6 @@ impl Tracker {
             .map_err(|e| StoreError::Git(format!("can't open {}: {e}", path.display())))?;
         file.lock().map_err(|e| StoreError::Git(format!("can't lock {}: {e}", path.display())))?;
         Ok(file)
-    }
-
-    /// Writes `after` as a commit on `tip`, storing only the files that changed since `before`.
-    fn commit_state(
-        &self,
-        tip: Option<&str>,
-        before: &State,
-        after: &State,
-        at: Millis,
-        message: &str,
-    ) -> Result<String, StoreError> {
-        let files = file_bytes(after.changed_files(before));
-        let commit = NewCommit {
-            scratch: SCRATCH_STATE,
-            parent: tip,
-            files: &files,
-            replica: self.replica.as_str(),
-            seconds: at.div_euclid(1_000),
-            message,
-        };
-        let mut ids = self.git.import_commits(&[commit])?;
-        Ok(ids.remove(0))
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -1047,40 +982,11 @@ impl Tracker {
         }
     }
 
-    /// Joins the state held at `reference`, such as another replica's state ref, into this replica's state.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the other state has seen more of this replica's writes than it has (another clone uses this
-    /// replica's id), or on a lock, git failure or lost races.
-    pub fn join_ref(&self, reference: &str) -> Result<Outcome, StoreError> {
-        self.join_refs(&[reference.to_owned()])
-    }
-
-    /// Joins the states held at `references` into this replica's state, in one commit.
-    ///
-    /// # Errors
-    ///
-    /// Fails as [`Self::join_ref`] does.
-    pub fn join_refs(&self, references: &[String]) -> Result<Outcome, StoreError> {
-        let mut tips = Vec::with_capacity(references.len());
-        for reference in references {
-            tips.push(
-                self.git
-                    .resolve(reference)?
-                    .ok_or_else(|| StoreError::Config(format!("no ref {reference}")))?,
-            );
-        }
-        self.join_tips(&tips, None, &[])
-    }
-
-    /// Joins the states held at these commits into this replica's state, in one commit, starting from `local`, the
-    /// state ref's tip as last listed, when known. `markers` are refs to set along with it, or alone when the join
-    /// changes nothing.
+    /// Joins the states held at these commits into this replica's state, in one commit. `markers` are refs to set
+    /// along with it, or alone when the join changes nothing.
     fn join_tips(
         &self,
         tips: &[String],
-        mut local: Option<String>,
         markers: &[(String, String)],
     ) -> Result<Outcome, StoreError> {
         let mut others = Vec::with_capacity(tips.len());
@@ -1089,56 +995,52 @@ impl Tracker {
         }
         crate::probe::mark("join: read states");
         let _lock = self.lock()?;
-        let started = Instant::now();
-        let mut retries = 0;
-        loop {
-            // A listed tip that moved since fails the transaction below, and the retry reads the ref afresh.
-            let (tip, before) = match local.take() {
-                Some(listed) => {
-                    let (tip, state, _) = self.load_at(Some(listed))?;
-                    (tip, state)
-                },
-                None => self.load()?,
-            };
-            let mut replica = Replica::open(self.replica.clone(), before.clone());
-            crate::probe::mark("join: load own state");
-            for other in &others {
-                replica.join(other)?;
-            }
-            crate::probe::mark("join: join");
-            if replica.state == before {
-                if !markers.is_empty() {
-                    let mut transaction = self.git.transaction()?;
-                    for (marker, tip) in markers {
-                        transaction.set(marker, tip)?;
-                    }
-                    transaction.prepare()?;
-                    transaction.commit()?;
-                }
+        let name = state_ref(&self.replica);
+        // Read under the lock: a write since the sync listed the refs moved the tip, and nothing moves it now.
+        let (tip, before, found) = self.load_at(self.git.resolve(&name)?)?;
+        let mut replica = Replica::open(self.replica.clone(), before);
+        replica.state.record();
+        crate::probe::mark("join: load own state");
+        for other in &others {
+            replica.join(other)?;
+        }
+        crate::probe::mark("join: join");
+        let mut state = replica.into_state();
+        let journal = state.take_journal().expect("the join records");
+        let outcome = if state.unchanged_since(&journal) {
+            if markers.is_empty() {
                 return Ok(Outcome::Unchanged);
             }
-            let at = replica.state.context.clocks.get(&self.replica).copied().unwrap_or(0);
-            let commit = self.commit_state(tip.as_deref(), &before, &replica.state, at, "join")?;
+            Outcome::Unchanged
+        } else {
+            let at = state.context.clocks.get(&self.replica).copied().unwrap_or(0);
+            let files = file_bytes(state.changed_files_since(&journal));
+            let commit = NewCommit {
+                scratch: SCRATCH_STATE,
+                parent: tip.as_deref(),
+                files: &files,
+                replica: self.replica.as_str(),
+                seconds: at.div_euclid(1_000),
+                message: "join",
+            };
+            let commit = self.git.import_commits(&[commit])?.remove(0);
             crate::probe::mark("join: commit");
-            let mut transaction = self.git.transaction()?;
-            transaction.update(&state_ref(&self.replica), &commit, tip.as_deref())?;
-            for (marker, tip) in markers {
-                transaction.set(marker, tip)?;
-            }
-            match transaction.prepare().and_then(|()| transaction.commit()) {
-                Ok(()) => {
-                    crate::probe::mark("join: update refs");
-                    self.cache()?.write(&commit, &replica.state);
-                    return Ok(Outcome::Committed { commit, retries });
-                },
-                Err(StoreError::Conflict) if started.elapsed() < RETRY_DEADLINE => {
-                    retries += 1;
-                    std::thread::sleep(backoff(retries));
-                },
-                Err(StoreError::Conflict) => return Err(StoreError::Timeout),
-                Err(err) => return Err(err),
-            }
+            Outcome::Committed { commit }
+        };
+        let mut transaction = self.git.transaction()?;
+        if let Outcome::Committed { commit } = &outcome {
+            transaction.update(&name, commit, tip.as_deref())?;
         }
+        for (marker, tip) in markers {
+            transaction.set(marker, tip)?;
+        }
+        transaction.prepare()?;
+        transaction.commit()?;
+        crate::probe::mark("join: update refs");
+        if let Outcome::Committed { commit } = &outcome {
+            self.cache()?.write_after(&found, commit, &state, journal.keys());
+        }
+        Ok(outcome)
     }
 
     /// Syncs with `remote`: fetches every replica's state ref, joins those that moved since this replica last joined
@@ -1150,9 +1052,10 @@ impl Tracker {
     ///
     /// # Errors
     ///
-    /// [`StoreError::State`] with an id reuse when another clone writes as this replica, and the errors of
-    /// [`Self::fetch`], [`Self::join_refs`] and [`Self::push`]; a failed push never retries, since right after a
-    /// fetch a moved ref means something else writes this replica's refs.
+    /// [`StoreError::Duplicate`] when the remote's copy of this replica's state ref shows another clone writing as
+    /// this replica, and [`StoreError::State`] with an id reuse when another replica's state has seen more of this
+    /// one's writes than it has; otherwise the errors of [`Self::fetch`], the join and [`Self::push`]. A failed push
+    /// isn't retried, since right after a fetch a moved ref means something else writes this replica's refs.
     pub fn sync(&self, remote: &str) -> Result<Synced, StoreError> {
         let prefix = tracking_prefix(remote);
         let own = format!("{prefix}{}", self.replica);
@@ -1220,9 +1123,7 @@ impl Tracker {
         let mut joined = false;
         if !fresh.is_empty() {
             let tips: Vec<String> = fresh.iter().map(|(_, tip)| tip.clone()).collect();
-            if let Outcome::Committed { commit, .. } =
-                self.join_tips(&tips, local.get(&mine).cloned(), &fresh)?
-            {
+            if let Outcome::Committed { commit } = self.join_tips(&tips, &fresh)? {
                 local.insert(mine.clone(), commit);
                 joined = true;
             }
@@ -1400,17 +1301,6 @@ fn read_files(git: &Git, commit: &str) -> Result<BTreeMap<String, String>, Store
         .collect()
 }
 
-/// Exponential backoff from about 5 ms to under 2 s: half the step plus up to a whole step of jitter, so racing
-/// writers spread out.
-fn backoff(retries: u32) -> Duration {
-    let base = 5u64 << retries.min(8);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    let jitter = u64::from(nanos) % base.max(1);
-    Duration::from_millis(base / 2 + jitter)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1513,12 +1403,5 @@ mod tests {
         let expected = [("p1", vec![("a2".to_owned(), 0)]), ("p2", vec![("a1".to_owned(), 1)])];
         assert_eq!(logged, expected.map(|(root, writes)| (root.to_owned(), writes)).into());
         assert_eq!(state, after, "and the state is as the batch left it");
-    }
-
-    #[test]
-    fn backoff_grows_and_stays_bounded() {
-        assert!(backoff(1) < Duration::from_millis(15));
-        assert!(backoff(30) < Duration::from_millis(1_920));
-        assert!(backoff(30) >= Duration::from_millis(640));
     }
 }

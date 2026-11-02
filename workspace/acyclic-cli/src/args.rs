@@ -34,7 +34,7 @@ pub struct Cli {
         short = 'o',
         long,
         global = true,
-        value_parser = values(&Format::ALL),
+        value_enum,
         help_heading = GLOBAL_OPTIONS
     )]
     pub output: Option<Format>,
@@ -44,18 +44,17 @@ pub struct Cli {
 }
 
 /// How a command prints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
+#[expect(
+    missing_docs,
+    reason = "clap prints a value's doc as its help, which switches help to its long layout"
+)]
 pub enum Format {
-    /// One JSON document.
+    // One JSON document.
     Json,
-    /// Tables and summaries, fitted to the terminal's width, with no borders when not printing to one.
+    // Tables and summaries, fitted to the terminal's width, with no borders when not printing to one.
     Pretty,
-}
-
-impl Format {
-    /// Every format, in the order help lists them.
-    pub const ALL: [Self; 2] = [Self::Json, Self::Pretty];
 }
 
 /// The top level's help sections, in order: what every session uses, the groups, then the rest.
@@ -167,7 +166,8 @@ pub enum Command {
         /// The lease in minutes: 60 by default, 1 to 480.
         #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
-        /// Claim even when the thread has no ready work.
+        /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim
+        /// on it, or on a resource it needs, still refuses.
         #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
@@ -190,7 +190,7 @@ pub enum Command {
         /// A note, such as where a record lives.
         #[arg(short = 'n', long)]
         note: Option<String>,
-        /// Finish it although it isn't ready or someone else holds it.
+        /// Finish it although it isn't ready or someone else holds it, or replace the evidence it was finished with.
         #[arg(short = 'f', long)]
         #[serde(default)]
         force: bool,
@@ -322,7 +322,57 @@ pub struct Up {
     pub socket: Option<PathBuf>,
 }
 
+/// What a command needs and does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// Needs no tracker: `init`, `prime`, `completions` and `import --schema`.
+    Standalone,
+    /// Starts a server: `serve` and `up`.
+    Server,
+    /// Works on the clone as a whole: `sync`, `import` and `doctor`.
+    Clone,
+    /// Only reads the tracker.
+    Read,
+    /// May write the tracker.
+    Write,
+}
+
 impl Command {
+    /// What the command needs and does. With no catch-all arm, a new command or subcommand fails to compile until it
+    /// is placed here.
+    #[must_use]
+    pub fn class(&self) -> Class {
+        match self {
+            Self::Init { .. }
+            | Self::Prime
+            | Self::Completions { .. }
+            | Self::Import { schema: true, .. } => Class::Standalone,
+            Self::Serve(_) | Self::Up(_) => Class::Server,
+            Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
+            Self::Ready { .. }
+            | Self::List
+            | Self::Show { .. }
+            | Self::Needs
+            | Self::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
+            | Self::Repo(RepoCommand::List | RepoCommand::Show { .. }) => Class::Read,
+            Self::Claim { .. }
+            | Self::Release { .. }
+            | Self::Done { .. }
+            | Self::Item(
+                ItemCommand::Add { .. }
+                | ItemCommand::Edit(_)
+                | ItemCommand::Reopen { .. }
+                | ItemCommand::Archive { .. }
+                | ItemCommand::Delete { .. },
+            )
+            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
+            | Self::Thread(
+                ThreadCommand::Add { .. } | ThreadCommand::Edit(_) | ThreadCommand::Renumber { .. },
+            )
+            | Self::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. }) => Class::Write,
+        }
+    }
+
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
     /// that require or exclude each other, and the flags that clear what another sets.
     ///
@@ -380,21 +430,22 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
 }
 
 /// The states a command may set: not `done`, which `acyclic done` sets with its evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
+#[expect(
+    missing_docs,
+    reason = "clap prints a value's doc as its help, which switches help to its long layout"
+)]
 pub enum StateWord {
-    /// Not started.
+    // Not started.
     Backlog,
-    /// Set aside on purpose.
+    // Set aside on purpose.
     Parked,
-    /// Being worked on.
+    // Being worked on.
     InProgress,
 }
 
 impl StateWord {
-    /// Every state a command may set.
-    pub const ALL: [Self; 3] = [Self::Backlog, Self::Parked, Self::InProgress];
-
     /// The model's state for the word.
     #[must_use]
     pub fn state(self) -> ItemState {
@@ -424,7 +475,7 @@ pub enum ItemCommand {
         #[arg(long)]
         thread: Option<String>,
         /// Its state; backlog by default.
-        #[arg(short = 's', long, value_parser = values(&StateWord::ALL))]
+        #[arg(short = 's', long, value_enum)]
         state: Option<StateWord>,
         /// Its notes.
         #[arg(long)]
@@ -492,7 +543,7 @@ pub struct ItemEdit {
     #[serde(default)]
     pub no_thread: bool,
     /// Set its state: not `done`, which `acyclic done` sets.
-    #[arg(short = 's', long, value_parser = values(&StateWord::ALL))]
+    #[arg(short = 's', long, value_enum)]
     pub state: Option<StateWord>,
     /// New notes.
     #[arg(long)]
@@ -556,19 +607,20 @@ impl ItemEdit {
 
 /// A link's kind as the command line names it. The stored names are the model's [`LinkKind`], which are kept as they
 /// are on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
+#[expect(
+    missing_docs,
+    reason = "clap prints a value's doc as its help, which switches help to its long layout"
+)]
 pub enum LinkWord {
-    /// `<FROM>` can't start until `<TO>` is done.
+    // `<FROM>` can't start until `<TO>` is done.
     WaitsFor,
-    /// Context only: neither orders the other.
+    // Context only: neither orders the other.
     RelatesTo,
 }
 
 impl LinkWord {
-    /// Every word.
-    pub const ALL: [Self; 2] = [Self::WaitsFor, Self::RelatesTo];
-
     /// The model's kind for the word.
     #[must_use]
     pub fn kind(self) -> LinkKind {
@@ -598,7 +650,7 @@ pub enum LinkCommand {
         /// The item that waits or relates.
         from: String,
         /// How `<FROM>` stands to `<TO>`.
-        #[arg(value_parser = values(&LinkWord::ALL))]
+        #[arg(value_enum)]
         kind: LinkWord,
         /// The item it stands to.
         to: String,
@@ -609,7 +661,7 @@ pub enum LinkCommand {
         /// The item that waits or relates.
         from: String,
         /// How `<FROM>` stands to `<TO>`.
-        #[arg(value_parser = values(&LinkWord::ALL))]
+        #[arg(value_enum)]
         kind: LinkWord,
         /// The item it stands to.
         to: String,

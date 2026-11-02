@@ -68,6 +68,18 @@ pub fn winner(state: &State, item: &Key, now: Millis) -> Result<Option<Claim>, E
     Ok(live(state, item, now)?.into_iter().next())
 }
 
+/// The distinct holders of `claims`, in their order: one holder's several claims are one claim on the thread.
+#[must_use]
+pub fn holders(claims: &[Claim]) -> Vec<String> {
+    let mut holders: Vec<String> = Vec::new();
+    for claim in claims {
+        if !holders.contains(&claim.holder) {
+            holders.push(claim.holder.clone());
+        }
+    }
+    holders
+}
+
 /// Releases `holder`'s claims on an entity and no one else's, so a contest's loser can step aside without taking the
 /// winner's claim with it, as any write to the field would. Returns whether it held one.
 pub fn release(replica: &mut Replica, item: &Key, holder: &str) -> bool {

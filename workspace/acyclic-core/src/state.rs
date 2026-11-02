@@ -205,8 +205,6 @@ pub enum Error {
         /// The writer's latest recorded timestamp.
         last: Millis,
     },
-    /// A rebuilt replica tried to write before its own entry was restored, which could reuse its dots.
-    NotContinuous(ReplicaId),
     /// A joined state has seen more of this replica's writes than the replica has.
     IdReused {
         /// The replica.
@@ -245,9 +243,6 @@ impl fmt::Display for Error {
                     crate::time::rfc3339(*now),
                     crate::time::rfc3339(*last)
                 )
-            },
-            Self::NotContinuous(replica) => {
-                write!(f, "replica {replica} was rebuilt and hasn't recovered its own writes yet")
             },
             Self::IdReused { replica, mine, theirs } => write!(
                 f,
@@ -425,21 +420,10 @@ impl State {
     }
 }
 
-/// Whether a replica may mint dots: only once its own entry is known to be its true highest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Continuity {
-    /// The replica's own state is intact, so its entry is its highest; it may write offline.
-    Intact,
-    /// The replica was rebuilt without its own state; it may write once it has joined a state holding its entry, or
-    /// it must take a new id.
-    Rebuilt,
-}
-
 /// A replica writing to its state.
 #[derive(Debug, Clone)]
 pub struct Replica {
     id: ReplicaId,
-    continuity: Continuity,
     /// How many writes and joins changed an entity.
     changes: u64,
     /// Read-only outside the crate: a batch records the changes made through the replica's own methods, and
@@ -448,18 +432,12 @@ pub struct Replica {
 }
 
 impl Replica {
-    /// A replica whose own state is intact.
+    /// A replica writing on its own state, which holds its highest counter: a replica's id is never reused without
+    /// it (see [`crate::store::Tracker::open`]).
     #[must_use]
     pub fn open(id: ReplicaId, mut state: State) -> Self {
         state.journal = None;
-        Self { id, continuity: Continuity::Intact, changes: 0, state }
-    }
-
-    /// A replica rebuilt without its own state, from whatever it could fetch.
-    #[must_use]
-    pub fn rebuilt(id: ReplicaId, mut state: State) -> Self {
-        state.journal = None;
-        Self { id, continuity: Continuity::Rebuilt, changes: 0, state }
+        Self { id, changes: 0, state }
     }
 
     /// The replica's state.
@@ -472,13 +450,6 @@ impl Replica {
     #[must_use]
     pub fn into_state(self) -> State {
         self.state
-    }
-
-    /// Marks a rebuilt replica as holding its true highest counter again. Call it only after joining every state ref
-    /// freshly fetched from the remote, its own pushed ref included: a stale peer's entry for this replica is not
-    /// enough. Otherwise take a new replica id.
-    pub fn mark_restored(&mut self) {
-        self.continuity = Continuity::Intact;
     }
 
     /// The replica's id.
@@ -504,15 +475,13 @@ impl Replica {
     ///
     /// # Errors
     ///
-    /// An intact replica refuses a state that has seen more of its own writes than it has: another clone is writing
-    /// under this replica's id, or this replica lost state. Joining it could reuse dots and lose writes silently.
+    /// Refuses a state that has seen more of this replica's own writes than it has: another clone is writing under
+    /// this replica's id, or this replica lost state. Joining it could reuse dots and lose writes silently.
     pub fn join(&mut self, other: &State) -> Result<(), Error> {
-        if self.continuity == Continuity::Intact {
-            let mine = self.state.context.seen.get(&self.id).copied().unwrap_or(0);
-            let theirs = other.context.seen.get(&self.id).copied().unwrap_or(0);
-            if theirs > mine {
-                return Err(Error::IdReused { replica: self.id.clone(), mine, theirs });
-            }
+        let mine = self.state.context.seen.get(&self.id).copied().unwrap_or(0);
+        let theirs = other.context.seen.get(&self.id).copied().unwrap_or(0);
+        if theirs > mine {
+            return Err(Error::IdReused { replica: self.id.clone(), mine, theirs });
         }
         if self.state.join(other) {
             self.changes += 1;
@@ -535,16 +504,13 @@ impl Replica {
     }
 
     /// Mints the next dot, with `at` raised to the replica's latest timestamp if it is earlier.
-    fn mint(&mut self, at: Millis) -> Result<(Dot, Millis), Error> {
-        if self.continuity == Continuity::Rebuilt {
-            return Err(Error::NotContinuous(self.id.clone()));
-        }
+    fn mint(&mut self, at: Millis) -> (Dot, Millis) {
         let counter = self.state.context.seen.entry(self.id.clone()).or_default();
         *counter += 1;
         let dot = Dot(self.id.clone(), *counter);
         let clock = self.state.context.clocks.entry(self.id.clone()).or_insert(at);
         *clock = (*clock).max(at);
-        Ok((dot, *clock))
+        (dot, *clock)
     }
 
     /// Drops the field's values that `keep` rejects, minting no dot: the context still covers them, so a join removes
@@ -564,7 +530,7 @@ impl Replica {
     ///
     /// # Errors
     ///
-    /// Fails on a non-integer number or when the replica can't mint dots yet.
+    /// Fails on a non-integer number.
     pub fn write(
         &mut self,
         key: &Key,
@@ -580,7 +546,7 @@ impl Replica {
             self.set(key, field, Register::new());
             return Ok(None);
         };
-        let (dot, at) = self.mint(at)?;
+        let (dot, at) = self.mint(at);
         let stamped = Stamped { actor: actor.to_owned(), at, value };
         self.set(key, field, Register::from([(dot.clone(), stamped)]));
         Ok(Some(dot))

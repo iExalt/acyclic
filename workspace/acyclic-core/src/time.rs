@@ -26,6 +26,18 @@ pub fn date(at: Millis) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// Serializes a time as [`rfc3339`] writes it, as every time in acyclic's output is.
+///
+/// # Errors
+///
+/// Fails as the serializer does.
+pub fn serialize_rfc3339<S: serde::Serializer>(
+    at: &Millis,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&rfc3339(*at))
+}
+
 /// A time as RFC 3339 in UTC, to the second: `YYYY-MM-DDTHH:MM:SSZ`.
 #[must_use]
 pub fn rfc3339(at: Millis) -> String {

@@ -5,7 +5,6 @@ expression: table
 2 invalid-name
 2 invalid-value
 1 clock-jump
-1 not-continuous
 1 id-reused
 1 claimed
 3 not-found
@@ -24,7 +23,6 @@ expression: table
 4 git
 4 conflict
 4 locked
-4 timeout
 5 no-replica
 4 remote-moved
 4 rejected
@@ -40,9 +38,6 @@ expression: table
 1 already-exists
 1 already-done
 1 incomplete-repository
-1 unwritable
-1 unopenable
-1 no-renderer
 3 not-found
 2 usage
 2 invalid-commit

@@ -2,7 +2,7 @@
 //!
 //! Two replicas that each add a thread before seeing the other's can end their ids in the same number, such as
 //! `thread-mac-32` and `thread-pi-32`. The ids differ, so nothing breaks, but the app draws threads by number, and
-//! `needs` lists the clash. The user resolves it by renumbering one of them.
+//! `needs` lists the clash. Renumbering one of them resolves it.
 //!
 //! A thread's id is named in more places than its members, such as its claims. So only a thread whose number clashes
 //! is renumbered, and only a fresh one: one with no live claim on it. Its own fields and its explicit

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use acyclic_cli::args::{Command, ItemCommand, LinkCommand, RepoCommand, Serve, ThreadCommand, Up};
+use acyclic_cli::args::{Class, Command, Serve, Up};
 use acyclic_cli::error::{CliError, exit};
 use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
@@ -315,53 +315,6 @@ fn bearer(headers: &HeaderMap) -> Option<&[u8]> {
     scheme.eq_ignore_ascii_case(b"Bearer").then_some(&token[1..])
 }
 
-/// What a command does, for the server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Use {
-    /// It only reads, so it runs beside anything.
-    Read,
-    /// It may write, so it waits for the other writes and the sync loop.
-    Write,
-    /// The server doesn't run it for a request: it sets up or syncs the clone, reads or writes files on the server, or
-    /// starts another server.
-    Refused,
-}
-
-/// What a command does. With no catch-all arm, a new command or subcommand fails to compile until it is placed here.
-fn classify(command: &Command) -> Use {
-    match command {
-        Command::Init { .. }
-        | Command::Sync
-        | Command::Prime
-        | Command::Import { .. }
-        | Command::Doctor
-        | Command::Serve(_)
-        | Command::Up(_)
-        | Command::Completions { .. } => Use::Refused,
-        Command::Ready { .. }
-        | Command::List
-        | Command::Show { .. }
-        | Command::Needs
-        | Command::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
-        | Command::Repo(RepoCommand::List | RepoCommand::Show { .. }) => Use::Read,
-        Command::Claim { .. }
-        | Command::Release { .. }
-        | Command::Done { .. }
-        | Command::Item(
-            ItemCommand::Add { .. }
-            | ItemCommand::Edit(_)
-            | ItemCommand::Reopen { .. }
-            | ItemCommand::Archive { .. }
-            | ItemCommand::Delete { .. },
-        )
-        | Command::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
-        | Command::Thread(
-            ThreadCommand::Add { .. } | ThreadCommand::Edit(_) | ThreadCommand::Renumber { .. },
-        )
-        | Command::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. }) => Use::Write,
-    }
-}
-
 /// The HTTP status for a command's exit code.
 fn status(code: u8) -> StatusCode {
     match code {
@@ -574,17 +527,22 @@ async fn command(
         },
     };
     let server = &listener.server;
-    let used = classify(&command);
-    let (code, envelope) = match used {
-        Use::Refused => return Refusal::NotAllowed.into_response(),
-        Use::Read => server.call(command, None).await,
-        Use::Write => match server.turn().await {
+    // Reads run beside anything and writes wait for the other writes and the sync loop. The server runs nothing
+    // else for a request: nothing that sets up or syncs the clone, reads or writes files on the server, or starts
+    // another server.
+    let class = command.class();
+    let (code, envelope) = match class {
+        Class::Read => server.call(command, None).await,
+        Class::Write => match server.turn().await {
             Ok(turn) => server.call(command, Some(turn)).await,
             Err(err) => (err.exit, err.envelope()),
         },
+        Class::Standalone | Class::Server | Class::Clone => {
+            return Refusal::NotAllowed.into_response();
+        },
     };
     // What the user's own write brings about is theirs, and needs no push.
-    if code == exit::OK && used == Use::Write {
+    if code == exit::OK && class == Class::Write {
         server.push.seen();
     }
     (status(code), Json(envelope)).into_response()
