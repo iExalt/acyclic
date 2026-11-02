@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acyclic"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "acyclic-cli",
  "acyclic-core",
@@ -16,11 +16,11 @@ dependencies = [
 
 [[package]]
 name = "acyclic-app-assets"
-version = "0.5.1"
+version = "0.5.2"
 
 [[package]]
 name = "acyclic-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "acyclic-core",
  "acyclic-fixtures",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "acyclic-core"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "hegeltest",
  "insta",
@@ -50,14 +50,14 @@ dependencies = [
 
 [[package]]
 name = "acyclic-fixtures"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "acyclic-core",
 ]
 
 [[package]]
 name = "acyclic-server"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "acyclic-app-assets",
  "acyclic-cli",
