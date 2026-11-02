@@ -175,7 +175,7 @@ impl<'a> Session<'a> {
                             given.as_deref().map(|id| format!(" --id {id}")).unwrap_or_default();
                         format!(
                             "acyclic item add{id} --title <TITLE> --thread {}",
-                            parent.as_deref().unwrap_or_default()
+                            shell_word(parent.as_deref().unwrap_or_default())
                         )
                     })
                 })
@@ -207,8 +207,9 @@ impl<'a> Session<'a> {
                 .map_err(|error| {
                     self.misplaced(error, edit.parent.as_deref(), || {
                         format!(
-                            "acyclic item edit {item} --thread {}",
-                            edit.parent.as_deref().unwrap_or_default()
+                            "acyclic item edit {} --thread {}",
+                            shell_word(item),
+                            shell_word(edit.parent.as_deref().unwrap_or_default())
                         )
                     })
                 })
@@ -596,8 +597,8 @@ impl<'a> Session<'a> {
                     return Err(CliError::refused(
                         "not-ready",
                         format!(
-                            "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it or \
-                             a resource it needs; `acyclic thread show {thread}` says why"
+                            "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it; \
+                             `acyclic thread show {thread}` says why"
                         ),
                     )
                     .with(json!({"readiness": status})));
@@ -817,6 +818,17 @@ fn run_order<'a>(
         order.entry(id).or_insert(at);
     }
     order
+}
+
+/// `word` as a shell reads it back: as it is when it holds only characters no shell treats specially, else in single
+/// quotes, so a suggested command that repeats a title can be pasted as it is.
+pub(crate) fn shell_word(word: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./@:,+=".contains(c);
+    if !word.is_empty() && word.chars().all(plain) {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
 }
 
 /// An item's key, refusing one that doesn't exist or was deleted.

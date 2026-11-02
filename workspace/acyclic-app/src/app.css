@@ -1502,7 +1502,7 @@ button.row {
     font-weight: 500;
   }
 }
-/* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
+/* Needs you's entries: the thread and what it asks on one line, what it names under it, then its action, all set in
    from the badge so the badges make a column to scan; a hairline between entries, as between any rows. */
 /* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. */
 :is(p, button).need-head {

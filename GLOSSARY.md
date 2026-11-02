@@ -82,7 +82,7 @@ An agent conversation that belongs to no thread yet; filing it makes it an item.
 _Avoid_: loose chat, orphan
 
 **Archived**:
-A finished subtree hidden from the graph, readiness and the dispatcher by default; archiving hides, never deletes.
+A finished subtree hidden from `thread ready` and the app by default; archiving hides, never deletes.
 _Avoid_: closed, deleted
 
 **In review**:

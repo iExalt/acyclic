@@ -96,7 +96,7 @@ pub struct Edit {
 pub enum ApplyError {
     /// The document breaks these rules, on its own or with what the tracker holds.
     Invalid(Vec<ValidationError>),
-    /// With what is already there, the document closes these cycles of parents or ordering links.
+    /// On its own or with what is already there, the document closes these cycles of parents or waits-for.
     Cycles(Vec<Vec<String>>),
     /// A write was refused.
     Write(WriteError),
@@ -149,6 +149,11 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     for item in &doc.items {
         if model::is_deleted(&replica.state, &model::item_key(&item.id)?) {
             return Err(WriteError::Deleted(item.id.clone()).into());
+        }
+    }
+    for thread in &doc.threads {
+        if model::is_deleted(&replica.state, &crate::claim::thread_key(&thread.id)?) {
+            return Err(WriteError::Deleted(thread.id.clone()).into());
         }
     }
     let before = Model::read(&replica.state)?;

@@ -56,9 +56,9 @@ two in step.
   across boxes passes beneath it.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an Okhsl lightness band per scheme, every hue at the same share of the colour
-  it can hold, so every line's badge takes a readable ink. Hues step round the wheel by number, a lap every 27
-  threads, each lap a quarter of the band lighter: thread 4 and thread 31 share a hue and look nearly alike (ΔE about
-  4), and the badge's number tells them apart; the user's call: "Don't change the hue step."
+  it can hold, so every line's badge takes a readable ink. Hues step round the wheel by a hash of the thread's id,
+  a lap every 27 positions, each lap a quarter of the band lighter: positions 4 and 31 share a hue and look nearly
+  alike (ΔE about 4), so every list names the thread beside its badge; the user's call: "Don't change the hue step."
 
 ## Typography
 
@@ -144,7 +144,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
   what it waits for in the thread), each with its stage's icon, the first eight and then how many more; "Starts with",
   its first items alone, meant nothing to the user. Then its brief.
-- **Thread badges:** the thread's number on its line's colour. A badge, and a stage's icon, stand on the middle of the
+- **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the
   menu open; only its buttons close it. (The menu closing on a checkbox read as bad UX.)
@@ -173,8 +173,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove button
   shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over one row of
   quiet buttons and over today's layout unboxed, as the calmest.) While it edits, the form's State and Thread stand in
-  for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker says each
-  thread as "4. CLI features", as text names a thread without a badge.
+  for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker names each
+  thread by its title alone, as text names a thread without a badge.
 - **A phone's bar** names the view alone, as a line under the name cost the bar its height.
 - **The ⋯ menu, on a phone,** is a list of plain rows, as Slack's is, 260 px wide: each switch a row, its name at the
   start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme ruled
@@ -183,7 +183,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   it names as rows, muted, at 14 px (13 px on a phone), regular and 32 px apart on touch, so the head leads and they
   read as its parts (the user asked for "the thread title … more prominent" and the "line spacing between each item …
   smaller"); each underlines under the pointer, in ink, saying it opens (a stage's icon beside each read as a mark
-  without a word), then its decision, compact, after what it acts on. An entry the app can only show says what
+  without a word), then its action, compact, after what it acts on. An entry the app can only show says what
   failed and what fixes it, in words, never a command to type, and names its item once, as its row. Merges unconfirmed
   for one cause in one repository are one entry, saying how many, its rows the first five, as the same why eight times
   read as noise; the count still counts each. A hairline between entries.
@@ -193,7 +193,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
-  at the field's end. A thread's row is its badge and name; the number is the badge's. An item's row says the project it
+  at the field's end. A thread's row is its badge and name. An item's row says the project it
   is in, not its id, which finds it but would only be plumbing under its title. A waiting move or link offers its
   targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
   where it is already or anything inside it.
@@ -267,9 +267,10 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   moved does only if it must move, so a zoom the user chose survives their edits; a tapped one moves the least that
   shows it. A strip taken from the Map, such as the slot, or a window turned, shows the selected item again if it hid
   it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user types.
-- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is made
-  from the title and asked for only once the server refuses it. Added, the item's panel takes the focus, and its Status
-  says Saving… until the server has placed it, rather than its state first; its editor opens on Title.
+- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is a
+  UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
+  item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state first;
+  its editor opens on Title.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page

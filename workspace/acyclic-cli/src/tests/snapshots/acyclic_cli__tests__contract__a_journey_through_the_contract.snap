@@ -225,7 +225,7 @@ $ ACYCLIC_ACTOR=session/pi acyclic thread claim Start
         "status": "claimed"
       }
     },
-    "message": "thread 01900000-0000-7000-8000-0000000000f0 isn't ready to claim: it has no ready work, or someone else holds it or a resource it needs; `acyclic thread show 01900000-0000-7000-8000-0000000000f0` says why"
+    "message": "thread 01900000-0000-7000-8000-0000000000f0 isn't ready to claim: it has no ready work, or someone else holds it; `acyclic thread show 01900000-0000-7000-8000-0000000000f0` says why"
   },
   "ok": false
 }
@@ -1518,7 +1518,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-000000
   "error": {
     "code": "deleted",
     "details": null,
-    "message": "item 01900000-0000-7000-8000-0000000000d1 was deleted, and its id isn't used again"
+    "message": "01900000-0000-7000-8000-0000000000d1 was deleted, and its id isn't used again"
   },
   "ok": false
 }

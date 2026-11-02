@@ -84,10 +84,10 @@ struct Generator {
     total: usize,
     scale: f64,
     import: Import,
-    /// Each item's depth, 1 for goals.
+    /// Each item's depth, 1 for roots.
     depth: Vec<usize>,
-    /// Each item's goal index.
-    goal: Vec<usize>,
+    /// Each item's root index.
+    root: Vec<usize>,
     /// Each item's parent index.
     parent: Vec<Option<usize>>,
 }
@@ -105,7 +105,7 @@ impl Generator {
             scale,
             import: Import::new(),
             depth: Vec::new(),
-            goal: Vec::new(),
+            root: Vec::new(),
             parent: Vec::new(),
         }
     }
@@ -156,8 +156,8 @@ impl Generator {
 
     fn push_item(&mut self, parent: Option<usize>) -> usize {
         let index = self.import.items.len();
-        let (depth, goal) = match parent {
-            Some(p) => (self.depth[p] + 1, self.goal[p]),
+        let (depth, root) = match parent {
+            Some(p) => (self.depth[p] + 1, self.root[p]),
             None => (1, index),
         };
         let title = self.title();
@@ -191,26 +191,26 @@ impl Generator {
             evidence: None,
         });
         self.depth.push(depth);
-        self.goal.push(goal);
+        self.root.push(root);
         self.parent.push(parent);
         index
     }
 
-    /// Goals, then umbrellas under goals, then leaves under umbrellas, and a few sub-items under leaves. Items are
+    /// Roots, then umbrellas under roots, then leaves under umbrellas, and a few sub-items under leaves. Items are
     /// laid out depth first, so an item's index orders it after everything it may depend on.
     fn tree(&mut self) {
-        let goals = self.scaled(2.0).max(2);
+        let roots = self.scaled(2.0).max(2);
         let umbrellas = self.scaled(28.0);
-        let leaves = self.total - goals - umbrellas;
-        // Umbrellas per goal, then leaves per umbrella, as near-even shares with jitter.
-        let per_goal = self.shares(umbrellas, goals);
+        let leaves = self.total - roots - umbrellas;
+        // Umbrellas per root, then leaves per umbrella, as near-even shares with jitter.
+        let per_root = self.shares(umbrellas, roots);
         let mut umbrella_leaves = self.shares(leaves, umbrellas).into_iter();
-        for umbrella_count in per_goal {
-            let goal = self.push_item(None);
+        for umbrella_count in per_root {
+            let root = self.push_item(None);
             for _ in 0..umbrella_count {
                 // The areas' draws, kept so each seed keeps its structure.
                 let _ = self.rng.below(AREAS.len());
-                let umbrella = self.push_item(Some(goal));
+                let umbrella = self.push_item(Some(root));
                 let mut last_leaf = None;
                 for _ in 0..umbrella_leaves.next().unwrap_or(0) {
                     if !self.rng.chance(0.005) && !self.rng.chance(0.85) {
@@ -272,7 +272,7 @@ impl Generator {
                 if self.rng.chance(0.5) {
                     let (a, b, c) = (self.rng.next_u64(), self.rng.next_u64(), self.rng.next_u64());
                     let sha = format!("{a:016x}{b:016x}{:08x}", c >> 32);
-                    // Only items under a goal are done, and each touches a repository.
+                    // Only items under a root are done, and each touches a repository.
                     let repository = item.repositories.iter().flatten().next();
                     item.evidence = Some(Evidence {
                         commit: repository.map(|repository| format!("{repository}@{sha}")),
@@ -288,16 +288,16 @@ impl Generator {
         }
     }
 
-    /// Threads take contiguous runs of non-goal items in depth-first order, so most stay within one umbrella; a few
-    /// swaps make some cross goals. About an eighth of the items stay unthreaded.
+    /// Threads take contiguous runs of non-root items in depth-first order, so most stay within one umbrella; a few
+    /// swaps make some cross roots. About an eighth of the items stay unthreaded.
     fn threads(&mut self) -> Vec<Option<usize>> {
         let count = self.scaled(21.0);
         let small = self.scaled(6.0).min(count - 1);
         let big = count - small;
         let eligible: Vec<usize> = (0..self.total).filter(|&i| self.depth[i] >= 2).collect();
         let unthreaded_target = (self.total as f64 * 0.125).round() as usize;
-        let goals = self.total - eligible.len();
-        let threaded = eligible.len() - unthreaded_target.saturating_sub(goals).min(eligible.len());
+        let roots = self.total - eligible.len();
+        let threaded = eligible.len() - unthreaded_target.saturating_sub(roots).min(eligible.len());
 
         let small_sizes: Vec<usize> = (0..small).map(|_| 1 + self.rng.below(2)).collect();
         let big_total = threaded - small_sizes.iter().sum::<usize>();
@@ -331,12 +331,12 @@ impl Generator {
             members.push(run);
             cursor += size;
         }
-        // Swap a sixtieth of the members between threads, including one swap across goals.
+        // Swap a sixtieth of the members between threads, including one swap across roots.
         let swaps = (threaded / 60).max(1);
         for n in 0..swaps {
             let a = pool[self.rng.below(pool.len())];
             let b = if n == 0 {
-                let other = pool.iter().copied().filter(|&i| self.goal[i] != self.goal[a]);
+                let other = pool.iter().copied().filter(|&i| self.root[i] != self.root[a]);
                 let candidates: Vec<usize> = other.collect();
                 candidates[self.rng.below(candidates.len())]
             } else {
@@ -493,7 +493,7 @@ mod tests {
         let unthreaded = stats.unthreaded as f64 / items as f64;
         assert!((0.085..=0.165).contains(&unthreaded), "unthreaded share {unthreaded}: {at}");
 
-        assert!(stats.cross_goal_threads > 0, "{at}");
+        assert!(stats.cross_root_threads > 0, "{at}");
         assert!(stats.multi_repository_threads > 0, "{at}");
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");

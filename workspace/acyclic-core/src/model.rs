@@ -595,7 +595,7 @@ pub enum WriteError {
     InvalidName(String),
     /// The item doesn't exist.
     NoItem(String),
-    /// The item was deleted, and its id isn't used again.
+    /// The item or thread was deleted, and its id isn't used again.
     Deleted(String),
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
@@ -621,7 +621,7 @@ impl fmt::Display for WriteError {
                 "{name:?} is not a valid name: use at most {MAX_ID_LEN} lowercase letters, digits, '-', '_' or '.'"
             ),
             Self::NoItem(id) => write!(f, "no item {id}"),
-            Self::Deleted(id) => write!(f, "item {id} was deleted, and its id isn't used again"),
+            Self::Deleted(id) => write!(f, "{id} was deleted, and its id isn't used again"),
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
             Self::LinkCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
@@ -944,7 +944,7 @@ impl<'a> Heads<'a> {
 
     /// A thread's heads: its open leaves that nothing in the thread orders, by id. A leaf follows another open member
     /// when a path of blocks links, from the leaf or an ancestor, reaches that member or one of its
-    /// ancestors. Ids, numbering and membership order nothing, so two or more heads mean the thread's order is partly
+    /// ancestors. Ids, titles and membership order nothing, so two or more heads mean the thread's order is partly
     /// unsaid: they may run in parallel, or a link is missing.
     #[must_use]
     pub fn of(&self, thread: &str) -> Vec<&'a str> {

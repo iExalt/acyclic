@@ -8,7 +8,9 @@
 #   sh scripts/tracker-ruleset.sh <owner>/<repository>
 set -eu
 repo=${1:?usage: tracker-ruleset.sh <owner>/<repository>}
-name='acyclic: append-only logs'
+# The old name finds a ruleset made before the rename, and the update renames it.
+name='acyclic: no rewritten logs'
+old_name='acyclic: append-only logs'
 body=$(cat <<EOF
 {
   "name": "$name",
@@ -20,7 +22,7 @@ body=$(cat <<EOF
 }
 EOF
 )
-id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$name\") | .id")
+id=$(gh api "repos/$repo/rulesets" --jq "[.[] | select(.name == \"$name\" or .name == \"$old_name\")] | first | .id // empty")
 if [ -n "$id" ]; then
   printf '%s' "$body" | gh api --method PUT "repos/$repo/rulesets/$id" --input - --jq '"updated ruleset \(.id)"'
 else

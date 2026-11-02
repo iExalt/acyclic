@@ -214,3 +214,19 @@ fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
     };
     assert_eq!(cycles, [[id(11), id(12)]]);
 }
+
+#[test]
+fn a_deleted_thread_is_refused_as_a_deleted_item_is() {
+    let mut r = replica();
+    let mut doc = Import::new();
+    doc.threads = vec![crate::import::Thread {
+        id: id(21),
+        title: "Gone".into(),
+        brief: None,
+        repositories: None,
+    }];
+    apply(&doc, &mut r, by(USER, 1)).unwrap();
+    assert!(crate::delete::delete_thread(&mut r, &id(21), by(USER, 2)).unwrap());
+    let err = apply(&doc, &mut r, by(USER, 3)).unwrap_err();
+    assert_eq!(err, ApplyError::Write(WriteError::Deleted(id(21))));
+}
