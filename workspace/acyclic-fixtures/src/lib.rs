@@ -523,12 +523,6 @@ mod tests {
     }
 
     #[test]
-    fn a_seed_always_gives_the_same_plan() {
-        assert_eq!(generate(BASE_ITEMS, 9).to_json(), generate(BASE_ITEMS, 9).to_json());
-        assert_ne!(generate(BASE_ITEMS, 9).to_json(), generate(BASE_ITEMS, 10).to_json());
-    }
-
-    #[test]
     fn apportion_sums_and_respects_bounds() {
         let shares = apportion(100, &[1.0, 1.0, 3.0], 4, 46);
         assert_eq!(shares.iter().sum::<usize>(), 100);

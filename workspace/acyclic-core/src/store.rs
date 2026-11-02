@@ -1049,9 +1049,10 @@ impl Tracker {
     ///
     /// # Errors
     ///
-    /// [`StoreError::State`] with an id reuse when another clone writes as this replica, and the errors of
-    /// [`Self::fetch`], the join and [`Self::push`]; a failed push never retries, since right after a
-    /// fetch a moved ref means something else writes this replica's refs.
+    /// [`StoreError::Duplicate`] when the remote's copy of this replica's state ref shows another clone writing as
+    /// this replica, and [`StoreError::State`] with an id reuse when another replica's state has seen more of this
+    /// one's writes than it has; otherwise the errors of [`Self::fetch`], the join and [`Self::push`]. A failed push
+    /// isn't retried, since right after a fetch a moved ref means something else writes this replica's refs.
     pub fn sync(&self, remote: &str) -> Result<Synced, StoreError> {
         let prefix = tracking_prefix(remote);
         let own = format!("{prefix}{}", self.replica);

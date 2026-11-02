@@ -574,9 +574,8 @@ impl<'a> Readiness<'a> {
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
-    /// unclaimed ones by title in natural order and id. Threads others hold are left out.
-    /// Archived subtrees are left out unless `include_archived` is set, which judges every item as if nothing were
-    /// archived.
+    /// unclaimed ones by title in natural order and id. Threads others hold are left out, and so are archived subtrees
+    /// unless `include_archived` is set, which judges every item as if nothing were archived.
     ///
     /// # Errors
     ///
@@ -587,21 +586,7 @@ impl<'a> Readiness<'a> {
             for item in model.items.values_mut() {
                 item.archived = Value::None;
             }
-            let unarchived = Readiness {
-                state: self.state,
-                model: &model,
-                now: self.now,
-                ancestry: self.ancestry,
-                merged: RefCell::new(self.merged.borrow().clone()),
-                cyclic: self.cyclic.clone(),
-                links_from: self.links_from.clone(),
-                archived: RefCell::default(),
-                members: OnceCell::new(),
-                resources: OnceCell::new(),
-                winners: RefCell::new(self.winners.borrow().clone()),
-                busy: RefCell::default(),
-                stages: RefCell::default(),
-            };
+            let unarchived = Readiness::new(self.state, &model, self.now, self.ancestry);
             return unarchived.ready(false, actor);
         }
         let title =
