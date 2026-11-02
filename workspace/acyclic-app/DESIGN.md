@@ -77,24 +77,23 @@ Overpass sets smaller than Inter at a size.)
 ## Layout
 
 - **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, Search, the outline, New item, the
-  menu), the views and Needs you in a tab bar along the bottom, panels as sheets rising from the bottom. The outline's
-  button and sheet are both called Outline; its projects carry no count, as opening one shows its threads.
+  menu), the views, Needs you among them, in a tab bar along the bottom, panels as sheets rising from the bottom. The
+  outline's button and sheet are both called Outline; its projects carry no count, as opening one shows its threads.
 - **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
   bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
   them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would push every panel down or lie over
   its buttons. A drag on it or on the header's free space follows the finger and lands by distance or by a flick, read
   from its last 100 ms, and down from half it closes the sheet as Escape does, so a form holding typing stays, saying
-  how to leave it. Needs you opens full, a list of decisions; the other panels open at half; a form (New item, an item's
-  editor) takes the whole height, with no handle. A tap on the Map that opens a panel over what it tapped pans the least
-  that shows it, measured where the panel comes to rest. (At 45 % of a 360 × 640 phone, Needs you showed no decision at
-  all.)
+  how to leave it. Panels open at half; a form (New item, an item's editor) takes the whole height, with no handle. A
+  tap on the Map that opens a panel over what it tapped pans the least that shows it, measured where the panel comes to
+  rest.
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about 210
   px beside a panel), with the Overview's lists in two columns once it is 680 px wide (a 728 px screen), and the
   projects in two columns, as each wave's tiles in the Threads view are; New item opens from the top as tall as its
   fields, clear of the keyboard, the Map in view below it.
-- **Wide:** a sidebar (the views, Needs you, New item, the outline of projects and threads, the menu at its foot);
-  panels open on the right. All between the wordmark and the foot scrolls as one, and each outline row is a line, cut
-  short with its full name on hover, as Linear's; a thread in more than one project adds a second line saying where
+- **Wide:** a sidebar (the views, Needs you among them, New item, the outline of projects and threads, the menu at its
+  foot); panels open on the right. All between the wordmark and the foot scrolls as one, and each outline row is a line,
+  cut short with its full name on hover, as Linear's; a thread in more than one project adds a second line saying where
   else, which its hover says too. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs
   you's count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in
   a scroll area of their own, read as clutter.)
@@ -104,9 +103,12 @@ Overpass sets smaller than Inter at a size.)
   with no panel open, Up next takes a third column of its own, the user's call: "allow three columns for the overview on
   wide screens"; an Up next at most half as long as the longest list beside it stays under In progress, and the projects
   take the third column instead, one row under another. (A single 960 px column left most of a desktop empty, and a
-  one-row Up next column left a third of it empty, the projects below the first view.) With more in Needs you than it
-  shows, the link under its rows opens it ("19 more in Needs you"), and the header has none; the threads' say where
-  theirs go too ("9 more in Threads").
+  one-row Up next column left a third of it empty, the projects below the first view.) Its Needs you section is a
+  preview of the view: with more in Needs you than it shows, the link under its rows goes there ("19 more in Needs
+  you"), and the header has none; the threads' say where theirs go too ("9 more in Threads").
+- **Needs you's view** is a page over the Map, as the Overview is: wide, its entries stand in columns of at least 360
+  px, as many as fit, the filters above them; on a phone, one column. (As a narrow pane on the right it left most of a
+  desktop empty, and only the Overview made room for it.)
 - **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
   wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
@@ -191,35 +193,33 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
   where it is already or anything inside it.
 - **Lists:** the Overview's rows a finger's height, ruled apart, each opening what it names, a chevron at its end. Rows
-  inside a panel, such as Needs you's items and a thread's Items, are text that opens what it names, with no chevron.
+  inside an entry or a panel, such as Needs you's items and a thread's Items, are text that opens what it names, with
+  no chevron.
 
 ## Interaction conventions
 
-- **Views are places, Needs you is a layer.** Overview, Map and Threads are views; the one shown carries
-  `aria-current="page"` and is filled. Needs you opens over any view as a toggle (`aria-pressed`), marked by ink alone.
-  On a phone and an upright tablet, where Needs you covers the view, picking a view from the tabs closes it.
+- **Views are places.** Overview, Map, Threads and Needs you are views; the one shown carries `aria-current="page"`
+  and is filled, and a phone's bar names it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
-- **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one. A
-  thread picked from Needs you, or from the command menu while Needs you shows, goes over the list, as an item picked
-  from it does, so closing it comes back to the list.
+- **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
 - **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows on
-  the Map, and one Back, Escape or ✕ returns to the view it came from, Needs you still open if it was. Selecting on the
-  Map or going to another view makes that where the user is, and going to another view closes the item, which it doesn't
-  show; what a link opened closes onto the Map. While Needs you is open over the Overview, the Overview's own Needs you
-  section steps aside rather than repeat it.
+  the Map, and one Back, Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the
+  focus on the row picked. Selecting on the Map or going to another view makes that where the user is, and going to
+  another view closes the item, which it doesn't show; what a link opened closes onto the Map.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
-- **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`,
-  `?needs=<entry>`), so a reload, a copied link or a notification opens it again; an item implies the Map, and one left
-  open over another view names that view too. A link opens over home, one history entry per layer, so Back closes what
-  it opened, then leaves. A link to something gone says so; one to an archived item shows archived items, with Hide
-  archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's panel carries it beside
-  the title, ticking in place. A device not yet paired keeps the address through pairing, so the link it opened shows
-  once it is.
+- **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`, and
+  `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;
+  an item implies the Map, and one left open over another view names that view too. An address from when Needs you
+  opened over the views, `?needs` as notifications send it, opens its view. A link opens over home, one history entry
+  per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item shows
+  archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's
+  panel carries it beside the title, ticking in place. A device not yet paired keeps the address through pairing, so the
+  link it opened shows once it is.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
-  Search) opens the command menu over everything: views, Needs you, New item, the archived switch, Refresh, and every
-  thread, project and item by title or id, grouped, the best first. While a move or link waits for its target, it finds
-  the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the focus back
-  where it was.
+  Search) opens the command menu over everything: views, Needs you among them, New item, the archived switch, Refresh,
+  and every thread, project and item by title or id, grouped, the best first. While a move or link waits for its target,
+  it finds the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the
+  focus back where it was.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
   ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys
   while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M
@@ -240,12 +240,12 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   it is the only place its reason shows.
 - **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while its
   write is out, so focus stays on it; only the pressed one looks held, as greying every one said they were all at work.
-  Once what it settled goes, focus goes to the next entry's action, else to the panel. What a one-press decision did is
-  said once saved ("Approved Codex: 2 items"), in its notice and to a screen reader politely.
-- **A notification never reloads the app:** the open app is asked to show what it names, over the view shown, and
-  waits, saying so, while a form holds what the user typed.
-- **Opening from a row lands on its entry:** a Needs you row on the Overview opens the list there, the entry focused
-  and none of its actions.
+  Once what it settled goes, focus goes to the next entry's action, else to the view or the panel. What a one-press
+  decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a screen reader politely.
+- **A notification never reloads the app:** the open app is asked to show what it names (Needs you's view, for the
+  server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
+- **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
+  focused and none of its actions.
 - **Going to a thread frames it.** A thread's row on the Overview or in the sidebar, or a link to a thread on the Map,
   goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
   further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
@@ -362,3 +362,8 @@ before what went wrong.
 - 2026-11-01: a Theme in the menu, System, Light or Dark, System by default, after the user asked for a switch on the
   phone; settings change at once and leave the menu open; a thread's panel lists its Items in place of Starts with. The
   user chose them.
+- 2026-11-01: Needs you is a view of its own, a peer of the Overview, the Map and Threads, over a pane on the right that
+  opened over them, which marks, toggling, the phone tabs closing it and the Overview stepping aside existed to explain.
+  The user: "The overview shrinks so it doesn't hide behind 'Needs you', but neither the map nor the threads view do
+  that. Honestly, I don't know if I like `Needs you` being a floating pane on the right at all, it feels like it should
+  probably get its own view like overview/map/threads?" Asked to confirm, they chose the view.

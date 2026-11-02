@@ -26,8 +26,9 @@ describe("a notice's life", () => {
     expect(after(raised("refusal"), moved(map))).toBeNull();
     const thread: Place = { ...map, layer: "thread", thread: "t1" };
     expect(after(raised("refusal", thread), moved({ ...thread, thread: "t2" }))).toBeNull();
-    const needs: Place = { ...map, layer: "needs" };
-    expect(after(raised("refusal", needs), moved({ ...needs, view: "overview" }))).toEqual(raised("refusal", needs));
+    // Any other layer, such as the outline's sheet, is the same surface whatever view is under it.
+    const sheet: Place = { ...map, layer: "projects" };
+    expect(after(raised("refusal", sheet), moved({ ...sheet, view: "overview" }))).toEqual(raised("refusal", sheet));
     expect(after(raised("refusal", map), moved({ ...map, view: "threads" }))).toBeNull();
   });
 

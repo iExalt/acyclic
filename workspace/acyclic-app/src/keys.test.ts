@@ -32,7 +32,7 @@ describe("single-key shortcuts", () => {
     const g = step(null, press("g", { timeStamp: 100 }), free);
     expect(g).toEqual({ pending: 100, action: null });
     expect(step(g.pending, press("t", { timeStamp: 600 }), free).action).toEqual({ kind: "go", view: "threads" });
-    expect(step(g.pending, press("n", { timeStamp: 600 }), free).action).toEqual({ kind: "needs" });
+    expect(step(g.pending, press("n", { timeStamp: 600 }), free).action).toEqual({ kind: "go", view: "needs" });
     expect(step(g.pending, press("x", { timeStamp: 600 }), free)).toEqual({ pending: null, action: null });
     // Too late, the letter is itself again: C adds.
     expect(step(g.pending, press("c", { timeStamp: 100 + SEQUENCE_MS + 1 }), free).action).toEqual({ kind: "add" });
@@ -79,13 +79,7 @@ describe("single-key shortcuts", () => {
       { kind: "addInside" },
     ]);
     expect(act("e")).toBeNull();
-    expect(["y", "d", "x", "Enter", " "].map((key) => act(key, {}, { ...free, panel: "needs" }))).toEqual([
-      null,
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect(["y", "d", "x", "Enter", " "].map((key) => act(key))).toEqual([null, null, null, null, null]);
   });
 
   it("read a letter from where it sits on a layout without Latin letters", () => {
@@ -124,7 +118,7 @@ describe("nextRow", () => {
 
 describe("keyReference", () => {
   it("lists every shortcut ? can't run now, so each is either runnable or described, with the platform's chords", () => {
-    const runnable = new Set(["view:overview", "view:map", "view:threads", "needs", "add"]);
+    const runnable = new Set(["view:overview", "view:map", "view:threads", "view:needs", "add"]);
     const rows = keyReference(runnable, true);
     const said = rows.map((row) => row.keys).join(" | ");
     const keys = rows.flatMap((row) => row.keys.split(", "));

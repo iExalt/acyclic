@@ -38,7 +38,7 @@ import {
 import { byNumber, lineLabel, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
-import { NeedsList } from "./NeedsList";
+import { type LeftAt, NeedsList } from "./NeedsList";
 import { Notify } from "./Notify";
 import { awaitingApproval, type Need } from "./needs";
 import { noticeAfter, type Place, type Raised } from "./notices";
@@ -134,10 +134,9 @@ interface Reopened {
   n: number;
 }
 
-/** The rows J and K step through: Needs you's entries, else the rows of the view in the page's main area. */
+/** The rows J and K step through: those of the view in the page's main area, the Overview's or Needs you's. */
 function rowsInView(): HTMLElement[] {
-  const scope = document.querySelector("[data-testid=needs]") ?? document.querySelector("main");
-  return [...(scope?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+  return [...(document.querySelector("main")?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
 }
 
 /** The Undo a reload left on offer in this tab, offered again; or none. */
@@ -168,7 +167,7 @@ export function App() {
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
   /** Counts the keyboard's asks to edit the item shown, which its panel answers. */
   const [editAsked, setEditAsked] = useState(0);
-  /** The Map, or the threads in waves over it. */
+  /** The Map, or a view over it: the Overview, the threads in waves, or Needs you. */
   const [view, setView] = useState<View>(HOME);
   const viewNow = useRef(view);
   viewNow.current = view;
@@ -183,10 +182,6 @@ export function App() {
    * close. Dropped once the user selects on the Map or goes to another view, which makes that where they are.
    */
   const [cameFrom, setCameFrom] = useState<{ view: View; by: "item" | "thread" } | null>(null);
-  /** A thread the command menu opened while Needs you showed, so shown over it. */
-  const [threadOver, setThreadOver] = useState<string | null>(null);
-  /** The item Needs you was opened over, which shows again once it closes. */
-  const [needsOver, setNeedsOver] = useState<string | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [framed, setFramed] = useState<Framed | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
@@ -213,9 +208,10 @@ export function App() {
   /** A write drawn before the server answers, until the plan read after it holds it. */
   const [pending, setPending] = useState<Pending | null>(null);
   const [reopened, setReopened] = useState<Reopened | null>(null);
-  const [showNeeds, setShowNeeds] = useState(false);
-  /** The entry Needs you opens at, when the Overview opened it from one. */
+  /** The entry Needs you's view opens at, when the Overview went there from one. */
   const [needsAt, setNeedsAt] = useState<string | null>(null);
+  /** Where Needs you's view was left for what an entry opened, so closing that comes back to it as it was. */
+  const needsLeft = useRef<LeftAt | null>(null);
   /**
    * An address to open: the one the app was opened at, or one a notification sent the app already open. It waits for
    * the plan to load, and for a form holding what the user typed to close.
@@ -342,10 +338,6 @@ export function App() {
   useEffect(() => {
     if (view !== "map") setCameFrom(null);
   }, [view]);
-  // A thread the command menu put over Needs you, once closed, opens again as any other does.
-  useEffect(() => {
-    if (thread === null) setThreadOver(null);
-  }, [thread]);
   /** Goes back to the view what is closing was opened from. */
   const goBack = () => {
     if (cameFrom !== null) setView(cameFrom.view);
@@ -624,12 +616,9 @@ export function App() {
     mode: mode.kind !== "idle",
     adding: adding !== null,
     item: chosen !== undefined,
-    needs: showNeeds,
     projects: showProjects && !wide,
     thread: thread !== null,
     away: !wide && view !== HOME,
-    threadOverNeeds: showNeeds && thread !== null && threadOver === thread,
-    needsOverItem: showNeeds && chosen !== undefined && needsOver === chosen.id,
   };
   /**
    * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
@@ -685,7 +674,6 @@ export function App() {
       else if (layer === "mode") setMode({ kind: "idle" });
       else if (layer === "add") setAdding(null);
       else if (layer === "item") closeItem();
-      else if (layer === "needs") setShowNeeds(false);
       else if (layer === "projects") setShowProjects(false);
       else if (layer === "away") setView(HOME);
       else closeThread();
@@ -788,8 +776,7 @@ export function App() {
     view,
     item: chosen?.id ?? null,
     thread,
-    needs: showNeeds,
-    needsAt: showNeeds ? needsAt : null,
+    needsAt: view === "needs" ? needsAt : null,
   };
   const hereNow = useRef(here);
   hereNow.current = here;
@@ -817,11 +804,12 @@ export function App() {
     const onMessage = (event: MessageEvent) => {
       if (event.data?.kind !== "open" || typeof event.data.search !== "string") return;
       event.ports[0]?.postMessage("opened");
-      // A newer link replaces one still waiting. One naming no view, such as Needs you's, opens over the view shown, so
-      // closing it goes back to where the user was.
+      // A newer link replaces one still waiting. One naming no view, such as a thread's, opens over the view shown, so
+      // closing it goes back to where the user was; Needs you's, bare `needs`, names its view.
       const asked = parse(event.data.search);
       const query = new URLSearchParams(event.data.search);
-      setWanted(query.has("view") || query.has("item") ? asked : { ...asked, view: hereNow.current.view });
+      const names = ["view", "item", "needs"].some((key) => query.has(key));
+      setWanted(names ? asked : { ...asked, view: hereNow.current.view });
     };
     container.addEventListener("message", onMessage);
     container.startMessages();
@@ -839,7 +827,7 @@ export function App() {
         ? (model.items.get(link.item)?.title ?? link.item)
         : link.thread !== null
           ? (lines.get(link.thread)?.name ?? link.thread)
-          : link.needs
+          : link.view === "needs"
             ? "Needs you"
             : link.view === "map"
               ? "the Map"
@@ -885,7 +873,7 @@ export function App() {
     // A link names what it opens where it is, so the user came from nowhere else.
     setCameFrom(null);
     setNeedsAt(to.needsAt);
-    setShowNeeds(to.needs);
+    needsLeft.current = null;
     const gone = found.missing.join(" and ");
     // An offered Undo waits wherever the user goes, a link included, and one a reload kept is offered again.
     setNotice((was) =>
@@ -974,15 +962,11 @@ export function App() {
     if (run.kind === "archived") return setShowArchived((was) => !was);
     if (run.kind === "refresh") return refresh();
     if (document.querySelector("form[data-dirty='true']") !== null) return setNotice(UNSAVED);
-    if (run.kind === "view") setView(run.view);
-    else if (run.kind === "needs") openNeeds();
+    if (run.kind === "view") goTo(run.view);
     else if (run.kind === "add") startAdd(null);
     else if (run.kind === "on-item") onItem(run.action);
-    else if (run.kind === "thread") {
-      // To the Map, framed, as every thread goes; over Needs you if it shows, so closing the thread comes back to it.
-      setThreadOver(showNeeds ? run.id : null);
-      toThread(run.id);
-    } else select(run.id, null);
+    else if (run.kind === "thread") toThread(run.id);
+    else select(run.id, null);
   };
   /**
    * Acts on the item whose panel shows, as its buttons do, while they would be enabled; a move or link, asked for
@@ -998,15 +982,14 @@ export function App() {
       setShowCommand(true);
     }
   };
-  /** Moves the focus to the next or previous row of the list in view: Needs you's entries, else the Overview's rows. */
+  /** Moves the focus to the next or previous row of the list in view: the Overview's rows, or Needs you's entries. */
   const moveRow = (by: 1 | -1) => {
     const rows = rowsInView();
     const here = document.activeElement instanceof HTMLElement ? document.activeElement.closest("[data-row]") : null;
     rows[nextRow(rows.length, here === null ? -1 : rows.indexOf(here as HTMLElement), by)]?.focus();
   };
   onKeyAction.current = (action) => {
-    if (action.kind === "go") setView(action.view);
-    else if (action.kind === "needs") openNeeds();
+    if (action.kind === "go") goTo(action.view);
     else if (action.kind === "add") startAdd(null);
     else if (action.kind === "search" || action.kind === "help") {
       setShortcutsOnly(action.kind === "help");
@@ -1186,25 +1169,15 @@ export function App() {
     </>
   );
   /**
-   * Needs you is a layer: pressed while another covers it, it comes back to the top, closing what was over it; on top,
-   * it closes. Opening it closes the item and the outline's sheet, which would cover it.
+   * Goes to a view: Needs you's from its top, or at the entry `at` names, as only closing what one of its entries
+   * opened comes back to it where it was left.
    */
-  const toggleNeeds = () => {
-    const above = openLayers(open).indexOf("needs");
-    if (above > 0) {
-      closeTop.current(above);
-      return;
+  const goTo = (to: View, at: string | null = null) => {
+    if (to === "needs") {
+      setNeedsAt(at);
+      needsLeft.current = null;
     }
-    // Over the item open, which shows again once it closes.
-    setNeedsOver(showNeeds ? null : selected);
-    setShowProjects(false);
-    setThreadOver(null);
-    setShowNeeds((was) => !was);
-  };
-  /** Opens Needs you, at the entry `key` names if given. */
-  const openNeeds = (key?: string) => {
-    setNeedsAt(key ?? null);
-    if (!showNeeds || topLayer(open) !== "needs") toggleNeeds();
+    setView(to);
   };
   return (
     <Shell
@@ -1213,19 +1186,12 @@ export function App() {
       autonomy={levelLabel(levelChosen ?? load.level)}
       view={view}
       onView={(to) => {
-        // On a phone, Needs you fills the screen, so a view picked from the tabs would change nothing in sight.
-        if (!wide) setShowNeeds(false);
         // An item is shown on the Map: going to another view leaves it, rather than its panel standing over a view
         // that doesn't show it.
         if (to !== "map") setSelected(null);
-        setView(to);
+        goTo(to);
       }}
       needs={load.needs.length}
-      needsOpen={showNeeds}
-      onNeeds={() => {
-        setNeedsAt(null);
-        toggleNeeds();
-      }}
       onAdd={() => startAdd(null)}
       menu={menu}
       outline={
@@ -1273,8 +1239,11 @@ export function App() {
             }
           />
         </Suspense>
-        {/* Wider, the sidebar or tabs show the view's name; it heads the page for assistive technology all the same. */}
-        {wide && view !== "overview" ? <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1> : null}
+        {/* Wider, the sidebar or tabs show the view's name; it heads the page for assistive technology all the same. The
+            Overview and Needs you title their own pages. */}
+        {wide && (view === "map" || view === "threads") ? (
+          <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1>
+        ) : null}
         {view === "threads" && waves !== null ? (
           <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={pickThread} />
         ) : null}
@@ -1287,11 +1256,26 @@ export function App() {
             waves={waves}
             outline={outline}
             items={itemsById}
-            onNeeds={openNeeds}
-            needsOpen={showNeeds}
+            onNeeds={(key) => goTo("needs", key ?? null)}
             onPickThread={toThread}
             onSelectProject={(id) => select(id, null)}
             onView={setView}
+          />
+        ) : null}
+        {view === "needs" ? (
+          <NeedsList
+            needs={load.needs}
+            titleOf={titleOf}
+            lines={lines}
+            membersOf={(id) => (model === null ? [] : membersOf(model, id))}
+            busy={busy}
+            onCommand={(edit, done, undo) => send(edit, { select: null, pin: null, done, ...(undo ? { undo } : {}) })}
+            // To the Map, as the Overview's rows go: the item selected, or the thread framed with its panel, and closing
+            // either comes back here.
+            onSelect={(id) => select(id, null)}
+            onPickThread={toThread}
+            at={needsAt}
+            left={needsLeft}
           />
         ) : null}
         {view === "map" && shown.length === 0 ? (
@@ -1373,29 +1357,6 @@ export function App() {
             busy={busy}
           />
         )}
-        {panel === "needs" ? (
-          <NeedsList
-            needs={load.needs}
-            titleOf={titleOf}
-            lines={lines}
-            membersOf={(id) => (model === null ? [] : membersOf(model, id))}
-            busy={busy}
-            onCommand={(edit, done, undo) => send(edit, { select: null, pin: null, done, ...(undo ? { undo } : {}) })}
-            onSelect={(id) => {
-              // Picked from the list, an item shows over it, even the one the list was opened over.
-              setNeedsOver(null);
-              select(id, null);
-            }}
-            onPickThread={(id) => {
-              // To the Map, framed, as an item picked from the list goes, over the list, so closing it comes back.
-              setThreadOver(id);
-              toThread(id);
-            }}
-            onClose={() => setShowNeeds(false)}
-            onDismiss={() => closeTop.current(1)}
-            at={needsAt}
-          />
-        ) : null}
         {panel === "projects" && outline !== null ? (
           <ProjectsSheet onClose={() => setShowProjects(false)} onDismiss={() => closeTop.current(1)}>
             <Projects

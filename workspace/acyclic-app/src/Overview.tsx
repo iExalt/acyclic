@@ -1,6 +1,6 @@
 // The Overview home: what needs the user, the threads at work, the threads to start next, and each project's progress,
-// as lists to scan; each row opens what it names. Nothing here acts on the plan: a decision is made in Needs you,
-// where it is the entry's own, and a row here only opens it.
+// as lists to scan; each row opens what it names. Nothing here acts on the plan: a decision is made in Needs you's
+// view, where it is the entry's own, and a row here, a preview of it, only opens it there.
 
 import type { Counts, Item } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
@@ -33,10 +33,8 @@ export interface OverviewProps {
   outline: Outline | null;
   /** The plan's items by id, for each project's own progress. */
   items: ReadonlyMap<string, Pick<Item, "progress">>;
-  /** Opens Needs you, at the entry `key` names if given. */
+  /** Goes to Needs you, at the entry `key` names if given. */
   onNeeds: (key?: string) => void;
-  /** Needs you is open over the Overview, so its section here would only repeat it. */
-  needsOpen: boolean;
   onPickThread: (id: string) => void;
   onSelectProject: (id: string) => void;
   /** The view to see everything a section stands for. */
@@ -52,7 +50,6 @@ export function Overview({
   outline,
   items,
   onNeeds,
-  needsOpen,
   onPickThread,
   onSelectProject,
   onView,
@@ -62,7 +59,7 @@ export function Overview({
   // In three columns, an Up next half as long as the longest list beside it stacks under In progress, and the projects
   // take its column, rather than leave most of it empty and start below the first view.
   const longest = Math.max(Math.min(needs.length, needsShown), Math.min(working.length, THREADS_SHOWN));
-  const shortNext = !needsOpen && 2 * Math.max(1, Math.min(next.length, THREADS_SHOWN)) <= longest;
+  const shortNext = 2 * Math.max(1, Math.min(next.length, THREADS_SHOWN)) <= longest;
   const thread = (id: string) => {
     const line = lines.get(id);
     const tally = counts.get(id);
@@ -109,7 +106,7 @@ export function Overview({
         Overview
       </h1>
 
-      <section className="overview-section" aria-labelledby="overview-needs" hidden={needsOpen}>
+      <section className="overview-section" aria-labelledby="overview-needs">
         <header>
           <h2 id="overview-needs">Needs you</h2>
           <span className="count muted">{countText(needs.length)}</span>

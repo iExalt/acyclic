@@ -127,7 +127,7 @@ button {
   font-weight: 650;
   cursor: pointer;
 }
-/* A view's row has hover of its own, below, which leaves Needs you open and the view shown as they are. */
+/* A view's row has hover of its own, below, which leaves the view shown as it is. */
 button:hover:not(:disabled, [aria-disabled="true"], .view) {
   background: var(--hover);
 }
@@ -347,7 +347,7 @@ button.autonomy:hover:not(:disabled) {
   flex: 1;
 }
 
-/* A view, Needs you, or a tab: a quiet row that marks the current one. */
+/* A view, Needs you among them, or a tab: a quiet row that marks the current one. */
 button.view {
   display: flex;
   gap: 10px;
@@ -357,18 +357,15 @@ button.view {
   color: var(--muted);
   text-align: left;
 }
-/* Not Needs you open: filled under a pointer left on it, or a finger just lifted, it read as a second view shown. */
-button.view:hover:not(:disabled, [aria-current="page"], [aria-pressed="true"]) {
+/* Not the view shown: filled under a pointer left on it, or a finger just lifted, it read as a second view shown. */
+button.view:hover:not(:disabled, [aria-current="page"]) {
   color: var(--ink);
   background: var(--hover);
 }
-/* The view shown is filled; Needs you open over it is only inked, so one place reads as where the user is. */
+/* The view shown is filled, so one place reads as where the user is. */
 button.view[aria-current="page"] {
   color: var(--ink);
   background: var(--tile);
-}
-button.view[aria-pressed="true"] {
-  color: var(--ink);
 }
 .needs-button .label {
   display: flex;
@@ -457,11 +454,10 @@ button.icon[aria-pressed="true"] {
 .tabbar button.view[aria-current="page"] {
   background: none;
 }
-.tabbar button.view[aria-current="page"] .icon-svg,
-.tabbar button.view[aria-pressed="true"] .icon-svg {
+.tabbar button.view[aria-current="page"] .icon-svg {
   stroke-width: 2.25;
 }
-/* On a phone, the view shown has a pill behind its icon; Needs you open is only inked. */
+/* On a phone, the view shown has a pill behind its icon. */
 .tabbar button.view[aria-current="page"]::before {
   content: "";
   position: absolute;
@@ -981,7 +977,7 @@ button.project-title {
   inset: 0;
 }
 
-/* The inspector, the needs list, a thread, the add form and a mode's prompt: a sheet along the bottom on a phone, a
+/* The inspector, a thread, the add form and a mode's prompt: a sheet along the bottom on a phone, a
    pane on the right when wide. A sheet is opaque: the Map behind it would only be noise. */
 .inspector,
 .sheet {
@@ -1447,11 +1443,18 @@ code {
   padding: 12px 0 14px;
   border-top: 1px solid var(--rule);
 }
-/* The entry the Overview opened the list at, marked until the list closes. */
+/* The entry the Overview opened the view at, marked until the view is left. */
 .needs > li[data-at="true"] {
   padding-left: 10px;
   box-shadow: inset 3px 0 0 var(--accent);
-  scroll-margin-top: 48px;
+  scroll-margin-top: 20px;
+}
+/* Needs you's view uses the page's width: entries in columns of at least 360 px, as many as fit, one on a phone. The
+   rows line up across columns, so each row's hairlines run level. */
+.needs-view .needs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  column-gap: 40px;
 }
 .notify {
   margin: 0;
@@ -1640,8 +1643,9 @@ input[aria-invalid="true"] + .hint,
   }
 }
 
-/* The Overview home: lists to scan over the Map, which stays drawn beneath. */
-.overview {
+/* The Overview home and Needs you's view: pages over the Map, which stays drawn beneath. */
+.overview,
+.needs-view {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -1657,7 +1661,7 @@ input[aria-invalid="true"] + .hint,
   letter-spacing: -0.01em;
 }
 /* A phone's bar names the view already. */
-.phone-shell .overview .view-title {
+.phone-shell .view-title {
   display: none;
 }
 .overview-section {
@@ -1700,16 +1704,10 @@ input[aria-invalid="true"] + .hint,
   .overview > .overview-projects {
     grid-column: 1 / -1;
   }
-  .overview-projects > .rows,
-  .overview-section[hidden] + .overview-pair .rows {
+  .overview-projects > .rows {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     column-gap: 40px;
-  }
-  /* With Needs you open beside it, its section steps aside, and the threads take its column too, in columns of rows,
-     rather than leave it empty. */
-  .overview-section[hidden] + .overview-pair {
-    grid-column: 1 / -1;
   }
 }
 /* On a wide screen with no panel open, Needs you, In progress and Up next stand in three columns. */
@@ -1733,7 +1731,7 @@ input[aria-invalid="true"] + .hint,
 }
 /* Wide, an open panel keeps its width clear. */
 @media (min-width: 900px) {
-  .stage:has(> .inspector, > .sheet.add) > .overview {
+  .stage:has(> .inspector, > .sheet.add) > :is(.overview, .needs-view) {
     padding-right: calc(360px + 24px);
   }
 }

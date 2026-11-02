@@ -7,8 +7,8 @@ default view, a box expanded and collapsed again without moving on screen, archi
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
 the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread is
 approved, an agent's proposals to it are kept and dropped, and its level, its flag and the global level are set; from
-the needs-you list, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
-subscription it is given, records a pushed notification without displaying a system banner, and opens the needs-you list
+Needs you's view, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
+subscription it is given, records a pushed notification without displaying a system banner, and opens Needs you's view
 it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
 and WebKit, a page on another port of the same host can neither write with the paired browser's cookie nor frame the
 app. Chromium then draws the 3,500-item fixture. What the Map should show is worked out here from the tracker's own
@@ -466,7 +466,7 @@ def to_map(page):
 @timed
 def overview_journey(page, view, name, failures):
     """The app opens on the Overview: its four lists, a thread's row taking the user to the Map with its panel open, a
-    needs row opening the list at its entry, the open list marked less than the view shown, and on a phone Back from the
+    needs row going to Needs you's view at its entry, that view marked as the one shown, and on a phone Back from the
     Map coming home."""
     overview = page.get_by_test_id("overview")
     overview.wait_for(timeout=5_000)
@@ -490,21 +490,16 @@ def overview_journey(page, view, name, failures):
     entry.click()
     needs = page.get_by_test_id("needs")
     needs.wait_for(timeout=5_000)
+    overview.wait_for(state="detached", timeout=5_000)
     at = needs.locator("[data-at=true]")
     if at.count() != 1 or not at.evaluate("e => e === document.activeElement"):
-        failures.append(f"{name}: a needs row on the Overview didn't open the list at its entry, focused")
-    # The view shown and the open list differ by more than colour: a fill, or on a phone a pill behind the icon.
-    marks = page.evaluate(
-        """() => ["[data-view=overview]", "[data-testid=needs-button]"].map(sel => {
-            const el = document.querySelector(sel);
-            return [getComputedStyle(el).backgroundColor, getComputedStyle(el, "::before").content];
-        })"""
-    )
-    if marks[0] == marks[1]:
-        failures.append(f"{name}: the open Needs you is marked as the view shown is: {marks}")
-    if overview.locator("[aria-labelledby=overview-needs]").is_visible():
-        failures.append(f"{name}: the Overview repeated Needs you under the open list")
-    page.keyboard.press("Escape")
+        failures.append(f"{name}: a needs row on the Overview didn't open Needs you at its entry, focused")
+    # Needs you is a view: the one shown, its name the bar's title on a phone, the address saying so.
+    current = page.locator("[data-view][aria-current=page]").evaluate_all("l => l.map(e => e.dataset.view)")
+    title = page.locator(".bar h1").all_inner_texts()
+    if current != ["needs"] or title not in ([], ["Needs you"]) or "view=needs" not in page.url:
+        failures.append(f"{name}: Needs you shown read as current {current}, titled {title}, at {page.url}")
+    page.locator("[data-view=overview]").click()
     needs.wait_for(state="detached", timeout=5_000)
     if view.get("has_touch"):
         # A phone's Back from another view comes home to the Overview, inside the app.
@@ -523,8 +518,9 @@ def overview_journey(page, view, name, failures):
 @timed
 def deep_link_journey(context, origin, view, plan, name, failures):
     """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
-    again; quick Escapes leave the address saying what's open; a stale link says so rather than opening nothing; and
-    Back from an item or a thread opened on the Overview or in Needs you goes back there, as the address says."""
+    again; quick Escapes leave the address saying what's open; a stale link says so rather than opening nothing; an old
+    Needs you address opens its view; and Back from an item or a thread opened on the Overview or in Needs you goes
+    back there, as the address says, Needs you scrolled as it was left."""
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda err: errors.append(str(err)))
@@ -584,8 +580,9 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         )
         if not (clear[0] >= 0 and clear[1] <= clear[2]):
             failures.append(f"{name}: a link to {far} drew it at {clear[:2]}, under the panel from {clear[2]}")
-    # A link to an item gone says so, and opens the rest it names: two layers, closed quicker than the history moves,
-    # leave the address saying what's open.
+    # A link to an item gone says so, and opens the rest it names: Needs you's view, from an address of when it opened
+    # over the others, and a thread over it. Two layers, a phone's view away from home one of them, closed quicker than
+    # the history moves, leave the address saying what's open.
     page.goto(f"{origin}/?item=no-such-item&thread=thread-0&needs")
     notice = page.get_by_test_id("notice")
     notice.wait_for(timeout=10_000)
@@ -596,11 +593,11 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     page.keyboard.press("Escape")
     page.locator("[data-testid=thread-panel]").wait_for(state="detached", timeout=5_000)
     page.wait_for_timeout(300)
-    if page.url != f"{origin}/?view=map":
+    if page.url != (f"{origin}/" if view.get("has_touch") else f"{origin}/?view=needs"):
         failures.append(f"{name}: after two quick Escapes the address is {page.url}")
     # An item opened from the Overview shows on the Map, and Back comes back to a bare address. On a phone, where Back
-    # is the way out and the entries stack: not while its editor holds typing; one opened from Needs you over the
-    # Overview comes back to both; and a thread opened from the Overview comes back to it too.
+    # is the way out and the entries stack: not while its editor holds typing; one opened from Needs you comes back to
+    # it, scrolled as it was and the focus on the row picked; and a thread opened from the Overview comes back to it.
     overview = page.get_by_test_id("overview")
     page.locator("[data-view=overview]").click()
     overview.wait_for(timeout=5_000)
@@ -626,19 +623,32 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: Back from an item opened on the Overview landed on {page.url}")
     if phone:
-        page.get_by_test_id("needs-button").click()
+        page.locator("[data-view=needs]").click()
         needs = page.get_by_test_id("needs")
-        needs.locator("[data-select]:visible").first.click()
+        needs.wait_for(timeout=5_000)
+        # Scrolled down the list, so coming back shows whether it kept its place.
+        top = needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
+        # A row already in view, so the click doesn't scroll the list first.
+        picked = needs.evaluate(
+            """n => { const box = n.getBoundingClientRect();
+                return [...n.querySelectorAll('[data-select]')].find(r => { const b = r.getBoundingClientRect();
+                    return b.height > 0 && b.top >= box.top && b.bottom <= box.bottom; })?.dataset.select; }"""
+        )
+        needs.locator(f"[data-select='{picked}']").click()
         title.wait_for(timeout=10_000)
         page.go_back()
         try:
             needs.wait_for(timeout=5_000)
-            overview.wait_for(timeout=5_000)
-            page.wait_for_function("() => location.search === '?needs'", timeout=5_000)
+            page.wait_for_function("() => location.search === '?view=needs'", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
+        kept = needs.evaluate("(n, id) => [n.scrollTop, document.activeElement?.dataset.select === id]", picked)
+        if top == 0 or abs(kept[0] - top) > 1 or not kept[1]:
+            failures.append(
+                f"{name}: Back to Needs you from {picked} came back scrolled {kept[0]} of {top}, focus there {kept[1]}"
+            )
         page.go_back()
-        needs.wait_for(state="detached", timeout=5_000)
+        overview.wait_for(timeout=5_000)
         # Up next's threads have an item ready, which the panel lists.
         page.locator("[aria-labelledby=overview-next] [data-overview-thread]").first.click()
         panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
@@ -667,7 +677,8 @@ def deep_link_journey(context, origin, view, plan, name, failures):
 @timed
 def command_journey(page, view, origin, plan, name, failures):
     """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
-    dismissed; on a phone, from the Map, Back then closes the item and comes home."""
+    dismissed; on a phone, from the Map, Back then closes the item and comes home. Wide, it goes to Needs you, whose
+    entries take the page's width in columns, and a thread one names goes to the Map and closes back."""
     id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
     title = plan.items[id]["title"]
     to_map(page)
@@ -715,23 +726,29 @@ def command_journey(page, view, origin, plan, name, failures):
             failures.append(f"{name}: Escape from the command menu didn't leave the item open, focused")
         page.keyboard.press("Escape")
         heading.wait_for(state="detached", timeout=5_000)
-        # A thread chosen while Needs you shows opens over it, where the user is looking; closing it shows the list.
-        page.get_by_test_id("needs-button").click()
-        needs = page.get_by_test_id("needs")
-        needs.wait_for(timeout=5_000)
         page.keyboard.press("ControlOrMeta+k")
         menu.wait_for(timeout=5_000)
-        # A thread is found by its number too.
-        page.keyboard.type("1")
-        page.locator(".command-row[data-command^='thread:']").first.click()
+        page.keyboard.type("needs")
+        page.locator(".command-row[data-command='view:needs']").click()
+        needs = page.get_by_test_id("needs")
+        needs.wait_for(timeout=5_000)
+        columns = needs.locator("[data-need]").evaluate_all(
+            "l => [new Set(l.map(e => e.offsetLeft)).size, Math.min(...l.map(e => e.offsetWidth))]"
+        )
+        if columns[0] < 2 or columns[1] < 360:
+            failures.append(f"{name}: Needs you's entries stood in {columns[0]} columns, {columns[1]} px wide")
+        page.screenshot(path=SHOTS / f"app-{name}-needs.png")
+        # A thread an entry names goes to the Map, framed, as every thread goes; closing it comes back here.
+        needs.locator("[data-pick-thread]").first.click()
         try:
-            page.get_by_test_id("thread-panel").wait_for(timeout=5_000)
+            page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=5_000)
+            if page.locator("[data-view=map][aria-current=page]").count() != 1:
+                failures.append(f"{name}: a thread picked in Needs you stayed off the Map, at {page.url}")
             page.keyboard.press("Escape")
             needs.wait_for(timeout=5_000)
         except PlaywrightTimeout:
-            failures.append(f"{name}: a thread the command menu chose didn't open over Needs you, then give it back")
-        page.keyboard.press("Escape")
-        needs.wait_for(state="detached", timeout=5_000)
+            failures.append(f"{name}: a thread picked in Needs you didn't open, or close back to Needs you")
+        to_map(page)
     print(f"{name}: the command menu found {id} by its title and opened it")
 
 
@@ -1131,13 +1148,13 @@ def map_journey(page, view, plan, name, failures, hint=None):
     pick_thread(page, plan, thread)
     panel.wait_for()
     if view.get("has_touch"):
-        # A phone's Back closes what's open one layer at a time, and stays in the app: the needs-you list over the
+        # A phone's Back closes what's open one layer at a time, and stays in the app: the outline's sheet over the
         # thread's panel, then the panel.
-        needs = page.get_by_test_id("needs")
-        page.get_by_test_id("needs-button").click()
-        needs.wait_for()
+        sheet = page.get_by_test_id("projects")
+        page.get_by_test_id("projects-button").click()
+        sheet.wait_for()
         page.go_back()
-        needs.wait_for(state="detached")
+        sheet.wait_for(state="detached")
         try:
             panel.wait_for(timeout=5_000)
             stayed = True
@@ -1151,33 +1168,33 @@ def map_journey(page, view, plan, name, failures, hint=None):
         # In the app, on the Map, the address saying so.
         if not stayed or urlsplit(page.url).query != "view=map":
             failures.append(
-                f"{name}: Back didn't close the needs-you list, then the thread's panel, in the app: at {page.url}"
+                f"{name}: Back didn't close the outline's sheet, then the thread's panel, in the app: at {page.url}"
             )
         if not panel.count():
             pick_thread(page, plan, thread)
         panel.wait_for()
         # Closed in the app, a layer gives its entry back, so the next Back closes what's open then. Under the panel,
         # the Map, away from the Overview, holds an entry of its own.
-        page.get_by_test_id("needs-button").click()
-        needs.get_by_role("button", name="Close").click()
-        needs.wait_for(state="detached")
+        page.get_by_test_id("projects-button").click()
+        sheet.get_by_role("button", name="Close", exact=True).click()
+        sheet.wait_for(state="detached")
         try:
             page.wait_for_function("() => history.state?.layers === 2", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
-                f"{name}: closing the needs-you list left the history at {page.evaluate('JSON.stringify(history.state)')}"
+                f"{name}: closing the outline's sheet left the history at {page.evaluate('JSON.stringify(history.state)')}"
             )
         # A jump back over both entries, as a long press on Back makes, closes both.
-        page.get_by_test_id("needs-button").click()
-        needs.wait_for()
+        page.get_by_test_id("projects-button").click()
+        sheet.wait_for()
         page.evaluate("history.go(-2)")
         try:
-            needs.wait_for(state="detached", timeout=5_000)
+            sheet.wait_for(state="detached", timeout=5_000)
             panel.wait_for(state="detached", timeout=5_000)
             page.wait_for_function("() => history.state?.layers === 1", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(
-                f"{name}: going back two entries didn't close both the needs-you list and the thread's panel"
+                f"{name}: going back two entries didn't close both the outline's sheet and the thread's panel"
             )
         if not panel.count():
             pick_thread(page, plan, thread)
@@ -2241,25 +2258,21 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 @timed
 def needs_journey(page, env, plan, thread, name, failures):
-    """Keeps an agent's proposal and approves a waiting thread from the needs-you list, whose count follows. Opened
-    from over the projects' sheet, the list shows in its place."""
+    """Keeps an agent's proposal and approves a waiting thread from Needs you's view, whose count follows. A thread or
+    an item an entry names goes to the Map, and closing it, by Escape or its ✕, comes back to the view."""
     count = page.get_by_test_id("needs-count")
     # The queue's count shows beside its name, on a phone as anywhere.
     if not count.is_visible():
         failures.append(f"{name}: the needs-you count isn't shown beside its name")
-    page.get_by_test_id("projects-button").click()
-    page.get_by_test_id("projects").wait_for()
-    page.get_by_test_id("needs-button").click()
+    page.locator("[data-view=needs]").click()
     needs = page.get_by_test_id("needs")
     try:
         needs.wait_for(timeout=10_000)
-        page.get_by_test_id("projects").wait_for(state="detached", timeout=5_000)
     except PlaywrightTimeout:
-        failures.append(f"{name}: Needs you opened over the projects' sheet left its list hidden")
+        failures.append(f"{name}: the Needs you tab showed no list")
         return
-    # A thread picked from the list goes to the Map, as any thread does, over the list; closing it comes back to both.
+    # A thread picked from the list goes to the Map, as any thread does; closing it comes back to the view.
     viewed = "() => new URLSearchParams(location.search).get('view')"
-    before = page.evaluate(viewed)
     needs.locator("[data-pick-thread]").first.click()
     try:
         page.get_by_test_id("thread-panel").wait_for(timeout=5_000)
@@ -2268,40 +2281,29 @@ def needs_journey(page, env, plan, thread, name, failures):
         page.keyboard.press("Escape")
         page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
         needs.wait_for(timeout=5_000)
-        if page.evaluate(viewed) != before:
+        if page.evaluate(viewed) != "needs":
             failures.append(f"{name}: closing a thread from Needs you left the view at {page.url}")
     except PlaywrightTimeout:
         failures.append(f"{name}: a thread picked from Needs you didn't open, or close back to the list")
-    # On a phone, where the list covers the view, a view chosen from the tabs closes it, so the choice shows.
-    page.locator("[data-view=threads]").click()
-    page.get_by_test_id("threads-view").wait_for(timeout=5_000)
-    try:
-        needs.wait_for(state="detached", timeout=5_000)
-    except PlaywrightTimeout:
-        failures.append(f"{name}: choosing Threads with Needs you open left the list over the Threads view")
-    page.locator("[data-view=map]").click()
-    page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
-    page.get_by_test_id("needs-button").click()
-    needs.wait_for(timeout=5_000)
-    # With an item open over the list, Needs you brings the list back rather than closing what's out of sight.
+    # An item likewise, selected on the Map; its panel's ✕ comes back.
     row = needs.locator("button.row[data-select]").first
     if row.count():
         row.click()
-        page.get_by_test_id("inspector").wait_for(timeout=5_000)
-        page.get_by_test_id("needs-button").click()
+        inspector = page.get_by_test_id("inspector")
         try:
-            page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+            inspector.wait_for(timeout=5_000)
+            if page.locator("[data-view=map][aria-current=page]").count() != 1:
+                failures.append(f"{name}: an item picked from Needs you stayed off the Map, at {page.url}")
+            inspector.get_by_role("button", name="Close", exact=True).click()
             needs.wait_for(timeout=5_000)
         except PlaywrightTimeout:
-            failures.append(f"{name}: Needs you under an item closed the list, or left the item over it")
-        if page.get_by_test_id("needs-button").get_attribute("aria-pressed") != "true":
-            failures.append(f"{name}: Needs you isn't pressed with its list on top")
+            failures.append(f"{name}: an item picked from Needs you didn't open, or its ✕ didn't come back to the list")
     else:
-        failures.append(f"{name}: no needs-you entry selects an item, so bringing the list back went unchecked")
+        failures.append(f"{name}: no needs-you entry selects an item, so coming back from one went unchecked")
     # The queue has the name its push notification gives it, apart from the in-review stage.
-    named = (page.get_by_test_id("needs-button").get_attribute("aria-label"), needs.locator("h2").inner_text())
+    named = (page.locator("[data-view=needs]").get_attribute("aria-label"), page.locator(".bar h1").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":
-        failures.append(f"{name}: the queue's button and heading read {named}, not Needs you")
+        failures.append(f"{name}: the queue's tab and title read {named}, not Needs you")
     outside = next(
         id
         for id, row in sorted(plan.items.items())
@@ -2388,12 +2390,12 @@ def needs_journey(page, env, plan, thread, name, failures):
         if sheet.count():
             page.get_by_test_id("projects").get_by_role("button", name="Close", exact=True).click()
         panel.get_by_role("button", name="Close").click()
-        # Picked from the list, the thread showed over it: closing it comes back to the list.
+        # Picked from the list, the thread showed on the Map: closing it comes back to the list.
         try:
             needs.wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: closing a thread picked from the needs-you list didn't come back to it")
-    print(f"{name}: kept a proposal and approved {approved} from the needs-you list")
+    print(f"{name}: kept a proposal and approved {approved} in Needs you, and came back from what it named")
 
 
 @timed
@@ -2414,7 +2416,6 @@ def push_journey(context, page, env, origin, name, failures):
             f"{name}: with permission and no subscription, the switch isn't off and ready"
         )
     page.keyboard.press("Escape")
-    page.get_by_test_id("needs-button").click()
     endpoint = "https://push.example/journey"
     answer = page.evaluate(
         """async (endpoint) => {
@@ -2478,10 +2479,9 @@ def push_journey(context, page, env, origin, name, failures):
     expected = {**message, "tag": "needs"}
     if shown != [expected]:
         failures.append(f"{name}: the push recorded {shown}, not {expected}")
-    # Opening the notification shows what it names, the needs-you list, in the app already open, without reloading it:
+    # Opening the notification shows what it names, Needs you's view, in the app already open, without reloading it:
     # the worker asks the page as its click handler does, and the page answers.
-    page.keyboard.press("Escape")
-    page.get_by_test_id("needs").wait_for(state="detached", timeout=5_000)
+    page.get_by_test_id("overview").wait_for(timeout=5_000)
     page.evaluate("() => { window.stayed = true; }")
     answered = worker.evaluate(
         """async (search) => {
@@ -2494,6 +2494,7 @@ def push_journey(context, page, env, origin, name, failures):
         "?needs",
     )
     page.get_by_test_id("needs").wait_for(timeout=10_000)
+    page.locator("[data-view=needs][aria-current=page]").wait_for(timeout=5_000)
     if not answered or not page.evaluate("() => window.stayed === true"):
         failures.append(f"{name}: a notification's link reloaded the open app, or it didn't answer ({answered})")
     page.evaluate(
@@ -2508,7 +2509,7 @@ def push_journey(context, page, env, origin, name, failures):
         failures.append(f"{name}: unsubscribing left the device")
     page.screenshot(path=SHOTS / f"app-{name}-notify.png")
     print(
-        f"{name}: subscribed, recorded a pushed notification, and opened the needs-you list"
+        f"{name}: subscribed, recorded a pushed notification, and opened Needs you's view"
     )
 
 

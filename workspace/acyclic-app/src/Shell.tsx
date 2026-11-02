@@ -1,5 +1,5 @@
-// The frame around the views: where the views, Needs you, adding and the menu are reached. A phone has one bar on top
-// and the views along the bottom; a wider screen has a quiet sidebar.
+// The frame around the views: where the views, Needs you among them, adding and the menu are reached. A phone has one
+// bar on top and the views along the bottom; a wider screen has a quiet sidebar.
 
 import { type ReactNode, useState } from "react";
 import { onMac } from "./commands";
@@ -18,7 +18,7 @@ import {
 import { Menu } from "./Menu";
 import { countText } from "./needs";
 
-export type View = "overview" | "map" | "threads";
+export type View = "overview" | "map" | "threads" | "needs";
 
 const MAC = onMac();
 /** Where this device remembers the sidebar folded. */
@@ -31,6 +31,7 @@ const VIEWS: { view: View; label: string; icon: typeof MapIcon; key: string }[] 
   { view: "overview", label: "Overview", icon: LayoutDashboard, key: "O" },
   { view: "map", label: "Map", icon: MapIcon, key: "M" },
   { view: "threads", label: "Threads", icon: Waypoints, key: "T" },
+  { view: "needs", label: "Needs you", icon: Inbox, key: "N" },
 ];
 
 export interface ShellProps {
@@ -41,9 +42,8 @@ export interface ShellProps {
   autonomy: string;
   view: View;
   onView: (view: View) => void;
+  /** How many entries Needs you holds, which its tab counts. */
   needs: number;
-  needsOpen: boolean;
-  onNeeds: () => void;
   onAdd: () => void;
   /** The menu's controls. */
   menu: ReactNode;
@@ -65,56 +65,41 @@ export function Shell(props: ShellProps) {
   return <SidebarShell {...props} />;
 }
 
-/** The views, each a destination: the one shown is the current page. */
-function ViewLinks({
-  view,
-  onView,
-  short,
-  shortcuts,
-}: Pick<ShellProps, "view" | "onView" | "shortcuts"> & { short?: boolean }) {
-  return VIEWS.map((one) => (
-    <button
-      key={one.view}
-      type="button"
-      className="view"
-      data-view={one.view}
-      aria-current={view === one.view ? "page" : undefined}
-      // A sequence, which aria-keyshortcuts can't say: the title names it. Without it, the title still names the icon,
-      // all a folded sidebar shows.
-      title={shortcuts ? `${one.label} (G then ${one.key})` : one.label}
-      onClick={() => onView(one.view)}
-    >
-      {short ? null : <Icon of={one.icon} />}
-      <span className="text">{one.label}</span>
-    </button>
-  ));
-}
-
-/** Needs you: a layer over the views, so a toggle rather than a destination. */
-function NeedsButton({ needs, needsOpen, onNeeds }: Pick<ShellProps, "needs" | "needsOpen" | "onNeeds">) {
-  return (
-    <button
-      type="button"
-      className="needs-button view"
-      data-testid="needs-button"
-      data-none={needs === 0}
-      aria-pressed={needsOpen}
-      aria-label={`Needs you: ${needs} waiting`}
-      title="Needs you"
-      onClick={onNeeds}
-    >
-      <Icon of={Inbox} />
-      {/* The count alone says something waits, as an inbox's does; with nothing waiting, none shows. */}
-      <span className="label">
-        <span className="text">Needs you</span>
-        {needs > 0 && (
-          <span className="count needs-n" data-testid="needs-count">
-            {countText(needs)}
+/** The views, each a destination: the one shown is the current page. Needs you's carries its count. */
+function ViewLinks({ view, onView, shortcuts, needs }: Pick<ShellProps, "view" | "onView" | "shortcuts" | "needs">) {
+  return VIEWS.map((one) => {
+    const isNeeds = one.view === "needs";
+    return (
+      <button
+        key={one.view}
+        type="button"
+        className={isNeeds ? "needs-button view" : "view"}
+        data-view={one.view}
+        data-none={isNeeds ? needs === 0 : undefined}
+        aria-current={view === one.view ? "page" : undefined}
+        aria-label={isNeeds ? `Needs you: ${needs} waiting` : undefined}
+        // A sequence, which aria-keyshortcuts can't say: the title names it. Without it, the title still names the
+        // icon, all a folded sidebar shows.
+        title={shortcuts ? `${one.label} (G then ${one.key})` : one.label}
+        onClick={() => onView(one.view)}
+      >
+        <Icon of={one.icon} />
+        {isNeeds ? (
+          // The count alone says something waits, as an inbox's does; with nothing waiting, none shows.
+          <span className="label">
+            <span className="text">{one.label}</span>
+            {needs > 0 && (
+              <span className="count needs-n" data-testid="needs-count">
+                {countText(needs)}
+              </span>
+            )}
           </span>
+        ) : (
+          <span className="text">{one.label}</span>
         )}
-      </span>
-    </button>
-  );
+      </button>
+    );
+  });
 }
 
 function Count({ count }: { count: number }) {
@@ -143,7 +128,7 @@ export function Wordmark() {
 }
 
 /**
- * A quiet sidebar holding the views, Needs you, adding and the outline, the menu at its foot; all but the foot scroll
+ * A quiet sidebar holding the views, adding and the outline, the menu at its foot; all but the foot scroll
  * as one. Folded, a rail of the controls' icons, Needs you's count kept, its fold remembered on this device.
  */
 function SidebarShell(props: ShellProps) {
@@ -187,8 +172,7 @@ function SidebarShell(props: ShellProps) {
             </span>
           </button>
           <nav className="views" aria-label="Views">
-            <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
-            <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
+            <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} needs={props.needs} />
           </nav>
           <button
             type="button"
@@ -244,7 +228,7 @@ function Autonomy({ level }: { level: string }) {
   );
 }
 
-/** A phone: the view's name with the outline, adding and the menu on top; the views and Needs you along the bottom. */
+/** A phone: the view's name with the outline, adding and the menu on top; the views along the bottom. */
 function PhoneShell(props: ShellProps) {
   const title = VIEWS.find((one) => one.view === props.view)?.label;
   return (
@@ -277,8 +261,7 @@ function PhoneShell(props: ShellProps) {
       </header>
       {props.children}
       <nav className="tabbar" aria-label="Views">
-        <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} />
-        <NeedsButton needs={props.needs} needsOpen={props.needsOpen} onNeeds={props.onNeeds} />
+        <ViewLinks view={props.view} onView={props.onView} shortcuts={props.shortcuts} needs={props.needs} />
       </nav>
     </div>
   );

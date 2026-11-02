@@ -2,7 +2,7 @@
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app. Pure, so the rules are tested without a browser.
 
-export type Layer = "command" | "mode" | "add" | "projects" | "item" | "needs" | "thread" | "away";
+export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "away";
 
 export interface Open {
   /** The command menu: over everything, as it can be opened from anywhere. */
@@ -12,7 +12,6 @@ export interface Open {
   adding: boolean;
   /** An item selected that is drawn. */
   item: boolean;
-  needs: boolean;
   /** The projects' sheet, on a phone. */
   projects: boolean;
   thread: boolean;
@@ -21,24 +20,13 @@ export interface Open {
    * bottom layer, under everything shown over the view.
    */
   away: boolean;
-  /**
-   * Not a layer but an order: a thread picked from Needs you, or from the command menu while it shows, goes over it,
-   * where the user is looking, rather than under it as a thread Needs you was opened over.
-   */
-  threadOverNeeds: boolean;
-  /** Likewise, Needs you opened over an item shows over it, and closing it shows the item again. */
-  needsOverItem: boolean;
 }
 
 /** The layers open, the one shown first. */
 export function openLayers(open: Open): Layer[] {
-  // The projects' sheet is opened over an item or the needs list, to see where they are, so it shows over both.
-  // An item over Needs you over a thread, unless Needs you was opened over the item, or the thread over Needs you; by
-  // where each goes rather than by swapping places, so both at once put the thread over Needs you over the item.
-  const panels: Layer[] = ["item"];
-  panels.splice(open.needsOverItem ? 0 : 1, 0, "needs");
-  panels.splice(open.threadOverNeeds ? panels.indexOf("needs") : panels.length, 0, "thread");
-  const order: Layer[] = ["command", "mode", "add", "projects", ...panels, "away"];
+  // The projects' sheet is opened over an item, to see where it is, so it shows over it; an item chosen from a
+  // thread's panel shows over the thread's.
+  const order: Layer[] = ["command", "mode", "add", "projects", "item", "thread", "away"];
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 
