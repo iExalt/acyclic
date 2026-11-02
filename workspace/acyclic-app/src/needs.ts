@@ -174,7 +174,7 @@ function viewOf(
         note: IN_A_TERMINAL,
       };
     case "dangling": {
-      const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}`;
+      const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}:${str(need.target)}`;
       const name = nameOf(str(need.entity), str(need.id));
       // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.
       if (str(need.entity) === "item" && str(need.field) === "waits-for")

@@ -144,6 +144,13 @@ describe("needView", () => {
     );
     expect(waits.text).toBe("A waits for q, which doesn't exist");
     expect(waits.note).toBe("acyclic item edit a --no-waits-for q");
+    // Each missing target is its own entry, however many one item's field names.
+    const keys = ["q", "r"].flatMap((target) =>
+      ["waits-for", "repositories"].map(
+        (field) => needView({ kind: "dangling", entity: "item", id: "a", field, target }, none, titles).key,
+      ),
+    );
+    expect(new Set(keys).size).toBe(4);
     // The waiting item itself gone leaves the older shape, kept as it was.
     const orphan = needView({ kind: "dangling", entity: "link", id: "x", field: "end", target: "q" }, none, titles);
     expect(orphan.text).toBe("x: its end names q, which doesn't exist");
