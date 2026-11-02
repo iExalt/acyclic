@@ -146,6 +146,18 @@ fn ordering_links_never_close_a_cycle_locally() {
 }
 
 #[test]
+fn a_stored_after_link_is_skipped() {
+    let mut r = replica("a");
+    items(&mut r, &["a", "b"]);
+    let key = Key::new(kind::LINK, "after-1-a-b").unwrap();
+    for (name, value) in [("from", "a"), ("to", "b"), ("kind", "after")] {
+        r.write(&key, name, "actor/user", 2, Some(json!(value))).unwrap();
+    }
+    r.write(&key, "present", "actor/user", 2, Some(json!(true))).unwrap();
+    assert_eq!(model(&r).links, []);
+}
+
+#[test]
 fn a_relates_link_orders_nothing_and_is_removed_once() {
     let mut r = replica("a");
     items(&mut r, &["a", "b"]);

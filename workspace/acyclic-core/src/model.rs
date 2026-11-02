@@ -407,7 +407,10 @@ impl Model {
                 self.items.insert(key.id.clone(), item);
             },
             kind::LINK => {
-                if state.field(key, link::PRESENT).is_none() {
+                // A soft dependency older versions stored is skipped: such links no longer order or relate anything.
+                if state.field(key, link::PRESENT).is_none()
+                    || value::<String>(state, key, link::KIND)? == Value::One("after".to_owned())
+                {
                     return Ok(());
                 }
                 let (Value::One(from), Value::One(to), Value::One(kind)) = (

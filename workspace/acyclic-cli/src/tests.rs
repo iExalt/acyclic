@@ -669,11 +669,14 @@ fn every_command_follows_the_input_conventions() {
 }
 
 #[test]
-fn a_removed_command_is_a_usage_error() {
-    let out = run("acyclic thread set t1 --title T");
-    assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""));
-    assert!(out.stderr.starts_with("error: "), "{out:?}");
+fn a_removed_command_such_as_graph_is_a_usage_error() {
+    for line in ["acyclic graph", "acyclic thread set t1 --title T"] {
+        let out = run(line);
+        assert_eq!((out.code, out.stdout.as_str()), (exit::USAGE, ""), "{line}");
+        assert!(out.stderr.starts_with("error: unrecognized subcommand"), "{out:?}");
+    }
 }
+
 #[test]
 fn flags_that_contradict_each_other_are_usage_errors() {
     let check = |line: &str| {
