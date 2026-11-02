@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.0](https://github.com/iExalt/acyclic/compare/v0.4.0...v0.5.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* record ids are UUIDv7s, and references resolve by full id, exact title or `owner/name`, or an id ending of at least 6 characters, refusing an ambiguous one with the new `ambiguous` error; an invalid `--id` or imported id is the new `invalid-id` error, and `reserved-id` is gone. `item add` and `thread add` take `--id` instead of a positional id, and `repository add` takes `--name <OWNER/NAME>` and an optional `--id` instead of a positional id and `--owner`; `repository edit` loses `--owner`. `item done` takes `--commit <OWNER/NAME>@<SHA>` and loses `--repository`. Evidence's `note` is now `text`, and the evidence view is `{commit: "owner/name@sha", text}`. Import reads only version 3, with `id` in place of `key`, an item's `thread` in place of a thread's `items`, and evidence as `{commit: "<repository id>@<sha>", text}`. The state format version is bumped, so a tracker written by an earlier version is refused until migrated. `clones.toml` is keyed by `owner/name`, not by repository id. `thread renumber` is removed. In JSON, adds take an `id` key, the positional `item`, `thread` and `repository` keys on adds are dropped, and `sync` no longer reports `number_clashes`.
+* the `link` command group (`link add`, `link remove`) is removed; use `item add --waits-for` and `item edit --waits-for` / `--no-waits-for`. The flags `--area`/`--no-area`, `--resource`/`--no-resource` and `--gate`/`--no-gate` are removed from `item add` and `item edit`, and `item edit --state` no longer takes `in-progress`. Item JSON drops `gate`, `areas`, `resources` and `links.relates_to`/`links.related_from`. The `resource-busy` readiness, the `resource-held` error and the `resource-clash` need are gone, and a dangling waits-for need now names the waiting item (`entity: item`, `field: waits-for`) and carries a `fix`. Import documents put `waits_for` on items: a `links` list, `areas`, `resources`, `gate` or an `in-progress` state is refused. A tracker holding relates or after links or stored in-progress states can't be read until it is migrated.
+* these commands moved, with no aliases, so the old names are now usage errors: `show` is now `item show`, `list` is now `item list`, `done` is now `item done`, `ready` is now `thread ready`, `claim` is now `thread claim` and `release` is now `thread release`. The `repo` group is now `repository` (`repository add`, `edit`, `show` and `list`). `done --note <NOTE>` / `-n` is now `item done --evidence <TEXT>` / `-e`. `--repository` gains the short form `-r` on `item add`, `item edit`, `thread add` and `thread edit`. In the server's API, `"list"` is now `{"item": "list"}`. `{"show": …}` is now `{"item": {"show": …}}`. `{"done": {…, "note": …}}` is now `{"item": {"done": {…, "evidence": …}}}`. `ready`, `claim` and `release` now sit under `thread`, and `repo` is now `repository`.
+* `--as-user`, `acyclic level`, the `proposal` commands, `thread approve`/`revoke`, `ready --approved` and `thread add/edit --level/--no-level` are removed. With no actor given, commands write as `actor/user` instead of `agent/undeclared`. The `user-only`, `user-from-environment`, `not-allowed` and `decided` error codes are gone. Thread JSON drops `approved` and `level`. Write and import results drop `proposals`, `placed` entries drop `outcome` and `proposal`, and the import format no longer accepts a thread's `approved`. `needs` no longer lists `awaiting-approval`, `proposal`, `unapproved`, `new-blocker` or `question` entries, and lists thread cycles as `thread-cycle`. The `up` session no longer refuses files that other users can open. `acyclic done` on work that isn't ready or that someone else holds now needs `--force`, for the user too.
+* `acyclic graph` and `ACYCLIC_OUTPUT` are removed, import format version 1 and `follows` links are refused, stored `after` links are skipped, and a browser holding only the shared `acyclic-up` cookie must pair again.
+* remove agent runs
+
+### Features
+
+* give every record a UUIDv7 id, and match records by id or name ([5d603f3](https://github.com/iExalt/acyclic/commit/5d603f3d7f86c7d9b12811ac160a05e839c06f52))
+
+
+### Bug Fixes
+
+* **bench:** pick batch items from the ready threads' rows ([0ced095](https://github.com/iExalt/acyclic/commit/0ced0959a1f29a66af406ee408f1ea11f7365bd1))
+* **core:** open a tracker without fully parsing every peer's state ([4772d2f](https://github.com/iExalt/acyclic/commit/4772d2f7a4d95dd0ebc1c50a64de2076f104b449))
+
+
+### Performance Improvements
+
+* run git without the xcrun stub on macOS, and split the two-machine sync test ([438d999](https://github.com/iExalt/acyclic/commit/438d99941407381b41677ee1b139c2ccefdb0119))
+
+
+### Code Refactoring
+
+* drop areas, resources, gates, relates-to links and the stored in-progress state ([107ef3c](https://github.com/iExalt/acyclic/commit/107ef3c06eaa543c7f70b41b5f3e90dfb8438f4d))
+* drop user-only gates, proposals and thread approval ([1571eda](https://github.com/iExalt/acyclic/commit/1571eda5844bb6d8caeabdf2e691c3b309e0d726))
+* put every command in its group, and give each flag one meaning ([4f0a162](https://github.com/iExalt/acyclic/commit/4f0a16295f595497c127df1655ddfcd7fc9069be))
+* remove agent runs ([9a86330](https://github.com/iExalt/acyclic/commit/9a86330db74376c3367c3e88ef12f3eeff653cd6))
+* remove the graph command, migration hints and backward compatibility ([33bc3ac](https://github.com/iExalt/acyclic/commit/33bc3ac72264a1c3268fe8123fac6f69aff80247))
+
 ## [0.4.0](https://github.com/iExalt/acyclic/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
