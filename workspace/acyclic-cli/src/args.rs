@@ -411,12 +411,6 @@ impl Command {
             },
             Self::Item(ItemCommand::Edit(edit)) => edit.validate(),
             Self::Thread(ThreadCommand::Edit(edit)) => edit.validate(),
-            Self::Repo(RepoCommand::Add { public, private, .. }) if public == private => {
-                Err(usage("a repository is --public or --private: pass one"))
-            },
-            Self::Repo(RepoCommand::Edit { public: true, private: true, .. }) => {
-                Err(usage("--public and --private contradict each other"))
-            },
             _ => Ok(()),
         }
     }
@@ -531,7 +525,7 @@ pub enum ItemCommand {
         /// The item.
         item: String,
     },
-    /// Archives a done subtree (user or project-management run only).
+    /// Archives a done subtree (user only).
     Archive {
         /// The subtree's root.
         item: String,
@@ -812,14 +806,6 @@ pub enum RepoCommand {
         /// The default branch.
         #[arg(long)]
         default_branch: String,
-        /// It is public: this or `--private`.
-        #[arg(long)]
-        #[serde(default)]
-        public: bool,
-        /// It is private: this or `--public`.
-        #[arg(long)]
-        #[serde(default)]
-        private: bool,
     },
     /// Edits a repository record: any of its fields.
     Edit {
@@ -834,14 +820,6 @@ pub enum RepoCommand {
         /// A new default branch.
         #[arg(long)]
         default_branch: Option<String>,
-        /// It is public.
-        #[arg(long)]
-        #[serde(default)]
-        public: bool,
-        /// It is private.
-        #[arg(long)]
-        #[serde(default)]
-        private: bool,
     },
 }
 

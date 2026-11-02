@@ -332,8 +332,8 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"thread": {"approve": {"thread": "t"}}}),
         json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
         json!({"thread": {"edit": {"thread": "t", "no-level": true}}}),
-        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main", "public": true}}}),
-        json!({"repo": {"edit": {"repository": "r", "private": true}}}),
+        json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
+        json!({"repo": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
         json!({"proposal": {"keep": {"proposal": "p"}}}),
     ] {
         assert_eq!(classify(write.clone()), Use::Write, "{write}");

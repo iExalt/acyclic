@@ -163,15 +163,12 @@ fn a_journey_through_the_contract() {
     let (code, out) = sh.output("item edit a2 --no-thread --as-user", AGENT);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)));
     assert_eq!(sh.run("repo add r1 --name code", AGENT), 2, "a new record needs every field");
-    let full = "repo add r1 --owner me --name code --default-branch main --public";
+    let full = "repo add r1 --owner me --name code --default-branch main";
     assert_eq!(sh.run(full, AGENT), 0);
     assert_eq!(sh.run(full, AGENT), 0, "a repeat changes nothing");
-    assert_eq!(
-        sh.run("repo add r1 --owner me --name code --default-branch main --private", AGENT),
-        1
-    );
+    assert_eq!(sh.run("repo add r1 --owner me --name code --default-branch trunk", AGENT), 1);
     assert_eq!(sh.run("repo edit r1 --default-branch trunk", AGENT), 0, "an edit takes any subset");
-    assert_eq!(sh.run("repo edit nope --private", AGENT), 3);
+    assert_eq!(sh.run("repo edit nope --default-branch main", AGENT), 3);
     for (flag, present) in [("--repository", true), ("--no-repository", false)] {
         let (code, out) = sh.output(&format!("item edit a2 {flag} r1"), AGENT);
         assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "{flag}");

@@ -119,7 +119,6 @@ fn a_commit_is_found_on_the_branch_by_a_prefix_and_one_git_doesnt_know_is_unveri
         id: "code".to_owned(),
         owner: model::Value::None,
         name: model::Value::None,
-        public: model::Value::None,
         default_branch: model::Value::One(branch.to_owned()),
         installation: model::Value::None,
     };

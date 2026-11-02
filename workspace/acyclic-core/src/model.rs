@@ -332,8 +332,6 @@ pub struct Repository {
     pub owner: Value<String>,
     /// The repository's name.
     pub name: Value<String>,
-    /// Whether the repository is public.
-    pub public: Value<bool>,
     /// The default branch.
     pub default_branch: Value<String>,
     /// The App's installation that reaches it.
@@ -446,7 +444,6 @@ impl Model {
                     id: key.id.clone(),
                     owner: value(state, key, repository::OWNER)?,
                     name: value(state, key, repository::NAME)?,
-                    public: value(state, key, repository::PUBLIC)?,
                     default_branch: value(state, key, repository::DEFAULT_BRANCH)?,
                     installation: value(state, key, repository::INSTALLATION)?,
                 };

@@ -370,7 +370,6 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
         },
         ("thread", "autonomy") => edit("level", true),
         ("repository", "default-branch") => edit("default-branch", false),
-        ("repository", "public") => Some(format!("acyclic repo edit {id} --public|--private")),
         ("item", "evidence") => Some(format!(
             "acyclic done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --note <NOTE>)"
         )),
@@ -447,13 +446,12 @@ pub(crate) fn thread_rows(model: &Model) -> Vec<Json> {
         .collect()
 }
 
-/// The repository summary: `{id, owner, name, public, default_branch}`.
+/// The repository summary: `{id, owner, name, default_branch}`.
 pub(crate) fn repo_row(record: &acyclic_core::model::Repository) -> Json {
     json!({
         "id": record.id,
         "owner": record.owner,
         "name": record.name,
-        "public": record.public.one() == Some(&true),
         "default_branch": record.default_branch,
     })
 }
@@ -594,7 +592,6 @@ mod tests {
         ] {
             model::set(&mut r, &repo, field, Some(&value), user).unwrap();
         }
-        model::set(&mut r, &repo, repository::PUBLIC, Some(&true), user).unwrap();
         scope::edit(&mut r, &member("a", Some("t")), user).unwrap();
         scope::edit(&mut r, &member("b", Some("t")), user).unwrap();
         scope::approve(&mut r, "t", true, user).unwrap();
@@ -637,8 +634,7 @@ mod tests {
                         assert!(inner.is_u64(), "{here}");
                         continue;
                     }
-                    if ["approved", "archived", "reopened", "public", "conflicted"]
-                        .contains(&name.as_str())
+                    if ["approved", "archived", "reopened", "conflicted"].contains(&name.as_str())
                         && !inner.is_object()
                     {
                         assert!(inner.is_boolean(), "{here}: {inner}");
@@ -978,7 +974,7 @@ mod tests {
         let shown = repo_show(&model, &model.repositories["r"]);
         assert_eq!(
             shown,
-            json!({"id": "r", "owner": "me", "name": "code", "public": true, "default_branch": "main",
+            json!({"id": "r", "owner": "me", "name": "code", "default_branch": "main",
                    "installation": null, "items": ["b"], "threads": []})
         );
         follows_the_conventions(&shown, "repository");

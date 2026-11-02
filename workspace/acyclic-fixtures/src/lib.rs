@@ -110,14 +110,11 @@ impl Generator {
     }
 
     fn repositories(&mut self) {
-        for (key, name, public) in
-            [("main", "product", true), ("infra", "deploy", false), ("site", "website", true)]
-        {
+        for (key, name) in [("main", "product"), ("infra", "deploy"), ("site", "website")] {
             self.import.repositories.push(Repository {
                 key: key.to_owned(),
                 owner: "example".to_owned(),
                 name: name.to_owned(),
-                public,
                 default_branch: "main".to_owned(),
             });
         }
@@ -521,7 +518,7 @@ mod tests {
     fn a_seed_gives_the_same_plan_everywhere() {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_474, 1_642_810_862_526_216_147));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_407, 3_170_696_018_017_436_757));
     }
 
     #[test]

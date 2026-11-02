@@ -215,7 +215,6 @@ impl Writer<'_, '_> {
             self.created(&key, |r| &mut r.repositories);
             self.field(&key, repository::OWNER, Some(&record.owner))?;
             self.field(&key, repository::NAME, Some(&record.name))?;
-            self.field(&key, repository::PUBLIC, Some(&record.public))?;
             self.field(&key, repository::DEFAULT_BRANCH, Some(&record.default_branch))?;
         }
         for record in &doc.threads {

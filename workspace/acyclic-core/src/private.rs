@@ -1,6 +1,5 @@
 //! Files only the user can read or write, for the secrets acyclic keeps under `~/.config/acyclic/`: the session `acyclic
-//! up` issues and the key the operator signs run tokens with. It lives in core, beside [`crate::locate`], which also
-//! decides paths there, because the server and the operator both keep such files and both already depend on core. Like
+//! up` issues. It lives in core, beside [`crate::locate`], which also decides paths there. Like
 //! every acyclic build target, it is Unix only.
 //!
 //! A directory or file that is open to other users, or isn't what it should be (a symbolic link, say), is refused

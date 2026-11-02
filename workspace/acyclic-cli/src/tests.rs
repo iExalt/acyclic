@@ -503,11 +503,9 @@ fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
     let model = Model::read(mac.state()).unwrap();
     assert_eq!(code(&model, &evidence("ghost", "abc1234")), Err("not-found"));
     assert_eq!(code(&model, &evidence("r", "abc1234")), Err("incomplete-repository"));
-    for (name, value) in [
-        (repository::NAME, json!("n")),
-        (repository::PUBLIC, json!(true)),
-        (repository::DEFAULT_BRANCH, json!("main")),
-    ] {
+    for (name, value) in
+        [(repository::NAME, json!("n")), (repository::DEFAULT_BRANCH, json!("main"))]
+    {
         set(&mut mac, &repo, name, Some(&value), user).unwrap();
     }
     let model = Model::read(mac.state()).unwrap();
@@ -733,7 +731,7 @@ fn removed_commands_say_what_replaced_them_and_valid_ones_are_left_alone() {
         "acyclic item edit a1 --state parked",
         "acyclic level blockers",
         "acyclic thread edit t1 --level blockers",
-        "acyclic repo edit r1 --private",
+        "acyclic repo edit r1 --default-branch trunk",
         // A way to print parses as one, so a graph line failing with it failed for another reason.
         "acyclic graph --output pretty --bogus",
         "acyclic --output=json graph --bogus",
@@ -769,16 +767,13 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic thread edit t --brief b --no-brief",
         "acyclic thread edit t --level blockers --no-level",
         "acyclic thread edit t --repository r --no-repository r",
-        "acyclic repo edit r --public --private",
-        "acyclic repo add r --owner o --name n --default-branch main",
-        "acyclic repo add r --owner o --name n --default-branch main --public --private",
     ] {
         assert_eq!(check(line), Err("usage"), "{line}");
     }
     for line in [
         "acyclic item edit a --area x --no-area y --no-notes --parent b",
-        "acyclic repo add r --owner o --name n --default-branch main --private",
-        "acyclic repo edit r --public",
+        "acyclic repo add r --owner o --name n --default-branch main",
+        "acyclic repo edit r --default-branch trunk",
     ] {
         assert_eq!(check(line), Ok(()), "{line}");
     }
@@ -792,7 +787,6 @@ fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
         id: id.to_owned(),
         owner: acyclic_core::model::Value::None,
         name: acyclic_core::model::Value::None,
-        public: acyclic_core::model::Value::None,
         default_branch: acyclic_core::model::Value::None,
         installation: acyclic_core::model::Value::None,
     };

@@ -88,8 +88,6 @@ pub mod repository {
     pub const OWNER: &str = "owner";
     /// The repository's name.
     pub const NAME: &str = "name";
-    /// Whether the repository is public.
-    pub const PUBLIC: &str = "public";
     /// The default branch.
     pub const DEFAULT_BRANCH: &str = "default-branch";
     /// The App's installation that reaches it.

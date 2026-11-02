@@ -158,17 +158,16 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
         owner: Some("o".into()),
         name: Some("n".into()),
         default_branch: Some("main".into()),
-        public: Some(true),
     };
     add_repository(&mut r, "r", &repo, AGENT).unwrap();
     let before = r.changes();
     add_repository(&mut r, "r", &repo, AGENT).unwrap();
     assert_eq!(r.changes(), before);
-    let private = RepositoryFields { public: Some(false), ..repo };
-    assert_eq!(add_repository(&mut r, "r", &private, AGENT).unwrap_err().code, "already-exists");
-    assert_eq!(edit_repository(&mut r, "r", &private, AGENT).map_err(|e| e.code), Ok(()));
+    let trunk = RepositoryFields { default_branch: Some("trunk".into()), ..repo };
+    assert_eq!(add_repository(&mut r, "r", &trunk, AGENT).unwrap_err().code, "already-exists");
+    assert_eq!(edit_repository(&mut r, "r", &trunk, AGENT).map_err(|e| e.code), Ok(()));
     assert_eq!(
-        edit_repository(&mut r, "ghost", &private, AGENT).map_err(|e| e.code),
+        edit_repository(&mut r, "ghost", &trunk, AGENT).map_err(|e| e.code),
         Err("not-found")
     );
 }

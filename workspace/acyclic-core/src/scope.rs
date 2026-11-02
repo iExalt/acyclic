@@ -1,5 +1,6 @@
 //! Edits to approved scope, applied or proposed by actor. The user's edits apply at once; an agent's edit to an
-//! approved thread's scope waits as a proposal for the user to keep or drop. The replica that applies the write decides, against its own view then.
+//! approved thread's scope waits as a proposal for the user to keep or drop. The replica that applies the write
+//! decides, against its own view then.
 //!
 //! An actor is the user only when it says so: anything undeclared or unknown is an agent.
 
@@ -179,8 +180,8 @@ impl From<Error> for ScopeError {
     }
 }
 
-/// Applies a scope edit, or records it as a proposal when it changes an approved thread's scope and comes from
-/// neither the user nor a project-management agent.
+/// Applies a scope edit, or records it as a proposal when it changes an approved thread's scope and doesn't come from
+/// the user.
 ///
 /// # Errors
 ///
@@ -444,10 +445,10 @@ fn apply(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), Wr
     }
 }
 
-/// Extends an approved thread's approval to a member applied to it, so work the user kept, or the user or a
-/// project manager added, counts as approved. The approval records members and nothing else, so a repository edit
-/// has nothing to extend. Competing records of members, which approvals on two replicas leave, are united. A thread
-/// that isn't approved, or whose approval recorded no members and so counts every member, is left alone.
+/// Extends an approved thread's approval to a member applied to it, so work the user kept or added counts as
+/// approved. The approval records members and nothing else, so a repository edit has nothing to extend. Competing
+/// records of members, which approvals on two replicas leave, are united. A thread that isn't approved, or whose
+/// approval recorded no members and so counts every member, is left alone.
 fn see_member(
     replica: &mut Replica,
     thread: &str,

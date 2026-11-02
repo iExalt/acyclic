@@ -300,14 +300,11 @@ impl<'a> Session<'a> {
                 owner,
                 name,
                 default_branch,
-                public,
-                ..
             }) => {
                 let fields = RepositoryFields {
                     owner: Some(owner.clone()),
                     name: Some(name.clone()),
                     default_branch: Some(default_branch.clone()),
-                    public: Some(*public),
                 };
                 self.write(|replica, by| {
                     edit::add_repository(replica, repository, &fields, by)?;
@@ -319,14 +316,11 @@ impl<'a> Session<'a> {
                 owner,
                 name,
                 default_branch,
-                public,
-                private,
             }) => {
                 let fields = RepositoryFields {
                     owner: owner.clone(),
                     name: name.clone(),
                     default_branch: default_branch.clone(),
-                    public: (*public || *private).then_some(*public),
                 };
                 self.write(|replica, by| {
                     edit::edit_repository(replica, repository, &fields, by)?;
@@ -845,7 +839,6 @@ pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), C
     let missing: Vec<&str> = [
         ("owner", record.owner.one().is_some()),
         ("name", record.name.one().is_some()),
-        ("public", record.public.one().is_some()),
         ("default-branch", record.default_branch.one().is_some()),
     ]
     .into_iter()

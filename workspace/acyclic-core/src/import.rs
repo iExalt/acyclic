@@ -31,7 +31,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
   "version": 2,
   // A code repository that items can name; all four fields are required.
   "repositories": [
-    {"key": "code", "owner": "me", "name": "garden", "public": false, "default_branch": "main"}
+    {"key": "code", "owner": "me", "name": "garden", "default_branch": "main"}
   ],
   "items": [
     // Required: key and title. "state" is backlog, parked, in-progress or done, and defaults to backlog.
@@ -84,8 +84,6 @@ pub struct Repository {
     pub owner: String,
     /// The repository's name.
     pub name: String,
-    /// Whether the repository is public.
-    pub public: bool,
     /// The default branch.
     pub default_branch: String,
 }
@@ -659,7 +657,6 @@ mod tests {
             key: "r".to_owned(),
             owner: "example".to_owned(),
             name: "code".to_owned(),
-            public: false,
             default_branch: "main".to_owned(),
         });
         import.items = vec![
