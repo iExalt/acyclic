@@ -14,7 +14,6 @@ acyclic-app-assets = { path = "workspace/acyclic-app-assets" }
 acyclic-cli = { path = "workspace/acyclic-cli" }
 acyclic-core = { path = "workspace/acyclic-core" }
 acyclic-fixtures = { path = "workspace/acyclic-fixtures" }
-acyclic-guard = { path = "workspace/acyclic-guard" }
 acyclic-server = { path = "workspace/acyclic-server" }
 # HTTP/1 only: Tailscale's proxy speaks it to the server, and HTTP/2 would carry the host outside `Host`.
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
