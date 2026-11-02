@@ -142,6 +142,11 @@ body names $term"
       commit a.txt a "docs: a"
       blocked "the deny-list is missing" origin main
       ;;
+    non-ascii-term)
+      printf 'Élodie\n' >>"$HOME/.config/acyclic/deny-list"
+      commit a.txt a "docs: a"
+      blocked "non-ASCII term" origin main
+      ;;
     empty-list)
       printf '# nothing\n\n   \n' >"$HOME/.config/acyclic/deny-list"
       commit a.txt a "docs: a"
@@ -170,7 +175,7 @@ regexes = ['.*']"
 }
 
 cases="clean added-line removed-line renamed-file merge path binary message author-email branch-name tag-message
-tag-secret deleting-a-bad-branch missing-list empty-list secret silenced-secret"
+tag-secret deleting-a-bad-branch missing-list non-ascii-term empty-list secret silenced-secret"
 # Cases named as arguments run alone, such as to time one.
 [ $# -eq 0 ] || cases=$*
 pids=""

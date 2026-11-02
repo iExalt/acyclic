@@ -23,6 +23,8 @@ die() {
 # changes what matches.
 sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$list" | grep -v -e '^$' -e '^#' >"$tmp/terms" || true
 [ -s "$tmp/terms" ] || die "the deny-list holds no terms: $list"
+# grep folds case outside ASCII only in some locales, so a term it might miss blocks rather than passes.
+! LC_ALL=C grep -q '[^ -~]' "$tmp/terms" || die "the deny-list holds a non-ASCII term, which can't be matched reliably"
 
 # Gitleaks's built-in rules, passed explicitly with an empty ignore file, so nothing in the pushed tree or the
 # environment can replace or relax them.
@@ -92,12 +94,12 @@ while read -r local_ref local_sha remote_ref remote_sha rest; do
     git diff-tree -r -z --root --no-commit-id --no-renames --name-only --diff-filter=AMT \
       --diff-merges=first-parent "$commit" >"$tmp/paths" || die "git can't read $commit"
     check "$tmp/paths" "$commit" "file path"
-    git log -1 -p --text --no-color --no-ext-diff --no-renames --diff-merges=first-parent --format= "$commit" \
+    git log -1 -p --text --no-color --no-ext-diff --no-textconv --no-renames --diff-merges=first-parent --format= "$commit" \
       >"$tmp/patch" || die "git can't read $commit"
     grep -a '^+' "$tmp/patch" >"$tmp/added" || true
     check "$tmp/added" "$commit" "added content"
   done <"$tmp/commits"
-  leaks git --ignore-gitleaks-allow --log-opts "$*" "$git_dir"
+  leaks git --ignore-gitleaks-allow --log-opts "$*" "$git_dir" </dev/null
 done
 
 if [ "$blocked" -ne 0 ]; then
