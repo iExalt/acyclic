@@ -1330,7 +1330,6 @@ fn months_between(from: &str, to: &str) -> u32 {
     u32::try_from((index(to) - index(from)).max(0)).unwrap_or(u32::MAX)
 }
 
-/// Reads a state from a commit's tree, refusing files that aren't in canonical form.
 /// The replicas a peer's state has seen, read from its header alone: a peer's entities, which this build may not read
 /// strictly, don't matter to which ids are taken.
 fn seen_replicas(git: &Git, commit: &str) -> Result<Vec<ReplicaId>, StoreError> {
@@ -1345,6 +1344,7 @@ fn seen_replicas(git: &Git, commit: &str) -> Result<Vec<ReplicaId>, StoreError> 
     Ok(seen.keys().filter_map(|id| ReplicaId::new(id).ok()).collect())
 }
 
+/// Reads a state from a commit's tree, refusing files that aren't in canonical form.
 fn read_state(git: &Git, commit: &str) -> Result<State, StoreError> {
     Ok(State::from_files(&read_files(git, commit)?)?)
 }

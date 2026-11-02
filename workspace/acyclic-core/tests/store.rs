@@ -23,6 +23,8 @@ fn git(dir: &Path, args: &[&str]) -> String {
         // stalls each call by seconds on a machine with a slow resolver.
         .env("GIT_COMMITTER_NAME", "acyclic test")
         .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .env("GIT_AUTHOR_NAME", "acyclic test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
@@ -411,11 +413,18 @@ fn a_peer_state_this_build_cant_read_whole_still_lets_a_clone_open() {
     let path = tracker(&dir, "mac");
     let (mac, _) = Tracker::open(&path).unwrap();
     write(&mac, "a1", "f", json!(1));
-    // A peer's state holding an entity file this build can't read, beside a header it can.
+    // A peer's state holding an entity file this build can't read, beside a header it can that also names an id this
+    // build can't parse.
+    let mut header: serde_json::Value =
+        serde_json::from_str(&git(&path, &["show", "refs/heads/state/mac:state.json"])).unwrap();
+    header["context"]["seen"]["Not An Id"] = json!(1);
+    std::fs::write(path.join("header"), header.to_string()).unwrap();
     std::fs::write(path.join("junk"), "{ \"not\": canonical").unwrap();
-    let blob = git(&path, &["hash-object", "-w", "junk"]);
     git(&path, &["read-tree", "refs/heads/state/mac"]);
-    git(&path, &["update-index", "--add", "--cacheinfo", &format!("100644,{blob},item/junk.json")]);
+    for (file, at) in [("junk", "item/junk.json"), ("header", "state.json")] {
+        let blob = git(&path, &["hash-object", "-w", file]);
+        git(&path, &["update-index", "--add", "--cacheinfo", &format!("100644,{blob},{at}")]);
+    }
     let tree = git(&path, &["write-tree"]);
     let peer = git(&path, &["commit-tree", &tree, "-m", "peer"]);
     git(&path, &["update-ref", "refs/heads/state/pi", &peer]);
@@ -649,6 +658,8 @@ fn a_forced_rewrite_of_a_segment_is_refused_and_moves_nothing() {
         // stalls each call by seconds on a machine with a slow resolver.
         .env("GIT_COMMITTER_NAME", "acyclic test")
         .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .env("GIT_AUTHOR_NAME", "acyclic test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
         .output()
         .unwrap();
     assert!(!forced.status.success());
