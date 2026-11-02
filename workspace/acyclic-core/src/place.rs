@@ -8,8 +8,7 @@ use crate::scope::{self, ScopeEdit};
 use crate::state::Replica;
 
 /// The thread new work under `id`'s parent joins, as [`passed_down`] says; `None` under a parent in conflict.
-#[must_use]
-pub fn inherited_thread<'m>(model: &'m Model, id: &str) -> Option<&'m str> {
+fn inherited_thread<'m>(model: &'m Model, id: &str) -> Option<&'m str> {
     // A parent in conflict has no single line to inherit along.
     let parent = model.items.get(id).and_then(|item| item.parent.one())?;
     passed_down(model, parent)

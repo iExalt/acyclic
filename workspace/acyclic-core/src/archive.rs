@@ -42,7 +42,7 @@ pub enum Reason {
     /// A root without a gate waits after its last item is done.
     Waiting {
         /// When it becomes eligible.
-        #[serde(rename = "eligible_at")]
+        #[serde(rename = "eligible_at", serialize_with = "crate::time::serialize_rfc3339")]
         until: Millis,
     },
 }

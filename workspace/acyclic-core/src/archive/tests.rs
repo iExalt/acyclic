@@ -63,6 +63,11 @@ fn a_gateless_group_waits_thirty_days_after_its_last_done() {
     let r = setup();
     assert_eq!(reasons(&r, "g", 2 * DAY), vec![Reason::Waiting { until: DAY + GATELESS_WAIT }]);
     assert_eq!(reasons(&r, "g", DAY + GATELESS_WAIT), Vec::<Reason>::new());
+    // Output carries the time as every time is printed.
+    assert_eq!(
+        serde_json::to_value(Reason::Waiting { until: DAY }).unwrap(),
+        serde_json::json!({"why": "waiting", "eligible_at": "1970-01-02T00:00:00Z"})
+    );
 }
 
 #[test]

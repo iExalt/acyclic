@@ -11,6 +11,7 @@ use acyclic_core::model::{Heads, Item, ItemState, Link, LinkKind, Model, Value};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{Readiness, ReadyThread};
 use acyclic_core::state::{Key, Millis, State};
+use acyclic_core::time::rfc3339;
 use serde_json::{Map, Value as Json, json};
 
 use crate::commands::{Member, thread_members};
@@ -45,8 +46,8 @@ pub(crate) fn claim_json(claim: &Claim) -> Json {
     json!({
         "holder": claim.holder,
         "replica": claim.replica,
-        "lease_started_at": claim.lease_start,
-        "lease_expires_at": claim.lease_expires,
+        "lease_started_at": rfc3339(claim.lease_start),
+        "lease_expires_at": claim.lease_expires.map(rfc3339),
     })
 }
 
@@ -129,7 +130,7 @@ impl View<'_> {
                 "links": links(&model.links, id),
                 "claims": claims,
                 "evidence": evidence(&item.evidence),
-                "done_at": item.done_at,
+                "done_at": item.done_at.map(rfc3339),
                 "archived": model.is_archived(id),
                 "reopened": item.reopened != Value::None,
             }),
@@ -393,9 +394,7 @@ pub(crate) fn repo_show(model: &Model, record: &acyclic_core::model::Repository)
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
 
-    use acyclic_core::archive::Reason;
     use acyclic_core::model::{self, By, add_item, link, set_parent, set_state};
     use acyclic_core::ready::Ancestry;
     use acyclic_core::schema::{kind, repository};
@@ -403,7 +402,6 @@ mod tests {
     use acyclic_core::state::{Key, Replica, ReplicaId};
 
     use super::*;
-    use crate::TIMESTAMP_KEYS;
 
     struct NoAncestry;
 
@@ -491,12 +489,17 @@ mod tests {
                     {
                         assert!(inner.is_boolean(), "{here}: {inner}");
                     }
-                    if inner.is_i64() {
+                    if name.ends_with("_at") && !inner.is_null() {
+                        let time = inner.as_str().unwrap_or_default();
                         assert!(
-                            TIMESTAMP_KEYS.contains(&name.as_str()),
-                            "{here}: a number that isn't counted"
+                            time.len() == 20 && time.ends_with('Z'),
+                            "{here}: {inner} isn't RFC 3339"
                         );
                     }
+                    assert!(
+                        !inner.is_i64() || name == "members",
+                        "{here}: a number that isn't counted"
+                    );
                     follows_the_conventions(inner, &here);
                 }
             },
@@ -547,43 +550,11 @@ mod tests {
                 json!({"repository": null, "commit": null, "note": "shipped"})
             );
             assert_eq!(done["archived"], true);
-            assert!(done["done_at"].is_i64());
+            assert!(done["done_at"].is_string());
             for shape in [&row, &shown, &done] {
                 follows_the_conventions(shape, "item");
             }
         });
-    }
-
-    #[test]
-    fn every_time_in_a_view_is_a_known_key() {
-        let r = tracker();
-        let mut keys = BTreeSet::new();
-        let walk = |value: &Json, keys: &mut BTreeSet<String>| {
-            fn go(value: &Json, keys: &mut BTreeSet<String>) {
-                match value {
-                    Json::Object(map) => {
-                        // What sits under `counts` is counted, not a time.
-                        for (name, inner) in map.iter().filter(|(name, _)| *name != "counts") {
-                            if inner.is_i64() && name != "members" {
-                                keys.insert(name.clone());
-                            }
-                            go(inner, keys);
-                        }
-                    },
-                    Json::Array(values) => values.iter().for_each(|v| go(v, keys)),
-                    _ => {},
-                }
-            }
-            go(value, keys);
-        };
-        viewing(&r, |view| {
-            for id in ["a", "d", "goal"] {
-                walk(&view.item(id, &view.model.items[id]).unwrap(), &mut keys);
-            }
-        });
-        walk(&json!(Reason::Waiting { until: 3 }), &mut keys);
-        let expected: BTreeSet<String> = TIMESTAMP_KEYS.map(String::from).into();
-        assert_eq!(keys, expected);
     }
 
     #[test]

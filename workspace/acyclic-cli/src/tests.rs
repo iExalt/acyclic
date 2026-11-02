@@ -83,7 +83,6 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::InvalidName("A".into()).into(),
         StateError::InvalidValue.into(),
         StateError::ClockJump { now: 0, last: 1 }.into(),
-        StateError::NotContinuous(id()).into(),
         StateError::IdReused { replica: id(), mine: 1, theirs: 2 }.into(),
         StateError::Claimed(key.clone()).into(),
         StateError::NoThread("t".into()).into(),
@@ -107,7 +106,6 @@ fn every_error_has_a_stable_code_and_exit() {
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
         StoreError::Locked { path: "x".into(), age_seconds: None }.into(),
-        StoreError::Timeout.into(),
         StoreError::Config("no replica".into()).into(),
         StoreError::RemoteMoved.into(),
         StoreError::Rejected { reference: "r".into(), reason: "no".into() }.into(),
@@ -124,9 +122,6 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
         CliError::refused("incomplete-repository", ""),
-        CliError::refused("unwritable", ""),
-        CliError::refused("unopenable", ""),
-        CliError::refused("no-renderer", ""),
         CliError::new("not-found", exit::NOT_FOUND, ""),
         CliError::new("usage", exit::USAGE, ""),
         CliError::new("invalid-commit", exit::USAGE, ""),
@@ -218,19 +213,6 @@ fn the_help_sections_hold_every_command_once() {
         .collect();
     commands.sort_unstable();
     assert_eq!(named, commands);
-}
-
-#[test]
-fn times_print_as_rfc3339_in_utc() {
-    let mut out = json!({"eligible_at": 0, "members": 0,
-                         "claims": [{"lease_expires_at": null, "lease_started_at": 0}]});
-    timestamps(&mut out);
-    assert_eq!(
-        out,
-        json!({"eligible_at": "1970-01-01T00:00:00Z", "members": 0,
-               "claims": [{"lease_expires_at": null,
-                           "lease_started_at": "1970-01-01T00:00:00Z"}]})
-    );
 }
 
 #[test]
@@ -487,12 +469,6 @@ fn links_are_named_waits_for_and_relates_to() {
         (args::LinkWord::RelatesTo, LinkKind::Relates),
     ] {
         assert_eq!(word.kind(), kind);
-    }
-    // Exhaustive, so a new word must be listed.
-    for word in args::LinkWord::ALL {
-        match word {
-            args::LinkWord::WaitsFor | args::LinkWord::RelatesTo => {},
-        }
     }
     // Any other word, such as an older name, gets the usual error.
     for word in ["follows", "after", "blocks", "relates", "sideways"] {

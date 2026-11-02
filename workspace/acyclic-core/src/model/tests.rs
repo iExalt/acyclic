@@ -169,7 +169,7 @@ fn a_relates_link_orders_nothing_and_is_removed_once() {
     for id in ["a", "b"] {
         put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(4)).unwrap();
     }
-    assert_eq!(model(&r).heads("t"), ["a", "b"]);
+    assert_eq!(model(&r).heads_index().of("t"), ["a", "b"]);
     // Removing it again writes nothing.
     assert_eq!(unlink(&mut r, "a", "b", LinkKind::Relates, by(5)), Ok(true));
     assert_eq!(model(&r).links, []);
@@ -265,8 +265,9 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     for id in ["a", "b", "c", "d"] {
         put(&mut r, &item_key(id).unwrap(), field::THREAD, Some(&"t"), by(2)).unwrap();
     }
-    let heads =
-        |r: &Replica| model(r).heads("t").into_iter().map(str::to_owned).collect::<Vec<_>>();
+    let heads = |r: &Replica| {
+        model(r).heads_index().of("t").into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
     assert_eq!(heads(&r), ["a", "b", "c", "d"], "membership alone orders nothing");
     link(&mut r, "b", "a", LinkKind::Blocks, by(3)).unwrap();
     link(&mut r, "a", "d", LinkKind::Relates, by(3)).unwrap();
@@ -344,7 +345,12 @@ fn heads_match_their_definition(tc: hegel::TestCase) {
     }
     let m = model(&r);
     for thread in ["t", "u"] {
-        assert_eq!(m.heads(thread), heads_by_definition(&m, thread), "{thread}: {:?}", m.links);
+        assert_eq!(
+            m.heads_index().of(thread),
+            heads_by_definition(&m, thread),
+            "{thread}: {:?}",
+            m.links
+        );
     }
 }
 
@@ -419,11 +425,6 @@ fn fields_with_invariants_need_their_checked_writes() {
 /// A name for each variant, written as an exhaustive `match` so that adding a variant fails to compile here until
 /// it is listed in its enum's `ALL`.
 fn listed_in_all() {
-    for state in ItemState::ALL {
-        match state {
-            ItemState::Backlog | ItemState::Parked | ItemState::InProgress | ItemState::Done => {},
-        }
-    }
     for size in Size::ALL {
         match size {
             Size::Xs | Size::S | Size::M | Size::L | Size::Xl => {},
@@ -446,7 +447,8 @@ fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debu
 #[test]
 fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
     listed_in_all();
-    assert_eq!(names(&ItemState::ALL), ["backlog", "parked", "in-progress", "done"]);
+    let states = [ItemState::Backlog, ItemState::Parked, ItemState::InProgress, ItemState::Done];
+    assert_eq!(names(&states), ["backlog", "parked", "in-progress", "done"]);
     assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
 }
 

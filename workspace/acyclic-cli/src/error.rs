@@ -22,7 +22,7 @@ pub mod exit {
     pub const USAGE: u8 = 2;
     /// Something named doesn't exist.
     pub const NOT_FOUND: u8 = 3;
-    /// The store failed: a lock, lost races, or git.
+    /// The store failed: a lock, a lost race, or git.
     pub const STORE: u8 = 4;
     /// The tracker or replica isn't set up.
     pub const CONFIG: u8 = 5;
@@ -81,7 +81,6 @@ impl From<StateError> for CliError {
             StateError::InvalidName(_) => ("invalid-name", exit::USAGE),
             StateError::InvalidValue => ("invalid-value", exit::USAGE),
             StateError::ClockJump { .. } => ("clock-jump", exit::REFUSED),
-            StateError::NotContinuous(_) => ("not-continuous", exit::REFUSED),
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
@@ -122,7 +121,6 @@ impl From<StoreError> for CliError {
             StoreError::Git(_) => Self::new("git", exit::STORE, message),
             StoreError::Conflict => Self::new("conflict", exit::STORE, message),
             StoreError::Locked { .. } => Self::new("locked", exit::STORE, message),
-            StoreError::Timeout => Self::new("timeout", exit::STORE, message),
             StoreError::Config(_) => Self::new("no-replica", exit::CONFIG, message),
             StoreError::RemoteMoved => Self::new("remote-moved", exit::STORE, message),
             StoreError::Duplicate(_) => Self::refused("duplicate-replica", message),

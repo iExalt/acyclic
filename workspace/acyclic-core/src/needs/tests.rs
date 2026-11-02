@@ -7,7 +7,7 @@ use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent
 use crate::ready::Ancestry;
 use crate::schema::{item as field, thread};
 use crate::scope::{ScopeEdit, USER, edit};
-use crate::state::{Replica, ReplicaId};
+use crate::state::{CLOCK_SKEW_MS, Replica, ReplicaId};
 
 const NOW: Millis = 10_000;
 
@@ -76,7 +76,7 @@ fn the_state_puts_its_problems_on_the_list() {
     link(&mut a, "z", "dep", LinkKind::Blocks, by).unwrap();
     b.join(&a.state).unwrap();
 
-    // Concurrent: a title conflict, a link cycle, a contest, a resource clash.
+    // Concurrent: a title conflict, a link cycle, a contest, a resource clash, a clock ahead.
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", LinkKind::Blocks, user(2)).unwrap();
@@ -85,6 +85,8 @@ fn the_state_puts_its_problems_on_the_list() {
     claim::claim(&mut b, "tx", "session/b", 2, NOW, NOW).unwrap();
     claim::claim(&mut a, "t1", "session/a", 2, NOW, NOW).unwrap();
     claim::claim(&mut b, "t2", "session/b", 2, NOW, NOW).unwrap();
+    // A claim from a clock running ahead of the reader's by more than the skew.
+    claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, NOW, NOW).unwrap();
     a.join(&b.state).unwrap();
 
     let entries = list(&a);
@@ -100,6 +102,7 @@ fn the_state_puts_its_problems_on_the_list() {
         holders: vec![("t1".into(), "session/a".into()), ("t2".into(), "session/b".into())],
     });
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
+    has(&Entry::ClockAhead { thread: "tk".into(), holder: "session/b".into() });
     has(&Entry::Dangling {
         kind: "item".into(),
         id: "orphan".into(),

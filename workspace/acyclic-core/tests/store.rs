@@ -144,53 +144,6 @@ fn a_new_month_starts_a_new_segment() {
     assert_eq!(refs, "refs/heads/log/mac/2026-10/0001\nrefs/heads/log/mac/2026-11/0001");
 }
 
-#[test]
-fn a_batch_that_loses_the_race_retries_on_the_new_tip() {
-    let dir = TempDir::new().unwrap();
-    let path = tracker(&dir, "mac");
-    let (tracker, _) = Tracker::open(&path).unwrap();
-    write(&tracker, "a1", "f", json!(1));
-    let refs = ["refs/heads/state/mac", "refs/heads/log/mac/2026-10/0001"];
-    let before: Vec<_> = refs.iter().map(|r| git(&path, &["rev-parse", r])).collect();
-    // Another writer's batch, rewound so the hook can replay it mid-batch.
-    write(&tracker, "b1", "f", json!(2));
-    let theirs: Vec<_> = refs.iter().map(|r| git(&path, &["rev-parse", r])).collect();
-    for (reference, tip) in refs.iter().zip(&before) {
-        git(&path, &["update-ref", reference, tip]);
-    }
-    let moved = std::cell::Cell::new(false);
-    let replay = {
-        let path = path.clone();
-        let theirs = theirs.clone();
-        move || {
-            if !moved.replace(true) {
-                for (reference, tip) in refs.iter().zip(&theirs) {
-                    git(&path, &["update-ref", reference, tip]);
-                }
-            }
-        }
-    };
-    let hooks = Hooks { after_objects: Some(Box::new(replay)), after_prepare: None };
-    let outcome = tracker
-        .batch_with(
-            &meta(),
-            NOW,
-            false,
-            &no_project,
-            |replica, at| {
-                replica.write(&item("c1"), "f", "actor/user", at, Some(json!(3))).map(|_| ())
-            },
-            &hooks,
-        )
-        .unwrap();
-    assert!(matches!(outcome, Outcome::Committed { retries, .. } if retries >= 1), "{outcome:?}");
-    let (_, state) = tracker.load().unwrap();
-    for id in ["a1", "b1", "c1"] {
-        assert!(state.field(&item(id), "f").is_some(), "{id} is present");
-    }
-    assert_eq!(log_lines(&path, refs[1], "_/15.jsonl").len(), 3);
-}
-
 /// The child half of the crash tests: runs one batch that aborts at the failpoint named in the environment.
 #[test]
 fn crash_child() {
@@ -200,11 +153,8 @@ fn crash_child() {
         return;
     };
     let (tracker, _) = Tracker::open(Path::new(&repo)).unwrap();
-    let abort: Box<dyn Fn()> = Box::new(|| std::process::abort());
-    let hooks = match point.as_str() {
-        "after-objects" => Hooks { after_objects: Some(abort), after_prepare: None },
-        _ => Hooks { after_objects: None, after_prepare: Some(abort) },
-    };
+    assert_eq!(point, "after-prepare");
+    let hooks = Hooks { after_prepare: Some(Box::new(|| std::process::abort())) };
     let key = item("a1");
     let _ = tracker.batch_with(
         &meta(),
@@ -283,11 +233,6 @@ fn the_store_repacks_once_packs_pile_up() {
 }
 
 #[test]
-fn a_crash_before_the_transaction_moves_nothing() {
-    crash_at("after-objects");
-}
-
-#[test]
 fn a_crash_after_prepare_moves_nothing() {
     crash_at("after-prepare");
 }
@@ -340,6 +285,8 @@ fn a_squashed_ref_holds_the_same_state() {
 #[test]
 fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
     let dir = TempDir::new().unwrap();
+    let remote = bare_remote(&dir);
+    let url = remote.to_str().unwrap();
     let path = tracker(&dir, "mac");
     let other = tracker(&dir, "phone");
     let (tracker, _) = Tracker::open(&path).unwrap();
@@ -368,11 +315,8 @@ fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
     tracker.squash().unwrap().unwrap();
     agree(&tracker);
     write(&phone, "b1", "f", json!(2));
-    git(
-        &path,
-        &["fetch", "-q", other.to_str().unwrap(), "refs/heads/state/phone:refs/remotes/phone"],
-    );
-    tracker.join_ref("refs/remotes/phone").unwrap();
+    phone.sync(url).unwrap();
+    assert!(tracker.sync(url).unwrap().joined);
     agree(&tracker);
 
     // A damaged cache is a miss: the read goes to Git and rewrites it.
@@ -457,21 +401,24 @@ fn fresh_clones_of_a_replica_take_different_ids() {
 #[test]
 fn joining_a_state_that_saw_more_of_our_writes_is_refused() {
     let dir = TempDir::new().unwrap();
+    let remote = bare_remote(&dir);
+    let url = remote.to_str().unwrap();
     let one = tracker(&dir, "mac");
     // A copied clone, config and all, before either has written.
     let two = tracker(&dir, "mac-copy");
     store::init_replica(&two, &ReplicaId::new("mac").unwrap()).unwrap();
     let (first, _) = Tracker::open(&one).unwrap();
     let (second, _) = Tracker::open(&two).unwrap();
+    let (pi, _) = Tracker::open(&tracker(&dir, "pi")).unwrap();
     write(&first, "a1", "f", json!(1));
     write(&first, "a1", "g", json!(2));
     write(&second, "b1", "f", json!(3));
-    // The second clone fetches the first's state ref and joins it.
-    git(
-        &two,
-        &["fetch", "-q", one.to_str().unwrap(), "refs/heads/state/mac:refs/remotes/one/state/mac"],
-    );
-    let err = second.join_ref("refs/remotes/one/state/mac").unwrap_err();
+    // A peer joins the first clone's writes, and the remote then loses the first's own ref, so only the join can
+    // tell the second clone that another writes as it.
+    first.sync(url).unwrap();
+    pi.sync(url).unwrap();
+    git(&remote, &["update-ref", "-d", "refs/heads/state/mac"]);
+    let err = second.sync(url).unwrap_err();
     assert!(matches!(err, StoreError::State(acyclic_core::state::Error::IdReused { .. })), "{err}");
 }
 
@@ -563,10 +510,16 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     );
 }
 
-/// A bare remote whose pre-receive hook refuses forced updates to log segments, like the tracker's ruleset.
-fn remote_with_ruleset(dir: &TempDir) -> PathBuf {
+/// A bare remote.
+fn bare_remote(dir: &TempDir) -> PathBuf {
     let remote = dir.path().join("remote.git");
     git(dir.path(), &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    remote
+}
+
+/// A bare remote whose pre-receive hook refuses forced updates to log segments, like the tracker's ruleset.
+fn remote_with_ruleset(dir: &TempDir) -> PathBuf {
+    let remote = bare_remote(dir);
     let hook = remote.join("hooks/pre-receive");
     std::fs::write(
         &hook,
@@ -805,8 +758,7 @@ fn a_copied_clone_writing_as_the_same_replica_is_refused_at_sync_and_moves_nothi
 #[test]
 fn a_lost_tracking_update_or_a_deleted_remote_ref_is_not_a_duplicate() {
     let dir = TempDir::new().unwrap();
-    let remote = dir.path().join("plain.git");
-    git(dir.path(), &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    let remote = bare_remote(&dir);
     let url = remote.to_str().unwrap();
     let path = tracker(&dir, "mac");
     let (mac, _) = Tracker::open(&path).unwrap();

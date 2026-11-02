@@ -472,12 +472,7 @@ impl<'a> Readiness<'a> {
         if let Some(status) = self.unclaimed(id, item) {
             return Ok(Some(status));
         }
-        let mut holders: Vec<String> = Vec::new();
-        for claim in claim::covering(self.state, self.model, id, self.now)? {
-            if !holders.contains(&claim.holder) {
-                holders.push(claim.holder);
-            }
-        }
+        let mut holders = claim::holders(&claim::covering(self.state, self.model, id, self.now)?);
         if holders.is_empty()
             && let Some(thread) = item.thread.one()
             && let Some((resource, thread, holder)) = self.thread_busy(thread)?
@@ -561,12 +556,7 @@ impl<'a> Readiness<'a> {
             .map(str::to_owned)
             .collect();
         let key = claim::thread_key(thread)?;
-        let mut holders: Vec<String> = Vec::new();
-        for claim in claim::live(self.state, &key, self.now)? {
-            if !holders.contains(&claim.holder) {
-                holders.push(claim.holder);
-            }
-        }
+        let mut holders = claim::holders(&claim::live(self.state, &key, self.now)?);
         if holders.len() > 1 {
             return Ok(ThreadStatus::Contested { holders, items });
         }

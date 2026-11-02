@@ -80,7 +80,7 @@ and thread it belongs with.
 - Records carry their own id as `id`. `list` and `show` return the same rows, and `show` adds details. Entries in
   `needs` embed the rows they are about.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
-- Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, lost races or git; retry later),
+- Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
 - Writes report `changed`. A repeated command changes nothing, except `claim`, which writes its lease again; any
   write can also commit a lease renewal that its own `changed` leaves out.

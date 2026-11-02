@@ -17,8 +17,6 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 
-use acyclic_core::time::rfc3339;
-
 use crate::args::{Cli, Command, Format, Serve, Up};
 pub use crate::context::now;
 use crate::error::{CliError, exit};
@@ -68,12 +66,8 @@ impl Env {
     }
 }
 
-/// Runs the CLI with the process's arguments, the first being the program name, and prints its output.
-pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
-    run_with(args, None)
-}
-
-/// Runs the CLI as [`run`] does, with the server that `acyclic serve` starts, if this binary has one.
+/// Runs the CLI with the process's arguments, the first being the program name, and prints its output; `serve` is
+/// the server that `acyclic serve` starts, if this binary has one.
 pub fn run_with(args: impl IntoIterator<Item = OsString>, serve: Option<ServeHook>) -> ExitCode {
     let outcome = execute_with(args, &Env::from_process(), serve);
     if let Err(err) = emit(&mut std::io::stdout().lock(), &outcome.stdout) {
@@ -176,13 +170,10 @@ fn execute_with(
     let result = commands::run(&cli, env);
     acyclic_core::probe::mark("command");
     match result {
-        Ok(commands::Output::Json(mut data)) => {
+        Ok(commands::Output::Json(data)) => {
             let output = match output {
                 Format::Json => render(&json!({"ok": true, "data": data})),
-                Format::Pretty => {
-                    timestamps(&mut data);
-                    pretty::render(&cli.command, &data, env.terminal)
-                },
+                Format::Pretty => pretty::render(&cli.command, &data, env.terminal),
             };
             acyclic_core::probe::mark("render output");
             Outcome::out(exit::OK, output)
@@ -231,45 +222,18 @@ pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u
 
 fn answer(cli: &Cli, env: &Env) -> (u8, Value) {
     let result = cli.command.validate().and_then(|()| commands::run(cli, env));
-    let (code, mut envelope) = match result {
+    let (code, envelope) = match result {
         Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),
         Ok(commands::Output::Text(text)) => (exit::OK, json!({"ok": true, "data": text})),
         Err(err) => (err.exit, err.envelope()),
     };
-    timestamps(&mut envelope);
     (code, envelope)
 }
 
 fn render(value: &serde_json::Value) -> String {
-    let mut value = value.clone();
-    timestamps(&mut value);
-    let mut text = serde_json::to_string_pretty(&value).expect("JSON values always serialize");
+    let mut text = serde_json::to_string_pretty(value).expect("JSON values always serialize");
     text.push('\n');
     text
-}
-
-/// The fields that hold a time in what commands print, each ending in `_at` but for the dates of an archive wait. A new
-/// time field in output must join this list, which a test checks against the views.
-const TIMESTAMP_KEYS: [&str; 4] =
-    ["done_at", "eligible_at", "lease_expires_at", "lease_started_at"];
-
-/// Rewrites every time in the output as RFC 3339 in UTC, to the second.
-fn timestamps(value: &mut serde_json::Value) {
-    use serde_json::Value;
-    match value {
-        Value::Object(map) => {
-            for (key, value) in map {
-                match value.as_i64() {
-                    Some(millis) if TIMESTAMP_KEYS.contains(&key.as_str()) => {
-                        *value = Value::String(rfc3339(millis));
-                    },
-                    _ => timestamps(value),
-                }
-            }
-        },
-        Value::Array(values) => values.iter_mut().for_each(timestamps),
-        _ => {},
-    }
 }
 
 #[cfg(test)]
