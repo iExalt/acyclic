@@ -276,17 +276,14 @@ fn thread_exists(state: &State, model: &Model, id: &str) -> bool {
             || model.items.values().any(|item| item.thread.all().contains(&&id.to_owned())))
 }
 
-/// Refuses a thread or repository that isn't there, before anything is written.
+/// Refuses a thread or repository that isn't there, before anything is written; `model` is `state`'s.
 fn check_targets(
     state: &State,
+    model: &Model,
     thread: Option<&String>,
     repositories: &[String],
 ) -> Result<(), CliError> {
-    if thread.is_none() && repositories.is_empty() {
-        return Ok(());
-    }
-    let model = Model::read(state)?;
-    if let Some(thread) = thread.filter(|thread| !thread_exists(state, &model, thread)) {
+    if let Some(thread) = thread.filter(|thread| !thread_exists(state, model, thread)) {
         return Err(not_found(format!(
             "no thread {thread}; `acyclic thread add --title <TITLE>` adds one"
         )));
@@ -314,7 +311,19 @@ fn item_scope(id: &str, fields: &ItemFields) -> Vec<ScopeEdit> {
     };
     edits.extend(fields.repositories.add.iter().map(|r| repository(r, true)));
     edits.extend(fields.repositories.remove.iter().map(|r| repository(r, false)));
-    edits
+    once_each(edits)
+}
+
+/// `edits` with each kept once, in order: two spellings of one repository resolve to the same edit, which
+/// [`scope_steps`] would otherwise judge against the same model and write twice.
+fn once_each(edits: Vec<ScopeEdit>) -> Vec<ScopeEdit> {
+    let mut kept: Vec<ScopeEdit> = Vec::with_capacity(edits.len());
+    for edit in edits {
+        if !kept.contains(&edit) {
+            kept.push(edit);
+        }
+    }
+    kept
 }
 
 /// The scope edits a set of thread fields asks for.
@@ -327,7 +336,7 @@ fn thread_scope(id: &str, fields: &ThreadFields) -> Vec<ScopeEdit> {
     let mut edits: Vec<ScopeEdit> =
         fields.repositories.add.iter().map(|r| repository(r, true)).collect();
     edits.extend(fields.repositories.remove.iter().map(|r| repository(r, false)));
-    edits
+    once_each(edits)
 }
 
 /// Whether a scope edit would change nothing.
@@ -349,11 +358,18 @@ fn scope_already(state: &State, model: &Model, change: &ScopeEdit) -> Result<boo
     })
 }
 
-/// Applies one scope edit unless it is so already.
-fn scope_step(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), CliError> {
-    let model = Model::read(replica.state())?;
-    if !scope_already(replica.state(), &model, change)? {
-        scope::edit(replica, change, by)?;
+/// Applies each scope edit unless it is so already, judged by `model`, the record's scope as it was before them: the
+/// edits touch different fields or elements, so none changes what another is judged by.
+fn scope_steps(
+    replica: &mut Replica,
+    model: &Model,
+    changes: &[ScopeEdit],
+    by: By<'_>,
+) -> Result<(), CliError> {
+    for change in changes {
+        if !scope_already(replica.state(), model, change)? {
+            scope::edit(replica, change, by)?;
+        }
     }
     Ok(())
 }
@@ -367,7 +383,9 @@ pub(crate) fn edit_item(
     by: By<'_>,
 ) -> Result<Written, CliError> {
     let key = existing(replica, id)?;
-    check_targets(replica.state(), fields.thread.value(), &fields.repositories.add)?;
+    // Read once: what the steps below judge by is what none of the earlier ones changes.
+    let model = Model::read(replica.state())?;
+    check_targets(replica.state(), &model, fields.thread.value(), &fields.repositories.add)?;
     set_if(replica, &key, field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, field::NOTES, &fields.notes, by)?;
     write_change(replica, &key, field::SIZE, &fields.size, by)?;
@@ -386,7 +404,7 @@ pub(crate) fn edit_item(
     if let Some(state) = fields.state {
         // Work set back from done is reopened, as `item reopen` does: out of any archived subtree, and flagged so its
         // dependents are listed.
-        let done = Model::read(replica.state())?.items.get(id).is_some_and(model::Item::is_done);
+        let done = model.items.get(id).is_some_and(model::Item::is_done);
         if done && state != ItemState::Done {
             archive::reopen(replica, id, by)?;
         }
@@ -402,9 +420,7 @@ pub(crate) fn edit_item(
         }
     }
     let mut written = Written::default();
-    for change in item_scope(id, fields) {
-        scope_step(replica, &change, by)?;
-    }
+    scope_steps(replica, &model, &item_scope(id, fields), by)?;
     // An explicit thread, or none, is the answer; otherwise a moved item joins the one its parent passes down.
     if moved && fields.thread == Change::Keep {
         written.inherited = place::place(replica, &[id.to_owned()], by)?;
@@ -491,7 +507,10 @@ pub(crate) fn add_item(
         return repeat_item(replica.state(), id, fields);
     }
     // Everything that can be refused is, before the item exists.
-    check_targets(replica.state(), fields.thread.value(), &fields.repositories.add)?;
+    if fields.thread.value().is_some() || !fields.repositories.add.is_empty() {
+        let model = Model::read(replica.state())?;
+        check_targets(replica.state(), &model, fields.thread.value(), &fields.repositories.add)?;
+    }
     model::add_item(replica, id, title, by)?;
     edit_item(replica, id, fields, by)
 }
@@ -543,20 +562,19 @@ fn thread_key(id: &str) -> Result<Key, CliError> {
     Ok(Key::new(kind::THREAD, id)?)
 }
 
+/// Writes a thread's fields; `model` is the tracker before them.
 fn write_thread(
     replica: &mut Replica,
+    model: &Model,
     id: &str,
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<(), CliError> {
-    check_targets(replica.state(), None, &fields.repositories.add)?;
+    check_targets(replica.state(), model, None, &fields.repositories.add)?;
     let key = thread_key(id)?;
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
-    for change in thread_scope(id, fields) {
-        scope_step(replica, &change, by)?;
-    }
-    Ok(())
+    scope_steps(replica, model, &thread_scope(id, fields), by)
 }
 
 /// Edits a thread, which exists when it has fields of its own or an item names it.
@@ -566,10 +584,11 @@ pub(crate) fn edit_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<(), CliError> {
-    if !thread_exists(replica.state(), &Model::read(replica.state())?, id) {
+    let model = Model::read(replica.state())?;
+    if !thread_exists(replica.state(), &model, id) {
         return Err(not_found(format!("no thread {id}; `acyclic thread list` lists them")));
     }
-    write_thread(replica, id, fields, by)
+    write_thread(replica, &model, id, fields, by)
 }
 
 /// Adds a thread, or accepts the same add again.
@@ -584,7 +603,8 @@ pub(crate) fn add_thread(
         return Err(model::WriteError::Deleted(id.to_owned()).into());
     }
     if replica.state().entity(&key).is_none() {
-        return write_thread(replica, id, fields, by);
+        let model = Model::read(replica.state())?;
+        return write_thread(replica, &model, id, fields, by);
     }
     let state = replica.state();
     let model = Model::read(state)?;
