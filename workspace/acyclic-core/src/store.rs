@@ -472,8 +472,7 @@ impl Tracker {
         }
         let mut remembered = BTreeSet::new();
         for (_, commit) in git.refs("refs/heads/state/")? {
-            let state = read_state(&git, &commit)?;
-            remembered.extend(state.context.seen.keys().cloned());
+            remembered.extend(seen_replicas(&git, &commit)?);
         }
         if unused && !remembered.contains(&id) {
             return Ok((tracker(git, id, true, None), None));
@@ -1329,6 +1328,20 @@ fn months_between(from: &str, to: &str) -> u32 {
         year.parse::<i64>().unwrap_or(0) * 12 + month.parse::<i64>().unwrap_or(1)
     };
     u32::try_from((index(to) - index(from)).max(0)).unwrap_or(u32::MAX)
+}
+
+/// The replicas a peer's state has seen, read from its header alone: a peer's entities, which this build may not read
+/// strictly, don't matter to which ids are taken.
+fn seen_replicas(git: &Git, commit: &str) -> Result<Vec<ReplicaId>, StoreError> {
+    let header = git.read_paths(commit, &[state::HEADER_PATH.to_owned()])?;
+    let unreadable =
+        || StoreError::State(state::Error::Format(format!("no readable header in state {commit}")));
+    let header: Json =
+        serde_json::from_slice(header.get(state::HEADER_PATH).ok_or_else(unreadable)?)
+            .map_err(|_| unreadable())?;
+    let seen = header.pointer("/context/seen").and_then(Json::as_object).ok_or_else(unreadable)?;
+    // An id this build can't parse can't clash with one it makes.
+    Ok(seen.keys().filter_map(|id| ReplicaId::new(id).ok()).collect())
 }
 
 /// Reads a state from a commit's tree, refusing files that aren't in canonical form.
