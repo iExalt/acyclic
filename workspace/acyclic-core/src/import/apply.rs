@@ -4,7 +4,7 @@
 //! list leaves out is removed, and removals are written before additions. The document is checked once as a whole,
 //! and the result once against what the tracker holds: references, repository names, cycles it would close, and evidence and archiving
 //! on work that isn't done. The writes themselves skip the per-write checks, which would read the whole model each
-//! time.
+//! time. A state is set as given: done work set back isn't flagged as reopened, as `acyclic item reopen` does.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -16,7 +16,7 @@ use super::{Import, KeyKind, ValidationError, owner_name};
 use crate::model::{self, By, Evidence, ItemState, Model, WriteError};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::scope::{self, ScopeEdit};
-use crate::state::{Error, Key, Replica};
+use crate::state::{Error, Key, Replica, State};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -157,7 +157,7 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
         }
     }
     let before = Model::read(&replica.state)?;
-    let mut errors = unknown_references(doc, &before);
+    let mut errors = unknown_references(doc, &before, &replica.state);
     errors.extend(taken_names(doc, &before));
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
@@ -189,8 +189,9 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     Ok(writer.report)
 }
 
-/// The references that name no record of their kind, in the document or the tracker.
-fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
+/// The references that name no record of their kind, in the document or the tracker. A thread with no record that
+/// items still name counts, unless its record was deleted: the CLI refuses moving work into it too.
+fn unknown_references(doc: &Import, before: &Model, state: &State) -> Vec<ValidationError> {
     let mine = |ids: Vec<&String>| ids.into_iter().cloned().collect::<BTreeSet<String>>();
     let items = mine(doc.items.iter().map(|i| &i.id).collect());
     let threads = mine(doc.threads.iter().map(|t| &t.id).collect());
@@ -200,7 +201,9 @@ fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
         KeyKind::Thread => {
             threads.contains(id)
                 || before.threads.contains_key(id)
-                || before.items.values().any(|item| item.thread.all().contains(&id))
+                || (before.items.values().any(|item| item.thread.all().contains(&id))
+                    && !crate::claim::thread_key(id)
+                        .is_ok_and(|key| model::is_deleted(state, &key)))
         },
         KeyKind::Repository => repositories.contains(id) || before.repositories.contains_key(id),
     };
@@ -274,8 +277,8 @@ fn taken_names(doc: &Import, before: &Model) -> Vec<ValidationError> {
     errors
 }
 
-/// Evidence on an item that isn't done, and archived subtrees with work that isn't, judged by the state each item has
-/// once imported: its own where the document leaves its state out.
+/// Evidence on an item that isn't done, and archived subtrees with work that isn't, the document's own or the
+/// tracker's, judged by the state each item has once imported: its own where the document leaves its state out.
 fn unfinished(doc: &Import, after: &Model) -> Vec<ValidationError> {
     let done = |id: &str| after.items.get(id).is_some_and(model::Item::is_done);
     let mut errors = Vec::new();
@@ -286,7 +289,17 @@ fn unfinished(doc: &Import, after: &Model) -> Vec<ValidationError> {
         if item.archived && !after.subtree(&item.id).into_iter().all(done) {
             errors.push(ValidationError::ArchivedNotDone(item.id.clone()));
         }
+        // Work an import leaves open under an archived root would be hidden: `acyclic item reopen` takes it out.
+        if !done(&item.id) {
+            let roots = after
+                .ancestors(&item.id)
+                .into_iter()
+                .filter(|root| after.items.get(*root).is_some_and(model::Item::is_archived_root));
+            errors.extend(roots.map(|root| ValidationError::ArchivedNotDone(root.to_owned())));
+        }
     }
+    errors.sort();
+    errors.dedup();
     errors
 }
 

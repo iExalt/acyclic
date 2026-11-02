@@ -351,3 +351,30 @@ fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
         ThreadFields { repositories: both(&id(3), "me/garden"), ..ThreadFields::default() };
     assert_eq!(code(thread.resolve(&model, &records, None)), "usage");
 }
+
+#[test]
+fn setting_done_work_back_reopens_it_out_of_its_archived_subtree() {
+    let mut r = replica();
+    add_item(&mut r, "p", &titled("Beds"), USER_BY).unwrap();
+    add_item(
+        &mut r,
+        "c",
+        &ItemFields { parent: Change::Set("p".into()), ..titled("Dig") },
+        USER_BY,
+    )
+    .unwrap();
+    for id in ["c", "p"] {
+        model::set_state(&mut r, id, ItemState::Done, USER_BY).unwrap();
+    }
+    r.write(&model::item_key("p").unwrap(), field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
+    assert!(Model::read(r.state()).unwrap().is_archived("c"));
+    let parked = ItemFields { state: Some(ItemState::Parked), ..ItemFields::default() };
+    edit_item(&mut r, "c", &parked, AGENT).unwrap();
+    let model = Model::read(r.state()).unwrap();
+    assert_eq!(model.items["c"].state.one(), Some(&ItemState::Parked));
+    assert!(
+        model.items["c"].reopened != model::Value::None,
+        "flagged, so its dependents are listed"
+    );
+    assert!(!model.is_archived("c"), "out of the archived subtree");
+}
