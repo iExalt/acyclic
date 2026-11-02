@@ -483,10 +483,13 @@ def overview_journey(page, view, name, failures):
         failures.append(f"{name}: {thread}'s row on the Overview opened no panel")
     if page.locator("[data-view=map][aria-current=page]").count() != 1:
         failures.append(f"{name}: {thread}'s row on the Overview didn't go to the Map")
-    page.keyboard.press("Escape")
-    panel.wait_for(state="detached", timeout=5_000)
+    # Going to a list view leaves the thread, whose panel would only stand over the list.
     page.locator("[data-view=overview]").click()
-    entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
+    try:
+        panel.wait_for(state="detached", timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: going to the Overview left {thread}'s panel open over it")
+    entry =overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
     entry.click()
     needs = page.get_by_test_id("needs")
     needs.wait_for(timeout=5_000)

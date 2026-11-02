@@ -205,7 +205,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **An item or a thread opens on the Map and closes back.** One opened from the Overview, Threads or Needs you shows on
   the Map, and one Back, Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the
   focus on the row picked. Selecting on the Map or going to another view makes that where the user is, and going to
-  another view closes the item, which it doesn't show; what a link opened closes onto the Map.
+  another view closes the item, which it doesn't show, and going to the Overview or Needs you closes the thread too, as
+  its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
+  the Map.
 - **A form never loses typing:** Escape and Back on a changed form say how to leave it instead.
 - **Everything open has an address.** The address bar always says what's open (`?view=`, `?item=`, `?thread=`, and
   `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;

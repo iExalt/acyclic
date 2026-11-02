@@ -1170,9 +1170,11 @@ export function App() {
   );
   /**
    * Goes to a view: Needs you's from its top, or at the entry `at` names, as only closing what one of its entries
-   * opened comes back to it where it was left.
+   * opened comes back to it where it was left. The Overview and Needs you are lists, over which a thread's panel would
+   * only cover what the user went to see, so going to either leaves the thread; the Threads view shows it picked.
    */
   const goTo = (to: View, at: string | null = null) => {
+    if (to === "overview" || to === "needs") setThread(null);
     if (to === "needs") {
       setNeedsAt(at);
       needsLeft.current = null;
