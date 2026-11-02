@@ -1,3 +1,3 @@
 #!/bin/sh
-# The publication guard (workspace/acyclic-guard). Any failure, including a build failure, blocks the push.
-exec mise exec -- cargo run --quiet --locked --package acyclic-guard -- pre-push "$@"
+# The publication guard (scripts/pre-push.sh), under mise so the pinned Gitleaks runs. Any failure blocks the push.
+exec mise exec -- sh scripts/pre-push.sh "$@"
