@@ -303,7 +303,7 @@ fn the_server_runs_only_the_commands_it_allows() {
 
 #[test]
 fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
-    let classify = |value: Value| classify(&serde_json::from_value(value).unwrap());
+    let classify = |value: Value| serde_json::from_value::<Command>(value).unwrap().class();
     for read in [
         json!("list"),
         json!("needs"),
@@ -314,7 +314,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"repo": "list"}),
         json!({"repo": {"show": {"repositories": ["r"]}}}),
     ] {
-        assert_eq!(classify(read.clone()), Use::Read, "{read}");
+        assert_eq!(classify(read.clone()), Class::Read, "{read}");
     }
     for write in [
         json!({"claim": {"thread": "t"}}),
@@ -330,7 +330,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
         json!({"repo": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
     ] {
-        assert_eq!(classify(write.clone()), Use::Write, "{write}");
+        assert_eq!(classify(write.clone()), Class::Write, "{write}");
     }
     for refused in [
         json!({"init": {"path": "/elsewhere", "replica": "x"}}),
@@ -339,7 +339,8 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"import": {"file": "/etc/passwd"}}),
         json!("doctor"),
     ] {
-        assert_eq!(classify(refused.clone()), Use::Refused, "{refused}");
+        let class = classify(refused.clone());
+        assert!(![Class::Read, Class::Write].contains(&class), "{refused}");
     }
 }
 

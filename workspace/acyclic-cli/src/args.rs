@@ -321,7 +321,55 @@ pub struct Up {
     pub socket: Option<PathBuf>,
 }
 
+/// What a command needs and does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// Needs no tracker: `init`, `prime`, `completions` and `import --schema`.
+    Standalone,
+    /// Starts a server: `serve` and `up`.
+    Server,
+    /// Works on the clone as a whole: `sync`, `import` and `doctor`.
+    Clone,
+    /// Only reads the tracker.
+    Read,
+    /// May write the tracker.
+    Write,
+}
+
 impl Command {
+    /// What the command needs and does. With no catch-all arm, a new command or subcommand fails to compile until it
+    /// is placed here.
+    #[must_use]
+    pub fn class(&self) -> Class {
+        match self {
+            Self::Init { .. } | Self::Prime | Self::Completions { .. } => Class::Standalone,
+            Self::Import { schema: true, .. } => Class::Standalone,
+            Self::Serve(_) | Self::Up(_) => Class::Server,
+            Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
+            Self::Ready { .. }
+            | Self::List
+            | Self::Show { .. }
+            | Self::Needs
+            | Self::Thread(ThreadCommand::List | ThreadCommand::Show { .. })
+            | Self::Repo(RepoCommand::List | RepoCommand::Show { .. }) => Class::Read,
+            Self::Claim { .. }
+            | Self::Release { .. }
+            | Self::Done { .. }
+            | Self::Item(
+                ItemCommand::Add { .. }
+                | ItemCommand::Edit(_)
+                | ItemCommand::Reopen { .. }
+                | ItemCommand::Archive { .. }
+                | ItemCommand::Delete { .. },
+            )
+            | Self::Link(LinkCommand::Add { .. } | LinkCommand::Remove { .. })
+            | Self::Thread(
+                ThreadCommand::Add { .. } | ThreadCommand::Edit(_) | ThreadCommand::Renumber { .. },
+            )
+            | Self::Repo(RepoCommand::Add { .. } | RepoCommand::Edit { .. }) => Class::Write,
+        }
+    }
+
     /// Checks what the command line's parser checks but deserializing doesn't: the arguments it requires, and the ones
     /// that require or exclude each other, and the flags that clear what another sets.
     ///
