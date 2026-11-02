@@ -152,11 +152,18 @@ impl Git {
             out
         });
         let contents = self.cat_file(&request, entries.len())?;
-        Ok(entries
+        // A tree names its own objects, so one missing is a damaged object store: read on, and the state would lose
+        // that record with nothing to say so.
+        entries
             .into_iter()
             .zip(contents)
-            .filter_map(|((path, _), content)| Some((path, content?)))
-            .collect())
+            .map(|((path, id), content)| match content {
+                Some(content) => Ok((path, content)),
+                None => Err(StoreError::Git(format!(
+                    "{commit} lists {path}, but its object {id} is missing from the repository"
+                ))),
+            })
+            .collect()
     }
 
     /// The contents of the given paths in a commit's tree; missing paths are left out.

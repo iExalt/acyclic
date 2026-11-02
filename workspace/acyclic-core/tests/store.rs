@@ -95,6 +95,50 @@ fn a_batch_moves_state_and_log_together() {
 }
 
 #[test]
+fn a_state_whose_tree_names_a_missing_object_fails_to_load() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "a1", "title", json!("kept"));
+    // The state as a damaged object store would hold it: its tree names a2's file, whose object isn't there.
+    let index = dir.path().join("index");
+    let indexed = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(args)
+            .env("GIT_INDEX_FILE", &index)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    indexed(&["read-tree", "state/mac"]);
+    // An object id, of whatever hash the repository uses, for content never written.
+    let id = {
+        let mut hashing = Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(["hash-object", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut hashing.stdin.take().unwrap(), b"never written").unwrap();
+        String::from_utf8(hashing.wait_with_output().unwrap().stdout).unwrap().trim().to_owned()
+    };
+    let absent = format!("100644,{id},{}", item("a2").path());
+    indexed(&["update-index", "--add", "--cacheinfo", &absent]);
+    let tree = indexed(&["write-tree", "--missing-ok"]);
+    let commit = git(&path, &["commit-tree", &tree, "-p", "state/mac", "-m", "damaged"]);
+    git(&path, &["update-ref", "refs/heads/state/mac", &commit]);
+    let Err(StoreError::Git(message)) = tracker.load_strict() else {
+        panic!("a state missing a record loaded")
+    };
+    assert!(message.contains(&item("a2").path()) && message.contains("missing"), "{message}");
+}
+
+#[test]
 fn an_unchanged_batch_commits_nothing() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
