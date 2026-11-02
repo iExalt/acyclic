@@ -64,7 +64,16 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
             Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
         },
         (Class::Clone | Class::Read | Class::Write, command) => {
-            Session::open(cli, env)?.dispatch(command).map(Output::Json)
+            let result = Session::open(cli, env).and_then(|session| session.dispatch(command));
+            result.map(Output::Json).map_err(|mut error| {
+                // Doctor doesn't point at itself.
+                if matches!(command, Command::Doctor)
+                    && error.details == json!({"hint": crate::error::DOCTOR_HINT})
+                {
+                    error.details = Json::Null;
+                }
+                error
+            })
         },
     }
 }

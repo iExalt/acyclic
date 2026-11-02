@@ -7,9 +7,16 @@ use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
-use acyclic_core::state::Error as StateError;
+use acyclic_core::state::{Error as StateError, FORMAT_VERSION};
 use acyclic_core::store::{BatchError, StoreError};
 use serde_json::{Value as Json, json};
+
+/// What an unreadable state hints at, except from `doctor` itself.
+pub(crate) const DOCTOR_HINT: &str = "run acyclic doctor";
+/// What a state an earlier format version wrote hints at, from every command.
+const MIGRATE_HINT: &str = "written by an earlier acyclic: migrate the tracker";
+/// What a state a later format version wrote hints at.
+const LATER_HINT: &str = "written by a later acyclic: run that version";
 
 /// Exit codes. Stable: agents branch on them.
 pub mod exit {
@@ -83,13 +90,17 @@ impl From<StateError> for CliError {
             StateError::IdReused { .. } => ("id-reused", exit::REFUSED),
             StateError::Claimed(_) => ("claimed", exit::REFUSED),
             StateError::NoThread(_) => ("not-found", exit::NOT_FOUND),
-            StateError::Format(_) => ("unreadable", exit::UNREADABLE),
+            StateError::Format(_) | StateError::Version(_) => ("unreadable", exit::UNREADABLE),
         };
-        let mut error = Self::new(code, exit, message);
-        if code == "unreadable" {
-            error = error.with(json!({"hint": "run acyclic doctor"}));
+        let error = Self::new(code, exit, message);
+        match err {
+            StateError::Version(version) if version < u64::from(FORMAT_VERSION) => {
+                error.with(json!({"hint": MIGRATE_HINT}))
+            },
+            StateError::Version(_) => error.with(json!({"hint": LATER_HINT})),
+            StateError::Format(_) => error.with(json!({"hint": DOCTOR_HINT})),
+            _ => error,
         }
-        error
     }
 }
 

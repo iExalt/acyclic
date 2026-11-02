@@ -233,6 +233,8 @@ impl View<'_> {
                 },
                 Entry::Unverified { item, repository, reason } => json!({
                     "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
+                    "repository_name": self.model.repositories.get(repository)
+                        .and_then(crate::resolve::repository_name),
                     "reason": reason,
                 }),
             };
@@ -601,6 +603,19 @@ mod tests {
         add_item(&mut mac, "e", "E", user).unwrap();
         scope::edit(&mut mac, &member("e", Some("t")), user).unwrap();
         link(&mut mac, "e", "c", user).unwrap();
+        // `h` waits for `f`, done in `r`, and `g`, done in a repository with no record, neither merge confirmed.
+        add_item(&mut mac, "h", "H", user).unwrap();
+        for (id, repository) in [("f", "r"), ("g", "gone")] {
+            add_item(&mut mac, id, &id.to_uppercase(), user).unwrap();
+            let evidence = acyclic_core::model::Evidence {
+                repository: Some(repository.into()),
+                commit: Some("abc1234".into()),
+                text: None,
+            };
+            model::set(&mut mac, &key(kind::ITEM, id), "evidence", Some(&evidence), user).unwrap();
+            set_state(&mut mac, id, ItemState::Done, user).unwrap();
+            link(&mut mac, "h", id, user).unwrap();
+        }
         // Two replicas disagree about an item's parent.
         let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
         set_parent(&mut mac, "b", None, user).unwrap();
@@ -627,6 +642,18 @@ mod tests {
                 json!(["t", "u"].map(|id| thread_row(&view.model.heads_index(), id, &listed[id])))
             );
             assert_eq!(cycle["notify"], true);
+            // An unconfirmed merge names its repository by id, and by `owner/name` when it has a record.
+            let named: Vec<(&Json, &Json, &Json)> = of("unverified")
+                .into_iter()
+                .map(|n| (&n["item"]["id"], &n["repository"], &n["repository_name"]))
+                .collect();
+            assert_eq!(
+                named,
+                [
+                    (&json!("f"), &json!("r"), &json!("me/code")),
+                    (&json!("g"), &json!("gone"), &json!(null))
+                ]
+            );
             for entry in &needs {
                 assert!(entry["kind"].is_string(), "{entry}");
                 follows_the_conventions(entry, "needs");

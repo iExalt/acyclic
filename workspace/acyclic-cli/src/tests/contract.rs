@@ -337,7 +337,7 @@ fn done_names_its_commit_by_repository_and_sha() {
 }
 
 #[test]
-fn a_tracker_an_earlier_format_wrote_is_refused_and_doctor_says_so() {
+fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
     sh.run(&format!("item add --id {} --title First", id("a1")), AGENT);
@@ -363,19 +363,31 @@ fn a_tracker_an_earlier_format_wrote_is_refused_and_doctor_says_so() {
     let current = format!("\"format_version\": {}", acyclic_core::state::FORMAT_VERSION);
     assert!(header.contains(&current), "{header}");
     let earlier = format!("\"format_version\": {}", acyclic_core::state::FORMAT_VERSION - 1);
-    std::fs::write(tracker.join("header"), header.replace(&current, &earlier) + "\n").unwrap();
-    git(&["read-tree", "refs/heads/state/mac"]);
-    let blob = git(&["hash-object", "-w", "header"]);
-    git(&["update-index", "--add", "--cacheinfo", &format!("100644,{blob},state.json")]);
-    let tree = git(&["write-tree"]);
-    let commit = git(&["commit-tree", &tree, "-p", "refs/heads/state/mac", "-m", "earlier"]);
-    git(&["update-ref", "refs/heads/state/mac", &commit]);
-    for line in ["item list", "doctor"] {
+    let write_header = |text: String| {
+        std::fs::write(tracker.join("header"), text + "\n").unwrap();
+        git(&["read-tree", "refs/heads/state/mac"]);
+        let blob = git(&["hash-object", "-w", "header"]);
+        git(&["update-index", "--add", "--cacheinfo", &format!("100644,{blob},state.json")]);
+        let tree = git(&["write-tree"]);
+        let commit = git(&["commit-tree", &tree, "-p", "refs/heads/state/mac", "-m", "header"]);
+        git(&["update-ref", "refs/heads/state/mac", &commit]);
+    };
+    write_header(header.replace(&current, &earlier));
+    let mut refused = |line: &str| {
         let (code, out) = sh.output(line, AGENT);
-        let message = out["error"]["message"].as_str().unwrap_or_default();
         assert_eq!((code, out["error"]["code"].as_str()), (6, Some("unreadable")), "{line}: {out}");
-        assert!(message.contains("must be migrated"), "{line}: {message}");
+        out["error"].clone()
+    };
+    // Every command, doctor too, says to migrate.
+    for line in ["item list", "doctor"] {
+        let error = refused(line);
+        assert!(error["message"].as_str().unwrap().contains("must be migrated"), "{line}: {error}");
+        assert_eq!(error["details"]["hint"], "written by an earlier acyclic: migrate the tracker");
     }
+    // Any other unreadable state points to doctor, except from doctor itself.
+    write_header("not a header".to_owned());
+    assert_eq!(refused("item list")["details"]["hint"], "run acyclic doctor");
+    assert_eq!(refused("doctor")["details"], json!(null));
 }
 
 #[test]

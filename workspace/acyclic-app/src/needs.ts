@@ -44,6 +44,8 @@ export interface NeedView {
   note: string | null;
   /** The keys of the entries it stands for besides its own, where several are shown as one (`together`). */
   merged?: string[];
+  /** An unconfirmed merge's repository as people name it: its `owner/name`, or its id when it has no record. */
+  repository?: string;
 }
 
 interface Row {
@@ -190,12 +192,14 @@ function viewOf(
       };
     }
     case "unverified": {
-      const repository = str(need.repository);
+      const id = str(need.repository);
+      const repository = str(need.repository_name) || id;
       const reason = str(need.reason);
       // The item is its row, so the text doesn't name it twice; the Overview, which shows no rows, gives it as detail.
       return {
         ...base,
-        key: `unverified:${item?.id ?? ""}:${repository}`,
+        key: `unverified:${item?.id ?? ""}:${id}`,
+        repository,
         text: `Can't confirm ${item === null ? "an item" : "its"} merge into ${repository}`,
         detail: item === null ? null : titled(item),
         note: unverifiedWhy(repository, reason),
@@ -254,7 +258,7 @@ export function together(views: readonly NeedView[]): NeedView[] {
     const all = items.length + was.more;
     out[first] = {
       ...was,
-      text: `Can't confirm ${all} items' merges into ${repository}`,
+      text: `Can't confirm ${all} items' merges into ${was.repository ?? repository}`,
       detail: null,
       items: items.slice(0, LISTED),
       more: all - Math.min(items.length, LISTED),

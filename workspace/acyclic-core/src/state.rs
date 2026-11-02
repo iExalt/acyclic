@@ -221,6 +221,8 @@ pub enum Error {
     NoThread(String),
     /// A state file that couldn't be read.
     Format(String),
+    /// A state another format version wrote, which this build doesn't read.
+    Version(u64),
 }
 
 impl fmt::Display for Error {
@@ -244,6 +246,16 @@ impl fmt::Display for Error {
             Self::Claimed(key) => write!(f, "{} {} already has a live claim", key.kind, key.id),
             Self::NoThread(thread) => write!(f, "no thread {thread}; claim a thread, not an item"),
             Self::Format(message) => write!(f, "unreadable state: {message}"),
+            Self::Version(version) => write!(
+                f,
+                "unreadable state: format version {version} is not supported; this build reads only \
+                 {FORMAT_VERSION}, so {}",
+                if *version < u64::from(FORMAT_VERSION) {
+                    "a tracker written by an earlier version must be migrated"
+                } else {
+                    "a tracker written by a later version needs a later acyclic"
+                }
+            ),
         }
     }
 }
@@ -851,10 +863,7 @@ fn read_entity(path: Option<&str>, file: EntityFile) -> Result<(Key, Entity), Er
 fn check_version(header: &Json) -> Result<(), Error> {
     let version = header.get("format_version").and_then(Json::as_u64).unwrap_or(0);
     if version != u64::from(FORMAT_VERSION) {
-        return Err(Error::Format(format!(
-            "format version {version} is not supported; this build reads only {FORMAT_VERSION}, so a tracker written \
-             by an earlier version must be migrated"
-        )));
+        return Err(Error::Version(version));
     }
     Ok(())
 }

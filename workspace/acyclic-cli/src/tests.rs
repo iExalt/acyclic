@@ -89,6 +89,7 @@ fn every_error_has_a_stable_code_and_exit() {
         StateError::Claimed(key.clone()).into(),
         StateError::NoThread("t".into()).into(),
         StateError::Format("bad".into()).into(),
+        StateError::Version(2).into(),
         WriteError::InvalidName("A".into()).into(),
         WriteError::NoItem("a1".into()).into(),
         WriteError::Deleted("a1".into()).into(),
