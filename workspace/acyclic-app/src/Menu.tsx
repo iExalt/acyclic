@@ -1,7 +1,7 @@
 // The bar's menu of what changes rarely. A disclosure, so it needs no script to open and browsers tell assistive
 // technology whether it is expanded. While it is open, a backdrop drawn by its summary takes a tap anywhere else, so
-// the tap closes the menu and nothing under it; Escape closes it too, and only it, and so does acting in it, so the
-// next tap reaches what it lands on.
+// the tap closes the menu and nothing under it; Escape closes it too, and only it, and so does a button in it, so the
+// next tap reaches what it lands on. A setting changed in it leaves it open.
 
 import { type ReactNode, useEffect, useRef } from "react";
 import { Icon, MoreHorizontal } from "./icons";
@@ -100,20 +100,14 @@ export function Menu({
       <summary aria-label={label} data-testid={testid}>
         <Icon of={MoreHorizontal} size={20} />
       </summary>
-      {/* Its buttons close it on a click, its fields on a change, and its lists on Enter; keys reach each control. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: listens for what its buttons, fields and lists already handle. */}
+      {/* Its buttons close it on a click, so the next tap reaches what it lands on. A setting, a box ticked or a value
+          picked, leaves it open showing the new value, as a menu closing under a finger on a checkbox read as wrong. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: listens for what its buttons already handle. */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: a key on a button clicks it, which reaches this too. */}
       <div
         className={list ? "menu-body menu-list" : "menu-body"}
         onClick={(event) => {
           if ((event.target as Element).closest("button") !== null) close(details.current);
-        }}
-        onChange={() => close(details.current)}
-        // Enter on a list writes its draft, which acts as a pick does; a list with no draft keeps the key to itself.
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || !(event.target instanceof HTMLSelectElement)) return;
-          // Its default would reach the summary that closing focuses, and open the menu again.
-          event.preventDefault();
-          close(details.current);
         }}
       >
         {children}

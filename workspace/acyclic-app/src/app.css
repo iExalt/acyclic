@@ -22,47 +22,33 @@
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
-/* The palettes: palette.ts's, which a unit test holds these to. A control's edge is stronger than a rule, so an
-   outlined button reads as one. */
-/* palette dark */
+/* The palettes: palette.ts's, which a unit test holds these to, each as light-dark(light, dark), so the scheme follows
+   the system's unless the menu's Theme sets one on the root. A control's edge is stronger than a rule, so an outlined
+   button reads as one. */
+/* palettes */
 :root {
-  --ground: #121417;
-  --chrome: #16191d;
-  --box: #181b1f;
-  --tile: #23282e;
-  --sheet: #1c2025;
-  --rule: #2b3138;
-  --edge: #4a535e;
-  --field: #6c7580;
-  --ink: #e8eaed;
-  --muted: #a2aab4;
-  --link: #6c7580;
-  --signal: #f2b33d;
-  --danger: #ff8a80;
-  --accent: #e8eaed;
-  --accent-ink: #121417;
-  color-scheme: dark;
+  --ground: light-dark(#f3f4f6, #121417);
+  --chrome: light-dark(#eceef1, #16191d);
+  --box: light-dark(#f9fafb, #181b1f);
+  --tile: light-dark(#ffffff, #23282e);
+  --sheet: light-dark(#ffffff, #1c2025);
+  --rule: light-dark(#d0d5db, #2b3138);
+  --edge: light-dark(#aab0b9, #4a535e);
+  --field: light-dark(#80878f, #6c7580);
+  --ink: light-dark(#1a1c20, #e8eaed);
+  --muted: light-dark(#5b626c, #a2aab4);
+  --link: light-dark(#878e98, #6c7580);
+  --signal: light-dark(#8f5100, #f2b33d);
+  --danger: light-dark(#b3261e, #ff8a80);
+  --accent: light-dark(#1a1c20, #e8eaed);
+  --accent-ink: light-dark(#ffffff, #121417);
+  color-scheme: light dark;
 }
-@media (prefers-color-scheme: light) {
-  /* palette light */
-  :root {
-    --ground: #f3f4f6;
-    --chrome: #eceef1;
-    --box: #f9fafb;
-    --tile: #ffffff;
-    --sheet: #ffffff;
-    --rule: #d0d5db;
-    --edge: #aab0b9;
-    --field: #80878f;
-    --ink: #1a1c20;
-    --muted: #5b626c;
-    --link: #878e98;
-    --signal: #8f5100;
-    --danger: #b3261e;
-    --accent: #1a1c20;
-    --accent-ink: #ffffff;
-    color-scheme: light;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 :root {
   /* At least 44 px to a fingertip; a mouse makes do with less. */
@@ -1316,16 +1302,42 @@ code {
   flex: 1;
 }
 
-.setting {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
+/* A thread's settings as the item panel's properties: muted labels in a column, each value beside its label as text
+   with a caret, outlined only under the pointer, so two settings line up and weigh no more than the facts above. */
+.settings {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 16px;
   align-items: center;
-  margin: 8px 0;
 }
-/* The label wraps before the choice is cut short. */
+.settings > h3 {
+  grid-column: 1 / -1;
+}
+.setting {
+  display: contents;
+  color: var(--muted);
+  font-size: 13px;
+}
 .setting select {
-  flex: none;
+  justify-self: start;
+  margin-left: -6px;
+  padding: 2px 30px 2px 6px;
+  border-color: transparent;
+  background-color: transparent;
+  background-position:
+    calc(100% - 17px) 55%,
+    calc(100% - 12px) 55%;
+  color: var(--ink);
+  font-weight: 550;
+}
+.setting select:hover {
+  background-color: var(--hover);
+}
+@media not (pointer: coarse) {
+  .setting select {
+    min-height: 30px;
+    font-size: 14px;
+  }
 }
 .proposals li {
   display: flex;
@@ -1598,10 +1610,6 @@ code.id {
 .hint {
   color: var(--muted);
   font-size: 12px;
-}
-/* What the choice means, under it at the panel's width rather than a narrow column beside it. */
-.setting .hint {
-  flex-basis: 100%;
 }
 input[aria-invalid="true"] + .hint,
 .hint:has(+ input[aria-invalid="true"]) {

@@ -2,6 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./app.css";
+import { applyTheme, readTheme } from "./palette";
+
+// Before the first render, so a Theme picked on this device shows from the start.
+applyTheme(readTheme());
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root");
