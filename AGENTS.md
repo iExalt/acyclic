@@ -15,8 +15,9 @@
 - Use the `acyclic` CLI for project management: finding, claiming and finishing work. Run `acyclic prime` first.
 - Use mise for tools: `mise run check` is the routine check (format, Clippy, unit tests, and the doc fence, Markdown and
   workflow lints) and must stay under 60 seconds on a warm cache.
-- Most behaviour is covered by unit tests in the core library; integration tests cover contracts; browser journeys
-  run in `mise run check:browser`, outside the routine check.
+- Most behaviour is covered by unit tests in the core library. The CLI's contract against one tracker runs in its
+  unit tests, in process; integration tests cover what needs several tracker clones syncing; browser journeys run in
+  `mise run check:browser`, outside the routine check.
 - Commit messages follow Conventional Commits.
 - Pull requests are squash-merged, and release-please reads only the squashed commit: its title, from the pull
   request's title, and its body, from the description. Title a pull request as a Conventional Commit that covers

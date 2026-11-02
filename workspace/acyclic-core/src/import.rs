@@ -279,6 +279,16 @@ pub enum ValidationError {
         /// The name.
         name: String,
     },
+    /// Two repositories would share an `owner/name`, in any case: one the document names, and another in it or in the
+    /// tracker.
+    RepositoryNameTaken {
+        /// The document's repository.
+        repository: String,
+        /// The name, as the document gives it.
+        name: String,
+        /// The other repository that has it.
+        other: String,
+    },
     /// An evidence commit that isn't `<repository id>@<sha>`.
     InvalidCommit {
         /// The item.
@@ -316,6 +326,9 @@ impl fmt::Display for ValidationError {
             Self::EvidenceNotDone(item) => write!(f, "item {item} has evidence but isn't done"),
             Self::InvalidRepositoryName { repository, name } => {
                 write!(f, "repository {repository}: {name:?} isn't owner/name")
+            },
+            Self::RepositoryNameTaken { repository, name, other } => {
+                write!(f, "repository {repository}: {name} is repository {other}'s name too")
             },
             Self::InvalidCommit { item, commit } => {
                 write!(f, "item {item}: evidence commit {commit:?} isn't <repository id>@<sha>")

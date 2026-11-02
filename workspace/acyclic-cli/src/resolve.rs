@@ -11,10 +11,12 @@
 //! Every rule is judged before deciding, so a reference that is one record's title and another's id ending is refused
 //! as `ambiguous`, naming both; one that is the title and an ending of the same record names it. A title matches as
 //! typed: only the comparison of an id ending is lowercased, never the reference as a whole. A deleted record is never
-//! a candidate.
+//! a candidate, except a thread items still name: like a thread with no record, it stays one so that `thread show`
+//! finds its members and pretty output can name it, and a write that would move an item into it refuses it as missing.
 //!
 //! Pretty output names items and threads by [`endings`] over the same candidates, so every ending it prints names its
-//! record, and repositories by their `owner/name`.
+//! record, and repositories by their `owner/name`. The exception is an id shorter than [`MIN_ENDING`], which no
+//! command makes: it prints whole, and names nothing.
 
 use std::collections::BTreeMap;
 
@@ -278,7 +280,7 @@ fn not_found(kind: Kind, reference: &str, meant: &[&Candidate<'_>]) -> CliError 
     if meant.is_empty() { error } else { error.with(details(kind, meant)) }
 }
 
-/// Each id by the shortest ending, at least [`MIN_ENDING`] characters, that no other of `ids` shares.
+/// Each id by the shortest ending, at least [`MIN_ENDING`] characters, that no other of `ids` shares: the whole id when it is shorter.
 pub(crate) fn endings<'i>(ids: impl IntoIterator<Item = &'i str>) -> BTreeMap<String, String> {
     let mut reversed: Vec<Vec<u8>> = ids.into_iter().map(|id| id.bytes().rev().collect()).collect();
     reversed.sort();
@@ -288,7 +290,7 @@ pub(crate) fn endings<'i>(ids: impl IntoIterator<Item = &'i str>) -> BTreeMap<St
     for (at, id) in reversed.iter().enumerate() {
         let before = at.checked_sub(1).map_or(0, |b| common(id, &reversed[b]));
         let after = reversed.get(at + 1).map_or(0, |next| common(id, next));
-        let length = (before.max(after) + 1).clamp(MIN_ENDING, id.len());
+        let length = (before.max(after) + 1).max(MIN_ENDING).min(id.len());
         let id: String = id.iter().rev().map(|b| char::from(*b)).collect();
         found.insert(id.clone(), id[id.len() - length..].to_owned());
     }

@@ -2,7 +2,7 @@
 //! differs, so importing the same document twice writes nothing. A single value the document leaves out is kept; a
 //! list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`) is the whole of it, so what the
 //! list leaves out is removed, and removals are written before additions. The document is checked once as a whole,
-//! and the result once against what the tracker holds: references, cycles it would close, and evidence and archiving
+//! and the result once against what the tracker holds: references, repository names, cycles it would close, and evidence and archiving
 //! on work that isn't done. The writes themselves skip the per-write checks, which would read the whole model each
 //! time.
 
@@ -157,7 +157,8 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
         }
     }
     let before = Model::read(&replica.state)?;
-    let errors = unknown_references(doc, &before);
+    let mut errors = unknown_references(doc, &before);
+    errors.extend(taken_names(doc, &before));
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
@@ -235,6 +236,41 @@ fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
     }
     errors.sort();
     errors.dedup();
+    errors
+}
+
+/// The document's repositories whose `owner/name`, in any case, another repository would have once imported: one
+/// in the document, or one in the tracker that the document doesn't rename.
+/// A tracker record whose owner or name is in conflict holds every name its values could make: stricter than
+/// `repository add`, which counts it as unnamed, so an import never makes a clash the conflict's resolution would expose.
+fn taken_names(doc: &Import, before: &Model) -> Vec<ValidationError> {
+    let mine: BTreeSet<&str> = doc.repositories.iter().map(|r| r.id.as_str()).collect();
+    let mut holders: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+    for record in before.repositories.values().filter(|r| !mine.contains(r.id.as_str())) {
+        for owner in record.owner.all() {
+            for name in record.name.all() {
+                holders
+                    .entry(format!("{owner}/{name}").to_lowercase())
+                    .or_default()
+                    .insert(&record.id);
+            }
+        }
+    }
+    for record in &doc.repositories {
+        holders.entry(record.name.to_lowercase()).or_default().insert(&record.id);
+    }
+    let mut errors = Vec::new();
+    for record in &doc.repositories {
+        let others = &holders[&record.name.to_lowercase()];
+        for other in others.iter().filter(|other| **other != record.id) {
+            errors.push(ValidationError::RepositoryNameTaken {
+                repository: record.id.clone(),
+                name: record.name.clone(),
+                other: (*other).to_owned(),
+            });
+        }
+    }
+    errors.sort();
     errors
 }
 

@@ -230,3 +230,37 @@ fn a_deleted_thread_is_refused_as_a_deleted_item_is() {
     let err = apply(&doc, &mut r, by(USER, 3)).unwrap_err();
     assert_eq!(err, ApplyError::Write(WriteError::Deleted(id(21))));
 }
+
+#[test]
+fn a_repository_name_another_record_would_share_is_refused_in_any_case() {
+    let repository = |n: u8, name: &str| crate::import::Repository {
+        id: id(n),
+        name: name.into(),
+        default_branch: "main".into(),
+    };
+    let taken = |n: u8, name: &str, other: u8| ValidationError::RepositoryNameTaken {
+        repository: id(n),
+        name: name.into(),
+        other: id(other),
+    };
+    let mut r = imported();
+    let mut doc = Import::new();
+    // The tracker's repository 1 is example/code; importing it again is no clash.
+    doc.repositories = vec![repository(1, "example/code")];
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    // Another record taking its name, in another case, is.
+    doc.repositories = vec![repository(2, "Example/Code")];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("a taken name accepted")
+    };
+    assert_eq!(errors, [taken(2, "Example/Code", 1)]);
+    // Two of the document's own records clash with each other.
+    doc.repositories = vec![repository(2, "me/garden"), repository(3, "ME/garden")];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
+        panic!("a name used twice accepted")
+    };
+    assert_eq!(errors, [taken(2, "me/garden", 3), taken(3, "ME/garden", 2)]);
+    // A document that renames 1 frees its old name for another record in the same import.
+    doc.repositories = vec![repository(1, "example/old"), repository(2, "example/code")];
+    apply(&doc, &mut r, by(USER, 5)).unwrap();
+}
