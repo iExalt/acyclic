@@ -378,3 +378,23 @@ fn setting_done_work_back_reopens_it_out_of_its_archived_subtree() {
     );
     assert!(!model.is_archived("c"), "out of the archived subtree");
 }
+
+#[test]
+fn one_repository_named_twice_is_written_once() {
+    let garden =
+        RepositoryFields { name: Some("me/garden".into()), default_branch: Some("main".into()) };
+    // Two spellings of one record resolve to the same id twice.
+    let written = |named: Vec<String>| {
+        let mut r = replica();
+        add_repository(&mut r, &id(3), &garden, USER_BY).unwrap();
+        add_item(&mut r, "a", &titled("A"), USER_BY).unwrap();
+        let before = r.changes();
+        let fields = ItemFields {
+            repositories: Delta { add: named, remove: vec![] },
+            ..ItemFields::default()
+        };
+        edit_item(&mut r, "a", &fields, AGENT).unwrap();
+        r.changes() - before
+    };
+    assert_eq!(written(vec![id(3), id(3)]), written(vec![id(3)]));
+}
