@@ -20,6 +20,7 @@ const placed: Placed = {
   laidOut: [],
   routes: new Map(),
   junctions: new Map(),
+  dividers: new Map(),
   redundant: new Set(),
   nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }])),
 };

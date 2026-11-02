@@ -40,6 +40,7 @@ function elements({ items, collapsed = [], archived = false, selection, colour }
     laidOut: [],
     routes: new Map(),
     junctions: new Map(),
+    dividers: new Map(),
     redundant: new Set(),
     nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: i * 7, width: 20 + i, height: 10 }])),
   };
@@ -162,6 +163,7 @@ describe("a junction's dot", () => {
         ],
       ]),
       junctions: new Map([["dig->sow", [{ x: 5, y: 5 }]]]),
+      dividers: new Map(),
       redundant: new Set(),
       nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: i * 7, width: 20 + i, height: 10 }])),
     };

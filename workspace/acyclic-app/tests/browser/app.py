@@ -1951,6 +1951,8 @@ def failed_add_journey(page, errors, name, failures):
             else route.fallback()
         ),
     )
+    # Added from the Overview, so the add goes to the Map to show where it landed.
+    page.locator("[data-view=overview]").click()
     page.locator("[data-action=add-top]").click()
     form = page.get_by_test_id("add-form")
     form.locator("input[name=title]").fill("Saved unread")
@@ -1959,6 +1961,10 @@ def failed_add_journey(page, errors, name, failures):
         timeout=10_000
     )
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    if not page.locator("[data-view=map][aria-current=page]").count() or not in_open_view(
+        page, "saved-unread"
+    ):
+        failures.append(f"{name}: an item added from the Overview wasn't shown on the Map")
     page.unroute("**/api/command")
     form = add(
         "Refused after",

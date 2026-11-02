@@ -58,6 +58,13 @@ export function elementsOf(
       // Not "lit": that names the thread's items, which a dot isn't.
       classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
     })),
+    // Over its box, under everything in it.
+    ...scene.dividers.map((divider) => ({
+      group: "nodes" as const,
+      data: { id: divider.id, layer: divider.layer, height: divider.bottom - divider.top, textWidth: 0 },
+      position: { x: divider.x, y: (divider.top + divider.bottom) / 2 },
+      classes: "divider",
+    })),
     ...scene.edges.map((edge) => ({
       group: "edges" as const,
       data: {

@@ -1,8 +1,8 @@
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { describe, expect, it } from "vitest";
-import { elkLayBox } from "./map/elk";
+import { dependencyOrder, elkLayBox } from "./map/elk";
 import { item } from "./map/fixture";
-import { LayoutCache, place } from "./map/layout";
+import { type LayBox, LayoutCache, place, ROOT } from "./map/layout";
 import { buildModel, defaultView, visible } from "./map/model";
 import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
 
@@ -62,7 +62,7 @@ describe("outlineOf", () => {
     ]);
   });
 
-  it("lists projects in the order the Map packs its top level in, with its boxes collapsed", async () => {
+  it("lists projects in the dependency order the Map packs its top level by, with its boxes collapsed", async () => {
     const plan = buildModel([
       item("project-1"),
       item("a", "project-1"),
@@ -75,15 +75,23 @@ describe("outlineOf", () => {
       item("e", "project-2"),
     ]);
     let packed: string[] = [];
-    // An engine that only notes what the top level is given, and puts everything at the origin.
+    // An engine that puts everything at the origin, and a layout that notes the order of what the top level is given.
     const engine = {
       layout: async (graph: ElkNode): Promise<ElkNode> => {
-        if (graph.id === "root") packed = (graph.children ?? []).map((child) => child.id);
         const children = graph.children?.map((child) => ({ ...child, x: 0, y: 0 }));
         return { id: graph.id, width: 1, height: 1, ...(children === undefined ? {} : { children }) };
       },
     };
-    await place(visible(plan, defaultView(plan)), new LayoutCache(), elkLayBox(engine), 1);
+    const lay = elkLayBox(engine);
+    const noted: LayBox = async (input) => {
+      if (input.id === ROOT)
+        packed = dependencyOrder(
+          input.children.map((child) => child.id),
+          input.edges,
+        );
+      return lay(input);
+    };
+    await place(visible(plan, defaultView(plan)), new LayoutCache(), noted, 1);
     expect(packed).toEqual(["project-2", "lone", "side-1", "project-1"]);
     expect(outlineOf(plan, [], false).projects.map((project) => project.id)).toEqual(
       packed.filter((id) => id !== "lone"),

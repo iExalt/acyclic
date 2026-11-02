@@ -34,6 +34,15 @@ export interface BoxLayout extends Size {
   routes?: Record<string, Point[]>;
   /** Where a trunk of links leaving one node splits, by the `source->target` of a link that splits there. */
   junctions?: Record<string, Point[]>;
+  /** The line between the children aside and the graph, when the box has both. */
+  divider?: Divider;
+}
+
+/** A vertical line at `x` from `top` to `bottom`. */
+export interface Divider {
+  x: number;
+  top: number;
+  bottom: number;
 }
 
 export type LayBox = (input: BoxInput) => Promise<BoxLayout>;
@@ -148,6 +157,8 @@ export interface Placed extends Size {
   routes: Map<string, Point[]>;
   /** Where trunks split, by the `source->target` of a link that splits there, in the same coordinates. */
   junctions: Map<string, Point[]>;
+  /** Each box's line between its children aside and its graph, by the box's id, in the same coordinates. */
+  dividers: Map<string, Divider>;
   /** The links a longer way inside their box implies, drawn only when asked for. */
   redundant: ReadonlySet<string>;
   /** The boxes laid out afresh for this view, rather than found in the cache. */
@@ -215,9 +226,12 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
   const nodes = new Map<string, { x: number; y: number } & Size>();
   const routes = new Map<string, Point[]>();
   const junctions = new Map<string, Point[]>();
+  const dividers = new Map<string, Divider>();
   const absolute = (id: string, ox: number, oy: number) => {
     const box = boxes.get(id);
     if (box === undefined) return;
+    if (box.divider !== undefined)
+      dividers.set(id, { x: ox + box.divider.x, top: oy + box.divider.top, bottom: oy + box.divider.bottom });
     const moved = (points: Point[]) => points.map((point) => ({ x: ox + point.x, y: oy + point.y }));
     for (const [key, way] of Object.entries(box.routes ?? {})) routes.set(key, moved(way));
     for (const [key, at] of Object.entries(box.junctions ?? {})) junctions.set(key, moved(at));
@@ -230,7 +244,16 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
     }
   };
   absolute(ROOT, 0, 0);
-  return { width: root.width, height: root.height, nodes, routes, junctions, redundant: scope.redundant, laidOut };
+  return {
+    width: root.width,
+    height: root.height,
+    nodes,
+    routes,
+    junctions,
+    dividers,
+    redundant: scope.redundant,
+    laidOut,
+  };
 }
 
 /**
