@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detentAfter, draggableFrom, velocity } from "./sheets";
+import { detentAfter, draggableFrom, firstHeight, PEEK, velocity } from "./sheets";
 
 describe("velocity", () => {
   it("reads a drag's speed from its last 100 ms, not from its start", () => {
@@ -18,31 +18,49 @@ describe("velocity", () => {
   });
 });
 
+describe("firstHeight", () => {
+  it("opens a panel short, as tall as its main action needs, and the outline at half the room, at least 320 px", () => {
+    expect([firstHeight(700, false), firstHeight(400, false), firstHeight(100, false)]).toEqual([PEEK, PEEK, 100]);
+    // A main action a long title pushed down still shows; one that fits leaves the panel short.
+    expect([firstHeight(700, false, 170), firstHeight(700, false, 120), firstHeight(150, false, 170)]).toEqual([
+      170,
+      PEEK,
+      150,
+    ]);
+    expect([firstHeight(700, true), firstHeight(500, true), firstHeight(300, true)]).toEqual([350, 320, 300]);
+  });
+});
+
 describe("detentAfter", () => {
-  // A 600 px stage: the half sheet 320 px tall, 280 px of travel to full.
-  const land = (from: "half" | "full", dy: number, speed = 0) => detentAfter(from, dy, speed, 280, 320);
-  it("opens a half sheet full past a quarter of the travel up, closes it past a third of its height down", () => {
-    expect([land("half", -80), land("half", -60), land("half", 120), land("half", 100)]).toEqual([
+  // A 744 px stage, as a large phone's between its bars: a panel's first height, 600 px of travel to full.
+  const land = (from: "first" | "full", dy: number, speed = 0) => detentAfter(from, dy, speed, 600, PEEK);
+  it("opens a short sheet full past a quarter of the travel up, closes it past a third of its height down", () => {
+    expect([land("first", -160), land("first", -140), land("first", 60), land("first", 40)]).toEqual([
       "full",
-      "half",
+      "first",
       "close",
-      "half",
+      "first",
     ]);
   });
 
-  it("brings a full sheet back to half past a quarter down, and closes it only past half and a third more", () => {
-    expect([land("full", 80), land("full", 60), land("full", 400), land("full", -40)]).toEqual([
-      "half",
+  it("brings a full sheet back to its first height past a quarter down, closing it only past that and a third", () => {
+    expect([land("full", 160), land("full", 140), land("full", 660), land("full", 640), land("full", -40)]).toEqual([
+      "first",
       "full",
       "close",
+      "first",
       "full",
     ]);
   });
 
   it("sends a flick the way it went whatever the distance", () => {
-    expect([land("half", -10, -0.8), land("half", 10, 0.8), land("full", 10, 0.8)]).toEqual(["full", "close", "half"]);
+    expect([land("first", -10, -0.8), land("first", 10, 0.8), land("full", 10, 0.8)]).toEqual([
+      "full",
+      "close",
+      "first",
+    ]);
     // A drag up that ends falling fast lands by its end.
-    expect(land("half", -100, 0.9)).toBe("close");
+    expect(land("first", -100, 0.9)).toBe("close");
   });
 });
 

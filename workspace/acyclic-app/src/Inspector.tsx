@@ -113,7 +113,7 @@ export function Inspector({
     </button>
   );
   const panel = useRef<HTMLElement>(null);
-  const sheet = useSheet(panel, "half", onDismiss);
+  const sheet = useSheet(panel, onDismiss);
   useFocusIn(panel);
   const chip = (id: string) => {
     const stage = stageOf(id);

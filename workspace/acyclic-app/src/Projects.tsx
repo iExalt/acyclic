@@ -133,13 +133,13 @@ export function ProjectsSheet({
   children: ReactNode;
 }) {
   const panel = useRef<HTMLElement>(null);
-  const sheet = useSheet(panel, "half", onDismiss);
+  const sheet = useSheet(panel, onDismiss, true);
   useFocusIn(panel);
   return (
     <aside
       ref={panel}
       tabIndex={-1}
-      className="inspector"
+      className="inspector half"
       data-testid="projects"
       aria-label="Outline"
       data-detent={sheet.detent}

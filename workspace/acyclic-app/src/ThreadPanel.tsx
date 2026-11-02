@@ -133,7 +133,7 @@ export function ThreadPanel({
   }, [id, version]);
   // One panel throughout, so focus put in it as it opens stays as it loads.
   const panel = useRef<HTMLElement>(null);
-  const sheet = useSheet(panel, "half", onDismiss);
+  const sheet = useSheet(panel, onDismiss);
   useFocusIn(panel);
   // A decision takes its button away once the thread is read again: the keyboard stays in the panel.
   const held = useHeld(busy, loaded);
@@ -175,20 +175,35 @@ export function ThreadPanel({
         </button>
       </header>
       {/* Waiting only as Needs you says it is: an unapproved thread with nothing open asks nothing of the user. No
-          total beside it: the counts below are of the items drawn, which a total of every member would not add up to. */}
-      <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
-        {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={Inbox} size={16} /> : null}
-        {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved"}
-      </p>
-      <div className="progress">
-        {counts === undefined || counts.leaves === 0 ? (
-          <span className="muted">No items shown</span>
-        ) : (
-          <StageCounts counts={counts} />
-        )}
+          total beside it: the counts are of the items drawn, which a total of every member would not add up to. On a
+          phone the two share a line, so the main action shows at the panel's first height. */}
+      <div className="thread-summary">
+        <p className={awaiting ? "thread-status waiting" : "thread-status"} data-testid="thread-status">
+          {detail.approved ? <Icon of={Check} size={16} /> : awaiting ? <Icon of={Inbox} size={16} /> : null}
+          {detail.approved ? "Approved" : awaiting ? "Waiting for your approval" : "Not approved"}
+        </p>
+        <div className="progress">
+          {counts === undefined || counts.leaves === 0 ? (
+            <span className="muted">No items shown</span>
+          ) : (
+            <StageCounts counts={counts} />
+          )}
+        </div>
       </div>
-      {detail.approved ? null : (
-        <div className="actions">
+      {/* The main action, Approve or Revoke, before the items and settings, where it reads and is reached first. */}
+      {detail.approved ? (
+        <div className="actions" data-main>
+          <button
+            type="button"
+            className="danger-quiet"
+            data-action="revoke"
+            {...held("revoke", () => onCommand(revokeCommand(id), `Revoked ${name}'s approval`), toPanel)}
+          >
+            Revoke approval
+          </button>
+        </div>
+      ) : (
+        <div className="actions" data-main>
           {/* Still offered with nothing open, as approval covers what joins the thread later, but not as the decision:
               its items, all finished, are no longer what it approves. */}
           <button
@@ -315,18 +330,6 @@ export function ThreadPanel({
           <option value="apply">Apply at once</option>
         </Choice>
       </div>
-      {detail.approved ? (
-        <div className="actions">
-          <button
-            type="button"
-            className="danger-quiet"
-            data-action="revoke"
-            {...held("revoke", () => onCommand(revokeCommand(id), `Revoked ${name}'s approval`), toPanel)}
-          >
-            Revoke approval
-          </button>
-        </div>
-      ) : null}
     </>,
   );
 }
