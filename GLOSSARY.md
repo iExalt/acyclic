@@ -41,8 +41,7 @@ Whether an item or thread can start now, given its dependencies, claims and reso
 _Avoid_: status (for readiness alone), unblocked
 
 **Blocker**:
-Something that stops approved work going ahead, which the user must clear; at the most autonomous level, agents ask
-about nothing else.
+Something that stops work going ahead, which the user must clear.
 _Avoid_: blocking issue
 
 **Placement**:
@@ -54,8 +53,7 @@ Dividing a set of items into threads, or one thread into several.
 _Avoid_: partition, breakdown
 
 **Thread**:
-A bounded piece of work that one continuing agent conversation works through from start to finish, approved as a
-unit.
+A bounded piece of work that one continuing agent conversation works through from start to finish.
 _Avoid_: workstream, track, lane, operation
 
 **Wave**:
@@ -63,26 +61,9 @@ A step in the order threads can start: each thread with work left comes after ev
 thread that waits on none and that none waits on is in no wave and can start any time.
 _Avoid_: round, tier
 
-**Provisional thread**:
-A thread an agent or an import created that the user has not yet approved.
-_Avoid_: draft thread, suggested thread
-
-**Proposal**:
-An agent's change to an approved thread's scope, waiting for the user to keep or drop it; a proposed member is one.
-_Avoid_: suggestion, pending change
-
-**Proposed member**:
-An item an agent added to an approved or running thread, waiting for the user's approval; the user's own changes
-apply at once. An agent's add that crossed the approval between machines is listed in
-the same way, kept by the user adding it to the thread again or, all at once, by approving the thread again.
-
 **Card**:
 A one-shot task the intake chat suggests, which the user starts, keeps or dismisses with a tap.
 _Avoid_: suggestion, ticket
-
-**Autonomy level**:
-The rule for what reaches the user from runs, set globally and overridable per thread.
-_Avoid_: trust level, mode (for this)
 
 **Run**:
 One stretch of an agent working on a thread, from launch to stop; a thread's runs happen one at a time, each
@@ -99,7 +80,7 @@ claim holds the resources the thread's open members name.
 _Avoid_: lock, assignment
 
 **Dispatcher**:
-The part of acyclic that starts runs of approved, ready threads on its own, within limits the user sets.
+The part of acyclic that starts runs of ready threads on its own, within limits the user sets.
 _Avoid_: scheduler, project manager
 
 **Intake**:
@@ -122,9 +103,9 @@ _Avoid_: closed, deleted
 The state of finished code work whose commit is not yet on its repository's default branch.
 
 **Needs-you list**:
-Everything waiting on the user: approvals, proposals and late members, agents' questions and permission prompts
-(nothing records either yet), conflicts nobody resolved, new blockers on approved work, resources or numbers two
-holders clash over, references to what doesn't exist, merges that can't be confirmed, and items in no thread. The app
+Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, reopened work,
+resources or numbers two holders clash over, references to what doesn't exist, merges that can't be confirmed, and
+items in no thread. The app
 calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
@@ -164,7 +145,7 @@ parked, or needs a thread; a parent's is its leaves'. The code's word: the app s
 _Avoid_: phase, step
 
 **Status**:
-What a panel says of where something stands: an item's stage, or a thread's approval.
+What a panel says of where something stands: an item's stage.
 
 **Any time**:
 The threads in no wave: they wait on no thread and none waits on them.

@@ -1,21 +1,11 @@
-// The commands the app's forms send: an item's fields, a conflict settled, a reopen, a thread approved, its level, the
-// global level, and a proposal kept or dropped. Pure, so each shape is tested against
-// the commands the server's tests run.
+// The commands the app's forms send: an item's fields, a conflict settled and a reopen. Pure, so each shape is tested
+// against the commands the server's tests run.
 
 import type { Command, Item } from "./api";
 
 /** The states a command may set; `done` is set by `acyclic done`, with evidence. */
 export const STATES = ["backlog", "parked", "in-progress"] as const;
 export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
-export const LEVELS = ["everything", "scope-and-irreversible", "blockers"] as const;
-export type Level = (typeof LEVELS)[number];
-
-/** A level as the app says it: "scope-and-irreversible" reads "Scope and irreversible". */
-export function levelLabel(level: string): string {
-  const words = level.replaceAll("-", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 /**
  * How a state the editor shows reads elsewhere, where that differs from its word: a leaf in the backlog shows as Ready
  * or Blocked by its waits, or as Needs a thread while it is in none; null for a parent, which has no stage, and for
@@ -26,16 +16,6 @@ export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: bo
   return draft.thread === ""
     ? "Backlog shows as Needs a thread in Status until it's in one"
     : "Backlog shows as Ready or Blocked in Status, by what it waits on";
-}
-
-/** What a level lets reach the user, as core's levels say it; null for one the app doesn't know. */
-export function levelHint(level: string): string | null {
-  const said: Record<string, string> = {
-    everything: "Agents ask about everything",
-    "scope-and-irreversible": "Agents ask about scope changes and irreversible actions",
-    blockers: "Agents ask only about blockers",
-  };
-  return said[level] ?? null;
 }
 
 /** The item's fields the editor changes; an empty string is a clear. */
@@ -86,7 +66,7 @@ export function itemEdit(id: string, base: ItemDraft, draft: ItemDraft): Command
 }
 
 /** An entity whose field can be in conflict, as `needs` reports it. */
-export type Entity = "item" | "thread" | "settings";
+export type Entity = "item" | "thread";
 
 /**
  * The command that settles a conflict by keeping one of its values (`null` for a clear), as the CLI's own hint for it
@@ -94,7 +74,6 @@ export type Entity = "item" | "thread" | "settings";
  */
 export function resolveCommand(entity: Entity, id: string, field: string, value: unknown): Command | null {
   const text = typeof value === "string" ? value : null;
-  if (entity === "settings") return field === "autonomy" && isLevel(text) ? globalLevelCommand(text) : null;
   if (entity === "item") {
     const edit = (fields: Record<string, unknown>) => ({ item: { edit: { item: id, ...fields } } });
     if (field === "title") return text === null ? null : edit({ title: text });
@@ -111,11 +90,6 @@ export function resolveCommand(entity: Entity, id: string, field: string, value:
   if (field === "title") return text === null ? null : edit({ title: text });
   if (field === "brief")
     return value === null ? edit({ "no-brief": true }) : text === null ? null : edit({ brief: text });
-  if (field === "autonomy")
-    return value === null ? edit({ "no-level": true }) : isLevel(text) ? edit({ level: text }) : null;
-  if (field === "approved") return value === true ? approveCommand(id) : revokeCommand(id);
-  // Approving again records the members as they are now.
-  if (field === "approved-members") return approveCommand(id);
   return null;
 }
 
@@ -127,45 +101,6 @@ export function unsettledWhy(entity: Entity, field: string, value: unknown): str
   return "Settle this one in a terminal: run acyclic needs to see how";
 }
 
-function isLevel(value: string | null): value is Level {
-  return value !== null && (LEVELS as readonly string[]).includes(value);
-}
-
 export function reopenCommand(item: string): Command {
   return { item: { reopen: { item } } };
-}
-
-export function approveCommand(thread: string): Command {
-  return { thread: { approve: { thread } } };
-}
-
-export function revokeCommand(thread: string): Command {
-  return { thread: { revoke: { thread } } };
-}
-
-/** A thread's own level, or none, so the global one applies. */
-export function threadLevelCommand(thread: string, level: Level | null): Command {
-  return { thread: { edit: level === null ? { thread, "no-level": true } : { thread, level } } };
-}
-
-export function globalLevelCommand(level: Level): Command {
-  return { level: { level } };
-}
-
-/** Keeps an item in a thread it joined after the thread's approval, as the user's own edit. */
-export function keepMemberCommand(item: string, thread: string): Command {
-  return { item: { edit: { item, thread } } };
-}
-
-/** Takes an item back out of a thread it joined after the thread's approval. */
-export function dropMemberCommand(item: string): Command {
-  return { item: { edit: { item, "no-thread": true } } };
-}
-
-export function keepCommand(proposal: string): Command {
-  return { proposal: { keep: { proposal } } };
-}
-
-export function dropCommand(proposal: string): Command {
-  return { proposal: { drop: { proposal } } };
 }

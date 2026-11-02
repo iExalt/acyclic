@@ -150,7 +150,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
-    cli(&tracker, "item add a --title A --as-user");
+    cli(&tracker, "item add a --title A");
     let (_server, address) = serve(&tracker, &[]);
 
     let anonymous = [("Host", HOST), ("Content-Type", "application/json")];
@@ -166,7 +166,7 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
 fn up_serves_whoever_holds_the_session_and_keeps_it_across_restarts() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
-    cli(&tracker, "item add a --title A --as-user");
+    cli(&tracker, "item add a --title A");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     let (server, address, session, _) = up(&tracker, &home, &[]);
@@ -282,7 +282,7 @@ fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
     assert!(event.contains(r#""actor":"actor/user""#), "{event}");
 
     // Another replica's write reaches the server's API through its sync loop.
-    cli(&phone, "item add b --title B --as-user");
+    cli(&phone, "item add b --title B");
     cli(&phone, "sync");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

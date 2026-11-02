@@ -30,8 +30,8 @@ machines recorded and pushes yours.
 ## Who you are
 
 - Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`. Two sessions
-  sharing a name share claims, and both would work the same thread. Without it you act as `agent/undeclared`.
-- You are never the user. `--as-user` is for the user alone; don't pass it.
+  sharing a name share claims, and both would work the same thread. Without it, or `--actor`, your writes are
+  labelled as the user's, `actor/user`.
 
 ## Links
 
@@ -61,9 +61,9 @@ likely from an earlier try; the error's details give its id. Give an id only to 
 Never put counters in titles.
 
 `acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, links, evidence, a
-done state or someone else's live claim on its thread, and in an approved thread only the user may delete. `acyclic
-link` has `add` and `remove`. `acyclic import <file>` applies a whole plan document, and `--dry-run` reports what it
-would change. `acyclic import --schema` prints the plan format.
+done state or someone else's live claim on its thread. `acyclic link` has `add` and `remove`. `acyclic import <file>`
+applies a whole plan document, and `--dry-run` reports what it would change. `acyclic import --schema` prints the plan
+format.
 
 Before adding work, read the plan with `acyclic list` and `acyclic thread list`, and give the item the parent, links
 and thread it belongs with.
@@ -87,12 +87,11 @@ and thread it belongs with.
 
 ## Finding and doing work
 
-1. `acyclic ready` lists the threads you may work: yours first, then those nobody holds, approved first, then by
-   title. Each row is the thread's summary with its ready `items`, each saying whether the user approved its work;
-   `acyclic ready --approved` lists only approved work. An item in no thread is
-   never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic list` lists every item. `acyclic show
-   <item>...` explains items, as an array in the order given: their readiness, children and their thread's claims.
-   See "Details" for work that waits as `in-review` or `unverified`.
+1. `acyclic ready` lists the threads you may work: yours first, then those nobody holds, by title. Each row is the
+   thread's summary with its ready `items`. An item in no thread is never ready, and `acyclic needs` lists it as
+   `unthreaded`. `acyclic list` lists every item. `acyclic show <item>...` explains items, as an array in the order
+   given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
+   `unverified`.
 2. `acyclic claim <thread>` before starting. A claim from anything but a run holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
    through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
@@ -114,12 +113,10 @@ and thread it belongs with.
    link them. `thread list` also puts the threads with work left in `waves`, first to last, each after the threads
    its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
-   --thread`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
-   its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
-   reports it as `placed`. Once the user approves a thread, your change to its members or repositories doesn't
-   apply: it waits in `acyclic needs` as a proposal for the user.
-   An item or thread edit, and an import, list their proposals in `proposals`, each with the `field` it proposed.
-   Carry on with other work.
+   --thread`, and give each a title and brief. New or moved work joins the thread its parent passes down, or else the
+   one its siblings share; an add, a move under another parent or an import reports it as `placed`. Threads whose
+   work waits on each other can't all finish: `acyclic needs` lists them as a `thread-cycle`, and a link or a member
+   should move.
 6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With

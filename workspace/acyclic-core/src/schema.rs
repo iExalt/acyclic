@@ -11,16 +11,7 @@ pub mod kind {
     pub const THREAD: &str = "thread";
     /// A code repository record.
     pub const REPOSITORY: &str = "repository";
-    /// A proposed edit awaiting a decision.
-    pub const PROPOSAL: &str = "proposal";
-    /// An agent's question for the user.
-    pub const QUESTION: &str = "question";
-    /// Settings; the global ones have the id [`super::GLOBAL`].
-    pub const SETTINGS: &str = "settings";
 }
-
-/// The id of the global settings entity.
-pub const GLOBAL: &str = "global";
 
 /// Item fields. Areas, repositories and resources are sets stored a field per element: see [`set`].
 pub mod item {
@@ -46,28 +37,6 @@ pub mod item {
     pub const DELETED: &str = "deleted";
     /// Set when the item is reopened, until it is done again; flags its dependents.
     pub const REOPENED: &str = "reopened";
-}
-
-/// Proposal fields.
-pub mod proposal {
-    /// The proposed scope edit.
-    pub const EDIT: &str = "edit";
-    /// Who proposed it.
-    pub const ACTOR: &str = "actor";
-    /// The user's decision: keep or drop.
-    pub const DECISION: &str = "decision";
-}
-
-/// Question fields.
-pub mod question {
-    /// The thread asking.
-    pub const THREAD: &str = "thread";
-    /// What kind of question it is, for the autonomy filter.
-    pub const CLASS: &str = "class";
-    /// The question.
-    pub const TEXT: &str = "text";
-    /// Whether it still awaits an answer.
-    pub const OPEN: &str = "open";
 }
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.
@@ -105,24 +74,12 @@ pub mod set {
     pub const RESOURCE: &str = "resource/";
 }
 
-/// Thread fields; the flags and choices are set only by the user's batches.
+/// Thread fields.
 pub mod thread {
     /// A short title.
     pub const TITLE: &str = "title";
     /// The brief.
     pub const BRIEF: &str = "brief";
-    /// Whether the thread's scope is approved.
-    pub const APPROVED: &str = "approved";
-    /// The members the latest approval saw, sorted: a member that joined unseen is the user's to keep or drop.
-    pub const APPROVED_MEMBERS: &str = "approved-members";
-    /// The thread's autonomy level, overriding the global default.
-    pub const AUTONOMY: &str = "autonomy";
     /// Set when a renumber retired the thread's id; the same field as an item's, read by `model::is_deleted`.
     pub const DELETED: &str = super::item::DELETED;
-}
-
-/// Global settings fields.
-pub mod settings {
-    /// The default autonomy level.
-    pub const AUTONOMY: &str = "autonomy";
 }

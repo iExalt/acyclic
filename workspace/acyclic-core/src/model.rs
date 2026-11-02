@@ -162,23 +162,6 @@ impl LinkKind {
     }
 }
 
-/// An autonomy level: which agents' questions reach the needs-you list. Blockers always do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Level {
-    /// Ask about everything.
-    Everything,
-    /// Ask about scope changes and irreversible actions.
-    ScopeAndIrreversible,
-    /// Ask only about blockers: the default.
-    Blockers,
-}
-
-impl Level {
-    /// Every level, most talkative first.
-    pub const ALL: [Self; 3] = [Self::Everything, Self::ScopeAndIrreversible, Self::Blockers];
-}
-
 /// What reopening recorded on an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -292,30 +275,8 @@ pub struct Thread {
     pub title: Value<String>,
     /// The brief.
     pub brief: Value<String>,
-    /// Whether the thread's scope is approved; a conflict counts as approved, which protects more.
-    pub approved: Value<bool>,
-    /// The members the latest approval saw; none on threads approved before approvals recorded them.
-    pub approved_members: Value<Vec<String>>,
     /// Repositories added explicitly, beyond those of its items.
     pub repositories: BTreeSet<String>,
-    /// The thread's autonomy level, overriding the global one.
-    pub autonomy: Value<Level>,
-}
-
-impl Thread {
-    /// Whether the thread's scope is approved: any approving value counts, so a conflict protects the scope.
-    #[must_use]
-    pub fn is_approved(&self) -> bool {
-        self.approved.all().into_iter().any(|approved| *approved)
-    }
-
-    /// Whether `item` was a member when the thread was approved, or `None` when no approval recorded its members.
-    /// Approvals that raced each other each saw what they list, so a member of any of them counts.
-    #[must_use]
-    pub fn approved_member(&self, item: &str) -> Option<bool> {
-        let lists = self.approved_members.all();
-        (!lists.is_empty()).then(|| lists.into_iter().flatten().any(|member| member == item))
-    }
 }
 
 /// A repository record as read.
@@ -344,8 +305,6 @@ pub struct Model {
     pub threads: BTreeMap<String, Thread>,
     /// Repository records by id.
     pub repositories: BTreeMap<String, Repository>,
-    /// The global autonomy level.
-    pub autonomy: Value<Level>,
     children: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -387,9 +346,6 @@ impl Model {
         self.links.extend(other.links);
         self.threads.extend(other.threads);
         self.repositories.extend(other.repositories);
-        if other.autonomy != Value::None {
-            self.autonomy = other.autonomy;
-        }
         for (parent, children) in other.children {
             self.children.entry(parent).or_default().extend(children);
         }
@@ -427,10 +383,7 @@ impl Model {
                     id: key.id.clone(),
                     title: value(state, key, thread::TITLE)?,
                     brief: value(state, key, thread::BRIEF)?,
-                    approved: value(state, key, thread::APPROVED)?,
-                    approved_members: value(state, key, thread::APPROVED_MEMBERS)?,
                     repositories: elements(state, key, set::REPOSITORY),
-                    autonomy: value(state, key, thread::AUTONOMY)?,
                 };
                 self.threads.insert(key.id.clone(), thread);
             },
@@ -443,9 +396,6 @@ impl Model {
                     installation: value(state, key, repository::INSTALLATION)?,
                 };
                 self.repositories.insert(key.id.clone(), record);
-            },
-            kind::SETTINGS if key.id == crate::schema::GLOBAL => {
-                self.autonomy = value(state, key, crate::schema::settings::AUTONOMY)?;
             },
             _ => {},
         }
@@ -679,18 +629,6 @@ impl Model {
             .collect();
         graph::cycles(&edges)
     }
-
-    /// A thread's autonomy level: its own, else the global one, else asking only about blockers. A conflicted level
-    /// counts as the one that asks most.
-    #[must_use]
-    pub fn level(&self, thread: Option<&str>) -> Level {
-        let own = thread.and_then(|t| self.threads.get(t)).map(|t| &t.autonomy);
-        let chosen = match own {
-            Some(level) if *level != Value::None => level,
-            _ => &self.autonomy,
-        };
-        chosen.all().into_iter().min().copied().unwrap_or(Level::Blockers)
-    }
 }
 
 /// A refused write.
@@ -715,13 +653,6 @@ pub enum WriteError {
         /// The checked write to use.
         write: &'static str,
     },
-    /// Only the user sets this field.
-    UserOnly {
-        /// The field.
-        field: String,
-        /// Who tried.
-        actor: String,
-    },
     /// An item can't link to itself.
     SelfLink(String),
 }
@@ -743,7 +674,6 @@ impl fmt::Display for WriteError {
             Self::Checked { field, write } => {
                 write!(f, "{field} has invariants: write it with {write}")
             },
-            Self::UserOnly { field, actor } => write!(f, "only the user sets {field}, not {actor}"),
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
         }
     }
@@ -809,21 +739,12 @@ const CHECKED: [(&str, &str, &str); 7] = [
     (kind::LINK, "", "link or unlink"),
 ];
 
-/// Fields only the user's batches set: a thread's approval and autonomy level, and every global setting.
-const USER_ONLY: [(&str, &str); 4] = [
-    (kind::THREAD, thread::APPROVED),
-    (kind::THREAD, thread::APPROVED_MEMBERS),
-    (kind::THREAD, thread::AUTONOMY),
-    (kind::SETTINGS, ""),
-];
-
 /// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
-/// archived flag and reopen flag, and a link's fields) are refused: use their checked writes. A thread's approval and
-/// autonomy level and the global settings are the user's alone.
+/// archived flag and reopen flag, and a link's fields) are refused: use their checked writes.
 ///
 /// # Errors
 ///
-/// Fails on a checked field, on a user-only field written by anyone else, or when the state layer refuses.
+/// Fails on a checked field, or when the state layer refuses.
 pub fn set<T: Serialize>(
     replica: &mut Replica,
     key: &Key,
@@ -836,12 +757,6 @@ pub fn set<T: Serialize>(
         .find(|(kind, field, _)| key.kind == *kind && (field.is_empty() || name == *field));
     if let Some((_, _, write)) = checked {
         return Err(WriteError::Checked { field: name.to_owned(), write });
-    }
-    let user_only = USER_ONLY
-        .iter()
-        .any(|(kind, field)| key.kind == *kind && (field.is_empty() || name == *field));
-    if user_only && by.actor != crate::scope::USER {
-        return Err(WriteError::UserOnly { field: name.to_owned(), actor: by.actor.to_owned() });
     }
     put(replica, key, name, value, by)
 }

@@ -18,7 +18,7 @@ use acyclic_core::needs::{self, Entry};
 use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, Readiness};
 use acyclic_core::schema::{item as field, kind, thread};
-use acyclic_core::scope::{self, ScopeEdit};
+
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
 use tempfile::TempDir;
@@ -399,38 +399,6 @@ fn a_parent_finished_while_a_child_arrives_is_done_early_until_reopened() {
     pair.spread(&pair.pi);
     pair.assert_settled();
     assert!(!pair.needs(NOW).contains(&early));
-}
-
-#[test]
-fn an_agents_member_racing_an_approval_is_listed_until_the_user_keeps_it() {
-    let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| {
-        add(r, by, "x", None)?;
-        add(r, by, "y", None)?;
-        scope::edit(r, &ScopeEdit::Member { item: "x".into(), thread: Some("t".into()) }, by)?;
-        Ok(())
-    });
-    pair.spread(&pair.mac);
-    // pi's agent sees t unapproved, so its edit applies; mac's user approves t at the same time.
-    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| {
-        let change = ScopeEdit::Member { item: "y".into(), thread: Some("t".into()) };
-        assert_eq!(scope::edit(r, &change, by)?, scope::Outcome::Applied);
-        Ok(())
-    });
-    pair.user(&pair.mac, &|r, by| Ok(scope::approve(r, "t", true, by).map(|_| ())?));
-    pair.exchange();
-    pair.assert_settled();
-    let listed = |entries: Vec<Entry>| {
-        entries.iter().any(|e| matches!(e, Entry::Unapproved { item, .. } if item == "y"))
-    };
-    assert!(listed(pair.needs(NOW)));
-    pair.user(&pair.pi, &|r, by| {
-        Ok(scope::edit(r, &ScopeEdit::Member { item: "y".into(), thread: Some("t".into()) }, by)
-            .map(|_| ())?)
-    });
-    pair.spread(&pair.pi);
-    pair.assert_settled();
-    assert!(!listed(pair.needs(NOW)));
 }
 
 #[test]

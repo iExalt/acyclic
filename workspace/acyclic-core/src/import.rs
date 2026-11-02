@@ -42,7 +42,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, its rec
     {"from": "plant", "kind": "waits-for", "to": "beds"}
   ],
   // A thread groups items for one continuing agent conversation; "items" lists its members' keys. Optional: brief,
-  // repositories (keys, beyond those of its items) and approved (only the user may import approved threads).
+  // repositories (keys, beyond those of its items).
   "threads": [
     {"key": "spring", "title": "Spring planting", "items": ["beds", "plant"]}
   ]
@@ -209,9 +209,6 @@ pub struct Thread {
     /// Repositories added explicitly, beyond those of its items.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repositories: Vec<String>,
-    /// Whether the thread's scope is approved. Whether an import may set it depends on who imports.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub approved: bool,
 }
 
 /// Why a document couldn't be read.
@@ -615,7 +612,6 @@ mod tests {
             brief: None,
             items: items.iter().map(|&i| i.to_owned()).collect(),
             repositories: Vec::new(),
-            approved: false,
         }
     }
 

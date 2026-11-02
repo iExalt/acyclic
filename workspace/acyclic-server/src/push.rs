@@ -3,7 +3,7 @@
 //! The server keeps, under `~/.config/acyclic/push`, its VAPID key, the devices subscribed, and the needs it has
 //! already told them of, so a restart or a sync tells them nothing twice. After agents' writes, syncs, and every
 //! minute besides (the CLI writes to the clone without the server), it reads the needs-you list and pushes one message
-//! naming what is new. What the user's own writes through the app bring about is taken as seen: revoking an approval
+//! naming what is new. What the user's own writes through the app bring about is taken as seen: reopening an item
 //! from the phone shouldn't buzz the phone. Sends are coalesced over a short window, never hold up a write, and back
 //! off when the push services fail.
 
@@ -323,8 +323,7 @@ impl Inner {
             // hears of it.
             return None;
         }
-        let (code, envelope) =
-            acyclic_cli::call(Command::Needs, self.tracker.clone(), true, &self.env);
+        let (code, envelope) = acyclic_cli::call(Command::Needs, self.tracker.clone(), &self.env);
         if code != 0 {
             eprintln!("acyclic: the needs-you list couldn't be read for pushing: {envelope}");
             return None;
@@ -607,17 +606,16 @@ pub fn key(entry: &Value) -> String {
             parts.push(text.to_owned());
         }
     }
-    for field in ["item", "thread", "blocker"] {
+    for field in ["item", "thread"] {
         if let Some(id) = entry[field]["id"].as_str() {
             parts.push(id.to_owned());
         }
     }
-    if let Some(id) = entry["proposal"]["id"].as_str() {
-        parts.push(id.to_owned());
-    }
-    for row in entry["items"].as_array().into_iter().flatten() {
-        if let Some(id) = row["id"].as_str() {
-            parts.push(id.to_owned());
+    for field in ["items", "threads"] {
+        for row in entry[field].as_array().into_iter().flatten() {
+            if let Some(id) = row["id"].as_str() {
+                parts.push(id.to_owned());
+            }
         }
     }
     parts.join(":")
@@ -630,21 +628,12 @@ pub fn line(entry: &Value) -> String {
         row["title"].as_str().or_else(|| row["id"].as_str()).unwrap_or("?").to_owned()
     };
     let text = match entry["kind"].as_str().unwrap_or_default() {
-        "question" => format!("An agent asks: {}", entry["text"].as_str().unwrap_or_default()),
-        "proposal" => format!("A proposal for {}", title(&entry["item"])),
-        "unapproved" => format!(
-            "{} joined {} after its approval",
-            title(&entry["item"]),
-            title(&entry["thread"])
-        ),
-        "awaiting-approval" => format!("{} waits for your approval", title(&entry["thread"])),
         "conflict" => format!(
             "{} {}'s {} was written differently on two machines",
             entry["entity"].as_str().unwrap_or_default(),
             entry["id"].as_str().unwrap_or_default(),
             entry["field"].as_str().unwrap_or_default()
         ),
-        "new-blocker" => format!("{} has a new blocker", title(&entry["item"])),
         "reopened" => format!("{} was reopened", title(&entry["item"])),
         "done-early" => format!("{} is done with work in it open", title(&entry["item"])),
         "contest" => {
@@ -654,9 +643,14 @@ pub fn line(entry: &Value) -> String {
             format!("Two threads need {}", entry["resource"].as_str().unwrap_or_default())
         },
         "link-cycle" | "parent-cycle" => "Items form a cycle".to_owned(),
+        "thread-cycle" => {
+            let threads: Vec<String> =
+                entry["threads"].as_array().into_iter().flatten().map(title).collect();
+            format!("{} wait on each other", threads.join(", "))
+        },
         other => format!("{other} needs you"),
     };
-    // Well within a push's 4 KB, however long a question.
+    // Well within a push's 4 KB, however long the titles.
     text.chars().take(140).collect()
 }
 
@@ -684,13 +678,13 @@ mod tests {
 
     #[test]
     fn a_need_is_known_by_its_kind_and_what_it_names() {
-        let question = |id: &str| json!({"kind": "question", "id": id, "thread": {"id": "t"}, "text": "Which?"});
-        assert_eq!(key(&question("q1")), "question:q1:t");
-        assert_ne!(key(&question("q1")), key(&question("q2")));
+        let cycle = |ids: [&str; 2]| json!({"kind": "thread-cycle", "threads": ids.map(|id| json!({"id": id, "title": id.to_uppercase()}))});
+        assert_eq!(key(&cycle(["t", "u"])), "thread-cycle:t:u");
+        assert_ne!(key(&cycle(["t", "u"])), key(&cycle(["t", "v"])));
+        assert_eq!(line(&cycle(["t", "u"])), "T, U wait on each other");
         let conflict = json!({"kind": "conflict", "entity": "item", "id": "a", "field": "title"});
         assert_eq!(key(&conflict), "conflict:a:item:title");
-        assert_eq!(line(&question("q1")), "An agent asks: Which?");
-        let long = json!({"kind": "question", "id": "q", "text": "x".repeat(500)});
+        let long = json!({"kind": "reopened", "item": {"id": "a", "title": "x".repeat(500)}});
         assert_eq!(line(&long).chars().count(), 140);
     }
 }

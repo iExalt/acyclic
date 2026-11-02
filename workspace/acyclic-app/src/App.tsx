@@ -1,8 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddForm } from "./AddForm";
 import { addressOf, landing, NOTHING, parse, type Wanted } from "./address";
-import { type Command, command, failure, globalLevel, type Item, items, needs, type Threads, threads } from "./api";
-import { Choice } from "./Choice";
+import { type Command, command, failure, type Item, items, needs, type Threads, threads } from "./api";
 import { CommandMenu } from "./CommandMenu";
 import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
 import {
@@ -20,7 +19,6 @@ import {
   unanswered,
   unlinkCommand,
 } from "./edits";
-import { globalLevelCommand, LEVELS, type Level, levelHint, levelLabel } from "./forms";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
@@ -40,10 +38,10 @@ import { buildModel, inArchived } from "./map/model";
 import type { Focus, Framed } from "./map/PlanMap";
 import { type LeftAt, NeedsList } from "./NeedsList";
 import { Notify } from "./Notify";
-import { awaitingApproval, type Need } from "./needs";
+import type { Need } from "./needs";
 import { noticeAfter, type Place, type Raised } from "./notices";
 import { Overview } from "./Overview";
-import { currentRows, membersOf, outlineOf, pickedAfter } from "./outline";
+import { currentRows, outlineOf, pickedAfter } from "./outline";
 import { Projects, ProjectsSheet } from "./Projects";
 import { PALETTES, setTheme, type Theme, useScheme, useTheme } from "./palette";
 import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
@@ -61,7 +59,7 @@ const PlanMap = lazy(() => mapModule);
 
 type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Threads; level: string; needs: Need[]; unread: Unread[] }
+  | { state: "loaded"; items: Item[]; threads: Threads; needs: Need[]; unread: Unread[] }
   | { state: "failed"; code: string; message: string };
 
 /** Where this device keeps whether single-key shortcuts are on. */
@@ -74,20 +72,12 @@ interface After {
   /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
   select: string | null;
   pin: string | null;
-  /**
-   * Offer to undo it, once saved: for the user's own moves, links, field edits and autonomy, and a first approval;
-   * never another decision.
-   */
+  /** Offer to undo it, once saved: for the user's own moves, links and field edits; never a decision. */
   undo?: true;
   /** Said once saved, for an undo: what it did. */
   undone?: string;
   /** Said once saved, for a write that takes away what it was done from, as settling a need does. */
   done?: string;
-  /**
-   * A setting, which its control shows at once: saved without the busy bar or holding anything else, and, sent while
-   * another write is out, sent after it rather than dropped.
-   */
-  background?: true;
 }
 
 /** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
@@ -224,23 +214,21 @@ export function App() {
   const [formsClosed, setFormsClosed] = useState(0);
   /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
   const [version, setVersion] = useState(0);
-  /** The global level just picked, shown until the plan read back says it, or put back if it was refused. */
-  const [levelChosen, setLevelChosen] = useState<string | null>(null);
 
   /** The plan's reads, so one overtaken by a later read is never shown, and the writes saved that none holds yet. */
   const reads = useRef<Reads>(NO_READS);
   /** The latest read shown, as the server had it: what an undo's guard is checked against. */
-  const lastRead = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
+  const lastRead = useRef<{ items: ReadonlyMap<string, Item> } | null>(null);
   /** Reads the plan, or null when a read started later has been shown already. */
   const fetchAll = useCallback(async () => {
     reads.current = start(reads.current);
     const n = reads.current.started;
-    const [found, listed, level, needed] = await Promise.all([items(), threads(), globalLevel(), needs()]);
+    const [found, listed, needed] = await Promise.all([items(), threads(), needs()]);
     const next = show(reads.current, n, found);
     if (next === null) return null;
     reads.current = next;
-    lastRead.current = { items: new Map(found.map((one) => [one.id, one])), level };
-    return { state: "loaded" as const, items: found, threads: listed, level, needs: needed, unread: next.unread };
+    lastRead.current = { items: new Map(found.map((one) => [one.id, one])) };
+    return { state: "loaded" as const, items: found, threads: listed, needs: needed, unread: next.unread };
   }, []);
   const refresh = useCallback(() => {
     setVersion((was) => was + 1);
@@ -253,7 +241,7 @@ export function App() {
           if (now?.restored !== true) return now;
           // A tab brought back hours later offers an Undo only while it can still take its write back.
           const { restored: _, ...checked } = now;
-          const plan = { items: new Map(next.items.map((one) => [one.id, one])), level: next.level };
+          const plan = { items: new Map(next.items.map((one) => [one.id, one])) };
           return now.undo?.holds(plan) === true ? checked : null;
         });
         // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
@@ -284,9 +272,8 @@ export function App() {
 
   const loaded = load.state === "loaded" ? load : null;
   /** The plan as the server last gave it, without writes still on their way: what an undo sets back to. */
-  const serverPlan = useRef<{ items: ReadonlyMap<string, Item>; level: string } | null>(null);
-  serverPlan.current =
-    loaded === null ? null : { items: new Map(loaded.items.map((one) => [one.id, one])), level: loaded.level };
+  const serverPlan = useRef<{ items: ReadonlyMap<string, Item> } | null>(null);
+  serverPlan.current = loaded === null ? null : { items: new Map(loaded.items.map((one) => [one.id, one])) };
   const shown = useMemo(
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
@@ -295,8 +282,6 @@ export function App() {
   const palette = PALETTES[useScheme()];
   const theme = useTheme();
   const lines = useMemo(() => linesOf(sorted, palette), [sorted, palette]);
-  const linesNow = useRef(lines);
-  linesNow.current = lines;
   const model = useMemo(() => (loaded === null ? null : buildModel(shown)), [loaded, shown]);
   const chosen = selected === null ? undefined : shown.find((one) => one.id === selected);
   const outline = useMemo(
@@ -317,7 +302,6 @@ export function App() {
     [loaded, shown, outline],
   );
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
-  const awaiting = useMemo(() => awaitingApproval(loaded?.needs ?? []), [loaded]);
   const current = useMemo(
     () =>
       model === null || outline === null ? { project: null, thread: null } : currentRows(model, outline, selected),
@@ -410,21 +394,12 @@ export function App() {
    * edit `drawn` is drawn at once, its form closed, and if the write fails, the form opens again with what the user
    * wrote, unless the server turns out to hold it after all.
    */
-  const queued = useRef<{ body: Command; after: After; drawn: Pending | null; saved: (saved: boolean) => void }[]>([]);
-  /** The write out is a setting's, which holds nothing, so a write the user makes meanwhile waits for it. */
-  const quietOut = useRef(false);
   const send = useCallback(
     async (body: Command, after: After, drawn: Pending | null = null): Promise<boolean> => {
-      if (sending.current) {
-        // Any other write sent while one is out was made through a control the busy state forgot to hold: dropped.
-        if (after.background === undefined && !quietOut.current) return false;
-        // One waiting behind a setting holds the controls as its own send would, so its form can't send it twice.
-        if (after.background === undefined) setBusy(true);
-        return new Promise((saved) => queued.current.push({ body, after, drawn, saved }));
-      }
+      // Any write sent while one is out was made through a control the busy state forgot to hold: dropped.
+      if (sending.current) return false;
       sending.current = true;
-      quietOut.current = after.background !== undefined;
-      if (after.background === undefined) setBusy(true);
+      setBusy(true);
       setNotice((was) => (after.undone === undefined ? noticeAfter(was, { kind: "write" }) : UNDOING));
       const before = serverPlan.current;
       const bringIn = () => {
@@ -441,8 +416,7 @@ export function App() {
       }
       let sent: Sent;
       try {
-        const answer = await command<{ proposals?: unknown[] } | null>(body);
-        const proposals = answer?.proposals?.length ?? 0;
+        await command(body);
         // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
         if (drawn !== null) reads.current = answered(reads.current, drawn);
         try {
@@ -451,7 +425,7 @@ export function App() {
           setPending(null);
           setAdding(null);
           bringIn();
-          sent = { write: "saved", proposals, reload: "done" };
+          sent = { write: "saved", reload: "done" };
         } catch (err) {
           // Saved, so what it drew stays, as unread, where the next write can't undo it.
           if (drawn !== null) {
@@ -460,7 +434,7 @@ export function App() {
             setPending(null);
           }
           setAdding(null);
-          sent = { write: "saved", proposals, reload: { failed: failure(err).message } };
+          sent = { write: "saved", reload: { failed: failure(err).message } };
         }
       } catch (err) {
         const { code, message } = failure(err);
@@ -485,15 +459,8 @@ export function App() {
         }
       }
       const { text, offer, fixId } = told(sent);
-      const saved = sent.write === "saved" && sent.reload === "done" && sent.proposals === 0;
-      const undo =
-        saved && after.undo && before !== null
-          ? undoOf(body, before, levelLabel, (id) => {
-              const line = linesNow.current.get(id);
-              // A thread titled only with its number is named by it.
-              return line?.name || (line?.number ? `thread ${line.number}` : id);
-            })
-          : null;
+      const saved = sent.write === "saved" && sent.reload === "done";
+      const undo = saved && after.undo && before !== null ? undoOf(body, before) : null;
       if (text !== null)
         setNotice({
           text,
@@ -524,18 +491,10 @@ export function App() {
       setVersion((was) => was + 1);
       sending.current = false;
       setBusy(false);
-      // A setting changed while this was out goes now, in the order chosen.
-      const next = queued.current.shift();
-      if (next !== undefined) void send(next.body, next.after, next.drawn).then(next.saved);
       return sent.write === "saved";
     },
     [fetchAll],
   );
-  // The level picked is the plan's own once a read says it.
-  useEffect(() => {
-    if (load.state === "loaded" && load.level === levelChosen) setLevelChosen(null);
-  }, [load, levelChosen]);
-
   /**
    * Takes back the write `undo` came from: reads the plan first, so the guard is checked against the server's latest,
    * and sends nothing when what the write left has changed since. Once at a time.
@@ -1148,28 +1107,6 @@ export function App() {
           <option value="dark">Dark</option>
         </select>
       </label>
-      <Choice
-        label="Autonomy, for threads without their own"
-        testid="global-level"
-        hint={levelHint(levelChosen ?? load.level)}
-        value={levelChosen ?? load.level}
-        disabled={false}
-        onWrite={(level) => {
-          setLevelChosen(level);
-          void send(globalLevelCommand(level as Level), { select: null, pin: null, undo: true, background: true }).then(
-            // Refused, it goes back, unless a later pick has taken its place.
-            (saved) => {
-              if (!saved) setLevelChosen((was) => (was === level ? null : was));
-            },
-          );
-        }}
-      >
-        {LEVELS.map((level) => (
-          <option key={level} value={level}>
-            {levelLabel(level)}
-          </option>
-        ))}
-      </Choice>
       <button type="button" onClick={refresh}>
         Refresh
       </button>
@@ -1195,7 +1132,6 @@ export function App() {
     <Shell
       wide={wide}
       count={shown.length}
-      autonomy={levelLabel(levelChosen ?? load.level)}
       view={view}
       onView={goTo}
       needs={load.needs.length}
@@ -1274,9 +1210,8 @@ export function App() {
             needs={load.needs}
             titleOf={titleOf}
             lines={lines}
-            membersOf={(id) => (model === null ? [] : membersOf(model, id))}
             busy={busy}
-            onCommand={(edit, done, undo) => send(edit, { select: null, pin: null, done, ...(undo ? { undo } : {}) })}
+            onCommand={(edit, done) => send(edit, { select: null, pin: null, done })}
             // To the Map, as the Overview's rows go: the item selected, or the thread framed with its panel, and closing
             // either comes back here.
             onSelect={(id) => select(id, null)}
@@ -1386,24 +1321,12 @@ export function App() {
           <ThreadPanel
             key={thread}
             id={thread}
-            globalLevel={levelChosen ?? load.level}
-            awaiting={awaiting.has(thread)}
             line={lines.get(thread)}
             counts={counts.get(thread)}
             titleOf={titleOf}
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
             waitsFor={(id) => model?.items.get(id)?.waitsFor ?? []}
             version={version}
-            busy={busy}
-            onCommand={(edit, done, undo) =>
-              send(edit, {
-                select: null,
-                pin: null,
-                ...(done === undefined ? {} : { done }),
-                ...(undo ? { undo } : {}),
-              })
-            }
-            onSetting={(edit) => send(edit, { select: null, pin: null, background: true })}
             onSelect={(id) => select(id, null)}
             onClose={closeThread}
             onDismiss={() => closeTop.current(1)}

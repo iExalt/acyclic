@@ -4,6 +4,7 @@ use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_stat
 use crate::needs::{Entry, needs_you};
 use crate::ready::{Ancestry, Readiness};
 use crate::schema::kind;
+use crate::scope::USER;
 use crate::scope::{ScopeEdit, edit};
 use crate::state::Key;
 use crate::state::{Millis, ReplicaId, State};
@@ -14,10 +15,6 @@ const NOW: Millis = 10_000;
 
 fn user(at: Millis) -> By<'static> {
     By { actor: USER, at }
-}
-
-fn agent(at: Millis) -> By<'static> {
-    By { actor: "session/mac", at }
 }
 
 fn replica(name: &str) -> Replica {
@@ -92,21 +89,11 @@ fn only_an_item_nothing_refers_to_is_deleted() {
 }
 
 #[test]
-fn in_an_approved_thread_only_the_user_deletes() {
-    let mut r = with_items(&["a", "b"]);
-    for id in ["a", "b"] {
-        edit(&mut r, &ScopeEdit::Member { item: id.into(), thread: Some("t".into()) }, user(2))
-            .unwrap();
-    }
-    crate::scope::approve(&mut r, "t", true, user(3)).unwrap();
-    assert!(matches!(
-        delete_item(&mut r, "a", agent(NOW)),
-        Err(DeleteError::NotAllowed { thread, .. }) if thread == "t"
-    ));
-    assert_eq!(delete_item(&mut r, "a", user(NOW)), Ok(true));
-    // Revoked, it is open to agents again.
-    crate::scope::approve(&mut r, "t", false, user(4)).unwrap();
-    assert_eq!(delete_item(&mut r, "b", agent(NOW)), Ok(true));
+fn an_agent_deletes_a_threads_member() {
+    let mut r = with_items(&["a"]);
+    edit(&mut r, &ScopeEdit::Member { item: "a".into(), thread: Some("t".into()) }, user(2))
+        .unwrap();
+    assert_eq!(delete_item(&mut r, "a", By { actor: "session/x", at: NOW }), Ok(true));
 }
 
 #[test]
@@ -124,10 +111,7 @@ fn a_deleted_item_is_missing_to_every_checked_write_and_its_id_is_retired() {
     assert!(missing(set_parent(&mut r, "other", Some("gone"), user(3))));
     assert!(missing(set_state(&mut r, "gone", ItemState::Parked, user(3))));
     let member = ScopeEdit::Member { item: "gone".into(), thread: Some("t".into()) };
-    assert!(matches!(
-        edit(&mut r, &member, user(3)),
-        Err(crate::scope::ScopeError::Write(WriteError::NoItem(_)))
-    ));
+    assert!(matches!(edit(&mut r, &member, user(3)), Err(WriteError::NoItem(_))));
     assert!(matches!(
         archive::reopen(&mut r, "gone", user(3)),
         Err(archive::ArchiveError::Write(WriteError::NoItem(_)))

@@ -2,24 +2,19 @@
 // allows. Each entry is a line, with what it names to select under it, then the actions the app can take on it, so
 // the button comes after what it acts on.
 
-import { type RefObject, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
-import { GROUPS, groupOf, type Need, type NeedGroup, needView, threadLabel, together } from "./needs";
+import { type Need, needView, threadLabel, together } from "./needs";
 import { Prose } from "./Prose";
 
-/** The actions that say yes, set as the entry's main one; dropping and the rest stay outlined. */
-const PRIMARY = new Set(["keep", "approve"]);
-
 /**
- * Where the view was left for an item or a thread an entry named, which shows on the Map: the filter shown, how far it
- * was scrolled, and the entry and control picked, so closing what it opened comes back to the list as it was, the
- * focus on that control. The filter comes back with the rest, as the scroll and the entry only hold under it.
+ * Where the view was left for an item or a thread an entry named, which shows on the Map: how far it was scrolled, and
+ * the entry and control picked, so closing what it opened comes back to the list as it was, the focus on that control.
  */
 export interface LeftAt {
-  filter: NeedGroup | null;
   top: number;
   entry: string;
   /** A selector for the control within the entry. */
@@ -30,11 +25,9 @@ export interface NeedsListProps {
   needs: Need[];
   titleOf: (id: string) => string;
   lines: ReadonlyMap<string, Line>;
-  /** A thread's items, as an approval covers them. */
-  membersOf?: (thread: string) => string[];
   busy: boolean;
   /** Sends an entry's action, with what to say once it is saved. */
-  onCommand: (command: Command, done: string, undo?: true) => void;
+  onCommand: (command: Command, done: string) => void;
   onSelect: (id: string) => void;
   onPickThread: (id: string) => void;
   /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
@@ -49,7 +42,6 @@ export function NeedsList({
   needs,
   titleOf,
   lines,
-  membersOf,
   busy,
   onCommand,
   onSelect,
@@ -57,26 +49,10 @@ export function NeedsList({
   at = null,
   left,
 }: NeedsListProps) {
-  const each = needs.map((need) => ({ group: groupOf(need.kind), view: needView(need, lines, membersOf, titleOf) }));
-  // Same-cause entries as one, which keeps the first's key and so its group.
-  const groupAt = new Map(each.map((entry) => [entry.view.key, entry.group]));
-  const all = together(each.map((entry) => entry.view)).map((view) => ({
-    group: groupAt.get(view.key) ?? groupOf(""),
-    view,
-  }));
-  // Filters for the groups present, only when there are two or more to choose between. Each counts what needs the
-  // user, as the tab's count does, an entry standing for several counting each.
-  const groups = GROUPS.map((one) => ({
-    ...one,
-    count: each.filter((entry) => entry.group === one.group).length,
-  })).filter((one) => one.count > 0);
-  // Read while rendering, before the effect below takes the rest of where the view was left and clears it.
-  const [filter, setFilter] = useState<NeedGroup | null>(() => left.current?.filter ?? null);
-  // A filter whose entries have all been settled shows everything again.
-  const shown = groups.some((one) => one.group === filter) ? filter : null;
-  const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
+  // Same-cause entries as one.
+  const views = together(needs.map((need) => needView(need, lines, titleOf)));
   // The entry asked for, or the one it was shown as part of.
-  const target = at === null ? null : (all.find(({ view }) => view.merged?.includes(at))?.view.key ?? at);
+  const target = at === null ? null : (views.find((view) => view.merged?.includes(at))?.key ?? at);
   const page = useRef<HTMLElement>(null);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
   // down it; with nothing left to settle, to the page.
@@ -108,7 +84,7 @@ export function NeedsList({
   }, [target, left]);
   /** Keeps where the view is, for the item or thread an entry opens, then opens it. */
   const leave = (entry: string, control: string, open: () => void) => () => {
-    left.current = { filter: shown, top: page.current?.scrollTop ?? 0, entry, control };
+    left.current = { top: page.current?.scrollTop ?? 0, entry, control };
     open();
   };
   return (
@@ -116,23 +92,9 @@ export function NeedsList({
       <h1 id="needs-title" className="view-title">
         Needs you
       </h1>
-      {groups.length < 2 ? null : (
-        <fieldset className="filters" aria-label="Show">
-          {[{ group: null, label: "All", count: each.length }, ...groups].map((one) => (
-            <button
-              type="button"
-              key={one.label}
-              className="chip"
-              aria-pressed={shown === one.group}
-              data-filter={one.group ?? "all"}
-              onClick={() => setFilter(one.group)}
-            >
-              {one.label} <span className="count">{one.count}</span>
-            </button>
-          ))}
-        </fieldset>
-      )}
-      {views.length === 0 ? <p className="empty">Nothing needs you. New approvals and blockers show here.</p> : null}
+      {views.length === 0 ? (
+        <p className="empty">Nothing needs you. Conflicts, cycles and reopened work show here.</p>
+      ) : null}
       <ul className="needs">
         {views.map((view, index) => (
           <li
@@ -196,18 +158,7 @@ export function NeedsList({
               ))}
               {view.more === 0 ? null : (
                 <li>
-                  {view.thread === null ? (
-                    <span className="row more">and {view.more} more</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="row more"
-                      data-pick-thread={view.thread}
-                      onClick={leave(view.key, ".more", () => view.thread && onPickThread(view.thread))}
-                    >
-                      and {view.more} more
-                    </button>
-                  )}
+                  <span className="row more">and {view.more} more</span>
                 </li>
               )}
             </ul>
@@ -217,11 +168,11 @@ export function NeedsList({
                   <button
                     type="button"
                     key={action.label}
-                    className={PRIMARY.has(action.action) ? "primary" : "quiet"}
+                    className="quiet"
                     data-action={action.action}
                     {...held(
                       `${view.key} ${action.action}`,
-                      () => onCommand(action.command, action.done, action.undo),
+                      () => onCommand(action.command, action.done),
                       after(index),
                     )}
                   >

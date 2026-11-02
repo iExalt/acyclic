@@ -324,22 +324,6 @@ fn leases_are_capped_and_expire() {
     assert!(!held.starts_in_future(0));
 }
 
-#[test]
-fn thread_and_global_fields_join_like_any_other() {
-    use crate::schema::{GLOBAL, kind, settings, thread};
-    let t = key(kind::THREAD, "t1");
-    let global = key(kind::SETTINGS, GLOBAL);
-    let (mut a, mut b) = (replica("a"), replica("b"));
-    for field in [thread::APPROVED, thread::AUTONOMY] {
-        a.write(&t, field, "user", 1, Some(json!(field))).unwrap();
-    }
-    b.write(&global, settings::AUTONOMY, "user", 1, Some(json!("blockers"))).unwrap();
-    a.join(&b.state).unwrap();
-    let a = round_trip(&a.state);
-    assert_eq!(a.entity(&t).unwrap().len(), 2);
-    assert_eq!(values(&a, &global, settings::AUTONOMY), vec![json!("blockers")]);
-}
-
 // Property tests: probe 1's convergence properties.
 
 const REPLICAS: [&str; 3] = ["r0", "r1", "r2"];

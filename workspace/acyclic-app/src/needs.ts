@@ -3,18 +3,10 @@
 
 import { type Command, titleOr } from "./api";
 import type { Entity } from "./forms";
-import {
-  approveCommand,
-  dropCommand,
-  dropMemberCommand,
-  keepCommand,
-  keepMemberCommand,
-  resolveCommand,
-  unsettledWhy,
-} from "./forms";
+import { resolveCommand, unsettledWhy } from "./forms";
 import type { Line } from "./lines";
 
-/** The most items an approval lists before it says how many more. */
+/** The most items an entry lists before it says how many more. */
 export const LISTED = 5;
 
 /** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
@@ -26,28 +18,23 @@ export type Need = { kind: string } & Record<string, unknown>;
 export interface Action {
   label: string;
   command: Command;
-  /** Names the action for tests: `keep`, `drop`, `approve` or `use`. */
+  /** Names the action for tests: `use`. */
   action: string;
   /** What the app says once it is saved, since the entry it settles goes. */
   done: string;
-  /** Offered back, as a first approval is, while no agent has started its work. */
-  undo?: true;
 }
 
 export interface NeedView {
   /** A stable key for the entry: its kind and what it names. */
   key: string;
   text: string;
-  /**
-   * What it asks, where the text is a name alone, for a list that shows the entry without its actions: an approval's
-   * text names its thread, and this says it waits and for how many items, the count its Approve button gives.
-   */
+  /** What it names besides its text, for a list that shows the entry without its rows, such as an item's title. */
   detail: string | null;
   /** The line of the one thread its text names, for its badge, which carries the number the text leaves out. */
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
-  /** How many more items it covers than it lists, as an approval of a large thread lists only its first few. */
+  /** How many more items it covers than it lists, as merges that can't be confirmed list only their first few. */
   more: number;
   threads: { id: string; title: string }[];
   /** The thread the badge-led text names, which the text picks: its row would only repeat it. */
@@ -70,34 +57,6 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(row).f
 const titled = (one: Row) => titleOr(one.title, one.id);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** What the user does about an entry, by which the needs-you list filters: say yes or no, answer, or resolve. */
-export type NeedGroup = "approve" | "answer" | "resolve";
-
-/** Each group's filter, named as a noun: "Approve 20" over a list of Approve buttons read as one more of them. */
-export const GROUPS: { group: NeedGroup; label: string }[] = [
-  { group: "approve", label: "Approvals" },
-  { group: "answer", label: "Questions" },
-  { group: "resolve", label: "Problems" },
-];
-
-/**
- * An entry's group: scope waiting for a yes or no, a blocker approving the thread again acknowledges, and an agent's
- * question; every other kind, including one the app doesn't know yet, is something in the way to settle.
- */
-export function groupOf(kind: string): NeedGroup {
-  if (["proposal", "unapproved", "awaiting-approval", "new-blocker"].includes(kind)) return "approve";
-  return kind === "question" ? "answer" : "resolve";
-}
-
-/** The threads Needs you asks the user to approve. */
-export function awaitingApproval(needs: readonly Need[]): Set<string> {
-  const ids = needs
-    .filter((need) => need.kind === "awaiting-approval")
-    .map((need) => row(need.thread)?.id)
-    .filter((id) => id !== undefined);
-  return new Set(ids);
-}
-
 /** A count as the Needs you button shows it: exact to 99, then 99+. */
 export function countText(count: number): string {
   return count > 99 ? "99+" : String(count);
@@ -109,19 +68,15 @@ export function threadLabel(thread: { id: string; title: string }, lines: Readon
   return { line, text: line?.name ?? thread.title };
 }
 
-/**
- * One entry as the app shows it, with each thread's line from `lines`, and a thread's items from `members`, in the
- * order its work runs, where the plan holds them.
- */
+/** One entry as the app shows it, with each thread's line from `lines`. */
 export function needView(
   need: Need,
   lines: ReadonlyMap<string, Line>,
-  members: (thread: string) => string[] = () => [],
   titleOf: (id: string) => string = (id) => id,
 ): NeedView {
   // A badge only where the text names its thread, and then the text picks the thread in place of its row.
   let named = false;
-  const view = viewOf(need, lines, members, titleOf, () => {
+  const view = viewOf(need, lines, titleOf, () => {
     named = true;
   });
   if (!named) return { ...view, line: undefined, thread: null };
@@ -131,12 +86,11 @@ export function needView(
 
 /**
  * The entry, calling `named` when its text names the badge's thread by its line. Ids the entry gives bare, such as a
- * proposal's threads or a conflict's values, are named by the thread's line or `titleOf` the item.
+ * conflict's values, are named by the thread's line or `titleOf` the item.
  */
 function viewOf(
   need: Need,
   lines: ReadonlyMap<string, Line>,
-  members: (thread: string) => string[],
   titleOf: (id: string) => string,
   named: () => void,
 ): Omit<NeedView, "thread"> {
@@ -146,7 +100,7 @@ function viewOf(
   const threads =
     need.kind === "resource-clash"
       ? holders.map((one) => row((one as { thread?: unknown }).thread)).filter((one) => one !== null)
-      : need.kind === "number-clash"
+      : need.kind === "number-clash" || need.kind === "thread-cycle"
         ? (Array.isArray(need.threads) ? need.threads : []).map(row).filter((one) => one !== null)
         : thread === null
           ? []
@@ -161,7 +115,7 @@ function viewOf(
   const threadName = (id: string) => lines.get(id)?.name ?? id;
   /** An entity the entry names by id, by its name. */
   const nameOf = (entity: string, id: string) =>
-    entity === "item" ? titleOf(id) : entity === "thread" ? threadName(id) : entity === "settings" ? "Settings" : id;
+    entity === "item" ? titleOf(id) : entity === "thread" ? threadName(id) : id;
   const base = {
     line,
     more: 0,
@@ -172,91 +126,12 @@ function viewOf(
     detail: null as string | null,
   };
   switch (need.kind) {
-    case "proposal": {
-      const proposal = need.proposal as { id?: string; actor?: string; edit?: Record<string, unknown> } | null;
-      const id = proposal?.id ?? "";
-      const edit = proposal?.edit ?? {};
-      const change = `${proposal?.actor ?? "an agent"}'s ${str(edit.field)} change`;
-      // A member's thread by its name, or no thread; a repository list joined, or none.
-      const value = (one: unknown) =>
-        edit.field === "thread"
-          ? typeof one === "string"
-            ? threadName(one)
-            : "no thread"
-          : Array.isArray(one)
-            ? one.map(shown).join(", ") || "none"
-            : shown(one);
-      const subject =
-        item !== null
-          ? titled(item)
-          : thread !== null
-            ? lineName(thread)
-            : typeof edit.thread === "string"
-              ? threadName(edit.thread)
-              : null;
-      return {
-        ...base,
-        key: `proposal:${id}`,
-        text: `${proposal?.actor ?? "An agent"} proposes ${str(edit.field)}: ${value(edit.before)} → ${value(edit.after)}${subject === null ? "" : `, for ${subject}`}`,
-        actions: [
-          { label: "Keep", command: keepCommand(id), action: "keep", done: `Kept ${change}` },
-          { label: "Drop", command: dropCommand(id), action: "drop", done: `Dropped ${change}` },
-        ],
-      };
-    }
-    case "unapproved": {
-      const id = item?.id ?? "";
-      const to = thread?.id ?? "";
-      const [title, name] = [item === null ? id : titled(item), thread === null ? to : lineName(thread)];
-      return {
-        ...base,
-        key: `unapproved:${id}:${to}`,
-        text: `${title} joined ${name} after its approval`,
-        actions: [
-          { label: "Keep", command: keepMemberCommand(id, to), action: "keep", done: `Kept ${title} in ${name}` },
-          { label: "Drop", command: dropMemberCommand(id), action: "drop", done: `Dropped ${title} from ${name}` },
-        ],
-      };
-    }
-    case "awaiting-approval": {
-      const id = thread?.id ?? "";
-      // All its members, as the thread's panel counts them: approval covers the thread's whole scope, so the entry
-      // lists the items it covers, as the plan holds them (only where the plan has none, the heads it names), the
-      // first few, and says how many more.
-      const count = Number((need.thread as { counts?: { members?: number } } | undefined)?.counts?.members ?? 0);
-      const heads = Array.isArray((need.thread as { heads?: unknown })?.heads)
-        ? ((need.thread as { heads: string[] }).heads ?? [])
-        : [];
-      const known = members(id);
-      const listed = (known.length > 0 ? known : heads).slice(0, LISTED);
-      const name = thread === null ? id : lineName(thread);
-      const items = `${count} ${count === 1 ? "item" : "items"}`;
-      return {
-        ...base,
-        key: `awaiting-approval:${id}`,
-        items: listed,
-        more: Math.max(0, count - listed.length),
-        // The name alone: every entry here waits for approval, which the list's filter and the button say, and a
-        // sentence on each row read as noise.
-        text: name,
-        detail: `${items} to approve`,
-        actions: [
-          {
-            label: `Approve ${items}`,
-            command: approveCommand(id),
-            action: "approve",
-            done: `Approved ${name}: ${items}`,
-            undo: true,
-          },
-        ],
-      };
-    }
     case "conflict": {
       const entity = str(need.entity);
       const id = str(need.id);
       const field = str(need.field);
       const values = Array.isArray(need.values) ? need.values : [];
-      const known = entity === "item" || entity === "thread" || entity === "settings";
+      const known = entity === "item" || entity === "thread";
       const actions: Action[] = [];
       const why: string[] = [];
       // A value naming an item or a thread by its name, as the command still sends the id.
@@ -292,39 +167,6 @@ function viewOf(
         note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
       };
     }
-    case "question": {
-      const id = str(need.id);
-      return {
-        ...base,
-        key: `question:${id}`,
-        text: str(need.text) || "An agent asks a question",
-        note: "The app can't answer questions yet",
-      };
-    }
-    case "new-blocker": {
-      const blocker = row(need.blocker);
-      // Approving the thread again acknowledges what its approval didn't see.
-      // Its row names the thread under the action, so the name here mustn't move it to a badge the text never names.
-      const name = thread === null ? null : threadName(thread.id);
-      return {
-        ...base,
-        items: [...base.items, ...(blocker === null ? [] : [blocker.id])],
-        key: `new-blocker:${item?.id ?? ""}:${blocker?.id ?? ""}`,
-        text: `${item === null ? "An item" : titled(item)} gained a new blocker since its approval: ${blocker === null ? "?" : titled(blocker)}`,
-        actions:
-          thread === null
-            ? []
-            : [
-                {
-                  label: "Approve again",
-                  command: approveCommand(thread.id),
-                  action: "approve",
-                  done: `Approved ${name} again`,
-                },
-              ],
-        note: thread === null ? IN_A_TERMINAL : null,
-      };
-    }
     case "resource-clash": {
       return {
         ...base,
@@ -333,6 +175,13 @@ function viewOf(
         note: IN_A_TERMINAL,
       };
     }
+    case "thread-cycle":
+      return {
+        ...base,
+        key: `thread-cycle:${threads.map((one) => one.id).join(":")}`,
+        text: `Threads wait on each other in a cycle: ${threads.map(lineName).join(", ")}`,
+        note: IN_A_TERMINAL,
+      };
     case "number-clash":
       return {
         ...base,
@@ -454,7 +303,6 @@ function describe(
     contest: "Two holders claim one thread",
     "clock-ahead": "A claim's clock runs ahead",
     unthreaded: "Needs a thread",
-    "new-blocker": "Gained a new blocker",
     reopened: "Reopened, with work waiting on it",
     "done-early": "Done while work in it is open",
   };

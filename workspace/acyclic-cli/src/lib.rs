@@ -193,7 +193,7 @@ fn execute_with(
 }
 
 fn serve_with(cli: &Cli, start: Start<'_>, env: &Env, serve: ServeHook) -> Result<(), CliError> {
-    if cli.actor.is_some() || cli.as_user {
+    if cli.actor.is_some() {
         let name = match start {
             Start::Serve(_) => "serve",
             Start::Up(_) => "up",
@@ -202,22 +202,19 @@ fn serve_with(cli: &Cli, start: Start<'_>, env: &Env, serve: ServeHook) -> Resul
             "usage",
             exit::USAGE,
             format!(
-                "{name} takes no --actor or --as-user: the server acts as the user only for requests carrying their \
-                 identity"
+                "{name} takes no --actor: the server acts as the user only for requests carrying their identity"
             ),
         ));
     }
     serve(start, context::tracker(cli, env)?, env)
 }
 
-/// Runs one command for another front end, such as the server: on the tracker clone at `tracker`, as the user or
-/// else as `env`'s actor, on `env`'s clock. Returns the exit code and the envelope, with times as RFC 3339 in UTC; a
+/// Runs one command for another front end, such as the server: on the tracker clone at `tracker`, as the user, on
+/// `env`'s clock. Returns the exit code and the envelope, with times as RFC 3339 in UTC; a
 /// command that prints text returns it as the envelope's data.
 #[must_use]
-pub fn call(command: Command, tracker: PathBuf, as_user: bool, env: &Env) -> (u8, Value) {
-    let cli =
-        Cli { tracker: Some(tracker), actor: None, as_user, output: Some(Format::Json), command };
-    answer(&cli, env)
+pub fn call(command: Command, tracker: PathBuf, env: &Env) -> (u8, Value) {
+    call_as(command, tracker, acyclic_core::scope::USER, env)
 }
 
 /// Runs one command as [`call`] does, as `actor`.
@@ -226,7 +223,6 @@ pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u
     let cli = Cli {
         tracker: Some(tracker),
         actor: Some(actor.to_owned()),
-        as_user: false,
         output: Some(Format::Json),
         command,
     };

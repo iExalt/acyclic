@@ -13,9 +13,6 @@ use crate::Env;
 use crate::args::{Cli, Format};
 use crate::error::{CliError, exit};
 
-/// The actor when none is declared: an agent, never the user.
-pub const UNDECLARED: &str = "agent/undeclared";
-
 /// How to print: `--output`, else pretty for a person at a terminal and JSON for whatever reads a pipe, as an agent's
 /// tool does.
 #[must_use]
@@ -23,24 +20,11 @@ pub fn output(cli: &Cli, env: &Env) -> Format {
     cli.output.unwrap_or(if env.terminal.is_some() { Format::Pretty } else { Format::Json })
 }
 
-/// The actor: `--as-user` or `--actor`, else `ACYCLIC_ACTOR`, else [`UNDECLARED`]. The environment may not name the
-/// user: a shell profile setting it would make every agent started from that shell the user.
+/// The actor, a label on what it writes: `--actor`, else `ACYCLIC_ACTOR`, else the user.
 pub fn actor(cli: &Cli, env: &Env) -> Result<String, CliError> {
-    if cli.as_user {
-        return Ok(USER.to_owned());
-    }
-    if let Some(actor) = &cli.actor {
-        return checked_actor(actor);
-    }
-    match env.var("ACYCLIC_ACTOR") {
-        Some(USER) => Err(CliError::new(
-            "user-from-environment",
-            exit::USAGE,
-            "ACYCLIC_ACTOR may not name the user, or every agent started from this shell would act as the user; pass \
-             --as-user on the command instead",
-        )),
+    match cli.actor.as_deref().or_else(|| env.var("ACYCLIC_ACTOR")) {
         Some(actor) => checked_actor(actor),
-        None => Ok(UNDECLARED.to_owned()),
+        None => Ok(USER.to_owned()),
     }
 }
 

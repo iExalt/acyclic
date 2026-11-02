@@ -5,9 +5,9 @@ that leaves the server is aborted. In Chromium, at both sizes, the page must lis
 needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should: the
 default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
-the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread is
-approved, an agent's proposals to it are kept and dropped, and its level and the global level are set; from
-Needs you's view, a proposal is kept and a waiting thread approved. Chromium's full build, headless, keeps a
+the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread's panel
+lists its items; from Needs you's view, a conflict is settled and threads that wait on each other are named. Chromium's
+full build, headless, keeps a
 subscription it is given, records a pushed notification without displaying a system banner, and opens Needs you's view
 it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
 and WebKit, a page on another port of the same host can neither write with the paired browser's cookie nor frame the
@@ -172,7 +172,7 @@ def tracker(directory, env, items, remote=None):
     )
     remote_args = [] if remote is None else ["--remote", str(remote)]
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
-    run(env, "--as-user", "import", str(plan))
+    run(env, "import", str(plan))
     if remote is not None:
         run(env, "sync")
     return Plan(env)
@@ -629,10 +629,11 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         page.locator("[data-view=needs]").click()
         needs = page.get_by_test_id("needs")
         needs.wait_for(timeout=5_000)
-        # Filtered and scrolled down the list, so coming back shows whether it kept its place: the scroll and the row
-        # hold only under the filter they were left at.
-        needs.locator("[data-filter=approve]").click()
-        top =needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
+        # Scrolled down the list, so coming back shows whether it kept its place. A shorter page, so the fixture's few
+        # entries scroll.
+        size = page.viewport_size
+        page.set_viewport_size({"width": size["width"], "height": 480})
+        top = needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
         # A row already in view, so the click doesn't scroll the list first.
         picked = needs.evaluate(
             """n => { const box = n.getBoundingClientRect();
@@ -648,14 +649,13 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
         kept = needs.evaluate(
-            """(n, id) => [n.scrollTop, document.activeElement?.dataset.select === id,
-                n.querySelector('[data-filter][aria-pressed=true]')?.dataset.filter]""",
+            "(n, id) => [n.scrollTop, document.activeElement?.dataset.select === id]",
             picked,
         )
-        if top == 0 or abs(kept[0] - top) > 1 or not kept[1] or kept[2] != "approve":
+        page.set_viewport_size(size)
+        if top == 0 or abs(kept[0] - top) > 1 or not kept[1]:
             failures.append(
-                f"{name}: Back to Needs you from {picked} came back filtered {kept[2]}, scrolled {kept[0]} of {top},"
-                f" focus there {kept[1]}"
+                f"{name}: Back to Needs you from {picked} came back scrolled {kept[0]} of {top}, focus there {kept[1]}"
             )
         page.go_back()
         overview.wait_for(timeout=5_000)
@@ -808,12 +808,17 @@ def keys_journey(page, plan, name, failures):
     if view.get_attribute("data-view") != "map":
         failures.append(f"{name}: with single-key shortcuts off, G then T still went to {view.get_attribute('data-view')}")
     from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
-    # ⌘Z takes back the autonomy just set, once, however often it is pressed.
-    level = page.get_by_test_id("global-level")
-    page.get_by_test_id("menu").click()
-    was = level.input_value()
-    to = next(one for one in level.locator("option").evaluate_all("os => os.map(o => o.value)") if one != was)
-    level.select_option(to)
+    # ⌘Z takes back the edit just saved, once, however often it is pressed.
+    page.keyboard.press("ControlOrMeta+k")
+    page.keyboard.type(plan.items[id]["title"])
+    page.keyboard.press("Enter")
+    heading = page.locator("[data-testid=inspector] h2")
+    heading.wait_for(timeout=5_000)
+    page.keyboard.press("e")
+    form.wait_for(timeout=5_000)
+    was = title.input_value()
+    title.fill(f"{was} for undo")
+    form.locator("button[type=submit]").click()
     page.get_by_test_id("notice").get_by_role("button", name="Undo").wait_for(timeout=10_000)
     page.evaluate("() => document.activeElement?.blur()")
     writes = []
@@ -821,16 +826,17 @@ def keys_journey(page, plan, name, failures):
         "request",
         lambda request: (
             writes.append(request.post_data)
-            if request.url.endswith("/api/command") and (request.post_data or "").startswith('{"level":{"level"')
+            if request.url.endswith("/api/command") and (request.post_data or "").startswith('{"item":{"edit"')
             else None
         ),
     )
     page.keyboard.press("ControlOrMeta+z")
     page.keyboard.press("ControlOrMeta+z")
-    page.get_by_text("Autonomy set back to").wait_for(timeout=10_000)
+    page.get_by_text(f"Set {was} back").wait_for(timeout=10_000)
     page.wait_for_timeout(300)
-    if level.input_value() != was or len(writes) != 1:
-        failures.append(f"{name}: ⌘Z twice set the autonomy to {level.input_value()}, in {len(writes)} writes")
+    if heading.inner_text() != was or len(writes) != 1:
+        failures.append(f"{name}: ⌘Z twice left the title {heading.inner_text()!r}, in {len(writes)} writes")
+    page.keyboard.press("Escape")
     print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off; ⌘Z undid once")
 
 
@@ -1713,7 +1719,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
-    run(env, "--as-user", "link", "add", added, "waits-for", first)
+    run(env, "link", "add", added, "waits-for", first)
     # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
     sent = []
     listen = lambda request: (
@@ -1727,106 +1733,13 @@ def edit_journey(page, view, env, plan, box, name, failures):
     page.remove_listener("request", listen)
     if sent:
         failures.append(f"{name}: a refused undo sent {sent}")
-    # Unlinked once more, as the journeys after expect: a new wait in an approved thread needs the user.
+    # Unlinked once more, as the journeys after expect.
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
     )
-
-
-@timed
-def level_keys_journey(page, name, failures):
-    """Arrow keys on the closed autonomy list move a draft, written once on Enter and dropped on Escape, while a pick
-    from the open list, opened from the keyboard too, writes at once. Where a browser's arrow keys open the list, as on
-    macOS, and its headless list takes no keys, there is nothing to check."""
-    writes = []
-
-    def sent(request):
-        body = request.post_data or ""
-        if request.url.endswith("/api/command") and body.startswith(
-            '{"level":{"level"'
-        ):
-            writes.append(json.loads(body)["level"]["level"])
-
-    page.on("request", sent)
-    try:
-        levels = page.get_by_test_id("global-level")
-        page.get_by_test_id("menu").click()
-        was = levels.input_value()
-        order = levels.evaluate("s => [...s.options].map(o => o.value)")
-        levels.focus()
-        page.keyboard.press("ArrowDown")
-        # A write is wrong on any platform; no change shows a platform whose arrow keys open the list.
-        page.wait_for_timeout(300)
-        if writes:
-            failures.append(f"{name}: an arrow key on the autonomy list wrote {writes}")
-            return
-        if levels.input_value() == was:
-            page.keyboard.press("Escape")
-            print(
-                f"{name}: arrow keys open the autonomy list here, so there is no draft to check"
-            )
-            return
-        page.keyboard.press("ArrowDown")
-        page.wait_for_timeout(300)
-        if writes:
-            failures.append(f"{name}: arrow keys on the autonomy list wrote {writes}")
-            return
-        page.keyboard.press("Enter")
-        step = order[min(order.index(was) + 2, len(order) - 1)]
-        settled_control(page, "[data-testid=global-level]", "value", step)
-        if writes != [step]:
-            failures.append(
-                f"{name}: Enter after two arrow keys wrote {writes}, not once {step}"
-            )
-        # A setting leaves the menu open, showing what it now is.
-        if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
-            failures.append(
-                f"{name}: Enter on the autonomy list wrote, and closed the menu"
-            )
-            page.get_by_test_id("menu").click()
-        levels.focus()
-        page.keyboard.press("ArrowUp")
-        page.keyboard.press("Escape")
-        page.get_by_test_id("menu").click()
-        if writes != [step] or levels.input_value() != step:
-            failures.append(
-                f"{name}: Escape after an arrow key wrote {writes[1:]} or left {levels.input_value()} showing"
-            )
-        # Enter on the list with nothing chosen leaves it open too.
-        levels.focus()
-        page.keyboard.press("Enter")
-        if not page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
-            failures.append(
-                f"{name}: Enter on the autonomy list, unchanged, closed the menu"
-            )
-            page.get_by_test_id("menu").click()
-        # Space opens the list; the keys in it reach only the list, and Enter there picks.
-        levels.focus()
-        for key in ["Space", "ArrowUp", "Enter"]:
-            page.keyboard.press(key)
-            # The list opens in its own time, as it does under a person's fingers.
-            page.wait_for_timeout(100)
-        picked = order[order.index(step) - 1]
-        try:
-            settled_control(page, "[data-testid=global-level]", "value", picked)
-        except PlaywrightTimeout:
-            failures.append(
-                f"{name}: a pick from the list opened by Space left {levels.input_value()} showing, not {picked}"
-            )
-        if writes != [step, picked]:
-            failures.append(
-                f"{name}: a pick from the list opened by Space wrote {writes[1:]}, not once {picked}"
-            )
-        if page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open"):
-            page.get_by_test_id("menu").click()
-        print(
-            f"{name}: arrow keys on the autonomy list wrote once, on Enter, and a pick at once"
-        )
-    finally:
-        page.remove_listener("request", sent)
 
 
 @timed
@@ -2113,7 +2026,7 @@ def form_journey(page, view, env, remote, id, name, failures):
                 f"{name}: with a keyboard up, the edit form's Save and Cancel are out of reach"
             )
     # Meanwhile, an agent sets the gate, and coming back to the app reads it: saving sends only what the user changed.
-    run(env, "--as-user", "item", "edit", id, "--gate", "Set elsewhere")
+    run(env, "item", "edit", id, "--gate", "Set elsewhere")
     reads = int(page.locator("main.stage").get_attribute("data-reads"))
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     page.wait_for_function(
@@ -2155,8 +2068,8 @@ def form_journey(page, view, env, remote, id, name, failures):
         str(remote),
     )
     run(other, "sync")
-    run(other, "--as-user", "item", "edit", id, "--title", "Title from the other clone")
-    run(env, "--as-user", "item", "edit", id, "--title", "Title from this clone")
+    run(other, "item", "edit", id, "--title", "Title from the other clone")
+    run(env, "item", "edit", id, "--title", "Title from this clone")
     run(other, "sync")
     run(env, "sync")
     refresh(page)
@@ -2182,7 +2095,7 @@ def form_journey(page, view, env, remote, id, name, failures):
         )
 
     # Reopen: finished elsewhere, reopened here.
-    run(env, "--as-user", "done", id, "--force", "--note", "finished for the journey")
+    run(env, "done", id, "--force", "--note", "finished for the journey")
     refresh(page)
     item_action(page, "reopen")
     page.locator("[data-action=reopen]").wait_for(state="detached", timeout=10_000)
@@ -2207,8 +2120,7 @@ def settled_control(page, selector, prop, value):
 
 @timed
 def thread_journey(page, env, plan, thread, name, failures):
-    """Approves the thread from its panel, keeps and drops an agent's proposals, and sets its level and the global
-    level, checking the panel and then the tracker."""
+    """Opens the thread's panel, which lists its items, and picks a Theme on the way."""
     panel = page.get_by_test_id("thread-panel")
     # Picking a thread already picked unpicks it.
     pick_thread(page, plan, thread)
@@ -2216,66 +2128,13 @@ def thread_journey(page, env, plan, thread, name, failures):
         panel.wait_for(timeout=3_000)
     except PlaywrightTimeout:
         pick_thread(page, plan, thread)
-
-    def shown():
-        return json.loads(run(env, "thread", "show", thread))["data"][0]
-
-    # Approve, naming what it approves; revoke first if the fixture approved it already.
-    if (
-        panel.locator("[data-action=revoke]")
-        .or_(panel.locator("[data-action=approve]"))
-        .first.get_attribute("data-action")
-        == "revoke"
-    ):
-        panel.locator("[data-action=revoke]").click()
-    approve = panel.locator("[data-action=approve]")
-    members = len(shown()["members"])
+    members = len(json.loads(run(env, "thread", "show", thread))["data"][0]["members"])
     # Its items, in the order their work runs, the first eight shown.
+    page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for(timeout=10_000)
     listed = panel.locator(".thread-items li").count()
     if listed != min(members, 8):
         failures.append(f"{name}: the panel lists {listed} of {thread}'s {members} items")
-    if approve.inner_text() != f"Approve {members} items":
-        failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
-    approve.click()
-    panel.locator("[data-action=revoke]").wait_for(timeout=10_000)
-    # Its main action shows at the panel's first height; its proposals and settings are below it.
-    try:
-        page.wait_for_function(
-            """() => {
-                const p = document.querySelector("[data-testid=thread-panel]");
-                const m = p?.querySelector("[data-main]");
-                return !!m && m.getBoundingClientRect().bottom <= p.getBoundingClientRect().bottom + 0.5;
-            }""",
-            timeout=3_000,
-        )
-    except PlaywrightTimeout:
-        failures.append(f"{name}: the thread's main action is below its panel's first height")
     open_full(page, "thread-panel")
-    # An agent proposes two items join the approved thread: one is kept, one dropped.
-    outside = sorted(id for id, row in plan.items.items() if row["thread"] != thread)[
-        :2
-    ]
-    for id in outside:
-        run(env, "item", "edit", id, "--thread", thread)
-    refresh(page)
-    rows = panel.locator("[data-proposal]")
-    rows.nth(1).wait_for(timeout=10_000)
-    first = rows.filter(has_text=plan.items[outside[0]]["title"])
-    first.locator("[data-action=keep]").click()
-    first.wait_for(state="detached", timeout=10_000)
-    rows.locator("[data-action=drop]").first.click()
-    panel.get_by_test_id("proposals").wait_for(state="detached", timeout=10_000)
-    # Its own level, and the global level.
-    panel.locator("select[name=level]").select_option("everything")
-    settled_control(
-        page, "[data-testid=thread-panel] select[name=level]", "value", "everything"
-    )
-
-    def level():
-        page.get_by_test_id("global-level").select_option("everything")
-        settled_control(page, "[data-testid=global-level]", "value", "everything")
-
-    from_menu(page, level)
     # A Theme picked on the device shows at once, over the system's scheme, and System gives it back.
     ground = "() => getComputedStyle(document.documentElement).backgroundColor"
     lit = page.evaluate(ground)
@@ -2283,36 +2142,15 @@ def thread_journey(page, env, plan, thread, name, failures):
     if lit == page.evaluate(ground) or page.evaluate("document.documentElement.dataset.theme") != "dark":
         failures.append(f"{name}: picking Dark over a light system left the page {lit}")
     from_menu(page, lambda: page.get_by_test_id("theme").select_option("system"))
-    # Settings show at once and save in the background, one after another: the tracker has them once the last lands.
-    deadline = time.monotonic() + 10
-    while True:
-        after = shown()
-        if (after["approved"], after["level"]) == (True, "everything") and json.loads(
-            run(env, "level")
-        )["data"]["global"] == "everything":
-            break
-        if time.monotonic() > deadline:
-            break
-        page.wait_for_timeout(200)
-    if (after["approved"], after["level"]) != (True, "everything"):
-        failures.append(f"{name}: the tracker shows {thread} as {after['approved'], after['level']}")
-    threads_of = {
-        id: json.loads(run(env, "show", id))["data"][0]["thread"] for id in outside
-    }
-    if threads_of != {outside[0]: thread, outside[1]: plan.items[outside[1]]["thread"]}:
-        failures.append(f"{name}: keep and drop left {threads_of}")
-    if json.loads(run(env, "level"))["data"]["global"] != "everything":
-        failures.append(f"{name}: the global level didn't change")
     page.screenshot(path=SHOTS / f"app-{name}-thread-panel.png")
-    print(
-        f"{name}: approved {thread}, kept and dropped proposals, and set its level and the global level"
-    )
+    print(f"{name}: {thread}'s panel listed its items, and a Theme showed at once")
 
 
 @timed
 def needs_journey(page, env, plan, thread, name, failures):
-    """Keeps an agent's proposal and approves a waiting thread from Needs you's view, whose count follows. A thread or
-    an item an entry names goes to the Map, and closing it, by Escape or its ✕, comes back to the view."""
+    """Settles a conflict two clones wrote from Needs you's view, whose count follows, and names threads that wait on
+    each other. A thread or an item an entry names goes to the Map, and closing it, by Escape or its ✕, comes back to
+    the view."""
     count = page.get_by_test_id("needs-count")
     # The queue's count shows beside its name, on a phone as anywhere.
     if not count.is_visible():
@@ -2357,12 +2195,23 @@ def needs_journey(page, env, plan, thread, name, failures):
     named = (page.locator("[data-view=needs]").get_attribute("aria-label"), page.locator(".bar h1").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":
         failures.append(f"{name}: the queue's tab and title read {named}, not Needs you")
+    # Threads that wait on each other are named, each a row that picks it.
+    cycle = needs.locator("[data-need^='thread-cycle:']").first
+    if not cycle.count() or cycle.locator("[data-pick-thread]").count() < 2:
+        failures.append(f"{name}: Needs you names no threads waiting on each other in a cycle")
+    # A conflict: the second clone form_journey made and this one write an item's title apart, and both sync.
     outside = next(
         id
         for id, row in sorted(plan.items.items())
-        if row["thread"] not in (thread, None)
+        if row["thread"] not in (thread, None) and row["state"] != "done"
     )
-    run(env, "item", "edit", outside, "--thread", thread)
+    other = {**env, "ACYCLIC_TRACKER": str(Path(env["ACYCLIC_TRACKER"]).parent / "other")}
+    run(env, "sync")
+    run(other, "sync")
+    run(other, "item", "edit", outside, "--title", "Needs you's title from the other clone")
+    run(env, "item", "edit", outside, "--title", "Needs you's title from this clone")
+    run(other, "sync")
+    run(env, "sync")
     before = int(count.inner_text())
     # The count alone says something waits, as an inbox's does: no "!" beside it.
     if page.get_by_test_id("needs-badge").count() or not count.is_visible():
@@ -2373,60 +2222,29 @@ def needs_journey(page, env, plan, thread, name, failures):
         arg=before + 1,
         timeout=10_000,
     )
-    # The Approve filter shows only what waits for a yes or no, and All shows everything again.
-    entries = needs.locator("[data-need]")
-    every = entries.count()
-    needs.locator("[data-filter=approve]").click()
-    kinds = {key.split(":")[0] for key in entries.evaluate_all("l => l.map(e => e.dataset.need)")}
-    if not kinds or not kinds <= {"proposal", "unapproved", "awaiting-approval", "new-blocker"}:
-        failures.append(f"{name}: the Approve filter shows {sorted(kinds)}")
-    needs.locator("[data-filter=all]").click()
-    if entries.count() != every:
-        failures.append(f"{name}: All shows {entries.count()} of {every} entries")
-    proposal = needs.locator("[data-need^='proposal:']").filter(
-        has_text=plan.items[outside]["title"]
-    )
-    proposal.locator("[data-action=keep]").click()
-    proposal.wait_for(state="detached", timeout=10_000)
-    waiting = needs.locator("[data-need^='awaiting-approval:']").first
-    approved = waiting.get_attribute("data-need").split(":", 1)[1]
-    # The text names the thread beside its badge and picks it, so no row repeats the thread below.
-    if (
-        waiting.locator(f":scope > button[data-pick-thread='{approved}']").count() != 1
-        or waiting.locator(".rows .line").count() != 0
-    ):
-        failures.append(
-            f"{name}: the entry for {approved} should pick it from its text, with no row repeating it"
-        )
-    waiting.locator("[data-action=approve]").click()
-    needs.locator(f"[data-need='awaiting-approval:{approved}']").wait_for(
-        state="detached", timeout=10_000
-    )
-    # The keyboard stays in the list, on what took the entry's place, and the approval is said.
+    key = f"conflict:item:{outside}:title"
+    conflict = needs.locator(f"[data-need='{key}']")
+    conflict.locator("[data-action=use]").filter(has_text="from the other clone").click()
+    conflict.wait_for(state="detached", timeout=10_000)
+    # The keyboard stays in the list, on what took the entry's place, and what was used is said.
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     kept = page.evaluate(
         "() => document.querySelector('[data-testid=needs]').contains(document.activeElement)"
     )
     said = page.locator("p[role=status]").inner_text()
-    if not kept or not said.startswith("Approved "):
+    if not kept or not said.startswith("Used "):
         failures.append(
-            f"{name}: approving from the list left focus at {page.evaluate('document.activeElement.tagName')}"
+            f"{name}: settling from the list left focus at {page.evaluate('document.activeElement.tagName')}"
             f" and said {said!r}"
         )
-    if int(count.inner_text()) >= before:
-        failures.append(
-            f"{name}: the needs count stayed at {count.inner_text()} after two were met"
-        )
-    if json.loads(run(env, "show", outside))["data"][0]["thread"] != thread:
-        failures.append(
-            f"{name}: keeping the proposal didn't put {outside} in {thread}"
-        )
-    if not json.loads(run(env, "thread", "show", approved))["data"][0]["approved"]:
-        failures.append(f"{name}: approving {approved} from the list didn't approve it")
+    if int(count.inner_text()) != before:
+        failures.append(f"{name}: the needs count is {count.inner_text()}, not {before}, once the conflict was settled")
+    if json.loads(run(env, "show", outside))["data"][0]["title"] != "Needs you's title from the other clone":
+        failures.append(f"{name}: settling the conflict from the list didn't keep the other clone's title")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
-    picker = needs.locator("[data-need] > button[data-pick-thread]").first
+    picker = needs.locator("[data-need] [data-pick-thread]").first
     if picker.count() == 0:
-        failures.append(f"{name}: no entry's text picks its thread")
+        failures.append(f"{name}: no entry picks a thread")
     else:
         picked = picker.get_attribute("data-pick-thread")
         picker.click()
@@ -2439,7 +2257,7 @@ def needs_journey(page, env, plan, thread, name, failures):
         try:
             page.locator(f"[data-thread='{picked}'][aria-pressed=true]").first.wait_for(timeout=5_000)
         except PlaywrightTimeout:
-            failures.append(f"{name}: an entry's text didn't pick {picked}, or its row is out of view")
+            failures.append(f"{name}: an entry didn't pick {picked}, or its row is out of view")
         if sheet.count():
             page.get_by_test_id("projects").get_by_role("button", name="Close", exact=True).click()
         panel.get_by_role("button", name="Close").click()
@@ -2448,7 +2266,7 @@ def needs_journey(page, env, plan, thread, name, failures):
             needs.wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: closing a thread picked from the needs-you list didn't come back to it")
-    print(f"{name}: kept a proposal and approved {approved} in Needs you, and came back from what it named")
+    print(f"{name}: settled a conflict in Needs you, named a cycle of threads, and came back from what it named")
 
 
 @timed
@@ -2501,7 +2319,7 @@ def push_journey(context, page, env, origin, name, failures):
         page.wait_for_timeout(50)
     message = {
         "title": "Needs you",
-        "body": "A proposal for the journey",
+        "body": "A conflict for the journey",
         "url": "/?needs",
     }
     # Record at the OS display boundary: even headless Chrome can show desktop banners.
@@ -2654,14 +2472,13 @@ def main():
                 if name == "desktop":
                     pairing_journey(context, page, origin, env, name, failures)
                     keys_journey(page, plan, name, failures)
-                    level_keys_journey(page, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.
                     leaf = min(
                         id for id in plan.children(hint) if not plan.children(id)
                     )
                     # Read by the reload edit_journey starts with.
-                    run(env, "--as-user", "item", "edit", leaf, "--notes", HOSTILE)
+                    run(env, "item", "edit", leaf, "--notes", HOSTILE)
                     edit_journey(page, view, env, plan, hint, name, failures)
                     form_journey(
                         page, view, env, remote, "journey-added", name, failures

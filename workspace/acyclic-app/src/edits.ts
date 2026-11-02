@@ -139,7 +139,7 @@ export function pick(model: Model, mode: Mode, target: Pick): Step {
 /** How an edit went: the write, then, if it was saved, reading the plan again. */
 export type Sent =
   | { write: "failed"; code: string; message: string }
-  | { write: "saved"; proposals: number; reload: "done" | { failed: string } };
+  | { write: "saved"; reload: "done" | { failed: string } };
 
 /** What the app tells the user after an edit, and what it offers: the same write again, or a refresh. */
 export interface Told {
@@ -152,14 +152,13 @@ export interface Told {
 export function told(sent: Sent): Told {
   if (sent.write === "failed") {
     const { retry, fixId } = recovery(sent.code);
-    // Decided or gone elsewhere: what the app shows is out of date.
-    const stale = sent.code === "decided" || sent.code === "not-found";
+    // Gone elsewhere: what the app shows is out of date.
+    const stale = sent.code === "not-found";
     return { text: sent.message, offer: retry ? "retry" : stale ? "refresh" : null, fixId };
   }
   // Saved is saved: a failed refresh is offered again, never the write.
   if (sent.reload !== "done")
     return { text: `Saved, but the refresh failed: ${sent.reload.failed}`, offer: "refresh", fixId: false };
-  if (sent.proposals > 0) return { text: "Sent as a proposal for you to keep", offer: null, fixId: false };
   return { text: null, offer: null, fixId: false };
 }
 

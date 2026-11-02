@@ -313,9 +313,6 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"thread": {"show": {"threads": ["t"]}}}),
         json!({"repo": "list"}),
         json!({"repo": {"show": {"repositories": ["r"]}}}),
-        json!({"proposal": "list"}),
-        json!({"proposal": {"show": {"proposals": ["p"]}}}),
-        json!({"level": {}}),
     ] {
         assert_eq!(classify(read.clone()), Use::Read, "{read}");
     }
@@ -323,18 +320,15 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"claim": {"thread": "t"}}),
         json!({"release": {"thread": "t"}}),
         json!({"done": {"item": "a", "note": "n"}}),
-        json!({"level": {"level": "blockers"}}),
         json!({"item": {"add": {"item": "a", "title": "A"}}}),
         json!({"item": {"edit": {"item": "a", "no-thread": true, "area": ["x"]}}}),
         json!({"item": {"archive": {"item": "a"}}}),
         json!({"item": {"delete": {"item": "a"}}}),
         json!({"link": {"add": {"from": "a", "kind": "waits-for", "to": "b"}}}),
-        json!({"thread": {"approve": {"thread": "t"}}}),
         json!({"thread": {"add": {"thread": "t", "title": "T"}}}),
-        json!({"thread": {"edit": {"thread": "t", "no-level": true}}}),
+        json!({"thread": {"edit": {"thread": "t", "no-brief": true}}}),
         json!({"repo": {"add": {"repository": "r", "owner": "o", "name": "n", "default-branch": "main"}}}),
         json!({"repo": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
-        json!({"proposal": {"keep": {"proposal": "p"}}}),
     ] {
         assert_eq!(classify(write.clone()), Use::Write, "{write}");
     }
@@ -611,7 +605,7 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
     let tracker = dir.path().join("tracker");
     let run = |command: Value| {
         let command: Command = serde_json::from_value(command).unwrap();
-        assert_eq!(acyclic_cli::call(command, tracker.clone(), true, &Env::default()).0, 0);
+        assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
     run(json!({"item": {"add": {"item": "a", "title": "a long title ".repeat(200)}}}));
@@ -645,7 +639,7 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
     assert_eq!(api("gzip", show), ["gzip"]);
     assert_eq!(api("br", show), ["br"]);
     assert_eq!(api("identity", show), Vec::<String>::new());
-    assert_eq!(api("gzip", r#""level""#), Vec::<String>::new());
+    assert_eq!(api("gzip", r#"{"repo": "list"}"#), Vec::<String>::new());
     // The app's files keep the one encoding they were built with, if any, for GET, HEAD and a 304 alike.
     let built = acyclic_app_assets::get("/index.html").unwrap().gz.is_some();
     let expected: Vec<String> = if built { vec!["gzip".into()] } else { Vec::new() };
@@ -665,12 +659,12 @@ fn every_command_the_app_sends_runs_through_the_api() {
     // crate doesn't reach outside it.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../acyclic-app/src/commands.examples.json");
-    let mut examples = std::fs::read_to_string(path).unwrap();
+    let examples = std::fs::read_to_string(path).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let tracker = dir.path().join("tracker");
     let run = |command: Value| {
         let command: Command = serde_json::from_value(command).unwrap();
-        assert_eq!(acyclic_cli::call(command, tracker.clone(), true, &Env::default()).0, 0);
+        assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
     run(json!({"item": {"add": {"item": "a", "title": "A"}}}));
@@ -678,21 +672,6 @@ fn every_command_the_app_sends_runs_through_the_api() {
     run(json!({"thread": {"add": {"thread": "t", "title": "T"}}}));
     run(json!({"item": {"add": {"item": "e", "title": "E"}}}));
     run(json!({"done": {"item": "e", "note": "n", "force": true}}));
-    run(json!({"thread": {"approve": {"thread": "t"}}}));
-    // An agent's edits to the approved thread's scope wait as proposals, which the examples keep and drop.
-    for n in 1..=2 {
-        run(json!({"item": {"add": {"item": format!("p{n}"), "title": "P"}}}));
-        let edit = json!({"item": {"edit": {"item": format!("p{n}"), "thread": "t"}}});
-        let (code, answer) = acyclic_cli::call_as(
-            serde_json::from_value(edit).unwrap(),
-            tracker.clone(),
-            "session/agent",
-            &Env::default(),
-        );
-        assert_eq!(code, 0, "{answer}");
-        let id = answer["data"]["proposals"][0]["id"].as_str().unwrap().to_owned();
-        examples = examples.replace(&format!("$proposal-{n}"), &id);
-    }
     let examples: Value = serde_json::from_str(&examples).unwrap();
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();

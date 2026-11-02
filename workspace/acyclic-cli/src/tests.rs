@@ -5,7 +5,6 @@ use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
-use acyclic_core::scope::ScopeError;
 use acyclic_core::state::{Error as StateError, Key, ReplicaId};
 use acyclic_core::store::StoreError;
 
@@ -28,15 +27,13 @@ fn actor(line: &str, vars: &[(&str, &str)]) -> Result<String, &'static str> {
 }
 
 #[test]
-fn the_user_is_never_inherited_from_the_environment() {
-    let user = [("ACYCLIC_ACTOR", "actor/user")];
+fn the_actor_is_the_flag_else_the_environment_else_the_user() {
     let session = [("ACYCLIC_ACTOR", "session/mac")];
-    assert_eq!(actor("acyclic needs", &[]), Ok("agent/undeclared".into()));
+    assert_eq!(actor("acyclic needs", &[]), Ok("actor/user".into()));
     assert_eq!(actor("acyclic needs", &session), Ok("session/mac".into()));
-    assert_eq!(actor("acyclic needs", &user), Err("user-from-environment"));
-    assert_eq!(actor("acyclic needs --as-user", &user), Ok("actor/user".into()));
-    assert_eq!(actor("acyclic needs --actor actor/user", &session), Ok("actor/user".into()));
+    assert_eq!(actor("acyclic needs --actor session/pi", &session), Ok("session/pi".into()));
     assert_eq!(actor("acyclic needs --actor nobody", &[]), Err("invalid-actor"));
+    assert_eq!(actor("acyclic needs", &[("ACYCLIC_ACTOR", "no one")]), Err("invalid-actor"));
 }
 
 #[test]
@@ -103,16 +100,10 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::ParentCycle("a1".into()).into(),
         WriteError::LinkCycle(vec!["a1".into()]).into(),
         WriteError::Checked { field: "state".into(), write: "set_state" }.into(),
-        WriteError::UserOnly { field: "approved".into(), actor: "session/s".into() }.into(),
         WriteError::SelfLink("a1".into()).into(),
-        ScopeError::NotTheUser("session/s".into()).into(),
-        ScopeError::NoProposal("p".into()).into(),
-        ScopeError::Decided("p".into()).into(),
         DeleteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
-        DeleteError::NotAllowed { actor: "session/s".into(), thread: "t".into() }.into(),
         ArchiveError::Ineligible { item: "a1".into(), reasons: vec![] }.into(),
         ArchiveError::NotDone("a1".into()).into(),
-        ArchiveError::NotAllowed("session/s".into()).into(),
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
         StoreError::Locked { path: "x".into(), age_seconds: None }.into(),
@@ -127,7 +118,6 @@ fn every_error_has_a_stable_code_and_exit() {
         ParseError::NotAnImport.into(),
         ParseError::UnsupportedVersion { found: 9 }.into(),
         ApplyError::Invalid(vec![]).into(),
-        ApplyError::UserOnly("approved threads".into()).into(),
         ApplyError::Cycles(vec![]).into(),
         // Raised by the commands themselves.
         CliError::refused("not-ready", ""),
@@ -142,7 +132,6 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("invalid-commit", exit::USAGE, ""),
         CliError::new("reserved-id", exit::USAGE, ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
-        CliError::new("user-from-environment", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
         CliError::new("no-server", exit::CONFIG, ""),
@@ -291,48 +280,6 @@ fn prime_is_text_matched_to_the_version() {
 }
 
 #[test]
-fn ready_says_which_thread_an_item_is_in_and_whether_its_work_is_approved() {
-    use acyclic_core::model::{self, By, Model, add_item};
-    use acyclic_core::schema::{kind, thread};
-    use acyclic_core::scope::ScopeEdit;
-    use acyclic_core::state::Replica;
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
-    let thread_key = |id: &str| Key::new(kind::THREAD, id).unwrap();
-    let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), acyclic_core::state::State::new());
-    for id in ["x", "y", "z", "late", "raced"] {
-        add_item(&mut mac, id, id, user).unwrap();
-    }
-    let join = |replica: &mut Replica, item: &str, thread: &str| {
-        let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
-        acyclic_core::scope::edit(replica, &member, user).unwrap();
-    };
-    join(&mut mac, "x", "ok");
-    join(&mut mac, "y", "draft");
-    join(&mut mac, "raced", "both");
-    acyclic_core::scope::approve(&mut mac, "ok", true, user).unwrap();
-    model::set(&mut mac, &thread_key("draft"), thread::APPROVED, Some(&false), user).unwrap();
-    // An agent's add that raced the approval reaches the thread unproposed, and the approval didn't see it.
-    let late = model::item_key("late").unwrap();
-    mac.write(&late, "thread", "session/mac", 2, Some(json!("ok"))).unwrap();
-    // One replica approves while another doesn't know of it and says no: a conflict.
-    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
-    model::set(&mut mac, &thread_key("both"), thread::APPROVED, Some(&true), user).unwrap();
-    model::set(&mut pi, &thread_key("both"), thread::APPROVED, Some(&false), user).unwrap();
-    mac.join(pi.state()).unwrap();
-    let model = Model::read(mac.state()).unwrap();
-    let thread = |t: &str| Some(t.to_owned());
-    for (item, expected) in [
-        ("x", (thread("ok"), true)),
-        ("y", (thread("draft"), false)),
-        ("z", (None, false)),
-        ("late", (thread("ok"), false)),
-        ("raced", (thread("both"), false)),
-    ] {
-        assert_eq!(crate::view::approval(&model, item), expected, "{item}");
-    }
-}
-
-#[test]
 fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() {
     use acyclic_core::model::{By, LinkKind, Model, add_item, link};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
@@ -417,7 +364,6 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             "import: dry_run",
             "import: file",
             "import: schema",
-            "proposal show: proposals",
             "repo show: repositories",
             "show: items",
             "thread show: threads",
@@ -436,7 +382,6 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(refused(json!({"import": {"schema": true}})), Ok(()));
     assert_eq!(refused(json!({"import": {"file": "p", "dry-run": true}})), Ok(()));
     assert_eq!(refused(json!({"repo": {"show": {"repositories": []}}})), Err("usage"));
-    assert_eq!(refused(json!({"proposal": {"show": {"proposals": []}}})), Err("usage"));
     for lease in [0, 481] {
         assert_eq!(refused(json!({"claim": {"thread": "t", "lease": lease}})), Err("usage"));
     }
@@ -609,7 +554,6 @@ fn every_command_follows_the_input_conventions() {
         ("init", "path"),
         ("completions", "shell"),
         ("import", "file"),
-        ("level", "level"),
         ("link add", "from"),
         ("link add", "kind"),
         ("link add", "to"),
@@ -617,7 +561,7 @@ fn every_command_follows_the_input_conventions() {
         ("link remove", "kind"),
         ("link remove", "to"),
     ];
-    let entities = ["ITEM", "THREAD", "REPOSITORY", "PROPOSAL"];
+    let entities = ["ITEM", "THREAD", "REPOSITORY"];
     for (path, command) in &commands {
         let longs: Vec<&str> = command.get_arguments().filter_map(clap::Arg::get_long).collect();
         for arg in command.get_arguments() {
@@ -692,7 +636,6 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --area x --no-area x",
         "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
-        "acyclic thread edit t --level blockers --no-level",
         "acyclic thread edit t --repository r --no-repository r",
     ] {
         assert_eq!(check(line), Err("usage"), "{line}");

@@ -15,7 +15,7 @@ const RULED: TableStyle =
     TableStyle::new().header_separator(LineStyle::none().fill('─').junction('─'));
 
 /// The entities a write names, in the order a summary looks for them.
-const ENTITIES: [&str; 4] = ["item", "thread", "repository", "proposal"];
+const ENTITIES: [&str; 3] = ["item", "thread", "repository"];
 
 /// A command's data for people. `width` is the terminal's, or `None` when not printing to one.
 pub(crate) fn render(command: &Command, data: &Json, width: Option<u16>) -> String {
@@ -68,7 +68,7 @@ pub(crate) fn error(envelope: &Json) -> String {
     }
 }
 
-/// An import as one line: what it wrote, or would write on a dry run, by kind, and what waits as a proposal.
+/// An import as one line: what it wrote, or would write on a dry run, by kind, and the threads items joined.
 fn import(data: &Json) -> String {
     let counts = &data["counts"];
     let kinds = [
@@ -93,10 +93,8 @@ fn import(data: &Json) -> String {
             compact(&counts["fields"])
         ),
     };
-    for key in ["proposals", "placed"] {
-        if !empty(&data[key]) {
-            write!(line, " · {key} {}", compact(&data[key])).expect("a String takes writes");
-        }
+    if !empty(&data["placed"]) {
+        write!(line, " · placed {}", compact(&data["placed"])).expect("a String takes writes");
     }
     line
 }
@@ -154,12 +152,12 @@ fn ready(data: &Json, width: Option<u16>) -> String {
                 String::new()
             };
             lines.push(serde_json::json!({
-                "thread": named, "item": item["id"], "title": item["title"], "approved": item["approved"],
+                "thread": named, "item": item["id"], "title": item["title"],
             }));
         }
     }
     let columns: Vec<String> =
-        ["thread", "item", "title", "approved"].iter().map(|key| (*key).to_owned()).collect();
+        ["thread", "item", "title"].iter().map(|key| (*key).to_owned()).collect();
     table(lines.iter().collect(), &columns, width)
 }
 
@@ -182,13 +180,13 @@ fn threads(data: &Json, width: Option<u16>) -> String {
         .into_iter()
         .map(|thread| {
             serde_json::json!({
-                "id": thread["id"], "title": thread["title"], "approved": thread["approved"],
+                "id": thread["id"], "title": thread["title"],
                 "members": thread["counts"]["members"], "done": thread["counts"]["done"], "heads": thread["heads"],
                 "wave": thread["id"].as_str().and_then(|id| wave.get(id)),
             })
         })
         .collect();
-    let columns: Vec<String> = ["id", "title", "approved", "members", "done", "wave", "heads"]
+    let columns: Vec<String> = ["id", "title", "members", "done", "wave", "heads"]
         .iter()
         .map(|key| (*key).to_owned())
         .collect();
@@ -228,7 +226,7 @@ fn block(record: &Json, width: Option<u16>) -> String {
     let Some(fields) = record.as_object() else {
         return compact(record);
     };
-    // A document that is only a list, as `needs` and `proposal list` are, is that list's table.
+    // A document that is only a list, as `needs` is, is that list's table.
     if let [(_, list)] = fields.iter().collect::<Vec<_>>()[..]
         && (list.is_array())
     {
@@ -353,7 +351,7 @@ fn compact(value: &Json) -> String {
         Json::Bool(yes) => (if *yes { "yes" } else { "no" }).to_owned(),
         Json::String(text) => text.clone(),
         Json::Number(number) => number.to_string(),
-        // An embedded record reads as its id, with its one other field when it has only one, as a proposal's does.
+        // An embedded record reads as its id, with its one other field when it has only one.
         Json::Object(fields) if fields.get("id").is_some_and(Json::is_string) => {
             let id = compact(&fields["id"]);
             match (fields.len(), fields.iter().find(|(key, _)| *key != "id")) {

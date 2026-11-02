@@ -10,7 +10,6 @@ use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Heads, Item, ItemState, Link, LinkKind, Model, Value};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{Readiness, ReadyThread};
-use acyclic_core::scope::{self, Decision, Proposal, ScopeEdit};
 use acyclic_core::state::{Key, Millis, State};
 use serde_json::{Map, Value as Json, json};
 
@@ -23,20 +22,6 @@ fn with(mut row: Json, extra: Json) -> Json {
         row.extend(extra);
     }
     row
-}
-
-/// An item's thread, and whether the user approved its work: the thread's approval holds without a conflict, and the
-/// approval saw the item when it recorded what it saw, or recorded nothing to compare against. A conflict counts
-/// against, unlike for protecting scope, since this says whether work may start.
-pub(crate) fn approval(model: &Model, id: &str) -> (Option<String>, bool) {
-    let Some(thread) = model.items.get(id).and_then(|item| item.thread.one()) else {
-        return (None, false);
-    };
-    let approved = model
-        .threads
-        .get(thread)
-        .is_some_and(|t| t.approved.one() == Some(&true) && t.approved_member(id) != Some(false));
-    (Some(thread.clone()), approved)
 }
 
 /// An item's state, which reads as backlog until one is set.
@@ -111,28 +96,15 @@ impl View<'_> {
     }
 
     /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
-    /// item row with whether its work is `approved`. When only approved work is asked for, the items are filtered by
-    /// their own `approved`, and a thread left with none is dropped.
-    pub fn ready_rows(
-        &self,
-        ready: &[ReadyThread],
-        only_approved: bool,
-    ) -> Result<Vec<Json>, CliError> {
+    /// item row.
+    pub fn ready_rows(&self, ready: &[ReadyThread]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
         let heads = self.model.heads_index();
         let mut rows = Vec::new();
         for ReadyThread { thread, items } in ready {
-            let mut found = Vec::new();
-            for id in items {
-                let row = with(self.item_row(id)?, json!({"approved": approval(self.model, id).1}));
-                if row["approved"] == true || !only_approved {
-                    found.push(row);
-                }
-            }
-            if !found.is_empty() {
-                let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
-                rows.push(with(thread_row(&heads, thread, listed), json!({"items": found})));
-            }
+            let found = items.iter().map(|id| self.item_row(id)).collect::<Result<Vec<_>, _>>()?;
+            let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
+            rows.push(with(thread_row(&heads, thread, listed), json!({"items": found})));
         }
         Ok(rows)
     }
@@ -165,16 +137,13 @@ impl View<'_> {
     }
 
     /// A thread in full: its summary, its `readiness` and live `claims`, and each member as an item summary that also
-    /// says whether its work is `approved` and whether it is `conflicted`, listed under each thread it was put in.
+    /// says whether it is `conflicted`, listed under each thread it was put in.
     pub fn thread(&self, id: &str, listed: &[Member<'_>]) -> Result<Json, CliError> {
         let claims = claim::live(self.state, &claim::thread_key(id)?, self.now)?;
         let claims: Vec<Json> = claims.iter().map(claim_json).collect();
         let mut members = Vec::new();
         for &Member { item, conflict } in listed {
-            members.push(with(
-                self.item_row(item)?,
-                json!({"approved": approval(self.model, item).1, "conflicted": conflict}),
-            ));
+            members.push(with(self.item_row(item)?, json!({"conflicted": conflict})));
         }
         let thread = self.model.threads.get(id);
         Ok(with(
@@ -183,7 +152,6 @@ impl View<'_> {
                 "readiness": self.readiness.thread(id)?,
                 "claims": claims,
                 "brief": thread.map(|t| &t.brief),
-                "level": thread.map(|t| &t.autonomy),
                 "repositories": self.model.repository_set(id),
                 "members": members,
             }),
@@ -192,13 +160,12 @@ impl View<'_> {
 }
 
 impl View<'_> {
-    /// The needs-you list: each entry is `{kind, notify, …}`, with item and thread entries embedding their summaries, a
-    /// proposal embedding what `proposal show` returns, and a conflict listing its `values` and how to `resolve` it.
+    /// The needs-you list: each entry is `{kind, notify, …}`, with item and thread entries embedding their summaries,
+    /// and a conflict listing its `values` and how to `resolve` it.
     /// `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
         let heads = self.model.heads_index();
-        let proposals = scope::proposals(self.state)?;
         // A thread's row walks its heads, and threads waiting on each other in a cycle name each other, so each row is
         // built once: per mention, a plan of thousands of items took seconds.
         let rows: std::cell::RefCell<BTreeMap<String, Json>> = std::cell::RefCell::default();
@@ -217,11 +184,6 @@ impl View<'_> {
         for entry in entries {
             let mut shown = match entry {
                 Entry::Conflict { kind, id, field } => self.conflict(kind, id, field, &thread)?,
-                Entry::AwaitingApproval { thread: id, members: open, waits_with, .. } => json!({
-                    "kind": "awaiting-approval", "thread": thread(id),
-                    "waits_with": waits_with.iter().map(|id| thread(id)).collect::<Vec<_>>(),
-                    "counts": {"open_members": open},
-                }),
                 Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
                 Entry::LinkCycle { items: ids } => {
                     json!({"kind": "link-cycle", "items": items(ids)?})
@@ -229,6 +191,10 @@ impl View<'_> {
                 Entry::ParentCycle { items: ids } => {
                     json!({"kind": "parent-cycle", "items": items(ids)?})
                 },
+                Entry::ThreadCycle { threads } => json!({
+                    "kind": "thread-cycle",
+                    "threads": threads.iter().map(|id| thread(id)).collect::<Vec<_>>(),
+                }),
                 Entry::Contest { thread: id, holders } => {
                     json!({"kind": "contest", "thread": thread(id), "holders": holders})
                 },
@@ -245,25 +211,6 @@ impl View<'_> {
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
                 },
-                Entry::Proposal { id, .. } => {
-                    let proposal = proposals.get(id);
-                    json!({
-                        "kind": "proposal",
-                        "proposal": proposal.map(|p| proposal_show(self.model, p)),
-                        "item": match proposal {
-                            Some(p) => self.proposal_item(p)?,
-                            None => Json::Null,
-                        },
-                    })
-                },
-                Entry::Unapproved { item, thread: id, actor, keep, drop } => json!({
-                    "kind": "unapproved", "item": self.item_row(item)?, "thread": thread(id),
-                    "actor": actor, "keep": keep, "drop": drop,
-                }),
-                Entry::NewBlocker { item, thread: id, blocker } => json!({
-                    "kind": "new-blocker", "item": self.item_row(item)?, "thread": thread(id),
-                    "blocker": self.item_row(blocker)?,
-                }),
                 Entry::Reopened { item, dependents } => json!({
                     "kind": "reopened", "item": self.item_row(item)?, "dependents": items(dependents)?,
                 }),
@@ -282,40 +229,11 @@ impl View<'_> {
                     "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
                     "reason": reason,
                 }),
-                Entry::Question { id, thread: asking, class, text } => json!({
-                    "kind": "question", "id": id, "thread": asking.as_deref().map(thread),
-                    "class": class, "text": text,
-                }),
             };
             shown["notify"] = entry.notifies().into();
             found.push(shown);
         }
         Ok(found)
-    }
-
-    /// The item a proposal's edit names, as every entry about an item shows it, or `null` for an edit of a thread's
-    /// repositories, which names none.
-    fn proposal_item(&self, proposal: &Proposal) -> Result<Json, CliError> {
-        match proposal.edit.one() {
-            Some(ScopeEdit::Member { item, .. } | ScopeEdit::ItemRepository { item, .. }) => {
-                self.item_row(item)
-            },
-            _ => Ok(Json::Null),
-        }
-    }
-
-    /// Every proposal, open ones first and then decided ones, each by id: what `proposal show` returns and the item
-    /// its edit names.
-    pub fn proposals(&self) -> Result<Vec<Json>, CliError> {
-        let all = scope::proposals(self.state)?;
-        let (open, decided): (Vec<&Proposal>, Vec<&Proposal>) =
-            all.values().partition(|p| p.decision == Value::None);
-        open.into_iter()
-            .chain(decided)
-            .map(|p| {
-                Ok(with(proposal_show(self.model, p), json!({"item": self.proposal_item(p)?})))
-            })
-            .collect()
     }
 
     /// A conflict: the entity and field, the values written apart (a clear among them as `null`), the entity's
@@ -368,17 +286,12 @@ fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String>
         ("item", "notes" | "gate" | "size" | "parent" | "thread") | ("thread", "brief") => {
             edit(field, true)
         },
-        ("thread", "autonomy") => edit("level", true),
         ("repository", "default-branch") => edit("default-branch", false),
         ("item", "evidence") => Some(format!(
             "acyclic done {id} --force --repository <REPOSITORY> --commit <COMMIT> (or --note <NOTE>)"
         )),
         ("item", "archived") => Some(format!("acyclic item archive {id}")),
         ("item", "reopened") => Some(format!("acyclic item reopen {id}")),
-        ("thread", "approved" | "approved-members") => {
-            Some(format!("acyclic thread approve|revoke {id} --as-user"))
-        },
-        ("settings", _) => Some("acyclic level <LEVEL> --as-user".to_owned()),
         ("link", _) => {
             let read = |name: &str| {
                 let key = Key::new("link", id).ok()?;
@@ -423,8 +336,8 @@ fn links(all: &[Link], id: &str) -> Json {
     Json::Object(map)
 }
 
-/// The thread summary: `{id, title, approved, heads, counts: {members, done, conflicted}}`. A thread only an item
-/// names has no title and isn't approved. `approved` is whether the approval holds, so a conflict counts as not.
+/// The thread summary: `{id, title, heads, counts: {members, done, conflicted}}`. A thread only an item names has no
+/// title.
 pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
     let model = heads.model();
     let thread = model.threads.get(id);
@@ -433,7 +346,6 @@ pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) ->
     json!({
         "id": id,
         "title": thread.map(|t| &t.title),
-        "approved": thread.is_some_and(|t| t.approved.one() == Some(&true)),
         "heads": heads.of(id),
         "counts": {"members": members.len(), "done": done, "conflicted": conflicted},
     })
@@ -479,60 +391,6 @@ pub(crate) fn repo_show(model: &Model, record: &acyclic_core::model::Repository)
     )
 }
 
-/// The proposal summary: `{id, actor, decision, threads}`, where `threads` are the approved threads it changes.
-pub(crate) fn proposal_row(model: &Model, proposal: &Proposal) -> Json {
-    let threads = proposal.edit.one().map(|edit| edit.approved_threads(model)).unwrap_or_default();
-    json!({
-        "id": proposal.id,
-        "actor": proposal.actor,
-        "decision": proposal.decision.one().map(|d| match d {
-            Decision::Keep => "keep",
-            Decision::Drop => "drop",
-        }),
-        "threads": threads,
-    })
-}
-
-/// A proposal in full: its summary and the edit, with the value it changes from and to. The value before is what
-/// the model holds now, so a decided proposal has none to show.
-pub(crate) fn proposal_show(model: &Model, proposal: &Proposal) -> Json {
-    with(proposal_row(model, proposal), json!({"edit": proposal_edit(model, proposal)}))
-}
-
-fn proposal_edit(model: &Model, proposal: &Proposal) -> Json {
-    let Some(edit) = proposal.edit.one() else { return Json::Null };
-    let decided = proposal.decision != Value::None;
-    let before = |now: Json| if decided { Json::Null } else { now };
-    let element = |set: &std::collections::BTreeSet<String>, repository: &str, present: bool| {
-        let mut after = set.clone();
-        if present {
-            after.insert(repository.to_owned());
-        } else {
-            after.remove(repository);
-        }
-        (json!(set), json!(after))
-    };
-    match edit {
-        ScopeEdit::Member { item, thread } => json!({
-            "kind": "member", "item": item, "field": "thread",
-            "before": before(model.items.get(item).map_or(Json::Null, |i| json!(i.thread))),
-            "after": thread,
-        }),
-        ScopeEdit::ItemRepository { item, repository, present } => {
-            let set = model.items.get(item).map(|i| i.repositories.clone()).unwrap_or_default();
-            let (now, after) = element(&set, repository, *present);
-            json!({"kind": "item-repository", "item": item, "repository": repository,
-                   "present": present, "field": "repositories", "before": before(now), "after": after})
-        },
-        ScopeEdit::ThreadRepository { thread, repository, present } => {
-            let set = model.threads.get(thread).map(|t| t.repositories.clone()).unwrap_or_default();
-            let (now, after) = element(&set, repository, *present);
-            json!({"kind": "thread-repository", "thread": thread, "repository": repository,
-                   "present": present, "field": "repositories", "before": before(now), "after": after})
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -540,8 +398,8 @@ mod tests {
     use acyclic_core::archive::Reason;
     use acyclic_core::model::{self, By, add_item, link, set_parent, set_state};
     use acyclic_core::ready::Ancestry;
-    use acyclic_core::schema::{kind, repository, thread as thread_field};
-    use acyclic_core::scope::{self, USER};
+    use acyclic_core::schema::{kind, repository};
+    use acyclic_core::scope::{self, ScopeEdit, USER};
     use acyclic_core::state::{Key, Replica, ReplicaId};
 
     use super::*;
@@ -565,7 +423,7 @@ mod tests {
         Key::new(kind, id).unwrap()
     }
 
-    /// Items `goal` > `a` and `b` in approved thread `t`, `late` an agent's raced add to it, `c` waiting for `a`
+    /// Items `goal` > `a` and `b` in thread `t`, `late` an agent's add to it, `c` waiting for `a`
     /// and relating to `b` through an after link as older versions stored one, `d` done with evidence and archived, and a repository `r` on `a`; `a` is claimed.
     fn tracker() -> Replica {
         let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
@@ -586,9 +444,9 @@ mod tests {
         ] {
             model::set(&mut r, &repo, field, Some(&value), user).unwrap();
         }
+        model::set(&mut r, &key(kind::THREAD, "t"), "title", Some(&"T"), user).unwrap();
         scope::edit(&mut r, &member("a", Some("t")), user).unwrap();
         scope::edit(&mut r, &member("b", Some("t")), user).unwrap();
-        scope::approve(&mut r, "t", true, user).unwrap();
         r.write(&model::item_key("late").unwrap(), "thread", "session/mac", NOW, Some(json!("t")))
             .unwrap();
         let evidence =
@@ -628,7 +486,7 @@ mod tests {
                         assert!(inner.is_u64(), "{here}");
                         continue;
                     }
-                    if ["approved", "archived", "reopened", "conflicted"].contains(&name.as_str())
+                    if ["archived", "reopened", "conflicted"].contains(&name.as_str())
                         && !inner.is_object()
                     {
                         assert!(inner.is_boolean(), "{here}: {inner}");
@@ -729,34 +587,21 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_row_is_a_thread_whose_items_are_approved_exactly_when_ready_approved_lists_them() {
+    fn a_ready_row_is_the_threads_summary_with_its_ready_items() {
         let r = tracker();
         viewing(&r, |view| {
             let items = ["a", "b", "late"].map(str::to_owned).to_vec();
-            let ready = [ReadyThread { thread: "t".into(), items }];
-            let all = view.ready_rows(&ready, false).unwrap();
-            let approved = view.ready_rows(&ready, true).unwrap();
-            assert_eq!(
-                (all[0]["id"].as_str(), all[0]["approved"].as_bool()),
-                (Some("t"), Some(true))
-            );
-            let flags: Vec<(&str, bool)> = all[0]["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|row| (row["id"].as_str().unwrap(), row["approved"].as_bool().unwrap()))
-                .collect();
-            // The agent's raced add was never seen by the approval.
-            assert_eq!(flags, [("a", true), ("b", true), ("late", false)]);
-            let kept = approved[0]["items"].as_array().unwrap();
-            assert!(kept.iter().all(|row| row["approved"] == true), "{approved:?}");
-            assert_eq!(kept.len(), 2);
-            // A thread left with no approved work isn't listed.
-            let unapproved = [ReadyThread { thread: "t".into(), items: vec!["late".into()] }];
-            assert_eq!(view.ready_rows(&unapproved, true).unwrap(), Vec::<Json>::new());
-            for row in &all {
-                follows_the_conventions(row, "ready");
+            let rows = view.ready_rows(&[ReadyThread { thread: "t".into(), items }]).unwrap();
+            let listed = thread_members(view.model);
+            let summary = thread_row(&view.model.heads_index(), "t", &listed["t"]);
+            for (name, value) in summary.as_object().unwrap() {
+                assert_eq!(&rows[0][name], value, "{name}");
             }
+            let ids: Vec<&Json> =
+                rows[0]["items"].as_array().unwrap().iter().map(|i| &i["id"]).collect();
+            assert_eq!(ids, ["a", "b", "late"]);
+            assert_eq!(rows[0]["items"][0], view.item_row("a").unwrap());
+            follows_the_conventions(&rows[0], "ready");
         });
     }
 
@@ -767,14 +612,9 @@ mod tests {
             let listed = thread_members(view.model);
             let shown = view.thread("t", &listed["t"]).unwrap();
             assert_eq!(shown["counts"], json!({"members": 3, "done": 0, "conflicted": 0}));
-            assert_eq!(shown["approved"], true);
-            let members: Vec<(&str, bool)> = shown["members"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|m| (m["id"].as_str().unwrap(), m["approved"].as_bool().unwrap()))
-                .collect();
-            assert_eq!(members, [("a", true), ("b", true), ("late", false)]);
+            let members: Vec<&Json> =
+                shown["members"].as_array().unwrap().iter().map(|m| &m["id"]).collect();
+            assert_eq!(members, ["a", "b", "late"]);
             assert_eq!(shown["members"][2]["conflicted"], false);
             let row = thread_row(&view.model.heads_index(), "t", &listed["t"]);
             for (name, value) in row.as_object().unwrap() {
@@ -782,81 +622,22 @@ mod tests {
             }
             follows_the_conventions(&shown, "thread");
         });
-        let mut conflicted = clean.clone();
-        let other = {
-            let mut other = Replica::open(ReplicaId::new("pi").unwrap(), clean.state().clone());
-            model::set(
-                &mut other,
-                &key(kind::THREAD, "t"),
-                thread_field::APPROVED,
-                Some(&false),
-                by(USER),
-            )
-            .unwrap();
-            other
-        };
-        conflicted.join(other.state()).unwrap();
-        let model = Model::read(conflicted.state()).unwrap();
-        assert_eq!(
-            thread_row(&model.heads_index(), "t", &[])["approved"],
-            false,
-            "a conflict isn't an approval"
-        );
-        assert_eq!(approval(&model, "a"), (Some("t".to_owned()), false));
-    }
-
-    #[test]
-    fn a_proposal_shows_what_it_changes_from_and_to_until_it_is_decided() {
-        let mut r = tracker();
-        let agent = by("session/mac");
-        scope::edit(&mut r, &member("c", Some("t")), agent).unwrap();
-        scope::edit(&mut r, &member("a", None), agent).unwrap();
-        let repository =
-            ScopeEdit::ItemRepository { item: "b".into(), repository: "r".into(), present: true };
-        scope::edit(&mut r, &repository, agent).unwrap();
-        let model = Model::read(r.state()).unwrap();
-        let all = scope::proposals(r.state()).unwrap();
-        let shown: Vec<Json> = all.values().map(|p| proposal_show(&model, p)).collect();
-        let edits: Vec<&Json> = shown.iter().map(|p| &p["edit"]).collect();
-        assert!(edits.contains(&&json!({"kind": "member", "item": "c", "field": "thread", "before": null, "after": "t"})));
-        assert!(edits.contains(&&json!({"kind": "member", "item": "a", "field": "thread", "before": "t", "after": null})));
-        assert!(edits.contains(
-            &&json!({"kind": "item-repository", "item": "b", "repository": "r", "present": true,
-                                         "field": "repositories", "before": [], "after": ["r"]})
-        ));
-        assert_eq!(shown[0]["threads"], json!(["t"]));
-        assert_eq!(
-            (&shown[0]["decision"], &shown[0]["actor"]),
-            (&Json::Null, &json!("session/mac"))
-        );
-        let id = all.keys().next().unwrap().clone();
-        scope::keep(&mut r, &id, by(USER)).unwrap();
-        let model = Model::read(r.state()).unwrap();
-        let decided = proposal_show(&model, &scope::proposals(r.state()).unwrap()[&id]);
-        assert_eq!(
-            (&decided["decision"], &decided["edit"]["before"]),
-            (&json!("keep"), &Json::Null)
-        );
-        assert_ne!(decided["edit"]["after"], Json::Null);
-        for p in shown.iter().chain([&decided]) {
-            follows_the_conventions(p, "proposal");
-        }
     }
 
     #[test]
     fn the_needs_list_embeds_what_each_entry_is_about() {
         let mut mac = tracker();
-        let agent = by("session/mac");
-        scope::edit(&mut mac, &member("c", Some("t")), agent).unwrap();
         let user = by(USER);
-        // Two replicas disagree about an item's parent and a thread's approval.
+        // `c` in `u` waits for `a` in `t`, and `e` in `t` waits for `c`: the two threads wait on each other.
+        model::set(&mut mac, &key(kind::THREAD, "u"), "title", Some(&"U"), user).unwrap();
+        scope::edit(&mut mac, &member("c", Some("u")), user).unwrap();
+        add_item(&mut mac, "e", "E", user).unwrap();
+        scope::edit(&mut mac, &member("e", Some("t")), user).unwrap();
+        link(&mut mac, "e", "c", LinkKind::Blocks, user).unwrap();
+        // Two replicas disagree about an item's parent.
         let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
         set_parent(&mut mac, "b", None, user).unwrap();
         set_parent(&mut pi, "b", Some("a"), user).unwrap();
-        model::set(&mut mac, &key(kind::THREAD, "u"), thread_field::APPROVED, Some(&true), user)
-            .unwrap();
-        model::set(&mut pi, &key(kind::THREAD, "u"), thread_field::APPROVED, Some(&false), user)
-            .unwrap();
         mac.join(pi.state()).unwrap();
         viewing(&mac, |view| {
             let entries =
@@ -871,46 +652,19 @@ mod tests {
             assert_eq!(parent["item"]["id"], "b");
             assert_eq!(parent["values"], json!([null, "a"]));
             assert_eq!(parent["resolve"], "acyclic item edit b --parent <PARENT> (or --no-parent)");
-            // A conflicting approval isn't one, and the command that settles it is the user's.
-            let approval = conflicts.iter().find(|c| c["field"] == "approved").unwrap();
+            // A thread cycle embeds each thread's summary.
+            let cycle = of("thread-cycle")[0];
+            let listed = thread_members(view.model);
             assert_eq!(
-                (&approval["thread"]["id"], &approval["thread"]["approved"]),
-                (&json!("u"), &json!(false))
+                cycle["threads"],
+                json!(["t", "u"].map(|id| thread_row(&view.model.heads_index(), id, &listed[id])))
             );
-            assert_eq!(approval["resolve"], "acyclic thread approve|revoke u --as-user");
-            // A proposal is what `proposal show` returns, and an unseen member names the thread and its commands.
-            let proposal = of("proposal")[0];
-            let all = scope::proposals(view.state).unwrap();
-            assert_eq!(
-                proposal["proposal"],
-                proposal_show(view.model, all.values().next().unwrap())
-            );
-            assert_eq!(proposal["proposal"]["edit"]["after"], "t");
-            assert_eq!(
-                proposal["item"],
-                view.item_row("c").unwrap(),
-                "the item, as `list` shows it"
-            );
-            let unseen = of("unapproved")[0];
-            assert_eq!(
-                (&unseen["item"]["id"], &unseen["thread"]["id"]),
-                (&json!("late"), &json!("t"))
-            );
-            assert_eq!(unseen["keep"], "acyclic item edit late --thread t");
+            assert_eq!(cycle["notify"], true);
             for entry in &needs {
                 assert!(entry["kind"].is_string(), "{entry}");
                 follows_the_conventions(entry, "needs");
             }
         });
-    }
-
-    #[test]
-    fn a_threads_level_is_settled_by_thread_edit() {
-        let state = tracker();
-        assert_eq!(
-            resolve(state.state(), "thread", "t", "autonomy").as_deref(),
-            Some("acyclic thread edit t --level <LEVEL> (or --no-level)")
-        );
     }
 
     #[test]
@@ -924,33 +678,6 @@ mod tests {
             resolve(mac.state(), "link", "relates-1-a-b", "present").as_deref(),
             Some("acyclic link add|remove a relates-to b")
         );
-    }
-
-    #[test]
-    fn proposals_list_open_before_decided_with_the_item_each_names() {
-        let mut r = tracker();
-        let agent = by("session/mac");
-        scope::edit(&mut r, &member("c", Some("t")), agent).unwrap();
-        let more = ScopeEdit::ThreadRepository {
-            thread: "t".into(),
-            repository: "r".into(),
-            present: true,
-        };
-        scope::edit(&mut r, &more, agent).unwrap();
-        let first = scope::proposals(r.state()).unwrap().into_keys().next().unwrap();
-        scope::keep(&mut r, &first, by(USER)).unwrap();
-        viewing(&r, |view| {
-            let listed = view.proposals().unwrap();
-            // The open one comes first, though it has the later id; the decided one keeps its item.
-            let shown: Vec<(&Json, &Json)> =
-                listed.iter().map(|p| (&p["decision"], &p["item"]["id"])).collect();
-            assert_eq!(shown, [(&Json::Null, &Json::Null), (&json!("keep"), &json!("c"))]);
-            assert_eq!(listed[0]["edit"]["kind"], "thread-repository");
-            assert_eq!(listed[1]["item"], view.item_row("c").unwrap());
-            for p in &listed {
-                follows_the_conventions(p, "proposal");
-            }
-        });
     }
 
     #[test]

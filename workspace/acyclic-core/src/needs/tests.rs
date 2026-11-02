@@ -5,7 +5,7 @@ use serde_json::json;
 use super::*;
 use crate::model::{By, ItemState, LinkKind, add_item, item_key, link, set_parent};
 use crate::ready::Ancestry;
-use crate::schema::{GLOBAL, item as field, settings, thread};
+use crate::schema::{item as field, thread};
 use crate::scope::{ScopeEdit, USER, edit};
 use crate::state::{Replica, ReplicaId};
 
@@ -34,82 +34,12 @@ fn list(r: &Replica) -> Vec<Entry> {
 }
 
 #[test]
-fn each_level_lets_through_its_classes_and_blockers_always_pass() {
-    use Class::{Blocker, Irreversible, Other, Scope};
-    let matrix = [
-        (Level::Everything, [true, true, true, true]),
-        (Level::ScopeAndIrreversible, [true, true, true, false]),
-        (Level::Blockers, [true, false, false, false]),
-    ];
-    for (level, expected) in matrix {
-        let got = [Blocker, Scope, Irreversible, Other].map(|class| passes(level, class));
-        assert_eq!(got, expected, "{level:?}");
-    }
-}
-
-#[test]
-fn a_threads_level_overrides_the_global_one_and_a_conflict_asks_most() {
-    let (mut a, mut b) = (replica("a"), replica("b"));
-    let global = Key::new(kind::SETTINGS, GLOBAL).unwrap();
-    let t = Key::new(kind::THREAD, "t").unwrap();
-    assert_eq!(Model::read(&a.state).unwrap().level(Some("t")), Level::Blockers, "the default");
-    model::set(&mut a, &global, settings::AUTONOMY, Some(&Level::ScopeAndIrreversible), user(1))
-        .unwrap();
-    assert_eq!(Model::read(&a.state).unwrap().level(Some("t")), Level::ScopeAndIrreversible);
-    model::set(&mut a, &t, thread::AUTONOMY, Some(&Level::Blockers), user(2)).unwrap();
-    model::set(&mut b, &t, thread::AUTONOMY, Some(&Level::Everything), user(2)).unwrap();
-    let model = Model::read(&a.state).unwrap();
-    assert_eq!(
-        (model.level(Some("t")), model.level(None)),
-        (Level::Blockers, Level::ScopeAndIrreversible)
-    );
-    a.join(&b.state).unwrap();
-    assert_eq!(Model::read(&a.state).unwrap().level(Some("t")), Level::Everything);
-}
-
-#[test]
-fn questions_reach_the_list_by_their_threads_level() {
-    let mut r = replica("a");
-    let t = Key::new(kind::THREAD, "t").unwrap();
-    model::set(&mut r, &t, thread::TITLE, Some(&"t"), user(1)).unwrap();
-    for (id, class) in [("q1", Class::Blocker), ("q2", Class::Scope), ("q3", Class::Other)] {
-        let q = Key::new(kind::QUESTION, id).unwrap();
-        model::set(&mut r, &q, question::THREAD, Some(&"t"), user(1)).unwrap();
-        model::set(&mut r, &q, question::CLASS, Some(&class), user(1)).unwrap();
-        model::set(&mut r, &q, question::TEXT, Some(&id), user(1)).unwrap();
-        model::set(&mut r, &q, question::OPEN, Some(&true), user(1)).unwrap();
-    }
-    let asked = |r: &Replica| {
-        list(r)
-            .into_iter()
-            .filter_map(|e| if let Entry::Question { id, .. } = e { Some(id) } else { None })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(asked(&r), vec!["q1"]);
-    model::set(&mut r, &t, thread::AUTONOMY, Some(&Level::ScopeAndIrreversible), user(2)).unwrap();
-    assert_eq!(asked(&r), vec!["q1", "q2"]);
-    model::set(
-        &mut r,
-        &Key::new(kind::QUESTION, "q1").unwrap(),
-        question::OPEN,
-        Some(&false),
-        user(3),
-    )
-    .unwrap();
-    assert_eq!(asked(&r), vec!["q2"]);
-}
-
-#[test]
 fn the_state_puts_its_problems_on_the_list() {
     let (mut a, mut b) = (replica("a"), replica("b"));
     let by = user(1);
-    for id in ["x", "y", "z", "p", "kid", "dep", "work", "gpu1", "gpu2", "orphan"] {
+    for id in ["x", "y", "z", "p", "kid", "dep", "gpu1", "gpu2", "orphan"] {
         add_item(&mut a, id, id, by).unwrap();
     }
-    let ok = Key::new(kind::THREAD, "ok").unwrap();
-    model::set(&mut a, &ok, thread::APPROVED, Some(&true), by).unwrap();
-    edit(&mut a, &ScopeEdit::Member { item: "work".into(), thread: Some("ok".into()) }, by)
-        .unwrap();
     for id in ["gpu1", "gpu2"] {
         model::set_element(&mut a, &item_key(id).unwrap(), SetField::Resource, "gpu", true, by)
             .unwrap();
@@ -156,14 +86,6 @@ fn the_state_puts_its_problems_on_the_list() {
     claim::claim(&mut a, "t1", "session/a", 2, NOW, NOW).unwrap();
     claim::claim(&mut b, "t2", "session/b", 2, NOW, NOW).unwrap();
     a.join(&b.state).unwrap();
-    // After approval: a new blocker on approved work, an agent's proposal.
-    link(&mut a, "work", "x", LinkKind::Blocks, user(3)).unwrap();
-    edit(
-        &mut a,
-        &ScopeEdit::Member { item: "y".into(), thread: Some("ok".into()) },
-        By { actor: "session/r1", at: 3 },
-    )
-    .unwrap();
 
     let entries = list(&a);
     let has = |want: &Entry| assert!(entries.contains(want), "missing {want:?} in {entries:#?}");
@@ -177,16 +99,6 @@ fn the_state_puts_its_problems_on_the_list() {
         resource: "gpu".into(),
         holders: vec![("t1".into(), "session/a".into()), ("t2".into(), "session/b".into())],
     });
-    has(&Entry::NewBlocker { item: "work".into(), thread: "ok".into(), blocker: "x".into() });
-    // Approving the thread again acknowledges it, though its members and approval are unchanged.
-    let mut acknowledged = a.clone();
-    assert!(scope::approve(&mut acknowledged, "ok", true, user(4)).unwrap());
-    assert!(!list(&acknowledged).iter().any(|e| matches!(e, Entry::NewBlocker { .. })));
-    assert!(
-        !scope::approve(&mut acknowledged, "ok", true, user(5)).unwrap(),
-        "a repeat changes nothing"
-    );
-    assert!(entries.iter().any(|e| matches!(e, Entry::Proposal { actor, threads, .. } if actor == "session/r1" && threads == &["ok"])));
     has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
     has(&Entry::Dangling {
         kind: "item".into(),
@@ -233,104 +145,51 @@ fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
 }
 
 #[test]
-fn unapproved_threads_with_members_await_approval_with_their_deadlocks() {
+fn threads_that_wait_on_each_other_are_one_thread_cycle() {
     let mut r = replica("a");
     let by = user(1);
-    for (item, thread) in [("x", "t"), ("x2", "t"), ("y", "u"), ("y2", "u")] {
+    for (item, thread) in [("x", "t"), ("x2", "t"), ("y", "u"), ("y2", "u"), ("z", "v")] {
         add_item(&mut r, item, item, by).unwrap();
         edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(thread.into()) }, by)
             .unwrap();
     }
-    for (thread, title) in [("t", "T"), ("u", "U"), ("empty", "E")] {
-        model::set(
-            &mut r,
-            &Key::new(kind::THREAD, thread).unwrap(),
-            thread::TITLE,
-            Some(&title),
-            by,
-        )
-        .unwrap();
+    for thread in ["t", "u", "v"] {
+        let key = Key::new(kind::THREAD, thread).unwrap();
+        model::set(&mut r, &key, thread::TITLE, Some(&thread), by).unwrap();
     }
-    // `t` waits on `u` and `u` on `t`: neither can finish as they stand.
+    // `t` waits on `u` and `u` on `t`; `v` only waits on `t`, so it is on no cycle.
     link(&mut r, "x", "y", LinkKind::Blocks, by).unwrap();
     link(&mut r, "y2", "x2", LinkKind::Blocks, by).unwrap();
-    let awaiting = |r: &Replica| -> Vec<Entry> {
-        list(r).into_iter().filter(|e| matches!(e, Entry::AwaitingApproval { .. })).collect()
-    };
-    // Nothing within either thread orders its two members.
-    let entry = |thread: &str, other: &str, heads: [&str; 2]| Entry::AwaitingApproval {
-        thread: thread.into(),
-        members: 2,
-        waits_with: vec![other.into()],
-        heads: heads.map(String::from).to_vec(),
-    };
-    model::set(&mut r, &Key::new(kind::THREAD, "finished").unwrap(), thread::TITLE, Some(&"F"), by)
-        .unwrap();
-    add_item(&mut r, "f", "f", by).unwrap();
-    edit(&mut r, &ScopeEdit::Member { item: "f".into(), thread: Some("finished".into()) }, by)
-        .unwrap();
-    model::set_state(&mut r, "f", ItemState::Done, by).unwrap();
-    assert_eq!(
-        awaiting(&r),
-        vec![entry("t", "u", ["x", "x2"]), entry("u", "t", ["y", "y2"])],
-        "an empty thread, or one with only finished work, awaits nothing"
-    );
-    let t = Key::new(kind::THREAD, "t").unwrap();
-    model::set(&mut r, &t, thread::APPROVED, Some(&true), user(2)).unwrap();
-    assert_eq!(awaiting(&r), vec![entry("u", "t", ["y", "y2"])]);
+    link(&mut r, "z", "x", LinkKind::Blocks, by).unwrap();
+    let cycles: Vec<Entry> =
+        list(&r).into_iter().filter(|e| matches!(e, Entry::ThreadCycle { .. })).collect();
+    assert_eq!(cycles, [Entry::ThreadCycle { threads: vec!["t".into(), "u".into()] }]);
+    assert!(cycles[0].notifies());
 }
 
+/// Trackers written by earlier versions hold kinds and fields no reader gives meaning to any more: proposals,
+/// questions, global settings, and a thread's approval and autonomy level. Every reader skips them.
 #[test]
-fn an_agents_member_the_approval_never_saw_is_the_users_to_keep_or_drop() {
-    let agent = By { actor: "session/pi", at: 2 };
-    let unapproved = |r: &Replica| -> Vec<String> {
-        list(r)
-            .into_iter()
-            .filter_map(|e| match e {
-                Entry::Unapproved { item, .. } => Some(item),
-                _ => None,
-            })
-            .collect()
-    };
-    let member = |item: &str| ScopeEdit::Member { item: item.into(), thread: Some("t".into()) };
-    let (mut a, mut b) = (replica("a"), replica("b"));
-    for id in ["seen", "late", "other"] {
-        add_item(&mut a, id, id, user(1)).unwrap();
-    }
-    edit(&mut a, &member("seen"), user(1)).unwrap();
-    b.join(&a.state).unwrap();
-    // b's agent sees t unapproved, so its edit applies, while a's user approves t.
-    scope::approve(&mut a, "t", true, user(2)).unwrap();
-    edit(&mut b, &member("late"), agent).unwrap();
-    a.join(&b.state).unwrap();
-    let entry = Entry::Unapproved {
-        item: "late".into(),
-        thread: "t".into(),
-        actor: "session/pi".into(),
-        keep: "acyclic item edit late --thread t".into(),
-        drop: "acyclic item edit late --no-thread".into(),
-    };
-    assert!(list(&a).contains(&entry), "{:?}", list(&a));
-    // The user putting it in the thread again keeps it: the user's write needs no approval.
-    edit(&mut a, &member("late"), user(3)).unwrap();
-    assert_eq!(unapproved(&a), Vec::<String>::new());
-    // Approvals that raced with different members each approved theirs.
-    edit(&mut b, &member("other"), agent).unwrap();
-    let mut c = replica("c");
-    c.join(&a.state).unwrap();
-    c.join(&b.state).unwrap();
-    scope::approve(&mut c, "t", true, user(4)).unwrap();
-    edit(&mut a, &ScopeEdit::Member { item: "seen".into(), thread: None }, user(4)).unwrap();
-    assert!(scope::approve(&mut a, "t", true, user(4)).unwrap());
-    a.join(&c.state).unwrap();
-    a.join(&b.state).unwrap();
-    assert!(Model::read(&a.state).unwrap().threads["t"].approved_members.is_conflict());
-    assert_eq!(unapproved(&a), Vec::<String>::new(), "other is in c's list, which raced a's");
-    // A thread approved before approvals recorded their members has nothing to compare against.
-    let old = Key::new(kind::THREAD, "old").unwrap();
-    add_item(&mut b, "legacy", "legacy", user(5)).unwrap();
-    edit(&mut b, &ScopeEdit::Member { item: "legacy".into(), thread: Some("old".into()) }, agent)
+fn kinds_and_fields_no_reader_knows_are_skipped() {
+    let mut r = replica("a");
+    add_item(&mut r, "x", "x", user(1)).unwrap();
+    edit(&mut r, &ScopeEdit::Member { item: "x".into(), thread: Some("t".into()) }, user(1))
         .unwrap();
-    model::set(&mut b, &old, thread::APPROVED, Some(&true), user(5)).unwrap();
-    assert_eq!(unapproved(&b), Vec::<String>::new());
+    let thread = Key::new(kind::THREAD, "t").unwrap();
+    model::set(&mut r, &thread, thread::TITLE, Some(&"T"), user(1)).unwrap();
+    let old = [
+        (thread.clone(), "approved", json!(true)),
+        (thread.clone(), "approved-members", json!([])),
+        (thread, "autonomy", json!("everything")),
+        (Key::new("settings", "global").unwrap(), "autonomy", json!("everything")),
+        (Key::new("proposal", "a-1").unwrap(), "edit", json!({"edit": "member", "item": "x"})),
+        (Key::new("question", "q").unwrap(), "open", json!(true)),
+        (Key::new("question", "q").unwrap(), "class", json!("blocker")),
+    ];
+    for (key, name, value) in old {
+        r.write(&key, name, "session/old", 2, Some(value)).unwrap();
+    }
+    let model = Model::read(&r.state).unwrap();
+    assert_eq!(model.thread_of("x"), Some("t"));
+    assert_eq!(list(&r), [], "nothing about them reaches the list");
 }

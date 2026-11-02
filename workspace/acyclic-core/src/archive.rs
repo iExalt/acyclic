@@ -11,7 +11,6 @@ use serde::Serialize;
 use crate::model::{self, By, ItemState, LinkKind, Model, Reopened, Value, WriteError};
 use crate::ready::{Ancestry, Readiness, Status};
 use crate::schema::item as field;
-use crate::scope;
 use crate::state::{Error, Millis, Replica};
 
 /// How long a root without a gate waits after its last item is done.
@@ -125,8 +124,6 @@ pub enum ArchiveError {
     },
     /// Reopening needs a done item.
     NotDone(String),
-    /// Only the user archives.
-    NotAllowed(String),
 }
 
 impl std::fmt::Display for ArchiveError {
@@ -144,9 +141,6 @@ impl std::fmt::Display for ArchiveError {
                     None => write!(f, "{item} can't be archived: ")?,
                 }
                 write!(f, "{}", crate::say::list(reasons, "; "))
-            },
-            Self::NotAllowed(actor) => {
-                write!(f, "{actor} may not archive; the user may")
             },
             Self::NotDone(id) => write!(f, "{id} isn't done, so there is nothing to reopen"),
         }
@@ -167,12 +161,11 @@ impl From<Error> for ArchiveError {
     }
 }
 
-/// Archives an eligible root, judged against the replica's own view at the write's time. Archiving takes work out
-/// of `ready` and the graph, so only the user archives; any actor may reopen.
+/// Archives an eligible root, judged against the replica's own view at the write's time.
 ///
 /// # Errors
 ///
-/// Fails for any other actor, when it isn't eligible, a value can't be read, or the write is refused.
+/// Fails when it isn't eligible, a value can't be read, or the write is refused.
 pub fn archive(
     replica: &mut Replica,
     ancestry: &dyn Ancestry,
@@ -181,9 +174,6 @@ pub fn archive(
 ) -> Result<(), ArchiveError> {
     model::existing(&replica.state, root)?;
     let model = Model::read(&replica.state)?;
-    if scope::classify(by.actor) == scope::Actor::Agent {
-        return Err(ArchiveError::NotAllowed(by.actor.to_owned()));
-    }
     let reasons = {
         let readiness = Readiness::new(&replica.state, &model, by.at, ancestry);
         eligibility(&readiness, &model, root, by.at)?

@@ -29,8 +29,8 @@ export interface Palette {
   /** A link on the Map: quieter than text, so the items lead, but at 3:1 on the ground and boxes it is drawn over. */
   link: string;
   /**
-   * Conflicts, links that cross boxes, and a thread waiting for approval. Lines may share its hue, so it is never a cue
-   * by colour alone: crossing links are dashed, conflicts have a dashed border, a waiting thread says so. So never draw
+   * Conflicts and links that cross boxes. Lines may share its hue, so it is never a cue by colour alone: crossing links
+   * are dashed, conflicts have a dashed border. So never draw
    * it as a solid border or a badge with a number. Also set as text, so it reads at 4.5:1 like any.
    */
   signal: string;

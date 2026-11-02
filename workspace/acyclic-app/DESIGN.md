@@ -10,7 +10,7 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 
 ## Primary tasks
 
-1. Settle what needs them: approve a thread, keep or drop an agent's proposal, resolve a conflict.
+1. Settle what needs them: resolve a conflict, untangle a cycle, look at reopened work.
 2. See where work stands: which threads are at work, which to start next, how each project is doing.
 3. Reshape the plan: add, move, link and edit items on the Map.
 
@@ -118,10 +118,10 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   preview of the view: with more in Needs you than it shows, the link under its rows goes there ("19 more in Needs
   you"), and the header has none; the threads' say where theirs go too ("9 more in Threads").
 - **Needs you's view** is a page over the Map, as the Overview is: wide, its entries stand in columns of at least 360
-  px, as many as fit, the filters above them; on a phone, one column. (As a narrow pane on the right it left most of a
+  px, as many as fit; on a phone, one column. (As a narrow pane on the right it left most of a
   desktop empty, and only the Overview made room for it.)
-- **Up next** lists the threads that can start now: not at work, approved, with an item ready; Any time first, then by
-  wave. One waiting for approval is in Needs you alone, and a wave all blocked has nothing to start. (The next wave,
+- **Up next** lists the threads that can start now: not at work, with an item ready; Any time first, then by wave. A
+  wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
 
 ## Shapes
@@ -141,22 +141,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Backlog", "In
   progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
   stage, as text: finishing sets it, not the form.
-- **A thread's status** follows Needs you: "Waiting for your approval", beside the inbox icon Needs you has, and a
-  filled Approve only when Needs you asks for it; until the thread is read again after a decision, it says what it said
-  as it was read, not what the list says by then. Unapproved with nothing open reads "Not approved", quiet, with an
-  outlined Approve, as approval still covers what joins it later. Under it, the thread's Items, in the order their work
-  runs (each after what it waits for in the thread), each with its stage's icon, the first eight and then how many more;
-  "Starts with", its first items alone, meant nothing to the user. Its settings, Autonomy and Scope edits, are rows as
-  the item panel's properties are, label beside value, with what a value means on hover rather than a line under each.
-  Its main action, Approve or Revoke approval, comes right under the status, before the Items and the settings, in the
-  markup as on the screen, so keys and a screen reader reach it in the order it shows; on a phone the status and its
-  counts share a line, so all three show at the panel's first height.
+- **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
+  what it waits for in the thread), each with its stage's icon, the first eight and then how many more; "Starts with",
+  its first items alone, meant nothing to the user. Then its brief.
 - **Thread badges:** the thread's number on its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
-- **Settings change at once.** A setting, in the ⋯ menu or a thread's panel, shows its new value as it is picked and
-  saves in the background, after any write already out, with no busy bar and nothing else held; a refusal puts the old
-  value back and says why. A setting leaves the menu open; only its buttons close it. (A busy bar and greyed controls
-  after each change read as "a brief loading screen - not good", and the menu closing on a checkbox as bad UX.)
+- **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the
+  menu open; only its buttons close it. (The menu closing on a checkbox read as bad UX.)
 - **Notify this device:** in the menu, a setting of this device, read again each time the menu opens; not at the top
   of Needs you, where every visit passed it.
 - **Key hints** (an item's ⋯ menu's letters, the sidebar's search chord, the command menu's keys) show only where a
@@ -184,27 +175,18 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   quiet buttons and over today's layout unboxed, as the calmest.) While it edits, the form's State and Thread stand in
   for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker says each
   thread as "4. CLI features", as text names a thread without a badge.
-- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"); at the sidebar's foot, pressing it opens
-  the menu at the setting, so the word is never left unexplained. A phone's bar names the view alone, and its menu's
-  Autonomy says the level, as a line under the name cost the bar its height. Under each list that sets it, what it lets
-  reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding "as set for
-  every thread".
+- **A phone's bar** names the view alone, as a line under the name cost the bar its height.
 - **The ⋯ menu, on a phone,** is a list of plain rows, as Slack's is, 260 px wide: each switch a row, its name at the
-  start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme and Autonomy each ruled
+  start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme ruled
   off, a muted caption over the value as a quiet row whose caret ends where the switches do; Refresh a row last.
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px, then what
   it names as rows, muted, at 14 px (13 px on a phone), regular and 32 px apart on touch, so the head leads and they
   read as its parts (the user asked for "the thread title … more prominent" and the "line spacing between each item …
   smaller"); each underlines under the pointer, in ink, saying it opens (a stage's icon beside each read as a mark
-  without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
-  its button and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
-  (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
-  how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
-  words, never a command to type, and names its item once, as its row. Merges unconfirmed for one cause in one
-  repository are one entry, saying how many, its rows the first five, as the same why eight times read as noise; the
-  filters still count each. A hairline between entries; the filters are tabs,
-  the one shown filled, named as nouns (Approvals, Questions, Problems), as "Approve 20" over the entries' Approve
-  buttons read as one more of them.
+  without a word), then its decision, compact, after what it acts on. An entry the app can only show says what
+  failed and what fixes it, in words, never a command to type, and names its item once, as its row. Merges unconfirmed
+  for one cause in one repository are one entry, saying how many, its rows the first five, as the same why eight times
+  read as noise; the count still counts each. A hairline between entries.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
   the pointer.
@@ -254,23 +236,20 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M
   moves, W and R link, A adds inside; a move or link from the keyboard finds its target in the menu. J and K move
   through the Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing. No
-  single key approves, keeps, drops or deletes. Keys go to fields, input methods and changed forms first, and the
+  single key settles a need or deletes. Keys go to fields, input methods and changed forms first, and the
   menu's Single-key shortcuts switch, per device, turns them off.
-- **Undo, not confirm.** A move, an item's fields (but its thread), a link added or removed, the global autonomy level,
-  and a thread's first approval offer Undo in their notice, and ⌘Z while it shows; nothing else does, as nothing else
-  has an exact inverse (an approval again, a revoking, a proposal kept or dropped, a thread's own level or flag, a
-  thread changed: agents act on them). An approval is taken back, by a revoke, only while no agent has started on the
-  work it approved, as a claim shows on any of its items that could start. Undo reads the plan first, and without that
-  read it undoes nothing; it takes back nothing changed since, nor a removed wait or a state once the work it released
-  has started, saying so. It says "Undoing…" until done, then what it did ("Autonomy set back to Blockers", not
-  "Undone": agents' work meanwhile stands), a link said as it reads ("Sow now waits for Dig", "Sow no longer waits for
-  Dig"), a move "Moved X back", selecting X where it is again, fields "Set X back". Undo sits in the slot, its text two
-  lines at most there, so it says what was done, as its button says what it offers; anything else in the slot wraps, as
-  it is the only place its reason shows.
-- **Settling keeps the keyboard in place.** An action in Needs you or a thread's panel is held, not disabled, while its
+- **Undo, not confirm.** A move, an item's fields (but its thread) and a link added or removed offer Undo in their
+  notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (a conflict settled, a reopen,
+  a thread changed: agents act on them). Undo reads the plan first, and without that read it undoes nothing; it takes
+  back nothing changed since, nor a removed wait or a state once the work it released has started, saying so. It says
+  "Undoing…" until done, then what it did (not "Undone": agents' work meanwhile stands), a link said as it reads ("Sow
+  now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set
+  X back". Undo sits in the slot, its text two lines at most there, so it says what was done, as its button says what it
+  offers; anything else in the slot wraps, as it is the only place its reason shows.
+- **Settling keeps the keyboard in place.** An action in Needs you is held, not disabled, while its
   write is out, so focus stays on it; only the pressed one looks held, as greying every one said they were all at work.
-  Once what it settled goes, focus goes to the next entry's action, else to the view or the panel. What a one-press
-  decision did is said once saved ("Approved Codex: 2 items"), in its notice and to a screen reader politely.
+  Once what it settled goes, focus goes to the next entry's action, else to the view. What a one-press
+  decision did is said once saved ("Used parked for state"), in its notice and to a screen reader politely.
 - **A notification never reloads the app:** the open app is asked to show what it names (Needs you's view, for the
   server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
@@ -301,7 +280,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 
 ## Voice & copy
 
-Plain verbs on actions ("Approve 3 items", "Add item"), and verbs any pointer fits: a move or link asks to "Choose" its
+Plain verbs on actions ("Use parked", "Add item"), and verbs any pointer fits: a move or link asks to "Choose" its
 target, as a tap or a click both do. Names follow `GLOSSARY.md`, the source of truth for every word the app shows:
 item, project, thread, wave, the needs-you list (written Needs you), and its other words. Where the app needs a word
 the glossary lacks, the glossary gains it first; the app never has words of its own for the tracker's ideas. Threads

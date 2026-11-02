@@ -342,8 +342,9 @@ impl Generator {
                 brief: Some("A synthetic thread.".to_owned()),
                 items: run.iter().map(|&i| format!("i{i}")).collect(),
                 repositories,
-                approved: self.rng.chance(0.5),
             });
+            // A draw the generator no longer uses, kept so each seed still gives the plan it gave.
+            let _ = self.rng.chance(0.5);
         }
         owner
     }
@@ -518,7 +519,7 @@ mod tests {
     fn a_seed_gives_the_same_plan_everywhere() {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_407, 3_170_696_018_017_436_757));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (133_239, 5_338_418_017_208_892_038));
     }
 
     #[test]

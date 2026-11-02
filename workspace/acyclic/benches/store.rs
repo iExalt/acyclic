@@ -99,8 +99,6 @@ impl Tracker {
             .env("GIT_CONFIG_NOSYSTEM", "1");
         if agent {
             command.env("ACYCLIC_ACTOR", AGENT);
-        } else if !line.starts_with("init") && is_write(line) {
-            command.arg("--as-user");
         }
         let start = Instant::now();
         let output = command.output().expect("the binary runs");
@@ -120,10 +118,6 @@ impl Tracker {
     fn time(&self, line: &str, agent: bool) -> Sample {
         self.run(line, agent).1
     }
-}
-
-fn is_write(line: &str) -> bool {
-    !["ready", "show", "needs", "doctor"].iter().any(|read| line.starts_with(read))
 }
 
 /// One size's results: each operation's median, in milliseconds, and the store's size.
