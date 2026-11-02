@@ -327,22 +327,6 @@ button.autonomy {
   text-align: left;
   text-overflow: ellipsis;
 }
-.brand button.autonomy {
-  max-width: 100%;
-  font-size: inherit;
-}
-/* On a touch screen its line is too short to hit: it takes in the view's name above it, which does nothing pressed. */
-@media (pointer: coarse) {
-  .brand {
-    position: relative;
-  }
-  .brand button.autonomy::after {
-    position: absolute;
-    /* Into the bar's padding, to a finger's height. */
-    inset: -3px 0;
-    content: "";
-  }
-}
 button.autonomy:hover:not(:disabled) {
   background: none;
   color: var(--ink);
@@ -388,14 +372,15 @@ button.view[aria-current="page"] {
   color: var(--ink);
 }
 
-/* The bar, a phone's only one. */
+/* The bar, a phone's only one: 44 px, its icon buttons' targets, with nothing added around them, as Linear's and
+   Slack's are. */
 .bar {
   display: flex;
-  gap: 4px;
+  gap: 0;
   align-items: center;
   min-width: 0;
-  padding: 6px 6px 6px 14px;
-  padding-top: max(6px, env(safe-area-inset-top));
+  height: calc(44px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 2px 0 14px;
   background: var(--chrome);
   border-bottom: 1px solid var(--rule);
 }
@@ -406,22 +391,16 @@ button.view[aria-current="page"] {
   flex: 1 1 0;
   min-width: 0;
 }
+/* The view's name, one line, at a title's 650. */
 .brand h1 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 750;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-}
-.brand p {
   overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.brand p .items {
-  font-size: inherit;
 }
 button.icon {
   display: inline-grid;
@@ -433,7 +412,8 @@ button.icon[aria-pressed="true"] {
   background: var(--tile);
 }
 
-/* A phone: the bar, the views, and the views' bar along the bottom, clear of the home indicator. */
+/* A phone: the bar, the views, and the views' bar along the bottom, clear of the home indicator. Its tabs are 44 px
+   targets with nothing added around them, a 20 px icon over an 11 px name, the shown one's in ink. */
 .phone-shell {
   grid-template-rows: auto 1fr auto auto;
 }
@@ -441,7 +421,7 @@ button.icon[aria-pressed="true"] {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  padding: 4px 4px max(4px, env(safe-area-inset-bottom));
+  padding: 0 4px env(safe-area-inset-bottom);
   background: var(--chrome);
   border-top: 1px solid var(--rule);
 }
@@ -449,12 +429,17 @@ button.icon[aria-pressed="true"] {
   position: relative;
   isolation: isolate;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   justify-content: center;
-  min-height: 52px;
-  padding: 4px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 500;
   background: none;
+}
+.tabbar button.view .icon-svg {
+  width: 20px;
+  height: 20px;
 }
 .tabbar button.view[aria-current="page"] {
   background: none;
@@ -467,10 +452,10 @@ button.icon[aria-pressed="true"] {
   content: "";
   position: absolute;
   top: 3px;
-  left: calc(50% - 28px);
-  width: 56px;
-  height: 26px;
-  border-radius: 13px;
+  left: calc(50% - 26px);
+  width: 52px;
+  height: 22px;
+  border-radius: 11px;
   z-index: -1;
   background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
@@ -713,6 +698,98 @@ button.icon[aria-pressed="true"] {
 @media not (pointer: coarse) {
   .menu-body select {
     font-size: 14px;
+  }
+}
+/* A phone's menu is a list of plain rows, as Slack's channel menu is: 260 px wide, each row its own 44 px target. */
+@media (max-width: 899px) {
+  .bar .menu-body {
+    gap: 0;
+    width: min(260px, calc(100vw - 16px));
+    padding: 4px 0;
+    font-size: 14px;
+  }
+  /* A switch row: its name at the start, the switch at the end, the whole row the target. */
+  .bar .menu-body label:has(> input[type="checkbox"]) {
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 14px;
+  }
+  .bar .menu-body label:has(> input[type="checkbox"]):hover {
+    background: var(--hover);
+  }
+  /* The checkbox drawn as a switch, in CSS alone: a track, and a knob that slides to the end when on. */
+  .bar .menu-body input[type="checkbox"] {
+    appearance: none;
+    flex: none;
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+    background: radial-gradient(circle at 10px 50%, var(--ink) 6px, transparent 6.5px), var(--edge);
+    cursor: pointer;
+  }
+  .bar .menu-body input[type="checkbox"]:checked {
+    background:
+      radial-gradient(circle at calc(100% - 10px) 50%, var(--accent-ink) 6px, transparent 6.5px), var(--accent);
+  }
+  .bar .menu-body input[type="checkbox"]:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  /* A setting picked from a list, Theme or Autonomy: ruled off, a muted caption, the value as a quiet row whose caret
+     ends where the switches do, then what the value means. */
+  .bar .menu-body label:not(:has(> input[type="checkbox"])) {
+    gap: 0;
+    margin-top: 4px;
+    padding: 8px 14px 0;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+  }
+  .bar .menu-body label:not(:has(> input[type="checkbox"])) + label {
+    margin-top: 0;
+  }
+  .bar .menu-body label > .hint {
+    padding-bottom: 6px;
+  }
+  /* Across the whole row, past the label's inset, so the caret ends 14 px from the row's end, where the switches'
+     tracks do: a field's usual cap at its container's width would leave it short of them. */
+  .bar .menu-body select {
+    width: calc(100% + 28px);
+    max-width: none;
+    min-height: 44px;
+    margin: 0 -14px;
+    padding: 0 38px 0 14px;
+    border: none;
+    border-radius: 0;
+    background-color: transparent;
+    font-size: 14px;
+  }
+  .bar .menu-body select:hover {
+    background-color: var(--hover);
+  }
+  /* Notify this device's reason, when it can't: under its row, inset as the row's name is. */
+  .bar .menu-body .notify .why {
+    padding: 0 14px 8px;
+    font-size: 12px;
+  }
+  /* Refresh, a quiet row ruled off from the settings above it. */
+  .bar .menu-body > button {
+    min-height: 44px;
+    padding: 0 14px;
+    border: none;
+    border-top: 1px solid var(--rule);
+    border-radius: 0;
+    font-weight: 500;
+    text-align: left;
+  }
+}
+/* iOS Safari zooms into a field under 16 px; only there does a phone's menu's select keep 16 px. */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 899px) {
+    .bar .menu-body select {
+      font-size: 16px;
+    }
   }
 }
 
@@ -997,8 +1074,6 @@ button.project-title {
   /* Room kept for a scrollbar, so the header's buttons don't shift as one comes and goes, as an editor brings one. */
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
-  /* A field scrolled to, as one focused under a keyboard is, clears a form's Save and Cancel, which stick below. */
-  scroll-padding-bottom: calc(var(--hit) + 48px);
   padding: 18px 16px max(16px, env(safe-area-inset-bottom));
   background: var(--sheet);
   border-top: 1px solid var(--rule);
@@ -1019,15 +1094,25 @@ button.project-title {
   border-radius: 2px;
   background: var(--edge);
 }
-/* A panel opens at half height, at least 320 px so a small phone still shows a decision; the handle or a drag takes it
-   to the full height of the views, and a drag follows the finger. A panel still loading takes the most room it will,
-   so what the Map brings into view above it stays there. */
+/* A panel opens short, 144 px (sheets.ts's PEEK), or taller if its main action or status needs it to show (Sheet.tsx's
+   --first): its title, its status and its main action, so the Map keeps most of the screen beside it. The outline, a
+   list to pick from, opens at half height, at least 320 px. The handle or a drag takes either to the full height of
+   the views, and a drag follows the finger. A panel still loading takes 200 px, more than a loaded one usually needs
+   with a phone's home bar under it, so what the Map frames above it as it opens stays clear. */
 @media (max-width: 899px) {
-  /* At least 320 px however little it holds, as a new item's panel holds little. */
+  .inspector,
+  .sheet {
+    font-size: 14px;
+  }
   .inspector {
+    max-height: min(100%, max(144px, var(--first, 0px)));
+    padding-inline: 14px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    transition: max-height 150ms ease-out;
+  }
+  .inspector.half {
     min-height: min(100%, 320px);
     max-height: min(100%, max(320px, 50%));
-    transition: max-height 150ms ease-out;
   }
   .inspector[data-detent="full"] {
     max-height: 100%;
@@ -1040,18 +1125,27 @@ button.project-title {
     transition: none;
   }
   .inspector[aria-busy="true"]:not([data-detent="full"]) {
-    height: min(100%, max(320px, 50%));
+    height: min(100%, max(200px, var(--first, 0px)));
   }
   /* The panel's own handle stands in for the drawn one. */
   .inspector::before {
     display: none;
   }
   /* The handle takes the strip at the top of the header, which stays in view as the sheet scrolls, and only that
-     strip: the header's own buttons sit right below it. 28 px tall, not the 44 px of other touch targets, as a taller
-     strip would push every panel's content down or lie over its buttons; a drag from the header's free space moves
-     the sheet too. */
+     strip, 100 px wide in the middle. 28 px tall, not the 44 px of other touch targets, as a taller strip would push
+     every panel's content down or lie over its buttons; a drag from the header's free space moves the sheet too. Below
+     the strip, the title stands centred on the header's buttons, its first line where it wraps, and what the panel
+     says follows close under them. */
   .inspector > header:has(> .sheet-handle) {
-    padding-top: 28px;
+    align-items: center;
+    margin-bottom: 0;
+    padding: 28px 0 0;
+  }
+  .inspector > header:has(> .sheet-handle) h2 {
+    padding-top: 0;
+  }
+  .inspector > header:has(> .header-actions) h2 {
+    padding-top: calc((44px - 1lh) / 2);
   }
   .sheet-handle {
     position: absolute;
@@ -1087,6 +1181,10 @@ button.project-title {
   top: 0;
   border-radius: 0;
   animation: none;
+  /* A field scrolled to, as one focused under a keyboard is, clears the form's Save and Cancel, which stick below. Only
+     a form's: on a panel, it took the foot of a short sheet for hidden, and scrolled its main action, focused or
+     clicked there, up under the header. */
+  scroll-padding-bottom: calc(var(--hit) + 48px);
 }
 .inspector.tall::before,
 .sheet.add::before,
@@ -1261,6 +1359,11 @@ code {
   background: none;
   color: var(--muted);
   font-weight: 600;
+}
+@media (max-width: 899px) {
+  .filters .chip {
+    font-size: 13px;
+  }
 }
 .filters .chip[aria-pressed="true"] {
   background: var(--hover);
@@ -1451,6 +1554,12 @@ code {
   padding: 12px 0 14px;
   border-top: 1px solid var(--rule);
 }
+/* On a phone, entries ruled apart with less air. */
+@media (max-width: 899px) {
+  .needs > li {
+    padding: 8px 0 10px;
+  }
+}
 /* The entry the Overview opened the view at, marked until the view is left. */
 .needs > li[data-at="true"] {
   padding-left: 10px;
@@ -1488,6 +1597,12 @@ button.row {
   font-weight: 600;
   text-align: left;
 }
+/* A phone's rows at the text's weight, so the titles over them, a panel's or a Needs you entry's, lead. */
+@media (max-width: 899px) {
+  button.row {
+    font-weight: 500;
+  }
+}
 /* Needs you's entries: the thread and what it asks on one line, what it names under it, then its decision, all set in
    from the badge so the badges make a column to scan; a hairline between entries, as between any rows. */
 /* As tall as its text, a row's 44 px over: a one-line head would stand apart from a two-line one. */
@@ -1521,18 +1636,30 @@ button.row {
 .need-items li + li {
   border-top: none;
 }
-/* In ink, as what opens: muted, they read as inert notes under the head. Smaller and lighter than the head, and close
-   together, so they read as its parts (the user's ask). */
+/* Muted, smaller and lighter than the head, and close together, so the head leads and they read as its parts (the
+   user's asks); each opens what it names, which the pointer's underline says. */
 .need-items button.row {
   min-height: 24px;
   padding: 1px 0;
-  color: var(--ink);
+  color: var(--muted);
   font-size: 14px;
   font-weight: 400;
 }
 .need-items button.row:hover:not(:disabled) {
   background: none;
+  color: var(--ink);
   text-decoration: underline;
+}
+/* A phone's at 13 px, the text's weight, set close; how many more alike. */
+@media (max-width: 899px) {
+  .need-items button.row,
+  .need-items .more {
+    font-size: 13px;
+  }
+  .need-items button.row {
+    font-weight: 500;
+    line-height: 1.3;
+  }
 }
 /* How many more an approval covers than it lists: muted, as a count is, opening the thread's panel where it can. */
 .need-items .more {
@@ -1551,6 +1678,15 @@ button.row {
   padding: 0 10px;
   font-size: 14px;
   font-weight: 600;
+}
+/* A phone's decision follows close, at 13 px. */
+@media (max-width: 899px) {
+  .need-actions {
+    margin-top: 2px;
+  }
+  .need-actions button {
+    font-size: 13px;
+  }
 }
 /* A column of the same filled button shouts: with a pointer, an entry's decision is outlined until the entry is under
    it or holds the focus, then filled, so one entry at a time shows its main action as main. */
@@ -1600,6 +1736,32 @@ code.id {
 }
 .progress {
   margin: 4px 0 8px;
+}
+/* A phone's thread panel: its status and counts on one line under the title, in the size of a list's detail, and its
+   main action right under them, so all three show at the panel's first height. The action's text is set as the panel's
+   is, so its fill doesn't outweigh the title. */
+@media (max-width: 899px) {
+  .thread-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .thread-summary > .thread-status,
+  .thread-summary > .progress {
+    margin: 0;
+  }
+  /* A row, so the counts take their own line's height rather than sit on the text's taller one. */
+  .thread-summary > .progress {
+    display: flex;
+  }
+  [data-testid="thread-panel"] > .actions {
+    margin: 4px 0 0;
+  }
+  [data-testid="thread-panel"] > .actions button {
+    font-weight: 600;
+  }
 }
 .settings,
 .notes-block {
@@ -1702,6 +1864,24 @@ input[aria-invalid="true"] + .hint,
     min-height: var(--hit);
   }
 }
+/* A phone's Overview and Needs you: less inset, sections closer, and headings at 14 px on a 32 px header, which a
+   button in it still makes a finger's height. */
+@media (max-width: 899px) {
+  .overview,
+  .needs-view {
+    padding: 8px 16px 24px;
+  }
+  .overview-section {
+    margin-bottom: 16px;
+  }
+  .overview-section > header {
+    min-height: 32px;
+    padding-bottom: 2px;
+  }
+  .overview-section h2 {
+    font-size: 14px;
+  }
+}
 /* From an upright tablet up, Needs you stands beside In progress, with Up next under it: a short list then leaves no
    column empty beside a long one. The projects span the page below them, their rows in columns. */
 @media (min-width: 700px) {
@@ -1779,6 +1959,25 @@ button.overview-row:not(:has(> .badge)) {
 button.more {
   margin-top: 4px;
   padding: 0 4px;
+}
+/* A phone's rows: each 44 px, its target, the title at 14 px over a 13 px detail; "24 more in Needs you" a quiet 13 px
+   row. */
+@media (max-width: 899px) {
+  button.overview-row {
+    font-size: 14px;
+  }
+  .overview-row .what {
+    gap: 0;
+    padding: 5px 0;
+  }
+  .overview-row .detail {
+    font-size: 13px;
+  }
+  .overview button.more {
+    margin-top: 0;
+    font-size: 13px;
+    font-weight: 500;
+  }
 }
 
 /* Over the Map home while anything needs the user. */
@@ -2102,9 +2301,8 @@ dl.facts .chip:hover:not(:disabled) {
   }
 }
 
-/* A panel's type, wide: one size for what it says, 14 px, as a list's detail is; the title a step up, at 650 rather
-   than bold; section headings small and muted, so the content leads. A phone keeps the base size, which reads at arm's
-   length. */
+/* A panel's type: one size for what it says, 14 px, as a list's detail is; the title a step up, at 650 rather than
+   bold; section headings small and muted, so the content leads. */
 .inspector > header,
 .sheet > header {
   gap: 2px;
@@ -2134,6 +2332,20 @@ dl.facts dt {
 dl.facts .chip,
 dl.facts .chip.line {
   font-weight: 550;
+}
+/* A phone's: the title 17 px, hints and reasons 12 px, and section headings closer to what they head. */
+@media (max-width: 899px) {
+  .inspector h2,
+  .sheet h2 {
+    font-size: 17px;
+  }
+  .inspector h3 {
+    margin: 12px 0 2px;
+  }
+  .inspector .hint,
+  .inspector .why {
+    font-size: 12px;
+  }
 }
 @media (min-width: 900px) {
   .inspector,

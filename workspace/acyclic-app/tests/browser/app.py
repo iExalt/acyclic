@@ -664,6 +664,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
         panel.wait_for(timeout=10_000)
         # An item chosen from the thread's panel closes back to the thread, and the thread back to the Overview.
+        open_full(page, "thread-panel")
         chosen = panel.locator("[data-select]").first
         if not chosen.count():
             failures.append(f"{name}: Up next's first thread lists no item, so Back from one went unchecked")
@@ -1268,6 +1269,7 @@ def outline_journey(page, view, plan, name, failures):
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the projects' sheet closed {picked}'s too")
     # The item's thread, picked from its panel, closes the item and opens the thread's panel, focus going to it.
+    open_full(page, "inspector")
     inspector.locator(f"[data-pick-thread='{thread}']").click()
     panel = page.get_by_test_id("thread-panel")
     try:
@@ -1346,6 +1348,7 @@ def threads_journey(page, view, env, name, failures):
     if tile.get_attribute("aria-pressed") != "true":
         failures.append(f"{name}: picking {picked}'s tile didn't mark it")
     # An item chosen from a thread's panel is shown on the Map: the view goes back to it, the item selected.
+    open_full(page, "thread-panel")
     row = page.locator("[data-testid=thread-panel] [data-select]").first
     if row.count() == 0:
         failures.append(f"{name}: {picked}'s panel offers no item to start, so going back to the Map went unchecked")
@@ -1452,6 +1455,21 @@ def check_tracker(env, id, check, what, failures, name):
         failures.append(f"{name}: the tracker doesn't show {what}")
 
 
+def open_full(page, testid, full=True):
+    """A phone's panel opens short, its title, status and main action in view: opens it full, as the user would to
+    reach the rest, or with `full` false puts it back, so the Map is in view again. Wide, a panel is whole already."""
+    if page.viewport_size["width"] >= 900:
+        return
+    panel = page.get_by_test_id(testid)
+    if (panel.get_attribute("data-detent") == "full") != full:
+        panel.locator(".sheet-handle").click()
+        # Come to rest, not only switched: what is measured next is where it stands.
+        page.wait_for_function(
+            f"() => {{ const p = document.querySelector('[data-testid={testid}]');"
+            f" return p?.dataset.detent === '{'full' if full else 'first'}' && p.getAnimations().length === 0; }}"
+        )
+
+
 def item_action(page, action):
     """Runs one of the item panel's actions from its menu, where all but Edit are."""
     page.get_by_test_id("item-menu").click()
@@ -1460,9 +1478,11 @@ def item_action(page, action):
 
 def unlink(page, testid):
     """Removes a panel's first link of a kind, its button shown as a pointer comes over its row."""
+    open_full(page, "inspector")
     row = page.locator(f"[data-testid={testid}] .link").first
     row.hover()
     row.locator(".unlink").click()
+    open_full(page, "inspector", full=False)
 
 
 def wait_inspector(page, selector, state="visible"):
@@ -1512,6 +1532,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     if notes.locator("img").count() or page.evaluate("window.pwned === true"):
         failures.append(f"{name}: the inspector ran a note as markup")
     # A fingertip reaches a close button and a chip from 44 px apart, though the chip is drawn smaller.
+    open_full(page, "inspector")
     reach = page.evaluate(
         """() => {
             const at = (el, dy) => { const r = el.getBoundingClientRect();
@@ -1526,6 +1547,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(
             f"{name}: too small to tap: close {reach[0]} px, chip reached {reach[1]}"
         )
+    open_full(page, "inspector", full=False)
 
     # Add inside the first leaf: the Map opens the leaf to show it, the leaf holds still, and the tracker has it.
     added = "journey-added"
@@ -1584,8 +1606,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     menu = page.locator("details.menu:has(> [data-testid=menu])")
     for close in (
         lambda: page.keyboard.press("Escape"),
-        # In the middle of the Map, below the open menu, which the backdrop must stop it reaching.
-        lambda: tap_middle(page, view, second),
+        # On an item clear of the open menu, below it, which the backdrop must stop the tap reaching: a tap on the menu
+        # itself would only test the row it landed on.
+        lambda: tap_middle(page, view, second, rise=-0.25),
     ):
         page.get_by_test_id("menu").click()
         close()
@@ -2216,6 +2239,19 @@ def thread_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: the approve button reads {approve.inner_text()!r}")
     approve.click()
     panel.locator("[data-action=revoke]").wait_for(timeout=10_000)
+    # Its main action shows at the panel's first height; its proposals and settings are below it.
+    try:
+        page.wait_for_function(
+            """() => {
+                const p = document.querySelector("[data-testid=thread-panel]");
+                const m = p?.querySelector("[data-main]");
+                return !!m && m.getBoundingClientRect().bottom <= p.getBoundingClientRect().bottom + 0.5;
+            }""",
+            timeout=3_000,
+        )
+    except PlaywrightTimeout:
+        failures.append(f"{name}: the thread's main action is below its panel's first height")
+    open_full(page, "thread-panel")
     # An agent proposes two items join the approved thread: one is kept, one dropped.
     outside = sorted(id for id, row in plan.items.items() if row["thread"] != thread)[
         :2

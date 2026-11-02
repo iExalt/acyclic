@@ -113,7 +113,7 @@ export function Inspector({
     </button>
   );
   const panel = useRef<HTMLElement>(null);
-  const sheet = useSheet(panel, "half", onDismiss);
+  const sheet = useSheet(panel, onDismiss);
   useFocusIn(panel);
   const chip = (id: string) => {
     const stage = stageOf(id);
@@ -213,7 +213,8 @@ export function Inspector({
         {editing ? null : (
           <>
             <dt>Status</dt>
-            <dd data-testid="state" className="status-value">
+            {/* An item's main thing to see at the sheet's first height: its status. */}
+            <dd data-testid="state" className="status-value" data-main>
               <ItemStatus item={item} />
             </dd>
             <dt>Thread</dt>

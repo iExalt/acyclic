@@ -38,7 +38,7 @@ export interface ShellProps {
   wide: boolean;
   /** How many items the plan shows. */
   count: number;
-  /** The global autonomy level, as a label: safety-relevant, so always in view. */
+  /** The global autonomy level, as a label: said at the sidebar's foot; a phone's menu says it. */
   autonomy: string;
   view: View;
   onView: (view: View) => void;
@@ -234,15 +234,12 @@ function PhoneShell(props: ShellProps) {
   return (
     <div className="shell phone-shell">
       <header className="bar">
+        {/* The view's name alone: the menu's Autonomy says the level, as the sidebar's foot does wide. */}
         <div className="brand">
           <h1>{title}</h1>
-          {/* The level, safety-relevant, in view as the sidebar's foot says it; the count is the sidebar's alone. */}
-          <p>
-            <Autonomy level={props.autonomy} />
-          </p>
         </div>
         <button type="button" className="icon" aria-label="Search" onClick={props.onSearch} data-action="search">
-          <Icon of={Search} size={22} />
+          <Icon of={Search} size={20} />
         </button>
         <button
           type="button"
@@ -252,10 +249,10 @@ function PhoneShell(props: ShellProps) {
           aria-pressed={props.outlineOpen}
           onClick={props.onOutline}
         >
-          <Icon of={ListTree} size={22} />
+          <Icon of={ListTree} size={20} />
         </button>
         <button type="button" className="icon" aria-label="New item" onClick={props.onAdd} data-action="add-top">
-          <Icon of={Plus} size={22} />
+          <Icon of={Plus} size={20} />
         </button>
         <Menu>{props.menu}</Menu>
       </header>

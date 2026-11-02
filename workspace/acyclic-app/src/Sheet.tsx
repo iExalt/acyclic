@@ -1,10 +1,10 @@
-// A phone's sheet: its handle, which says the sheet is a layer and switches it between half and full height, and the
-// drag on the handle or the header that follows the finger and lands where sheets.ts says. Closing by a drag goes the
-// way Escape and Back do, so a form holding typing stays open and says how to leave it. Wide, the panel is a pane and
-// none of this shows.
+// A phone's sheet: its handle, which says the sheet is a layer and switches it between its first and full height, and
+// the drag on the handle or the header that follows the finger and lands where sheets.ts says. Closing by a drag goes
+// the way Escape and Back do, so a form holding typing stays open and says how to leave it. Wide, the panel is a pane
+// and none of this shows.
 
-import { type PointerEvent, type ReactNode, type RefObject, useRef, useState } from "react";
-import { type Detent, detentAfter, draggableFrom, type Sample, SLOP, velocity } from "./sheets";
+import { type PointerEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
+import { type Detent, detentAfter, draggableFrom, firstHeight, type Sample, SLOP, velocity } from "./sheets";
 
 export interface SheetDrag {
   detent: Detent;
@@ -16,9 +16,44 @@ export interface SheetDrag {
   };
 }
 
-/** The sheet in `panel`, opening at `initial`; `onClose` closes it as Escape does, and may refuse. */
-export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, onClose: () => void): SheetDrag {
-  const [detent, setDetent] = useState<Detent>(initial);
+/**
+ * The sheet in `panel`, opening at its first height, which is short for a panel and `half` the room for the outline (as
+ * app.css sets them); `onClose` closes it as Escape does, and may refuse. A panel's main action or status, marked
+ * `data-main`, shows at the first height however its title and status wrap: the sheet measures where it ends, for app.css (as
+ * `--first`) and for where a drag lands.
+ */
+export function useSheet(panel: RefObject<HTMLElement | null>, onClose: () => void, half = false): SheetDrag {
+  const [detent, setDetent] = useState<Detent>("first");
+  /** How tall the first height must be to show the main action, 0 without one. */
+  const needs = useRef(0);
+  // After every render, as what the panel holds changes, and whenever its header rewraps, as when the window turns.
+  useLayoutEffect(() => {
+    const sheet = panel.current;
+    if (sheet === null || half) return;
+    const measure = () => {
+      const main = sheet.querySelector<HTMLElement>("[data-main]");
+      // From the sheet's top, as if unscrolled, wherever in it the main thing sits.
+      const measured =
+        main === null
+          ? 0
+          : Math.ceil(
+              main.getBoundingClientRect().bottom -
+                sheet.getBoundingClientRect().top +
+                sheet.scrollTop +
+                Number.parseFloat(getComputedStyle(sheet).paddingBottom),
+            );
+      // Written only when it changes: the sheet's rise to it is a transition, which a write each render would hold back.
+      if (measured === needs.current && sheet.style.getPropertyValue("--first") !== "") return;
+      needs.current = measured;
+      sheet.style.setProperty("--first", `${measured}px`);
+    };
+    measure();
+    const header = sheet.querySelector(":scope > header");
+    if (header === null) return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(header);
+    return () => watch.disconnect();
+  });
   /** A press that may become a drag: where it started, the sheet's height then, and its moves since. */
   const press = useRef<{ id: number; y: number; height: number; dragging: boolean; samples: Sample[] } | null>(null);
   /** A drag just ended on the handle: the click that follows it isn't a tap. */
@@ -68,8 +103,8 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
       sheet.style.removeProperty("--dragged");
       if (ended.type === "pointercancel") return;
       const room = sheet.parentElement?.getBoundingClientRect().height ?? now.height;
-      const half = halfOf(room);
-      const landed = detentAfter(detent, ended.clientY - now.y, velocity(now.samples), room - half, half);
+      const first = firstHeight(room, half, needs.current);
+      const landed = detentAfter(detent, ended.clientY - now.y, velocity(now.samples), room - first, first);
       if (landed === "close") onClose();
       else setDetent(landed);
     };
@@ -90,7 +125,7 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
           dragged.current = false;
           return;
         }
-        setDetent((was) => (was === "full" ? "half" : "full"));
+        setDetent((was) => (was === "full" ? "first" : "full"));
       }}
     />
   );
@@ -103,11 +138,6 @@ export function useSheet(panel: RefObject<HTMLElement | null>, initial: Detent, 
       },
     },
   };
-}
-
-/** The half sheet's height in a stage `room` tall, as the stylesheet sets it: half, at least 320 px, at most all. */
-function halfOf(room: number): number {
-  return Math.min(room, Math.max(320, room / 2));
 }
 
 const phone = () => window.matchMedia("(max-width: 899px)").matches;

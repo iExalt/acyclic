@@ -23,9 +23,11 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 ## Accessibility & inclusion
 
 WCAG 2.2 AA in both schemes: text at 4.5:1 on every surface it sits on, which `palette.test.ts` holds the palettes to.
-Touch targets are 44 px on a coarse pointer. With a fine one, `--hit` gives default buttons and fields 34 px, and
-compact rows and controls inside lists go down to 28 px (a Needs you item row to 24 px), as Linear's do. Everything is
-reachable by keyboard; focus is always visible. Reduced motion turns the sheets' rise off.
+Touch targets are 44 px on a coarse pointer, each a row's or a button's own box, never a reach drawn over its
+neighbours; Needs you's item rows alone are 32 px, which clears the 24 px of WCAG 2.5.8, as the user asked for them
+closer. With a fine pointer, `--hit` gives default buttons and fields 34 px, and compact rows and controls inside lists
+go down to 28 px (a Needs you item row to 24 px), as Linear's do. Everything is reachable by keyboard; focus is always
+visible. Reduced motion turns the sheets' rise off.
 
 ## Overview
 
@@ -63,30 +65,39 @@ two in step.
 Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
 Sentence case. Tabular figures where counts are compared. Monospace only for ids.
 
+A phone is set as compactly as Linear's and Slack's apps, in px on each element rather than a smaller base, which
+would shrink every size set in rem with it: the bar's view name 17 px at 650, the tab bar's names 11 px, the Overview's
+headings 14 px, its rows 14 px over a 13 px detail, and rows at the text's 500, so the titles over them lead. (At the
+desktop's sizes the user found the phone "comically... big", and the Map had little room beside a panel.)
+
 Text sets at 500, not the face's 400, and every heavier weight a step up with it. The Map's leaves' titles stay at 500,
 as the text does, and its boxes' at 700: its renderer takes only hundreds, and at 600 a project's title barely led its
 items. Overpass's regular strokes are thin on a screen, and the text strained to read
 beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at 450. Inter, tried in its place, read
 cold; Overpass, heavier, keeps the app's voice.
 
-Panels, wide, set what they say in one size, 14 px, labels and values alike, their fields too; notes and briefs, the
-reading, at 15 px; the title 19 px at 650, not bold; section headings 13 px at 600, muted, so the content leads.
-(Mixed sizes and weights read as awkward; then 13 px read a smidge small beside Linear at the same window size, as
-Overpass sets smaller than Inter at a size.)
+Panels set what they say in one size, 14 px, labels and values alike, and wide their fields too (a phone's stay at 16
+px, so it doesn't zoom in on them); notes and briefs, the reading, at 15 px wide; the title 19 px at 650, not bold, 17
+px on a phone; section headings 13 px at 600, muted, so the content leads. (Mixed sizes and weights read as awkward;
+then 13 px read a smidge small beside Linear at the same window size, as Overpass sets smaller than Inter at a size.)
 
 ## Layout
 
-- **Phone (under 900 px):** a bar on top (the view's name over the autonomy level, Search, the outline, New item, the
-  menu), the views, Needs you among them, in a tab bar along the bottom, panels as sheets rising from the bottom. The
-  outline's button and sheet are both called Outline; its projects carry no count, as opening one shows its threads.
-- **Sheets, on a phone:** two heights. Half, at least 320 px, so a small phone still shows a decision; full, up to the
-  bar. The handle, a button in a strip at the top of the header, which stays in view as the sheet scrolls, switches
-  them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would push every panel down or lie over
-  its buttons. A drag on it or on the header's free space follows the finger and lands by distance or by a flick, read
-  from its last 100 ms, and down from half it closes the sheet as Escape does, so a form holding typing stays, saying
-  how to leave it. Panels open at half; a form (New item, an item's editor) takes the whole height, with no handle. A
-  tap on the Map that opens a panel over what it tapped pans the least that shows it, measured where the panel comes to
-  rest.
+- **Phone (under 900 px):** a 44 px bar on top (the view's name, Search, the outline, New item, the menu), the views,
+  Needs you among them, in a tab bar along the bottom, its tabs 44 px with nothing around them, panels as sheets rising
+  from the bottom. Each bar is its buttons' height, as Linear's and Slack's are. The outline's button and sheet are both
+  called Outline; its projects carry no count, as opening one shows its threads.
+- **Sheets, on a phone:** two heights. A panel's first is 144 px: its title, its status and its main action, so the Map
+  keeps most of the screen beside it (the user: "This hurts especially when browsing half the map and half an item"),
+  taller only where a long title or status pushes the main action, or an item's status, further down; while it loads,
+  200 px, more than it will need, so what the Map frames above it stays clear. The outline's, a list to pick from,
+  half, at least 320 px. Full reaches the bar. The handle, a button in a strip at the top of the header, which stays in
+  view as the sheet scrolls, switches them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would
+  push every panel down or lie over its buttons, and the title starts below it. A drag on it or on the header's free
+  space follows the finger and lands by distance or by a flick, read from its last 100 ms, and down from the first
+  height it closes the sheet as Escape does, so a form holding typing stays, saying how to leave it. A form (New item,
+  an item's editor) takes the whole height, with no handle. A tap on the Map that opens a panel over what it tapped pans
+  the least that shows it, measured where the panel comes to rest.
 - **An upright tablet** keeps the phone's layout (the user's call over the wide one, which would leave the Map about 210
   px beside a panel), with the Overview's lists in two columns once it is 680 px wide (a 728 px screen), and the
   projects in two columns, as each wave's tiles in the Threads view are; New item opens from the top as tall as its
@@ -137,6 +148,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   runs (each after what it waits for in the thread), each with its stage's icon, the first eight and then how many more;
   "Starts with", its first items alone, meant nothing to the user. Its settings, Autonomy and Scope edits, are rows as
   the item panel's properties are, label beside value, with what a value means on hover rather than a line under each.
+  Its main action, Approve or Revoke approval, comes right under the status, before the Items and the settings, in the
+  markup as on the screen, so keys and a screen reader reach it in the order it shows; on a phone the status and its
+  counts share a line, so all three show at the panel's first height.
 - **Thread badges:** the thread's number on its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting, in the ⋯ menu or a thread's panel, shows its new value as it is picked and
@@ -170,15 +184,19 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   quiet buttons and over today's layout unboxed, as the calmest.) While it edits, the form's State and Thread stand in
   for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker says each
   thread as "4. CLI features", as text names a thread without a badge.
-- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"); under the view's name on a phone and at
-  the sidebar's foot, pressing it opens the menu at the setting, so the word is never left unexplained; on a touch
-  screen the view's name above it is part of its target, as its own line is too short for a finger. Under each list that
-  sets it, what it lets reach the user, in core's words ("Agents ask only about blockers"), a thread without its own
-  level adding "as set for every thread".
+- **Autonomy:** the level said the same way everywhere ("Autonomy: Blockers"); at the sidebar's foot, pressing it opens
+  the menu at the setting, so the word is never left unexplained. A phone's bar names the view alone, and its menu's
+  Autonomy says the level, as a line under the name cost the bar its height. Under each list that sets it, what it lets
+  reach the user, in core's words ("Agents ask only about blockers"), a thread without its own level adding "as set for
+  every thread".
+- **The ⋯ menu, on a phone,** is a list of plain rows, as Slack's is, 260 px wide: each switch a row, its name at the
+  start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme and Autonomy each ruled
+  off, a muted caption over the value as a quiet row whose caret ends where the switches do; Refresh a row last.
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px, then what
-  it names as rows in ink at 14 px, regular and 32 px apart on touch, so they read as the head's parts (the user's
-  ask), and in ink, which says they open (muted, they read as inert notes; a stage's icon beside each read
-  as a mark without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
+  it names as rows, muted, at 14 px (13 px on a phone), regular and 32 px apart on touch, so the head leads and they
+  read as its parts (the user asked for "the thread title … more prominent" and the "line spacing between each item …
+  smaller"); each underlines under the pointer, in ink, saying it opens (a stage's icon beside each read as a mark
+  without a word), then its decision, compact, after what it acts on. An approval names its thread alone, as
   its button and the list's filter say what it asks; the Overview, which shows no buttons, adds "4 items to approve".
   (Each row ending "waits for your approval" read as noise.) An approval lists the first five items it covers and says
   how many more, so its count and its list agree; an entry the app can only show says what failed and what fixes it, in
@@ -386,3 +404,8 @@ before what went wrong.
   The user: "The overview shrinks so it doesn't hide behind 'Needs you', but neither the map nor the threads view do
   that. Honestly, I don't know if I like `Needs you` being a floating pane on the right at all, it feels like it should
   probably get its own view like overview/map/threads?" Asked to confirm, they chose the view.
+- 2026-11-01: a denser phone, after the user found it "comically... big" beside Linear and Slack: of three mockups they
+  picked B ("Let's go with B."), every row and button its own 44 px target, with C's gains that cost no target added
+  (the 44 px bar and tab bar, a panel's 144 px first height, a thread's status and counts on one line, and Needs you's
+  items 32 px apart); C's shorter rows, reaching 44 px over their neighbours, were left out. Needs you's items went
+  muted with it, on every screen.

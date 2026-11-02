@@ -1,8 +1,20 @@
-// A phone's sheets come in two heights, half and full, and a drag on the handle or the header moves between them or
-// closes the sheet. Where a drag lands is decided here, from how far it went and how fast it was going at the end,
-// so the rules are tested without a browser.
+// A phone's sheets come in two heights, the first they open at and full, and a drag on the handle or the header moves
+// between them or closes the sheet. Where a drag lands is decided here, from how far it went and how fast it was going
+// at the end, so the rules are tested without a browser.
 
-export type Detent = "half" | "full";
+export type Detent = "first" | "full";
+
+/** A panel's first height: its title, its status and its main action, so the Map keeps most of the screen. */
+export const PEEK = 144;
+
+/**
+ * A sheet's first height in a stage `room` tall, as the stylesheet sets it, at most all of it: a panel's is `PEEK`, or
+ * what its main action `needs` to show if more, as a long title wraps; the outline's, a list to pick from, half the room
+ * and at least 320 px, so a small phone still shows a few of its rows.
+ */
+export function firstHeight(room: number, half: boolean, needs = 0): number {
+  return Math.min(room, half ? Math.max(320, room / 2) : Math.max(PEEK, needs));
+}
 
 /** A pointer's position down the screen at a time, in milliseconds. */
 export interface Sample {
@@ -24,22 +36,16 @@ export function velocity(samples: readonly Sample[]): number {
 }
 
 /**
- * Where a drag from `from` that moved `dy` pixels (down positive) lands, ending at `speed`, with `travel` the pixels
- * between the two heights: a flick goes its way; otherwise up past a quarter of the travel opens it full, down from
- * full past a quarter comes back to half, and down from half past a third of the half sheet's height closes it.
- * Anything less snaps back.
+ * Where a drag from `from` that moved `dy` pixels (down positive) lands, ending at `speed`, with `first` the first
+ * height and `travel` the pixels between it and full: a flick goes its way; otherwise up past a quarter of the travel
+ * opens it full, down from full past a quarter comes back to the first height, and down from it past a third of that
+ * height closes it. Anything less snaps back.
  */
-export function detentAfter(
-  from: Detent,
-  dy: number,
-  speed: number,
-  travel: number,
-  halfHeight: number,
-): Detent | "close" {
-  const down = speed > FLICK || (speed >= -FLICK && dy > 0 && dy > (from === "full" ? travel / 4 : halfHeight / 3));
+export function detentAfter(from: Detent, dy: number, speed: number, travel: number, first: number): Detent | "close" {
+  const down = speed > FLICK || (speed >= -FLICK && dy > 0 && dy > (from === "full" ? travel / 4 : first / 3));
   const up = speed < -FLICK || (speed <= FLICK && dy < 0 && -dy > travel / 4);
-  if (from === "half") return up ? "full" : down ? "close" : "half";
-  return down ? (dy > travel + halfHeight / 3 ? "close" : "half") : "full";
+  if (from === "first") return up ? "full" : down ? "close" : "first";
+  return down ? (dy > travel + first / 3 ? "close" : "first") : "full";
 }
 
 /** Whether a press on `target` may start a drag: not on a control, which a tap must still reach. */
