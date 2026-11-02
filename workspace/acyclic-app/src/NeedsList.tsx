@@ -14,10 +14,12 @@ import { Prose } from "./Prose";
 const PRIMARY = new Set(["keep", "approve"]);
 
 /**
- * Where the view was left for an item or a thread an entry named, which shows on the Map: how far it was scrolled, and
- * the entry and control picked, so closing what it opened comes back to the list as it was, the focus on that control.
+ * Where the view was left for an item or a thread an entry named, which shows on the Map: the filter shown, how far it
+ * was scrolled, and the entry and control picked, so closing what it opened comes back to the list as it was, the
+ * focus on that control. The filter comes back with the rest, as the scroll and the entry only hold under it.
  */
 export interface LeftAt {
+  filter: NeedGroup | null;
   top: number;
   entry: string;
   /** A selector for the control within the entry. */
@@ -61,7 +63,8 @@ export function NeedsList({
     ...one,
     count: all.filter((entry) => entry.group === one.group).length,
   })).filter((one) => one.count > 0);
-  const [filter, setFilter] = useState<NeedGroup | null>(null);
+  // Read while rendering, before the effect below takes the rest of where the view was left and clears it.
+  const [filter, setFilter] = useState<NeedGroup | null>(() => left.current?.filter ?? null);
   // A filter whose entries have all been settled shows everything again.
   const shown = groups.some((one) => one.group === filter) ? filter : null;
   const views = all.filter((entry) => shown === null || entry.group === shown).map((entry) => entry.view);
@@ -96,7 +99,7 @@ export function NeedsList({
   }, [at, left]);
   /** Keeps where the view is, for the item or thread an entry opens, then opens it. */
   const leave = (entry: string, control: string, open: () => void) => () => {
-    left.current = { top: page.current?.scrollTop ?? 0, entry, control };
+    left.current = { filter: shown, top: page.current?.scrollTop ?? 0, entry, control };
     open();
   };
   return (

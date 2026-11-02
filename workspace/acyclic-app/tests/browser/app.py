@@ -489,7 +489,7 @@ def overview_journey(page, view, name, failures):
         panel.wait_for(state="detached", timeout=5_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: going to the Overview left {thread}'s panel open over it")
-    entry =overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
+    entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
     entry.click()
     needs = page.get_by_test_id("needs")
     needs.wait_for(timeout=5_000)
@@ -629,8 +629,10 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         page.locator("[data-view=needs]").click()
         needs = page.get_by_test_id("needs")
         needs.wait_for(timeout=5_000)
-        # Scrolled down the list, so coming back shows whether it kept its place.
-        top = needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
+        # Filtered and scrolled down the list, so coming back shows whether it kept its place: the scroll and the row
+        # hold only under the filter they were left at.
+        needs.locator("[data-filter=approve]").click()
+        top =needs.evaluate("n => (n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight))")
         # A row already in view, so the click doesn't scroll the list first.
         picked = needs.evaluate(
             """n => { const box = n.getBoundingClientRect();
@@ -645,10 +647,15 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             page.wait_for_function("() => location.search === '?view=needs'", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from an item opened in Needs you landed on {page.url}")
-        kept = needs.evaluate("(n, id) => [n.scrollTop, document.activeElement?.dataset.select === id]", picked)
-        if top == 0 or abs(kept[0] - top) > 1 or not kept[1]:
+        kept = needs.evaluate(
+            """(n, id) => [n.scrollTop, document.activeElement?.dataset.select === id,
+                n.querySelector('[data-filter][aria-pressed=true]')?.dataset.filter]""",
+            picked,
+        )
+        if top == 0 or abs(kept[0] - top) > 1 or not kept[1] or kept[2] != "approve":
             failures.append(
-                f"{name}: Back to Needs you from {picked} came back scrolled {kept[0]} of {top}, focus there {kept[1]}"
+                f"{name}: Back to Needs you from {picked} came back filtered {kept[2]}, scrolled {kept[0]} of {top},"
+                f" focus there {kept[1]}"
             )
         page.go_back()
         overview.wait_for(timeout=5_000)
@@ -727,14 +734,17 @@ def command_journey(page, view, origin, plan, name, failures):
         back = page.evaluate("() => !!document.activeElement?.closest('[data-testid=inspector]')")
         if not back or not heading.count():
             failures.append(f"{name}: Escape from the command menu didn't leave the item open, focused")
-        page.keyboard.press("Escape")
-        heading.wait_for(state="detached", timeout=5_000)
+        # Going to another view from the menu, with the item still open, leaves the item, as the tabs do.
         page.keyboard.press("ControlOrMeta+k")
         menu.wait_for(timeout=5_000)
         page.keyboard.type("needs")
         page.locator(".command-row[data-command='view:needs']").click()
         needs = page.get_by_test_id("needs")
         needs.wait_for(timeout=5_000)
+        try:
+            heading.wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: going to Needs you from the command menu left {id}'s panel over it")
         columns = needs.locator("[data-need]").evaluate_all(
             "l => [new Set(l.map(e => e.offsetLeft)).size, Math.min(...l.map(e => e.offsetWidth))]"
         )

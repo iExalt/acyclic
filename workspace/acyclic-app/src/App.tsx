@@ -1169,11 +1169,14 @@ export function App() {
     </>
   );
   /**
-   * Goes to a view: Needs you's from its top, or at the entry `at` names, as only closing what one of its entries
-   * opened comes back to it where it was left. The Overview and Needs you are lists, over which a thread's panel would
-   * only cover what the user went to see, so going to either leaves the thread; the Threads view shows it picked.
+   * Goes to a view, every way the user asks to (the tabs and sidebar, keys, the command menu, the Overview's links):
+   * Needs you's from its top, or at the entry `at` names, as only closing what one of its entries opened comes back to
+   * it where it was left. An item is shown on the Map, so going to another view leaves it, rather than its panel
+   * standing over a view that doesn't show it. The Overview and Needs you are lists, over which a thread's panel would
+   * only cover what the user went to see, so going to either leaves the thread too; the Threads view shows it picked.
    */
   const goTo = (to: View, at: string | null = null) => {
+    if (to !== "map") setSelected(null);
     if (to === "overview" || to === "needs") setThread(null);
     if (to === "needs") {
       setNeedsAt(at);
@@ -1187,12 +1190,7 @@ export function App() {
       count={shown.length}
       autonomy={levelLabel(levelChosen ?? load.level)}
       view={view}
-      onView={(to) => {
-        // An item is shown on the Map: going to another view leaves it, rather than its panel standing over a view
-        // that doesn't show it.
-        if (to !== "map") setSelected(null);
-        goTo(to);
-      }}
+      onView={goTo}
       needs={load.needs.length}
       onAdd={() => startAdd(null)}
       menu={menu}
@@ -1261,7 +1259,7 @@ export function App() {
             onNeeds={(key) => goTo("needs", key ?? null)}
             onPickThread={toThread}
             onSelectProject={(id) => select(id, null)}
-            onView={setView}
+            onView={goTo}
           />
         ) : null}
         {view === "needs" ? (
