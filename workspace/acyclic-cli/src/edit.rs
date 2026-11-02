@@ -124,8 +124,12 @@ fn removals(
 impl ItemFields {
     /// The fields with every reference resolved to the id of the record it names. `item` is the item they are for,
     /// when it exists: a removal looks among what it holds first, so it finds an element whose record is gone.
-    pub fn resolve(self, model: &Model, item: Option<&str>) -> Result<Self, CliError> {
-        let records = Records::of(model);
+    pub fn resolve(
+        self,
+        model: &Model,
+        records: &Records<'_>,
+        item: Option<&str>,
+    ) -> Result<Self, CliError> {
         let parent = match self.parent {
             Change::Set(parent) => Change::Set(records.item(&parent)?),
             other => other,
@@ -151,7 +155,7 @@ impl ItemFields {
                 .iter()
                 .map(|r| records.repository(r))
                 .collect::<Result<_, _>>()?,
-            remove: removals(&records, &held_repositories, &self.repositories.remove)?,
+            remove: removals(records, &held_repositories, &self.repositories.remove)?,
         }
         .disjoint("repository")?;
         let waits_for = Delta {
@@ -174,8 +178,12 @@ impl ItemFields {
 impl ThreadFields {
     /// The fields with every repository resolved to the id of its record, a removal looking among what `thread`
     /// holds first.
-    pub fn resolve(self, model: &Model, thread: Option<&str>) -> Result<Self, CliError> {
-        let records = Records::of(model);
+    pub fn resolve(
+        self,
+        model: &Model,
+        records: &Records<'_>,
+        thread: Option<&str>,
+    ) -> Result<Self, CliError> {
         let held: Vec<String> = thread
             .and_then(|id| model.threads.get(id))
             .map(|thread| thread.repositories.iter().cloned().collect())
@@ -187,7 +195,7 @@ impl ThreadFields {
                 .iter()
                 .map(|r| records.repository(r))
                 .collect::<Result<_, _>>()?,
-            remove: removals(&records, &held, &self.repositories.remove)?,
+            remove: removals(records, &held, &self.repositories.remove)?,
         }
         .disjoint("repository")?;
         Ok(Self { repositories, ..self })
@@ -414,6 +422,7 @@ pub(crate) fn given_id(id: &str) -> Result<String, CliError> {
 /// work is finished.
 pub(crate) fn new_id(
     replica: &Replica,
+    model: &Model,
     of: &str,
     given: Option<&str>,
     title: &str,
@@ -429,7 +438,6 @@ pub(crate) fn new_id(
             return Ok(id.clone());
         }
     }
-    let model = Model::read(replica.state())?;
     let same = if of == kind::THREAD {
         model
             .threads

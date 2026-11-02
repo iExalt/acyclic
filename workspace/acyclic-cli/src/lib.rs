@@ -168,20 +168,21 @@ fn execute_with(
             Err(err) => failed(err),
         };
     }
-    let result = commands::run(&cli, env);
+    let result = match output {
+        Format::Json => commands::run(&cli, env).map(|output| (output, commands::Names::new())),
+        Format::Pretty => commands::run_named(&cli, env),
+    };
     acyclic_core::probe::mark("command");
     match result {
-        Ok(commands::Output::Json(data)) => {
+        Ok((commands::Output::Json(data), names)) => {
             let output = match output {
                 Format::Json => render(&json!({"ok": true, "data": data})),
-                Format::Pretty => {
-                    pretty::render(&cli.command, &data, env.terminal, &commands::names(&cli, env))
-                },
+                Format::Pretty => pretty::render(&cli.command, &data, env.terminal, &names),
             };
             acyclic_core::probe::mark("render output");
             Outcome::out(exit::OK, output)
         },
-        Ok(commands::Output::Text(text)) => Outcome::out(exit::OK, text),
+        Ok((commands::Output::Text(text), _)) => Outcome::out(exit::OK, text),
         Err(err) => failed(err),
     }
 }
