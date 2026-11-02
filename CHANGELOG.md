@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.1](https://github.com/iExalt/acyclic/compare/v0.5.0...v0.5.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* bring docs, messages and comments in line with what the code does ([#121](https://github.com/iExalt/acyclic/issues/121)) ([5344eb2](https://github.com/iExalt/acyclic/commit/5344eb2eed7f197a102864d88ec2dac40ac58e94))
+* keep conflicted evidence in the evidence shape, key each dangling need by its target, and hint at what reads an old tracker ([#123](https://github.com/iExalt/acyclic/issues/123)) ([909b1cd](https://github.com/iExalt/acyclic/commit/909b1cdc0783aff9afb71df32671fd805d1f8cfc))
+* refuse clashing repository names on import and add-and-remove of one record ([#122](https://github.com/iExalt/acyclic/issues/122)) ([f94febc](https://github.com/iExalt/acyclic/commit/f94febcfe68117fae76acfe59df561730d7c3245))
+
+
+### Performance Improvements
+
+* **cli:** name records in pretty output from the state the command read or wrote ([#124](https://github.com/iExalt/acyclic/issues/124)) ([3f4f9c0](https://github.com/iExalt/acyclic/commit/3f4f9c0b56fd0cfb576e8c5930eabd31e9faa7ff))
+
+
+### Reverts
+
+* **core:** run git from PATH again instead of resolving macOS's xcrun stub ([#119](https://github.com/iExalt/acyclic/issues/119)) ([a82bd3c](https://github.com/iExalt/acyclic/commit/a82bd3c9eb654e93cabe68e67153782a35ba5004))
+
 ## [0.5.0](https://github.com/iExalt/acyclic/compare/v0.4.0...v0.5.0) (2026-11-02)
 
 
