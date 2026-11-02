@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/iExalt/acyclic/compare/v0.4.0...v0.5.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove agent runs
+
+### Code Refactoring
+
+* remove agent runs ([9a86330](https://github.com/iExalt/acyclic/commit/9a86330db74376c3367c3e88ef12f3eeff653cd6))
+
 ## [0.4.0](https://github.com/iExalt/acyclic/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
