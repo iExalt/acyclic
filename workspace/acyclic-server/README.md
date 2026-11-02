@@ -25,70 +25,26 @@ credential derived from the session, so rotating the session unpairs it too. Eac
 port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a command it
 authenticates, a read as much as a write, must come from the listener's own origin, and no page may frame the app.
 
-`up --tailscale --login <login> --host <name>.ts.net` also serves requests through `tailscale serve`, checked as
-`serve` checks them: Tailscale replaces any `Tailscale-User-Login` a client sends with the user's, and passes the
-`.ts.net` name on as `Host`, without a port. It listens on port 7479 of `127.0.0.1` (`--tailscale-port`), since
-Tailscale's Mac apps run sandboxed and can't open a Unix socket. Every process and container on the machine, runs
-included, can reach that port and send any identity header, so the port answers only paths under a secret first
-segment, derived from the session, and takes it off; anything else gets an empty 404. `up` prints the command that
-points Tailscale at it, `tailscale serve --bg http://127.0.0.1:7479/<secret>`, and Tailscale prepends the secret to
-every path, so browsers never see it. Only what can read the session can learn it, which keeps out runs as long as
-none mounts `~/.config/acyclic`; whatever keeps `up`'s output, such as a service's log, must be the user's alone too.
-`--rotate` changes the secret, and the command must be run again. With the open-source `tailscaled`, which can open
-one, `--socket <path>` listens on a Unix socket only the user can open instead, with no secret, pointed at by
-`tailscale serve --bg unix:<path>`. The phone then reaches the Mac while it is awake.
+`up --tailscale --login <login> --host <name>.ts.net` also serves requests through `tailscale serve`, checked as `serve`
+checks them: Tailscale replaces any `Tailscale-User-Login` a client sends with the user's, and passes the `.ts.net` name
+on as `Host`, without a port. It listens on port 7479 of `127.0.0.1` (`--tailscale-port`), since Tailscale's Mac apps
+run sandboxed and can't open a Unix socket. Every process and container on the machine can reach that port and send any
+identity header, so the port answers only paths under a secret first segment, derived from the session, and takes it
+off; anything else gets an empty 404. `up` prints the command that points Tailscale at it, `tailscale serve --bg
+http://127.0.0.1:7479/<secret>`, and Tailscale prepends the secret to every path, so browsers never see it. Only what
+can read the session can learn it, which keeps out containers as long as none mounts `~/.config/acyclic`; whatever keeps
+`up`'s output, such as a service's log, must be the user's alone too. `--rotate` changes the secret, and the command
+must be run again. With the open-source `tailscaled`, which can open one, `--socket <path>` listens on a Unix socket
+only the user can open instead, with no secret, pointed at by `tailscale serve --bg unix:<path>`. The phone then reaches
+the Mac while it is awake.
 
 `up` doesn't sync on a timer unless given `--sync-every`, so the clone syncs when told to, as it does without a
 server. It shares the clone with the CLI, whose writes queue with its own.
 
-## Runs, on `up --runners <port>`
-
-`up --runners <port>` also listens on that port of `127.0.0.1` for runs, each presenting the token the operator gave
-it as `Authorization: Bearer <token>`. It needs the operator's public key, `~/.config/acyclic/operator/key.pub`, which
-the operator writes and only the user may be able to change, and the deny-list, `~/.config/acyclic/deny-list`; it
-reads the key once, so a new operator key needs `up` restarted. `Host` isn't checked there: a container names the Mac
-as `host.containers.internal`, and the check guards a browser's cookie, which no run has.
-
-A run's token counts only there, and only while its run is under way. It reads the tracker as the run, and sends the
-writes of its own work in its thread, each with its number in `Acyclic-Operation: <seq>`, counting from 1. A write is
-scanned for the deny-list's terms and, with Gitleaks, for secrets, then applied as the run, once: sent again, it is
-answered `duplicate`. It supersedes only what the tracker held when the run last read, as the server recorded it.
-`GET /api/run` says the run, its thread and the latest of its operations applied.
-
-## Runs' code
-
-The runners' listener also serves git's smart HTTP protocol at `/git/<owner>/<name>.git`, so a run never holds a
-credential for the forge. A run reaches only the repositories of its thread's set as it stands at each request; any
-other is refused as not in this thread.
-
-Each repository has a bare mirror in `$XDG_DATA_HOME/acyclic/mirrors` (by default under `~/.local/share`), made on first
-use and fetched from `https://github.com/<owner>/<name>.git` (`ACYCLIC_UPSTREAM` names another forge) whenever a run
-fetches, unless another fetch began in the last 5 seconds (`ACYCLIC_MIRROR_FRESH`), and every 5 minutes when `up` is
-given a non-zero `--sync-every`, which by default it isn't; when the forge can't be reached, runs get the mirror as last
-fetched. Git runs there with no settings or credentials of the user's, so only public repositories can be mirrored for
-now. Readiness checks whether a commit is merged against the mirror of a repository with no clone mapped in
-`~/.config/acyclic/clones.toml`.
-
-No run reaches a mirror itself: each thread has a repository of its own beside it, which borrows the mirror's objects
-and holds its runs' pushes. A run sees the forge's branches and tags and its thread's runs' refs, so one replacing
-another picks up its work, and nothing of another thread's. It pushes only to its own refs, `refs/runs/<run>/*`, and
-only commits; a push's hook scans the new commits for the deny-list's terms, in a public repository, and with
-Gitleaks, in every one. A request may take 10 minutes, a push 512 MiB and 64 refs, and a run one push at a time to
-each repository.
-
-Since the threads' repositories borrow its objects, a mirror keeps everything it fetched. Every 5 minutes when `up` is
-given a non-zero `--sync-every`, which by default it isn't, the repositories of finished threads, those with every item
-done and no run under way, are removed once every run's ref in them is on the forge, as the mirror has it, since until
-then they hold the only copy of that work; and a mirror no thread borrows from any more drops what the forge no longer
-has.
-
-The operator's `runs::environment` gives a run the settings that send every repository of the tracker's owners, by
-any of the forge's URLs, to the server with the run's token.
-
 ## The app
 
 Both serve the app built into the binary (`acyclic-app-assets`), or the one in `--static <dir>`, which must hold an
-`index.html`; runs' listeners serve neither. `/` is `/index.html`, and a path with no file is 404, since the app has
+`index.html`. `/` is `/index.html`, and a path with no file is 404, since the app has
 no routes of its own. Files are sent Brotli- or gzip-compressed when the browser takes it and the build wrote the
 copy. The bundle's hashed files under `/assets/` may be kept for good; everything else is revalidated. Every response
 carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing, except
@@ -114,7 +70,7 @@ The server tells the user's devices, through Web Push, when something new needs 
 whose `notify` is true, the first time it appears. `GET /api/push/key` gives the server's VAPID public key, `POST
 /api/push/subscribe` takes a browser's `PushSubscription` as JSON (an `https://` endpoint and its `p256dh` and `auth`
 keys), and `POST /api/push/unsubscribe` takes `{"endpoint": …}`. Only the user may call them, from the server's own
-origin; never a run. Up to 10 devices are kept, the oldest replaced first.
+origin. Up to 10 devices are kept, the oldest replaced first.
 
 After agents' writes, after syncs, and every minute besides, the server reads the list and, a few seconds later, sends
 each device one encrypted message (RFC 8291) naming what is new; a push service keeps it for a day. What the user's own

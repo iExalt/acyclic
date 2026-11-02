@@ -15,9 +15,9 @@ Every command's inputs follow these rules, so you can guess a command from its n
    level, and `link add|remove <FROM> <KIND> <TO>`.
 3. **Every other input is a long flag named for the field it sets.** A scalar field takes `--field <VALUE>` to set it
    and `--no-field` to clear it. A set takes `--field <VALUE>`, repeatable, to add elements and `--no-field <VALUE>`,
-   repeatable, to remove them. A boolean is a pair of presence flags, such as `--public` and `--private`. Naming a
-   field and its `--no-` form together is a usage error. The common flags also take a short form, their initial:
-   `-t` for `--title`, `-n` for `--note`, and `-n` for `--dry-run` as other tools have it; `-o` is `--output`.
+   repeatable, to remove them. Naming a field and its `--no-` form together is a usage error. The common flags also
+   take a short form, their initial: `-t` for `--title`, `-n` for `--note`, and `-n` for `--dry-run` as other tools
+   have it; `-o` is `--output`.
 4. **`add` and `edit`** take the same fields. `add` creates; adding what exists again with the same values changes
    nothing, and with other values is refused as `already-exists`, naming the fields that differ. `edit` changes an
    existing entity and refuses an unknown one as `not-found`. A write is all or nothing: if any part is refused,
@@ -56,18 +56,18 @@ Every command's output follows these rules, so you can guess a key from the inpu
    `waited_on_by` and `related_from` towards it.
 3. **One summary per entity**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`;
    `ready` lists thread summaries, each with its ready `items`, which add `approved`. A thread is
-   `{id, title, approved, heads, counts}`, a repository record `{id, owner, name, public, default_branch}` and a
+   `{id, title, approved, heads, counts}`, a repository record `{id, owner, name, default_branch}` and a
    proposal `{id, actor, decision, threads}`. `list` returns the summaries and `show` returns the same object with
    its details added at the top level, so a thread's
    `show` adds `members`, each an item summary that says whether it is `approved` and `conflicted`. `proposal list`
    returns every proposal, open ones first, as `proposal show` does, with the item its edit names under `item`.
 4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor`, `graph --file`
    and `import`. An absent scalar is `null`, an absent set is `[]`, and a flag such as `approved`, `archived`,
-   `reopened`, `public` or `conflicted` is always `true` or `false`. A scalar whose replicas disagree reads
+   `reopened` or `conflicted` is always `true` or `false`. A scalar whose replicas disagree reads
    `{"conflict": […]}`, and `needs` lists it.
 5. **Approved** is one meaning everywhere: the thread's approval holds, without a conflict, and it saw the item when it
    recorded the members it saw, or recorded none. `ready --approved` lists exactly the rows whose `approved` is true.
-   The user's own change to an approved thread's members, a project manager's, and `proposal keep` extend the approval
+   The user's own change to an approved thread's members and `proposal keep` extend the approval
    to the member; an agent's change that waits as a proposal doesn't.
 6. **Writes** return `{changed, <entity>: id, …}`; `done` adds the `evidence` it recorded. An item or thread edit and
    an import also return `proposals`, every edit the write left waiting for the user as `{id, field}`, its own and the

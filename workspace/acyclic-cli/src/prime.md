@@ -29,9 +29,8 @@ machines recorded and pushes yours.
 
 ## Who you are
 
-- Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`, or `run/<id>`
-  for a run. Two sessions sharing a name share claims, and both would work the same thread. Without it you act as
-  `agent/undeclared`.
+- Set `ACYCLIC_ACTOR` to a name unique to this session, such as `session/<machine>-<session id>`. Two sessions
+  sharing a name share claims, and both would work the same thread. Without it you act as `agent/undeclared`.
 - You are never the user. `--as-user` is for the user alone; don't pass it.
 
 ## Links
@@ -122,7 +121,7 @@ standard output.
    --thread`, give each a title and brief, and leave approving them to the user. New or moved work joins the thread
    its parent passes down, or else the one its siblings share; an add, a move under another parent or an import
    reports it as `placed`. Once the user approves a thread, your change to its members or repositories doesn't
-   apply unless you are a run on a project-management thread: it waits in `acyclic needs` as a proposal for the user.
+   apply: it waits in `acyclic needs` as a proposal for the user.
    An item or thread edit, and an import, list their proposals in `proposals`, each with the `field` it proposed.
    Carry on with other work.
 6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
