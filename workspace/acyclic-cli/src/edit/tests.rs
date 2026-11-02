@@ -209,7 +209,7 @@ fn an_import_that_places_into_an_approved_thread_lists_the_proposal() {
     add_item(&mut r, "a", &ItemFields { thread: Change::Set("t".into()), ..titled("A") }, USER_BY)
         .unwrap();
     acyclic_core::scope::approve(&mut r, "t", true, USER_BY).unwrap();
-    let plan = json!({"format": "acyclic-import", "version": 1, "items": [
+    let plan = json!({"format": "acyclic-import", "version": 2, "items": [
         {"key": "a", "title": "A", "state": "backlog"},
         {"key": "c", "title": "C", "state": "backlog", "parent": "a"}]});
     let doc = acyclic_core::import::Import::from_json(&plan.to_string()).unwrap();

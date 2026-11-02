@@ -1,4 +1,0 @@
-# The graph page's renderers, read by scripts/vendor-graph.sh and by the CLI's build script; THIRD_PARTY.md names the
-# same pins. Fields: name, tarball URL, tarball SHA-256, file in the package, the file's SHA-256.
-graphviz https://registry.npmjs.org/@hpcc-js/wasm-graphviz/-/wasm-graphviz-1.29.2.tgz fbabf5f7a085f37009477d3585b2da1e4960f99dda54004e69c20553c8d172df dist/index.js 550d9cd6ff429f5bd225316fe1faed4f852038c3e1ec609ce113af1f9379ce25
-mermaid https://registry.npmjs.org/mermaid/-/mermaid-12.2.0.tgz 071914164d0f6d53e5c26a10a220230d4ae8d37ed0f2263fbf072266f0af3a0a dist/mermaid.min.js a8a6a6f805b074a8261a2825c86f99c8054acb3b35f50bb7e24a4f9f2c3c3b9f

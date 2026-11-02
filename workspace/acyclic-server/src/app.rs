@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 /// What every page is allowed to load and do: only the server's own files and API, nothing framed, no other base,
-/// and forms only to itself. Inline styles stay allowed, since the graph's renderers set them; inline scripts don't.
+/// and forms only to itself. Inline styles stay allowed, since the app's Map sets them; inline scripts don't.
 pub const POLICY: &str = "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; \
                           img-src 'self' data:; style-src 'self' 'unsafe-inline'; manifest-src 'self'; \
                           frame-ancestors 'none'; base-uri 'none'; form-action 'self'";

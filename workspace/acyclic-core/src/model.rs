@@ -134,9 +134,6 @@ pub struct Evidence {
 pub enum LinkKind {
     /// A hard dependency: `from` waits for `to`.
     Blocks,
-    /// A retired soft dependency, still in stored state: the model reads it as [`LinkKind::Relates`], and no write
-    /// adds one.
-    After,
     /// Context only.
     Relates,
 }
@@ -145,17 +142,15 @@ impl LinkKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Blocks => "blocks",
-            Self::After => "after",
             Self::Relates => "relates",
         }
     }
 
-    /// The word a command line and its output use for the kind: `waits-for`, `follows` or `relates-to`.
+    /// The word a command line and its output use for the kind: `waits-for` or `relates-to`.
     #[must_use]
     pub fn word(self) -> &'static str {
         match self {
             Self::Blocks => "waits-for",
-            Self::After => "follows",
             Self::Relates => "relates-to",
         }
     }
@@ -366,8 +361,6 @@ impl Model {
             model.add(state, key)?;
         }
         model.links.sort();
-        // A stored after link reads as relates-to, so a pair holding both is one link.
-        model.links.dedup();
         Ok(model)
     }
 
@@ -424,7 +417,6 @@ impl Model {
                 ) else {
                     return Err(Error::Format(format!("link {} lacks its ends or kind", key.id)));
                 };
-                let kind = if kind == LinkKind::After { LinkKind::Relates } else { kind };
                 self.links.push(Link { from, to, kind });
             },
             kind::THREAD => {
@@ -729,8 +721,6 @@ pub enum WriteError {
     },
     /// An item can't link to itself.
     SelfLink(String),
-    /// Follows links are retired: nothing adds one.
-    FollowsRetired,
 }
 
 impl fmt::Display for WriteError {
@@ -752,11 +742,6 @@ impl fmt::Display for WriteError {
             },
             Self::UserOnly { field, actor } => write!(f, "only the user sets {field}, not {actor}"),
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
-            Self::FollowsRetired => write!(
-                f,
-                "follows links are retired: use waits-for when one item can't start before the other is done, \
-                 or relates-to for context"
-            ),
         }
     }
 }
@@ -999,7 +984,7 @@ pub fn set_parent(
 ///
 /// # Errors
 ///
-/// Fails on an after link, which is retired, when either item doesn't exist, when a blocks link would close a cycle,
+/// Fails when either item doesn't exist, when a blocks link would close a cycle,
 /// or when the state layer refuses.
 pub fn link(
     replica: &mut Replica,
@@ -1008,9 +993,6 @@ pub fn link(
     kind: LinkKind,
     by: By<'_>,
 ) -> Result<Key, WriteError> {
-    if kind == LinkKind::After {
-        return Err(WriteError::FollowsRetired);
-    }
     existing(&replica.state, from)?;
     existing(&replica.state, to)?;
     if from == to {
@@ -1031,23 +1013,7 @@ pub fn link(
     Ok(key)
 }
 
-/// Stores an after link as older versions wrote one, for tests of how the model reads it.
-#[cfg(test)]
-pub(crate) fn store_after_link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) {
-    let key = link_key(from, to, LinkKind::After).unwrap();
-    for (name, value) in [
-        (link::FROM, to_json(&from)),
-        (link::TO, to_json(&to)),
-        (link::KIND, to_json(&LinkKind::After)),
-        (link::PRESENT, to_json(&true)),
-    ] {
-        replica.write(&key, name, by.actor, by.at, Some(value)).unwrap();
-    }
-}
-
-/// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Removing a relates link also
-/// removes a stored after link between the same items, since the model reads one as the other. Returns whether it
-/// wrote.
+/// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Returns whether it wrote.
 ///
 /// # Errors
 ///
@@ -1059,21 +1025,13 @@ pub fn unlink(
     kind: LinkKind,
     by: By<'_>,
 ) -> Result<bool, WriteError> {
-    let mut kinds = vec![kind];
-    if kind == LinkKind::Relates {
-        kinds.push(LinkKind::After);
+    let key = link_key(from, to, kind)?;
+    if replica.state.field(&key, link::PRESENT).is_none() {
+        return Ok(false);
     }
-    let mut wrote = false;
-    for kind in kinds {
-        let key = link_key(from, to, kind)?;
-        if replica.state.field(&key, link::PRESENT).is_none() {
-            continue;
-        }
-        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
-        replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
-        wrote = true;
-    }
-    Ok(wrote)
+    // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
+    replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+    Ok(true)
 }
 
 /// Whether an item has been deleted: its tombstone is set, and nothing clears it.
