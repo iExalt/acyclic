@@ -166,7 +166,11 @@ fn a_fresh_replica_can_continue_after_the_old_clock_jumps_ahead() {
 
     let (code, out) = sh.output(&format!("item edit {item} --notes blocked"), AGENT);
     assert_eq!((code, out["error"]["code"].as_str()), (1, Some("clock-jump")), "{out}");
-    assert!(out["error"]["details"]["hint"].as_str().unwrap().contains("fresh clone"), "{out}");
+    assert_eq!(
+        out["error"]["details"]["hint"],
+        "Correct the system clock and wait until it is within five minutes of this replica's saved time, or sync this clone and continue from a fresh clone with an unused replica id",
+        "{out}"
+    );
     let (_, unchanged) = old.load_strict().unwrap();
     assert_eq!(unchanged, before, "the refused write leaves old replica state unchanged");
     assert_eq!(sh.run("sync", AGENT), 0, "sync does not stamp a write");

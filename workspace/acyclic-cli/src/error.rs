@@ -18,7 +18,8 @@ const MIGRATE_HINT: &str = "written by an earlier acyclic: read it with that ver
                             `acyclic import` from a version-3 document";
 /// What a state a later format version wrote hints at.
 const LATER_HINT: &str = "written by a later acyclic: run that version";
-const CLOCK_JUMP_HINT: &str = "Correct the system clock and wait until it is within five minutes of this replica's +                               saved time, or sync this clone and continue from a fresh clone with an unused replica id";
+const CLOCK_JUMP_HINT: &str = "Correct the system clock and wait until it is within five minutes of this replica's \
+                               saved time, or sync this clone and continue from a fresh clone with an unused replica id";
 
 /// Exit codes. Stable: agents branch on them.
 pub mod exit {

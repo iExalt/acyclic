@@ -94,8 +94,9 @@ waits-for and thread it belongs with.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
-- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which writes its lease again; any
-  write can also commit a lease renewal that its own `changed` leaves out.
+- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which renews its lease, and an
+  edit that explicitly adds a repository the item or thread already holds. That edit records the add again. Any write
+  can also commit a lease renewal that its own `changed` leaves out.
 - A `clock-jump` refusal means this replica's saved time is more than five minutes ahead of the system clock. Correct
   the clock and wait until it is within five minutes of the saved time. Writes remain stamped at the saved time until
   the clock catches up fully. To write sooner, sync this clone and continue from a new clone with an unused replica id.
