@@ -27,7 +27,7 @@ fn add_item(
     fields: &ItemFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, |_| Ok(item_changes(id, fields, Adding::Given)))
+    commit(r, by, None, None, |_| Ok(item_changes(id, fields, Adding::Given)))
 }
 
 fn edit_item(
@@ -36,7 +36,7 @@ fn edit_item(
     fields: &ItemFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, |_| Ok(item_changes(id, fields, Adding::No)))
+    commit(r, by, None, None, |_| Ok(item_changes(id, fields, Adding::No)))
 }
 
 fn add_thread(
@@ -45,7 +45,7 @@ fn add_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, |_| Ok(thread_changes(id, fields, Adding::Given)))
+    commit(r, by, None, None, |_| Ok(thread_changes(id, fields, Adding::Given)))
 }
 
 fn edit_thread(
@@ -54,7 +54,7 @@ fn edit_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, |_| Ok(thread_changes(id, fields, Adding::No)))
+    commit(r, by, None, None, |_| Ok(thread_changes(id, fields, Adding::No)))
 }
 
 fn add_repository(
@@ -63,7 +63,7 @@ fn add_repository(
     fields: &RepositoryFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, fields.name.as_deref(), |_| repository_changes(id, fields, Adding::Given))
+    commit(r, by, fields.name.as_deref(), None, |_| repository_changes(id, fields, Adding::Given))
 }
 
 fn edit_repository(
@@ -72,7 +72,7 @@ fn edit_repository(
     fields: &RepositoryFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, fields.name.as_deref(), |_| repository_changes(id, fields, Adding::No))
+    commit(r, by, fields.name.as_deref(), None, |_| repository_changes(id, fields, Adding::No))
 }
 
 fn item(replica: &Replica, id: &str) -> acyclic_core::model::Item {
@@ -351,7 +351,7 @@ fn a_minted_add_whose_title_open_work_has_is_refused_naming_it() {
         } else {
             item_changes(id, &titled(title), Adding::Minted)
         };
-        commit(r, USER_BY, None, |_| Ok(changes)).map_err(|err| (err.code, err.details))
+        commit(r, USER_BY, None, None, |_| Ok(changes)).map_err(|err| (err.code, err.details))
     };
     minted(&mut r, kind::ITEM, "a", "Sow").unwrap();
     // A retry with a new id is refused, naming the item the first made; one with the same id is a repeat.
@@ -382,7 +382,7 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
     for (n, title) in ["Weed", "Sow", "Rows"].into_iter().enumerate() {
         let changes = item_changes(&format!("n{n}"), &titled(title), Adding::Minted);
-        assert!(commit(&mut r, USER_BY, None, |_| Ok(changes)).is_ok(), "{title}");
+        assert!(commit(&mut r, USER_BY, None, None, |_| Ok(changes)).is_ok(), "{title}");
     }
 }
 
@@ -520,4 +520,45 @@ fn work_moved_or_added_under_an_archived_root_is_refused() {
     assert_eq!((err.code, err.details.clone()), ("archived", json!({"root": "p"})));
     let new = ItemFields { parent: Change::Set("p".into()), ..titled("New") };
     assert_eq!(code(add_item(&mut r, "n", &new, USER_BY)), "archived");
+}
+
+#[test]
+fn a_finish_refused_for_its_evidence_reads_as_the_cli_has_always_told_it() {
+    use acyclic_core::model::Evidence;
+    struct NoClones;
+    impl Ancestry for NoClones {
+        fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
+            Err("no clone".into())
+        }
+    }
+    let mut r = replica();
+    let fields = RepositoryFields { name: Some("o/n".into()), ..RepositoryFields::default() };
+    add_repository(&mut r, "r", &fields, USER_BY).unwrap();
+    add_item(&mut r, "a", &titled("A"), USER_BY).unwrap();
+    let finish = |r: &mut Replica, commit: &str, force: bool| {
+        let evidence =
+            Evidence { repository: Some("r".into()), commit: Some(commit.into()), text: None };
+        let change = WriteChange::Finish { item: "a".into(), evidence: Some(evidence), force };
+        super::commit(r, USER_BY, None, Some(&NoClones), |_| Ok(ChangeSet(vec![change])))
+            .map_err(|err| (err.code, err.message, err.details))
+    };
+    assert_eq!(
+        finish(&mut r, "abc1234", true).unwrap_err(),
+        (
+            "incomplete-repository",
+            "repository r is missing default-branch; set it with `acyclic repository edit r`"
+                .into(),
+            json!({"missing": ["default_branch"]})
+        )
+    );
+    let fields =
+        RepositoryFields { default_branch: Some("main".into()), ..RepositoryFields::default() };
+    edit_repository(&mut r, "r", &fields, USER_BY).unwrap();
+    finish(&mut r, "abc1234", true).unwrap();
+    let (code, message, details) = finish(&mut r, "def5678", false).unwrap_err();
+    assert_eq!(
+        (code, message.as_str()),
+        ("already-done", "item a is done with other evidence; pass --force to replace it")
+    );
+    assert_eq!(details["evidence"]["commit"], json!("o/n@abc1234"), "{details}");
 }

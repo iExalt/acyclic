@@ -14,12 +14,12 @@ use std::process::Command;
 
 use acyclic_core::model::{self, By, Model};
 use acyclic_core::needs::{self, Entry};
-use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, Readiness};
-use acyclic_core::schema::{item as field, kind};
+use acyclic_core::schema::kind;
 
-use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
+use acyclic_core::state::{Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
+use acyclic_core::write::{self, Assign, Change, ChangeSet, ItemAssign, Outcome, Record, Repeat};
 use tempfile::TempDir;
 
 /// 2026-10-15T00:00:00Z.
@@ -145,8 +145,14 @@ impl Pair {
     }
 }
 
-fn item(id: &str) -> Key {
-    model::item_key(id).unwrap()
+/// Judges and writes `changes` as the CLI does.
+fn commit(
+    replica: &mut Replica,
+    by: By<'_>,
+    changes: Vec<Change>,
+) -> Result<Outcome, Box<dyn std::error::Error>> {
+    write::commit(replica, by, None, |_| Ok::<_, ()>(ChangeSet(changes)))
+        .map_err(|error| format!("{error:?}").into())
 }
 
 fn add(
@@ -154,18 +160,37 @@ fn add(
     by: By<'_>,
     id: &str,
     parent: Option<&str>,
+) -> Result<Outcome, Box<dyn std::error::Error>> {
+    let mut with = vec![Assign::Item(id.into(), ItemAssign::Title(id.into()))];
+    with.extend(
+        parent.map(|parent| Assign::Item(id.into(), ItemAssign::Parent(Some(parent.into())))),
+    );
+    let add = Change::Add {
+        record: Record::Item(id.into()),
+        minted: false,
+        on_repeat: Repeat::Refuse,
+        with,
+    };
+    commit(replica, by, vec![add])
+}
+
+fn set_parent(
+    replica: &mut Replica,
+    by: By<'_>,
+    id: &str,
+    parent: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    model::add_item(replica, id, id, by)?;
-    if parent.is_some() {
-        model::set_parent(replica, id, parent, by)?;
-    }
-    Ok(())
+    let parent = ItemAssign::Parent(parent.map(str::to_owned));
+    commit(replica, by, vec![Change::Set(Assign::Item(id.into(), parent))]).map(drop)
 }
 
 fn set_title(
     title: &'static str,
 ) -> impl Fn(&mut Replica, By<'_>) -> Result<(), Box<dyn std::error::Error>> {
-    move |replica, by| Ok(model::set(replica, &item("x"), field::TITLE, Some(&title), by)?)
+    move |replica, by| {
+        let title = ItemAssign::Title(title.into());
+        commit(replica, by, vec![Change::Set(Assign::Item("x".into(), title))]).map(drop)
+    }
 }
 
 fn conflict(id: &str, field: &str) -> Entry {
@@ -175,7 +200,7 @@ fn conflict(id: &str, field: &str) -> Entry {
 #[test]
 fn concurrent_edits_conflict_and_a_resolution_clears_them_unless_it_races_another_edit() {
     let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
+    pair.user(&pair.mac, &|r, by| add(r, by, "x", None).map(drop));
     pair.spread(&pair.mac);
     pair.user(&pair.mac, &set_title("one"));
     pair.user(&pair.pi, &set_title("two"));
@@ -206,18 +231,18 @@ fn a_move_to_the_top_racing_another_move_conflicts_until_one_is_chosen() {
     pair.user(&pair.mac, &|r, by| {
         add(r, by, "p", None)?;
         add(r, by, "q", None)?;
-        add(r, by, "x", Some("p"))
+        add(r, by, "x", Some("p")).map(drop)
     });
     pair.spread(&pair.mac);
     // The user moves x to the top level, a clear of its parent, while an agent moves it under q.
-    pair.user(&pair.mac, &|r, by| Ok(model::set_parent(r, "x", None, by)?));
-    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| Ok(model::set_parent(r, "x", Some("q"), by)?));
+    pair.user(&pair.mac, &|r, by| set_parent(r, by, "x", None));
+    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| set_parent(r, by, "x", Some("q")));
     pair.exchange();
     let state = pair.assert_settled();
     let parent = &Model::read(&state).unwrap().items["x"].parent;
     assert_eq!(*parent, model::Value::Conflict(vec![None, Some("q".to_owned())]));
     assert!(pair.needs(NOW).contains(&conflict("x", "parent")));
-    pair.user(&pair.pi, &|r, by| Ok(model::set_parent(r, "x", None, by)?));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "x", None));
     pair.spread(&pair.pi);
     let state = pair.assert_settled();
     assert_eq!(Model::read(&state).unwrap().items["x"].parent, model::Value::None);
@@ -230,11 +255,11 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     pair.user(&pair.mac, &|r, by| {
         add(r, by, "a", None)?;
         add(r, by, "b", None)?;
-        add(r, by, "c", Some("a"))
+        add(r, by, "c", Some("a")).map(drop)
     });
     pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| Ok(model::set_parent(r, "a", Some("b"), by)?));
-    pair.user(&pair.pi, &|r, by| Ok(model::set_parent(r, "b", Some("a"), by)?));
+    pair.user(&pair.mac, &|r, by| set_parent(r, by, "a", Some("b")));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", Some("a")));
     pair.exchange();
     let state = pair.assert_settled();
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
@@ -247,11 +272,11 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     );
     readiness.ready(false, "session/mac").unwrap();
     Pair::edit(&pair.mac, "session/mac", NOW, &|r, by| {
-        add(r, by, "d", Some("c"))?;
-        assert_eq!(place::place(r, &["d".to_owned()], by)?, Vec::new(), "nothing to inherit");
+        let added = add(r, by, "d", Some("c"))?;
+        assert_eq!(added.placed(), Vec::new(), "nothing to inherit");
         Ok(())
     });
-    pair.user(&pair.pi, &|r, by| Ok(model::set_parent(r, "b", None, by)?));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", None));
     pair.exchange();
     pair.assert_settled();
     assert!(!pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
@@ -260,13 +285,13 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
 #[test]
 fn squashes_on_both_sides_join_through_tips_the_cache_never_saw() {
     let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
+    pair.user(&pair.mac, &|r, by| add(r, by, "x", None).map(drop));
     pair.spread(&pair.mac);
     // pi holds mac's tip; both squash and write, so pi's next fetch is a forced update to a parentless commit.
     pair.mac.squash().unwrap();
-    pair.user(&pair.mac, &|r, by| add(r, by, "m", None));
+    pair.user(&pair.mac, &|r, by| add(r, by, "m", None).map(drop));
     pair.pi.squash().unwrap();
-    pair.user(&pair.pi, &|r, by| add(r, by, "p", None));
+    pair.user(&pair.pi, &|r, by| add(r, by, "p", None).map(drop));
     pair.exchange();
     let state = pair.assert_settled();
     let model = Model::read(&state).unwrap();
@@ -277,8 +302,8 @@ fn squashes_on_both_sides_join_through_tips_the_cache_never_saw() {
 #[test]
 fn a_replica_holds_the_whole_state_without_another_replicas_logs() {
     let pair = Pair::new();
-    pair.user(&pair.mac, &|r, by| add(r, by, "x", None));
-    pair.user(&pair.pi, &|r, by| add(r, by, "y", None));
+    pair.user(&pair.mac, &|r, by| add(r, by, "x", None).map(drop));
+    pair.user(&pair.pi, &|r, by| add(r, by, "y", None).map(drop));
     pair.exchange();
     pair.assert_settled();
     assert_eq!(git(&pair.pi_path, &["for-each-ref", "refs/heads/log/mac/"]), "", "state refs only");

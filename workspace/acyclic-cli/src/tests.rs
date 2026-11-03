@@ -95,7 +95,6 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::Deleted("a1".into()).into(),
         WriteError::ParentCycle("a1".into()).into(),
         WriteError::LinkCycle(vec!["a1".into()]).into(),
-        WriteError::Checked { field: "state".into(), write: "set_state" }.into(),
         WriteError::SelfLink("a1".into()).into(),
         DeleteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
         ArchiveError::Ineligible { item: "a1".into(), reasons: vec![] }.into(),
@@ -227,38 +226,6 @@ fn the_help_sections_hold_every_command_once() {
         .collect();
     commands.sort_unstable();
     assert_eq!(named, commands);
-}
-
-#[test]
-fn an_actor_may_claim_past_its_own_claims_only() {
-    use acyclic_core::ready::Status;
-    use commands::may_claim;
-    let me = "session/mac";
-    let claimed = |holder: &str| Status::Claimed { holder: holder.into() };
-    let contested = |first: &str, second: &str| Status::Contested {
-        holders: vec![first.into(), second.into()],
-    };
-    for (status, may) in [
-        (Status::Ready, true),
-        (claimed(me), true),
-        (claimed("session/r1"), false),
-        (contested(me, "session/r1"), true),
-        (contested("session/r1", me), false),
-        (Status::Parent, false),
-    ] {
-        assert_eq!(may_claim(Some(&status), me), may, "{status:?}");
-        assert_eq!(
-            commands::may_finish(Some(&status), me),
-            may,
-            "{status:?}: finishing as claiming"
-        );
-    }
-    assert!(!may_claim(None, me));
-    // Finishing again changes nothing, so it needs no claim; a blocked item can't be finished.
-    let blocked = Status::Blocked { waiting: std::collections::BTreeMap::new() };
-    for (status, may) in [(Status::Done, true), (Status::InReview, true), (blocked, false)] {
-        assert_eq!(commands::may_finish(Some(&status), me), may, "{status:?}");
-    }
 }
 
 #[test]
@@ -417,53 +384,6 @@ fn a_closed_pipe_is_an_error_to_return_not_a_panic() {
     let mut ok = Vec::new();
     emit(&mut ok, "text").unwrap();
     assert_eq!(ok, b"text");
-}
-
-#[test]
-fn evidence_must_be_able_to_verify_and_is_not_silently_replaced() {
-    use acyclic_core::model::{By, Evidence, ItemState, Model, add_item, set, set_state};
-    use acyclic_core::schema::{item, kind, repository};
-    use acyclic_core::state::{Replica, State};
-    let user = By { actor: acyclic_core::scope::USER, at: 1 };
-    let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
-    add_item(&mut mac, "a", "A", user).unwrap();
-    let repo = Key::new(kind::REPOSITORY, "r").unwrap();
-    set(&mut mac, &repo, repository::OWNER, Some(&"o"), user).unwrap();
-    let evidence = |repository: &str, commit: &str| Evidence {
-        repository: Some(repository.to_owned()),
-        commit: Some(commit.to_owned()),
-        text: None,
-    };
-    let code = |model: &Model, e: &Evidence| commands::check_evidence(model, e).map_err(|e| e.code);
-    let model = Model::read(mac.state()).unwrap();
-    assert_eq!(code(&model, &evidence("ghost", "abc1234")), Err("not-found"));
-    assert_eq!(code(&model, &evidence("r", "abc1234")), Err("incomplete-repository"));
-    for (name, value) in
-        [(repository::NAME, json!("n")), (repository::DEFAULT_BRANCH, json!("main"))]
-    {
-        set(&mut mac, &repo, name, Some(&value), user).unwrap();
-    }
-    let model = Model::read(mac.state()).unwrap();
-    for bad in ["123", "abc123", "abc123g", &"a".repeat(65), ""] {
-        assert_eq!(code(&model, &evidence("r", bad)), Err("invalid-commit"), "{bad:?}");
-    }
-    for good in ["abc1234", "ABC1234", &"a".repeat(64)] {
-        assert_eq!(code(&model, &evidence("r", good)), Ok(()), "{good}");
-    }
-    assert_eq!(code(&model, &Evidence { text: Some("n".into()), ..Evidence::default() }), Ok(()));
-
-    // Only done items with other evidence are overwritten.
-    let first = evidence("r", "abc1234");
-    let overwrites = |replica: &Replica, e: &Evidence| {
-        commands::overwrites(&Model::read(replica.state()).unwrap().items["a"], e)
-    };
-    assert!(!overwrites(&mac, &first), "an item that isn't done");
-    set(&mut mac, &Key::new(kind::ITEM, "a").unwrap(), item::EVIDENCE, Some(&first), user).unwrap();
-    assert!(!overwrites(&mac, &evidence("r", "def5678")), "an item that isn't done");
-    set_state(&mut mac, "a", ItemState::Done, user).unwrap();
-    assert!(!overwrites(&mac, &first), "the same evidence");
-    assert!(overwrites(&mac, &evidence("r", "def5678")));
-    assert!(overwrites(&mac, &Evidence { text: Some("n".into()), ..Evidence::default() }));
 }
 
 #[test]

@@ -173,7 +173,8 @@ pub fn preview(doc: &Import, before: &Model, by: By<'_>) -> Result<Report, Apply
 }
 
 fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {
-    write::judge(before, &changes(doc, before), by).map_err(|violations| refused(doc, &violations))
+    write::judge(before, &changes(doc, before), by, None)
+        .map_err(|violations| refused(doc, &violations))
 }
 
 /// The document as one change set: each record's fields, then the lists it gives, removals before additions, then

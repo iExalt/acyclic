@@ -57,7 +57,7 @@ fn only_an_item_nothing_refers_to_is_deleted() {
         )
         .unwrap();
     }
-    claim::claim(&mut r, "held", "session/pi", NOW, 60_000, 480 * 60_000).unwrap();
+    claim::claim(&mut r, "held", "session/pi", NOW, (60_000, 480 * 60_000), None).unwrap();
     assert_eq!(refusal(&mut r, "parent", user(NOW)), ["has-children"]);
     // A link either way, and a link of any kind.
     assert_eq!(refusal(&mut r, "a", user(NOW)), ["linked"]);
@@ -197,7 +197,7 @@ fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
     }
     edit(&mut r, &ScopeEdit::Member { item: "a".into(), thread: Some("t".into()) }, user(2))
         .unwrap();
-    claim::claim(&mut r, "u", USER, NOW, 60_000, 480 * 60_000).unwrap();
+    claim::claim(&mut r, "u", USER, NOW, (60_000, 480 * 60_000), None).unwrap();
     let why = |r: &mut Replica, id: &str| match delete_thread(r, id, user(NOW)) {
         Err(DeleteError::ThreadInUse { reasons, .. }) => reasons
             .into_iter()

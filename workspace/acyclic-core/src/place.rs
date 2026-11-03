@@ -62,31 +62,33 @@ pub struct Inherited {
     pub thread: String,
 }
 
-/// Places `items` after an add, a move or an import: an item with no thread joins the one [`passed_down`] names; an
-/// item that has a thread keeps it.
-///
-/// # Errors
-///
-/// Fails when the state layer refuses.
-pub fn place(
-    replica: &mut Replica,
-    items: &[String],
-    by: By<'_>,
-) -> Result<Vec<Inherited>, WriteError> {
-    let model = Model::read(replica.state())?;
-    let mut placed = Vec::new();
-    for item in items {
-        let Some(found) = model.items.get(item) else { continue };
-        if found.thread != Value::None || found.is_done() {
-            continue;
+fixture! {
+    /// Places `items` after an add, a move or an import: an item with no thread joins the one [`passed_down`] names; an
+    /// item that has a thread keeps it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the state layer refuses.
+    fn place(
+        replica: &mut Replica,
+        items: &[String],
+        by: By<'_>,
+    ) -> Result<Vec<Inherited>, WriteError> {
+        let model = Model::read(replica.state())?;
+        let mut placed = Vec::new();
+        for item in items {
+            let Some(found) = model.items.get(item) else { continue };
+            if found.thread != Value::None || found.is_done() {
+                continue;
+            }
+            if let Some(thread) = inherited_thread(&model, item) {
+                let change = ScopeEdit::Member { item: item.clone(), thread: Some(thread.to_owned()) };
+                scope::edit(replica, &change, by)?;
+                placed.push(Inherited { item: item.clone(), thread: thread.to_owned() });
+            }
         }
-        if let Some(thread) = inherited_thread(&model, item) {
-            let change = ScopeEdit::Member { item: item.clone(), thread: Some(thread.to_owned()) };
-            scope::edit(replica, &change, by)?;
-            placed.push(Inherited { item: item.clone(), thread: thread.to_owned() });
-        }
+        Ok(placed)
     }
-    Ok(placed)
 }
 
 #[cfg(test)]

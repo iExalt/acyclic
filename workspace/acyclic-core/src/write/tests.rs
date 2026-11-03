@@ -42,12 +42,12 @@ fn thread(id: &str) -> Change {
 
 /// Commits `changes` at `at`, panicking on a refusal.
 fn commit_ok(replica: &mut Replica, at: Millis, changes: Vec<Change>) -> Outcome {
-    commit(replica, by(at), |_| Ok::<_, ()>(ChangeSet(changes))).unwrap()
+    commit(replica, by(at), None, |_| Ok::<_, ()>(ChangeSet(changes))).unwrap()
 }
 
 /// The rules a refused change set breaks.
 fn refused(replica: &Replica, changes: Vec<Change>) -> Vec<Rule> {
-    let violations = judge(&read(replica), &ChangeSet(changes), by(99)).unwrap_err();
+    let violations = judge(&read(replica), &ChangeSet(changes), by(99), None).unwrap_err();
     violations.into_iter().map(|violation| violation.rule).collect()
 }
 
@@ -79,8 +79,12 @@ fn done_tree() -> Replica {
 #[test]
 fn a_change_that_holds_already_writes_nothing_but_a_conflict_takes_it() {
     let mut a = done_tree();
-    let again =
-        judge(&read(&a), &ChangeSet(vec![item("leaf", ItemAssign::Title("LEAF".into()))]), by(3));
+    let again = judge(
+        &read(&a),
+        &ChangeSet(vec![item("leaf", ItemAssign::Title("LEAF".into()))]),
+        by(3),
+        None,
+    );
     assert!(!again.unwrap().changes());
     // Two replicas retitle it apart: the same title again now settles the conflict.
     let mut b = replica("b");
@@ -254,7 +258,7 @@ fn evidence_needs_done_work_and_an_add_may_refuse_to_repeat_differently() {
         on_repeat: Repeat::Refuse,
         with: vec![Assign::Item("open".into(), ItemAssign::Title(title.into()))],
     };
-    assert!(!judge(&read(&r), &ChangeSet(vec![again("OPEN")]), by(4)).unwrap().changes());
+    assert!(!judge(&read(&r), &ChangeSet(vec![again("OPEN")]), by(4), None).unwrap().changes());
     assert_eq!(refused(&r, vec![again("other")]), [Rule::RepeatDiffers]);
 }
 
@@ -274,7 +278,7 @@ fn a_minted_add_may_not_take_open_works_title_and_a_name_is_taken_by_any_value_a
         [Rule::TitleTaken(Record::Item("open".into()))]
     );
     // Done work's title is free again.
-    assert!(judge(&read(&a), &ChangeSet(vec![minted("twin", "LEAF")]), by(4)).is_ok());
+    assert!(judge(&read(&a), &ChangeSet(vec![minted("twin", "LEAF")]), by(4), None).is_ok());
     let repository = |id: &str, owner: &str| Change::Add {
         record: Record::Repository(id.into()),
         minted: false,
@@ -325,6 +329,125 @@ fn change(tc: &TestCase) -> Change {
 }
 
 /// What the judge projects is what reading the written state gives, across replicas and conflicts.
+/// Ancestry with no clones, so no merge can be checked.
+struct Unmapped;
+
+impl crate::ready::Ancestry for Unmapped {
+    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
+        Err("no clone".into())
+    }
+}
+
+/// The rules finishing `id` breaks, judged with readiness or without it, or none when it is accepted.
+fn finishing(
+    r: &Replica,
+    id: &str,
+    evidence: Option<Evidence>,
+    force: bool,
+    ready: bool,
+) -> Vec<Rule> {
+    let before = read(r);
+    let readiness = ready.then(|| Readiness::new(&r.state, &before, 99, &Unmapped));
+    let finish = Change::Finish { item: id.into(), evidence, force };
+    judge(&before, &ChangeSet(vec![finish]), by(99), readiness.as_ref())
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|violation| violation.rule)
+        .collect()
+}
+
+#[test]
+fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("free", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("parent", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("child", vec![ItemAssign::Parent(Some("parent".into()))]),
+            add("lone", vec![]),
+        ],
+    );
+    assert_eq!(finishing(&r, "free", None, false, true), []);
+    // Without readiness to judge by, only a forced finish passes.
+    assert_eq!(finishing(&r, "free", None, false, false), [Rule::NotReady(None)]);
+    assert_eq!(finishing(&r, "free", None, true, false), []);
+    assert_eq!(
+        finishing(&r, "lone", None, false, true),
+        [Rule::NotReady(Some(Status::Unthreaded))]
+    );
+    assert_eq!(
+        finishing(&r, "parent", None, false, true),
+        [Rule::OpenWork { open: vec!["child".into()], held: None }]
+    );
+    assert_eq!(finishing(&r, "lone", None, true, true), []);
+    // Someone else's claim holds the thread's work back from the finisher.
+    crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), None).unwrap();
+    let held = Status::Claimed { holder: "session/other".into() };
+    assert_eq!(finishing(&r, "free", None, false, true), [Rule::NotReady(Some(held))]);
+    // A parent whose work is done may be finished.
+    commit_ok(&mut r, 3, vec![item("child", ItemAssign::State(ItemState::Done))]);
+    assert_eq!(finishing(&r, "parent", None, false, true), []);
+    let ghost = Change::Finish { item: "ghost".into(), evidence: None, force: true };
+    assert_eq!(refused(&r, vec![ghost]), [Rule::NoRecord(Record::Item("ghost".into()))]);
+}
+
+#[test]
+fn evidence_must_be_able_to_verify_and_done_work_keeps_what_it_was_finished_with() {
+    let mut r = replica("a");
+    let repository = |id: &str, more: Vec<RepositoryAssign>| Change::Add {
+        record: Record::Repository(id.into()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: std::iter::once(RepositoryAssign::Owner("o".into()))
+            .chain(more)
+            .map(|assign| Assign::Repository(id.into(), assign))
+            .collect(),
+    };
+    commit_ok(&mut r, 1, vec![add("a", vec![]), repository("half", vec![])]);
+    let evidence = |repository: &str, commit: &str| Evidence {
+        repository: Some(repository.into()),
+        commit: Some(commit.into()),
+        text: None,
+    };
+    let forced = |r: &Replica, evidence: Evidence| finishing(r, "a", Some(evidence), true, false);
+    let ghost = Rule::NoRecord(Record::Repository("ghost".into()));
+    assert_eq!(forced(&r, evidence("ghost", "abc1234")), [ghost]);
+    let missing = vec!["name", "default-branch"];
+    assert_eq!(
+        forced(&r, evidence("half", "abc1234")),
+        [Rule::IncompleteRepository { repository: "half".into(), missing }]
+    );
+    // A repository the same change set completes is complete.
+    let complete = repository(
+        "half",
+        vec![RepositoryAssign::Name("n".into()), RepositoryAssign::DefaultBranch("main".into())],
+    );
+    let finish_a =
+        |evidence| Change::Finish { item: "a".into(), evidence: Some(evidence), force: true };
+    let both = ChangeSet(vec![complete.clone(), finish_a(evidence("half", "abc1234"))]);
+    assert!(judge(&read(&r), &both, by(2), None).is_ok());
+    commit_ok(&mut r, 2, vec![complete]);
+    for bad in ["123", "abc123", "abc123g", &"a".repeat(65), ""] {
+        assert_eq!(forced(&r, evidence("half", bad)), [Rule::InvalidCommit], "{bad:?}");
+    }
+    for good in ["abc1234", "ABC1234", &"a".repeat(64)] {
+        assert_eq!(forced(&r, evidence("half", good)), [], "{good}");
+    }
+    // Done work keeps the evidence it was finished with, unless forced; the same evidence again changes nothing.
+    commit_ok(&mut r, 3, vec![finish_a(evidence("half", "abc1234"))]);
+    let other = evidence("half", "def5678");
+    assert_eq!(finishing(&r, "a", Some(other.clone()), false, true), [Rule::EvidenceDiffers]);
+    let text = Evidence { text: Some("n".into()), ..Evidence::default() };
+    assert_eq!(finishing(&r, "a", Some(text), false, true), [Rule::EvidenceDiffers]);
+    assert_eq!(forced(&r, other), []);
+    let again = ChangeSet(vec![finish_a(evidence("half", "abc1234"))]);
+    assert!(!judge(&read(&r), &again, by(4), None).unwrap().changes());
+}
+
 #[hegel::test]
 fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
     let mut replicas = [replica("a"), replica("b")];
@@ -361,6 +484,7 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
                         &read(replica),
                         &ChangeSet(vec![item(id, ItemAssign::State(state))]),
                         by(at),
+                        None,
                     )
                     .map(|outcome| write(replica, &outcome, by(at)).unwrap());
                 }
@@ -378,7 +502,6 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
         {
             changes.0.push(item(&link.from, ItemAssign::WaitsFor(link.to.clone(), false)));
         }
-        eprintln!("PROBE conflicts {}", before.conflicts().count());
         // And settle a conflict, which needs a write to a field two replicas wrote apart.
         if let Some((_, id, field)) = before.conflicts().next()
             && tc.draw(gs::booleans())
@@ -393,7 +516,7 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
             };
             changes.0.push(item(id, settle));
         }
-        if let Ok(outcome) = judge(&before, &changes, by(at)) {
+        if let Ok(outcome) = judge(&before, &changes, by(at), None) {
             write(replica, &outcome, by(at)).unwrap();
             assert_eq!(read(replica), outcome.after, "after {changes:?}");
         }

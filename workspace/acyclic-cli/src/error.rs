@@ -117,7 +117,6 @@ impl From<WriteError> for CliError {
             WriteError::LinkCycle(path) => {
                 Self::refused("link-cycle", message).with(json!({"items": path}))
             },
-            WriteError::Checked { .. } => Self::refused("checked-field", message),
             WriteError::SelfLink(_) => Self::refused("self-link", message),
         }
     }

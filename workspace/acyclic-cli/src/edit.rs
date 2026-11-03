@@ -1,9 +1,7 @@
-//! The writes behind `add` and `edit`, which take the same fields: `edit` changes an existing entity and refuses an
-//! unknown one, `add` creates one, and adding it again with what it already holds changes nothing while adding it with
-//! other values is refused. Each runs inside a batch, so a refusal anywhere writes nothing at all.
-//!
-//! Membership and repositories of items and threads are scope edits, as every other write to them is. What an item
-//! waits for is a link entity, written by the model's checked link and unlink.
+//! The change sets behind `add`, `edit` and `done`, and how the CLI tells their refusals. `add` and `edit` take the same
+//! fields: `edit` changes an existing entity and refuses an unknown one, `add` creates one, and adding it again with
+//! what it already holds changes nothing while adding it with other values is refused. The core's write module judges
+//! each change set whole, so a refusal anywhere writes nothing at all.
 //!
 //! The fields hold what the command line named until [`ItemFields::resolve`] or [`ThreadFields::resolve`] turns each
 //! reference into the id of the record it names; the writes take ids.
@@ -11,6 +9,7 @@
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
 use acyclic_core::model::{By, ItemState, Model, Size, WriteError};
+use acyclic_core::ready::{Ancestry, Status};
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
     self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
@@ -20,6 +19,7 @@ use serde_json::json;
 
 use crate::error::{CliError, exit};
 use crate::resolve::{self, Records};
+use crate::view;
 
 /// A single-valued field's change: `--field` sets it, `--no-field` clears it, and neither leaves it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -252,16 +252,17 @@ pub(crate) fn new_repository_id(given: Option<&str>) -> Result<String, CliError>
 }
 
 /// Judges and writes the change set `build` makes from the tracker's model, read once, telling a refusal as the CLI
-/// does. `name` is the `owner/name` a repository write gave.
+/// does. `name` is the `owner/name` a repository write gave; `ancestry` checks merges when finishing work.
 pub(crate) fn commit(
     replica: &mut Replica,
     by: By<'_>,
     name: Option<&str>,
+    ancestry: Option<&dyn Ancestry>,
     build: impl FnOnce(&Model) -> Result<ChangeSet, CliError>,
 ) -> Result<Outcome, CliError> {
-    write::commit(replica, by, build).map_err(|error| match error {
+    write::commit(replica, by, ancestry, build).map_err(|error| match error {
         CommitError::Build(error) => error,
-        CommitError::Refused(violations) => refusal(&violations, name),
+        CommitError::Refused(violations, before) => refusal(&violations, name, &before),
         CommitError::Write(error) => error.into(),
     })
 }
@@ -393,7 +394,7 @@ fn flag(field: &FieldName) -> &'static str {
 
 /// One violation as the CLI has always told it: its code, exit status, message and details. `name` is the
 /// `owner/name` a repository write gave, which a taken name repeats as given.
-fn violation_error(violation: &Violation, name: Option<&str>) -> CliError {
+fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) -> CliError {
     let record = violation.at.as_ref().map(|at| &at.record);
     match &violation.rule {
         Rule::NoRecord(Record::Item(id)) => WriteError::NoItem(id.clone()).into(),
@@ -431,6 +432,50 @@ fn violation_error(violation: &Violation, name: Option<&str>) -> CliError {
             ),
         )
         .with(json!({"root": root})),
+        Rule::NotReady(status) => {
+            let id = record.map_or("", Record::id);
+            CliError::refused(
+                "not-ready",
+                format!(
+                    "item {id} isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show \
+                     {id}` says which"
+                ),
+            )
+            .with(json!({"readiness": status}))
+        },
+        Rule::OpenWork { open, held } => {
+            let id = record.map_or("", Record::id);
+            CliError::refused(
+                "not-ready",
+                format!(
+                    "item {id} can't be finished yet: it has open children or is held back; `acyclic item show {id}` \
+                     says which"
+                ),
+            )
+            .with(json!({"readiness": Status::Parent, "open": open, "held": held}))
+        },
+        Rule::EvidenceDiffers => {
+            let id = record.map_or("", Record::id);
+            let evidence = before.items.get(id).map(|item| view::evidence(before, &item.evidence));
+            CliError::refused(
+                "already-done",
+                format!("item {id} is done with other evidence; pass --force to replace it"),
+            )
+            .with(json!({"evidence": evidence}))
+        },
+        Rule::InvalidCommit => CliError::new(
+            "invalid-commit",
+            exit::USAGE,
+            "a commit is 7 to 64 hexadecimal characters, as git prints it",
+        ),
+        Rule::IncompleteRepository { repository, missing } => CliError::refused(
+            "incomplete-repository",
+            format!(
+                "repository {repository} is missing {}; set it with `acyclic repository edit {repository}`",
+                missing.join(", ")
+            ),
+        )
+        .with(json!({"missing": missing.iter().map(|f| f.replace('-', "_")).collect::<Vec<_>>()})),
         Rule::EvidenceNotDone | Rule::RepeatDiffers | Rule::Contradicts => {
             CliError::refused("refused", violation.to_string())
         },
@@ -441,7 +486,7 @@ fn violation_error(violation: &Violation, name: Option<&str>) -> CliError {
 /// flag that differs. Otherwise the first violation by exit status (a usage error, then one naming nothing, then a
 /// refusal) and then by change speaks for all, its message and details as when it is alone, and with others the
 /// details list every violation's message too.
-pub(crate) fn refusal(violations: &[Violation], name: Option<&str>) -> CliError {
+pub(crate) fn refusal(violations: &[Violation], name: Option<&str>, before: &Model) -> CliError {
     // Every field an add gives another value is told once, where the first is.
     let mut errors: Vec<CliError> = Vec::new();
     let mut repeated = false;
@@ -465,7 +510,7 @@ pub(crate) fn refusal(violations: &[Violation], name: Option<&str>) -> CliError 
                 errors.push(already_exists(what, edit, at.record.id(), &differs));
             },
             (Rule::RepeatDiffers, _) => {},
-            _ => errors.push(violation_error(violation, name)),
+            _ => errors.push(violation_error(violation, name, before)),
         }
     }
     let rank = |error: &CliError| match error.exit {

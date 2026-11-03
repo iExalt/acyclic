@@ -380,29 +380,6 @@ fn equal_concurrent_values_read_as_one_and_unreadable_ones_fail() {
     assert!(matches!(Model::read(&a.state), Err(Error::Format(_))));
 }
 
-#[test]
-fn fields_with_invariants_need_their_checked_writes() {
-    let mut r = replica("a");
-    items(&mut r, &["x", "y"]);
-    let x = item_key("x").unwrap();
-    for name in [field::PARENT, field::STATE] {
-        assert!(matches!(
-            set(&mut r, &x, name, Some(&"y"), by(2)),
-            Err(WriteError::Checked { .. })
-        ));
-    }
-    let link = link_key("x", "y").unwrap();
-    assert!(matches!(
-        set(&mut r, &link, link::FROM, Some(&"x"), by(2)),
-        Err(WriteError::Checked { .. })
-    ));
-    assert!(matches!(
-        set(&mut r, &x, field::THREAD, Some(&"t"), by(2)),
-        Err(WriteError::Checked { .. })
-    ));
-    set(&mut r, &x, field::NOTES, Some(&"fine"), by(2)).unwrap();
-}
-
 /// A name for each variant, written as an exhaustive `match` so that adding a variant fails to compile here until
 /// it is listed in its enum's `ALL`.
 fn listed_in_all() {

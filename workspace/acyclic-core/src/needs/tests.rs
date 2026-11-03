@@ -76,10 +76,10 @@ fn the_state_puts_its_problems_on_the_list() {
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", user(2)).unwrap();
     link(&mut b, "y", "x", user(2)).unwrap();
-    claim::claim(&mut a, "tx", "session/a", 2, NOW, NOW).unwrap();
-    claim::claim(&mut b, "tx", "session/b", 2, NOW, NOW).unwrap();
+    claim::claim(&mut a, "tx", "session/a", 2, (NOW, NOW), None).unwrap();
+    claim::claim(&mut b, "tx", "session/b", 2, (NOW, NOW), None).unwrap();
     // A claim from a clock running ahead of the reader's by more than the skew.
-    claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, NOW, NOW).unwrap();
+    claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, (NOW, NOW), None).unwrap();
     a.join(&b.state).unwrap();
 
     let entries = list(&a);
