@@ -45,7 +45,7 @@ export interface Notice extends Raised {
   text: string;
   offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
   /** The write again, offered when the server was only busy. */
-  retry: { body: Command; after: After } | null;
+  retry: { body: Command; after: After; expected?: readonly Expected[] } | null;
   /** Said of a link waiting for a form to close: dismissing it drops the link. */
   held?: true;
   /** A link to copy by hand, where the browser offers no clipboard. */
@@ -284,7 +284,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
       tell({
         text,
         offer,
-        retry: offer === "retry" ? { body, after } : null,
+        retry: offer === "retry" ? { body, after, ...(expected === undefined ? {} : { expected }) } : null,
         // A plan saved but not read again is out of date wherever the user goes; a refusal is the surface's.
         lasts: offer === "refresh" ? "stale" : "refusal",
         at: null,
@@ -365,7 +365,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
     send: write,
     retry() {
       const again = snap.notice?.retry;
-      return again ? write(again.body, again.after) : Promise.resolve(false);
+      return again ? write(again.body, again.after, null, again.expected) : Promise.resolve(false);
     },
     undo,
     tell,

@@ -42,6 +42,20 @@ function server(titles: Record<string, string> = { a: "A" }) {
     if (fault === "500") return new Response("oops", { status: 500 });
     if (fault === "busy" || fault === "archived" || fault === "changed-since")
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
+    const conditions = (request as { expect?: { kind: string; item?: string; field?: string; value?: unknown }[] })
+      .expect;
+    if (
+      conditions?.some(
+        (condition) =>
+          condition.kind === "item-field" &&
+          condition.field === "title" &&
+          condition.item !== undefined &&
+          plan.get(condition.item) !== condition.value,
+      )
+    )
+      return new Response(
+        JSON.stringify({ ok: false, error: { code: "changed-since", message: "changed since", details: null } }),
+      );
     if (name === "item list") return answer({ items: [...plan.keys()].map((id) => ({ id })) });
     if (name === "item show")
       return answer(
@@ -199,6 +213,25 @@ describe("a session's Undo", () => {
       expect: [{ kind: "item-field", item: "a", field: "title", value: "B" }],
     });
     expect(tracker.plan.get("a")).toBe("B");
+    expect(session.snapshot().notice).toMatchObject({
+      text: "Changed since, so it can't be undone",
+      offer: null,
+      lasts: "refusal",
+    });
+  });
+
+  it("keeps Undo expectations when retrying a busy write", async () => {
+    const { session, tracker } = await renamed();
+    tracker.fail("item edit", "busy");
+    await session.undo();
+    expect(session.snapshot().notice?.offer).toBe("retry");
+    tracker.plan.set("a", "C");
+    await session.retry();
+    expect(tracker.requests.at(-1)).toEqual({
+      command: rename("a", "A"),
+      expect: [{ kind: "item-field", item: "a", field: "title", value: "B" }],
+    });
+    expect(tracker.plan.get("a")).toBe("C");
     expect(session.snapshot().notice).toMatchObject({
       text: "Changed since, so it can't be undone",
       offer: null,
