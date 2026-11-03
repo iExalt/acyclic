@@ -197,6 +197,18 @@ describe("a session's Undo", () => {
     expect(tracker.plan.get("a")).toBe("A");
   });
 
+  it("stays kept over a reload while it is still on offer after a check that failed", async () => {
+    const storage = memory();
+    const { session, tracker } = await renamed(storage);
+    const stored = storage.kept.get(UNDO_KEY);
+    tracker.fail("item list", "500");
+    await session.undo();
+    expect(session.snapshot().notice?.offer).toBe("undo");
+    expect(storage.kept.get(UNDO_KEY)).toBe(stored);
+    const again = open(server({ a: "B" }), storage);
+    expect(again.session.snapshot().notice).toMatchObject({ offer: "undo", restored: true });
+  });
+
   it("is kept over a reload, offered again once a read says it still takes its write back", async () => {
     const storage = memory();
     await renamed(storage);

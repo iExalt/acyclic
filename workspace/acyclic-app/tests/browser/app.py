@@ -1802,13 +1802,24 @@ def failed_add_journey(page, errors, name, failures):
         failures.append(
             f"{name}: after cancelling an add form, its notice stayed, or focus didn't go back to Add"
         )
-    # A refused edit opens the editor again with what was typed, over the item as it was: one added for it.
+    # A refused edit opens the editor again with what was typed, over the item as it was: one added for it, from the
+    # Overview, so the add goes to the Map to show where it landed, from a Map zoomed far out: at a zoom its title
+    # reads at. Zoomed in braces, so nothing comes back: Cytoscape's zoom returns the whole graph, which takes the
+    # browser seconds to serialise.
+    page.get_by_test_id("map").evaluate("m => { m.cy.zoom(0.3); }")
+    page.locator("[data-view=overview]").click()
     page.locator("[data-action=add-top]").click()
     form.locator("input[name=title]").fill("Edit refused")
     form.locator("button[type=submit]").click()
     inspector = page.get_by_test_id("inspector")
     inspector.get_by_role("heading", name="Edit refused").wait_for(timeout=10_000)
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    try:
+        page.locator("[data-view=map][aria-current=page]").wait_for(timeout=5_000)
+        page.wait_for_function("() => document.querySelector('[data-testid=map]').cy.zoom() >= 0.85", timeout=5_000)
+    except PlaywrightTimeout:
+        zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+        failures.append(f"{name}: an item added from the Overview came in on the Map at zoom {zoom:.2f}, past reading")
     page.route(
         "**/api/command",
         lambda route: (

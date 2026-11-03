@@ -303,6 +303,8 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
 
   async function undo() {
     const offered = snap.notice?.offer === "undo" ? snap.notice.undo : undefined;
+    /** How it is kept over a reload, which it stays while it is still on offer. */
+    const keeping = snap.notice?.kept;
     if (offered === undefined || undoing || sending) return;
     undoing = true;
     // Said at once and until it is done: the plan is read again before the undo is sent.
@@ -320,6 +322,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
           offer: "undo",
           retry: null,
           undo: offered,
+          ...(keeping === undefined ? {} : { kept: keeping }),
           lasts: "offer",
           at: null,
         });
