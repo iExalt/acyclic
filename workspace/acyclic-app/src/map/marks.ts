@@ -80,7 +80,7 @@ export function boxMarkSvg(
   const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
   if (stage !== null) parts.push(iconAt(stage, TITLE - 4, middle, palette));
-  // A finished thread's group: its thread's stripe down the left, as its items carry it.
+  // A finished thread's box: its thread's stripe down the left, as its items carry it.
   if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${tall}" fill="${thread.colour}"/>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${parts.join("")}</svg>`;
 }

@@ -24,20 +24,20 @@ const chained = (xWaitsForR: boolean) => [
 ];
 
 describe("foldDone", () => {
-  it("folds a finished thread's leaves in a box into a group named after it, and those groups into the done pile", () => {
+  it("folds a finished thread's leaves in a box into a box named after it, and those boxes into the Done box", () => {
     const folded = fold(chained(false));
     expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);
     expect(folded.model.items.get("~thread p a")).toMatchObject({ title: "Thread a", thread: "a", parent: "~done p" });
-    // b waits for a, and r for b: all finished, and nothing else is tied to them, so all go in the pile together.
+    // b waits for a, and r for b: all finished, and nothing else is tied to them, so all go in the Done box together.
     expect(kidsOf(folded, "~done p")).toEqual(["r", "~thread p a", "~thread p b"]);
     expect(kidsOf(folded, "p")).toEqual(["x", "~done p"]);
     expect(folded.model.items.get("~done p")?.progress).toMatchObject({ done: 5, leaves: 5 });
-    expect(folded.groups.get("~done p")).toEqual({ kind: "done", threads: 2 });
+    expect(folded.doneBoxes.get("~done p")).toEqual({ kind: "rest", threads: 2 });
     expect(folded.model.items.get("a1")?.parent).toBe("~thread p a");
     expect(folded.model.depth.get("a1")).toBe(3);
   });
 
-  it("keeps finished work out of the pile when links tie it, through each other, to work left in the box", () => {
+  it("keeps finished work out of the Done box when links tie it, through each other, to work left in the box", () => {
     const folded = fold(chained(true));
     expect(folded.model.children.has("~done p")).toBe(false);
     expect(kidsOf(folded, "p")).toEqual(["r", "x", "~thread p a", "~thread p b"]);
@@ -55,7 +55,7 @@ describe("foldDone", () => {
       item("b3", "q", [], { state: "in-progress", stage: "in-review", thread: "b" }),
       ready("x", "p", null),
     ]);
-    expect(folded.groups.size).toBe(0);
+    expect(folded.doneBoxes.size).toBe(0);
     expect(kidsOf(folded, "p")).toEqual(["a1", "a2", "b1", "b2", "x"]);
   });
 
@@ -71,16 +71,35 @@ describe("foldDone", () => {
     expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);
   });
 
-  it("makes no group of one: a finished thread's only leaf in a box stays a tile, and a pile needs two", () => {
+  it("makes no done box of one: a finished thread's only leaf in a box stays a tile, and the Done box needs two", () => {
     const one = fold([item("p"), done("a1", "p", "a"), ready("x", "p", null)]);
-    expect(one.groups.size).toBe(0);
+    expect(one.doneBoxes.size).toBe(0);
     const two = fold([item("p"), done("a1", "p", "a"), done("r", "p", null), ready("x", "p", null)]);
     expect(kidsOf(two, "~done p")).toEqual(["a1", "r"]);
   });
 
-  it("makes no pile of a box's whole contents, whose own fold already does that", () => {
+  it("makes no Done box of a box's whole contents, whose own fold already does that", () => {
     const folded = fold([item("p"), done("a1", "p", "a"), done("a2", "p", "a"), done("r", "p", null)]);
     expect(kidsOf(folded, "p")).toEqual(["r", "~thread p a"]);
+  });
+
+  it("makes no Done box beside only archived work, which may be hidden", () => {
+    const folded = fold([
+      item("p"),
+      done("a1", "p", "a"),
+      done("r", "p", null),
+      item("old", "p", [], { stage: "ready", archived: true }),
+    ]);
+    expect(folded.model.children.has("~done p")).toBe(false);
+  });
+
+  it("counts a thread the plan doesn't name as none", () => {
+    const folded = foldDone(
+      buildModel([item("p"), done("a1", "p", "gone"), done("a2", "p", "gone"), ready("x", "p", null)]),
+      () => null,
+    );
+    expect(kidsOf(folded, "~done p")).toEqual(["a1", "a2"]);
+    expect(folded.doneBoxes.get("~done p")).toEqual({ kind: "rest", threads: 0 });
   });
 
   it("leaves a thread's leaves inside a child box to that box", () => {
@@ -98,19 +117,19 @@ describe("foldDone", () => {
 });
 
 describe("a folded model on the Map", () => {
-  it("opens with the groups folded, their links lifted to them and those inside dropped", () => {
+  it("opens with the doneBoxes folded, their links lifted to them and those inside dropped", () => {
     const folded = fold([...chained(true), item("far"), ready("y", "far", null, ["a2"])]);
     const view = visible(
       folded.model,
       { collapsed: collapsedWith(folded.model, new Map()), showArchived: false },
-      folded.groups,
+      folded.doneBoxes,
     );
     const node = view.nodes.find((one) => one.id === "~thread p a");
     expect(node).toMatchObject({
       kind: "collapsed",
       parent: "p",
       note: "2 done",
-      group: { kind: "thread", thread: "a" },
+      doneBox: { kind: "thread", thread: "a" },
     });
     expect(view.edges).toEqual([
       { source: "r", target: "x" },
@@ -121,7 +140,7 @@ describe("a folded model on the Map", () => {
     expect(view.threads.get("a")).toEqual(["~thread p a"]);
   });
 
-  it("opens every group above an item brought into view", () => {
+  it("opens every done box above an item brought into view", () => {
     const folded = fold(chained(false));
     const toggles = expandTo(folded.model, "a1", new Map());
     expect([...toggles]).toEqual([
@@ -132,7 +151,7 @@ describe("a folded model on the Map", () => {
     const view = visible(
       folded.model,
       { collapsed: collapsedWith(folded.model, toggles), showArchived: false },
-      folded.groups,
+      folded.doneBoxes,
     );
     expect(view.nodes.find((one) => one.id === "a1")?.parent).toBe("~thread p a");
     expect(view.nodes.find((one) => one.id === "~done p")).toMatchObject({ kind: "box", note: "5 done in 2 threads" });

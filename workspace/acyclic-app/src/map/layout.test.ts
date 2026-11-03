@@ -241,6 +241,16 @@ describe("elkLayBox", () => {
     expect(shapeAfter(laid, 900, 1192)).toBe(0.8);
   });
 
+  it("stands a box's Done box last among its children aside, whatever order it is given in", async () => {
+    const none = { layout: async (graph: ElkNode) => graph };
+    const children = ["~done p", "a", "b"].map((id) => ({ id, width: LEAF.width, height: LEAF.height }));
+    const laid = await elkLayBox(none)({ id: "p", children, edges: [] });
+    const order = Object.entries(laid.at)
+      .sort(([, one], [, two]) => one.x - two.x || one.y - two.y)
+      .map(([id]) => id);
+    expect(order).toEqual(["a", "b", "~done p"]);
+  });
+
   it("breaks a dependency cycle at its least id", () => {
     const edges = [
       { source: "a", target: "b" },

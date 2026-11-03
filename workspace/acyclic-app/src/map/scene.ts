@@ -131,8 +131,8 @@ export function scene(
       kind: node.kind,
       // A box's, where its work stands as a whole.
       stage: node.kind === "leaf" ? node.stage : node.progress === null ? null : overallStage(node.progress),
-      // A finished thread's group carries its thread, as its stripe shows and a tap on it picks.
-      thread: node.kind === "leaf" || node.group?.kind === "thread" ? node.thread : null,
+      // A finished thread's box carries its thread, as its stripe shows and a tap on it picks.
+      thread: node.kind === "leaf" || node.doneBox?.kind === "thread" ? node.thread : null,
       x: at.x + at.width / 2,
       y: at.y + at.height / 2,
       width: at.width,
@@ -205,19 +205,19 @@ export function scene(
  * collapsed, with how many items it hides, and a parent's leaves by stage take the line under it.
  */
 export function labelOf(
-  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress" | "note" | "group">,
+  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress" | "note" | "doneBox">,
   width: number,
   fonts: Fonts,
 ): string {
   // Backticks set a run as code in the panels; the canvas draws only plain text, so it drops them.
   const text = node.title.replace(/`([^`]+)`/g, "$1");
   if (node.kind === "leaf") return wrap(text, width, 3, fonts.regular).join("\n");
-  // A group says what it holds under its name instead.
+  // A done box says what it holds under its name instead.
   const hidden = node.kind === "collapsed" && node.note === undefined ? ` (+${node.hidden})` : "";
   const title = cut(text, width - fonts.bold(hidden), fonts.bold) + hidden;
   // A folded thread's name takes two lines, as it names what the tile stands for, as a tile's title does.
   const named =
-    node.kind === "collapsed" && node.group?.kind === "thread" ? wrap(text, width, 2, fonts.bold).join("\n") : title;
+    node.kind === "collapsed" && node.doneBox?.kind === "thread" ? wrap(text, width, 2, fonts.bold).join("\n") : title;
   if (node.note !== undefined) return `${named}\n${cut(node.note, width, fonts.bold)}`;
   return node.progress === null ? title : `${title}\n${cut(countsText(node.progress), width, fonts.bold)}`;
 }
