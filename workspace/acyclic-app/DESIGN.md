@@ -226,8 +226,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   opened over the views, `?needs` as notifications send it, opens its view. A link opens over home, one history entry
   per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item shows
   archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's
-  panel carries it beside the title, ticking in place. A device not yet paired keeps the address through pairing, so the
-  link it opened shows once it is.
+  panel carries it beside the title, ticking in place.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you among them, New item, the archived switch, Refresh,
   and every thread, project and item by title or id, grouped, the best first. While a move or link waits for its target,
@@ -278,9 +277,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page
   of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out, rather
-  than show a blank canvas that reads as no plan. A browser the server no longer knows, after `acyclic up --rotate`, is
-  told how to pair again, with the server's port, and offered no Try again or Refresh: coming back to the app once
-  paired reads the plan again.
+  than show a blank canvas that reads as no plan.
 
 ## Voice & copy
 

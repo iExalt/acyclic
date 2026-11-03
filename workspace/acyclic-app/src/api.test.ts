@@ -47,7 +47,7 @@ describe("command", () => {
   });
 
   it("names the status when the answer isn't an envelope", async () => {
-    const fetcher = async () => new Response("unpaired", { status: 401 });
+    const fetcher = async () => new Response("forbidden", { status: 403 });
     await expect(command({ item: "list" }, fetcher)).rejects.toMatchObject({ code: "http" });
   });
 });
@@ -170,14 +170,6 @@ describe("failure", () => {
     expect(bug?.code).toBe("network");
     expect(bug?.message).not.toBe("Can't reach the server");
     expect(failure(new CommandError("busy", "try again"))).toEqual({ code: "busy", message: "Try again" });
-  });
-
-  it("tells a browser the server no longer knows to pair again, on the server's own port", () => {
-    const refused = new CommandError("no-session", "the request carries no session: present the one acyclic up issued");
-    expect(failure(refused, "7479").message).toBe(
-      "This browser isn't paired with acyclic up any more. Run acyclic up --link --port 7479 where it runs, and open the link it prints within five minutes",
-    );
-    expect(failure(refused, "").message).toContain("Run acyclic up --link where it runs");
   });
 
   it("words a refusal the server names by id for people, and starts any other as a sentence", () => {

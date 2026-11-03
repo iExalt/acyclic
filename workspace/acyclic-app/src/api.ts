@@ -139,15 +139,10 @@ export class CommandError extends Error {
   }
 }
 
-/**
- * A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. A browser
- * the server no longer knows, since `acyclic up --rotate` replaced the session it paired with, is told how to pair
- * again, with the server's `port`.
- */
-export function failure(err: unknown, port = globalThis.location?.port ?? ""): { code: string; message: string } {
+/** A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. */
+export function failure(err: unknown): { code: string; message: string } {
   if (err instanceof CommandError) {
-    const said = err.code === "no-session" ? pairAgain(port) : REFUSALS[err.code];
-    return { code: err.code, message: said ?? sentence(err.message) };
+    return { code: err.code, message: REFUSALS[err.code] ?? sentence(err.message) };
   }
   return { code: "network", message: err instanceof Error ? err.message : String(err) };
 }
@@ -171,12 +166,6 @@ function sentence(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
-/** What a browser that isn't paired with the server on `port` (empty for the scheme's own) should do. */
-export function pairAgain(port: string): string {
-  const flag = port === "" ? "" : ` --port ${port}`;
-  return `This browser isn't paired with acyclic up any more. Run acyclic up --link${flag} where it runs, and open the link it prints within five minutes`;
-}
-
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
 /**
@@ -185,7 +174,7 @@ export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
  */
 export type Command = string | Record<string, unknown>;
 
-/** Runs one command as the paired browser's user; the session cookie rides along, since the page is same-origin. */
+/** Runs one command as the user. */
 export async function command<T>(body: Command, fetcher: Fetch = fetch): Promise<T> {
   // A request that never reached the server says so in each browser's own words ("Failed to fetch", "Load
   // failed"…), so it's told in the app's.

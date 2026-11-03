@@ -94,7 +94,7 @@ export default defineConfig({
 });
 
 /**
- * In development (`mise run app:dev`), passes the API and the pairing link to `acyclic up` at `origin`, as that server's
+ * In development (`mise run app:dev`), passes the API to `acyclic up` at `origin`, as that server's
  * own origin: it refuses a request from any other.
  */
 function upstream(origin: string | undefined) {
@@ -107,5 +107,5 @@ function upstream(origin: string | undefined) {
         if (request.hasHeader("origin")) request.setHeader("origin", origin);
       }),
   };
-  return { "/api": route, "/login": route };
+  return { "/api": route };
 }
