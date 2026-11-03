@@ -57,6 +57,50 @@ fn expected_fields_and_one_wait_edge_match_the_model_values() {
     .unwrap();
     assert_eq!(mismatch.len(), 1);
     assert_eq!(mismatch[0].actual, Json::Bool(true));
+
+    for (item, target) in [("gone", "b"), ("a", "gone")] {
+        let mismatch = check_expected(
+            &r.state,
+            &read(&r),
+            &[Expectation::WaitsFor { item: item.into(), target: target.into(), present: false }],
+            4,
+        )
+        .unwrap();
+        assert_eq!(mismatch.len(), 1);
+        assert_eq!(mismatch[0].actual["missing_items"].as_array().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn expected_thread_title_and_brief_match_and_mismatch() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![thread("t")]);
+    let expected = [
+        Expectation::ThreadField {
+            thread: "t".into(),
+            field: ExpectedThreadField::Title,
+            value: ExpectedValue::One("T".into()),
+        },
+        Expectation::ThreadField {
+            thread: "t".into(),
+            field: ExpectedThreadField::Brief,
+            value: ExpectedValue::Unset(()),
+        },
+    ];
+    assert_eq!(check_expected(&r.state, &read(&r), &expected, 2).unwrap(), Vec::new());
+    let mismatch = check_expected(
+        &r.state,
+        &read(&r),
+        &[Expectation::ThreadField {
+            thread: "t".into(),
+            field: ExpectedThreadField::Title,
+            value: ExpectedValue::One("stale".into()),
+        }],
+        2,
+    )
+    .unwrap();
+    assert_eq!(mismatch.len(), 1);
+    assert_eq!(mismatch[0].actual, json!("T"));
 }
 
 #[test]
@@ -102,6 +146,7 @@ fn expected_conflict_values_keep_their_order_and_malformed_conditions_are_reject
         json!({"kind": "waits-for", "item": "a", "target": "b", "present": true, "ignore": true}),
         json!({"kind": "item-field", "item": "a", "field": "title", "value": {"other": "x"}}),
         json!({"kind": "item-field", "item": "a", "field": "title", "value": {"conflict": []}}),
+        json!({"kind": "item-field", "item": "a", "field": "title"}),
     ] {
         assert!(serde_json::from_value::<Expectation>(invalid).is_err());
     }

@@ -286,7 +286,9 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         "command": {"item": {"edit": {"item": item, "title": "B"}}},
         "expect": [
             {"kind": "item-field", "item": item, "field": "title", "value": "A"},
-            {"kind": "item-field", "item": item, "field": "notes", "value": null}
+            {"kind": "item-field", "item": item, "field": "notes", "value": null},
+            {"kind": "thread-field", "thread": thread, "field": "title", "value": "T"},
+            {"kind": "thread-field", "thread": thread, "field": "brief", "value": null}
         ]
     });
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &accepted.to_string());
@@ -301,7 +303,10 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
     let before = snapshot();
     let stale = json!({
         "command": {"item": {"edit": {"item": item, "title": "C"}}},
-        "expect": [{"kind": "item-field", "item": item, "field": "title", "value": "A"}]
+        "expect": [
+            {"kind": "item-field", "item": item, "field": "title", "value": "A"},
+            {"kind": "thread-field", "thread": thread, "field": "title", "value": "stale"}
+        ]
     });
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &stale.to_string());
     let refusal: Value = serde_json::from_str(&body).unwrap();
@@ -310,7 +315,23 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         (StatusCode::CONFLICT, Some("changed-since"))
     );
     assert_eq!(refusal["error"]["details"]["mismatches"][0]["actual"], json!("B"));
+    assert!(
+        refusal["error"]["details"]["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mismatch| mismatch["actual"] == json!("T"))
+    );
     assert_eq!(snapshot(), before, "a refused guard must not stamp the clock or renew a claim");
+
+    let missing_edge = json!({
+        "command": {"item": {"edit": {"item": item, "title": "C"}}},
+        "expect": [{"kind": "waits-for", "item": item, "target": "01900000-0000-7000-8000-0000000000b1", "present": false}]
+    });
+    let (status, body) =
+        send(&router, Method::POST, "/api/command", &pass, &missing_edge.to_string());
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "changed-since".into()));
+    assert_eq!(snapshot(), before, "a missing endpoint is not an absent edge");
 
     let malformed = json!({
         "command": {"item": {"edit": {"item": item, "title": "C"}}},
@@ -319,6 +340,15 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &malformed.to_string());
     assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, "usage".into()));
     assert_eq!(snapshot(), before, "an unsupported predicate must be rejected before dispatch");
+
+    let missing_value = json!({
+        "command": {"item": {"edit": {"item": item, "title": "C"}}},
+        "expect": [{"kind": "item-field", "item": item, "field": "title"}]
+    });
+    let (status, body) =
+        send(&router, Method::POST, "/api/command", &pass, &missing_value.to_string());
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, "usage".into()));
+    assert_eq!(snapshot(), before, "a missing expected value is not an unset expectation");
 
     // The original raw command body remains a supported API request.
     let legacy = json!({"item": {"edit": {"item": item, "title": "D"}}});

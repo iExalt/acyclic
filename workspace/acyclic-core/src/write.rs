@@ -33,6 +33,15 @@ pub enum Expectation {
         /// Its expected value, including the ordered values of a conflict.
         value: ExpectedValue,
     },
+    /// A thread's title or brief as read by the model; null means unset.
+    ThreadField {
+        /// The thread.
+        thread: String,
+        /// A field an exact edit can restore.
+        field: ExpectedThreadField,
+        /// Its expected value, including the ordered values of a conflict.
+        value: ExpectedValue,
+    },
     /// Whether one item waits for one other item.
     WaitsFor {
         /// The waiting item.
@@ -65,6 +74,16 @@ pub enum ExpectedItemField {
     Notes,
     /// The size.
     Size,
+}
+
+/// A thread field an exact edit can restore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExpectedThreadField {
+    /// The title.
+    Title,
+    /// The brief.
+    Brief,
 }
 
 /// A model value, serialized as null, one scalar, or a conflict with ordered sides.
@@ -153,7 +172,30 @@ pub fn check_expected(
                 }
                 .expect("model values serialize")
             },
+            Expectation::ThreadField { thread, field, .. } => {
+                let Some(thread) = model.threads.get(thread) else {
+                    mismatches
+                        .push(Mismatch { expectation: expectation.clone(), actual: Json::Null });
+                    continue;
+                };
+                match field {
+                    ExpectedThreadField::Title => serde_json::to_value(&thread.title),
+                    ExpectedThreadField::Brief => serde_json::to_value(&thread.brief),
+                }
+                .expect("model values serialize")
+            },
             Expectation::WaitsFor { item, target, .. } => {
+                if !model.items.contains_key(item) || !model.items.contains_key(target) {
+                    let missing = [item, target]
+                        .into_iter()
+                        .filter(|id| !model.items.contains_key(*id))
+                        .collect::<Vec<_>>();
+                    mismatches.push(Mismatch {
+                        expectation: expectation.clone(),
+                        actual: serde_json::json!({"missing_items": missing}),
+                    });
+                    continue;
+                }
                 Json::Bool(model.links.iter().any(|link| link.from == *item && link.to == *target))
             },
             Expectation::StartedAtMost { item, .. } => {
@@ -176,7 +218,7 @@ pub fn check_expected(
             },
         };
         let matches = match expectation {
-            Expectation::ItemField { value, .. } => {
+            Expectation::ItemField { value, .. } | Expectation::ThreadField { value, .. } => {
                 actual == serde_json::to_value(value).expect("expected values serialize")
             },
             Expectation::WaitsFor { present, .. } => actual == Json::Bool(*present),
