@@ -3,16 +3,10 @@
 // on, a refusal once the surface that raised it closes, a form's warning with the form, and what is offered (Undo, a
 // refresh that failed) whatever the user does next. Pure, so the rules are tested without a browser.
 
-import type { Layer } from "./layers";
-import type { View } from "./Shell";
+import type { Layer, Place } from "./nav";
 
-/** Where the user is: the panel on top, the item and the thread open, and the view under them. */
-export interface Place {
-  layer: Layer | null;
-  item: string | null;
-  thread: string | null;
-  view: View;
-}
+/** Where the user is, as they see it: the panel on top, the item drawn and the thread open, and the view under them. */
+export type Seen = Pick<Place, "item" | "thread" | "view"> & { layer: Layer | null };
 
 /**
  * What a notice is, which says how long it lasts:
@@ -27,12 +21,12 @@ export type Lasts = "news" | "refusal" | "offer" | "stale" | "form";
 export interface Raised {
   lasts: Lasts;
   /** Where it was first shown, or null until it has been. */
-  at: Place | null;
+  at: Seen | null;
 }
 
 export type NoticeEvent =
   /** The user is now at `to`; a notice not yet shown is shown here. */
-  | { kind: "moved"; to: Place }
+  | { kind: "moved"; to: Seen }
   /** A write starts. */
   | { kind: "write" }
   /** A read of the plan landed. */
@@ -55,7 +49,7 @@ export function noticeAfter<T extends Raised>(notice: T | null, event: NoticeEve
   return notice;
 }
 
-const same = (a: Place, b: Place) =>
+const same = (a: Seen, b: Seen) =>
   a.layer === b.layer && a.item === b.item && a.thread === b.thread && a.view === b.view;
 
 /**
@@ -63,7 +57,7 @@ const same = (a: Place, b: Place) =>
  * such as a move waiting for its target or the add form, is the same surface for as long as it stays open, so a
  * refused target is said for as long as the move waits.
  */
-function sameSurface(a: Place, b: Place): boolean {
+function sameSurface(a: Seen, b: Seen): boolean {
   if (a.layer !== b.layer) return false;
   if (a.layer === "item") return a.item === b.item;
   if (a.layer === "thread") return a.thread === b.thread;

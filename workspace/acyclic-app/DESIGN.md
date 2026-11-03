@@ -206,7 +206,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Views are places.** Overview, Map, Threads and Needs you are views; the one shown carries `aria-current="page"`
   and is filled, and a phone's bar names it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
-- **Layers stack in one order** (`src/layers.ts`), with one history entry each, so Escape and Back close the top one.
+- **Layers stack in one order** (`src/nav.ts`), with one history entry each, so Escape and Back close the top one.
 - **An item or a thread opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you, or
   a thread from anywhere, shows on the Map (the user's call, so every thread opens the same way), and one Back,
   Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the focus on the row

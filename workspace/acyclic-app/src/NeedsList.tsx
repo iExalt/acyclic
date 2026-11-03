@@ -2,24 +2,14 @@
 // allows. Each entry is a line, with what it names to select under it, then the actions the app can take on it, so
 // the button comes after what it acts on.
 
-import { type RefObject, useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
+import type { NeedsLeft } from "./nav";
 import { type Need, needView, threadLabel, together } from "./needs";
 import { Prose } from "./Prose";
-
-/**
- * Where the view was left for an item or a thread an entry named, which shows on the Map: how far it was scrolled, and
- * the entry and control picked, so closing what it opened comes back to the list as it was, the focus on that control.
- */
-export interface LeftAt {
-  top: number;
-  entry: string;
-  /** A selector for the control within the entry. */
-  control: string;
-}
 
 export interface NeedsListProps {
   needs: Need[];
@@ -33,9 +23,10 @@ export interface NeedsListProps {
   /** The entry to open at, as the Overview's row for it asks: scrolled to, marked and focused, but none of its actions,
    *  so a stray Enter decides nothing. */
   at?: string | null;
-  /** Where the view was left, kept by the app while it isn't shown: set as an entry opens what it names, and taken
-   *  back, then cleared, as the view shows again. */
-  left: RefObject<LeftAt | null>;
+  /** Says where the view is left, as an entry opens what it names, for the app to keep while it isn't shown. */
+  onLeave: (left: NeedsLeft) => void;
+  /** Where the view was left, asked back as it shows again: each new one taken back once. */
+  restore?: NeedsLeft | undefined;
 }
 
 export function NeedsList({
@@ -47,7 +38,8 @@ export function NeedsList({
   onSelect,
   onPickThread,
   at = null,
-  left,
+  onLeave,
+  restore,
 }: NeedsListProps) {
   // Same-cause entries as one.
   const views = together(needs.map((need) => needView(need, lines, titleOf)));
@@ -66,9 +58,13 @@ export function NeedsList({
   };
   // Back from what an entry opened, the list is as it was left; else at the entry asked for, if any. Before paint, so
   // the list never shows at its top first.
+  const seen = useRef<{ target: string | null; restore: NeedsLeft | undefined } | null>(null);
   useLayoutEffect(() => {
-    const was = left.current;
-    left.current = null;
+    const before = seen.current;
+    seen.current = { target, restore };
+    const was = restore !== undefined && restore !== before?.restore ? restore : null;
+    // Only a new ask moves the list: the request going, as the app moves on, or the same target again, leaves it.
+    if (was === null && before !== null && before.target === target) return;
     const scroller = page.current;
     if (scroller === null) return;
     if (was !== null) {
@@ -81,10 +77,10 @@ export function NeedsList({
     const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(target)}"]`);
     entry?.scrollIntoView({ block: "start" });
     entry?.focus({ preventScroll: true });
-  }, [target, left]);
+  }, [target, restore]);
   /** Keeps where the view is, for the item or thread an entry opens, then opens it. */
   const leave = (entry: string, control: string, open: () => void) => () => {
-    left.current = { top: page.current?.scrollTop ?? 0, entry, control };
+    onLeave({ top: page.current?.scrollTop ?? 0, entry, control });
     open();
   };
   return (

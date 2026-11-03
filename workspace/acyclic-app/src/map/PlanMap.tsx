@@ -83,24 +83,25 @@ export interface PlanMapProps {
   onSelect: (item: string | null) => void;
   /**
    * An item to bring into view, expanding the boxes above it, while `pin` (or its nearest drawn ancestor) holds still
-   * on screen. A new `n` asks again.
+   * on screen. A new object asks again.
    */
-  focus: Focus | null;
-  /** A thread to frame, its items fitted in the part of the Map nothing covers. A new `n` asks again. */
-  framed?: Framed | null;
+  focus?: Focus | undefined;
+  /**
+   * A thread to frame, its items fitted in the part of the Map nothing covers. A new object asks again, and an ask
+   * waits for the Map to be drawn, even once the prop has moved on.
+   */
+  framed?: Framed | undefined;
   /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
   onPick: ((item: string | null) => void) | null;
 }
 
 export interface Framed {
   thread: string;
-  n: number;
 }
 
 export interface Focus {
   id: string;
   pin: string | null;
-  n: number;
 }
 
 export default function PlanMap({
@@ -112,7 +113,7 @@ export default function PlanMap({
   selected,
   onSelect,
   focus,
-  framed = null,
+  framed,
   onPick,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -144,7 +145,7 @@ export default function PlanMap({
   // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
     const core = cy.current;
-    if (focus === null) return;
+    if (focus === undefined) return;
     if (core === null) {
       // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
       shown.current = focus.id;
@@ -359,13 +360,17 @@ export default function PlanMap({
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
   // user came to the Map for is framed instead.
   const sought = useRef<string | null>(null);
-  const framedDone = useRef(0);
+  const toFrame = useRef(framed);
+  const framedSeen = useRef(framed);
   useEffect(() => {
+    if (framed !== undefined && framed !== framedSeen.current) toFrame.current = framed;
+    framedSeen.current = framed;
     const core = cy.current;
     const element = host.current;
-    if (framed === null || framed.n === framedDone.current || framed.thread !== thread) return;
+    const asked = toFrame.current;
+    if (asked === undefined || asked.thread !== thread) return;
     if (core === null || element === null || drawn === null) return;
-    framedDone.current = framed.n;
+    toFrame.current = undefined;
     sought.current = thread;
     const boxOf = (kind: (node: SceneNode) => boolean) =>
       drawn.nodes.flatMap((node) => {

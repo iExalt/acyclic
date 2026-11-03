@@ -25,8 +25,8 @@ export interface InspectorProps {
   /** A linked item's stage, to show beside it. */
   stageOf: (id: string) => Stage | undefined;
   onSelect: (id: string) => void;
-  /** Counts the keyboard's asks to edit: each new count opens the editor, as Edit does. */
-  editAsked: number;
+  /** The keyboard's ask to edit: each new one opens the editor, as Edit does. */
+  edit?: object | undefined;
   /** Whether single-key shortcuts are on, so the buttons say their keys. */
   shortcuts: boolean;
   /** Picks the item's thread, which closes the item to show the thread's panel. */
@@ -46,8 +46,8 @@ export interface InspectorProps {
   onCommand: (command: Command) => void;
   /** Saves its fields, with the draft to draw at once. */
   onSave: (command: Command, edited: Edited) => void;
-  /** The editor's draft, open again after a save failed, or null. */
-  reopened: Edited | null;
+  /** The editor's draft, asked open again after a save failed: each new ask opens the editor with it. */
+  reopen?: { edited: Edited } | undefined;
   threads: Thread[];
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
@@ -61,7 +61,7 @@ export function Inspector({
   titleOf,
   stageOf,
   onSelect,
-  editAsked,
+  edit,
   shortcuts,
   onPickThread,
   onUnlink,
@@ -74,20 +74,30 @@ export function Inspector({
   onEditorClosed,
   onCommand,
   onSave,
-  reopened,
+  reopen,
   threads,
   lines,
   needs,
   busy,
 }: InspectorProps) {
-  const [editing, setEditing] = useState(reopened !== null);
+  const [editing, setEditing] = useState(false);
   // An ask from the keyboard, made after the panel opened; one made before belongs to an earlier panel.
-  const asked = useRef(editAsked);
+  const asked = useRef(edit);
   useEffect(() => {
-    if (editAsked === asked.current) return;
-    asked.current = editAsked;
-    if (!busy) setEditing(true);
-  }, [editAsked, busy]);
+    if (edit === asked.current) return;
+    asked.current = edit;
+    if (edit !== undefined && !busy) setEditing(true);
+  }, [edit, busy]);
+  /** What the user wrote, open again once their save failed. */
+  const [reopened, setReopened] = useState<Edited | null>(null);
+  const reopenSeen = useRef(reopen);
+  useEffect(() => {
+    if (reopen === reopenSeen.current) return;
+    reopenSeen.current = reopen;
+    if (reopen === undefined) return;
+    setReopened(reopen.edited);
+    setEditing(true);
+  }, [reopen]);
   /** A button's key, for assistive technology and a tooltip, while shortcuts are on. */
   const key = (label: string, letter: string) =>
     shortcuts ? { title: `${label} (${letter})`, "aria-keyshortcuts": letter } : {};
@@ -253,10 +263,12 @@ export function Inspector({
           threads={threads.map((one) => ({ id: one.id, label: one.title }))}
           initial={reopened}
           busy={busy}
-          onSave={(edit, edited) => {
+          onSave={(command, edited) => {
             setEditing(false);
+            // Sent with what it drew: a failure asks the editor open again with it.
+            setReopened(null);
             onEditorClosed();
-            onSave(edit, edited);
+            onSave(command, edited);
           }}
           onCancel={() => {
             setEditing(false);

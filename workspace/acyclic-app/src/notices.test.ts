@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { noticeAfter as after, type Lasts, type Place } from "./notices";
+import { noticeAfter as after, type Lasts, type Seen } from "./notices";
 
-const map: Place = { layer: null, item: null, thread: null, view: "map" };
-const item: Place = { ...map, layer: "item", item: "i1" };
-const raised = (lasts: Lasts, at: Place | null = item) => ({ lasts, at });
-const moved = (to: Place) => ({ kind: "moved" as const, to });
+const map: Seen = { layer: null, item: null, thread: null, view: "map" };
+const item: Seen = { ...map, layer: "item", item: "i1" };
+const raised = (lasts: Lasts, at: Seen | null = item) => ({ lasts, at });
+const moved = (to: Seen) => ({ kind: "moved" as const, to });
 
 describe("a notice's life", () => {
   it("is shown where the user is when it first shows, whatever moved in the same step", () => {
@@ -24,10 +24,10 @@ describe("a notice's life", () => {
     expect(after(raised("refusal"), moved({ ...item, thread: "t1" }))).toEqual(raised("refusal"));
     expect(after(raised("refusal"), moved({ ...item, item: "i2" }))).toBeNull();
     expect(after(raised("refusal"), moved(map))).toBeNull();
-    const thread: Place = { ...map, layer: "thread", thread: "t1" };
+    const thread: Seen = { ...map, layer: "thread", thread: "t1" };
     expect(after(raised("refusal", thread), moved({ ...thread, thread: "t2" }))).toBeNull();
     // Any other layer, such as the outline's sheet, is the same surface whatever view is under it.
-    const sheet: Place = { ...map, layer: "projects" };
+    const sheet: Seen = { ...map, layer: "projects" };
     expect(after(raised("refusal", sheet), moved({ ...sheet, view: "overview" }))).toEqual(raised("refusal", sheet));
     expect(after(raised("refusal", map), moved({ ...map, view: "threads" }))).toBeNull();
   });

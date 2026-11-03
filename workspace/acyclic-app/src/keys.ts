@@ -3,7 +3,7 @@
 // ignored while the user is typing, composing, holding a modifier or a form holds what they typed, and all of them
 // can be turned off from the menu (WCAG 2.1.4). Pure, so the rules are tested without a browser.
 
-import type { Layer } from "./layers";
+import type { Layer } from "./nav";
 import type { View } from "./Shell";
 
 export type KeyAction =
