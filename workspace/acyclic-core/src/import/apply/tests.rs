@@ -3,7 +3,9 @@ use serde_json::json;
 use super::*;
 use crate::import::State as Planned;
 use crate::import::tests::{id, item, valid};
-use crate::model::{ItemState, Value};
+use crate::model::{self, ItemState, Value};
+use crate::schema::item as field;
+use crate::scope::ScopeEdit;
 use crate::scope::USER;
 use crate::state::{Millis, ReplicaId, State};
 
@@ -266,7 +268,7 @@ fn a_repository_name_another_record_would_share_is_refused_in_any_case() {
 }
 
 #[test]
-fn open_work_left_under_an_archived_root_is_refused_naming_the_root_once() {
+fn new_work_under_an_archived_root_is_refused_and_done_work_set_back_is_reopened() {
     let mut r = imported();
     // 10 and its subtree done, then archived.
     for n in [10, 11] {
@@ -280,13 +282,24 @@ fn open_work_left_under_an_archived_root_is_refused_naming_the_root_once() {
         by(USER, 3),
     )
     .unwrap();
+    // New work under the archived root would be hidden.
     let mut doc = Import::new();
-    doc.items =
-        vec![item(11, Some(Planned::Backlog), None), item(12, Some(Planned::Backlog), None)];
+    doc.items = vec![item(30, None, Some(10)), item(31, None, Some(11))];
     let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
         panic!("open work under an archived root accepted")
     };
     assert_eq!(errors, [ValidationError::ArchivedNotDone(id(10))]);
+    // Done work set back is reopened, as `item reopen` does: flagged, and out of the archive above it.
+    doc.items = vec![item(11, Some(Planned::Backlog), Some(10))];
+    let report = apply(&doc, &mut r, by(USER, 5)).unwrap();
+    let m = model(&r);
+    assert_eq!(m.items[&id(11)].reopened, Value::One(model::Reopened { archived: true }));
+    assert_eq!(m.items[&id(10)].archived, Value::None);
+    let fields = |n: u8| -> Vec<&str> {
+        let row = report.changes.iter().find(|c| c.name == Name::Id { id: id(n) }).unwrap();
+        row.fields.keys().map(String::as_str).collect()
+    };
+    assert_eq!((fields(10), fields(11)), (vec!["archived"], vec!["reopened", "state"]));
 }
 
 #[test]

@@ -12,7 +12,6 @@ use acyclic_core::ids;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
-use acyclic_core::place;
 use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
 use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
@@ -614,22 +613,18 @@ impl<'a> Session<'a> {
             CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
         })?;
         let doc = Import::from_json(&text)?;
-        // Imported work with no thread of its own joins the one passed down to it, as an add's does.
-        let keys: Vec<String> = doc.items.iter().map(|item| item.id.clone()).collect();
         if dry_run {
             let (_, state) = self.tracker.load()?;
-            let mut replica = Replica::open(self.tracker.replica().clone(), state);
+            let replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let by = By { actor: &self.actor, at };
-            let report = import::apply(&doc, &mut replica, by)?;
-            let placed = place::place(&mut replica, &keys, by)?;
-            return Ok(import_json(&report, &placed, true));
+            let report = import::preview(
+                &doc,
+                &Model::read(replica.state())?,
+                By { actor: &self.actor, at },
+            )?;
+            return Ok(import_json(&report, true));
         }
-        self.write(|replica, by| {
-            let report = import::apply(&doc, replica, by)?;
-            let placed = place::place(replica, &keys, by)?;
-            Ok(import_json(&report, &placed, false))
-        })
+        self.write(|replica, by| Ok(import_json(&import::apply(&doc, replica, by)?, false)))
     }
 
     fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
@@ -1053,11 +1048,7 @@ fn set_origin(
 
 /// An import's result: what it changed, in counts and field by field, and the threads items joined, as
 /// `{item, thread}`. A dry run changes nothing.
-pub(crate) fn import_json(
-    report: &import::Report,
-    inherited: &[place::Inherited],
-    dry_run: bool,
-) -> Json {
+pub(crate) fn import_json(report: &import::Report, dry_run: bool) -> Json {
     let mut data = json!({
         "dry_run": dry_run,
         "counts": {
@@ -1068,7 +1059,7 @@ pub(crate) fn import_json(
             "fields": report.fields,
         },
         "changes": report.changes,
-        "placed": inherited,
+        "placed": report.placed,
     });
     if dry_run {
         data["changed"] = json!(false);

@@ -1,10 +1,10 @@
-//! Applying a validated import to a replica: an upsert in one pass. Every field the document sets is written when it
-//! differs, so importing the same document twice writes nothing. A single value the document leaves out is kept; a
-//! list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`) is the whole of it, so what the
-//! list leaves out is removed, and removals are written before additions. The document is checked once as a whole,
-//! and the result once against what the tracker holds: references, repository names, cycles it would close, and evidence and archiving
-//! on work that isn't done. The writes themselves skip the per-write checks, which would read the whole model each
-//! time. A state is set as given: done work set back isn't flagged as reopened, as `acyclic item reopen` does.
+//! Applying a validated import to a replica: an upsert, judged as one change set by [`crate::write`]. Every field the
+//! document sets is written when it differs, so importing the same document twice writes nothing. A single value the
+//! document leaves out is kept; a list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`)
+//! is the whole of it, so what the list leaves out is removed. The judge refuses references to nothing, repository
+//! names another record holds, cycles the import would close, and evidence and archiving on work that isn't done, and
+//! brings what any write brings: done work set back is reopened, and new or moved work with no thread joins the one
+//! passed down to it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -13,10 +13,14 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::model::{self, By, Evidence, ItemState, Model, WriteError};
-use crate::schema::{item as field, kind, link, repository, thread};
-use crate::scope::{self, ScopeEdit};
-use crate::state::{Error, Key, Replica};
+use crate::model::{By, Evidence, ItemState, Model, Size, WriteError};
+use crate::place::Inherited;
+use crate::schema::kind;
+use crate::state::{Error, Replica};
+use crate::write::{
+    self, Assign, Change as Write, ChangeSet, FieldAddr, FieldName, ItemAssign, Outcome, Record,
+    Repeat, RepositoryAssign, Rule, ThreadAssign, Violation, Written,
+};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -33,6 +37,9 @@ pub struct Report {
     pub fields: usize,
     /// Each record the import creates, changes or removes, in the order they were met.
     pub changes: Vec<Change>,
+    /// The new or moved work with no thread that joined the one passed down to it.
+    #[serde(skip)]
+    pub placed: Vec<Inherited>,
 }
 
 /// What an import did to one record.
@@ -146,426 +153,383 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
-    for item in &doc.items {
-        if model::is_deleted(&replica.state, &model::item_key(&item.id)?) {
-            return Err(WriteError::Deleted(item.id.clone()).into());
-        }
-    }
-    for thread in &doc.threads {
-        if model::is_deleted(&replica.state, &crate::claim::thread_key(&thread.id)?) {
-            return Err(WriteError::Deleted(thread.id.clone()).into());
-        }
-    }
     let before = Model::read(&replica.state)?;
-    let mut errors = unknown_references(doc, &before);
-    errors.extend(taken_names(doc, &before));
-    if !errors.is_empty() {
-        return Err(ApplyError::Invalid(errors));
-    }
-    let cycles_before: BTreeSet<Vec<String>> =
-        before.parent_cycles().into_iter().chain(before.link_cycles()).collect();
-    let mut writer =
-        Writer { replica, by, before: &before, report: Report::default(), rows: BTreeMap::new() };
-    writer.records(doc)?;
-    // Removals first, so a document that turns a link around never holds both ways at once.
-    writer.lists(doc, false)?;
-    writer.lists(doc, true)?;
-    writer.members(doc)?;
-
-    let after = Model::read(&writer.replica.state)?;
-    let errors = unfinished(doc, &after);
-    if !errors.is_empty() {
-        return Err(ApplyError::Invalid(errors));
-    }
-    let new: Vec<Vec<String>> = after
-        .parent_cycles()
-        .into_iter()
-        .chain(after.link_cycles())
-        .filter(|cycle| !cycles_before.contains(cycle))
-        .collect();
-    if !new.is_empty() {
-        return Err(ApplyError::Cycles(new));
-    }
-    Ok(writer.report)
+    let outcome = judged(doc, &before, by)?;
+    write::write(replica, &outcome, by)?;
+    Ok(report(&before, &outcome))
 }
 
-/// The references that name no record of their kind, in the document or the tracker. A thread items name but that has
-/// no record isn't one.
-fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
-    let mine = |ids: Vec<&String>| ids.into_iter().cloned().collect::<BTreeSet<String>>();
-    let items = mine(doc.items.iter().map(|i| &i.id).collect());
-    let threads = mine(doc.threads.iter().map(|t| &t.id).collect());
-    let repositories = mine(doc.repositories.iter().map(|r| &r.id).collect());
-    let known = |kind: KeyKind, id: &String| match kind {
-        KeyKind::Item => items.contains(id) || before.items.contains_key(id),
-        KeyKind::Thread => threads.contains(id) || before.threads.contains_key(id),
-        KeyKind::Repository => repositories.contains(id) || before.repositories.contains_key(id),
+/// What applying `doc` to a tracker whose model is `before` would do, writing nothing.
+///
+/// # Errors
+///
+/// Fails as [`apply`] would.
+pub fn preview(doc: &Import, before: &Model, by: By<'_>) -> Result<Report, ApplyError> {
+    let errors = doc.validate();
+    if !errors.is_empty() {
+        return Err(ApplyError::Invalid(errors));
+    }
+    Ok(report(before, &judged(doc, before, by)?))
+}
+
+fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {
+    write::judge(before, &changes(doc, before), by).map_err(|violations| refused(doc, &violations))
+}
+
+/// The document as one change set: each record's fields, then the lists it gives, removals before additions, then
+/// the threads it puts items in, so a report lists them in that order.
+fn changes(doc: &Import, before: &Model) -> ChangeSet {
+    let add = |record: Record, with: Vec<Assign>| Write::Add {
+        record,
+        minted: false,
+        on_repeat: Repeat::Update,
+        with,
     };
-    let mut errors = Vec::new();
-    let mut check = |at: String, kind: KeyKind, id: &String| {
-        if !known(kind, id) {
-            errors.push(ValidationError::UnknownReference { at, kind, id: id.clone() });
-        }
-    };
+    let mut changes = Vec::new();
+    for record in &doc.repositories {
+        let (owner, name) = owner_name(&record.name).expect("validated");
+        let id = &record.id;
+        let field = |assign| Assign::Repository(id.clone(), assign);
+        changes.push(add(
+            Record::Repository(id.clone()),
+            vec![
+                field(RepositoryAssign::Owner(owner.to_owned())),
+                field(RepositoryAssign::Name(name.to_owned())),
+                field(RepositoryAssign::DefaultBranch(record.default_branch.clone())),
+            ],
+        ));
+    }
     for record in &doc.threads {
-        for id in record.repositories.iter().flatten() {
-            check(format!("thread {}, repositories", record.id), KeyKind::Repository, id);
+        let id = &record.id;
+        let mut with = vec![Assign::Thread(id.clone(), ThreadAssign::Title(record.title.clone()))];
+        if let Some(brief) = &record.brief {
+            with.push(Assign::Thread(id.clone(), ThreadAssign::Brief(Some(brief.clone()))));
         }
+        changes.push(add(Record::Thread(id.clone()), with));
     }
     for item in &doc.items {
-        let at = |field: &str| format!("item {}, {field}", item.id);
-        if let Some(parent) = &item.parent {
-            check(at("parent"), KeyKind::Item, parent);
-        }
-        if let Some(thread) = &item.thread {
-            check(at("thread"), KeyKind::Thread, thread);
-        }
-        for id in item.repositories.iter().flatten() {
-            check(at("repositories"), KeyKind::Repository, id);
-        }
-        for id in item.waits_for.iter().flatten() {
-            check(at("waits_for"), KeyKind::Item, id);
-        }
-        let commit = item.evidence.as_ref().and_then(|e| e.commit.as_ref());
-        if let Some((repository, _)) = commit.and_then(|c| c.rsplit_once('@')) {
-            check(at("evidence"), KeyKind::Repository, &repository.to_owned());
-        }
+        let with = item_fields(item);
+        changes.push(add(Record::Item(item.id.clone()), with));
     }
-    errors.sort();
-    errors.dedup();
-    errors
-}
-
-/// The document's repositories whose `owner/name`, in any case, another repository would have once imported: one
-/// in the document, or one in the tracker that the document doesn't rename.
-/// A tracker record whose owner or name is in conflict holds every name its values could make: stricter than
-/// `repository add`, which counts it as unnamed, so an import never makes a clash the conflict's resolution would expose.
-fn taken_names(doc: &Import, before: &Model) -> Vec<ValidationError> {
-    let mine: BTreeSet<&str> = doc.repositories.iter().map(|r| r.id.as_str()).collect();
-    let mut holders: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
-    for record in before.repositories.values().filter(|r| !mine.contains(r.id.as_str())) {
-        for owner in record.owner.all() {
-            for name in record.name.all() {
-                holders
-                    .entry(format!("{owner}/{name}").to_lowercase())
-                    .or_default()
-                    .insert(&record.id);
-            }
-        }
-    }
-    for record in &doc.repositories {
-        holders.entry(record.name.to_lowercase()).or_default().insert(&record.id);
-    }
-    let mut errors = Vec::new();
-    for record in &doc.repositories {
-        let others = &holders[&record.name.to_lowercase()];
-        for other in others.iter().filter(|other| **other != record.id) {
-            errors.push(ValidationError::RepositoryNameTaken {
-                repository: record.id.clone(),
-                name: record.name.clone(),
-                other: (*other).to_owned(),
-            });
-        }
-    }
-    errors.sort();
-    errors
-}
-
-/// Evidence on an item that isn't done, and archived subtrees with work that isn't, the document's own or the
-/// tracker's, judged by the state each item has once imported: its own where the document leaves its state out.
-fn unfinished(doc: &Import, after: &Model) -> Vec<ValidationError> {
-    let done = |id: &str| after.items.get(id).is_some_and(model::Item::is_done);
-    let mut errors = Vec::new();
-    for item in &doc.items {
-        if item.evidence.is_some() && !done(&item.id) {
-            errors.push(ValidationError::EvidenceNotDone(item.id.clone()));
-        }
-        if item.archived && !after.subtree(&item.id).into_iter().all(done) {
-            errors.push(ValidationError::ArchivedNotDone(item.id.clone()));
-        }
-        // Work an import leaves open under an archived root would be hidden: `acyclic item reopen` takes it out.
-        if !done(&item.id) {
-            let roots = after
-                .ancestors(&item.id)
-                .into_iter()
-                .filter(|root| after.items.get(*root).is_some_and(model::Item::is_archived_root));
-            errors.extend(roots.map(|root| ValidationError::ArchivedNotDone(root.to_owned())));
-        }
-    }
-    errors.sort();
-    errors.dedup();
-    errors
-}
-
-struct Writer<'a, 'b> {
-    replica: &'a mut Replica,
-    by: By<'b>,
-    /// The tracker as it was before the import.
-    before: &'a Model,
-    report: Report,
-    /// Where each record's row sits in the report's changes.
-    rows: BTreeMap<(&'static str, String), usize>,
-}
-
-impl Writer<'_, '_> {
-    /// Writes the records' own fields.
-    fn records(&mut self, doc: &Import) -> Result<(), ApplyError> {
-        for record in &doc.repositories {
-            let key = Key::new(kind::REPOSITORY, &record.id)?;
-            self.created(&key, |r| &mut r.repositories);
-            let (owner, name) = owner_name(&record.name).expect("validated");
-            self.field(&key, repository::OWNER, Some(&owner))?;
-            self.field(&key, repository::NAME, Some(&name))?;
-            self.field(&key, repository::DEFAULT_BRANCH, Some(&record.default_branch))?;
-        }
-        for record in &doc.threads {
-            let key = Key::new(kind::THREAD, &record.id)?;
-            self.created(&key, |r| &mut r.threads);
-            self.field(&key, thread::TITLE, Some(&record.title))?;
-            self.field(&key, thread::BRIEF, record.brief.as_ref())?;
-        }
+    for adding in [false, true] {
         for item in &doc.items {
-            let key = model::item_key(&item.id)?;
-            let new = self.created(&key, |r| &mut r.items);
-            self.field(&key, field::TITLE, Some(&item.title))?;
-            self.field(&key, field::NOTES, item.notes.as_ref())?;
-            // Backlog only for a new item: one left out keeps its state, finished work included.
-            let state = item.state.or(new.then_some(super::State::Backlog));
-            self.field(&key, field::STATE, state.as_ref())?;
-            self.field(&key, field::PARENT, item.parent.as_ref())?;
-            self.field(&key, field::SIZE, item.size.as_ref())?;
-            let evidence = item.evidence.as_ref().map(|evidence| {
-                let commit = evidence.commit.as_ref().and_then(|c| c.rsplit_once('@'));
-                Evidence {
-                    repository: commit.map(|(repository, _)| repository.to_owned()),
-                    commit: commit.map(|(_, sha)| sha.to_owned()),
-                    text: evidence.text.clone(),
-                }
-            });
-            self.field(&key, field::EVIDENCE, evidence.as_ref())?;
-            if item.archived {
-                self.field(&key, field::ARCHIVED, Some(&true))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Writes the lists the document gives: when `adding`, what each lacks, and otherwise the removal of what each
-    /// holds and the document leaves out.
-    fn lists(&mut self, doc: &Import, adding: bool) -> Result<(), ApplyError> {
-        for item in &doc.items {
+            let id = &item.id;
             if let Some(list) = &item.waits_for {
                 let held: BTreeSet<&String> =
-                    self.before.links.iter().filter(|l| l.from == item.id).map(|l| &l.to).collect();
-                let wanted: BTreeSet<&String> = list.iter().collect();
-                if adding {
-                    for to in &wanted {
-                        self.link(&item.id, to)?;
-                    }
-                } else {
-                    for to in held.difference(&wanted) {
-                        self.unlink(&item.id, to)?;
-                    }
+                    before.links.iter().filter(|l| l.from == *id).map(|l| &l.to).collect();
+                for (to, present) in list_changes(&held, list, adding) {
+                    changes.push(Write::Set(Assign::Item(
+                        id.clone(),
+                        ItemAssign::WaitsFor(to, present),
+                    )));
                 }
             }
             if let Some(list) = &item.repositories {
-                let held = self.before.items.get(&item.id).map(|i| i.repositories.clone());
-                for (repository, present) in changes(&held.unwrap_or_default(), list, adding) {
-                    let edit =
-                        ScopeEdit::ItemRepository { item: item.id.clone(), repository, present };
-                    self.scope(&edit)?;
+                let held = before
+                    .items
+                    .get(id)
+                    .map(|i| i.repositories.iter().collect())
+                    .unwrap_or_default();
+                for (repository, present) in list_changes(&held, list, adding) {
+                    changes.push(Write::Set(Assign::Item(
+                        id.clone(),
+                        ItemAssign::Repository(repository, present),
+                    )));
                 }
             }
         }
         for record in &doc.threads {
             if let Some(list) = &record.repositories {
-                let held = self.before.threads.get(&record.id).map(|t| t.repositories.clone());
-                for (repository, present) in changes(&held.unwrap_or_default(), list, adding) {
-                    let edit = ScopeEdit::ThreadRepository {
-                        thread: record.id.clone(),
-                        repository,
-                        present,
-                    };
-                    self.scope(&edit)?;
+                let held = before
+                    .threads
+                    .get(&record.id)
+                    .map(|t| t.repositories.iter().collect())
+                    .unwrap_or_default();
+                for (repository, present) in list_changes(&held, list, adding) {
+                    let assign = ThreadAssign::Repository(repository, present);
+                    changes.push(Write::Set(Assign::Thread(record.id.clone(), assign)));
                 }
             }
         }
-        Ok(())
     }
-
-    /// Puts each item the document gives a thread in it; an item it gives none stays where it is.
-    fn members(&mut self, doc: &Import) -> Result<(), ApplyError> {
-        for item in &doc.items {
-            if let Some(thread) = &item.thread {
-                let key = model::item_key(&item.id)?;
-                let held = self.replica.state.field(&key, field::THREAD).into_iter().flatten();
-                let values: Vec<&Json> = held.map(|(_, v)| &v.value).collect();
-                if values != [&json!(thread)] {
-                    let edit =
-                        ScopeEdit::Member { item: item.id.clone(), thread: Some(thread.clone()) };
-                    self.scope(&edit)?;
-                }
-            }
+    for item in &doc.items {
+        if let Some(thread) = &item.thread {
+            changes.push(Write::Set(Assign::Item(
+                item.id.clone(),
+                ItemAssign::Thread(Some(thread.clone())),
+            )));
         }
-        Ok(())
     }
+    ChangeSet(changes)
+}
 
-    /// Makes `from` wait for `to`, as one link entity.
-    fn link(&mut self, from: &str, to: &str) -> Result<(), ApplyError> {
-        let key = model::link_key(from, to)?;
-        if self.replica.state.field(&key, link::PRESENT).is_none() {
-            self.report.links += 1;
-            self.link_row(from, to, Action::Create);
+/// An item's fields as the document gives them. One it leaves out keeps what it holds, finished work included; the
+/// judge starts a new item in the backlog.
+fn item_fields(item: &super::Item) -> Vec<Assign> {
+    let id = &item.id;
+    let field = |assign| Assign::Item(id.clone(), assign);
+    let mut with = vec![field(ItemAssign::Title(item.title.clone()))];
+    if let Some(notes) = &item.notes {
+        with.push(field(ItemAssign::Notes(Some(notes.clone()))));
+    }
+    if let Some(state) = item.state {
+        with.push(field(ItemAssign::State(state.into())));
+    }
+    if let Some(parent) = &item.parent {
+        with.push(field(ItemAssign::Parent(Some(parent.clone()))));
+    }
+    if let Some(size) = item.size {
+        with.push(field(ItemAssign::Size(Some(size.into()))));
+    }
+    if let Some(evidence) = &item.evidence {
+        let commit = evidence.commit.as_ref().and_then(|c| c.rsplit_once('@'));
+        with.push(field(ItemAssign::Evidence(Some(Evidence {
+            repository: commit.map(|(repository, _)| repository.to_owned()),
+            commit: commit.map(|(_, sha)| sha.to_owned()),
+            text: evidence.text.clone(),
+        }))));
+    }
+    if item.archived {
+        with.push(field(ItemAssign::Archive));
+    }
+    with
+}
+
+/// The edits that take a list from `held` to `wanted`: when `adding`, each element of `wanted`, which the judge drops
+/// where it is held already, and otherwise the removal of each held element `wanted` leaves out.
+fn list_changes(held: &BTreeSet<&String>, wanted: &[String], adding: bool) -> Vec<(String, bool)> {
+    let wanted: BTreeSet<&String> = wanted.iter().collect();
+    if adding {
+        wanted.difference(held).map(|r| ((*r).clone(), true)).collect()
+    } else {
+        held.difference(&wanted).map(|r| ((*r).clone(), false)).collect()
+    }
+}
+
+/// The judge's refusal in the import's own terms, one kind at a time as the import has always told them: a deleted
+/// record, then references to nothing and names taken, then evidence and archiving on open work, then cycles.
+fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
+    if let Some(record) = violations.iter().find_map(|v| match &v.rule {
+        Rule::Deleted(record) => Some(record),
+        _ => None,
+    }) {
+        return WriteError::Deleted(record.id().to_owned()).into();
+    }
+    let mut unknown = Vec::new();
+    let mut taken = Vec::new();
+    let mut unfinished = Vec::new();
+    let mut cycles = Vec::new();
+    for violation in violations {
+        let at = violation.at.as_ref();
+        match (&violation.rule, at) {
+            (Rule::NoRecord(target), Some(at)) => unknown.push(ValidationError::UnknownReference {
+                at: where_in(at),
+                kind: match target {
+                    Record::Item(_) => KeyKind::Item,
+                    Record::Thread(_) => KeyKind::Thread,
+                    Record::Repository(_) => KeyKind::Repository,
+                },
+                id: target.id().to_owned(),
+            }),
+            (Rule::NameTaken { other, .. }, Some(at)) => {
+                let id = at.record.id();
+                let name = doc
+                    .repositories
+                    .iter()
+                    .find(|r| r.id == id)
+                    .map_or_else(String::new, |r| r.name.clone());
+                taken.push(ValidationError::RepositoryNameTaken {
+                    repository: id.to_owned(),
+                    name,
+                    other: other.clone(),
+                });
+            },
+            (Rule::EvidenceNotDone, Some(at)) => {
+                unfinished.push(ValidationError::EvidenceNotDone(at.record.id().to_owned()));
+            },
+            (Rule::ArchivedOpen(root), _) => {
+                unfinished.push(ValidationError::ArchivedNotDone(root.clone()));
+            },
+            (Rule::SelfLink, Some(at)) => {
+                unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
+            },
+            (Rule::ParentCycle(cycle) | Rule::LinkCycle(cycle), _) => cycles.push(cycle.clone()),
+            // An import's adds name their ids and update what exists, once each: nothing else is refused.
+            _ => debug_assert!(false, "an import can't be refused for {violation:?}"),
         }
-        self.field(&key, link::FROM, Some(&from))?;
-        self.field(&key, link::TO, Some(&to))?;
-        self.field(&key, link::KIND, Some(&link::BLOCKS))?;
-        self.field(&key, link::PRESENT, Some(&true))?;
-        Ok(())
     }
-
-    /// Stops `from` waiting for `to`.
-    fn unlink(&mut self, from: &str, to: &str) -> Result<(), ApplyError> {
-        if model::unlink(self.replica, from, to, self.by)? {
-            self.report.fields += 1;
-            self.link_row(from, to, Action::Remove);
-        }
-        Ok(())
+    unknown.sort();
+    unknown.dedup();
+    taken.sort();
+    taken.dedup();
+    unknown.extend(taken);
+    if !unknown.is_empty() {
+        return ApplyError::Invalid(unknown);
     }
-
-    fn link_row(&mut self, from: &str, to: &str, action: Action) {
-        self.report.changes.push(Change {
-            entity: kind::LINK,
-            name: Name::Link { from: from.to_owned(), kind: "waits-for", to: to.to_owned() },
-            action,
-            fields: BTreeMap::new(),
-        });
+    unfinished.sort();
+    unfinished.dedup();
+    if !unfinished.is_empty() {
+        return ApplyError::Invalid(unfinished);
     }
+    ApplyError::Cycles(cycles)
+}
 
-    /// Counts a record the import creates, and says whether it does.
-    fn created(&mut self, key: &Key, count: impl Fn(&mut Report) -> &mut usize) -> bool {
-        let new = self.replica.state.entity(key).is_none();
-        if new {
-            *count(&mut self.report) += 1;
-            self.row(entity(&key.kind), &key.id).action = Action::Create;
-        }
-        new
-    }
+/// Where in the document a field is, as a validation error says it.
+fn where_in(at: &FieldAddr) -> String {
+    let field = match &at.field {
+        FieldName::Repository(_) => "repositories",
+        FieldName::WaitsFor(_) => "waits_for",
+        other => other.name(),
+    };
+    format!("{} {}, {field}", at.record.kind(), at.record.id())
+}
 
-    /// The row for a record, added as an update when it is the first mention.
-    fn row(&mut self, entity: &'static str, id: &str) -> &mut Change {
-        let changes = &mut self.report.changes;
-        let at = *self.rows.entry((entity, id.to_owned())).or_insert_with(|| {
-            changes.push(Change {
+/// What an accepted import does, record by record, in the order its writes are made.
+fn report(before: &Model, outcome: &Outcome) -> Report {
+    let mut report = Report { placed: outcome.placed(), ..Report::default() };
+    let mut rows: BTreeMap<(&'static str, String), usize> = BTreeMap::new();
+    let mut row = |report: &mut Report, entity: &'static str, id: &str| -> usize {
+        *rows.entry((entity, id.to_owned())).or_insert_with(|| {
+            report.changes.push(Change {
                 entity,
                 name: Name::Id { id: id.to_owned() },
                 action: Action::Update,
                 fields: BTreeMap::new(),
             });
-            changes.len() - 1
-        });
-        &mut self.report.changes[at]
-    }
-
-    /// Writes a field the document sets, unless it already holds exactly that value; `None` leaves it alone.
-    fn field<T: Serialize>(
-        &mut self,
-        key: &Key,
-        name: &str,
-        value: Option<&T>,
-    ) -> Result<(), ApplyError> {
-        let Some(value) = value else { return Ok(()) };
-        let json = serde_json::to_value(value).expect("import values serialize");
-        let current: Vec<&Json> = self
-            .replica
-            .state
-            .field(key, name)
-            .into_iter()
-            .flatten()
-            .map(|(_, v)| &v.value)
-            .collect();
-        // Equal values written apart hold it too, so a done item is never marked done again.
-        if current.is_empty() || current.iter().any(|held| **held != json) {
-            let from = match current.as_slice() {
-                [] => Json::Null,
-                [one] => (*one).clone(),
-                many => serde_json::json!({"conflict": many}),
-            };
-            model::put(self.replica, key, name, Some(&json), self.by)?;
-            self.report.fields += 1;
-            if key.kind != kind::LINK {
-                let edit = Edit { from, to: json };
-                self.row(entity(&key.kind), &key.id).fields.insert(name.replace('-', "_"), edit);
-            }
+            report.changes.len() - 1
+        })
+    };
+    for step in &outcome.steps {
+        if !matches!(step.write, Written::Place(_)) {
+            report.fields += write::registers(before, &step.write);
         }
-        Ok(())
-    }
-
-    /// Notes a repository added to or removed from a record's set on its row, with the whole set before and after.
-    fn set_edit(&mut self, entity: &'static str, id: &str, element: &str, present: bool) {
-        let current = self.before_set(entity, id);
-        let row = self.row(entity, id);
-        let edit = row
-            .fields
-            .entry("repositories".to_owned())
-            .or_insert_with(|| Edit { from: json!(current), to: json!(current) });
-        let mut to: BTreeSet<String> =
-            serde_json::from_value(edit.to.clone()).expect("a set of names");
-        if present {
-            to.insert(element.to_owned());
-        } else {
-            to.remove(element);
+        match &step.write {
+            Written::Create(record) => {
+                let entity = record.kind();
+                match record {
+                    Record::Item(_) => report.items += 1,
+                    Record::Thread(_) => report.threads += 1,
+                    Record::Repository(_) => report.repositories += 1,
+                }
+                let at = row(&mut report, entity, record.id());
+                report.changes[at].action = Action::Create;
+            },
+            Written::Assign(Assign::Item(from, ItemAssign::WaitsFor(to, present))) => {
+                if *present {
+                    report.links += 1;
+                }
+                report.changes.push(Change {
+                    entity: kind::LINK,
+                    name: Name::Link { from: from.clone(), kind: "waits-for", to: to.clone() },
+                    action: if *present { Action::Create } else { Action::Remove },
+                    fields: BTreeMap::new(),
+                });
+            },
+            Written::Assign(assign) => {
+                let at = assign.at();
+                let entity = at.record.kind();
+                let n = row(&mut report, entity, at.record.id());
+                let fields = &mut report.changes[n].fields;
+                match &at.field {
+                    FieldName::Repository(element) => {
+                        let held = held_set(before, &at.record);
+                        let edit = fields
+                            .entry("repositories".to_owned())
+                            .or_insert_with(|| Edit { from: json!(held), to: json!(held) });
+                        let mut to: BTreeSet<String> =
+                            serde_json::from_value(edit.to.clone()).expect("a set of names");
+                        if assign_present(assign) {
+                            to.insert(element.clone());
+                        } else {
+                            to.remove(element);
+                        }
+                        edit.to = json!(to);
+                    },
+                    field => {
+                        let edit = Edit { from: held(before, &at), to: assign.value() };
+                        fields.insert(field.name().replace('-', "_"), edit);
+                    },
+                }
+            },
+            Written::Reopened(id, value) => {
+                let n = row(&mut report, kind::ITEM, id);
+                let from = before.items.get(id).map_or(Json::Null, |item| json!(item.reopened));
+                report.changes[n]
+                    .fields
+                    .insert("reopened".to_owned(), Edit { from, to: json!(value) });
+            },
+            Written::Unarchive(id) => {
+                let n = row(&mut report, kind::ITEM, id);
+                let from = before.items.get(id).map_or(Json::Null, |item| json!(item.archived));
+                report.changes[n]
+                    .fields
+                    .insert("archived".to_owned(), Edit { from, to: Json::Null });
+            },
+            Written::Place(_) => {},
         }
-        edit.to = json!(to);
     }
-
-    /// A repository set's members before the import.
-    fn before_set(&self, entity: &str, id: &str) -> BTreeSet<String> {
-        let before = match entity {
-            kind::THREAD => self.before.threads.get(id).map(|t| t.repositories.clone()),
-            _ => self.before.items.get(id).map(|i| i.repositories.clone()),
-        };
-        before.unwrap_or_default()
-    }
-
-    fn scope(&mut self, change: &ScopeEdit) -> Result<(), ApplyError> {
-        scope::edit(self.replica, change, self.by)?;
-        self.report.fields += 1;
-        let (entity, id, element, present) = match change {
-            ScopeEdit::Member { item, thread } => {
-                let from = self.before.items.get(item).map_or(Json::Null, |i| json!(i.thread));
-                let edit = Edit { from, to: json!(thread) };
-                self.row(kind::ITEM, item).fields.insert("thread".to_owned(), edit);
-                return Ok(());
-            },
-            ScopeEdit::ItemRepository { item, repository, present } => {
-                (kind::ITEM, item, repository, *present)
-            },
-            ScopeEdit::ThreadRepository { thread, repository, present } => {
-                (kind::THREAD, thread, repository, *present)
-            },
-        };
-        self.set_edit(entity, id, element, present);
-        Ok(())
-    }
+    report
 }
 
-/// The edits that take a set from `held` to `wanted`: when `adding`, each element to add, and otherwise each to remove.
-fn changes(held: &BTreeSet<String>, wanted: &[String], adding: bool) -> Vec<(String, bool)> {
-    let wanted: BTreeSet<String> = wanted.iter().cloned().collect();
-    if adding {
-        wanted.difference(held).map(|r| (r.clone(), true)).collect()
-    } else {
-        held.difference(&wanted).map(|r| (r.clone(), false)).collect()
-    }
+fn assign_present(assign: &Assign) -> bool {
+    matches!(
+        assign,
+        Assign::Item(_, ItemAssign::Repository(_, true))
+            | Assign::Thread(_, ThreadAssign::Repository(_, true))
+    )
 }
 
-/// The kind of record a key names, as a change reports it.
-fn entity(key_kind: &str) -> &'static str {
-    [kind::ITEM, kind::THREAD, kind::REPOSITORY, kind::LINK]
-        .into_iter()
-        .find(|name| *name == key_kind)
-        .unwrap_or(kind::ITEM)
+/// A record's repository set before the import.
+fn held_set(before: &Model, record: &Record) -> BTreeSet<String> {
+    match record {
+        Record::Item(id) => before.items.get(id).map(|i| i.repositories.clone()),
+        Record::Thread(id) => before.threads.get(id).map(|t| t.repositories.clone()),
+        Record::Repository(_) => None,
+    }
+    .unwrap_or_default()
+}
+
+/// A field's value before the import: `null` when unset or new, and a conflict as `{"conflict": [values]}`.
+fn held(before: &Model, at: &FieldAddr) -> Json {
+    let value = match &at.record {
+        Record::Item(id) => before.items.get(id).map(|item| match at.field {
+            FieldName::Title => json!(item.title),
+            FieldName::Notes => json!(item.notes),
+            FieldName::State => json!(item.state),
+            FieldName::Parent => json!(item.parent),
+            FieldName::Size => json!(item.size),
+            FieldName::Archived => json!(item.archived),
+            FieldName::Evidence => json!(item.evidence),
+            FieldName::Thread => json!(item.thread),
+            FieldName::Reopened => json!(item.reopened),
+            _ => Json::Null,
+        }),
+        Record::Thread(id) => before.threads.get(id).map(|thread| match at.field {
+            FieldName::Title => json!(thread.title),
+            FieldName::Brief => json!(thread.brief),
+            _ => Json::Null,
+        }),
+        Record::Repository(id) => before.repositories.get(id).map(|record| match at.field {
+            FieldName::Owner => json!(record.owner),
+            FieldName::Name => json!(record.name),
+            FieldName::DefaultBranch => json!(record.default_branch),
+            _ => Json::Null,
+        }),
+    };
+    value.unwrap_or(Json::Null)
+}
+
+/// The model's size for an imported one.
+impl From<super::Size> for Size {
+    fn from(size: super::Size) -> Self {
+        match size {
+            super::Size::Xs => Self::Xs,
+            super::Size::S => Self::S,
+            super::Size::M => Self::M,
+            super::Size::L => Self::L,
+            super::Size::Xl => Self::Xl,
+        }
+    }
 }
 
 /// The model's state for an imported one.

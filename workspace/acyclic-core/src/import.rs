@@ -14,7 +14,7 @@ use crate::ids;
 
 mod apply;
 
-pub use apply::{ApplyError, Report, apply};
+pub use apply::{ApplyError, Report, apply, preview};
 
 /// The value of the document's `format` field.
 pub const FORMAT: &str = "acyclic-import";
