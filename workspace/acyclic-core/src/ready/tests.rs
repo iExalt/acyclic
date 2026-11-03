@@ -522,9 +522,15 @@ fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() 
     );
     assert_eq!((rolled.progress.done, rolled.progress.total), (3, 6));
     assert_eq!(rolled.progress.state, ProgressState::InProgress, "done work under it moves it");
+    assert_eq!(rolled.stage, Some(Stage::InProgress));
     let rolled = rollup(&r, "parked");
     assert_eq!(rolled.stages, Stages { done: 1, parked: 2, ..Stages::default() });
     assert_eq!(rolled.progress.state, ProgressState::Parked);
+    assert_eq!(
+        rolled.stage,
+        Some(Stage::Parked),
+        "a part parked by hand reads parked though work under it is done"
+    );
 }
 
 #[test]
@@ -916,5 +922,37 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
         (Status::Unthreaded, false),
     ] {
         assert_eq!(status.finishable_by(me), may, "{status:?}");
+    }
+}
+
+#[test]
+fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what_is_left_is_parked()
+{
+    let of = |done, in_review, in_progress, ready, blocked, parked, unthreaded| Stages {
+        done,
+        in_review,
+        in_progress,
+        ready,
+        blocked,
+        parked,
+        unthreaded,
+    };
+    for (stages, claimed, stage) in [
+        (of(0, 0, 0, 0, 0, 0, 0), false, None),
+        (of(3, 0, 0, 0, 0, 0, 0), false, Some(Stage::Done)),
+        (of(2, 1, 0, 0, 0, 0, 0), false, Some(Stage::InReview)),
+        // Started wins over what is still ready, even beside work in review.
+        (of(1, 0, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
+        (of(0, 1, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
+        (of(0, 0, 1, 0, 3, 0, 0), false, Some(Stage::InProgress)),
+        // A live claim below starts it, even with only blocked work.
+        (of(0, 0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
+        (of(0, 0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
+        (of(0, 0, 0, 0, 1, 1, 1), false, Some(Stage::Blocked)),
+        // What is left all parked, by hand or under a parked part, reads parked however much is done.
+        (of(2, 1, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
+        (of(0, 0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
+    ] {
+        assert_eq!(stages.rolled_up(claimed), stage, "{stages:?} claimed {claimed}");
     }
 }
