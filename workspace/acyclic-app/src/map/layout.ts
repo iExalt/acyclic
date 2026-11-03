@@ -121,7 +121,10 @@ export function withinOneBox(view: View): (edge: { source: string; target: strin
 /** A bounded cache of box layouts by signature, evicting the least recently used. */
 export class LayoutCache {
   private readonly entries = new Map<string, BoxLayout>();
-  /** The top level as last placed, which a top level of the same boxes keeps where it was. */
+  /**
+   * The top level as last packed, which every top level of the same boxes is held from: so where a box stands depends
+   * only on that packing and the boxes' sizes now, never on the order boxes were opened and closed in.
+   */
   root: { input: BoxInput; layout: BoxLayout } | null = null;
 
   constructor(private readonly limit = 4096) {}
@@ -207,18 +210,19 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
         };
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
         const signature = JSON.stringify([input.children, input.edges, input.aspect]);
-        let layout = cache.get(signature);
-        // A top level of the same boxes, as a box collapsing or expanding makes it, keeps every box where it was but
-        // for what one that grew now covers, rather than packing them again and moving the rest of the plan out of
-        // view. Kept out of the cache, so a reload packs afresh; collapsing again finds the layout from before in it.
-        const kept = id === ROOT && layout === undefined ? held(cache.root, input) : undefined;
-        if (kept !== undefined) layout = kept;
+        // A top level of the same boxes, as a box collapsing or expanding makes it, is held from its last packing: every
+        // box where it was packed but for what one that grew now covers, rather than packed again, which moved the rest
+        // of the plan out of view. Kept out of the cache, so a reload packs afresh.
+        let layout = id === ROOT ? held(cache.root, input) : undefined;
         if (layout === undefined) {
-          layout = await layBox(input);
-          cache.set(signature, layout);
-          laidOut.push(id);
+          layout = cache.get(signature);
+          if (layout === undefined) {
+            layout = await layBox(input);
+            cache.set(signature, layout);
+            laidOut.push(id);
+          }
+          if (id === ROOT) cache.root = { input, layout };
         }
-        if (id === ROOT) cache.root = { input, layout };
         boxes.set(id, layout);
       }),
     );
@@ -258,9 +262,9 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
 }
 
 /**
- * The top level's last layout, held for a top level `now` of the same boxes in the same order, with the same links and
- * shape: each box where it was, but for what one that grew now covers. Undefined for any other change, which packs it
- * again.
+ * The top level's last packing, held for a top level `now` of the same boxes in the same order, with the same links and
+ * shape: each box where it was packed, but for what one larger than it was packed at now covers. Undefined for any
+ * other change, which packs it again.
  */
 export function held(last: { input: BoxInput; layout: BoxLayout } | null, now: BoxInput): BoxLayout | undefined {
   if (last === null) return undefined;

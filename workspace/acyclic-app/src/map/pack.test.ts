@@ -63,15 +63,19 @@ describe("hold", () => {
     },
   };
   const waits = new Map([["e", ["c"]]]);
-  const grown = (id: string, width: number, height: number) =>
-    hold(
-      was,
-      was.children.map((kid) => (kid.id === id ? box(id, width, height) : kid)),
-      waits,
+  const settled = (layout: ReturnType<typeof hold>) => layout ?? { width: NaN, height: NaN, at: {} };
+  const sized = (sizes: Record<string, [number, number]>, by = waits) =>
+    settled(
+      hold(
+        was,
+        was.children.map((kid) => (kid.id in sizes ? box(kid.id, ...(sizes[kid.id] ?? [0, 0])) : kid)),
+        by,
+      ),
     );
+  const grown = (id: string, width: number, height: number) => sized({ [id]: [width, height] });
 
   it("keeps every box where it was when none grew", () => {
-    expect(hold(was, was.children, waits).at).toEqual(was.layout.at);
+    expect(sized({}).at).toEqual(was.layout.at);
     expect(grown("d", 50, 50).at).toEqual(was.layout.at);
   });
 
@@ -83,15 +87,15 @@ describe("hold", () => {
     // Taller, a moves c down; e, clear of a, follows c, which it waits on, rather than stand above it.
     expect(grown("a", 200, 200).at).toEqual({ ...was.layout.at, c: { x: 12, y: 236 }, e: { x: 236, y: 236 } });
     // c waiting on e, which it stood before, as packing leaves one of a cycle, isn't moved after it.
-    expect(
-      hold(
-        was,
-        was.children.map((kid) => (kid.id === "e" ? box("e", 200, 300) : kid)),
-        new Map([["c", ["e"]]]),
-      ).at,
-    ).toEqual(was.layout.at);
+    expect(sized({ e: [200, 300] }, new Map([["c", ["e"]]])).at).toEqual(was.layout.at);
     // Wider, e meets d, which stands on its right from higher up: d makes way, and e stays where it was.
     expect(grown("e", 300, 100).at).toEqual({ ...was.layout.at, d: { x: 560, y: 12 } });
+    // b, moved right by a, grows too: it stays where a moved it, rather than go back and push a down.
+    expect(sized({ a: [300, 100], b: [250, 100] }).at).toEqual({
+      ...was.layout.at,
+      b: { x: 336, y: 12 },
+      d: { x: 610, y: 12 },
+    });
   });
 });
 
@@ -115,8 +119,14 @@ describe("hold, over random packings", () => {
         ]),
       );
       const packed = pack(kids, waits, 1);
+      expect(hold({ children: kids, layout: packed }, kids, waits)?.at, `seed ${seed}: held as packed`).toEqual(
+        packed.at,
+      );
       const now = kids.map((kid) => (next() < 0.3 ? box(kid.id, kid.width + size(), kid.height + size()) : kid));
       const held = hold({ children: kids, layout: packed }, now, waits);
+      // A plan whose moves don't settle packs afresh; none of these should come to that.
+      expect(held, `seed ${seed}: settles`).toBeDefined();
+      if (held === undefined) continue;
       const place = (layout: typeof packed, list: typeof kids, id: string) => {
         const at = layout.at[id] ?? { x: NaN, y: NaN };
         const kid = list.find((one) => one.id === id) ?? box(id, NaN, NaN);

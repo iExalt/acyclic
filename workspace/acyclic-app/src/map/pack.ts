@@ -109,80 +109,68 @@ function placing(
 }
 
 /**
- * The top level `was` laid out, for the same `children` at their sizes now: each where it was, but for what a box that
- * grew now covers, which moves right if it stood right of the box it meets, and down if not, and stays after what it
- * waits on. A box opening so moves only what it would cover, and the rest of the plan stays in view.
+ * The top level `was` packed to, for the same `children` at their sizes now: each where it was packed, but for what a
+ * box larger than it was packed at now covers, which moves away from it the way it stood from it when packed, right if
+ * it stood on its right and down if below, and stays after what it waits on. Where a box stands so depends only on the
+ * packing and the sizes now, not on the order boxes grew and shrank in. Undefined if the moves don't settle, as boxes
+ * pushing each other round a ring would, which packs it afresh.
  */
 export function hold(
   was: { children: readonly ({ id: string } & Size)[]; layout: BoxLayout },
   children: readonly ({ id: string } & Size)[],
   waits: ReadonlyMap<string, readonly string[]>,
-): BoxLayout {
-  const before = new Map(
+): BoxLayout | undefined {
+  const packed = new Map(
     was.children.map((child) => {
       const at = was.layout.at[child.id] ?? { x: PAD, y: PAD };
       return [child.id, { x: at.x - PAD, y: at.y - PAD, width: child.width, height: child.height }];
     }),
   );
-  const old = (id: string) => before.get(id) ?? { x: 0, y: 0, width: 0, height: 0 };
-  // What a box waits on and stood after before, below it or level with it or lower on its right, it stays after.
+  const old = (id: string) => packed.get(id) ?? { x: 0, y: 0, width: 0, height: 0 };
+  const right = (a: Placed, b: Placed) => b.x >= a.x + a.width + GAP;
+  const below = (a: Placed, b: Placed) => b.y >= a.y + a.height + GAP;
+  const now = children.map((child) => ({ id: child.id, ...old(child.id), width: child.width, height: child.height }));
+  const at = new Map(now.map((box) => [box.id, box]));
+  // What a box waits on and stood after when packed, below it or level with it or lower on its right, it stays after.
   // Packing breaks a cycle of waits somewhere, and what it left before what it waits on stays there.
-  const after = (id: string, first: string) => {
-    const [me, then] = [old(id), old(first)];
-    if (me.y >= then.y + then.height + GAP) return "below";
-    return me.x >= then.x + then.width + GAP && me.y >= then.y ? "beside" : null;
-  };
-  // The boxes that grew first, where they were, so what they now cover makes way for them, each once what it stays
-  // after is placed; then the rest, in reading order, so whatever a box meets has settled.
-  const grew = (child: { id: string } & Size) =>
-    child.width > old(child.id).width || child.height > old(child.id).height;
-  const left = [...children].sort((a, b) => old(a.id).y - old(b.id).y || old(a.id).x - old(b.id).x);
-  const waiting = (child: { id: string }) =>
-    left.find((first) => (waits.get(child.id) ?? []).includes(first.id) && after(child.id, first.id) !== null);
-  const order: ({ id: string } & Size)[] = [];
-  while (left.length > 0) {
-    // What a box stays after stood before it in reading order, so going down to what it waits on ends.
-    let next = left.find(grew) ?? left[0];
-    for (let first = next && waiting(next); first !== undefined; first = waiting(first)) next = first;
-    if (next === undefined) break;
-    order.push(next);
-    left.splice(left.indexOf(next), 1);
-  }
-  const placed = new Map<string, Placed>();
-  const at: Record<string, { x: number; y: number }> = {};
-  let [right, bottom] = [0, 0];
-  for (const child of order) {
-    let { x, y } = old(child.id);
-    // Each move takes it past one settled box for good, as x and y only grow: so this ends.
-    for (let moved = true; moved; ) {
-      moved = false;
-      for (const id of waits.get(child.id) ?? []) {
-        const first = placed.get(id);
-        const relation = after(child.id, id);
-        if (first === undefined || relation === null) continue;
-        const least = relation === "below" ? first.y + first.height + GAP : first.y;
-        if (y < least) [y, moved] = [least, true];
-        // Beside it, clear of it on its right, unless now below it.
-        if (relation === "beside" && x < first.x + first.width + GAP && y < first.y + first.height + GAP)
-          [x, moved] = [first.x + first.width + GAP, true];
-      }
-      for (const [id, box] of placed) {
+  const after = [...waits].flatMap(([id, firsts]) =>
+    firsts.flatMap((first) => {
+      const [me, then] = [at.get(id), at.get(first)];
+      if (me === undefined || then === undefined) return [];
+      if (below(old(first), old(id))) return [{ me, then, beside: false }];
+      return right(old(first), old(id)) && old(id).y >= old(first).y ? [{ me, then, beside: true }] : [];
+    }),
+  );
+  // Each move only ever takes a box right or down, past what it met: a few rounds settle any plan but a ring.
+  for (let round = 0; round <= 4 * now.length; round++) {
+    let moved = false;
+    for (const a of now)
+      for (const b of now) {
         const meets =
-          box.x < x + child.width + GAP &&
-          x < box.x + box.width + GAP &&
-          box.y < y + child.height + GAP &&
-          y < box.y + box.height + GAP;
+          a !== b &&
+          a.x < b.x + b.width + GAP &&
+          b.x < a.x + a.width + GAP &&
+          a.y < b.y + b.height + GAP &&
+          b.y < a.y + a.height + GAP;
         if (!meets) continue;
-        const then = old(id);
-        if (old(child.id).x >= then.x + then.width + GAP) x = box.x + box.width + GAP;
-        else y = box.y + box.height + GAP;
-        moved = true;
+        // b moves from a the way it stood from a when packed; stood left of or above a, a moves from it instead.
+        if (right(old(a.id), old(b.id))) [b.x, moved] = [a.x + a.width + GAP, true];
+        else if (below(old(a.id), old(b.id))) [b.y, moved] = [a.y + a.height + GAP, true];
       }
+    for (const { me, then, beside } of after) {
+      const least = beside ? then.y : then.y + then.height + GAP;
+      if (me.y < least) [me.y, moved] = [least, true];
+      if (beside && !right(then, me) && !below(then, me)) [me.x, moved] = [then.x + then.width + GAP, true];
     }
-    placed.set(child.id, { x, y, width: child.width, height: child.height });
-    at[child.id] = { x: x + PAD, y: y + PAD };
-    right = Math.max(right, x + child.width);
-    bottom = Math.max(bottom, y + child.height);
+    if (!moved) {
+      const width = Math.max(0, ...now.map((box) => box.x + box.width));
+      const height = Math.max(0, ...now.map((box) => box.y + box.height));
+      return {
+        width: width + 2 * PAD,
+        height: height + 2 * PAD,
+        at: Object.fromEntries(now.map((box) => [box.id, { x: box.x + PAD, y: box.y + PAD }])),
+      };
+    }
   }
-  return { width: right + 2 * PAD, height: bottom + 2 * PAD, at };
+  return undefined;
 }

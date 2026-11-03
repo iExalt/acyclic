@@ -333,8 +333,9 @@ before what went wrong.
   another.
 - **Opening a box moves only what it covers.** Once packed, the top level keeps its boxes where they are: a box that
   grows, as one opening inside it makes it, stays at its corner, what it now covers makes way, right if it stood on its
-  right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Closing it
-  again finds the packing from before; a reload packs afresh.
+  right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Where a box
+  stands depends only on the last packing and the boxes' sizes now, so what made way goes back when the box that moved
+  it closes, whatever was opened in between; a reload packs afresh.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
