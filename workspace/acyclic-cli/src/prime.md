@@ -94,8 +94,14 @@ waits-for and thread it belongs with.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
-- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which writes its lease again; any
-  write can also commit a lease renewal that its own `changed` leaves out.
+- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which renews its lease, and an
+  edit that explicitly adds a repository the item or thread already holds. That edit records the add again. Any write
+  can also commit a lease renewal that its own `changed` leaves out.
+- A `clock-jump` refusal means this replica's saved time is more than five minutes ahead of the system clock. Correct
+  the clock and wait until it is within five minutes of the saved time. Writes remain stamped at the saved time until
+  the clock catches up fully. If this clone has a shared remote, sync it and continue from a new clone with an unused
+  replica id. That migration keeps old timestamps: future-dated done work keeps its archive wait, and live claims keep
+  their expiry until they expire or their holder releases them.
 
 ## Finding and doing work
 
@@ -107,7 +113,8 @@ waits-for and thread it belongs with.
 2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any
    write through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder
-   has written something other than a claim in the last 60 minutes. `sync` doesn't renew. Don't use `--force` to take
+   has written something other than a claim in the last 60 minutes. Renewal resets the lease to 60 minutes, regardless
+   of the initial `--lease`. `sync` doesn't renew. Don't use `--force` to take
    someone else's work. If `thread claim` or `acyclic thread show <thread>` says another holder wins a contest for your
    thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
    only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>` still

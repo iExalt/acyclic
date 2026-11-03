@@ -611,7 +611,7 @@ pub enum ThreadCommand {
     Claim {
         /// The thread.
         thread: String,
-        /// The lease in minutes: 60 by default, 1 to 480.
+        /// The initial lease in minutes: 60 by default, 1 to 480; active claims renew to 60 minutes.
         #[arg(short = 'l', long, value_parser = lease_minutes)]
         lease: Option<u32>,
         /// Claim without checking the thread's readiness, as when it has no ready work. Another holder's live claim

@@ -18,6 +18,9 @@ const MIGRATE_HINT: &str = "written by an earlier acyclic: read it with that ver
                             `acyclic import` from a version-3 document";
 /// What a state a later format version wrote hints at.
 const LATER_HINT: &str = "written by a later acyclic: run that version";
+const CLOCK_JUMP_HINT: &str = "Correct the system clock and wait until it is within five minutes of this replica's \
+                               saved time. If this clone has a shared remote, sync it and continue from a fresh clone \
+                               with an unused replica id";
 
 /// Exit codes. Stable: agents branch on them.
 pub mod exit {
@@ -99,6 +102,7 @@ impl From<StateError> for CliError {
                 error.with(json!({"hint": MIGRATE_HINT}))
             },
             StateError::Version(_) => error.with(json!({"hint": LATER_HINT})),
+            StateError::ClockJump { .. } => error.with(json!({"hint": CLOCK_JUMP_HINT})),
             StateError::Format(_) => error.with(json!({"hint": DOCTOR_HINT})),
             _ => error,
         }

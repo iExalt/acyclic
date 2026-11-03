@@ -136,6 +136,97 @@ fn two_machines_sync_through_a_shared_repository() {
 }
 
 #[test]
+fn a_fresh_replica_can_continue_after_the_old_clock_jumps_ahead() {
+    let mut sh = shared();
+    assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    let thread = "01900000-0000-7000-8000-0000000000f1".to_owned();
+    let item = "01900000-0000-7000-8000-0000000000a1".to_owned();
+    assert_eq!(sh.run(&format!("thread add --id {thread} --title Work"), AGENT), 0);
+    assert_eq!(sh.run(&format!("item add --id {item} --title First --thread {thread}"), AGENT), 0);
+
+    // A debug-only clock moves this synthetic replica forward without touching the host clock.
+    let future = (NOW.parse::<i64>().unwrap() + 86_400_000).to_string();
+    let future_at = future.parse::<i64>().unwrap();
+    let future_writer = [("ACYCLIC_ACTOR", "session/mac"), ("ACYCLIC_NOW", future.as_str())];
+    assert_eq!(sh.run("thread claim Work --lease 5", &future_writer), 0);
+    assert_eq!(sh.run(&format!("item done {item} --force --evidence shipped"), &future_writer), 0);
+
+    let old_path = sh.path().join("tracker");
+    let (old, _) = acyclic_core::store::Tracker::open(&old_path).unwrap();
+    let (_, before) = old.load_strict().unwrap();
+    let old_id = acyclic_core::state::ReplicaId::new("mac").unwrap();
+    assert_eq!(before.context.clocks.get(&old_id), Some(&future_at));
+    let old_model = acyclic_core::model::Model::read(&before).unwrap();
+    assert_eq!(old_model.items[&item].done_at, Some(future_at));
+    assert_eq!(old_model.items[&item].evidence.one().unwrap().text.as_deref(), Some("shipped"));
+    let thread_key = acyclic_core::claim::thread_key(&thread).unwrap();
+    let future_claim =
+        acyclic_core::claim::winner(&before, &thread_key, NOW.parse().unwrap()).unwrap().unwrap();
+    assert_eq!(future_claim.lease_expires, Some(future_at + 5 * 60_000));
+
+    let (code, out) = sh.output(&format!("item edit {item} --notes blocked"), AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("clock-jump")), "{out}");
+    assert_eq!(
+        out["error"]["details"]["hint"],
+        "Correct the system clock and wait until it is within five minutes of this replica's saved time. If this clone has a shared remote, sync it and continue from a fresh clone with an unused replica id",
+        "{out}"
+    );
+    let (_, unchanged) = old.load_strict().unwrap();
+    assert_eq!(unchanged, before, "the refused write leaves old replica state unchanged");
+    assert_eq!(sh.run("sync", AGENT), 0, "sync does not stamp a write");
+    let (_, pushed) = old.load_strict().unwrap();
+    assert_eq!(pushed.context.clocks.get(&old_id), Some(&future_at));
+
+    assert_eq!(sh.run("init fresh --replica pi --remote ../shared.git", &[]), 0);
+    let fresh = [("ACYCLIC_ACTOR", "session/mac"), ("ACYCLIC_TRACKER", "fresh")];
+    assert_eq!(sh.run("sync", &fresh), 0);
+    let (new, _) = acyclic_core::store::Tracker::open(&sh.path().join("fresh")).unwrap();
+    let (_, joined) = new.load_strict().unwrap();
+    assert_eq!(joined.context.clocks.get(&old_id), Some(&future_at));
+    assert_eq!(
+        joined.context.clocks.get(&acyclic_core::state::ReplicaId::new("pi").unwrap()),
+        None,
+        "the new replica has its own clock"
+    );
+    let joined_model = acyclic_core::model::Model::read(&joined).unwrap();
+    assert_eq!(joined_model.items[&item].done_at, Some(future_at));
+    assert_eq!(joined_model.items[&item].evidence.one().unwrap().text.as_deref(), Some("shipped"));
+    let inherited_claim =
+        acyclic_core::claim::winner(&joined, &thread_key, NOW.parse().unwrap()).unwrap().unwrap();
+    assert_eq!(inherited_claim.lease_expires, Some(future_at + 5 * 60_000));
+
+    let (code, out) = sh.output(
+        "thread claim Work --force",
+        &[("ACYCLIC_ACTOR", "session/other"), ("ACYCLIC_TRACKER", "fresh")],
+    );
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("claimed")), "{out}");
+    let (_, after_refusal) = new.load_strict().unwrap();
+    assert_eq!(after_refusal, joined, "force does not replace another holder's live claim");
+
+    assert_eq!(sh.run(&format!("item edit {item} --notes recovered"), &fresh), 0);
+    let (_, continued) = new.load_strict().unwrap();
+    let new_id = acyclic_core::state::ReplicaId::new("pi").unwrap();
+    assert_eq!(continued.context.clocks.get(&old_id), Some(&future_at));
+    assert_eq!(continued.context.clocks.get(&new_id), Some(&NOW.parse().unwrap()));
+    let continued_model = acyclic_core::model::Model::read(&continued).unwrap();
+    assert_eq!(continued_model.items[&item].done_at, Some(future_at));
+    assert_eq!(
+        continued_model.items[&item].evidence.one().unwrap().text.as_deref(),
+        Some("shipped")
+    );
+    assert_eq!(continued_model.items[&item].notes.one().map(String::as_str), Some("recovered"));
+
+    let (code, out) = sh.output("thread release Work", &fresh);
+    assert_eq!((code, out["data"]["released"].as_bool()), (0, Some(true)), "{out}");
+    let (_, released) = new.load_strict().unwrap();
+    assert!(
+        acyclic_core::claim::winner(&released, &thread_key, NOW.parse().unwrap())
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn init_checks_the_effective_origin_before_changing_a_new_destination() {
     let mut sh = shared();
     let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
