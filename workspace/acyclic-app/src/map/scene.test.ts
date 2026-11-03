@@ -185,3 +185,27 @@ describe("buildModel", () => {
     expect(model.items.get("q")?.progress).toBeNull();
   });
 });
+
+describe("a box's stage", () => {
+  it("is the stage core gives its row, a collapsed one's too, and none without one, as with no leaves to count", () => {
+    const rows = [
+      item("p", null, [], { stage: "in-progress" }),
+      item("p1", "p", [], { stage: "in-review" }),
+      item("p2", "p", [], { stage: "ready" }),
+      item("q", null, [], { stage: "blocked" }),
+      item("q1", "q", [], { stage: "blocked" }),
+      item("r"),
+      item("r1", "r", [], { archived: true }),
+      item("r2", "r", [], { archived: true }),
+    ];
+    const built = buildModel(rows);
+    const shown = visible(built, { collapsed: new Set(["q"]), showArchived: true });
+    const at = new Map(shown.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }]));
+    const drawn = scene(shown, { ...placed, nodes: at }, { item: null, thread: null }, () => null);
+    const stageOf = (id: string) => drawn.nodes.find((node) => node.id === id)?.stage;
+    // One leaf in review beside a ready one: in progress, as core tells it, not in review.
+    expect(stageOf("p")).toBe("in-progress");
+    expect(stageOf("q")).toBe("blocked");
+    expect(stageOf("r")).toBeNull();
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overallStage, stageCounts, stageCountWords, stateWords } from "./stages";
+import { stageCounts, stageCountWords, stateWords } from "./stages";
 
 describe("a state in words", () => {
   it("reads as a sentence starts it", () => {
@@ -36,17 +36,5 @@ describe("stageCountWords", () => {
       "3 need a thread",
     ]);
     expect(stageCountWords("in-review", 2)).toBe("in review");
-  });
-});
-
-describe("overallStage", () => {
-  const none = { done: 0, leaves: 0, in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
-  it("tells a parent's work as one stage: moving first, then in review, done, ready, blocked and parked", () => {
-    expect(overallStage({ ...none, leaves: 3, done: 1, in_progress: 1, blocked: 1 })).toBe("in-progress");
-    expect(overallStage({ ...none, leaves: 2, done: 2, in_review: 1 })).toBe("in-review");
-    expect(overallStage({ ...none, leaves: 2, done: 2 })).toBe("done");
-    expect(overallStage({ ...none, leaves: 3, done: 1, ready: 1, blocked: 1 })).toBe("ready");
-    expect(overallStage({ ...none, leaves: 2, done: 1, blocked: 1 })).toBe("blocked");
-    expect(overallStage({ ...none, leaves: 1, parked: 1 })).toBe("parked");
   });
 });

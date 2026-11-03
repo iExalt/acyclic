@@ -12,7 +12,7 @@ export interface MapItem {
   parent: string | null;
   thread: string | null;
   archived: boolean;
-  /** A leaf's stage, or null for a parent or an archived item. */
+  /** Its stage as core gives it, a parent's from its leaves; null for an archived item or a parent with none to count. */
   stage: Stage | null;
   /** A parent's leaves by stage, or null for a leaf or a parent whose leaves are all archived. */
   progress: Counts | null;
@@ -143,7 +143,7 @@ export interface VisibleNode {
   hidden: number;
   /** In an archived subtree: archived itself, or under an item that is. */
   archived: boolean;
-  /** A leaf's stage, as its item has it. */
+  /** Its stage, as its item has it; a tile core gives none takes one from its state. */
   stage: Stage | null;
   /** A leaf's thread, which its stripe and badge show. */
   thread: string | null;
@@ -246,7 +246,7 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
       kind: kids.length === 0 ? "leaf" : collapsed ? "collapsed" : "box",
       hidden: collapsed ? count(id) : 0,
       archived,
-      stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : null,
+      stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : item.stage,
       thread: item.thread,
       progress: item.progress,
       ...doneBoxOf(doneBoxes.get(id), item.progress),

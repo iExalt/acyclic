@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, countsText, failure, items, settle, thread, threads } from "./api";
+import { CommandError, command, countsText, failure, items, NO_COUNTS, settle, thread, threads } from "./api";
 import { examples } from "./commands.examples.json";
 import { ID } from "./map/fixture";
 
@@ -67,16 +67,31 @@ describe("items", () => {
     await expect(items(empty.fetcher)).resolves.toEqual([]);
     expect(empty.sent).toHaveLength(1);
   });
+
+  it("keeps the stage core gives a parent from its leaves, beside its progress", async () => {
+    const counts = { ...NO_COUNTS, leaves: 2, done: 1, in_review: 1, ready: 1 };
+    const parent = { ...raw(ID.a), stage: "in-progress", progress: { state: "in-progress", counts } };
+    const { fetcher } = server({
+      "item list": { ok: true, data: { items: [{ id: ID.a }] } },
+      "item show": { ok: true, data: [parent] },
+    });
+    await expect(items(fetcher)).resolves.toMatchObject([{ stage: "in-progress", progress: { counts } }]);
+  });
 });
 
 describe("threads", () => {
-  it("lists threads, titling one with a conflicted title by its first value", async () => {
+  it("lists threads with their leaves by stage, titling one with a conflicted title by its first value", async () => {
     const { fetcher, sent } = server({
       "thread list": {
         ok: true,
         data: {
           threads: [
-            { id: "t", title: "T", waits_for: [] },
+            {
+              id: "t",
+              title: "T",
+              waits_for: [],
+              progress: { counts: { ...NO_COUNTS, leaves: 3, done: 2, in_review: 1, ready: 1 } },
+            },
             { id: "u", title: { conflict: [null, "V"] }, waits_for: ["t"] },
           ],
           waves: [["t"], ["u"]],
@@ -86,8 +101,9 @@ describe("threads", () => {
     });
     await expect(threads(fetcher)).resolves.toEqual({
       threads: [
-        { id: "t", title: "T", waitsFor: [] },
-        { id: "u", title: "V", waitsFor: ["t"] },
+        { id: "t", title: "T", waitsFor: [], counts: { ...NO_COUNTS, leaves: 3, done: 2, in_review: 1, ready: 1 } },
+        // Counts from a server that sends none: no leaves.
+        { id: "u", title: "V", waitsFor: ["t"], counts: NO_COUNTS },
       ],
       waves: [["t"], ["u"]],
       anytime: [],

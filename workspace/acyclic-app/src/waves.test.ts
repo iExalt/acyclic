@@ -7,29 +7,29 @@ import { wavesView } from "./waves";
 // Project p holds a's work and some of b's, project q the rest of b's; c waits on b, and b and d on each other.
 const items = [
   item("p"),
-  item("a1", "p", [], { thread: "a", stage: "done" }),
-  item("a2", "p", [], { thread: "a", stage: "in-review" }),
-  item("b1", "p", [], { thread: "b", stage: "ready" }),
+  item("a1", "p", [], { thread: "a" }),
+  item("a2", "p", [], { thread: "a" }),
+  item("b1", "p", [], { thread: "b" }),
   item("q"),
-  item("b2", "q", [], { thread: "b", stage: "in-progress" }),
-  item("b3", "q", [], { thread: "b", archived: true }),
-  item("c1", "q", [], { thread: "c", stage: "blocked" }),
-  item("d1", "q", [], { thread: "d", stage: "parked" }),
+  item("b2", "q", [], { thread: "b" }),
+  item("c1", "q", [], { thread: "c" }),
+  item("d1", "q", [], { thread: "d" }),
 ];
+const none = { done: 0, leaves: 0, in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
 const listed = {
   threads: [
-    { id: "a", title: "A", waitsFor: [] },
-    { id: "b", title: "B", waitsFor: ["d"] },
-    { id: "c", title: "C", waitsFor: ["b", "d"] },
-    { id: "d", title: "D", waitsFor: ["b"] },
-    { id: "e", title: "E", waitsFor: [] },
+    { id: "a", title: "A", waitsFor: [], counts: { ...none, leaves: 2, done: 2, in_review: 1 } },
+    { id: "b", title: "B", waitsFor: ["d"], counts: { ...none, leaves: 3, ready: 1, in_progress: 1, parked: 1 } },
+    { id: "c", title: "C", waitsFor: ["b", "d"], counts: { ...none, leaves: 1, blocked: 1 } },
+    { id: "d", title: "D", waitsFor: ["b"], counts: { ...none, leaves: 1, parked: 1 } },
+    { id: "e", title: "E", waitsFor: [], counts: none },
   ],
   waves: [["b", "d"], ["c"]],
   anytime: ["a", "e"],
 };
 
 describe("wavesView", () => {
-  const view = wavesView(listed, items, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"], false));
+  const view = wavesView(listed, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"], false));
 
   it("lays out each wave's threads as tiles, with the projects they work in and what they wait on, earlier or in a cycle", () => {
     expect(view.waves.map((wave) => wave.map((tile) => tile.id))).toEqual([["b", "d"], ["c"]]);
@@ -38,9 +38,9 @@ describe("wavesView", () => {
     expect(view.anytime.map((tile) => tile.id)).toEqual(["a", "e"]);
   });
 
-  it("counts a thread's leaves by stage, done counting those in review, and none archived", () => {
-    expect(view.anytime[0]?.counts).toMatchObject({ leaves: 2, done: 2, in_review: 1 });
-    expect(view.waves[0]?.[0]?.counts).toMatchObject({ leaves: 2, ready: 1, in_progress: 1, done: 0 });
+  it("takes each tile's counts from core's for its thread, whatever the plan's items say", () => {
+    expect(view.anytime[0]?.counts).toBe(listed.threads[0]?.counts);
+    expect(view.waves[0]?.[0]?.counts).toMatchObject({ leaves: 3, ready: 1, in_progress: 1, parked: 1 });
     expect(view.anytime[1]?.counts.leaves).toBe(0);
   });
 });

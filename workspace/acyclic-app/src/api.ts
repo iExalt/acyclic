@@ -20,13 +20,20 @@ interface RawItem {
   size: Raw<string>;
   archived: boolean;
   links: { waits_for: string[]; waited_on_by: string[] };
-  /** A leaf's stage, as core tells it; a parent or an archived item has none. */
+  /**
+   * Where it stands, as core tells it: a leaf's own stage, or a parent's from its leaves. An archived item has none,
+   * nor a parent with no leaves to count.
+   */
   stage?: Stage;
   /** A parent's state as the work under it makes it, and its leaves counted by stage; a leaf has none. */
   progress?: Progress;
 }
 
-/** Where a leaf stands: core's seven stages, which tell every leaf apart. */
+/**
+ * Where a leaf stands: core's seven stages, which tell every leaf apart. A parent takes one from its leaves: once all
+ * are finished, in review while any still is, else done; else in progress once work under it has started and some of
+ * what is left isn't parked; else the first of ready, blocked, parked and needs a thread that its leaves have.
+ */
 
 export type Stage = "done" | "in-review" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
 
@@ -44,6 +51,18 @@ export interface Counts {
   parked: number;
   unthreaded: number;
 }
+
+/** No leaves at all. */
+export const NO_COUNTS: Counts = {
+  done: 0,
+  leaves: 0,
+  in_review: 0,
+  in_progress: 0,
+  ready: 0,
+  blocked: 0,
+  parked: 0,
+  unthreaded: 0,
+};
 
 export interface Progress {
   state: string;
@@ -197,6 +216,8 @@ export interface Thread {
   title: string;
   /** The threads whose work its own waits on. */
   waitsFor: string[];
+  /** Its member leaves by stage, as core counts them: every one but those archived. */
+  counts: Counts;
 }
 
 /**
@@ -210,7 +231,7 @@ export interface Threads {
 }
 
 interface RawThreads {
-  threads: { id: string; title: Raw<string>; waits_for: string[] }[];
+  threads: { id: string; title: Raw<string>; waits_for: string[]; progress?: { counts: Counts } }[];
   waves: string[][];
   anytime: string[];
 }
@@ -223,6 +244,7 @@ export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
       id: row.id,
       title: titleOr(row.title, row.id),
       waitsFor: row.waits_for,
+      counts: row.progress?.counts ?? NO_COUNTS,
     })),
     waves: raw.waves,
     anytime: raw.anytime,

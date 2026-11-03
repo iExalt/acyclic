@@ -16,7 +16,7 @@ export interface ThreadPanelProps {
   id: string;
   /** The thread's line, for its badge. */
   line: Line | undefined;
-  /** Its leaves by stage, or undefined when it has none drawn. */
+  /** Its leaves by stage, as core counts them, or undefined while the plan isn't read. */
   counts: Counts | undefined;
   titleOf: (id: string) => string;
   stageOf: (id: string) => Stage | undefined;
@@ -99,7 +99,7 @@ export function ThreadPanel({
           <Icon of={X} />
         </button>
       </header>
-      {/* No total beside the counts: they are of the items drawn, which a total of every member would not add up to. */}
+      {/* No total beside the counts: they are of its leaves, which a total of every member, parents too, wouldn't add up to. */}
       <div className="thread-summary">
         <div className="progress">
           {counts === undefined || counts.leaves === 0 ? (

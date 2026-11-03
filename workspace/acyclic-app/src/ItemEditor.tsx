@@ -26,7 +26,8 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
   const edit = itemEdit(item.id, base, draft);
-  const hint = stateHint(draft, item.stage !== undefined);
+  // A leaf core has placed: a parent has a stage too, from its leaves, and progress besides.
+  const hint = stateHint(draft, item.progress === undefined && item.stage !== undefined);
   const form = useRef<HTMLFormElement>(null);
   useFieldInView(form);
   const submit = (event: FormEvent) => {
@@ -57,7 +58,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
         // Finished work's state is set by finishing it, so it reads as the panel says it, not as a field.
         <div className="fixed-field">
           State
-          <StageLabel stage={item.stage ?? "done"} />
+          <StageLabel stage={item.progress === undefined ? (item.stage ?? "done") : "done"} />
         </div>
       ) : (
         <label>

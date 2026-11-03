@@ -2,7 +2,6 @@
 // drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
 import { countsText, type Stage } from "../api";
-import { overallStage } from "../stages";
 import { cut, type Measure, wrap } from "./fit";
 import { type Placed, withinOneBox } from "./layout";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
@@ -129,8 +128,8 @@ export function scene(
       label: labelOf(node, textWidth, fonts),
       textWidth,
       kind: node.kind,
-      // A box's, where its work stands as a whole.
-      stage: node.kind === "leaf" ? node.stage : node.progress === null ? null : overallStage(node.progress),
+      // A box's, where its work stands as a whole, as core tells it.
+      stage: node.stage,
       // A finished thread's box carries its thread, as its stripe shows and a tap on it picks.
       thread: node.kind === "leaf" || node.doneBox?.kind === "thread" ? node.thread : null,
       x: at.x + at.width / 2,

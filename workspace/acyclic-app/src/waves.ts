@@ -1,14 +1,14 @@
 // The Threads view's tiles: each thread with work left, in the wave the tracker puts it in, with the projects it works
 // in, its leaves by stage, and the threads it waits on. Pure, so the rules are tested without a browser.
 
-import type { Counts, Item, Threads } from "./api";
+import { type Counts, NO_COUNTS, type Threads } from "./api";
 import type { Outline } from "./outline";
 
 export interface ThreadTile {
   id: string;
   /** The titles of the projects it has work in. */
   projects: string[];
-  /** Its leaves by stage; parents and archived leaves have none. */
+  /** Its leaves by stage, as core counts them: archived ones aside, whatever the Map shows. */
   counts: Counts;
   /** The threads in earlier waves it waits on. */
   after: string[];
@@ -21,36 +21,9 @@ export interface WavesView {
   anytime: ThreadTile[];
 }
 
-const NONE: Counts = {
-  done: 0,
-  leaves: 0,
-  in_review: 0,
-  in_progress: 0,
-  ready: 0,
-  blocked: 0,
-  parked: 0,
-  unthreaded: 0,
-};
-
-/** Each thread's leaves by stage, counted from `items`; parents and archived leaves have no stage, so none count. */
-export function threadCounts(items: readonly Item[]): Map<string, Counts> {
-  const counts = new Map<string, Counts>();
-  for (const item of items) {
-    if (item.thread === null || item.stage === undefined) continue;
-    const was = counts.get(item.thread) ?? { ...NONE };
-    was.leaves += 1;
-    if (item.stage === "done" || item.stage === "in-review") was.done += 1;
-    if (item.stage === "in-review") was.in_review += 1;
-    else if (item.stage === "in-progress") was.in_progress += 1;
-    else if (item.stage !== "done") was[item.stage] += 1;
-    counts.set(item.thread, was);
-  }
-  return counts;
-}
-
-/** The tiles for `listed`'s waves, counted from `items` and placed in `outline`'s projects. */
-export function wavesView(listed: Threads, items: readonly Item[], outline: Outline): WavesView {
-  const counts = threadCounts(items);
+/** The tiles for `listed`'s waves, with core's counts of each thread's leaves, placed in `outline`'s projects. */
+export function wavesView(listed: Threads, outline: Outline): WavesView {
+  const counts = new Map(listed.threads.map((thread) => [thread.id, thread.counts]));
   const wave = new Map<string, number>();
   listed.waves.forEach((ids, at) => {
     for (const id of ids) wave.set(id, at);
@@ -63,7 +36,7 @@ export function wavesView(listed: Threads, items: readonly Item[], outline: Outl
       projects: outline.projects
         .filter((project) => project.threads.some((one) => one.id === id))
         .map((project) => project.title),
-      counts: counts.get(id) ?? NONE,
+      counts: counts.get(id) ?? NO_COUNTS,
       after: on.filter((other) => (wave.get(other) ?? -1) < (wave.get(id) ?? -1)),
       looped: on.filter((other) => wave.get(other) === wave.get(id)),
     };
