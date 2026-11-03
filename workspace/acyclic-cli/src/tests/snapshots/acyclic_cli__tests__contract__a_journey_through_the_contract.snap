@@ -1077,11 +1077,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit First --title Renamed --waits-for 
     "code": "link-cycle",
     "details": {
       "items": [
-        "01900000-0000-7000-8000-0000000000a2",
-        "01900000-0000-7000-8000-0000000000a1"
+        "01900000-0000-7000-8000-0000000000a1",
+        "01900000-0000-7000-8000-0000000000a2"
       ]
     },
-    "message": "the link would close a cycle through 01900000-0000-7000-8000-0000000000a2, 01900000-0000-7000-8000-0000000000a1"
+    "message": "the link would close a cycle through 01900000-0000-7000-8000-0000000000a1, 01900000-0000-7000-8000-0000000000a2"
   },
   "ok": false
 }

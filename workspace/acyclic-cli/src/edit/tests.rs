@@ -1,4 +1,6 @@
-use acyclic_core::scope::USER;
+use acyclic_core::model;
+use acyclic_core::schema::{item as field, kind};
+use acyclic_core::scope::{ScopeEdit, USER};
 use acyclic_core::state::{ReplicaId, State};
 
 use super::*;
@@ -16,6 +18,61 @@ fn titled(title: &str) -> ItemFields {
 
 fn code<T>(result: Result<T, CliError>) -> &'static str {
     result.map_or_else(|err| err.code, |_| "ok")
+}
+
+// The writes as the commands make them, each judged against the tracker as it is.
+fn add_item(
+    r: &mut Replica,
+    id: &str,
+    fields: &ItemFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, None, |_| Ok(item_changes(id, fields, Adding::Given)))
+}
+
+fn edit_item(
+    r: &mut Replica,
+    id: &str,
+    fields: &ItemFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, None, |_| Ok(item_changes(id, fields, Adding::No)))
+}
+
+fn add_thread(
+    r: &mut Replica,
+    id: &str,
+    fields: &ThreadFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, None, |_| Ok(thread_changes(id, fields, Adding::Given)))
+}
+
+fn edit_thread(
+    r: &mut Replica,
+    id: &str,
+    fields: &ThreadFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, None, |_| Ok(thread_changes(id, fields, Adding::No)))
+}
+
+fn add_repository(
+    r: &mut Replica,
+    id: &str,
+    fields: &RepositoryFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, fields.name.as_deref(), |_| repository_changes(id, fields, Adding::Given))
+}
+
+fn edit_repository(
+    r: &mut Replica,
+    id: &str,
+    fields: &RepositoryFields,
+    by: By<'_>,
+) -> Result<Outcome, CliError> {
+    commit(r, by, fields.name.as_deref(), |_| repository_changes(id, fields, Adding::No))
 }
 
 fn item(replica: &Replica, id: &str) -> acyclic_core::model::Item {
@@ -102,7 +159,7 @@ fn an_agents_membership_and_repository_edits_apply_and_a_repeat_writes_nothing()
     let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
     add_thread(&mut r, "t", &thread, USER_BY).unwrap();
     let repository = RepositoryFields { name: Some("o/r".into()), ..RepositoryFields::default() };
-    crate::edit::add_repository(&mut r, "r", &repository, USER_BY).unwrap();
+    add_repository(&mut r, "r", &repository, USER_BY).unwrap();
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
     let out_of_t = ItemFields {
@@ -234,7 +291,7 @@ fn adding_a_thread_or_repository_again_needs_the_same_fields() {
     assert_eq!(r.changes(), before);
     let trunk = RepositoryFields { default_branch: Some("trunk".into()), ..repo };
     assert_eq!(add_repository(&mut r, "r", &trunk, AGENT).unwrap_err().code, "already-exists");
-    assert_eq!(edit_repository(&mut r, "r", &trunk, AGENT).map_err(|e| e.code), Ok(()));
+    assert_eq!(edit_repository(&mut r, "r", &trunk, AGENT).map(|_| ()).map_err(|e| e.code), Ok(()));
     assert_eq!(
         edit_repository(&mut r, "ghost", &trunk, AGENT).map_err(|e| e.code),
         Err("not-found")
@@ -254,8 +311,8 @@ fn an_item_added_under_a_threads_member_joins_the_thread_and_says_so() {
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
     let under = ItemFields { parent: Change::Set("a".into()), ..titled("B") };
-    let data = add_item(&mut r, "b", &under, AGENT).unwrap().item("b");
-    assert_eq!(data, json!({"item": "b", "placed": [{"item": "b", "thread": "t"}]}));
+    let placed = add_item(&mut r, "b", &under, AGENT).unwrap().placed();
+    assert_eq!(json!(placed), json!([{"item": "b", "thread": "t"}]));
     assert_eq!(item(&r, "b").thread.one().map(String::as_str), Some("t"));
 }
 
@@ -285,28 +342,32 @@ fn id(n: u16) -> String {
 }
 
 #[test]
-fn an_add_without_an_id_is_given_a_new_one_and_a_retry_names_the_first() {
+fn a_minted_add_whose_title_open_work_has_is_refused_naming_it() {
     let mut r = replica();
-    let new = |r: &Replica, of: &str, given: Option<&str>, title: &str| {
-        new_id(r, &Model::read(r.state()).unwrap(), of, given, title)
-            .map_err(|err| (err.code, err.details))
+    let minted = |r: &mut Replica, of: &str, id: &str, title: &str| {
+        let changes = if of == kind::THREAD {
+            let fields = ThreadFields { title: Some(title.to_owned()), ..ThreadFields::default() };
+            thread_changes(id, &fields, Adding::Minted)
+        } else {
+            item_changes(id, &titled(title), Adding::Minted)
+        };
+        commit(r, USER_BY, None, |_| Ok(changes)).map_err(|err| (err.code, err.details))
     };
-    let made = new(&r, kind::ITEM, None, "Sow").unwrap();
-    assert_eq!(acyclic_core::ids::v7(&made), Some(made.clone()));
-    add_item(&mut r, &made, &titled("Sow"), AGENT).unwrap();
-    // A retry of the same add is refused, naming the item it made, with an id of its own or none.
-    let named = Err(("already-exists", json!({"id": made})));
-    assert_eq!(new(&r, kind::ITEM, None, "Sow"), named);
-    assert_eq!(new(&r, kind::ITEM, Some(&id(2)), "Sow"), named);
-    // An id that exists is looked up before the title, in any case, so the add is a repeat.
-    assert_eq!(new(&r, kind::ITEM, Some(&made.to_uppercase()), "Sow"), Ok(made.clone()));
-    assert_eq!(new(&r, kind::ITEM, Some("plant"), "Plant").unwrap_err().0, "invalid-id");
+    minted(&mut r, kind::ITEM, "a", "Sow").unwrap();
+    // A retry with a new id is refused, naming the item the first made; one with the same id is a repeat.
+    assert_eq!(
+        minted(&mut r, kind::ITEM, "b", "Sow").unwrap_err(),
+        ("already-exists", json!({"id": "a"}))
+    );
+    assert!(add_item(&mut r, "a", &titled("Sow"), USER_BY).is_ok());
+    assert!(
+        add_item(&mut r, "c", &titled("Sow"), USER_BY).is_ok(),
+        "an id the caller chose isn't judged by title"
+    );
     // Threads match on title too, apart from items.
-    assert!(new(&r, kind::THREAD, None, "Sow").is_ok());
-    let fields = ThreadFields { title: Some("Beds".into()), ..ThreadFields::default() };
-    add_thread(&mut r, &id(3), &fields, USER_BY).unwrap();
-    assert_eq!(new(&r, kind::THREAD, None, "Beds").unwrap_err().0, "already-exists");
-    assert_eq!(new(&r, kind::THREAD, Some(&id(3)), "Beds"), Ok(id(3)));
+    minted(&mut r, kind::THREAD, "t", "Sow").unwrap();
+    assert_eq!(minted(&mut r, kind::THREAD, "u", "Sow").unwrap_err().0, "already-exists");
+    assert_eq!(given_id("plant").unwrap_err().code, "invalid-id");
 }
 
 #[test]
@@ -319,9 +380,9 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     r.write(&key, field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
     add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
-    for title in ["Weed", "Sow", "Rows"] {
-        let model = Model::read(r.state()).unwrap();
-        assert!(new_id(&r, &model, kind::ITEM, None, title).is_ok(), "{title}");
+    for (n, title) in ["Weed", "Sow", "Rows"].into_iter().enumerate() {
+        let changes = item_changes(&format!("n{n}"), &titled(title), Adding::Minted);
+        assert!(commit(&mut r, USER_BY, None, |_| Ok(changes)).is_ok(), "{title}");
     }
 }
 
@@ -397,4 +458,66 @@ fn one_repository_named_twice_is_written_once() {
         r.changes() - before
     };
     assert_eq!(written(vec![id(3), id(3)]), written(vec![id(3)]));
+}
+
+#[test]
+fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
+    let mut r = replica();
+    for id in ["p", "c"] {
+        add_item(&mut r, id, &titled(id), USER_BY).unwrap();
+    }
+    edit_item(
+        &mut r,
+        "c",
+        &ItemFields { parent: Change::Set("p".into()), ..ItemFields::default() },
+        USER_BY,
+    )
+    .unwrap();
+    let under_c = ItemFields { parent: Change::Set("c".into()), ..ItemFields::default() };
+    let err = edit_item(&mut r, "p", &under_c, USER_BY).unwrap_err();
+    assert_eq!(
+        (err.code, err.message.as_str()),
+        ("parent-cycle", "p can't go under itself or its own descendant")
+    );
+    let itself = ItemFields { parent: Change::Set("c".into()), ..ItemFields::default() };
+    let err = edit_item(&mut r, "c", &itself, USER_BY).unwrap_err();
+    assert_eq!(
+        (err.code, err.message.as_str()),
+        ("parent-cycle", "c can't go under itself or its own descendant")
+    );
+    edit_item(
+        &mut r,
+        "p",
+        &ItemFields {
+            waits_for: Delta { add: vec!["c".into()], remove: vec![] },
+            ..ItemFields::default()
+        },
+        USER_BY,
+    )
+    .unwrap();
+    let back = ItemFields {
+        waits_for: Delta { add: vec!["p".into()], remove: vec![] },
+        ..ItemFields::default()
+    };
+    let err = edit_item(&mut r, "c", &back, USER_BY).unwrap_err();
+    assert_eq!((err.code, err.details.clone()), ("link-cycle", json!({"items": ["c", "p"]})));
+    // Several at once: the one naming nothing speaks first, and every one is listed.
+    let both = ItemFields { thread: Change::Set("nowhere".into()), ..back };
+    let err = edit_item(&mut r, "c", &both, USER_BY).unwrap_err();
+    assert_eq!(err.code, "not-found");
+    assert_eq!(err.details["violations"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn work_moved_or_added_under_an_archived_root_is_refused() {
+    let mut r = replica();
+    add_item(&mut r, "p", &titled("Beds"), USER_BY).unwrap();
+    model::set_state(&mut r, "p", ItemState::Done, USER_BY).unwrap();
+    r.write(&model::item_key("p").unwrap(), field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
+    add_item(&mut r, "o", &titled("Open"), USER_BY).unwrap();
+    let under = ItemFields { parent: Change::Set("p".into()), ..ItemFields::default() };
+    let err = edit_item(&mut r, "o", &under, USER_BY).unwrap_err();
+    assert_eq!((err.code, err.details.clone()), ("archived", json!({"root": "p"})));
+    let new = ItemFields { parent: Change::Set("p".into()), ..titled("New") };
+    assert_eq!(code(add_item(&mut r, "n", &new, USER_BY)), "archived");
 }
