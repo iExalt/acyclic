@@ -3,14 +3,12 @@ use axum::http::Method;
 
 use serde_json::json;
 
-use super::session::{CODE_LIFE, CODE_SKEW};
 use super::*;
 
 const LOGIN: &str = "user@example.com";
 const HOST_NAME: &str = "acyclic.example.ts.net";
 
 const PORT: u16 = 7478;
-const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn config(static_dir: Option<PathBuf>) -> Config {
     Config {
@@ -29,8 +27,8 @@ fn tailscale() -> Access {
     }
 }
 
-fn session() -> Access {
-    Access::Session { port: PORT, token: Token::parse(TOKEN).unwrap() }
+fn local() -> Access {
+    Access::Local { port: PORT }
 }
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -50,8 +48,8 @@ fn only_the_user_through_tailscale_for_this_host_passes() {
     let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
     let user = (IDENTITY, LOGIN);
     let host = ("host", HOST_NAME);
-    assert_eq!(check(&[user, host]), Ok(Credential::Identity));
-    assert_eq!(check(&[user, ("host", "ACYCLIC.example.ts.net")]), Ok(Credential::Identity));
+    assert_eq!(check(&[user, host]), Ok(()));
+    assert_eq!(check(&[user, ("host", "ACYCLIC.example.ts.net")]), Ok(()));
     assert_eq!(check(&[host]), Err(Refusal::NoIdentity));
     assert_eq!(check(&[user, user, host]), Err(Refusal::NoIdentity));
     assert_eq!(check(&[(IDENTITY, "other@example.com"), host]), Err(Refusal::WrongIdentity));
@@ -67,26 +65,17 @@ fn only_the_user_through_tailscale_for_this_host_passes() {
         host: format!("{HOST_NAME}:8080"),
         origin: format!("https://{HOST_NAME}"),
     };
-    assert_eq!(
-        ported.check(&headers(&[user, ("host", "acyclic.example.ts.net:8080")])),
-        Ok(Credential::Identity)
-    );
+    assert_eq!(ported.check(&headers(&[user, ("host", "acyclic.example.ts.net:8080")])), Ok(()));
     assert_eq!(ported.check(&headers(&[user, host])), Err(Refusal::WrongHost));
 }
 
 #[test]
-fn only_the_session_for_this_port_passes_on_the_machine() {
-    let access = session();
+fn anything_on_the_machine_passes_for_this_port() {
+    let access = local();
     let check = |pairs: &[(&str, &str)]| access.check(&headers(pairs));
-    let bearer = format!("Bearer {TOKEN}");
-    let session = ("authorization", bearer.as_str());
-    let host = ("host", "127.0.0.1:7478");
-    assert_eq!(check(&[session, host]), Ok(Credential::Bearer));
-    assert_eq!(check(&[session, ("host", "localhost:7478")]), Ok(Credential::Bearer));
-    assert_eq!(check(&[session, ("host", "LOCALHOST:7478")]), Ok(Credential::Bearer));
-    assert_eq!(check(&[session, ("host", "[::1]:7478")]), Ok(Credential::Bearer));
-    let lower = format!("bearer {TOKEN}");
-    assert_eq!(check(&[("authorization", lower.as_str()), host]), Ok(Credential::Bearer));
+    for name in ["127.0.0.1:7478", "localhost:7478", "LOCALHOST:7478", "[::1]:7478"] {
+        assert_eq!(check(&[("host", name)]), Ok(()), "{name}");
+    }
     // A name that merely resolves to the machine, another port, or a spelling that isn't one of the three is refused,
     // so a page from elsewhere can't rebind its name to the loopback address.
     for other in [
@@ -98,40 +87,19 @@ fn only_the_session_for_this_port_passes_on_the_machine() {
         "127.0.0.1:07478",
         "::1:7478",
     ] {
-        assert_eq!(check(&[session, ("host", other)]), Err(Refusal::WrongHost), "{other}");
+        assert_eq!(check(&[("host", other)]), Err(Refusal::WrongHost), "{other}");
     }
-    assert_eq!(check(&[session]), Err(Refusal::WrongHost));
-    assert_eq!(check(&[session, host, host]), Err(Refusal::WrongHost));
-    let short = &TOKEN[1..];
-    let long = format!("{TOKEN}0");
-    let wrong = format!("1{short}");
-    let upper = TOKEN.to_uppercase();
-    for presented in [
-        String::new(),
-        "Bearer".into(),
-        "Bearer ".into(),
-        format!("Bearer {short}"),
-        format!("Bearer {long}"),
-        format!("Bearer {wrong}"),
-        format!("Bearer {upper}"),
-        format!("Bearer  {TOKEN}"),
-        format!("Bearer {TOKEN} "),
-        format!("Basic {TOKEN}"),
-        TOKEN.into(),
-    ] {
-        let sent = check(&[("authorization", presented.as_str()), host]);
-        assert_eq!(sent, Err(Refusal::NoSession), "{presented:?}");
-    }
-    assert_eq!(check(&[host]), Err(Refusal::NoSession));
-    assert_eq!(check(&[session, session, host]), Err(Refusal::NoSession));
-    // Tailscale's header counts for nothing here.
-    assert_eq!(check(&[(IDENTITY, LOGIN), host]), Err(Refusal::NoSession));
+    assert_eq!(check(&[]), Err(Refusal::WrongHost));
+    assert_eq!(
+        check(&[("host", "127.0.0.1:7478"), ("host", "127.0.0.1:7478")]),
+        Err(Refusal::WrongHost)
+    );
 }
 
 #[test]
 fn commands_come_as_json_from_no_other_origin() {
     let access = tailscale();
-    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), &Credential::Identity);
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs));
     let json = ("content-type", "application/json");
     assert_eq!(check(&[json]), Ok(()));
     assert_eq!(check(&[("content-type", "Application/JSON; charset=utf-8")]), Ok(()));
@@ -150,8 +118,8 @@ fn commands_come_as_json_from_no_other_origin() {
         Err(Refusal::WrongOrigin)
     );
     // On the machine, a page from the listener's own names and port.
-    let access = session();
-    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs), &Credential::Bearer);
+    let access = local();
+    let check = |pairs: &[(&str, &str)]| access.same_origin(&headers(pairs));
     assert_eq!(check(&[json]), Ok(()));
     assert_eq!(check(&[json, ("origin", "http://127.0.0.1:7478")]), Ok(()));
     assert_eq!(check(&[json, ("origin", "http://localhost:7478")]), Ok(()));
@@ -232,32 +200,20 @@ fn every_route_is_behind_the_listeners_check() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
         assert!(!body.contains("outside"), "{path}");
     }
-    // On the machine, the session stands in for the identity, and a preflight without it is refused, so no other
-    // page's script is ever let in.
-    let router = super::router(config(Some(www)), session());
+    // On the machine, the right `Host` is all it takes, but a page on another port still can't write.
+    let router = super::router(config(Some(www)), local());
     let host = ("host", "127.0.0.1:7478");
-    let bearer = format!("Bearer {TOKEN}");
-    let (status, body) = send(&router, Method::GET, "/index.html", &[host, (IDENTITY, LOGIN)], "");
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(body.contains("acyclic up --link"), "{body}");
-    for (method, path) in [
-        (Method::GET, "/api/command"),
-        (Method::OPTIONS, "/api/command"),
-        (Method::POST, "/api/command"),
-    ] {
-        let (status, body) = send(&router, method.clone(), path, &[host, (IDENTITY, LOGIN)], "");
-        assert_eq!(
-            (status, code(&body)),
-            (StatusCode::UNAUTHORIZED, "no-session".into()),
-            "{method} {path}"
-        );
-    }
     assert_eq!(
-        send(&router, Method::GET, "/index.html", &[host, ("authorization", &bearer)], ""),
+        send(&router, Method::GET, "/index.html", &[host], ""),
         (StatusCode::OK, "the app".into())
     );
+    let elsewhere =
+        [host, ("content-type", "application/json"), ("origin", "http://localhost:3000")];
+    let (status, body) =
+        send(&router, Method::POST, "/api/command", &elsewhere, r#"{"item": "list"}"#);
+    assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "wrong-origin".into()));
     // No page may frame the app, or a refusal.
-    for pairs in [vec![host, ("authorization", bearer.as_str())], vec![host]] {
+    for pairs in [vec![host], vec![("host", "evil.example:7478")]] {
         let (_, headers) = exchange(&router, "/index.html", &pairs);
         assert_eq!(headers[CONTENT_SECURITY_POLICY], app::POLICY);
         assert_eq!(headers[X_FRAME_OPTIONS], "DENY");
@@ -372,12 +328,6 @@ fn a_write_that_cant_get_its_turn_is_told_the_server_is_busy() {
     assert_ne!(code(&body), "busy", "{status}");
 }
 
-/// A server for `acyclic up` whose clock reads `now`.
-fn up_router(now: i64) -> Router {
-    let env = Env { vars: [("ACYCLIC_NOW".to_owned(), now.to_string())].into(), ..Env::default() };
-    super::router(Config { env, ..config(None) }, session())
-}
-
 /// Sends a request and returns its status and its headers.
 fn exchange(router: &Router, path: &str, pairs: &[(&str, &str)]) -> (StatusCode, HeaderMap) {
     let mut request = Request::builder().uri(path);
@@ -389,143 +339,6 @@ fn exchange(router: &Router, path: &str, pairs: &[(&str, &str)]) -> (StatusCode,
         let response = router.clone().oneshot(request.body(Body::empty()).unwrap()).await.unwrap();
         (response.status(), response.headers().clone())
     })
-}
-
-#[test]
-fn a_link_pairs_a_browser_once_while_it_is_fresh() {
-    let now = 1_792_022_400_000;
-    let router = up_router(now);
-    let token = Token::parse(TOKEN).unwrap();
-    let host = ("host", "127.0.0.1:7478");
-    let code = token.code(now - 60_000, [7; 8]);
-    let path = format!("/login?code={code}");
-
-    let (status, headers) = exchange(&router, &path, &[("host", "evil.example:7478")]);
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert!(headers.get(SET_COOKIE).is_none());
-    let (status, headers) = exchange(&router, &path, &[host]);
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(headers[LOCATION], "/");
-    let cookie = headers[SET_COOKIE].to_str().unwrap();
-    assert!(cookie.contains("; HttpOnly; SameSite=Strict; Path=/;"), "{cookie}");
-    // The cookie holds a credential of its own, never the session.
-    assert!(cookie.starts_with(&format!("acyclic-up-7478={}", token.browser())), "{cookie}");
-    assert!(!cookie.contains(TOKEN));
-    // A link is spent once used.
-    assert_eq!(exchange(&router, &path, &[host]).0, StatusCode::FORBIDDEN);
-    for stale in [token.code(now - CODE_LIFE - 1, [1; 8]), token.code(now + CODE_SKEW + 1, [2; 8])]
-    {
-        let path = format!("/login?code={stale}");
-        assert_eq!(exchange(&router, &path, &[host]).0, StatusCode::FORBIDDEN, "{stale}");
-    }
-    for bad in ["/login", "/login?code=", "/login?other=1", "/login?code=1.2.3"] {
-        assert_eq!(exchange(&router, bad, &[host]).0, StatusCode::FORBIDDEN, "{bad}");
-    }
-}
-
-#[test]
-fn pairing_lands_on_the_app_address_the_browser_opened_unpaired() {
-    let now = 1_792_022_400_000;
-    let router = up_router(now);
-    let token = Token::parse(TOKEN).unwrap();
-    let host = ("host", "127.0.0.1:7478");
-    let kept = |path: &str| {
-        let (status, headers) = exchange(&router, path, &[host]);
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
-        assert_eq!(headers[CONTENT_TYPE], "text/html; charset=utf-8");
-        headers.get(SET_COOKIE).map(|value| value.to_str().unwrap().to_owned())
-    };
-    // An app address is kept, for the pairing link's path alone and as long as a link lasts.
-    assert_eq!(
-        kept("/?item=a&view=map").as_deref(),
-        Some(
-            "acyclic-up-7478-to=item=a&view=map; HttpOnly; SameSite=Lax; Path=/login; Max-Age=300"
-        )
-    );
-    // Nothing else is: not an asset, nor a query the app never writes, which forgets an earlier one, as home does.
-    // (A query can't hold a control character: a request can't be built with one.)
-    assert_eq!(kept("/assets/app.js?v=1"), None);
-    let long = format!("/?item={}", "a".repeat(LANDING_MAX));
-    for forgotten in ["/", "/?//evil.example", "/?item=%22a%22;b", "/?item=a,b", long.as_str()] {
-        let cookie = kept(forgotten).unwrap();
-        assert!(
-            cookie.starts_with("acyclic-up-7478-to=;")
-                && cookie.ends_with("Path=/login; Max-Age=0"),
-            "{cookie}"
-        );
-    }
-    let pair = |seed: u8, cookie: &str| {
-        let path = format!("/login?code={}", token.code(now, [seed; 8]));
-        let (status, headers) = exchange(&router, &path, &[host, ("cookie", cookie)]);
-        assert_eq!(status, StatusCode::SEE_OTHER);
-        let set: Vec<_> =
-            headers.get_all(SET_COOKIE).iter().map(|value| value.to_str().unwrap()).collect();
-        assert!(
-            set.iter()
-                .any(|one| one.starts_with("acyclic-up-7478-to=;") && one.ends_with("Max-Age=0")),
-            "{set:?}"
-        );
-        headers[LOCATION].to_str().unwrap().to_owned()
-    };
-    assert_eq!(pair(1, "acyclic-up-7478-to=item=a&view=map"), "/?item=a&view=map");
-    // Any page on the host can set the cookie, so what it holds is checked again, and only this port's is read.
-    assert_eq!(pair(2, "acyclic-up-7478-to=//evil.example"), "/");
-    assert_eq!(pair(3, "acyclic-up-7479-to=item=a"), "/");
-    assert_eq!(pair(4, "other=1"), "/");
-}
-
-#[test]
-fn a_paired_browser_writes_only_from_the_listeners_own_page() {
-    let router = up_router(0);
-    let credential = Token::parse(TOKEN).unwrap().browser();
-    let browser = format!("acyclic-up-7478={credential}");
-    let host = ("host", "localhost:7478");
-    let json = ("content-type", "application/json");
-    let paired = ("cookie", browser.as_str());
-    let post = |pairs: &[(&str, &str)]| {
-        let (status, body) =
-            send(&router, Method::POST, "/api/command", pairs, r#"{"item": "list"}"#);
-        (status, code(&body))
-    };
-    // The tracker clone is missing, so a request let in fails as the CLI would.
-    let ran = |(status, _): (StatusCode, String)| status.is_server_error();
-    assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478")])));
-    // Each server on the host has a cookie of its own.
-    let others = format!("acyclic-up-7479=forged; {browser}");
-    assert!(ran(post(&[host, json, ("cookie", &others), ("origin", "http://localhost:7478")])));
-    let same = ("sec-fetch-site", "same-origin");
-    assert!(ran(post(&[host, json, paired, ("origin", "http://localhost:7478"), same])));
-    // The cookie reaches every port on the machine, so a page on another one, or one that hides its origin, is refused.
-    for refused in [
-        vec![host, json, paired],
-        vec![host, json, paired, ("origin", "http://localhost:3000")],
-        vec![host, json, paired, ("origin", "http://127.0.0.1:7478")],
-        vec![
-            host,
-            json,
-            paired,
-            ("origin", "http://localhost:7478"),
-            ("sec-fetch-site", "same-site"),
-        ],
-    ] {
-        assert_eq!(post(&refused), (StatusCode::FORBIDDEN, "wrong-origin".into()), "{refused:?}");
-    }
-    // A wrong cookie, or a wrong session beside a right cookie, lets nothing in.
-    let forged = ("cookie", "acyclic-up=forged");
-    let elsewhere = format!("acyclic-up-7479={credential}");
-    let unported = format!("acyclic-up={credential}");
-    let wrong = ("authorization", "Bearer forged");
-    for refused in [
-        vec![host, json, forged],
-        vec![host, json, ("cookie", &elsewhere)],
-        vec![host, json, ("cookie", &unported)],
-        vec![host, json, paired, wrong],
-    ] {
-        assert_eq!(post(&refused), (StatusCode::UNAUTHORIZED, "no-session".into()), "{refused:?}");
-    }
-    // The session itself needs no origin: no browser sends it.
-    let bearer = format!("Bearer {TOKEN}");
-    assert!(ran(post(&[host, json, ("authorization", &bearer)])));
 }
 
 #[test]
@@ -549,63 +362,12 @@ fn a_socket_replaces_only_one_no_server_listens_on() {
 }
 
 #[test]
-fn the_tailscale_port_answers_only_under_its_secret_taken_off_once() {
-    let secret = Token::parse(TOKEN).unwrap().tailscale();
-    let echo = Router::new().fallback(|uri: axum::http::Uri| async move { uri.to_string() });
-    let under = under(secret.clone(), echo);
-    let reach = |path: &str| send(&under, Method::GET, path, &[], "");
-    let found = |path: &str| (StatusCode::OK, path.to_owned());
-    let missing = (StatusCode::NOT_FOUND, String::new());
-    assert_eq!(reach(&format!("/{secret}/x/y")), found("/x/y"));
-    assert_eq!(reach(&format!("/{secret}/api/command?q=1")), found("/api/command?q=1"));
-    assert_eq!(reach(&format!("/{secret}/?q")), found("/?q"));
-    assert_eq!(reach(&format!("/{secret}")), found("/"));
-    // Once: a second copy is an ordinary path beneath it.
-    assert_eq!(reach(&format!("/{secret}/{secret}/x")), found(&format!("/{secret}/x")));
-    for path in [
-        "/".to_owned(),
-        "/api/command".to_owned(),
-        format!("/{secret}x"),
-        format!("/{}", &secret[..31]),
-        format!("/{secret}0"),
-        format!("/{}/x", secret.to_uppercase()),
-        // Its first character percent-encoded: compared as sent, not decoded.
-        format!("/%{:02X}{}/x", secret.as_bytes()[0], &secret[1..]),
-        format!("/x/{secret}/y"),
-    ] {
-        assert_eq!(reach(&path), missing, "{path}");
-    }
-    // Beneath it is the whole server, routed on the path left, and checked as Tailscale's listener is.
-    let routes = super::under(secret.clone(), router(config(None), tailscale()));
-    let json = ("content-type", "application/json");
-    let (status, body) = send(
-        &routes,
-        Method::POST,
-        &format!("/{secret}/api/command"),
-        &[(IDENTITY, LOGIN), ("host", HOST_NAME), json],
-        r#"{"item": "list"}"#,
-    );
-    assert!(
-        serde_json::from_str::<Value>(&body).is_ok_and(|v| v.get("ok").is_some()),
-        "{status} {body}"
-    );
-    let (status, body) = send(
-        &routes,
-        Method::POST,
-        &format!("/{secret}/api/command"),
-        &[("host", HOST_NAME), json],
-        r#"{"item": "list"}"#,
-    );
-    assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "no-identity".to_owned()));
-}
-
-#[test]
 fn tailscales_forwarding_headers_change_nothing() {
     let access = tailscale();
     let user = (IDENTITY, LOGIN);
     let forged = [("x-forwarded-host", "other.example.ts.net"), ("x-forwarded-proto", "http")];
     let check = |pairs: &[(&str, &str)]| access.check(&headers(&[pairs, &forged].concat()));
-    assert_eq!(check(&[user, ("host", HOST_NAME)]), Ok(Credential::Identity));
+    assert_eq!(check(&[user, ("host", HOST_NAME)]), Ok(()));
     assert_eq!(check(&[user, ("host", "other.example.ts.net")]), Err(Refusal::WrongHost));
 }
 

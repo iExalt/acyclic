@@ -12,10 +12,10 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
 
-from app import ACYCLIC, VIEWS, run, tracker, wait_drawn
 from playwright.sync_api import sync_playwright
+
+from app import ACYCLIC, VIEWS, tracker, wait_drawn
 
 RUNS = 3
 # Chrome slows only the page's own thread, not workers, so ELK in its worker runs at full speed even when throttled:
@@ -55,8 +55,7 @@ def main():
             [ACYCLIC, "up", "--port", "0"], env=env, stdout=subprocess.PIPE, text=True
         )
         try:
-            link = json.loads(server.stdout.readline())["data"]["link"]
-            port = str(urlsplit(link).port)
+            link = f"http://{json.loads(server.stdout.readline())['data']['listening']}/"
             browser = playwright.chromium.launch()
             default = len(plan.default())
             box = min(
@@ -71,9 +70,6 @@ def main():
                         "Emulation.setCPUThrottlingRate", {"rate": THROTTLE}
                     )
                     page.goto(link)
-                    link = json.loads(run(env, "up", "--link", "--port", port))["data"][
-                        "link"
-                    ]
                     if engine == "inline":
                         page.goto(page.url.rstrip("/") + "/?engine=inline")
                     first = wait_drawn(page, default, timeout=120_000)

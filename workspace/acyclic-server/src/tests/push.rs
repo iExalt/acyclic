@@ -3,6 +3,7 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Mutex as StdMutex;
 
+use axum::http::header::AUTHORIZATION;
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use p256::SecretKey;
 

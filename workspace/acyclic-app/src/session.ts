@@ -188,14 +188,9 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
       next = await fetchAll();
     } catch (err: unknown) {
       const { code, message } = failure(err);
-      // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another, unless
-      // the browser must pair first: coming back to the app after pairing reads again by itself.
+      // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another.
       if (reads.shown === 0) set({ load: { state: "failed", code, message } });
-      else {
-        const unpaired = code === "no-session";
-        const text = unpaired ? message : `Couldn't refresh: ${message}`;
-        tell({ text, offer: unpaired ? null : "refresh", retry: null, lasts: "stale", at: null });
-      }
+      else tell({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
       return;
     }
     if (next === null) return;

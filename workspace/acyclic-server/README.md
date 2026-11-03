@@ -14,29 +14,19 @@ own. On a Mac, use `acyclic up`.
 
 ## `acyclic up`, on the Mac
 
-`up` listens on `127.0.0.1` only (`--port`, 7478 by default) and lets in requests presenting its session as
-`Authorization: Bearer <session>`, with `Host` naming that port on `127.0.0.1`, `localhost` or `[::1]`. The session
-lives in `~/.config/acyclic/up/session`, readable by the user alone, and lasts across restarts until
-`acyclic up --rotate` replaces it. Never mount that directory into a container.
-
-A browser pairs instead: `up` prints a link when it starts, and `acyclic up --link` (with the server's `--port`, if
-it has one) prints a fresh one. A link is good once, for five minutes, and gives the browser a cookie with a
-credential derived from the session, so rotating the session unpairs it too. Each server names its cookie for its
-port, so pairing one doesn't unpair another. The cookie still reaches every port on localhost, so a command it
-authenticates, a read as much as a write, must come from the listener's own origin, and no page may frame the app.
+`up` listens on `127.0.0.1` only (`--port`, 7478 by default) and lets in any request whose `Host` names that port on
+`127.0.0.1`, `localhost` or `[::1]`. Every process on the machine, agents and containers included, can reach it and
+acts as the user: the tracker is the user's and their agents', and the server draws no line between them. The checks
+on `Host` and `Origin`, and the ban on framing, keep out web pages the user's browser opens, which could otherwise
+reach the port too.
 
 `up --tailscale --login <login> --host <name>.ts.net` also serves requests through `tailscale serve`, checked as `serve`
 checks them: Tailscale replaces any `Tailscale-User-Login` a client sends with the user's, and passes the `.ts.net` name
 on as `Host`, without a port. It listens on port 7479 of `127.0.0.1` (`--tailscale-port`), since Tailscale's Mac apps
-run sandboxed and can't open a Unix socket. Every process and container on the machine can reach that port and send any
-identity header, so the port answers only paths under a secret first segment, derived from the session, and takes it
-off; anything else gets an empty 404. `up` prints the command that points Tailscale at it, `tailscale serve --bg
-http://127.0.0.1:7479/<secret>`, and Tailscale prepends the secret to every path, so browsers never see it. Only what
-can read the session can learn it, which keeps out containers as long as none mounts `~/.config/acyclic`; whatever keeps
-`up`'s output, such as a service's log, must be the user's alone too. `--rotate` changes the secret, and the command
-must be run again. With the open-source `tailscaled`, which can open one, `--socket <path>` listens on a Unix socket
-only the user can open instead, with no secret, pointed at by `tailscale serve --bg unix:<path>`. The phone then reaches
-the Mac while it is awake.
+run sandboxed and can't open a Unix socket. Local processes can reach that port and send any identity header, but they
+could reach the main port anyway. `up` prints the command that points Tailscale at it, `tailscale serve --bg
+http://127.0.0.1:7479`. With the open-source `tailscaled`, which can open one, `--socket <path>` listens on a Unix
+socket instead, pointed at by `tailscale serve --bg unix:<path>`. The phone then reaches the Mac while it is awake.
 
 `up` doesn't sync on a timer unless given `--sync-every`, so the clone syncs when told to, as it does without a
 server. It shares the clone with the CLI, whose writes queue with its own.
@@ -47,8 +37,7 @@ Both serve the app built into the binary (`acyclic-app-assets`), or the one in `
 `index.html`. `/` is `/index.html`, and a path with no file is 404, since the app has
 no routes of its own. Files are sent Brotli- or gzip-compressed when the browser takes it and the build wrote the
 copy. The bundle's hashed files under `/assets/` may be kept for good; everything else is revalidated. Every response
-carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing, except
-the empty 404 that `up --tailscale` gives a path outside its secret.
+carries a content policy that allows only the server's own scripts, styles, workers and API, and no framing.
 
 ## The API
 

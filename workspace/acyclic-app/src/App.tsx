@@ -547,20 +547,13 @@ export function App() {
       <div className="status-page" role="alert">
         <Wordmark />
         <h1>Couldn't load the plan</h1>
-        {load.code === "no-session" ? (
-          // Nothing to try again until the browser is paired; coming back to the app after that reads again.
-          <p>{load.message}.</p>
-        ) : (
-          <>
-            <p>
-              Check that <code>acyclic up</code> is still running where you paired this app, then try again.
-            </p>
-            <p className="muted">{load.message}</p>
-            <button type="button" className="primary" onClick={refresh}>
-              Try again
-            </button>
-          </>
-        )}
+        <p>
+          Check that <code>acyclic up</code> is still running, then try again.
+        </p>
+        <p className="muted">{load.message}</p>
+        <button type="button" className="primary" onClick={refresh}>
+          Try again
+        </button>
       </div>
     );
   const titleOf = (id: string) => model?.items.get(id)?.title ?? id;

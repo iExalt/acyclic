@@ -51,7 +51,7 @@ dir = "workspace/acyclic-app"
 run = "pnpm exec vite build --logLevel warn"
 
 [tasks."app:dev"]
-description = "Serve the app from Vite's dev server, reloading on change, against acyclic up on a fixture tracker; prints the pairing link"
+description = "Serve the app from Vite's dev server, reloading on change, against acyclic up on a fixture tracker; prints its address"
 depends = ["app:install"]
 run = "sh scripts/app-dev.sh"
 

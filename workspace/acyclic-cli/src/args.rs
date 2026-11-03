@@ -193,10 +193,7 @@ pub enum Command {
     /// Serves the JSON API and the app, refusing any request without the user's Tailscale identity.
     #[serde(skip)]
     Serve(Serve),
-    /// Serves the JSON API and the app on this machine, to whoever holds its session.
-    ///
-    /// The session lives in ~/.config/acyclic/up/session, readable only by the user, and a request presents it as
-    /// `Authorization: Bearer <session>`.
+    /// Serves the JSON API and the app on this machine, to every process on it, as the user.
     #[serde(skip)]
     Up(Up),
     /// Prints a completion script for a shell, as text.
@@ -252,19 +249,8 @@ pub struct Up {
     /// told to, as it does without the server.
     #[arg(long, default_value_t = 0)]
     pub sync_every: u64,
-    /// Replace the session with a new one before serving, so whatever held the old one, paired browsers included, is
-    /// shut out. A server already running keeps the old session until it restarts.
-    #[arg(long)]
-    pub rotate: bool,
-    /// Print a link that pairs a browser with the running server, valid once for five minutes, and serve nothing.
-    /// Give the same --port as the server, if it has one.
-    #[arg(long, conflicts_with_all = ["rotate", "static_dir", "sync_every", "tailscale"])]
-    pub link: bool,
     /// Also serve through `tailscale serve`, to requests carrying the user's Tailscale identity: on a port of 127.0.0.1,
-    /// under a secret first path segment derived from the session, or on a Unix socket with --socket. Run the
-    /// `tailscale serve --bg` command the output gives. Tailscale's Mac apps can't open a Unix socket, and every process
-    /// and container on the machine can reach the port, so the port answers only paths under the secret, which
-    /// `tailscale serve` adds; --rotate changes it, and the command must be run again.
+    /// or on a Unix socket with --socket. Run the `tailscale serve --bg` command the output gives.
     #[arg(long, requires_all = ["login", "host"])]
     pub tailscale: bool,
     /// The user's Tailscale login, which every request through Tailscale must carry in `Tailscale-User-Login`.
@@ -281,8 +267,7 @@ pub struct Up {
     #[arg(long, requires = "tailscale", default_value_t = 7479)]
     pub tailscale_port: u16,
     /// A Unix socket for `tailscale serve` in place of the port, for the open-source tailscaled, which can open one.
-    /// Its directory should be open to the user alone; only the user's processes can then reach it, so it needs no
-    /// secret.
+    /// Its directory should be open to the user alone.
     #[arg(long, requires = "tailscale", conflicts_with = "tailscale_port")]
     pub socket: Option<PathBuf>,
 }

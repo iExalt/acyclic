@@ -12,15 +12,12 @@ use acyclic_cli::error::{CliError, exit};
 use acyclic_cli::{Env, Start};
 use axum::body::Bytes;
 use axum::extract::{Request, State};
-use axum::http::header::{
-    AUTHORIZATION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE as COOKIE_HEADER, HOST, LOCATION,
-    ORIGIN, SET_COOKIE, WWW_AUTHENTICATE, X_FRAME_OPTIONS,
-};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::http::header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, ORIGIN, X_FRAME_OPTIONS};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
+use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower::ServiceExt as _;
@@ -29,9 +26,6 @@ use tower_http::compression::predicate::SizeAbove;
 
 pub mod app;
 pub mod push;
-pub mod session;
-
-use session::Token;
 
 /// The header Tailscale sets to the login of the user behind a request.
 pub const IDENTITY: &str = "Tailscale-User-Login";
@@ -53,7 +47,8 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub enum Access {
     /// Requests through Tailscale, which sets [`IDENTITY`] from its own lookup. Whatever reaches the listener without
-    /// passing through Tailscale can forge the header, so only Tailscale may be able to reach it.
+    /// passing through Tailscale can forge the header, so only Tailscale and local processes, which are trusted
+    /// anyway, may be able to reach it.
     Tailscale {
         /// The user's login, which [`IDENTITY`] must equal.
         login: String,
@@ -62,13 +57,11 @@ pub enum Access {
         /// The origin a browser's request must come from, such as `https://<host>`.
         origin: String,
     },
-    /// Requests on 127.0.0.1 presenting the session `acyclic up` issued. Every process on the machine, and every
-    /// container, can reach a loopback port, so the address proves nothing and the session is what counts.
-    Session {
+    /// Requests on 127.0.0.1 from anything on the machine: every local process, agents included, acts as the user.
+    /// Only the checks on `Host` and `Origin` keep out web pages the user's browser opens.
+    Local {
         /// The port the listener is bound to, which `Host` must carry.
         port: u16,
-        /// The session.
-        token: Token,
     },
 }
 
@@ -89,13 +82,13 @@ impl Access {
         })
     }
 
-    /// The names `Host` may carry on a session listener: the loopback address and `localhost`, with the listener's
+    /// The names `Host` may carry on a local listener: the loopback address and `localhost`, with the listener's
     /// port, so that a page from another name that resolves to 127.0.0.1 can't reach it.
     fn local_hosts(port: u16) -> [String; 3] {
         [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")]
     }
 
-    /// Checks that a request is for this server: on a session listener, that it names the listener's own address.
+    /// Checks that a request is for this server: on a local listener, that it names the listener's own address.
     ///
     /// # Errors
     ///
@@ -106,7 +99,7 @@ impl Access {
             Self::Tailscale { host, .. } => {
                 sent.is_some_and(|sent| sent.eq_ignore_ascii_case(host.as_bytes()))
             },
-            Self::Session { port, .. } => sent.is_some_and(|sent| {
+            Self::Local { port } => sent.is_some_and(|sent| {
                 Self::local_hosts(*port)
                     .iter()
                     .any(|name| sent.eq_ignore_ascii_case(name.as_bytes()))
@@ -115,48 +108,29 @@ impl Access {
         if ok { Ok(()) } else { Err(Refusal::WrongHost) }
     }
 
-    /// Checks that a request comes from the user, by the listener's own means, for this server, and says how.
+    /// Checks that a request comes from the user, by the listener's own means, for this server.
     ///
     /// # Errors
     ///
     /// Why the request is refused.
-    pub fn check(&self, headers: &HeaderMap) -> Result<Credential, Refusal> {
-        match self {
-            Self::Tailscale { login, .. } => {
-                match single(headers, IDENTITY) {
-                    None => return Err(Refusal::NoIdentity),
-                    Some(sent) if sent != login.as_bytes() => return Err(Refusal::WrongIdentity),
-                    Some(_) => {},
-                }
-                self.host(headers)?;
-                Ok(Credential::Identity)
-            },
-            Self::Session { port, token } => {
-                self.host(headers)?;
-                if headers.contains_key(AUTHORIZATION) {
-                    return match bearer(headers) {
-                        Some(presented) if token.matches(presented) => Ok(Credential::Bearer),
-                        _ => Err(Refusal::NoSession),
-                    };
-                }
-                let browser = token.browser();
-                let own = cookie(*port);
-                if cookies(headers, &own).any(|value| session::equal(value, browser.as_bytes())) {
-                    return Ok(Credential::Cookie);
-                }
-                Err(Refusal::NoSession)
-            },
+    pub fn check(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+        if let Self::Tailscale { login, .. } = self {
+            match single(headers, IDENTITY) {
+                None => return Err(Refusal::NoIdentity),
+                Some(sent) if sent != login.as_bytes() => return Err(Refusal::WrongIdentity),
+                Some(_) => {},
+            }
         }
+        self.host(headers)
     }
 
     /// Checks that a command's request is JSON and, when a browser sent it, that it comes from the server's own
-    /// origin, so that no other site can make the user's browser send one. A request the cookie let in must say
-    /// where it comes from: the cookie goes to every port on the machine, so any local page could otherwise send one.
+    /// origin, so that no other site can make the user's browser send one.
     ///
     /// # Errors
     ///
     /// Why the request is refused.
-    pub fn same_origin(&self, headers: &HeaderMap, credential: &Credential) -> Result<(), Refusal> {
+    pub fn same_origin(&self, headers: &HeaderMap) -> Result<(), Refusal> {
         let json = single(headers, CONTENT_TYPE).is_some_and(|value| {
             let media = value.split(|byte| *byte == b';').next().unwrap_or_default();
             media.trim_ascii().eq_ignore_ascii_case(b"application/json")
@@ -164,23 +138,12 @@ impl Access {
         if !json {
             return Err(Refusal::NotJson);
         }
-        if *credential == Credential::Cookie {
-            let site = single(headers, "sec-fetch-site");
-            if headers.contains_key("sec-fetch-site") && site != Some(b"same-origin".as_slice()) {
-                return Err(Refusal::WrongOrigin);
-            }
-            let own = single(headers, HOST).map(|host| [b"http://".as_slice(), host].concat());
-            return match (single(headers, ORIGIN), own) {
-                (Some(origin), Some(own)) if origin.eq_ignore_ascii_case(&own) => Ok(()),
-                _ => Err(Refusal::WrongOrigin),
-            };
-        }
         if headers.get(ORIGIN).is_none() {
             return Ok(());
         }
         let allowed = |origin: &[u8]| match self {
             Self::Tailscale { origin: own, .. } => origin.eq_ignore_ascii_case(own.as_bytes()),
-            Self::Session { port, .. } => Self::local_hosts(*port)
+            Self::Local { port } => Self::local_hosts(*port)
                 .iter()
                 .any(|name| origin.eq_ignore_ascii_case(format!("http://{name}").as_bytes())),
         };
@@ -191,61 +154,11 @@ impl Access {
     }
 }
 
-/// How a request showed it comes from the user.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Credential {
-    /// Tailscale's identity header.
-    Identity,
-    /// The session, in `Authorization`.
-    Bearer,
-    /// A paired browser's cookie.
-    Cookie,
-}
-
-/// The cookie a paired browser holds, named for the listener's port: browsers scope cookies by host and not by port, so
-/// servers on other ports of the same host would otherwise replace each other's.
-fn cookie(port: u16) -> String {
-    format!("acyclic-up-{port}")
-}
-
-/// The values of every cookie in the request named `name`; each is tried.
-fn cookies<'a>(headers: &'a HeaderMap, name: &'a str) -> impl Iterator<Item = &'a [u8]> {
-    headers.get_all(COOKIE_HEADER).into_iter().flat_map(move |value| {
-        value.as_bytes().split(|byte| *byte == b';').filter_map(move |pair| {
-            let (found, value) = pair
-                .trim_ascii()
-                .split_at(pair.trim_ascii().iter().position(|byte| *byte == b'=')?);
-            (found == name.as_bytes()).then_some(&value[1..])
-        })
-    })
-}
-
-/// The cookie that holds the address an unpaired browser opened, while it pairs, so pairing lands there: only the
-/// query of an address the app could have written, sent only to the pairing link's path, for as long as a link lasts.
-fn landing(port: u16) -> String {
-    format!("acyclic-up-{port}-to")
-}
-
-/// The longest query a landing keeps.
-const LANDING_MAX: usize = 1024;
-
-/// Whether `query` may be a landing: one the app could have written, with nothing a cookie or a redirect would read
-/// otherwise. It is checked again when read, since any page on the host, whatever its port, can set the cookie.
-fn landable(query: &[u8]) -> bool {
-    query.first().is_some_and(u8::is_ascii_alphanumeric)
-        && query.len() <= LANDING_MAX
-        && query
-            .iter()
-            .all(|byte| (0x21..=0x7e).contains(byte) && !matches!(byte, b'"' | b',' | b';' | b'\\'))
-}
-
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
     /// No identity header, or more than one.
     NoIdentity,
-    /// No session, another one, or more than one.
-    NoSession,
     /// Another login.
     WrongIdentity,
     /// No `Host`, more than one, or another name.
@@ -262,7 +175,6 @@ impl Refusal {
     fn code(self) -> &'static str {
         match self {
             Self::NoIdentity => "no-identity",
-            Self::NoSession => "no-session",
             Self::WrongIdentity => "wrong-identity",
             Self::WrongHost => "wrong-host",
             Self::WrongOrigin => "wrong-origin",
@@ -274,7 +186,6 @@ impl Refusal {
     fn message(self) -> &'static str {
         match self {
             Self::NoIdentity => "the request carries no single Tailscale identity",
-            Self::NoSession => "the request carries no session: present the one acyclic up issued",
             Self::WrongIdentity => "the request's Tailscale identity isn't the user's",
             Self::WrongHost => "the request is for another host",
             Self::WrongOrigin => "the request comes from another origin",
@@ -289,10 +200,6 @@ impl IntoResponse for Refusal {
         let envelope = json!({"ok": false, "error": {"code": self.code(), "message": self.message(), "details": null}});
         match self {
             Self::NotJson => (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(envelope)).into_response(),
-            Self::NoSession => {
-                (StatusCode::UNAUTHORIZED, [(WWW_AUTHENTICATE, "Bearer")], Json(envelope))
-                    .into_response()
-            },
             _ => (StatusCode::FORBIDDEN, Json(envelope)).into_response(),
         }
     }
@@ -305,14 +212,6 @@ fn single(headers: &HeaderMap, name: impl axum::http::header::AsHeaderName) -> O
         (Some(value), None) => Some(value.as_bytes()),
         _ => None,
     }
-}
-
-/// The token of the request's one `Authorization` header, if it says `Bearer` and one space then the token.
-fn bearer(headers: &HeaderMap) -> Option<&[u8]> {
-    let value = single(headers, AUTHORIZATION)?;
-    let space = value.iter().position(|byte| *byte == b' ')?;
-    let (scheme, token) = value.split_at(space);
-    scheme.eq_ignore_ascii_case(b"Bearer").then_some(&token[1..])
 }
 
 /// The HTTP status for a command's exit code.
@@ -380,55 +279,18 @@ impl Server {
     }
 }
 
-/// A listener's state: the server, who the listener lets in, and the pairing codes spent on it.
+/// A listener's state: the server and who the listener lets in.
 struct Listener {
     server: Arc<Server>,
     access: Access,
-    spent: session::Spent,
 }
 
-/// The path a pairing link opens.
-const LOGIN: &str = "/login";
-
-/// How long a paired browser keeps its cookie: 400 days, the most browsers allow.
-const COOKIE_AGE: u32 = 400 * 24 * 60 * 60;
-
-async fn guard(
-    State(listener): State<Arc<Listener>>,
-    mut request: Request,
-    next: Next,
-) -> Response {
-    let access = &listener.access;
-    if let Access::Session { port, token } = access
-        && request.uri().path() == LOGIN
-    {
-        return match access.host(request.headers()) {
-            Ok(()) => pair(&listener, *port, token, request.uri().query(), request.headers()),
-            Err(refusal) => refusal.into_response(),
-        };
-    }
-    match access.check(request.headers()) {
-        Ok(credential) => {
-            request.extensions_mut().insert(credential);
-            next.run(request).await
-        },
-        Err(Refusal::NoSession)
-            if request.method() == Method::GET && !request.uri().path().starts_with("/api/") =>
-        {
-            let Access::Session { port, .. } = access else {
-                return page(StatusCode::UNAUTHORIZED, UNPAIRED);
-            };
-            unpaired(*port, request.uri())
-        },
+async fn guard(State(listener): State<Arc<Listener>>, request: Request, next: Next) -> Response {
+    match listener.access.check(request.headers()) {
+        Ok(()) => next.run(request).await,
         Err(refusal) => refusal.into_response(),
     }
 }
-
-const UNPAIRED: &str = "This browser isn't paired with acyclic up. Run <code>acyclic up --link</code>, with the same \
-                        <code>--port</code> as the server if it has one, and open the link it prints within five \
-                        minutes.";
-
-const SPENT: &str = "This pairing link has expired or was already used. Run <code>acyclic up --link</code> for a new one.";
 
 /// A short page for people, one paragraph of static HTML: nothing in it comes from the request, so nothing needs
 /// escaping.
@@ -440,83 +302,12 @@ fn page(status: StatusCode, text: &'static str) -> Response {
     (status, [(CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
-/// The page for a browser that isn't paired, which keeps the app address it opened as its landing, or forgets an
-/// earlier one when it opened the app's home: the latest address wins.
-fn unpaired(port: u16, uri: &Uri) -> Response {
-    let mut response = page(StatusCode::UNAUTHORIZED, UNPAIRED);
-    let kept = match uri.query() {
-        _ if uri.path() != "/" => return response,
-        Some(query) if landable(query.as_bytes()) => {
-            format!(
-                "{}={query}; HttpOnly; SameSite=Lax; Path={LOGIN}; Max-Age={LANDING_AGE}",
-                landing(port)
-            )
-        },
-        _ => forget(port),
-    };
-    response
-        .headers_mut()
-        .insert(SET_COOKIE, HeaderValue::from_str(&kept).expect("a landable query is a header"));
-    response
-}
-
-/// How long a landing is kept, in seconds: as long as a pairing link lasts.
-const LANDING_AGE: i64 = session::CODE_LIFE / 1000;
-
-/// The header that removes a landing.
-fn forget(port: u16) -> String {
-    format!("{}=; HttpOnly; SameSite=Lax; Path={LOGIN}; Max-Age=0", landing(port))
-}
-
-/// Pairs a browser that opened a link with a valid, unspent code, by giving it the cookie, and sends it home, or to the
-/// app address it opened before it paired.
-fn pair(
-    listener: &Listener,
-    port: u16,
-    token: &Token,
-    query: Option<&str>,
-    headers: &HeaderMap,
-) -> Response {
-    let now = acyclic_cli::now(&listener.server.config.env);
-    let code = query.and_then(|query| query.strip_prefix("code="));
-    let made = code.and_then(|code| Some((code, token.verify(code, now)?)));
-    match made {
-        Some((code, made)) if listener.spent.spend(code, made, now) => {
-            let set = format!(
-                "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_AGE}",
-                cookie(port),
-                token.browser()
-            );
-            // Home, or the address the browser opened before it paired: only a query, so it stays on this server.
-            let name = landing(port);
-            let kept = cookies(headers, &name)
-                .find(|value| landable(value))
-                .and_then(|value| str::from_utf8(value).ok());
-            let home = kept.map_or_else(|| "/".to_owned(), |query| format!("/?{query}"));
-            let mut response =
-                (StatusCode::SEE_OTHER, [(SET_COOKIE, set), (LOCATION, home)]).into_response();
-            let forgotten =
-                HeaderValue::from_str(&forget(port)).expect("a cookie's name is a header");
-            response.headers_mut().append(SET_COOKIE, forgotten);
-            response
-        },
-        _ => page(StatusCode::FORBIDDEN, SPENT),
-    }
-}
-
-/// A pairing link for the session listener on `port`.
-fn link(port: u16, token: &Token, env: &Env) -> Result<String, CliError> {
-    let code = token.code(acyclic_cli::now(env), session::nonce()?);
-    Ok(format!("http://127.0.0.1:{port}{LOGIN}?code={code}"))
-}
-
 async fn command(
     State(listener): State<Arc<Listener>>,
-    Extension(credential): Extension<Credential>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
+    if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
     let command: Command = match serde_json::from_slice(&body) {
@@ -556,11 +347,10 @@ async fn push_key(State(listener): State<Arc<Listener>>) -> Response {
 /// Takes a device's subscription: the browser's `PushSubscription`, as JSON.
 async fn push_subscribe(
     State(listener): State<Arc<Listener>>,
-    Extension(credential): Extension<Credential>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
+    if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
     match serde_json::from_slice::<push::Subscription>(&body) {
@@ -574,11 +364,10 @@ async fn push_subscribe(
 /// Forgets a device: `{"endpoint": …}`.
 async fn push_unsubscribe(
     State(listener): State<Arc<Listener>>,
-    Extension(credential): Extension<Credential>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(refusal) = listener.access.same_origin(&headers, &credential) {
+    if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
     let endpoint = serde_json::from_slice::<Value>(&body)
@@ -602,8 +391,7 @@ fn pushed(outcome: Result<Value, push::Refused>) -> Response {
 }
 
 /// Gives every response, refusals included, the app's content policy ([`app::POLICY`]), which among other things
-/// forbids every page to frame it: a page from another local server is the same site as the app's, so a paired
-/// browser would send its cookie into a frame, and the frame could be clicked into writes.
+/// forbids every page to frame it, or the frame could be clicked into writes that the app's own origin sends.
 async fn unframed(mut response: Response) -> Response {
     let headers = response.headers_mut();
     headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(app::POLICY));
@@ -619,7 +407,7 @@ pub fn router(config: Config, access: Access) -> Router {
 fn routes(server: Arc<Server>, access: Access) -> Router {
     // The API's answers are compressed when they're worth it: a whole tracker's `item show` is megabytes of JSON, and a
     // phone may reach the server through a relay. None of them holds a secret an attacker could guess at through
-    // their compressed size: the session travels only in the request. The app's files are compressed already.
+    // their compressed size. The app's files are compressed already.
     let router = Router::new()
         .route("/api/command", post(command))
         .route("/api/push/key", get(push_key))
@@ -627,7 +415,7 @@ fn routes(server: Arc<Server>, access: Access) -> Router {
         .route("/api/push/unsubscribe", post(push_unsubscribe))
         .layer(CompressionLayer::new().compress_when(SizeAbove::new(1024)))
         .fallback(files);
-    let listener = Arc::new(Listener { server, access, spent: session::Spent::default() });
+    let listener = Arc::new(Listener { server, access });
     router
         .layer(middleware::from_fn_with_state(listener.clone(), guard))
         .layer(middleware::map_response(unframed))
@@ -698,43 +486,27 @@ pub fn serve(options: &Serve, tracker: PathBuf, env: &Env) -> Result<(), CliErro
     })
 }
 
-/// Serves the tracker clone at `tracker` on 127.0.0.1 to whoever holds the session, until interrupted: `acyclic up`.
-/// Prints one JSON line once it listens, with the address, the session's file and a pairing link, never the session.
-/// With `--link`, prints only a fresh pairing link instead, and serves nothing.
+/// Serves the tracker clone at `tracker` on 127.0.0.1 to every local process, until interrupted: `acyclic up`.
+/// Prints one JSON line with the address once it listens.
 ///
 /// # Errors
 ///
-/// When the home directory or the session's file is wrong, or the port can't be bound.
+/// When the settings are wrong or the port can't be bound.
 pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
-    let home = env.vars.get("HOME").filter(|home| !home.is_empty()).ok_or_else(|| {
-        CliError::new("session", exit::CONFIG, "HOME isn't set, so the session has nowhere to live")
-    })?;
-    if options.link {
-        let (token, _) = session::existing(home.as_ref())?;
-        let link = link(options.port, &token, env)?;
-        println!("{}", json!({"ok": true, "data": {"link": link}}));
-        return Ok(());
-    }
     if let Some(dir) = &options.static_dir {
         app::check_dir(dir)?;
     }
-    let (token, path) = session::open(home.as_ref(), options.rotate)?;
     let tailscale = match (options.tailscale, &options.login, &options.host) {
         (true, Some(login), Some(host)) => {
             Some(Access::tailscale(login, host, options.origin.as_deref())?)
         },
         _ => None,
     };
-    let secret = token.tailscale();
     let mut extra = Vec::new();
     if let Some(access) = tailscale.clone() {
         extra.push(match &options.socket {
             Some(socket) => Extra::Unix(socket.clone(), access),
-            None => Extra::Tcp(
-                SocketAddr::from(([127, 0, 0, 1], options.tailscale_port)),
-                access,
-                Some(secret.clone()),
-            ),
+            None => Extra::Tcp(SocketAddr::from(([127, 0, 0, 1], options.tailscale_port)), access),
         });
     }
     let subject = match &tailscale {
@@ -744,10 +516,9 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
     let push = push::Settings { subject, ..push::Settings::default() };
     let config = Config { tracker, env: env.clone(), static_dir: options.static_dir.clone(), push };
     let bind = SocketAddr::from(([127, 0, 0, 1], options.port));
-    let link = |port| link(port, &token, env);
     let socket = options.socket.clone();
     run(config, options.sync_every, bind, extra, |address, bound| {
-        let mut started = json!({"listening": address.to_string(), "session": path, "link": link(address.port())?});
+        let mut started = json!({"listening": address.to_string()});
         let mut bound = bound.into_iter();
         if tailscale.is_some() {
             started["tailscale"] = match (&socket, bound.next().flatten()) {
@@ -756,12 +527,12 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
                 },
                 (None, Some(at)) => json!({
                     "listening": at.to_string(),
-                    "serve": format!("tailscale serve --bg http://{at}/{secret}"),
+                    "serve": format!("tailscale serve --bg http://{at}"),
                 }),
                 (None, None) => unreachable!("a TCP listener has an address"),
             };
         }
-        Ok((Access::Session { port: address.port(), token: token.clone() }, started))
+        Ok((Access::Local { port: address.port() }, started))
     })
 }
 
@@ -769,8 +540,8 @@ pub fn up(options: &Up, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
 enum Extra {
     /// A Unix socket.
     Unix(PathBuf, Access),
-    /// A TCP address, serving only under the secret first path segment if one is given.
-    Tcp(SocketAddr, Access, Option<String>),
+    /// A TCP address.
+    Tcp(SocketAddr, Access),
 }
 
 /// Binds `bind`, and each extra listener with its own access, gives the bound address, and each extra listener's in
@@ -805,7 +576,7 @@ fn run(
                         axum::serve(unix, routes).with_graceful_shutdown(stopped()).await
                     });
                 },
-                Extra::Tcp(at, access, secret) => {
+                Extra::Tcp(at, access) => {
                     let tcp = tokio::net::TcpListener::bind(at)
                         .await
                         .map_err(|err| failed(&format!("listening on {at}"), err))?;
@@ -813,10 +584,6 @@ fn run(
                         tcp.local_addr().map_err(|err| failed("reading the address", err))?,
                     ));
                     let routes = routes(server.clone(), access);
-                    let routes = match secret {
-                        Some(secret) => under(secret, routes),
-                        None => routes,
-                    };
                     serving.spawn(async move {
                         axum::serve(tcp, routes).with_graceful_shutdown(stopped()).await
                     });
@@ -842,45 +609,6 @@ fn run(
         }
         Ok(())
     })
-}
-
-/// Serves `routes` only under the first path segment `secret`, which is taken off before they see the request; every
-/// other path is answered 404, empty. `tailscale serve`, pointed at `http://127.0.0.1:<port>/<secret>`, prepends it to
-/// every path, so browsers never see it, and only processes that can read the user's session can learn it: the Tailscale
-/// port is on loopback, which every process and container on the machine can reach, and Tailscale's identity header
-/// alone would let any of them act as the user.
-///
-/// It wraps the whole router, since a router's own layers run after it has routed the path they would rewrite.
-fn under(secret: String, routes: Router) -> Router {
-    Router::new().fallback_service(tower::service_fn(move |request: Request| {
-        let routes = routes.clone();
-        let inside = beneath(&secret, request);
-        async move {
-            match inside {
-                Some(request) => routes.oneshot(request).await,
-                None => Ok(StatusCode::NOT_FOUND.into_response()),
-            }
-        }
-    }))
-}
-
-/// `request` with the path's first segment taken off, if that segment is `secret`, compared as sent; `/<secret>` alone
-/// is `/`. Only the first segment is taken, once.
-fn beneath(secret: &str, mut request: Request) -> Option<Request> {
-    let rest = request.uri().path().strip_prefix('/')?;
-    let (first, after) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
-    if !session::equal(first.as_bytes(), secret.as_bytes()) {
-        return None;
-    }
-    let after = if after.is_empty() { "/" } else { after };
-    let path = match request.uri().query() {
-        Some(query) => format!("{after}?{query}"),
-        None => after.to_owned(),
-    };
-    let mut parts = request.uri().clone().into_parts();
-    parts.path_and_query = Some(path.parse().ok()?);
-    *request.uri_mut() = axum::http::Uri::from_parts(parts).ok()?;
-    Some(request)
 }
 
 /// The longest path a Unix socket can have on macOS, the shortest limit of the systems acyclic runs on.

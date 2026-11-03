@@ -1,7 +1,7 @@
 #!/bin/sh
 # Serves the app from Vite's dev server, reloading as its source changes, against `acyclic up` on a fixture tracker in a
-# temporary home: Vite passes the API and the pairing link through to the server. Prints the link to pair a browser
-# with, then runs until interrupted, removing the temporary home on the way out.
+# temporary home: Vite passes the API through to the server. Prints the app's address, then runs until interrupted,
+# removing the temporary home on the way out.
 #
 # Usage: app-dev.sh [items] [seed]
 set -eu
@@ -22,9 +22,8 @@ mkfifo "$fifo"
 "$acyclic" up --port 0 >"$fifo" &
 server=$!
 read -r line <"$fifo"
-link=$(printf '%s' "$line" | sed -n 's/.*"link":"\([^"]*\)".*/\1/p')
-origin=$(printf '%s' "$link" | sed 's#^\(https\{0,1\}://[^/]*\).*#\1#')
+origin=http://$(printf '%s' "$line" | sed -n 's/.*"listening":"\([^"]*\)".*/\1/p')
 port=${ACYCLIC_DEV_PORT:-5173}
-echo "Pair at: http://localhost:$port${link#"$origin"}"
+echo "Open: http://localhost:$port/"
 cd "$root/workspace/acyclic-app"
 ACYCLIC_UP="$origin" pnpm exec vite --port "$port" --strictPort

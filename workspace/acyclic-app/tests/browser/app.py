@@ -1,8 +1,8 @@
-"""Drives the app that `acyclic up` serves: pairing, installing, and the Map, as a phone and as a desktop.
+"""Drives the app that `acyclic up` serves: installing, and the Map, as a phone and as a desktop.
 
-`acyclic up` runs on a fixture with a home of its own; the browser pairs through the link it prints, and every request
+`acyclic up` runs on a fixture with a home of its own; the browser opens the address it prints, and every request
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
-needs the manifest and its icons fetched through the session's cookie), and draw the Map as the plan says it should: the
+needs the manifest and its icons), and draw the Map as the plan says it should: the
 default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
 the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread's panel
@@ -10,8 +10,7 @@ lists its items; from Needs you's view, a conflict is settled and threads that w
 full build, headless, keeps a
 subscription it is given, records a pushed notification without displaying a system banner, and opens Needs you's view
 it names. WebKit draws the default view at the phone's size, and the Threads view's arrows at the desktop's. In Chromium
-and WebKit, a page on another port of the same host can neither write with the paired browser's cookie nor frame the
-app. Chromium then draws the 3,500-item fixture. What the Map should show is worked out here from the tracker's own
+and WebKit, a page on another port of the same host can neither write to the app nor frame it. Chromium then draws the 3,500-item fixture. What the Map should show is worked out here from the tracker's own
 answers, not from the app's code. Screenshots go to target/browser/.
 
 Usage: app.py <acyclic binary> <acyclic-fixtures binary>
@@ -455,7 +454,7 @@ def open_app(browser, view, link, failures, name):
     )
     page.goto(link)
     if page.url.rstrip("/") != origin:
-        failures.append(f"{name}: pairing landed on {page.url}, not the app")
+        failures.append(f"{name}: opening the app landed on {page.url}")
     # The shell shows once the plan has loaded; a failed load is an alert.
     page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
     return context, page, origin, errors
@@ -879,21 +878,13 @@ def installable(context, page, origin, name, failures):
 
 
 @timed
-def pairing_journey(context, page, origin, env, name, failures):
-    """The paired browser's cookie is the app's alone: page script can't read it, and a page on another port of the
-    same host, which the browser sends it to, can neither write with it nor frame the app.
+def cross_origin_journey(context, origin, env, name, failures):
+    """A page on another port of the same host can neither write to the app nor frame it.
 
     A cross-origin JSON post needs a preflight the server never answers, so the browser refuses it before it is sent;
-    the attacker's one way to send the cookie with a write is a form, which can't say it holds JSON. That the server
-    also checks a cookie's request comes from its own origin is proven by its unit tests, since no browser sends one.
+    the attacker's one other way to write is a form, which can't say it holds JSON. That the server also refuses a
+    request from another origin is proven by its unit tests.
     """
-    port = urlsplit(origin).port
-    cookies = [c for c in context.cookies(origin) if c["name"].startswith("acyclic-up")]
-    held = [(c["name"], c["httpOnly"], c["sameSite"], c["path"]) for c in cookies]
-    if held != [(f"acyclic-up-{port}", True, "Strict", "/")]:
-        failures.append(f"{name}: the paired browser holds the cookies {held}")
-    if "acyclic-up" in page.evaluate("document.cookie"):
-        failures.append(f"{name}: the page's script can read the session's cookie")
     # Ids of this view's own, so a write that got through is found.
     tag = name.encode().hex()[:10].ljust(10, "0")
     form, fetched = f"01900000-0000-7000-8000-{tag}0f", f"01900000-0000-7000-8000-{tag}1f"
@@ -919,8 +910,7 @@ def pairing_journey(context, page, origin, env, name, failures):
         def log_message(self, *_):
             pass
 
-    # Another port of the same host, served from loopback as a local server's page would be: the same site, so the
-    # browser sends the cookie with its requests. A page from nowhere, such as one a route fulfils, isn't local, and
+    # Another port of the same host, served from loopback as a local server's page would be. A page from nowhere, such as one a route fulfils, isn't local, and
     # Chromium would refuse its loads from loopback before the server's own refusals were tried.
     server = ThreadingHTTPServer(("127.0.0.1", 0), Attacker)
     # Polled often, so shutting it down is quick.
@@ -947,7 +937,6 @@ def pairing_journey(context, page, origin, env, name, failures):
         other.evaluate("document.forms[0].submit()")
     answer = navigation.value
     refused = (answer.status, answer.json()["error"]["code"]) if answer else None
-    # 401 no-session would mean the cookie never went, and the check would prove nothing.
     if refused != (415, "not-json"):
         failures.append(f"{name}: another port's form write was answered {refused}, not 415 not-json")
     # The page's load waits for its frame's; a refused frame holds an engine's error page, which has no #root.
@@ -962,7 +951,7 @@ def pairing_journey(context, page, origin, env, name, failures):
         failures.append(f"{name}: another port's writes reached the tracker: {sorted(landed)}")
     if framed:
         failures.append(f"{name}: a page on another port framed the app, or no frame was drawn")
-    print(f"{name}: the cookie stayed the app's, and another port could neither write with it nor frame the app")
+    print(f"{name}: another port could neither write to the app nor frame it")
 
 
 def first_view_readable(page, name, failures):
@@ -2380,26 +2369,17 @@ def main():
                 text=True,
             )
             servers.append(server)
-            link = json.loads(server.stdout.readline())["data"]["link"]
-            port = str(urlsplit(link).port)
-
-            def fresh():
-                # A link is good once, and each context pairs afresh.
-                return json.loads(run(env, "up", "--link", "--port", port))["data"][
-                    "link"
-                ]
-
-            return plan, link, fresh, env, remote
+            listening = json.loads(server.stdout.readline())["data"]["listening"]
+            return plan, f"http://{listening}/", env, remote
 
         try:
-            plan, link, fresh, env, remote = serve(350)
+            plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
             hint = None
             for name, view in VIEWS.items():
                 context, page, origin, errors = open_app(
                     chromium, view, link, failures, name
                 )
-                link = fresh()
                 # The sidebar counts the plan's items; a phone's bar leaves the count out.
                 counted = page.get_by_test_id("item-count")
                 count = counted.inner_text() if counted.count() else str(len(plan.items))
@@ -2417,7 +2397,7 @@ def main():
                 deep_link_journey(context, origin, view, plan, name, failures)
                 command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
-                    pairing_journey(context, page, origin, env, name, failures)
+                    cross_origin_journey(context, origin, env, name, failures)
                     keys_journey(page, plan, name, failures)
                 if name == "phone" and hint is not None:
                     # Edits run once, on the phone the app is used on; the plan is read again after them.
@@ -2445,7 +2425,6 @@ def main():
             context, page, origin, errors = open_app(
                 notifying, VIEWS["phone"], link, failures, "notifying phone"
             )
-            link = fresh()
             push_journey(context, page, env, origin, "phone", failures)
             if errors:
                 failures.append(
@@ -2457,7 +2436,7 @@ def main():
             context, page, origin, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )
-            pairing_journey(context, page, origin, env, "webkit phone", failures)
+            cross_origin_journey(context, origin, env, "webkit phone", failures)
             to_map(page)
             wait_drawn(page, len(plan.default()))
             page.screenshot(path=SHOTS / "app-webkit-phone.png")
@@ -2483,7 +2462,6 @@ def main():
                 )
             context.close()
             # WebKit draws the Threads view's arrows where Chromium does, clear of the tiles.
-            link = fresh()
             context, page, _, errors = open_app(
                 webkit,
                 {**VIEWS["desktop"], "color_scheme": "light"},
@@ -2503,7 +2481,7 @@ def main():
             context.close()
             webkit.close()
 
-            large, link, _, _, _ = serve(3500)
+            large, link, _, _ = serve(3500)
             context, page, _, errors = open_app(
                 chromium, VIEWS["desktop"], link, failures, "3,500 items"
             )
