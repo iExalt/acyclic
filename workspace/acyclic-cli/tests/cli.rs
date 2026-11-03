@@ -168,7 +168,7 @@ fn a_fresh_replica_can_continue_after_the_old_clock_jumps_ahead() {
     assert_eq!((code, out["error"]["code"].as_str()), (1, Some("clock-jump")), "{out}");
     assert_eq!(
         out["error"]["details"]["hint"],
-        "Correct the system clock and wait until it is within five minutes of this replica's saved time, or sync this clone and continue from a fresh clone with an unused replica id",
+        "Correct the system clock and wait until it is within five minutes of this replica's saved time. If this clone has a shared remote, sync it and continue from a fresh clone with an unused replica id",
         "{out}"
     );
     let (_, unchanged) = old.load_strict().unwrap();

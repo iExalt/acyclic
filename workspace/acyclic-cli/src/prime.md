@@ -99,9 +99,9 @@ waits-for and thread it belongs with.
   can also commit a lease renewal that its own `changed` leaves out.
 - A `clock-jump` refusal means this replica's saved time is more than five minutes ahead of the system clock. Correct
   the clock and wait until it is within five minutes of the saved time. Writes remain stamped at the saved time until
-  the clock catches up fully. To write sooner, sync this clone and continue from a new clone with an unused replica id.
-  The migration keeps old timestamps: future-dated done work keeps its archive wait, and live claims keep their expiry
-  until they expire or their holder releases them.
+  the clock catches up fully. If this clone has a shared remote, sync it and continue from a new clone with an unused
+  replica id. That migration keeps old timestamps: future-dated done work keeps its archive wait, and live claims keep
+  their expiry until they expire or their holder releases them.
 
 ## Finding and doing work
 
