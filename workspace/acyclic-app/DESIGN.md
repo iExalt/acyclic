@@ -330,6 +330,10 @@ before what went wrong.
   it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
   and the Overview's projects come in dependency order (`topOrder`), which the Map keeps wherever one box waits on
   another.
+- **Opening a box moves only what it covers.** Once packed, the top level keeps its boxes where they are: a box that
+  grows, as one opening inside it makes it, stays at its corner, what it now covers makes way, right if it stood on its
+  right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Closing it
+  again finds the packing from before; a reload packs afresh.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
@@ -407,3 +411,5 @@ before what went wrong.
   done" in a box of interleaved tiles. They asked for finished threads with links to fold too, as one box "named after
   the thread", rather than vanishing into Done, and chose a frame around an unfolded thread's items ("Approve, frame
   around items") over a Fold button in its panel or a Fold tile.
+- 2026-11-03: opening a box no longer packs the top level afresh, after the user found that unfolding a thread's done
+  box made "the entire map … shift over".

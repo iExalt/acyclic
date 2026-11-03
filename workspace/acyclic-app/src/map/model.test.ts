@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, topOf, visible } from "./model";
 
 // garden
 //   beds: dig, edge
@@ -144,5 +144,12 @@ describe("implied links", () => {
     const changed: Record<string, string[]> = { b1: ["a1", "a2"], b2: ["b1"], c1: ["b2"], c2: ["a2", "c1"] };
     const linked = boxes.map((one) => (one.id in changed ? item(one.id, one.parent, changed[one.id]) : one));
     expect(visible(buildModel(linked), open).edges).toContainEqual({ source: "A", target: "C", implied: true });
+  });
+});
+
+describe("topOf", () => {
+  it("finds the top-level node a node is drawn in", () => {
+    const view = visible(model, { collapsed: new Set(), showArchived: false });
+    expect([topOf(view, "sow"), topOf(view, "plant"), topOf(view, "tools")]).toEqual(["garden", "garden", "tools"]);
   });
 });

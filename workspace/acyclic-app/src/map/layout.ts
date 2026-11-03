@@ -6,6 +6,7 @@
 
 import { natural } from "../natural";
 import type { Kind, View } from "./model";
+import { hold } from "./pack";
 import type { Point } from "./route";
 
 /** The scope above the top-level items. */
@@ -120,7 +121,7 @@ export function withinOneBox(view: View): (edge: { source: string; target: strin
 /** A bounded cache of box layouts by signature, evicting the least recently used. */
 export class LayoutCache {
   private readonly entries = new Map<string, BoxLayout>();
-  /** The top level as last placed, which a top level that only shrank keeps where it was. */
+  /** The top level as last placed, which a top level of the same boxes keeps where it was. */
   root: { input: BoxInput; layout: BoxLayout } | null = null;
 
   constructor(private readonly limit = 4096) {}
@@ -207,9 +208,9 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
         const signature = JSON.stringify([input.children, input.edges, input.aspect]);
         let layout = cache.get(signature);
-        // A top level that only shrank, as a box collapsing makes it, keeps every box where it was, rather than
-        // packing them again around the smaller one and moving the rest of the plan out of view. Kept out of the
-        // cache, so a reload packs afresh; expanding again finds the layout from before in it.
+        // A top level of the same boxes, as a box collapsing or expanding makes it, keeps every box where it was but
+        // for what one that grew now covers, rather than packing them again and moving the rest of the plan out of
+        // view. Kept out of the cache, so a reload packs afresh; collapsing again finds the layout from before in it.
         const kept = id === ROOT && layout === undefined ? held(cache.root, input) : undefined;
         if (kept !== undefined) layout = kept;
         if (layout === undefined) {
@@ -257,17 +258,17 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
 }
 
 /**
- * The top level's last layout, for a top level `now` that only shrank from it: the same boxes in the same order, the
- * same links and shape, and no box larger. Undefined for any other change, which packs it again.
+ * The top level's last layout, held for a top level `now` of the same boxes in the same order, with the same links and
+ * shape: each box where it was, but for what one that grew now covers. Undefined for any other change, which packs it
+ * again.
  */
 export function held(last: { input: BoxInput; layout: BoxLayout } | null, now: BoxInput): BoxLayout | undefined {
   if (last === null) return undefined;
   const was = last.input;
   if (was.aspect !== now.aspect || was.children.length !== now.children.length) return undefined;
   if (JSON.stringify(was.edges) !== JSON.stringify(now.edges)) return undefined;
-  const shrank = now.children.every((child, n) => {
-    const before = was.children[n];
-    return before?.id === child.id && child.width <= before.width && child.height <= before.height;
-  });
-  return shrank ? last.layout : undefined;
+  if (!now.children.every((child, n) => was.children[n]?.id === child.id)) return undefined;
+  const waits = new Map<string, string[]>();
+  for (const { source, target } of now.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
+  return hold({ children: was.children, layout: last.layout }, now.children, waits);
 }
