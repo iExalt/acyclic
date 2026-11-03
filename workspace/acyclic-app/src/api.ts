@@ -158,7 +158,7 @@ export function pairAgain(port: string): string {
   return `This browser isn't paired with acyclic up any more. Run acyclic up --link${flag} where it runs, and open the link it prints within five minutes`;
 }
 
-type Fetch = (input: string, init: RequestInit) => Promise<Response>;
+export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
 /**
  * A CLI command as the API takes it: a bare name for one without arguments, such as `"needs"`, else `{name: args}`,

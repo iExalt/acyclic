@@ -1,21 +1,18 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AddForm } from "./AddForm";
-import { type Command, command, failure, type Item, items, needs, type Threads, threads } from "./api";
 import { CommandMenu } from "./CommandMenu";
 import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
-import {
-  addCommand,
-  landed,
-  type NewItem,
-  type Pending,
-  type Pick,
-  pick,
-  redraft,
-  type Sent,
-  told,
-  unanswered,
-  unlinkCommand,
-} from "./edits";
+import { addCommand, type NewItem, type Pick, pick, unlinkCommand } from "./edits";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
@@ -51,18 +48,17 @@ import {
   type Wanted,
   type World,
 } from "./nav";
-import type { Need } from "./needs";
-import { noticeAfter, type Raised, type Seen } from "./notices";
+import type { Seen } from "./notices";
 import { Overview } from "./Overview";
 import { currentRows, outlineOf } from "./outline";
 import { Projects, ProjectsSheet } from "./Projects";
 import { PALETTES, setTheme, type Theme, useScheme, useTheme } from "./palette";
-import { answered, drawn as drawnOver, NO_READS, type Reads, show, start, type Unread } from "./reads";
+import { drawn as drawnOver } from "./reads";
 import { Shell, type View, Wordmark } from "./Shell";
+import { createSession, type Notice } from "./session";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
-import { type Kept, keep, type Undo, undoOf, unkeep } from "./undo";
 import { threadCounts, wavesView } from "./waves";
 import { useWide } from "./wide";
 
@@ -70,50 +66,9 @@ import { useWide } from "./wide";
 const mapModule = import("./map/PlanMap");
 const PlanMap = lazy(() => mapModule);
 
-type Load =
-  | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Threads; needs: Need[]; unread: Unread[] }
-  | { state: "failed"; code: string; message: string };
-
 /** Where this device keeps whether single-key shortcuts are on. */
 const SHORTCUTS_KEY = "acyclic.shortcuts";
-/** The Undo on offer, kept in this tab over a reload. */
-const UNDO_KEY = "acyclic.undo";
 
-/** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
-interface After {
-  /** The item to select and show, or null to leave the selection as it is, as a thread's edits do. */
-  select: string | null;
-  pin: string | null;
-  /** Offer to undo it, once saved: for the user's own moves, links and field edits; never a decision. */
-  undo?: true;
-  /** Said once saved, for an undo: what it did. */
-  undone?: string;
-  /** Said once saved, for a write that takes away what it was done from, as settling a need does. */
-  done?: string;
-}
-
-/** A refusal or failure to show, with what it offers: the command again when the server was only busy, or a refresh. */
-/** What the app tells the user, which `notices.ts` says how long to keep and where to show. */
-interface Notice extends Raised {
-  text: string;
-  offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
-  retry: { body: Command; after: After } | null;
-  /** Said of a link waiting for a form to close: dismissing it drops the link. */
-  held?: true;
-  /** A link to copy by hand, where the browser offers no clipboard. */
-  link?: string;
-  /** What Undo takes back, with the offer "undo". */
-  undo?: Undo;
-  /** That Undo as it is kept over a reload. */
-  kept?: Kept;
-  /** Brought back by a reload, and not yet checked against the plan read since. */
-  restored?: true;
-  /** News, not a failure: told politely, as a status. */
-  polite?: true;
-}
-
-const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null, lasts: "offer", at: null };
 /** What a form holding typing says when the user tries to leave it. */
 const UNSAVED: Notice = {
   text: "Unsaved changes: save them, or cancel",
@@ -126,6 +81,15 @@ const UNSAVED: Notice = {
 /** What opens as a link does: an address, or the place a history entry holds. */
 type Opening = Wanted & { place?: Place };
 
+/** The tab's storage, where the Undo on offer is kept over a reload, or null where the browser blocks it. */
+function storageOrNull(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether a form holds what the user typed, which nothing closes unasked. */
 const dirtyForm = () => document.querySelector("form[data-dirty='true']") !== null;
 
@@ -134,21 +98,7 @@ function rowsInView(): HTMLElement[] {
   return [...(document.querySelector("main")?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
 }
 
-/** The Undo a reload left on offer in this tab, offered again; or none. */
-function kept(): Notice | null {
-  try {
-    const raw = sessionStorage.getItem(UNDO_KEY);
-    const was: Kept | null = raw === null ? null : JSON.parse(raw);
-    const undo = was === null ? null : unkeep(was);
-    if (was === null || undo === null) return null;
-    return { text: was.text, offer: "undo", retry: null, undo, kept: was, restored: true, lasts: "offer", at: null };
-  } catch {
-    return null;
-  }
-}
-
 export function App() {
-  const [load, setLoad] = useState<Load>({ state: "loading" });
   const [showArchived, setShowArchived] = useState(false);
   /**
    * Where the user is, and what the moves since the last render asked of what is drawn. `placeNow` is the place as of
@@ -185,27 +135,21 @@ export function App() {
   /** Single-key shortcuts, on unless switched off on this device. */
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
   const wide = useWide();
-  const [notice, setNotice] = useState<Notice | null>(kept);
-  const [busy, setBusy] = useState(false);
-  // Kept while it is on offer, and dropped once anything else takes its place; "Undoing…" passes it on to what follows.
-  // Written once each, not as the notice moves with the user, as a large plan takes a while to write.
-  const keptNow = useRef<Kept | undefined>(notice?.kept);
-  useEffect(() => {
-    const next = notice?.kept;
-    if (next === keptNow.current || (next === undefined && notice === UNDOING)) return;
-    keptNow.current = next;
-    try {
-      if (next !== undefined) sessionStorage.setItem(UNDO_KEY, JSON.stringify(next));
-      else sessionStorage.removeItem(UNDO_KEY);
-    } catch {
-      // Too big a plan for the tab's storage: the Undo is offered until a reload, as without it.
-      sessionStorage.removeItem(UNDO_KEY);
-    }
-  }, [notice]);
-  /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */
-  const sending = useRef(false);
-  /** A write drawn before the server answers, until the plan read after it holds it. */
-  const [pending, setPending] = useState<Pending | null>(null);
+  /**
+   * The session with the server: the plan, the write out, and the one notice slot. Its moves of where the user is go
+   * through `goNow`, so they start from where the user is by then.
+   */
+  const goNow = useRef<(intent: Intent) => void>(go);
+  goNow.current = go;
+  const [session] = useState(() =>
+    createSession({
+      fetcher: (input, init) => fetch(input, init),
+      storage: storageOrNull(),
+      nav: { go: (intent) => goNow.current(intent), item: () => placeNow.current.item },
+    }),
+  );
+  const { load, notice, busy, pending, version, reads } = useSyncExternalStore(session.subscribe, session.snapshot);
+  const { refresh, send, tell } = session;
   /**
    * An address to open: the one the app was opened at, one a notification sent the app already open, or the place a
    * history entry Forward landed on holds, with what it names. It waits for the plan to load, and for a form holding
@@ -217,54 +161,7 @@ export function App() {
   });
   /** Counts forms closed, so a link waiting on one opens once it has. */
   const [formsClosed, setFormsClosed] = useState(0);
-  /** Counts edits sent and refreshes, so panels that read more than the plan read again after each. */
-  const [version, setVersion] = useState(0);
 
-  /** The plan's reads, so one overtaken by a later read is never shown, and the writes saved that none holds yet. */
-  const reads = useRef<Reads>(NO_READS);
-  /** The latest read shown, as the server had it: what an undo's guard is checked against. */
-  const lastRead = useRef<{ items: ReadonlyMap<string, Item> } | null>(null);
-  /** Reads the plan, or null when a read started later has been shown already. */
-  const fetchAll = useCallback(async () => {
-    reads.current = start(reads.current);
-    const n = reads.current.started;
-    const [found, listed, needed] = await Promise.all([items(), threads(), needs()]);
-    const next = show(reads.current, n, found);
-    if (next === null) return null;
-    reads.current = next;
-    lastRead.current = { items: new Map(found.map((one) => [one.id, one])) };
-    return { state: "loaded" as const, items: found, threads: listed, needs: needed, unread: next.unread };
-  }, []);
-  const refresh = useCallback(() => {
-    setVersion((was) => was + 1);
-    fetchAll().then(
-      (next) => {
-        if (next === null) return;
-        setLoad(next);
-        setNotice((was) => {
-          const now = noticeAfter(was, { kind: "read" });
-          if (now?.restored !== true) return now;
-          // A tab brought back hours later offers an Undo only while it can still take its write back.
-          const { restored: _, ...checked } = now;
-          const plan = { items: new Map(next.items.map((one) => [one.id, one])) };
-          return now.undo?.holds(plan) === true ? checked : null;
-        });
-        // A plan read while a write is out may not hold it yet: the write's own read drops what it drew.
-        if (!sending.current) setPending(null);
-      },
-      (err: unknown) => {
-        const { code, message } = failure(err);
-        // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another, unless
-        // the browser must pair first: coming back to the app after pairing reads again by itself.
-        if (reads.current.shown === 0) setLoad({ state: "failed", code, message });
-        else {
-          const unpaired = code === "no-session";
-          const text = unpaired ? message : `Couldn't refresh: ${message}`;
-          setNotice({ text, offer: unpaired ? null : "refresh", retry: null, lasts: "stale", at: null });
-        }
-      },
-    );
-  }, [fetchAll]);
   useEffect(() => {
     refresh();
     // Coming back to the app shows what changed meanwhile.
@@ -276,9 +173,6 @@ export function App() {
   }, [refresh]);
 
   const loaded = load.state === "loaded" ? load : null;
-  /** The plan as the server last gave it, without writes still on their way: what an undo sets back to. */
-  const serverPlan = useRef<{ items: ReadonlyMap<string, Item> } | null>(null);
-  serverPlan.current = loaded === null ? null : { items: new Map(loaded.items.map((one) => [one.id, one])) };
   const shown = useMemo(
     () => (loaded === null ? [] : drawnOver(loaded.items, loaded.unread, pending)),
     [loaded, pending],
@@ -330,149 +224,6 @@ export function App() {
   /** To the Map for a thread, as its row or tile anywhere does: picked, its panel open, and its items framed. */
   const toThread = useCallback((id: string) => go({ kind: "thread", id }), [go]);
 
-  /**
-   * Sends an edit; once saved, reloads the plan and brings `after.select` into view with `after.pin` held still. An
-   * edit `drawn` is drawn at once, its form closed, and if the write fails, the form opens again with what the user
-   * wrote, unless the server turns out to hold it after all.
-   */
-  const send = useCallback(
-    async (body: Command, after: After, drawn: Pending | null = null): Promise<boolean> => {
-      // Any write sent while one is out was made through a control the busy state forgot to hold: dropped.
-      if (sending.current) return false;
-      sending.current = true;
-      setBusy(true);
-      setNotice((was) => (after.undone === undefined ? noticeAfter(was, { kind: "write" }) : UNDOING));
-      const before = serverPlan.current;
-      const bringIn = () => go({ kind: "wrote", select: after.select, pin: after.pin });
-      if (drawn !== null) {
-        setPending(drawn);
-        bringIn();
-      }
-      let sent: Sent;
-      try {
-        await command(body);
-        // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
-        if (drawn !== null) reads.current = answered(reads.current, drawn);
-        try {
-          const next = await fetchAll();
-          if (next !== null) setLoad(next);
-          setPending(null);
-          bringIn();
-          sent = { write: "saved", reload: "done" };
-        } catch (err) {
-          // Saved, so what it drew stays, as unread, where the next write can't undo it.
-          if (drawn !== null) {
-            const { unread } = reads.current;
-            setLoad((was) => (was.state === "loaded" ? { ...was, unread } : was));
-            setPending(null);
-          }
-          go({ kind: "wrote", select: null, pin: null });
-          sent = { write: "saved", reload: { failed: failure(err).message } };
-        }
-      } catch (err) {
-        const { code, message } = failure(err);
-        sent = { write: "failed", code, message };
-        if (drawn !== null) {
-          // No answer may still mean saved: the plan says, and the form opens again only if it isn't. What was drawn
-          // stays until then, so the item stays selected if it was saved.
-          let held = false;
-          if (unanswered(code)) {
-            const next = await fetchAll().catch(() => undefined);
-            if (next !== undefined) {
-              // A read overtaken by one already shown: that one says.
-              if (next !== null) setLoad(next);
-              held = landed(drawn, next?.items ?? reads.current.items);
-            }
-          }
-          setPending(null);
-          if (!held && drawn.kind === "add")
-            go({ kind: "redraft", adding: { parent: drawn.item.parent, draft: redraft(drawn.item, code) } });
-          if (!held && drawn.kind === "edit") go({ kind: "reopen", id: drawn.id, edited: drawn.edited });
-        }
-      }
-      const { text, offer } = told(sent);
-      const saved = sent.write === "saved" && sent.reload === "done";
-      const undo = saved && after.undo && before !== null ? undoOf(body, before) : null;
-      if (text !== null)
-        setNotice({
-          text,
-          offer,
-          retry: offer === "retry" ? { body, after } : null,
-          // A plan saved but not read again is out of date wherever the user goes; a refusal is the surface's.
-          lasts: offer === "refresh" ? "stale" : "refusal",
-          at: null,
-        });
-      else if (undo !== null)
-        setNotice({
-          text: after.done ?? undo.text,
-          offer: "undo",
-          retry: null,
-          undo,
-          ...(before === null ? {} : { kept: keep(body, before, after.done ?? undo.text, undo.undone) }),
-          // A decision's outcome is said politely, as it is without an Undo.
-          ...(after.done === undefined ? {} : { polite: true }),
-          lasts: "offer",
-          at: null,
-        });
-      else if (saved && after.undone !== undefined)
-        setNotice({ text: after.undone, offer: null, retry: null, lasts: "news", at: null });
-      else if (saved && after.done !== undefined)
-        setNotice({ text: after.done, offer: null, retry: null, polite: true, lasts: "news", at: null });
-      else setNotice((was) => noticeAfter(was, { kind: "write" }));
-      setVersion((was) => was + 1);
-      sending.current = false;
-      setBusy(false);
-      return sent.write === "saved";
-    },
-    [fetchAll, go],
-  );
-  /**
-   * Takes back the write `undo` came from: reads the plan first, so the guard is checked against the server's latest,
-   * and sends nothing when what the write left has changed since. Once at a time.
-   */
-  const undoing = useRef(false);
-  const runUndo = useCallback(
-    async (undo: Undo) => {
-      if (undoing.current || sending.current) return;
-      undoing.current = true;
-      // Said at once and until it is done: the plan is read again before the undo is sent.
-      setNotice(UNDOING);
-      try {
-        // Never without a fresh read: one overtaken by a later read shown leaves that one, as fresh, to check against.
-        let next: Awaited<ReturnType<typeof fetchAll>>;
-        try {
-          next = await fetchAll();
-        } catch (err: unknown) {
-          // Still on offer: Undo tries again.
-          const { message } = failure(err);
-          setNotice({
-            text: `Couldn't check the plan, so nothing was undone: ${message}`,
-            offer: "undo",
-            retry: null,
-            undo,
-            lasts: "offer",
-            at: null,
-          });
-          return;
-        }
-        if (next !== null) setLoad(next);
-        const plan = lastRead.current;
-        if (plan === null || !undo.holds(plan))
-          setNotice({
-            text: "Changed since, so it can't be undone",
-            offer: null,
-            retry: null,
-            lasts: "offer",
-            at: null,
-          });
-        else await send(undo.command, { select: undo.shows ?? placeNow.current.item, pin: null, undone: undo.undone });
-      } finally {
-        undoing.current = false;
-      }
-    },
-    [fetchAll, send],
-  );
-
   const choose = useCallback(
     (target: Pick) => {
       if (model === null) return;
@@ -480,7 +231,8 @@ export function App() {
       go({ kind: "mode", mode: step.mode });
       const refusal = step.refusal;
       // A target refused says why where the user chose it; one taken drops what an earlier choice was refused.
-      setNotice((was) =>
+      const was = session.snapshot().notice;
+      tell(
         refusal !== null
           ? { text: refusal, offer: null, retry: null, lasts: "refusal", at: null }
           : was?.lasts === "refusal"
@@ -492,7 +244,7 @@ export function App() {
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
       send(step.command, { select: mode.item, pin, undo: true });
     },
-    [model, mode, send, go],
+    [model, mode, send, go, session, tell],
   );
   const open = openOf(place, worldNow.current);
   /**
@@ -514,9 +266,9 @@ export function App() {
   const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
-    setNotice((was) => noticeAfter(was, { kind: "form-closed" }));
+    session.event({ kind: "form-closed" });
     setFormsClosed((was) => was + 1);
-  }, []);
+  }, [session]);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [panel]);
   /** Where the user is, which says how long a notice stays. */
@@ -525,8 +277,8 @@ export function App() {
   // A notice is first shown where the user is, and kept or dropped as they move. As an update of the notice as it
   // is by then, so it never brings back one another effect of the same move cleared, such as a closed form's.
   useEffect(() => {
-    if (notice !== null) setNotice((was) => noticeAfter(was, { kind: "moved", to: seen }));
-  }, [notice, seen]);
+    if (notice !== null) session.event({ kind: "moved", to: seen });
+  }, [notice, seen, session]);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
@@ -536,7 +288,7 @@ export function App() {
     const closing = openLayers(openOf(placeNow.current, worldNow.current)).slice(0, count);
     if (go({ kind: "close", count }).requests.unsaved) {
       // A link waiting for the form says so already, and dismissing that drops it.
-      setNotice((was) => (was?.held ? was : UNSAVED));
+      if (!session.snapshot().notice?.held) tell(UNSAVED);
       return 0;
     }
     return closing.length;
@@ -544,11 +296,9 @@ export function App() {
   /** What the keys read of the app as it is: kept current at each render, for the one listener. */
   const keysSee = useRef({ shortcuts, panel, menu: showCommand });
   keysSee.current = { shortcuts, panel, menu: showCommand };
-  /** The undo on offer, while its notice shows and nothing is being sent: what ⌘Z takes back. */
-  const undoNow = useRef<Undo | null>(null);
-  undoNow.current = notice?.offer === "undo" && !notice.restored && !busy ? (notice.undo ?? null) : null;
-  const runUndoNow = useRef(runUndo);
-  runUndoNow.current = runUndo;
+  /** Whether an Undo is on offer, its notice shown and nothing being sent: what ⌘Z takes back. */
+  const undoNow = useRef(false);
+  undoNow.current = notice?.offer === "undo" && notice.undo !== undefined && !notice.restored && !busy;
   /** What a single-key shortcut does; set once the plan has loaded. */
   const onKeyAction = useRef<(action: KeyAction) => void>(() => undefined);
   useEffect(() => {
@@ -564,7 +314,7 @@ export function App() {
         const blocked = undo === null || keysSee.current.menu || typingIn(event.target) || dirtyForm();
         if (!blocked) {
           event.preventDefault();
-          runUndoNow.current(undo);
+          session.undo();
         }
       } else if (opensMenu(event, mac)) {
         event.preventDefault();
@@ -709,7 +459,7 @@ export function App() {
     if (dirtyForm()) {
       // An entry Forward landed on stands for what is open meanwhile, so no later move goes back over it unasked.
       if (entries.current.restoring) act(restored(entries.current, layersNow.current));
-      setNotice({
+      tell({
         text: `Unsaved changes: save or cancel, then ${name} opens`,
         offer: null,
         retry: null,
@@ -738,7 +488,8 @@ export function App() {
     }
     const gone = found.missing.join(" and ");
     // An offered Undo waits wherever the user goes, a link included, and one a reload kept is offered again.
-    setNotice((was) =>
+    const was = session.snapshot().notice;
+    tell(
       found.missing.length > 0
         ? {
             text: `That ${gone} ${found.missing.length > 1 ? "aren't" : "isn't"} in the plan any more`,
@@ -775,7 +526,7 @@ export function App() {
       await navigator.clipboard.writeText(url);
       return true;
     } catch {
-      setNotice({ text: "Copy this link:", offer: null, retry: null, link: url, lasts: "refusal", at: null });
+      tell({ text: "Copy this link:", offer: null, retry: null, link: url, lasts: "refusal", at: null });
       return false;
     }
   };
@@ -829,7 +580,7 @@ export function App() {
     if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
     if (run.kind === "archived") return setShowArchived((was) => !was);
     if (run.kind === "refresh") return refresh();
-    if (dirtyForm()) return setNotice(UNSAVED);
+    if (dirtyForm()) return tell(UNSAVED);
     if (run.kind === "view") goTo(run.view);
     else if (run.kind === "add") startAdd(null);
     else if (run.kind === "on-item") onItem(run.action);
@@ -909,11 +660,7 @@ export function App() {
           {notice.text}
         </span>
         {notice.retry === null ? null : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => notice.retry && send(notice.retry.body, notice.retry.after)}
-          >
+          <button type="button" disabled={busy} onClick={() => session.retry()}>
             Try again
           </button>
         )}
@@ -934,7 +681,7 @@ export function App() {
             type="button"
             disabled={busy}
             aria-keyshortcuts={onMac() ? "Meta+Z" : "Control+Z"}
-            onClick={() => notice.undo && runUndo(notice.undo)}
+            onClick={() => session.undo()}
           >
             Undo
           </button>
@@ -943,7 +690,7 @@ export function App() {
           <button
             type="button"
             onClick={() => {
-              setNotice(null);
+              session.dismiss();
               setShowArchived(false);
             }}
           >
@@ -954,7 +701,7 @@ export function App() {
           <button
             type="button"
             onClick={() => {
-              setNotice(null);
+              session.dismiss();
               refresh();
             }}
           >
@@ -967,7 +714,7 @@ export function App() {
           aria-label="Dismiss"
           onClick={() => {
             if (notice.held) setWanted(null);
-            setNotice(null);
+            session.dismiss();
           }}
         >
           <Icon of={X} />
@@ -1053,7 +800,7 @@ export function App() {
         {notice?.polite ? notice.text : ""}
       </p>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
-      <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads.current.shown}>
+      <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads}>
         <Suspense fallback={<p className="status">Loading the Map…</p>}>
           <PlanMap
             items={shown}
@@ -1171,7 +918,7 @@ export function App() {
             onCopyLink={() =>
               copyLink({ ...NOTHING, view: "map", item: chosen.id }).then((copied) => {
                 if (copied)
-                  setNotice({ text: "Link copied", offer: null, retry: null, polite: true, lasts: "news", at: null });
+                  tell({ text: "Link copied", offer: null, retry: null, polite: true, lasts: "news", at: null });
               })
             }
             onEditorClosed={formClosed}
