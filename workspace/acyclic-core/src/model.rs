@@ -291,10 +291,12 @@ pub struct Model {
     /// Repository records by id.
     pub repositories: BTreeMap<String, Repository>,
     /// The keys of deleted items and threads, which no other field holds: an id deleted is never used again.
-    deleted: BTreeSet<Key>,
+    pub(crate) deleted: BTreeSet<Key>,
     /// Each live entity's fields that hold different values, as `(kind, id, field)`.
-    conflicts: BTreeSet<(String, String, String)>,
-    children: BTreeMap<String, BTreeSet<String>>,
+    pub(crate) conflicts: BTreeSet<(String, String, String)>,
+    /// The ids of link entities that were removed, so restoring one writes only its presence.
+    pub(crate) removed_links: BTreeSet<String>,
+    pub(crate) children: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Model {
@@ -341,6 +343,7 @@ impl Model {
         self.repositories.extend(other.repositories);
         self.deleted.extend(other.deleted);
         self.conflicts.extend(other.conflicts);
+        self.removed_links.extend(other.removed_links);
         for (parent, children) in other.children {
             self.children.entry(parent).or_default().extend(children);
         }
@@ -386,6 +389,7 @@ impl Model {
             },
             kind::LINK => {
                 if state.field(key, link::PRESENT).is_none() {
+                    self.removed_links.insert(key.id.clone());
                     return Ok(());
                 }
                 let (Value::One(from), Value::One(to), Value::One(LinkKind::Blocks)) = (
