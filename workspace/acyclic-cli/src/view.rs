@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value};
 use acyclic_core::needs::Entry;
-use acyclic_core::ready::{Readiness, ReadyThread};
+use acyclic_core::ready::{Readiness, ReadyThread, Stages};
 use acyclic_core::state::{Millis, State};
 use acyclic_core::time::rfc3339;
 use serde_json::{Map, Value as Json, json};
@@ -75,8 +75,9 @@ pub(crate) struct View<'a> {
 }
 
 impl View<'_> {
-    /// The item summary: `{id, title, state, parent, thread, readiness}`, with a leaf's `stage` unless it is archived,
-    /// and a parent's `progress`, `{state, counts}`, from the leaves under it and the claims on their threads. `counts`
+    /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` unless it is archived (a
+    /// parent's rolled up from its leaves, none with no leaf to count), and a parent's `progress`, `{state, counts}`,
+    /// from the leaves under it and the claims on their threads. `counts`
     /// has its leaves, those `done`, and every other leaf by stage, so they add up to `leaves`; `in_review` counts the
     /// done ones not merged yet. An id the model lacks has only its id.
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
@@ -98,17 +99,19 @@ impl View<'_> {
             row["stage"] = json!(stage);
         }
         if let Some(rollup) = self.readiness.progress(id)? {
-            let (progress, stages) = (rollup.progress, rollup.stages);
-            row["progress"] = json!({
-                "state": progress.state,
-                "counts": {
-                    "done": progress.done, "leaves": progress.total, "in_review": stages.in_review,
-                    "in_progress": stages.in_progress, "ready": stages.ready, "blocked": stages.blocked,
-                    "parked": stages.parked, "unthreaded": stages.unthreaded,
-                },
-            });
+            row["progress"] =
+                json!({"state": rollup.progress.state, "counts": stage_counts(&rollup.stages)});
+            if let Some(stage) = rollup.stage {
+                row["stage"] = json!(stage);
+            }
         }
         Ok(row)
+    }
+
+    /// A thread's progress, `{counts}`: its member leaves by stage, counted as a parent's leaves are.
+    pub fn thread_progress(&self, listed: &[Member<'_>]) -> Result<Json, CliError> {
+        let stages = Stages::of_leaves(self.readiness, listed.iter().map(|member| member.item))?;
+        Ok(json!({"counts": stage_counts(&stages)}))
     }
 
     /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
@@ -163,6 +166,7 @@ impl View<'_> {
             thread_row(&self.model.heads_index(), id, listed),
             json!({
                 "readiness": self.readiness.thread(id)?,
+                "progress": self.thread_progress(listed)?,
                 "claims": claims,
                 "brief": thread.map(|t| &t.brief),
                 "repositories": self.model.repository_set(id),
@@ -305,7 +309,19 @@ fn links(all: &[Link], id: &str) -> Json {
     Json::Object(map)
 }
 
-/// The thread summary: `{id, title, heads, counts: {members, done, conflicted}}`. A thread only an item names has no
+/// Leaves by stage, as a parent's or a thread's `progress.counts` gives them: `leaves` in all, those `done`
+/// (merged or in review), and every other leaf by stage, so they add up to `leaves`; `in_review` counts the done ones
+/// not merged yet.
+fn stage_counts(stages: &Stages) -> Json {
+    json!({
+        "done": stages.done + stages.in_review, "leaves": stages.total(), "in_review": stages.in_review,
+        "in_progress": stages.in_progress, "ready": stages.ready, "blocked": stages.blocked,
+        "parked": stages.parked, "unthreaded": stages.unthreaded,
+    })
+}
+
+/// The thread summary: `{id, title, heads, counts: {members, done, conflicted}}`, counting members; its `progress`,
+/// where a thread list or show gives it, counts member leaves. A thread only an item names has no
 /// title.
 pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
     let model = heads.model();
@@ -499,6 +515,8 @@ mod tests {
                 json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_review": 0, "in_progress": 2,
                        "ready": 0, "blocked": 0, "parked": 0, "unthreaded": 0}})
             );
+            // And its stage, rolled up from them under the key a leaf's has.
+            assert_eq!(view.item_row("goal").unwrap()["stage"], "in-progress");
             let shown = view.item("a", &view.model.items["a"]).unwrap();
             assert_eq!(shown.get("progress"), None);
             // The summary is at the top level, with no nested item, and show adds the rest.

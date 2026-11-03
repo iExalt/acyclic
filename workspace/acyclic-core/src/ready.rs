@@ -381,6 +381,51 @@ impl Stages {
         *slot += count;
     }
 
+    /// The stage of a parent with these leaves, `claimed` when a live claim holds the thread of an open leaf under it:
+    /// once every leaf is finished, in review while any still is, else done; before that, in progress once any work
+    /// below has started and some of what is left isn't parked; otherwise ready, blocked, parked or needs a thread by
+    /// its leaves, in that order. `None` with no leaf to count.
+    #[must_use]
+    pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
+        let finished = self.done + self.in_review;
+        if self.total() == 0 {
+            return None;
+        }
+        if finished == self.total() {
+            return Some(if self.in_review > 0 { Stage::InReview } else { Stage::Done });
+        }
+        let open = self.in_progress + self.ready + self.blocked + self.unthreaded;
+        if open > 0 && (self.in_progress > 0 || finished > 0 || claimed) {
+            return Some(Stage::InProgress);
+        }
+        [
+            (self.ready, Stage::Ready),
+            (self.blocked, Stage::Blocked),
+            (self.parked, Stage::Parked),
+            (self.unthreaded, Stage::Unthreaded),
+        ]
+        .into_iter()
+        .find_map(|(count, stage)| (count > 0).then_some(stage))
+    }
+
+    /// Leaves counted by the stage each has; parents and archived items have none, so none count.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn of_leaves<'i>(
+        readiness: &Readiness<'_>,
+        items: impl IntoIterator<Item = &'i str>,
+    ) -> Result<Self, Error> {
+        let mut stages = Self::default();
+        for id in items {
+            if let Some(stage) = readiness.stage(id)? {
+                stages.add(stage, 1);
+            }
+        }
+        Ok(stages)
+    }
+
     /// The leaves counted, every stage together.
     #[must_use]
     pub fn total(&self) -> usize {
@@ -401,6 +446,8 @@ pub struct Rollup {
     pub progress: Progress,
     /// The same leaves by stage: the done and in-review ones together are the model's done.
     pub stages: Stages,
+    /// Its stage, from its leaves; `None` with no leaf to count.
+    pub stage: Option<Stage>,
 }
 
 /// Readiness over one state, with ancestry checks cached by repository and commit.
@@ -645,14 +692,13 @@ impl<'a> Readiness<'a> {
         let mut stages = Stages::default();
         let parked = progress.state == ProgressState::Parked;
         self.tally(id, parked, &mut BTreeSet::from([id]), &mut stages)?;
+        let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
         if progress.state == ProgressState::InProgress || progress.state == ProgressState::Backlog {
-            let moving = stages.in_progress > 0
-                || progress.done > 0
-                || self.claimed_under(id, &mut BTreeSet::from([id]))?;
+            let moving = stages.in_progress > 0 || progress.done > 0 || claimed;
             progress.state =
                 if moving { ProgressState::InProgress } else { ProgressState::Backlog };
         }
-        Ok(Some(Rollup { progress, stages }))
+        Ok(Some(Rollup { progress, stages, stage: stages.rolled_up(claimed) }))
     }
 
     /// Counts the leaves under `id` by stage, walking as the model's own tally does: archived ones aside, each item

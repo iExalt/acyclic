@@ -533,9 +533,12 @@ impl<'a> Session<'a> {
         self.with_view(|view| {
             let waves = view.readiness.waves()?;
             let mut rows = view::thread_rows(view.model);
+            let members = thread_members(view.model);
             for row in &mut rows {
-                let waits = row["id"].as_str().and_then(|id| waves.waits_for.get(id));
-                row["waits_for"] = json!(waits.cloned().unwrap_or_default());
+                let id = row["id"].as_str().unwrap_or_default().to_owned();
+                row["waits_for"] = json!(waves.waits_for.get(&id).cloned().unwrap_or_default());
+                row["progress"] =
+                    view.thread_progress(members.get(id.as_str()).map_or(&[][..], Vec::as_slice))?;
             }
             Ok(json!({"threads": rows, "waves": waves.waves, "anytime": waves.anytime}))
         })

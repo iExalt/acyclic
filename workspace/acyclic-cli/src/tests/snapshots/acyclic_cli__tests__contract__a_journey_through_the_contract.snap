@@ -326,6 +326,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "title": "Second"
         }
       ],
+      "progress": {
+        "counts": {
+          "blocked": 0,
+          "done": 1,
+          "in_progress": 1,
+          "in_review": 0,
+          "leaves": 2,
+          "parked": 0,
+          "ready": 0,
+          "unthreaded": 0
+        }
+      },
       "readiness": {
         "holder": "session/mac",
         "items": [
@@ -618,6 +630,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         },
         "heads": [],
         "id": "01900000-0000-7000-8000-0000000000f0",
+        "progress": {
+          "counts": {
+            "blocked": 0,
+            "done": 0,
+            "in_progress": 0,
+            "in_review": 0,
+            "leaves": 0,
+            "parked": 0,
+            "ready": 0,
+            "unthreaded": 0
+          }
+        },
         "title": "Start",
         "waits_for": []
       },
@@ -631,6 +655,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
           "01900000-0000-7000-8000-0000000000a2"
         ],
         "id": "01900000-0000-7000-8000-0000000000f1",
+        "progress": {
+          "counts": {
+            "blocked": 0,
+            "done": 1,
+            "in_progress": 0,
+            "in_review": 0,
+            "leaves": 2,
+            "parked": 0,
+            "ready": 1,
+            "unthreaded": 0
+          }
+        },
         "title": "Work",
         "waits_for": []
       }
@@ -724,6 +760,18 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "title": "Second"
         }
       ],
+      "progress": {
+        "counts": {
+          "blocked": 0,
+          "done": 1,
+          "in_progress": 0,
+          "in_review": 0,
+          "leaves": 2,
+          "parked": 0,
+          "ready": 1,
+          "unthreaded": 0
+        }
+      },
       "readiness": {
         "items": [
           "01900000-0000-7000-8000-0000000000a2"

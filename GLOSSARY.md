@@ -131,7 +131,9 @@ _Avoid_: group (for this), container, lane
 
 **Stage**:
 Where an item's work stands, said one way everywhere with its icon: in progress, in review, done, ready, blocked,
-parked, or needs a thread; a parent's is its leaves'. The code's word: the app shows a stage as an item's Status.
+parked, or needs a thread. A parent's comes from its leaves: once every leaf is finished, in review while any still is,
+else done; before that, in progress once any work below has started and some of what is left isn't parked; otherwise
+ready, blocked, parked or needs a thread by its leaves. The code's word: the app shows a stage as an item's Status.
 _Avoid_: phase, step
 
 **Status**:
