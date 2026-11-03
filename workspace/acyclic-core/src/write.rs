@@ -976,7 +976,22 @@ fn open_under_archive(after: &Model, steps: &[Step]) -> Vec<Violation> {
 /// Cycles of parents or waits-for the change set closes: one already there stays the user's to break.
 fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
     let mut found = Vec::new();
-    // Cycles are judged whole: one already there stays the user's to break, and only a new one is refused.
+    // Cycles are judged whole: one already there stays the user's to break, and only a new one is refused, or one a
+    // write chooses an edge of, as settling a conflicted parent on the value that closes a cycle would.
+    let closes = |parents: bool, cycle: &[String]| {
+        steps.iter().any(|step| {
+            let (id, to) = match &step.write {
+                Written::Assign(Assign::Item(id, ItemAssign::Parent(Some(to)))) if parents => {
+                    (id, to)
+                },
+                Written::Assign(Assign::Item(id, ItemAssign::WaitsFor(to, true))) if !parents => {
+                    (id, to)
+                },
+                _ => return false,
+            };
+            cycle.contains(id) && cycle.contains(to)
+        })
+    };
     let cycles = |model: &Model| -> BTreeSet<(bool, Vec<String>)> {
         model
             .parent_cycles()
@@ -986,7 +1001,9 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
             .collect()
     };
     let old = cycles(before);
-    for (parents, cycle) in cycles(after).into_iter().filter(|cycle| !old.contains(cycle)) {
+    for (parents, cycle) in cycles(after).into_iter().filter(|(parents, cycle)| {
+        !old.contains(&(*parents, cycle.clone())) || closes(*parents, cycle)
+    }) {
         let change = steps.iter().find(|step| match &step.write {
             Written::Assign(Assign::Item(id, ItemAssign::Parent(_))) if parents => {
                 cycle.contains(id)
