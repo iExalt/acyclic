@@ -875,9 +875,14 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
             },
             _ => false,
         });
+        // Named at the write that closed it, so a refusal names the item moved or made to wait.
+        let at = change.and_then(|step| match &step.write {
+            Written::Assign(assign) => Some(assign.at()),
+            _ => None,
+        });
         found.push(Violation {
             change: change.map(|step| step.change),
-            at: None,
+            at,
             rule: if parents { Rule::ParentCycle(cycle) } else { Rule::LinkCycle(cycle) },
         });
     }

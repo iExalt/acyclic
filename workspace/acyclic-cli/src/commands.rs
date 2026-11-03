@@ -25,7 +25,7 @@ use crate::args::{
     ThreadCommand,
 };
 use crate::context;
-use crate::edit::{self, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
+use crate::edit::{self, Adding, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
 use crate::error::{CliError, exit};
 use crate::resolve::Records;
 use crate::view::{self, View};
@@ -179,13 +179,16 @@ impl<'a> Session<'a> {
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let records = Records::of(&model);
-                    let id = edit::new_id(replica, &model, kind::ITEM, given.as_deref(), title)?;
-                    let fields = fields.clone().resolve(&model, &records, None)?;
-                    let mut data = edit::add_item(replica, &id, &fields, by)?.item(&id);
-                    data["title"] = json!(title);
-                    Ok(data)
+                    let (id, adding) = match given {
+                        Some(given) => (edit::given_id(given)?, Adding::Given),
+                        None => (acyclic_core::ids::new(), Adding::Minted),
+                    };
+                    let outcome = edit::commit(replica, by, None, |model| {
+                        let fields = fields.clone().resolve(model, &Records::of(model), None)?;
+                        Ok(edit::item_changes(&id, &fields, adding))
+                    })?;
+                    self.remember(&outcome.after);
+                    Ok(json!({"item": id, "placed": outcome.placed(), "title": title}))
                 })
                 .map_err(|error| {
                     self.misplaced(error, parent.as_deref(), || {
@@ -217,11 +220,15 @@ impl<'a> Session<'a> {
                 };
                 let item = &edit.item;
                 self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let records = Records::of(&model);
-                    let id = records.item(item)?;
-                    let fields = fields.clone().resolve(&model, &records, Some(&id))?;
-                    Ok(edit::edit_item(replica, &id, &fields, by)?.item(&id))
+                    let mut id = String::new();
+                    let outcome = edit::commit(replica, by, None, |model| {
+                        let records = Records::of(model);
+                        id = records.item(item)?;
+                        let fields = fields.clone().resolve(model, &records, Some(&id))?;
+                        Ok(edit::item_changes(&id, &fields, Adding::No))
+                    })?;
+                    self.remember(&outcome.after);
+                    Ok(json!({"item": id, "placed": outcome.placed()}))
                 })
                 .map_err(|error| {
                     self.misplaced(error, edit.parent.as_deref(), || {
@@ -289,11 +296,15 @@ impl<'a> Session<'a> {
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let records = Records::of(&model);
-                    let id = edit::new_id(replica, &model, kind::THREAD, given.as_deref(), title)?;
-                    let fields = fields.clone().resolve(&model, &records, None)?;
-                    edit::add_thread(replica, &id, &fields, by)?;
+                    let (id, adding) = match given {
+                        Some(given) => (edit::given_id(given)?, Adding::Given),
+                        None => (acyclic_core::ids::new(), Adding::Minted),
+                    };
+                    let outcome = edit::commit(replica, by, None, |model| {
+                        let fields = fields.clone().resolve(model, &Records::of(model), None)?;
+                        Ok(edit::thread_changes(&id, &fields, adding))
+                    })?;
+                    self.remember(&outcome.after);
                     Ok(json!({"thread": id, "title": title}))
                 })
             },
@@ -308,11 +319,14 @@ impl<'a> Session<'a> {
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let records = Records::of(&model);
-                    let id = records.thread(thread)?;
-                    let fields = fields.clone().resolve(&model, &records, Some(&id))?;
-                    edit::edit_thread(replica, &id, &fields, by)?;
+                    let mut id = String::new();
+                    let outcome = edit::commit(replica, by, None, |model| {
+                        let records = Records::of(model);
+                        id = records.thread(thread)?;
+                        let fields = fields.clone().resolve(model, &records, Some(&id))?;
+                        Ok(edit::thread_changes(&id, &fields, Adding::No))
+                    })?;
+                    self.remember(&outcome.after);
                     Ok(json!({"thread": id}))
                 })
             },
@@ -327,7 +341,11 @@ impl<'a> Session<'a> {
                 };
                 self.write(|replica, by| {
                     let id = edit::new_repository_id(given.as_deref())?;
-                    edit::add_repository(replica, &id, &fields, by)?;
+                    let adding = if given.is_some() { Adding::Given } else { Adding::Minted };
+                    let outcome = edit::commit(replica, by, Some(name), |_| {
+                        edit::repository_changes(&id, &fields, adding)
+                    })?;
+                    self.remember(&outcome.after);
                     Ok(json!({"repository": id}))
                 })
             },
@@ -335,8 +353,12 @@ impl<'a> Session<'a> {
                 let fields =
                     RepositoryFields { name: name.clone(), default_branch: default_branch.clone() };
                 self.write(|replica, by| {
-                    let id = Records::of(&Model::read(replica.state())?).repository(repository)?;
-                    edit::edit_repository(replica, &id, &fields, by)?;
+                    let mut id = String::new();
+                    let outcome = edit::commit(replica, by, name.as_deref(), |model| {
+                        id = Records::of(model).repository(repository)?;
+                        edit::repository_changes(&id, &fields, Adding::No)
+                    })?;
+                    self.remember(&outcome.after);
                     Ok(json!({"repository": id}))
                 })
             },
@@ -408,11 +430,16 @@ impl<'a> Session<'a> {
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();
+            if let Some(named) = &self.named {
+                *named.borrow_mut() = None;
+            }
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
-            // The names of the state the batch commits. Naming never fails a write: a model that can't be read leaves
-            // the names to the tracker afterwards.
-            if let Some(named) = &self.named {
+            // The names of the state the batch commits, unless the command kept those of the model its writes left.
+            // Naming never fails a write: a model that can't be read leaves the names to the tracker afterwards.
+            if let Some(named) = &self.named
+                && named.borrow().is_none()
+            {
                 *named.borrow_mut() = Model::read(replica.state()).ok().as_ref().map(names_of);
             }
             Ok(())
@@ -917,20 +944,6 @@ pub(crate) fn single(register: Option<&acyclic_core::state::Register>) -> Option
             register.values().next().map(|v| v.value.clone()).filter(|value| !value.is_null())
         },
         _ => None,
-    }
-}
-
-/// Whether a field holds only `value`, or, for `None`, nothing but clears. A conflict holds neither, so writing
-/// either resolves it.
-pub(crate) fn holds_only(
-    register: Option<&acyclic_core::state::Register>,
-    value: Option<Json>,
-) -> bool {
-    let values: Vec<&Json> = register.into_iter().flatten().map(|(_, v)| &v.value).collect();
-    match value {
-        // Equal values written apart read as one, so they hold it too.
-        Some(value) => !values.is_empty() && values.iter().all(|held| **held == value),
-        None => values.iter().all(|held| held.is_null()),
     }
 }
 
