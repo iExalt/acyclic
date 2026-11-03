@@ -16,7 +16,7 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import { foldDone, isDoneBox } from "./fold";
 import type { Placed } from "./layout";
-import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
+import { buildModel, collapsedWith, type Model, topOf, type View, visible } from "./model";
 import {
   firstView,
   frame,
@@ -138,7 +138,10 @@ export default function PlanMap({
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
   const aspect = useAspect(host);
-  /** The box last toggled, and where its top-left corner was on screen, to hold it there. */
+  /**
+   * The top-level box holding the box last toggled, and where its top-left corner was on screen, to hold it there: the
+   * top level keeps its boxes where they were, so the rest of the plan stays put while the toggled box opens in place.
+   */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
   const shown = useRef<string | null>(null);
@@ -153,6 +156,8 @@ export default function PlanMap({
     () => visible(model, { collapsed, showArchived }, doneBoxes),
     [model, collapsed, showArchived, doneBoxes],
   );
+  const viewNow = useRef(view);
+  viewNow.current = view;
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
   const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
 
@@ -340,7 +345,7 @@ export default function PlanMap({
       const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
       core.viewport({ zoom: view.zoom, pan: view.pan });
     } else if (anchor.current !== null) {
-      // Pan so the toggled box's corner is where it was before the layout changed.
+      // Pan so the toggled box's top-level box has its corner where it was before the layout changed.
       const box = core.getElementById(anchor.current.id);
       if (box.nonempty()) {
         const now = box.renderedBoundingBox({ includeLabels: false });
@@ -462,8 +467,9 @@ export default function PlanMap({
         return;
       }
       if (action === "toggle") {
-        const corner = node.renderedBoundingBox({ includeLabels: false });
-        anchor.current = { id, x: corner.x1, y: corner.y1 };
+        const top = topOf(viewNow.current, id);
+        const corner = core.getElementById(top).renderedBoundingBox({ includeLabels: false });
+        anchor.current = { id: top, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
         setToggles((was) => new Map(was).set(id, kind === "box"));
         return;

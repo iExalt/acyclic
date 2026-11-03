@@ -302,3 +302,14 @@ function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { don
 export function fallbackStage(state: string): Stage | null {
   return state === "done" || state === "parked" || state === "in-progress" ? state : null;
 }
+
+/**
+ * The top-level node `id` is drawn in, or `id` if it is one: a box opening or closing inside it holds it still, as the
+ * top level holds its boxes still, so the rest of the plan stays where it was.
+ */
+export function topOf(view: View, id: string): string {
+  const parent = new Map(view.nodes.map((node) => [node.id, node.parent]));
+  let top = id;
+  for (let up = parent.get(top) ?? null; up !== null; up = parent.get(up) ?? null) top = up;
+  return top;
+}

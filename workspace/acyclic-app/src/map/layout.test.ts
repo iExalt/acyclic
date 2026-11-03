@@ -8,7 +8,7 @@ import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } fro
 import { buildModel, type ViewState, visible } from "./model";
 
 /**
- * A layout engine whose box sizes depend on content: children in rows of two, each row as tall as its tallest child,
+ * A layout engine whose box sizes depend on content: children in rows of two, as far apart as packing puts them, each row as tall as its tallest child,
  * so a box grows with every second child and with any child that grows. Edges don't change a size.
  */
 function grid() {
@@ -21,12 +21,12 @@ function grid() {
     for (let row = 0; row < input.children.length; row += 2) {
       const pair = input.children.slice(row, row + 2);
       pair.forEach((child, i) => {
-        at[child.id] = { x: i * (child.width + 20), y };
+        at[child.id] = { x: i * (child.width + 24), y };
         width = Math.max(width, child.width);
       });
       y += Math.max(...pair.map((child) => child.height)) + 32;
     }
-    return { width: width * 2 + 44, height: y + 12, at };
+    return { width: width * 2 + 48, height: y + 12, at };
   };
   return { calls, layBox };
 }
@@ -54,8 +54,8 @@ describe("place", () => {
     // size holds, so the top level isn't laid out again.
     const grown = [...plan, item("r2", "right"), item("r3", "right")];
     expect(await relaid(plan, grown)).toEqual(["right", "top"]);
-    // A fifth opens a third row: right outgrows left, so top grows, and the top level is laid out again.
-    expect(await relaid(grown, [...grown, item("r4", "right"), item("r5", "right")])).toEqual([ROOT, "right", "top"]);
+    // A fifth opens a third row: right outgrows left, so top grows, and the top level holds every box where it was.
+    expect(await relaid(grown, [...grown, item("r4", "right"), item("r5", "right")])).toEqual(["right", "top"]);
     // A move changes both boxes; left loses its second row, so top shrinks, and the top level keeps where it was.
     const moved = plan.map((one) => (one.id === "l3" ? item("l3", "right") : one));
     expect(await relaid(plan, moved)).toEqual(["left", "right", "top"]);
@@ -69,7 +69,7 @@ describe("place", () => {
     expect(await relaid(plan, plan, open, { collapsed: new Set(["left"]), showArchived: false })).toEqual(["top"]);
   });
 
-  it("keeps the top level where it was when a box in it only shrank, and packs it again for anything else", async () => {
+  it("keeps the top level where it was when a box in it shrank or grew, and packs it again for anything else", async () => {
     const engine = grid();
     const cache = new LayoutCache();
     const model = buildModel(plan);
@@ -90,7 +90,15 @@ describe("place", () => {
     expect(folded.nodes.get("top")?.height).toBeLessThan(first.nodes.get("top")?.height ?? 0);
     // Folded again elsewhere, it still holds; expanding again finds the layout from before.
     expect((await place(visible(model, open), cache, engine.layBox, PORTRAIT)).nodes).toEqual(first.nodes);
-    // A new top-level box, or one that grew, packs the top level again; a fresh cache, as a reload has, does too.
+    // Expanded from collapsed in a fresh cache, top grows to the right, where nothing stands: far, on its left, stays.
+    const shut = { collapsed: new Set(["top"]), showArchived: false };
+    const fromShut = new LayoutCache();
+    const was = await place(visible(model, shut), fromShut, engine.layBox, PORTRAIT);
+    const grew = await place(visible(model, open), fromShut, engine.layBox, PORTRAIT);
+    expect(grew.laidOut).not.toContain(ROOT);
+    const corner = (placed: typeof was, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
+    for (const id of ["top", "far"]) expect(corner(grew, id)).toEqual(corner(was, id));
+    // A new top-level box packs the top level again; a fresh cache, as a reload has, does too.
     const added = await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
     expect(added.laidOut).toContain(ROOT);
     const fresh = await place(
