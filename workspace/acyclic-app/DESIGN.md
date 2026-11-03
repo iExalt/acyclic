@@ -327,11 +327,15 @@ before what went wrong.
   the boxes allow (the user's ask: no gaps between rows), each box after those it waits on: below one, or level with
   it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
   and the Overview's projects come in dependency order (`topOrder`), which the Map keeps wherever one box waits on
-  another.
+  another. Items never wait on themselves through their links, but boxes can: a box waits on another when an item in
+  it waits on an item in the other, so two boxes linked both ways, by different items, wait on each other with no
+  item in a cycle. Packing breaks such a cycle at its largest box, which then stands before what it waits on; moving
+  an item, so that the links between two boxes all run one way, ends it.
 - **Opening a box moves only what it covers.** Once packed, the top level keeps its boxes where they are: a box that
   grows, as one opening inside it makes it, stays at its corner, what it now covers makes way, right if it stood on its
-  right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Closing it
-  again finds the packing from before; a reload packs afresh.
+  right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Where a box
+  stands depends only on the last packing and the boxes' sizes now, so what made way goes back when the box that moved
+  it closes, whatever was opened in between; a reload packs afresh.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same

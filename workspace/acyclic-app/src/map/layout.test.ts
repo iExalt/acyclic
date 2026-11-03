@@ -110,6 +110,23 @@ describe("place", () => {
     expect(fresh.laidOut).toContain(ROOT);
   });
 
+  it("places the top level by its sizes alone, whatever order its boxes were opened and closed in", async () => {
+    // Two top-level boxes, both collapsed at first, each opened and closed in turn.
+    const two = buildModel([item("x"), item("x1", "x"), item("x2", "x"), item("x3", "x"), item("y"), item("y1", "y")]);
+    const at = (collapsed: string[]) => visible(two, { collapsed: new Set(collapsed), showArchived: false });
+    const engine = grid();
+    const direct = new LayoutCache();
+    const shut = await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
+    const yOpen = await place(at(["x"]), direct, engine.layBox, PORTRAIT);
+    const walked = new LayoutCache();
+    await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT);
+    await place(at(["y"]), walked, engine.layBox, PORTRAIT);
+    await place(at([]), walked, engine.layBox, PORTRAIT);
+    // Reached by way of x opening and closing, y open stands as it does opened alone, and both closed as at first.
+    expect((await place(at(["x"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(yOpen.nodes);
+    expect((await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(shut.nodes);
+  });
+
   it("finds every layout in the cache on returning to a view", async () => {
     const engine = grid();
     const cache = new LayoutCache();
