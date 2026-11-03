@@ -108,7 +108,19 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
             on_repeat: Repeat::Update,
             with: vec![],
         };
-        assert_eq!(refused(&r, vec![empty]), [Rule::EmptyRecord(record)]);
+        assert_eq!(refused(&r, vec![empty.clone()]), [Rule::EmptyRecord(record.clone())]);
+
+        let before = r.state.clone();
+        let error =
+            commit(&mut r, by(1), None, |_| Ok::<_, ()>(ChangeSet(vec![empty]))).unwrap_err();
+        let CommitError::Refused(violations, _) = error else {
+            panic!("an empty record add should be refused");
+        };
+        assert_eq!(
+            violations.into_iter().map(|violation| violation.rule).collect::<Vec<_>>(),
+            [Rule::EmptyRecord(record)]
+        );
+        assert_eq!(r.state, before, "a refused empty add must leave the replica unchanged");
     }
 
     let thread = Change::Add {
