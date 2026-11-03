@@ -13,8 +13,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app import ACYCLIC, VIEWS, tracker, wait_drawn
 from playwright.sync_api import sync_playwright
+
+from app import ACYCLIC, VIEWS, tracker, wait_drawn
 
 RUNS = 3
 # Chrome slows only the page's own thread, not workers, so ELK in its worker runs at full speed even when throttled:
