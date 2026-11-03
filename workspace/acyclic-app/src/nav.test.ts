@@ -7,22 +7,27 @@ import {
   follow,
   type Intent,
   landing,
+  landingPlace,
   NOTHING,
   navigate,
   openLayers,
   openOf,
   type Place,
   parse,
+  placeIn,
   restored,
   START,
+  type Step,
+  stored,
   topLayer,
   type Wanted,
   type World,
 } from "./nav";
 
-// Items a, b in thread t; c in none; d not drawn.
+// Items a, b in thread t; c in none; d not drawn; e archived, hidden.
 const world: World = {
   has: (id) => id !== "d",
+  archived: (id) => id === "e",
   threadOf: (id) => (id === "a" || id === "b" ? "t" : null),
   wide: true,
   dirty: false,
@@ -89,12 +94,19 @@ describe("outline", () => {
 });
 
 describe("itemThread", () => {
-  it("closes the item so its thread's panel shows, unframed, keeping where the item came from", () => {
+  it("goes to the thread framed, the item under its panel, keeping where the item came from", () => {
     const opened = at({ view: "map", item: "a", cameFrom: { view: "overview", by: "item" } });
-    expect(go(opened, { kind: "itemThread", id: "t" })).toEqual({
-      place: { ...opened, item: null, thread: "t" },
-      requests: {},
+    const step = go(opened, { kind: "itemThread", id: "t" });
+    expect(step).toEqual({
+      place: { ...opened, item: null, thread: "t", cameFrom: { view: "overview", by: "thread", item: "a" } },
+      requests: { frame: { thread: "t" } },
     });
+    // A layer of its own under the thread's, so Back closes the thread before the item.
+    expect(openLayers(openOf(step.place, world))).toEqual(["thread", "under"]);
+    // Gone or hidden since, it is no layer.
+    expect(openLayers(openOf({ ...step.place, cameFrom: { view: "map", by: "thread", item: "e" } }, world))).toEqual([
+      "thread",
+    ]);
   });
 });
 
@@ -248,12 +260,22 @@ const none = {
   item: false,
   projects: false,
   thread: false,
+  under: false,
   away: false,
 };
 
 describe("topLayer", () => {
   it("puts the command menu over all, a waiting move over a form, a form over the projects, those over an item, and that over a thread", () => {
-    const all = { command: false, mode: true, adding: true, item: true, projects: true, thread: true, away: true };
+    const all = {
+      command: false,
+      mode: true,
+      adding: true,
+      item: true,
+      projects: true,
+      thread: true,
+      under: false,
+      away: true,
+    };
     expect(topLayer({ ...all, command: true })).toBe("command");
     expect(topLayer(all)).toBe("mode");
     expect(topLayer({ ...all, mode: false })).toBe("add");
@@ -389,5 +411,139 @@ describe("landing", () => {
       missing: ["thread"],
     });
     expect(landing({ ...NOTHING, view: "map", item: "gone", thread: "t-9" }, plan).missing).toEqual(["item", "thread"]);
+  });
+});
+
+describe("Back and Forward", () => {
+  type Move = Intent | "back" | "forward";
+  /**
+   * Walks `moves` from `start` as the history does: Back closes the top layer, leaving the entry it was on, with the
+   * place that entry held, for Forward to open again, as cloned as the browser keeps it.
+   */
+  const walk = (start: Place, moves: Move[], over: Partial<World> = {}) => {
+    let step: Step = { place: start, requests: {} };
+    const ahead: unknown[] = [];
+    for (const move of moves) {
+      if (move === "back") {
+        ahead.push(structuredClone({ layers: 1, place: stored(step.place) }));
+        step = go(step.place, { kind: "close", count: 1 }, over);
+      } else if (move === "forward") {
+        const place = placeIn(ahead.pop());
+        if (place === null) throw new Error("an entry with no place");
+        step = go(step.place, { kind: "restore", place }, over);
+      } else step = go(step.place, move, over);
+    }
+    return step;
+  };
+  const left = { top: 40, entry: "e", control: "button" };
+  const fromOverview = { view: "overview" as const, by: "item" as const };
+  const cases: [string, Place, Move[], Step, Partial<World>?][] = [
+    [
+      "an item's thread from its panel, then Back, opens the item again, brought in",
+      onMap,
+      [{ kind: "select", id: "a", pin: null }, { kind: "itemThread", id: "t" }, "back"],
+      { place: at({ view: "map", item: "a" }), requests: { focus: { id: "a", pin: null } } },
+    ],
+    [
+      "then Forward goes to the thread again, framed, the item under it",
+      onMap,
+      [{ kind: "select", id: "a", pin: null }, { kind: "itemThread", id: "t" }, "back", "forward"],
+      {
+        place: at({ view: "map", thread: "t", cameFrom: { view: "map", by: "thread", item: "a" } }),
+        requests: { frame: { thread: "t" } },
+      },
+    ],
+    [
+      "an item's thread, the item hidden since, then Back, goes where the item came from",
+      overview,
+      [{ kind: "select", id: "e", pin: null }, { kind: "itemThread", id: "t" }, "back"],
+      { place: overview, requests: {} },
+    ],
+    [
+      "an item opened on the Overview, then Back, comes back to the Overview",
+      overview,
+      [{ kind: "select", id: "c", pin: null }, "back"],
+      { place: overview, requests: {} },
+    ],
+    [
+      "an item opened in Needs you, then Back, comes back to it scrolled and focused as it was left",
+      at({ view: "needs" }),
+      [{ kind: "leaveNeeds", left }, { kind: "select", id: "c", pin: null }, "back"],
+      { place: at({ view: "needs" }), requests: { restoreNeeds: left } },
+    ],
+    [
+      "Back over a form holding typing closes nothing, and says so",
+      at({ view: "map", item: "c", overlays: { ...START.overlays, add: { parent: "c", draft: null } } }),
+      ["back"],
+      {
+        place: at({ view: "map", item: "c", overlays: { ...START.overlays, add: { parent: "c", draft: null } } }),
+        requests: { unsaved: true },
+      },
+      { dirty: true },
+    ],
+    [
+      "a link to an item, then Back, leaves the Map shown",
+      START,
+      [{ kind: "link", wanted: { ...NOTHING, view: "map", item: "c" } }, "back"],
+      { place: onMap, requests: {} },
+    ],
+    [
+      "Forward after Back opens the item again where it came from, so closing it goes back there",
+      overview,
+      [{ kind: "select", id: "c", pin: null }, "back", "forward"],
+      {
+        place: at({ view: "map", item: "c", cameFrom: fromOverview }),
+        requests: { focus: { id: "c", pin: null } },
+      },
+    ],
+    [
+      "Forward never brings back what passes, such as the add form open as the entry was left",
+      overview,
+      [{ kind: "select", id: "c", pin: null }, { kind: "add", parent: "c" }, "back", "forward"],
+      {
+        place: at({ view: "map", item: "c", cameFrom: fromOverview }),
+        requests: { focus: { id: "c", pin: null } },
+      },
+    ],
+    [
+      "on a phone, Back closes the outline's sheet over a thread's panel, then the panel, staying on the Map",
+      at({ view: "map", thread: "t", overlays: { ...START.overlays, projects: true } }),
+      ["back", "back"],
+      { place: onMap, requests: {} },
+      { wide: false },
+    ],
+    [
+      "on a phone, Back closes a thread's panel kept over the Threads view, then goes home",
+      at({ view: "threads", thread: "t" }),
+      ["back", "back"],
+      { place: START, requests: {} },
+      { wide: false },
+    ],
+  ];
+  it.each(cases)("%s", (_, start, moves, want, over) => {
+    expect(walk(start, moves, over)).toEqual(want);
+  });
+
+  it("opens from an entry written before entries held places what its address names, and none from another's", () => {
+    expect(placeIn({ layers: 1 })).toBeNull();
+    expect(placeIn(null)).toBeNull();
+    expect(placeIn({ layers: 1, place: { view: "elsewhere", item: null, thread: null } })).toBeNull();
+    expect(placeIn({ layers: 1, place: { view: "map", item: "c", thread: null } })).toEqual(
+      at({ view: "map", item: "c" }),
+    );
+  });
+
+  it("lands a place an entry held as a link does: what is gone since dropped and named, an archived item shown", () => {
+    const has = {
+      item: (id: string): Found => (id === "e" ? "archived" : id === "c" ? "shown" : null),
+      thread: () => false,
+    };
+    const held = at({ view: "map", item: "gone", thread: "t", cameFrom: fromOverview });
+    expect(landingPlace(held, has)).toEqual({
+      place: { ...held, item: null, thread: null },
+      archived: false,
+      missing: ["item", "thread"],
+    });
+    expect(landingPlace({ ...held, item: "e", thread: null }, has)).toMatchObject({ archived: true, missing: [] });
   });
 });

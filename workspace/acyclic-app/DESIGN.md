@@ -207,6 +207,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   and is filled, and a phone's bar names it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
 - **Layers stack in one order** (`src/nav.ts`), with one history entry each, so Escape and Back close the top one.
+  Each entry keeps where the user was, so Forward opens it again as it was left, closing back where it came from, and
+  without the command menu, a form or a sheet that was open over it; what has gone since is dropped, as a link's is.
 - **An item or a thread opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you, or
   a thread from anywhere, shows on the Map (the user's call, so every thread opens the same way), and one Back,
   Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the focus on the row
@@ -255,12 +257,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
   focused and none of its actions.
 - **Going to a thread frames it.** A thread's row on the Overview or in the sidebar (the picked thread's too, while one
-  of its items is open over it), or a link to a thread on the Map,
+  of its items is open over it), the Thread button on an item's panel, or a link to a thread on the Map,
   goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
   further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
   known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,
   and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
-  sidebar, on the Map, unpicks it.
+  sidebar, on the Map, unpicks it. A thread gone to from an item's panel keeps the item under it: closing the thread,
+  or Back, opens the item again, unless it has gone or been archived since.
 - **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
   comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it. On a Map
   zoomed out past reading, one the user picked comes in at a zoom its title reads at, wherever it was, and one a write

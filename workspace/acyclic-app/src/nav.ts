@@ -36,6 +36,13 @@ export interface Overlays {
   projects: boolean;
 }
 
+export interface CameFrom {
+  view: View;
+  by: "item" | "thread";
+  /** The item a thread was opened from, under the thread: closing the thread opens it again. */
+  item?: string;
+}
+
 export interface Place {
   /** The Map, or a view over it: the Overview, the threads in waves, or Needs you. */
   view: View;
@@ -46,9 +53,10 @@ export interface Place {
   /**
    * The view an item or a thread was opened from, which closing the one opened from it returns to: both are shown on
    * the Map, but the user came from there. An item chosen from a thread's panel leaves the thread's, for the thread's
-   * close. Dropped once the user selects on the Map or goes to another view, which makes that where they are.
+   * close. Dropped once the user selects on the Map or goes to another view, which makes that where they are. A
+   * thread opened from an item's panel keeps the item, which closing the thread opens again.
    */
-  cameFrom: { view: View; by: "item" | "thread" } | null;
+  cameFrom: CameFrom | null;
   /** The entry Needs you's view opens at, when the Overview went there from one. */
   needsAt: string | null;
   /** Where Needs you's view was left for what an entry opened, until the user comes back to it. */
@@ -72,6 +80,8 @@ export const START: Place = {
 export interface World {
   /** Whether the item is drawn. */
   has: (id: string) => boolean;
+  /** Whether the item is hidden, in an archived subtree while archived items aren't shown. */
+  archived: (id: string) => boolean;
   /** The thread an item is in, if any. */
   threadOf: (id: string) => string | null;
   /** Side by side rather than a phone's one column. */
@@ -115,7 +125,7 @@ export type Intent =
   | { kind: "thread"; id: string }
   /** A thread's row in the outline: the thread picked on the Map with nothing over it is unpicked; else as `thread`. */
   | { kind: "outline"; id: string }
-  /** The thread an item's panel names: the item closes, so the thread's panel shows. */
+  /** The thread an item's panel names: to it as `thread` does, the item kept under it, for closing it to reopen. */
   | { kind: "itemThread"; id: string }
   /** To a view, the tabs, keys, the command menu and the Overview's links all: Needs you at the entry `at`, if any. */
   | { kind: "goTo"; view: View; at: string | null }
@@ -141,7 +151,9 @@ export type Intent =
   /** Needs you's view left for what an entry opens. */
   | { kind: "leaveNeeds"; left: NeedsLeft }
   /** A link, landed on the plan as it is: opened as named, over nothing else. */
-  | { kind: "link"; wanted: Wanted };
+  | { kind: "link"; wanted: Wanted }
+  /** Forward onto an entry: the place it holds, landed on the plan as it is, opened again over nothing else. */
+  | { kind: "restore"; place: Place };
 
 /** The place after `intent`, and what it asks of what is drawn. */
 export function navigate(place: Place, intent: Intent, world: World): Step {
@@ -217,8 +229,19 @@ function move(place: Place, intent: Intent, world: World): Step {
       if (place.thread === intent.id && place.view === "map" && place.item === null)
         return only({ ...place, thread: null });
       return move(place, { kind: "thread", id: intent.id }, world);
-    case "itemThread":
-      return only({ ...place, item: null, thread: intent.id });
+    case "itemThread": {
+      const from: CameFrom = { view: place.cameFrom?.view ?? place.view, by: "thread" };
+      return {
+        place: {
+          ...place,
+          item: null,
+          thread: intent.id,
+          view: "map",
+          cameFrom: place.item === null ? from : { ...from, item: place.item },
+        },
+        requests: { frame: { thread: intent.id } },
+      };
+    }
     case "goTo": {
       // An item is shown on the Map, so going to another view leaves it. The Overview and Needs you are lists, over
       // which a thread's panel would only cover what the user went to see; the Threads view shows it picked.
@@ -234,10 +257,16 @@ function move(place: Place, intent: Intent, world: World): Step {
       const closing = openLayers(openOf(place, world)).slice(0, intent.count);
       // The command menu closes over a form without touching it.
       if (closing.some((layer) => layer !== "command") && world.dirty) return { place, requests: { unsaved: true } };
-      return only(closing.reduce(shut, place));
+      return closing.reduce<Step>(
+        (step, layer) => {
+          const next = shut(step.place, layer, world);
+          return { place: next.place, requests: { ...step.requests, ...next.requests } };
+        },
+        { place, requests: {} },
+      );
     }
     case "shut":
-      return only(shut(place, intent.layer));
+      return shut(place, intent.layer, world);
     case "command":
       return only(overlay(place, { command: intent.open }));
     case "projects":
@@ -269,6 +298,20 @@ function move(place: Place, intent: Intent, world: World): Step {
       };
     case "leaveNeeds":
       return only({ ...place, needsLeft: intent.left });
+    case "restore": {
+      // As a link opens what it names, with where it came from as it was: the transient layers never come back.
+      const to: Place = { ...intent.place, overlays: CLOSED };
+      const onMap = to.view === "map";
+      return {
+        place: to,
+        requests:
+          onMap && to.item !== null
+            ? { focus: { id: to.item, pin: null } }
+            : onMap && to.thread !== null
+              ? { frame: { thread: to.thread } }
+              : {},
+      };
+    }
     case "link": {
       // A link names what it opens where it is, so the user came from nowhere else.
       const to = intent.wanted;
@@ -288,28 +331,52 @@ function move(place: Place, intent: Intent, world: World): Step {
   }
 }
 
-/** Closes one layer: an item chosen from a thread's panel goes back to the thread, whose own close goes back further. */
-function shut(place: Place, layer: Layer): Place {
+/**
+ * Closes one layer: an item chosen from a thread's panel goes back to the thread, whose own close goes back further, to
+ * the item it was opened from if that is still shown, brought into view.
+ */
+function shut(place: Place, layer: Layer, world: Pick<World, "has" | "archived">): Step {
+  const only = (next: Place): Step => ({ place: next, requests: {} });
   const goBack = (next: Place): Place => ({
     ...next,
     view: place.cameFrom === null ? next.view : place.cameFrom.view,
     cameFrom: null,
   });
-  if (layer === "command") return overlay(place, { command: false });
-  if (layer === "mode") return overlay(place, { mode: { kind: "idle" } });
-  if (layer === "add") return overlay(place, { add: null });
-  if (layer === "projects") return overlay(place, { projects: false });
-  if (layer === "away") return { ...place, view: HOME };
+  if (layer === "command") return only(overlay(place, { command: false }));
+  if (layer === "mode") return only(overlay(place, { mode: { kind: "idle" } }));
+  if (layer === "add") return only(overlay(place, { add: null }));
+  if (layer === "projects") return only(overlay(place, { projects: false }));
+  if (layer === "away") return only({ ...place, view: HOME });
   if (layer === "item")
-    return place.cameFrom?.by === "item" ? goBack({ ...place, item: null }) : { ...place, item: null };
-  return goBack({ ...place, thread: null });
+    return only(place.cameFrom?.by === "item" ? goBack({ ...place, item: null }) : { ...place, item: null });
+  // The item under a thread opened from it, once that thread has closed and opened it again.
+  if (layer === "under") return place.thread === null && place.item !== null ? shut(place, "item", world) : only(place);
+  const under = itemUnder(place, world);
+  if (under === null) return only(goBack({ ...place, thread: null }));
+  const from = place.cameFrom?.view ?? "map";
+  return {
+    place: {
+      ...place,
+      thread: null,
+      item: under,
+      view: "map",
+      cameFrom: from === "map" ? null : { view: from, by: "item" },
+    },
+    requests: { focus: { id: under, pin: null } },
+  };
+}
+
+/** The item the thread open was opened from, if it is still shown: else closing the thread goes back past it. */
+function itemUnder(place: Place, world: Pick<World, "has" | "archived">): string | null {
+  const item = place.cameFrom?.by === "thread" ? place.cameFrom.item : undefined;
+  return place.thread !== null && item !== undefined && world.has(item) && !world.archived(item) ? item : null;
 }
 
 // What's on top: the one sheet shown over the Map, which Escape and Back close first. One order for both, so a key
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app.
 
-export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "away";
+export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
 
 export interface Open {
   /** The command menu: over everything, as it can be opened from anywhere. */
@@ -322,6 +389,8 @@ export interface Open {
   /** The projects' sheet, on a phone. */
   projects: boolean;
   thread: boolean;
+  /** The item a thread was opened from, under the thread's panel, which closing the panel opens again. */
+  under: boolean;
   /**
    * On a phone, a view other than the home one: Back returns home before it leaves the app, as a phone's tabs do. The
    * bottom layer, under everything shown over the view.
@@ -330,7 +399,7 @@ export interface Open {
 }
 
 /** What of `place` is open as a layer: an item only once drawn; the projects' sheet and a view away only on a phone. */
-export function openOf(place: Place, world: Pick<World, "has" | "wide">): Open {
+export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wide">): Open {
   return {
     command: place.overlays.command,
     mode: place.overlays.mode.kind !== "idle",
@@ -338,6 +407,7 @@ export function openOf(place: Place, world: Pick<World, "has" | "wide">): Open {
     item: place.item !== null && world.has(place.item),
     projects: place.overlays.projects && !world.wide,
     thread: place.thread !== null,
+    under: itemUnder(place, world) !== null,
     away: !world.wide && place.view !== HOME,
   };
 }
@@ -346,7 +416,7 @@ export function openOf(place: Place, world: Pick<World, "has" | "wide">): Open {
 export function openLayers(open: Open): Layer[] {
   // The projects' sheet is opened over an item, to see where it is, so it shows over it; an item chosen from a
   // thread's panel shows over the thread's.
-  const order: Layer[] = ["command", "mode", "add", "projects", "item", "thread", "away"];
+  const order: Layer[] = ["command", "mode", "add", "projects", "item", "thread", "under", "away"];
   return order.filter((layer) => open[layer === "add" ? "adding" : layer]);
 }
 
@@ -463,6 +533,50 @@ export function parse(search: string): Wanted {
     item,
     thread: query.get("thread") || null,
     needsAt: view === "needs" ? query.get("needs") || null : null,
+  };
+}
+
+/** What a history entry holds of the place it was written at: never what passes, the overlays, nor any request. */
+export const stored = (place: Place): Place => ({ ...place, overlays: CLOSED });
+
+/** Whether two places are the same, as an entry holds them. */
+export const samePlace = (a: Place | null, b: Place | null): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+const idOrNull = (value: unknown): value is string | null => value === null || typeof value === "string";
+
+/**
+ * The place a history entry holds, or null for one that holds none, as entries written before places were do, or one
+ * not this app's: those open what their address names, as a link does.
+ */
+export function placeIn(state: unknown): Place | null {
+  const place = (state as { place?: Partial<Place> } | null)?.place;
+  if (typeof place !== "object" || place === null) return null;
+  const { view, item, thread, needsAt, cameFrom, needsLeft } = place;
+  if (!VIEWS.some((one) => one === view) || !idOrNull(item) || !idOrNull(thread)) return null;
+  return {
+    ...START,
+    view: view as View,
+    item,
+    thread,
+    needsAt: idOrNull(needsAt) ? needsAt : null,
+    cameFrom: typeof cameFrom === "object" && cameFrom !== null ? cameFrom : null,
+    needsLeft: typeof needsLeft === "object" && needsLeft !== null ? needsLeft : null,
+  };
+}
+
+/**
+ * What of a place an entry held opens in the plan as it is, as `landing` says of a link: an item or a thread gone since
+ * is dropped, and named, and an archived item opens with archived items shown.
+ */
+export function landingPlace(
+  place: Place,
+  has: Parameters<typeof landing>[1],
+): { place: Place; archived: boolean; missing: ("item" | "thread")[] } {
+  const found = landing({ view: place.view, item: place.item, thread: place.thread, needsAt: place.needsAt }, has);
+  return {
+    place: { ...place, item: found.wanted.item, thread: found.wanted.thread },
+    archived: found.archived,
+    missing: found.missing,
   };
 }
 
