@@ -329,6 +329,33 @@ fn change(tc: &TestCase) -> Change {
 }
 
 /// What the judge projects is what reading the written state gives, across replicas and conflicts.
+#[test]
+fn settling_a_conflicted_parent_on_the_value_that_closes_a_cycle_is_refused() {
+    let mut a = replica("a");
+    let kid = add("kid", vec![ItemAssign::Parent(Some("x".into()))]);
+    commit_ok(&mut a, 1, vec![add("x", vec![]), add("p", vec![]), kid]);
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    // One replica, as an older version might, wrote x under its own child while another moved it under p.
+    let x = crate::model::item_key("x").unwrap();
+    a.write(&x, field::PARENT, "actor/user", 2, Some(Json::from("kid"))).unwrap();
+    commit_ok(&mut b, 2, vec![item("x", ItemAssign::Parent(Some("p".into())))]);
+    a.join(&b.state).unwrap();
+    let rules = refused(&a, vec![item("x", ItemAssign::Parent(Some("kid".into())))]);
+    assert!(matches!(rules.as_slice(), [Rule::ParentCycle(_)]), "{rules:?}");
+    assert_eq!(refused_or_none(&a, item("x", ItemAssign::Parent(Some("p".into())))), []);
+}
+
+/// The rules one change breaks, or none when it is accepted.
+fn refused_or_none(replica: &Replica, change: Change) -> Vec<Rule> {
+    judge(&read(replica), &ChangeSet(vec![change]), by(99), None)
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|violation| violation.rule)
+        .collect()
+}
+
 /// Ancestry with no clones, so no merge can be checked.
 struct Unmapped;
 
