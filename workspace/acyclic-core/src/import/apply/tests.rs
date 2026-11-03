@@ -329,3 +329,24 @@ fn a_deleted_thread_items_still_name_is_unknown_to_an_import() {
         }]
     );
 }
+
+#[test]
+fn evidence_naming_a_tracker_repository_that_cant_be_verified_is_refused_naming_what_it_lacks() {
+    let mut r = imported();
+    let repository = crate::state::Key::new(crate::schema::kind::REPOSITORY, &id(1)).unwrap();
+    let branch = crate::schema::repository::DEFAULT_BRANCH;
+    model::set::<String>(&mut r, &repository, branch, None, by(USER, 2)).unwrap();
+    let mut doc = valid();
+    doc.repositories.clear();
+    doc.items[2].evidence.as_mut().unwrap().commit = Some(format!("{}@def5678", id(1)));
+    let refused = apply(&doc, &mut r, by(USER, 3)).unwrap_err();
+    let incomplete = ValidationError::IncompleteRepository {
+        item: id(12),
+        repository: id(1),
+        missing: vec!["default-branch".into()],
+    };
+    assert!(
+        matches!(&refused, ApplyError::Invalid(errors) if errors == &[incomplete]),
+        "{refused:?}"
+    );
+}

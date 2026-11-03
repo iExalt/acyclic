@@ -296,6 +296,15 @@ pub enum ValidationError {
         /// The commit.
         commit: String,
     },
+    /// Evidence naming a repository record that lacks fields it needs to be verified.
+    IncompleteRepository {
+        /// The item.
+        item: String,
+        /// The repository record.
+        repository: String,
+        /// The fields it lacks.
+        missing: Vec<String>,
+    },
 }
 
 impl ValidationError {
@@ -333,6 +342,11 @@ impl fmt::Display for ValidationError {
             Self::InvalidCommit { item, commit } => {
                 write!(f, "item {item}: evidence commit {commit:?} isn't <repository id>@<sha>")
             },
+            Self::IncompleteRepository { item, repository, missing } => write!(
+                f,
+                "item {item}: evidence names repository {repository}, which is missing {}",
+                missing.join(", ")
+            ),
         }
     }
 }

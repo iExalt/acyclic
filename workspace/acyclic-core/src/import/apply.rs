@@ -348,6 +348,23 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
             (Rule::EvidenceNotDone, Some(at)) => {
                 unfinished.push(ValidationError::EvidenceNotDone(at.record.id().to_owned()));
             },
+            (Rule::InvalidCommit, Some(at)) => {
+                let item = at.record.id();
+                let commit = doc
+                    .items
+                    .iter()
+                    .find(|i| i.id == item)
+                    .and_then(|i| i.evidence.as_ref()?.commit.clone())
+                    .unwrap_or_default();
+                unknown.push(ValidationError::InvalidCommit { item: item.to_owned(), commit });
+            },
+            (Rule::IncompleteRepository { repository, missing }, Some(at)) => {
+                unfinished.push(ValidationError::IncompleteRepository {
+                    item: at.record.id().to_owned(),
+                    repository: repository.clone(),
+                    missing: missing.iter().map(|&field| field.to_owned()).collect(),
+                });
+            },
             (Rule::ArchivedOpen(root), _) => {
                 unfinished.push(ValidationError::ArchivedNotDone(root.clone()));
             },
@@ -355,8 +372,25 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                 unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
             },
             (Rule::ParentCycle(cycle) | Rule::LinkCycle(cycle), _) => cycles.push(cycle.clone()),
-            // An import's adds name their ids and update what exists, once each: nothing else is refused.
-            _ => debug_assert!(false, "an import can't be refused for {violation:?}"),
+            // Told above.
+            (Rule::Deleted(_), _) => {},
+            // An import's adds name their ids, update what exists and finish nothing, once each: these can't arise,
+            // and naming each makes a new rule decide here.
+            (
+                Rule::NoRecord(_)
+                | Rule::NameTaken { .. }
+                | Rule::EvidenceNotDone
+                | Rule::InvalidCommit
+                | Rule::IncompleteRepository { .. }
+                | Rule::SelfLink
+                | Rule::TitleTaken(_)
+                | Rule::RepeatDiffers
+                | Rule::Contradicts
+                | Rule::NotReady(_)
+                | Rule::OpenWork { .. }
+                | Rule::EvidenceDiffers,
+                _,
+            ) => debug_assert!(false, "an import can't be refused for {violation:?}"),
         }
     }
     unknown.sort();
