@@ -1,5 +1,6 @@
 use hegel::TestCase;
 use hegel::generators as gs;
+use serde_json::json;
 
 use super::*;
 use crate::state::{ReplicaId, State};
@@ -14,6 +15,130 @@ fn by(at: Millis) -> By<'static> {
 
 fn read(replica: &Replica) -> Model {
     Model::read(&replica.state).unwrap()
+}
+
+#[test]
+fn expected_fields_and_one_wait_edge_match_the_model_values() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            add("a", vec![ItemAssign::Notes(None), ItemAssign::WaitsFor("b".into(), true)]),
+            add("b", vec![]),
+            add("c", vec![]),
+        ],
+    );
+    let expected = [
+        Expectation::ItemField {
+            item: "a".into(),
+            field: ExpectedItemField::Title,
+            value: ExpectedValue::One("A".into()),
+        },
+        Expectation::ItemField {
+            item: "a".into(),
+            field: ExpectedItemField::Notes,
+            value: ExpectedValue::Unset(()),
+        },
+        Expectation::WaitsFor { item: "a".into(), target: "b".into(), present: true },
+    ];
+    assert_eq!(check_expected(&r.state, &read(&r), &expected, 2).unwrap(), Vec::new());
+
+    // Another edge from the same item does not invalidate the one this Undo depends on.
+    commit_ok(&mut r, 3, vec![item("a", ItemAssign::WaitsFor("c".into(), true))]);
+    assert_eq!(check_expected(&r.state, &read(&r), &expected, 4).unwrap(), Vec::new());
+
+    let mismatch = check_expected(
+        &r.state,
+        &read(&r),
+        &[Expectation::WaitsFor { item: "a".into(), target: "b".into(), present: false }],
+        4,
+    )
+    .unwrap();
+    assert_eq!(mismatch.len(), 1);
+    assert_eq!(mismatch[0].actual, Json::Bool(true));
+}
+
+#[test]
+fn expected_conflict_values_keep_their_order_and_malformed_conditions_are_rejected() {
+    let mut a = replica("a");
+    commit_ok(&mut a, 1, vec![add("a", vec![])]);
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    commit_ok(&mut a, 2, vec![item("a", ItemAssign::Title("first".into()))]);
+    commit_ok(&mut b, 2, vec![item("a", ItemAssign::Title("second".into()))]);
+    a.join(&b.state).unwrap();
+
+    let current = serde_json::to_value(&read(&a).items["a"].title).unwrap();
+    let expected: ExpectedValue = serde_json::from_value(current.clone()).unwrap();
+    let condition = Expectation::ItemField {
+        item: "a".into(),
+        field: ExpectedItemField::Title,
+        value: expected,
+    };
+    assert_eq!(
+        check_expected(&a.state, &read(&a), std::slice::from_ref(&condition), 3).unwrap(),
+        Vec::new()
+    );
+
+    let reversed = match current {
+        Json::Object(mut object) => {
+            let Json::Array(mut values) = object.remove("conflict").unwrap() else {
+                panic!("conflict sides are an array");
+            };
+            values.reverse();
+            json!({"conflict": values})
+        },
+        other => panic!("expected a conflict, got {other}"),
+    };
+    let condition: Expectation = serde_json::from_value(json!({
+        "kind": "item-field", "item": "a", "field": "title", "value": reversed
+    }))
+    .unwrap();
+    assert_eq!(check_expected(&a.state, &read(&a), &[condition], 3).unwrap().len(), 1);
+
+    for invalid in [
+        json!({"kind": "item-field", "item": "a", "field": "unknown", "value": null}),
+        json!({"kind": "waits-for", "item": "a", "target": "b", "present": true, "ignore": true}),
+        json!({"kind": "item-field", "item": "a", "field": "title", "value": {"other": "x"}}),
+        json!({"kind": "item-field", "item": "a", "field": "title", "value": {"conflict": []}}),
+    ] {
+        assert!(serde_json::from_value::<Expectation>(invalid).is_err());
+    }
+}
+
+#[test]
+fn started_at_most_includes_live_claims_on_leaf_and_parent() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("root", vec![]),
+            add(
+                "leaf",
+                vec![ItemAssign::Parent(Some("root".into())), ItemAssign::Thread(Some("t".into()))],
+            ),
+        ],
+    );
+    let no_started = [
+        Expectation::StartedAtMost { item: "leaf".into(), count: 0 },
+        Expectation::StartedAtMost { item: "root".into(), count: 0 },
+    ];
+    assert_eq!(check_expected(&r.state, &read(&r), &no_started, 2).unwrap(), Vec::new());
+
+    crate::claim::claim(&mut r, "t", "session/test", 3, (60_000, 60_000), None).unwrap();
+    let mismatch = check_expected(&r.state, &read(&r), &no_started, 4).unwrap();
+    assert_eq!(mismatch.len(), 2);
+    assert!(mismatch.iter().all(|one| one.actual.as_u64() == Some(1)));
+    let allowed = [
+        Expectation::StartedAtMost { item: "leaf".into(), count: 1 },
+        Expectation::StartedAtMost { item: "root".into(), count: 1 },
+    ];
+    assert_eq!(check_expected(&r.state, &read(&r), &allowed, 4).unwrap(), Vec::new());
+    let missing = [Expectation::StartedAtMost { item: "gone".into(), count: 0 }];
+    assert_eq!(check_expected(&r.state, &read(&r), &missing, 4).unwrap()[0].actual, Json::Null);
 }
 
 fn item(id: &str, assign: ItemAssign) -> Change {

@@ -49,7 +49,16 @@ pub type Names = BTreeMap<String, String>;
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
-    run_with(cli, env, false).map(|(output, _)| output)
+    run_with(cli, env, false, None).map(|(output, _)| output)
+}
+
+/// Runs one app write with conditions checked under the store lock before the batch changes anything.
+pub fn run_expected(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+) -> Result<Output, CliError> {
+    run_with(cli, env, false, Some(expected)).map(|(output, _)| output)
 }
 
 /// Runs a parsed command, and says what pretty output calls each record the tracker holds once it is done: items and
@@ -58,10 +67,15 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
 /// command when it neither read nor wrote through the model; none for a command with no tracker, or one that can't
 /// be read.
 pub fn run_named(cli: &Cli, env: &Env) -> Result<(Output, Names), CliError> {
-    run_with(cli, env, true)
+    run_with(cli, env, true, None)
 }
 
-fn run_with(cli: &Cli, env: &Env, named: bool) -> Result<(Output, Names), CliError> {
+fn run_with(
+    cli: &Cli,
+    env: &Env,
+    named: bool,
+    expected: Option<Vec<acyclic_core::write::Expectation>>,
+) -> Result<(Output, Names), CliError> {
     let text = |text: String| (Output::Text(text), Names::new());
     match (cli.command.class(), &cli.command) {
         (Class::Standalone, Command::Init { path, replica, remote }) => {
@@ -79,7 +93,14 @@ fn run_with(cli: &Cli, env: &Env, named: bool) -> Result<(Output, Names), CliErr
             Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
         },
         (Class::Clone | Class::Read | Class::Write, command) => {
-            let result = Session::open(cli, env, named).and_then(|session| {
+            if expected.is_some() && command.class() != Class::Write {
+                return Err(CliError::new(
+                    "usage",
+                    exit::USAGE,
+                    "write expectations require a write command",
+                ));
+            }
+            let result = Session::open(cli, env, named, expected).and_then(|session| {
                 let data = session.dispatch(command)?;
                 Ok((Output::Json(data), if named { session.names() } else { Names::new() }))
             });
@@ -117,10 +138,16 @@ struct Session<'a> {
     /// The names of the records in the state the command last read or wrote through [`Session::read`] or
     /// [`Session::write`], kept only when pretty output asked for them.
     named: Option<RefCell<Option<Names>>>,
+    expected: Option<Vec<write::Expectation>>,
 }
 
 impl<'a> Session<'a> {
-    fn open(cli: &Cli, env: &'a Env, named: bool) -> Result<Self, CliError> {
+    fn open(
+        cli: &Cli,
+        env: &'a Env,
+        named: bool,
+        expected: Option<Vec<write::Expectation>>,
+    ) -> Result<Self, CliError> {
         let actor = context::actor(cli, env)?;
         let path = context::tracker(cli, env)?;
         let (tracker, renamed) = Tracker::open(&path)?;
@@ -134,6 +161,7 @@ impl<'a> Session<'a> {
             now: context::now(env),
             env,
             named: named.then(|| RefCell::new(None)),
+            expected,
         })
     }
 
@@ -423,7 +451,19 @@ impl<'a> Session<'a> {
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
         let meta = Meta { actor: self.actor.clone() };
+        let expected = self.expected.as_deref();
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
+            if let Some(expected) = expected {
+                let model = Model::read(replica.state())?;
+                let mismatches = write::check_expected(replica.state(), &model, expected, at)?;
+                if !mismatches.is_empty() {
+                    return Err(CliError::refused(
+                        "changed-since",
+                        "the state changed since the app read it",
+                    )
+                    .with(json!({"mismatches": mismatches})));
+                }
+            }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
             let before = replica.changes();

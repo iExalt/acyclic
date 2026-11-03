@@ -18,6 +18,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower::ServiceExt as _;
@@ -264,12 +265,23 @@ impl Server {
     async fn call(
         self: &Arc<Self>,
         command: Command,
+        expected: Option<Vec<acyclic_core::write::Expectation>>,
         turn: Option<OwnedMutexGuard<()>>,
     ) -> (u8, Value) {
         let server = Arc::clone(self);
         let run = tokio::task::spawn_blocking(move || {
             let _turn = turn;
-            acyclic_cli::call(command, server.config.tracker.clone(), &server.config.env)
+            match expected {
+                Some(expected) => acyclic_cli::call_expected(
+                    command,
+                    server.config.tracker.clone(),
+                    &server.config.env,
+                    expected,
+                ),
+                None => {
+                    acyclic_cli::call(command, server.config.tracker.clone(), &server.config.env)
+                },
+            }
         });
         run.await.unwrap_or_else(|_| {
             let err =
@@ -277,6 +289,14 @@ impl Server {
             (err.exit, err.envelope())
         })
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppWrite {
+    command: Command,
+    #[serde(default)]
+    expect: Vec<acyclic_core::write::Expectation>,
 }
 
 /// A listener's state: the server and who the listener lets in.
@@ -310,22 +330,43 @@ async fn command(
     if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
-    let command: Command = match serde_json::from_slice(&body) {
-        Ok(command) => command,
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
         Err(err) => {
             let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
             return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
         },
+    };
+    let (command, expected) = if value.get("command").is_some() {
+        match serde_json::from_value::<AppWrite>(value) {
+            Ok(request) => (request.command, Some(request.expect)),
+            Err(err) => {
+                let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
+                return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+            },
+        }
+    } else {
+        match serde_json::from_value::<Command>(value) {
+            Ok(command) => (command, None),
+            Err(err) => {
+                let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
+                return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+            },
+        }
     };
     let server = &listener.server;
     // Reads run beside anything and writes wait for the other writes and the sync loop. The server runs nothing
     // else for a request: nothing that sets up or syncs the clone, reads or writes files on the server, or starts
     // another server.
     let class = command.class();
+    if expected.is_some() && class != Class::Write {
+        let err = CliError::new("usage", exit::USAGE, "write expectations require a write command");
+        return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+    }
     let (code, envelope) = match class {
-        Class::Read => server.call(command, None).await,
+        Class::Read => server.call(command, None, None).await,
         Class::Write => match server.turn().await {
-            Ok(turn) => server.call(command, Some(turn)).await,
+            Ok(turn) => server.call(command, expected, Some(turn)).await,
             Err(err) => (err.exit, err.envelope()),
         },
         Class::Standalone | Class::Server | Class::Clone => {
@@ -666,7 +707,7 @@ async fn sync(server: Arc<Server>, every: Duration) {
         ticks.tick().await;
         // A sync waits as long as it must: it is the server's own, and the next tick would only queue behind it.
         let turn = server.turns.clone().lock_owned().await;
-        let (code, envelope) = server.call(Command::Sync, Some(turn)).await;
+        let (code, envelope) = server.call(Command::Sync, None, Some(turn)).await;
         if code == exit::OK {
             server.push.look();
             continue;
