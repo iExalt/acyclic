@@ -1759,9 +1759,8 @@ def edit_journey(page, view, env, plan, box, name, failures):
 
 @timed
 def failed_add_journey(page, errors, name, failures):
-    """An add the server refuses opens its form again with what was typed, and nothing stays drawn; one whose answer
-    is lost after the server saved it stays drawn, with the form closed."""
-    nodes = int(page.get_by_test_id("map").get_attribute("data-nodes"))
+    """A form holding typing survives Escape and Back; a refused edit opens the editor again with what was typed, the
+    session's smoke test in the browser. What else a write, a read and an Undo come to is session.test.ts's."""
     refusal = json.dumps(
         {
             "ok": False,
@@ -1772,24 +1771,6 @@ def failed_add_journey(page, errors, name, failures):
             },
         }
     )
-
-    # The ids the app made for the items it added, last last.
-    sent = []
-
-    def add(title, answer):
-        page.route(
-            "**/api/command",
-            lambda route: (
-                (sent.append(json.loads(route.request.post_data)["item"]["add"]["id"]), answer(route))
-                if '"add"' in (route.request.post_data or "")
-                else route.fallback()
-            ),
-        )
-        page.locator("[data-action=add-top]").click()
-        form = page.get_by_test_id("add-form")
-        form.locator("input[name=title]").fill(title)
-        form.locator("button[type=submit]").click()
-        return form
 
     # Escape never throws away what was typed: it says how to leave instead. From nothing selected, so the form's
     # opener is the bar's Add, which is still there when the form closes.
@@ -1821,52 +1802,24 @@ def failed_add_journey(page, errors, name, failures):
         failures.append(
             f"{name}: after cancelling an add form, its notice stayed, or focus didn't go back to Add"
         )
-    form = add(
-        "Refused add",
-        lambda route: route.fulfill(
-            status=200, content_type="application/json", body=refusal
-        ),
-    )
-    page.get_by_test_id("notice").wait_for(timeout=10_000)
-    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
-    page.unroute("**/api/command")
-    if (
-        not form.count()
-        or form.locator("input[name=title]").input_value() != "Refused add"
-        or page.get_by_test_id("map").evaluate(
-            "(m, id) => m.cy.getElementById(id).nonempty()", sent[-1] if sent else ""
-        )
-        or page.get_by_test_id("inspector").count()
-    ):
-        failures.append(
-            f"{name}: a refused add didn't give back its form, or stayed drawn"
-        )
-    form.get_by_role("button", name="Cancel").click()
-
-    def lost(route):
-        route.fetch()
-        route.abort()
-
-    logged = len(errors)
-    form = add("Lost answer", lost)
-    page.get_by_test_id("notice").wait_for(timeout=10_000)
-    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
-    page.unroute("**/api/command")
-    page.wait_for_function(
-        "n => Number(document.querySelector('[data-testid=map]').dataset.nodes) === n",
-        arg=nodes + 1,
-    )
-    if form.count() or not page.get_by_test_id("map").evaluate(
-        "(m, id) => m.cy.getElementById(id).nonempty()", sent[-1] if sent else ""
-    ):
-        failures.append(
-            f"{name}: an add saved without an answer opened its form again, or wasn't drawn"
-        )
-        if form.count():
-            form.get_by_role("button", name="Cancel").click()
-    # A refused edit opens the editor again with what was typed, over the item as it was.
+    # A refused edit opens the editor again with what was typed, over the item as it was: one added for it, from the
+    # Overview, so the add goes to the Map to show where it landed, from a Map zoomed far out: at a zoom its title
+    # reads at. Zoomed in braces, so nothing comes back: Cytoscape's zoom returns the whole graph, which takes the
+    # browser seconds to serialise.
+    page.get_by_test_id("map").evaluate("m => { m.cy.zoom(0.3); }")
+    page.locator("[data-view=overview]").click()
+    page.locator("[data-action=add-top]").click()
+    form.locator("input[name=title]").fill("Edit refused")
+    form.locator("button[type=submit]").click()
     inspector = page.get_by_test_id("inspector")
-    inspector.get_by_role("heading", name="Lost answer").wait_for(timeout=10_000)
+    inspector.get_by_role("heading", name="Edit refused").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    try:
+        page.locator("[data-view=map][aria-current=page]").wait_for(timeout=5_000)
+        page.wait_for_function("() => document.querySelector('[data-testid=map]').cy.zoom() >= 0.85", timeout=5_000)
+    except PlaywrightTimeout:
+        zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+        failures.append(f"{name}: an item added from the Overview came in on the Map at zoom {zoom:.2f}, past reading")
     page.route(
         "**/api/command",
         lambda route: (
@@ -1888,97 +1841,14 @@ def failed_add_journey(page, errors, name, failures):
         or editor.locator("input[name=title]").input_value() != "Refused edit"
         or editor.locator("textarea[name=notes]").input_value()
         != "Notes typed on the phone"
-        or inspector.get_by_role("heading", name="Lost answer").count() != 1
+        or inspector.get_by_role("heading", name="Edit refused").count() != 1
     ):
         failures.append(
             f"{name}: a refused edit didn't give back what was typed over the item as it was"
         )
     if editor.count():
         editor.get_by_role("button", name="Cancel").click()
-    # A saved add whose read back failed stays drawn through a later add the server refuses.
-    sent = []
-    page.route(
-        "**/api/command",
-        lambda route: (
-            route.fulfill(status=500, body="")
-            if route.request.post_data == '{"item":"list"}'
-            else (sent.append(route.request.post_data or ""), route.fallback())
-        ),
-    )
-    # Added from the Overview, so the add goes to the Map to show where it landed: from a Map zoomed far out.
-    page.get_by_test_id("map").evaluate("m => m.cy.zoom(0.3)")
-    page.locator("[data-view=overview]").click()
-    page.locator("[data-action=add-top]").click()
-    form = page.get_by_test_id("add-form")
-    form.locator("input[name=title]").fill("Saved unread")
-    form.locator("button[type=submit]").click()
-    page.get_by_test_id("notice").get_by_text("Saved, but the refresh failed").wait_for(
-        timeout=10_000
-    )
-    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
-    # The id the app made for it.
-    saved = next(
-        (json.loads(body)["item"]["add"]["id"] for body in sent if '"add"' in body), ""
-    )
-    # In view, and at a zoom its title reads at, however far out the Map was left.
-    if (
-        not page.locator("[data-view=map][aria-current=page]").count()
-        or not in_open_view(page, saved)
-        or page.get_by_test_id("map").evaluate("m => m.cy.zoom()") < 0.85
-    ):
-        failures.append(f"{name}: an item added from the Overview wasn't shown on the Map, readable")
-    page.unroute("**/api/command")
-    form = add(
-        "Refused after",
-        lambda route: route.fulfill(
-            status=200, content_type="application/json", body=refusal
-        ),
-    )
-    form.locator("input[name=title]").wait_for(timeout=10_000)
-    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
-    page.unroute("**/api/command")
-    if (
-        not page.get_by_test_id("map").evaluate(
-            "(m, id) => m.cy.getElementById(id).nonempty()", saved
-        )
-        or form.locator("input[name=title]").input_value() != "Refused after"
-    ):
-        failures.append(
-            f"{name}: a saved add went missing when the next add was refused"
-        )
-    if form.count():
-        form.get_by_role("button", name="Cancel").click()
-    # A refresh that fails keeps the plan shown, and offers another.
-    nodes = page.get_by_test_id("map").get_attribute("data-nodes")
-    page.route(
-        "**/api/command",
-        lambda route: (
-            route.fulfill(status=500, body="")
-            if route.request.post_data == '{"item":"list"}'
-            else route.fallback()
-        ),
-    )
-    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    notice = page.get_by_test_id("notice")
-    notice.get_by_text("Couldn't refresh").wait_for(timeout=10_000)
-    page.unroute("**/api/command")
-    if (
-        page.get_by_test_id("map").get_attribute("data-nodes") != nodes
-        or notice.get_by_role("button", name="Refresh").count() != 1
-    ):
-        failures.append(
-            f"{name}: a failed refresh lost the plan, or offered no Refresh"
-        )
-    notice.get_by_role("button", name="Refresh").click()
-    # The browser logs the answer it lost, and the read refused, as it should.
-    errors[logged:] = [
-        one
-        for one in errors[logged:]
-        if "net::ERR_FAILED" not in one and "status of 500" not in one
-    ]
-    print(
-        f"{name}: a refused add or edit gave back what was typed; an add saved without an answer stayed drawn"
-    )
+    print(f"{name}: a form kept its typing through Escape and Back, and a refused edit gave back what was typed")
 
 
 def in_open_view(page, id):
