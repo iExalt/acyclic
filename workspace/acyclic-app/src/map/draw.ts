@@ -35,7 +35,7 @@ export function elementsOf(
         mark:
           node.kind === "leaf"
             ? markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette)
-            : boxMarkOf(node.kind, node.stage, node.width, node.height, palette),
+            : boxMarkOf(node.kind, node.stage, node.width, node.height, palette, threadOf(node.thread, lines)),
       },
       position: { x: node.x, y: node.y },
       classes: [

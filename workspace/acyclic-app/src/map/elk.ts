@@ -8,6 +8,7 @@
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
+import { isPile } from "./fold";
 import { type BoxLayout, type LayBox, LEAF, ROOT, type Size, scopes } from "./layout";
 import { type Model, visible } from "./model";
 import { pack } from "./pack";
@@ -180,10 +181,9 @@ export function elkLayBox(engine: Engine): LayBox {
             }),
             input.edges,
           );
-    return beside(
-      graph,
-      input.children.filter((child) => !linked.has(child.id)),
-    );
+    // The group of done work last, after what can start.
+    const aside = input.children.filter((child) => !linked.has(child.id));
+    return beside(graph, [...aside.filter((child) => !isPile(child.id)), ...aside.filter((child) => isPile(child.id))]);
   };
 }
 
