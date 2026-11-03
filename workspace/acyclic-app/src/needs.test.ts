@@ -11,7 +11,14 @@ describe("needView", () => {
   it("says which merge it can't confirm, in which repository by its owner/name, and what to do about it", () => {
     const unverified = (reason: string, name: string | null = "me/app") =>
       needView(
-        { kind: "unverified", item: { id: "i1", title: "Move in" }, repository: "r1", repository_name: name, reason },
+        {
+          kind: "unverified",
+          key: "unverified:i1:r1",
+          item: { id: "i1", title: "Move in" },
+          repository: "r1",
+          repository_name: name,
+          reason,
+        },
         none,
       );
     expect(unverified("no clone of the repository is mapped")).toMatchObject({
@@ -31,7 +38,14 @@ describe("needView", () => {
   it("puts the merges one cause leaves unconfirmed in one repository in one entry, where the first was", () => {
     const unverified = (id: string, repository: string, reason: string) =>
       needView(
-        { kind: "unverified", item: { id, title: id }, repository, repository_name: `me/${repository}`, reason },
+        {
+          kind: "unverified",
+          key: `unverified:${id}:${repository}`,
+          item: { id, title: id },
+          repository,
+          repository_name: `me/${repository}`,
+          reason,
+        },
         none,
       );
     const views = [
@@ -111,7 +125,6 @@ describe("needView", () => {
     );
     expect(conflict.actions.map((one) => one.label)).toEqual(["Use parked"]);
     expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
-    expect(conflict.key).toBe("conflict:item:a:state");
     // Named, and its values too where they are ids, while the command keeps the id.
     const titles = (id: string) => id.toUpperCase();
     const moved = needView(
@@ -144,13 +157,6 @@ describe("needView", () => {
     );
     expect(waits.text).toBe("A waits for q, which doesn't exist");
     expect(waits.note).toBe("acyclic item edit a --no-waits-for q");
-    // Each missing target is its own entry, however many one item's field names.
-    const keys = ["q", "r"].flatMap((target) =>
-      ["waits-for", "repositories"].map(
-        (field) => needView({ kind: "dangling", entity: "item", id: "a", field, target }, none, titles).key,
-      ),
-    );
-    expect(new Set(keys).size).toBe(4);
     // The waiting item itself gone leaves the older shape, kept as it was.
     const orphan = needView({ kind: "dangling", entity: "link", id: "x", field: "end", target: "q" }, none, titles);
     expect(orphan.text).toBe("x: its end names q, which doesn't exist");
@@ -174,11 +180,17 @@ describe("needView", () => {
       note: "Open it to choose its thread in its editor",
     });
     expect(needView({ kind: "something-new" }, none).text).toBe("something-new");
-    expect(needView({ kind: "contest", thread: thread("t") }, none).key).toBe("contest:t");
+    // The key is the list's, whatever the entry names.
+    expect(needView({ kind: "contest", key: "contest:t", thread: thread("t"), holders: ["x"] }, none).key).toBe(
+      "contest:t",
+    );
   });
 
   it("names the threads a cycle holds, and a title written apart as its first value", () => {
-    const cycle = needView({ kind: "thread-cycle", threads: [thread("t"), thread("u")], notify: true }, none);
+    const cycle = needView(
+      { kind: "thread-cycle", key: "thread-cycle:t:u", threads: [thread("t"), thread("u")], notify: true },
+      none,
+    );
     expect(cycle).toMatchObject({
       key: "thread-cycle:t:u",
       text: "Threads wait on each other in a cycle: T, U",

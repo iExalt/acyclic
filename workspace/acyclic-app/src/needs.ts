@@ -26,7 +26,7 @@ export interface Action {
 }
 
 export interface NeedView {
-  /** A stable key for the entry: its kind and what it names. */
+  /** The entry's stable key, as the needs-you list gives it: its kind and what it is about. */
   key: string;
   text: string;
   /** What it names besides its text, for a list that shows the entry without its rows, such as an item's title. */
@@ -117,6 +117,8 @@ function viewOf(
   const nameOf = (entity: string, id: string) =>
     entity === "item" ? titleOf(id) : entity === "thread" ? threadName(id) : id;
   const base = {
+    // The list's own key, which the server's pushes use too.
+    key: str(need.key),
     line,
     more: 0,
     items: item === null ? [] : [item.id],
@@ -161,7 +163,6 @@ function viewOf(
       }
       return {
         ...base,
-        key: `conflict:${entity}:${id}:${field}`,
         text: `${nameOf(entity, id)}: its ${field} was written differently on two machines`,
         actions,
         note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
@@ -170,24 +171,20 @@ function viewOf(
     case "thread-cycle":
       return {
         ...base,
-        key: `thread-cycle:${threads.map((one) => one.id).join(":")}`,
         text: `Threads wait on each other in a cycle: ${threads.map(lineName).join(", ")}`,
         note: IN_A_TERMINAL,
       };
     case "dangling": {
-      const key = `dangling:${str(need.entity)}:${str(need.id)}:${str(need.field)}:${str(need.target)}`;
       const name = nameOf(str(need.entity), str(need.id));
       // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.
       if (str(need.entity) === "item" && str(need.field) === "waits-for")
         return {
           ...base,
-          key,
           text: `${name} waits for ${shown(need.target)}, which doesn't exist`,
           note: str(need.fix) || IN_A_TERMINAL,
         };
       return {
         ...base,
-        key,
         text: `${name}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
         // An item in a thread that is gone is in none, which its editor puts right.
         note: str(need.entity) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
@@ -200,7 +197,6 @@ function viewOf(
       // The item is its row, so the text doesn't name it twice; the Overview, which shows no rows, gives it as detail.
       return {
         ...base,
-        key: `unverified:${item?.id ?? ""}:${id}`,
         repository,
         text: `Can't confirm ${item === null ? "an item" : "its"} merge into ${repository}`,
         detail: item === null ? null : titled(item),
@@ -210,7 +206,6 @@ function viewOf(
     case "unthreaded": {
       return {
         ...base,
-        key: `unthreaded:${item?.id ?? ""}`,
         text: "Needs a thread",
         detail: item === null ? null : titled(item),
         note: EDIT_THREAD,
@@ -219,17 +214,9 @@ function viewOf(
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix) || str(need.resolve);
-      const ids = [
-        str(need.id),
-        ...base.items,
-        ...base.threads.map((one) => one.id),
-        ...named.map((one) => one.id),
-        str(need.remote),
-      ];
       return {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],
-        key: `${need.kind}:${ids.filter((one) => one !== "").join(":")}`,
         text: describe(need.kind, item, thread, named, lineName),
         note: hint === "" ? IN_A_TERMINAL : hint,
       };

@@ -597,31 +597,9 @@ pub fn check_endpoint(endpoint: &str, transport: Transport) -> Result<(), Refuse
     }
 }
 
-/// A need's stable key: its kind and what it names, so the same need on the next look is known as told. Lists that
-/// change while the need stands, such as a contest's holders or a reopened item's dependents, stay out of it.
-#[must_use]
-pub fn key(entry: &Value) -> String {
-    let mut parts = vec![entry["kind"].as_str().unwrap_or_default().to_owned()];
-    // The fields after `field` name what a reference points at, a repository or a claim's holder: no kind that
-    // notifies has them, so adding them changed no key already told.
-    for field in ["id", "entity", "field", "target", "repository", "holder", "remote"] {
-        if let Some(text) = entry[field].as_str() {
-            parts.push(text.to_owned());
-        }
-    }
-    for field in ["item", "thread"] {
-        if let Some(id) = entry[field]["id"].as_str() {
-            parts.push(id.to_owned());
-        }
-    }
-    for field in ["items", "threads"] {
-        for row in entry[field].as_array().into_iter().flatten() {
-            if let Some(id) = row["id"].as_str() {
-                parts.push(id.to_owned());
-            }
-        }
-    }
-    parts.join(":")
+/// A need's stable key, as the needs-you list gives it, so the same need on the next look is known as told.
+fn key(entry: &Value) -> String {
+    entry["key"].as_str().unwrap_or_default().to_owned()
 }
 
 /// A need in a line, for a notification.
@@ -677,19 +655,12 @@ mod tests {
     }
 
     #[test]
-    fn a_need_is_known_by_its_kind_and_what_it_names() {
-        let cycle = |ids: [&str; 2]| json!({"kind": "thread-cycle", "threads": ids.map(|id| json!({"id": id, "title": id.to_uppercase()}))});
-        assert_eq!(key(&cycle(["t", "u"])), "thread-cycle:t:u");
-        assert_ne!(key(&cycle(["t", "u"])), key(&cycle(["t", "v"])));
-        assert_eq!(line(&cycle(["t", "u"])), "T, U wait on each other");
-        let conflict = json!({"kind": "conflict", "entity": "item", "id": "a", "field": "title"});
-        assert_eq!(key(&conflict), "conflict:a:item:title");
-        // Two references from one item differ only in what they point at.
-        let dangling = |target: &str| json!({"kind": "dangling", "entity": "item", "id": "a", "field": "repository", "target": target});
-        assert_eq!(key(&dangling("r")), "dangling:a:item:repository:r");
-        assert_ne!(key(&dangling("r")), key(&dangling("s")));
-        let unverified = |repository: &str| json!({"kind": "unverified", "item": {"id": "a"}, "repository": repository});
-        assert_ne!(key(&unverified("r")), key(&unverified("s")));
+    fn a_need_reads_as_one_line_and_is_known_by_the_key_the_list_gives() {
+        let cycle = json!({"kind": "thread-cycle", "key": "thread-cycle:t:u", "threads": [
+            {"id": "t", "title": "T"}, {"id": "u", "title": "U"},
+        ]});
+        assert_eq!(key(&cycle), "thread-cycle:t:u");
+        assert_eq!(line(&cycle), "T, U wait on each other");
         let long = json!({"kind": "reopened", "item": {"id": "a", "title": "x".repeat(500)}});
         assert_eq!(line(&long).chars().count(), 140);
     }

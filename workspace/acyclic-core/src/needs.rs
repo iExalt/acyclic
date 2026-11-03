@@ -11,6 +11,9 @@ use crate::ready::{Readiness, Status, Wait};
 use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
+mod keep;
+pub use keep::{Keep, Kept, Unkept, keeps};
+
 /// One entry on the needs-you list.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "entry")]
@@ -106,6 +109,38 @@ pub enum Entry {
 }
 
 impl Entry {
+    /// A stable, readable key: its kind and what it is about, joined by `:`, so the same need on the next look is
+    /// known as the same. Lists that change while the need stands, such as a contest's holders or a reopened item's
+    /// dependents, stay out of it. Ids and field names hold no `:`.
+    #[must_use]
+    pub fn key(&self) -> String {
+        let parts: Vec<&str> = match self {
+            Self::Conflict { kind, id, field } => vec!["conflict", kind, id, field],
+            Self::Unpushed { remote } => vec!["unpushed", remote],
+            Self::LinkCycle { items } => {
+                std::iter::once("link-cycle").chain(items.iter().map(String::as_str)).collect()
+            },
+            Self::ParentCycle { items } => {
+                std::iter::once("parent-cycle").chain(items.iter().map(String::as_str)).collect()
+            },
+            Self::ThreadCycle { threads } => {
+                std::iter::once("thread-cycle").chain(threads.iter().map(String::as_str)).collect()
+            },
+            Self::Contest { thread, holders: _ } => vec!["contest", thread],
+            Self::ClockAhead { thread, holder } => vec!["clock-ahead", thread, holder],
+            Self::Unthreaded { item, fix: _ } => vec!["unthreaded", item],
+            Self::Reopened { item, dependents: _ } => vec!["reopened", item],
+            Self::DoneEarly { item, open: _ } => vec!["done-early", item],
+            Self::Dangling { kind, id, field, target, fix: _ } => {
+                vec!["dangling", kind, id, field, target]
+            },
+            Self::Unverified { item, repository, reason: _ } => {
+                vec!["unverified", item, repository]
+            },
+        };
+        parts.join(":")
+    }
+
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
     /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked) and items in no
     /// thread, which agents leave routinely, stay on the list without a notification. With no catch-all arm, a new
