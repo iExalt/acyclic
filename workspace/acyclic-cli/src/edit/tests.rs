@@ -479,6 +479,12 @@ fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
         (err.code, err.message.as_str()),
         ("parent-cycle", "p can't go under itself or its own descendant")
     );
+    let itself = ItemFields { parent: Change::Set("c".into()), ..ItemFields::default() };
+    let err = edit_item(&mut r, "c", &itself, USER_BY).unwrap_err();
+    assert_eq!(
+        (err.code, err.message.as_str()),
+        ("parent-cycle", "c can't go under itself or its own descendant")
+    );
     edit_item(
         &mut r,
         "p",
