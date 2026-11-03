@@ -77,6 +77,29 @@ fn a_tracker_clone_needs_no_home_or_mapping() {
 }
 
 #[test]
+fn an_internal_import_error_keeps_each_violation_in_its_details() {
+    let violations = vec![
+        acyclic_core::write::Violation {
+            change: None,
+            at: None,
+            rule: acyclic_core::write::Rule::LinkCycle(vec!["a".into(), "b".into()]),
+        },
+        acyclic_core::write::Violation {
+            change: None,
+            at: None,
+            rule: acyclic_core::write::Rule::EmptyRecord(acyclic_core::write::Record::Thread(
+                "t".into(),
+            )),
+        },
+    ];
+    let expected: Vec<String> = violations.iter().map(ToString::to_string).collect();
+    let error: CliError = ApplyError::Internal(violations).into();
+    assert_eq!(error.code, "internal");
+    assert!(error.message.contains("internal error"));
+    assert_eq!(error.details["violations"], json!(expected));
+}
+
+#[test]
 fn every_error_has_a_stable_code_and_exit() {
     let key = Key::new("item", "a1").unwrap();
     // One of each variant, so a renamed code shows here.
@@ -119,6 +142,7 @@ fn every_error_has_a_stable_code_and_exit() {
         }])
         .into(),
         ApplyError::Cycles(vec![]).into(),
+        ApplyError::Internal(vec![]).into(),
         DeleteError::ThreadInUse { thread: "t".into(), reasons: vec![] }.into(),
         DeleteError::NoThread("t".into()).into(),
         // Raised by the commands themselves.

@@ -187,6 +187,9 @@ impl From<ApplyError> for CliError {
         let message = err.to_string();
         match err {
             ApplyError::Archive(err) => err.into(),
+            ApplyError::Internal(violations) => Self::refused("internal", message).with(json!({
+                "violations": violations.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            })),
             ApplyError::Write(err) => err.into(),
             // Ids are judged first, and alone: an agent branching on the code sees the real reason.
             ApplyError::Invalid(errors) if errors.iter().any(ValidationError::is_invalid_id) => {
