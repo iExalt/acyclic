@@ -577,6 +577,8 @@ impl Judging<'_> {
     }
 
     fn create(&mut self, change: usize, record: &Record) {
+        // A record exists once a field of it is written: an item always gets its state, a thread or repository needs
+        // a field given.
         let id = record.id().to_owned();
         match record {
             Record::Item(_) => {
@@ -624,6 +626,40 @@ impl Judging<'_> {
                 _ => None,
             })
             .collect();
+        self.start_in_backlog(&asked);
+        self.reopen(&asked);
+        self.place(&asked);
+    }
+
+    fn start_in_backlog(&mut self, asked: &[(usize, Assign)]) {
+        // A new item with no state given starts in the backlog.
+        let stated: BTreeSet<&str> = asked
+            .iter()
+            .filter_map(|(_, assign)| match assign {
+                Assign::Item(id, ItemAssign::State(_)) => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        let unstated: Vec<(usize, String)> = self
+            .steps
+            .iter()
+            .filter_map(|step| match &step.write {
+                Written::Create(Record::Item(id)) if !stated.contains(id.as_str()) => {
+                    Some((step.change, id.clone()))
+                },
+                _ => None,
+            })
+            .collect();
+        for (n, id) in unstated {
+            self.apply(
+                n,
+                false,
+                Written::Assign(Assign::Item(id, ItemAssign::State(ItemState::Backlog))),
+            );
+        }
+    }
+
+    fn reopen(&mut self, asked: &[(usize, Assign)]) {
         let archived_by_change: BTreeSet<String> = asked
             .iter()
             .filter_map(|(_, assign)| match assign {
@@ -632,8 +668,11 @@ impl Judging<'_> {
             })
             .collect();
         // Done work set back is reopened: flagged, and out of every archive on its line, unless the change set itself
-        // archives that root, which the archive rule then judges.
-        for (n, assign) in &asked {
+        // archives that root, which the archive rule then judges. Each is judged on the model the asked-for writes
+        // leave, before any archive is left, so the order of the changes doesn't matter.
+        let mut reopens: Vec<(usize, String, bool, Vec<String>)> = Vec::new();
+        let mut finished: Vec<(usize, String)> = Vec::new();
+        for (n, assign) in asked {
             let Assign::Item(id, ItemAssign::State(state)) = assign else { continue };
             let was_done = self
                 .before
@@ -641,28 +680,36 @@ impl Judging<'_> {
                 .get(id)
                 .is_some_and(|item| item.state == Value::One(ItemState::Done));
             if was_done && *state != ItemState::Done {
-                let archived = self.after.is_archived(id);
-                let line: Vec<String> = std::iter::once(id.as_str())
+                let line = std::iter::once(id.as_str())
                     .chain(self.after.ancestors(id))
+                    .filter(|root| {
+                        self.after.items.get(*root).is_some_and(|item| item.archived != Value::None)
+                            && !archived_by_change.contains(*root)
+                    })
                     .map(str::to_owned)
                     .collect();
-                for root in line {
-                    let held = self
-                        .after
-                        .items
-                        .get(&root)
-                        .is_some_and(|item| item.archived != Value::None);
-                    if held && !archived_by_change.contains(&root) {
-                        self.apply(*n, false, Written::Unarchive(root));
-                    }
-                }
-                self.apply(*n, false, Written::Reopened(id.clone(), Some(Reopened { archived })));
+                reopens.push((*n, id.clone(), self.after.is_archived(id), line));
             } else if *state == ItemState::Done
                 && self.after.items.get(id).is_some_and(|item| item.reopened != Value::None)
             {
-                self.apply(*n, false, Written::Reopened(id.clone(), None));
+                finished.push((*n, id.clone()));
             }
         }
+        let mut left: BTreeSet<String> = BTreeSet::new();
+        for (n, id, archived, line) in reopens {
+            for root in line {
+                if left.insert(root.clone()) {
+                    self.apply(n, false, Written::Unarchive(root));
+                }
+            }
+            self.apply(n, false, Written::Reopened(id, Some(Reopened { archived })));
+        }
+        for (n, id) in finished {
+            self.apply(n, false, Written::Reopened(id, None));
+        }
+    }
+
+    fn place(&mut self, asked: &[(usize, Assign)]) {
         // New or moved work with no thread joins the one passed down to it, all judged on one snapshot so one
         // placement doesn't steer the next.
         let threaded: BTreeSet<&str> = asked

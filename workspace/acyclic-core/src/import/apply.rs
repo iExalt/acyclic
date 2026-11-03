@@ -208,7 +208,7 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
         changes.push(add(Record::Thread(id.clone()), with));
     }
     for item in &doc.items {
-        let with = item_fields(item, !before.items.contains_key(&item.id));
+        let with = item_fields(item);
         changes.push(add(Record::Item(item.id.clone()), with));
     }
     for adding in [false, true] {
@@ -263,16 +263,16 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
     ChangeSet(changes)
 }
 
-/// An item's fields as the document gives them; a new item starts in the backlog.
-fn item_fields(item: &super::Item, new: bool) -> Vec<Assign> {
+/// An item's fields as the document gives them. One it leaves out keeps what it holds, finished work included; the
+/// judge starts a new item in the backlog.
+fn item_fields(item: &super::Item) -> Vec<Assign> {
     let id = &item.id;
     let field = |assign| Assign::Item(id.clone(), assign);
     let mut with = vec![field(ItemAssign::Title(item.title.clone()))];
     if let Some(notes) = &item.notes {
         with.push(field(ItemAssign::Notes(Some(notes.clone()))));
     }
-    // Backlog only for a new item: one left out keeps its state, finished work included.
-    if let Some(state) = item.state.or(new.then_some(super::State::Backlog)) {
+    if let Some(state) = item.state {
         with.push(field(ItemAssign::State(state.into())));
     }
     if let Some(parent) = &item.parent {

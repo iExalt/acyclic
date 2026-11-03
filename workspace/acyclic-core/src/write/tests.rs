@@ -119,6 +119,34 @@ fn done_work_set_back_is_reopened_and_leaves_the_archive_keeping_its_evidence() 
 }
 
 #[test]
+fn reopening_siblings_under_one_archived_root_flags_each_as_archived_in_any_order() {
+    for order in [["mid", "other"], ["other", "mid"]] {
+        let mut r = done_tree();
+        commit_ok(&mut r, 3, vec![add("other", vec![ItemAssign::Parent(Some("root".into()))])]);
+        commit_ok(
+            &mut r,
+            4,
+            vec![
+                item("other", ItemAssign::State(ItemState::Done)),
+                item("leaf", ItemAssign::State(ItemState::Done)),
+            ],
+        );
+        commit_ok(&mut r, 5, vec![item("root", ItemAssign::Archive)]);
+        let back = order.iter().map(|id| item(id, ItemAssign::State(ItemState::Backlog))).collect();
+        commit_ok(&mut r, 6, back);
+        let m = read(&r);
+        for id in order {
+            assert_eq!(
+                m.items[id].reopened,
+                Value::One(Reopened { archived: true }),
+                "{id} in {order:?}"
+            );
+        }
+        assert_eq!(m.items["root"].archived, Value::None);
+    }
+}
+
+#[test]
 fn archiving_a_root_while_reopening_under_it_is_refused_rather_than_undone() {
     let r = done_tree();
     let rules = refused(
