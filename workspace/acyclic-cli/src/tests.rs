@@ -611,10 +611,16 @@ fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
         default_branch: acyclic_core::model::Value::None,
         installation: acyclic_core::model::Value::None,
     };
+    let clones = temp.path().join(".config/acyclic/clones.toml");
+    let missing = context::clones(&env(&[("HOME", home)])).unwrap();
+    assert_eq!(missing(&record("me", "app")), None);
     // A mirror where older servers kept one is no longer read.
     std::fs::create_dir_all(temp.path().join(".local/share/acyclic/mirrors/app.git")).unwrap();
     std::fs::create_dir_all(temp.path().join(".config/acyclic")).unwrap();
-    let clones = temp.path().join(".config/acyclic/clones.toml");
+    std::fs::write(&clones, "").unwrap();
+    let empty = context::clones(&env(&[("HOME", home)])).unwrap();
+    assert_eq!(empty(&record("me", "app")), None);
+
     std::fs::write(&clones, "[clones]\n\"me/Mapped\" = \"/code/mapped\"\n").unwrap();
     let clone_of = context::clones(&env(&[("HOME", home)])).unwrap();
     assert_eq!(clone_of(&record("me", "app")), None);
@@ -630,6 +636,20 @@ fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
         refused.message.contains("clones.toml") && refused.message.contains("owner/name"),
         "{refused}"
     );
+
+    std::fs::write(&clones, "[clones\n").unwrap();
+    let Err(parse_error) = context::clones(&env(&[("HOME", home)])) else {
+        panic!("malformed TOML accepted")
+    };
+    assert_eq!((parse_error.code, parse_error.exit), ("config", exit::CONFIG));
+    std::fs::remove_file(&clones).unwrap();
+    std::fs::create_dir(&clones).unwrap();
+    let Err(read_error) = context::clones(&env(&[("HOME", home)])) else {
+        panic!("an unreadable clones.toml was treated as empty")
+    };
+    assert_eq!((read_error.code, read_error.exit), ("config", exit::CONFIG));
+    assert!(read_error.message.contains("clones.toml"), "{read_error}");
+    assert_ne!(read_error.message, parse_error.message, "read and parse failures stay distinct");
 }
 
 #[test]

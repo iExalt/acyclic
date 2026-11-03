@@ -20,6 +20,25 @@ fn code<T>(result: Result<T, CliError>) -> &'static str {
     result.map_or_else(|err| err.code, |_| "ok")
 }
 
+#[test]
+fn an_unreadable_readiness_on_item_done_is_exit_six_not_a_not_ready_refusal() {
+    let before = Model::default();
+    let unreadable = violation_error(
+        &Violation { change: None, at: None, rule: Rule::NotReady(None) },
+        None,
+        &before,
+    );
+    assert_eq!((unreadable.code, unreadable.exit), ("unreadable", exit::UNREADABLE));
+    assert_eq!(unreadable.details["hint"], DOCTOR_HINT);
+
+    let not_ready = violation_error(
+        &Violation { change: None, at: None, rule: Rule::NotReady(Some(Status::Unthreaded)) },
+        None,
+        &before,
+    );
+    assert_eq!((not_ready.code, not_ready.exit), ("not-ready", exit::REFUSED));
+}
+
 // The writes as the commands make them, each judged against the tracker as it is.
 fn add_item(
     r: &mut Replica,

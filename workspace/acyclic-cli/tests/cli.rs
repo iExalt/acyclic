@@ -136,6 +136,48 @@ fn two_machines_sync_through_a_shared_repository() {
 }
 
 #[test]
+fn init_checks_the_effective_origin_before_changing_a_new_destination() {
+    let mut sh = shared();
+    let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
+    assert_eq!(code, 0, "{out}");
+    sh.run("item add --title First", AGENT);
+    sh.run("sync", AGENT);
+
+    let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
+    assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(false)), "same-clone re-init");
+
+    let (code, out) = sh.output("init duplicate --replica mac --remote ../shared.git", &[]);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("duplicate-replica")), "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("choose a different --replica id"));
+    assert!(!sh.path().join("duplicate").exists(), "duplicate id must not create its destination");
+
+    git(sh.path(), &["init", "-q", "--bare", "empty.git"]);
+    let override_path = sh.path().join("override");
+    std::fs::create_dir(&override_path).unwrap();
+    git(&override_path, &["init", "-q"]);
+    git(&override_path, &["remote", "add", "origin", "../shared.git"]);
+    let (code, out) = sh.output("init override --replica mac --remote ../empty.git", &[]);
+    assert_eq!(code, 0, "an explicit remote overrides the existing origin: {out}");
+    assert!(
+        std::fs::read_to_string(override_path.join(".git/config"))
+            .unwrap()
+            .contains("../empty.git")
+    );
+
+    let failed = sh.path().join("failed");
+    std::fs::create_dir(&failed).unwrap();
+    std::fs::write(failed.join("keep"), "unchanged").unwrap();
+    git(&failed, &["init", "-q"]);
+    git(&failed, &["remote", "add", "origin", "../missing.git"]);
+    let (code, out) = sh.output("init failed --replica other", &[]);
+    assert_eq!((code, out["error"]["code"].as_str()), (4, Some("git")), "{out}");
+    assert_eq!(std::fs::read_to_string(failed.join("keep")).unwrap(), "unchanged");
+    let config = std::fs::read_to_string(failed.join(".git/config")).unwrap();
+    assert!(config.contains("../missing.git"));
+    assert!(!config.contains("acyclic.replica"), "failed preflight must not configure a replica");
+}
+
+#[test]
 fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_sync() {
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
