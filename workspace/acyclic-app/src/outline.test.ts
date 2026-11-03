@@ -4,7 +4,7 @@ import { dependencyOrder, elkLayBox } from "./map/elk";
 import { item } from "./map/fixture";
 import { type LayBox, LayoutCache, place, ROOT } from "./map/layout";
 import { buildModel, defaultView, visible } from "./map/model";
-import { currentRows, outlineOf, pickedAfter } from "./outline";
+import { currentRows, outlineOf } from "./outline";
 
 // Two projects and a lone item at the top level: t works in both projects, u only in the second, v only in the lone
 // item, and w nowhere; the first project's archived part holds x.
@@ -110,14 +110,5 @@ describe("currentRows", () => {
     expect(currentRows(model, outline, "p2")).toEqual({ project: "p2", thread: "u" });
     expect(currentRows(model, outline, "lone")).toEqual({ project: null, thread: "v" });
     expect(currentRows(model, outline, null)).toEqual({ project: null, thread: null });
-  });
-});
-
-describe("pickedAfter", () => {
-  it("keeps the picked thread for an item in it, and unpicks it for any other, the project above it included", () => {
-    expect(pickedAfter(model, "t", "c")).toBe("t");
-    expect(pickedAfter(model, "t", "p2")).toBeNull();
-    expect(pickedAfter(model, "t", "lone")).toBeNull();
-    expect(pickedAfter(model, null, "c")).toBeNull();
   });
 });

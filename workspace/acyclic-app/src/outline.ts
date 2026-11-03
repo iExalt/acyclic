@@ -68,11 +68,3 @@ export function currentRows(
   const project = outline.projects.some((one) => one.id === root) ? root : null;
   return { project, thread: model.items.get(selected)?.thread ?? null };
 }
-
-/**
- * The thread still picked once `id` is selected: one thing in focus, so selecting an item outside the picked thread
- * unpicks it, and one in it keeps it.
- */
-export function pickedAfter(model: Model | null, picked: string | null, id: string): string | null {
-  return picked !== null && model?.items.get(id)?.thread === picked ? picked : null;
-}
