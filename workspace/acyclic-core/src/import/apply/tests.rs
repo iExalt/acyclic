@@ -1,9 +1,11 @@
 use serde_json::json;
 
 use super::*;
+use crate::archive::{ArchiveError, Reason};
 use crate::import::State as Planned;
 use crate::import::tests::{id, item, valid};
-use crate::model::{self, ItemState, Value};
+use crate::model::{self, ItemState, Repository, Value};
+use crate::ready::Ancestry;
 use crate::schema::item as field;
 use crate::scope::ScopeEdit;
 use crate::scope::USER;
@@ -15,6 +17,26 @@ fn replica() -> Replica {
 
 fn by(actor: &str, at: Millis) -> By<'_> {
     By { actor, at }
+}
+
+struct Merged;
+
+impl Ancestry for Merged {
+    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
+        Ok(true)
+    }
+}
+
+struct Unmerged;
+
+impl Ancestry for Unmerged {
+    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+}
+
+fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
+    super::apply(doc, replica, by, &Merged)
 }
 
 fn imported() -> Replica {
@@ -167,10 +189,15 @@ fn evidence_and_archiving_are_judged_by_the_state_each_item_ends_with() {
     done.evidence = Some(crate::import::Evidence { commit: None, text: Some("again".into()) });
     done.archived = true;
     doc.items.push(done);
-    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    let mut release = item(11, None, None);
+    release.waits_for = Some(vec![]);
+    doc.items.push(release);
+    apply(&doc, &mut r, by(USER, 31 * 24 * 60 * 60 * 1000)).unwrap();
     // 11 isn't done, so evidence on it is refused.
-    doc.items[0] = item(11, None, None);
-    doc.items[0].evidence = Some(crate::import::Evidence { commit: None, text: Some("n".into()) });
+    doc.items.clear();
+    let mut open = item(11, None, None);
+    open.evidence = Some(crate::import::Evidence { commit: None, text: Some("n".into()) });
+    doc.items.push(open);
     let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
         panic!("evidence on open work accepted")
     };
@@ -349,4 +376,83 @@ fn evidence_naming_a_tracker_repository_that_cant_be_verified_is_refused_naming_
         matches!(&refused, ApplyError::Invalid(errors) if errors == &[incomplete]),
         "{refused:?}"
     );
+}
+
+fn archive_import(clear_dependent: bool) -> Import {
+    let mut doc = Import::new();
+    let mut root = item(12, None, None);
+    root.archived = true;
+    doc.items.push(root);
+    if clear_dependent {
+        let mut dependent = item(11, None, None);
+        dependent.waits_for = Some(vec![]);
+        doc.items.push(dependent);
+    }
+    doc
+}
+
+#[test]
+fn import_archive_uses_the_shared_grace_merge_and_external_dependent_rules() {
+    let mut r = imported();
+    let doc = archive_import(true);
+    let preview = super::preview(&doc, &r, by(USER, 2), &Merged).unwrap_err();
+    let before = r.state.clone();
+    let grace = apply(&doc, &mut r, by(USER, 2)).unwrap_err();
+    assert_eq!(preview, grace);
+    assert_eq!(r.state, before, "a refused archive writes nothing");
+    assert!(matches!(grace, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
+        if reasons.iter().any(|reason| matches!(reason, Reason::Waiting { .. }))));
+
+    let mut r = imported();
+    let dependent =
+        apply(&archive_import(false), &mut r, by(USER, 31 * 24 * 60 * 60 * 1000)).unwrap_err();
+    assert!(matches!(dependent, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
+        if reasons.iter().any(|reason| matches!(reason, Reason::LiveDependent { .. }))));
+
+    let mut r = imported();
+    let doc = archive_import(true);
+    let unmerged =
+        super::apply(&doc, &mut r, by(USER, 31 * 24 * 60 * 60 * 1000), &Unmerged).unwrap_err();
+    assert!(matches!(unmerged, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
+        if reasons.iter().any(|reason| matches!(reason, Reason::Unmerged { .. }))));
+}
+
+#[test]
+fn imported_archive_candidates_are_order_independent_and_preview_matches_apply() {
+    let make_replica = || {
+        let mut r = replica();
+        let mut doc = valid();
+        let mut parent = item(13, Some(Planned::Done), None);
+        parent.evidence =
+            Some(crate::import::Evidence { commit: None, text: Some("finished".into()) });
+        let mut child = item(14, Some(Planned::Done), Some(13));
+        child.evidence =
+            Some(crate::import::Evidence { commit: None, text: Some("finished".into()) });
+        doc.items.extend([parent, child]);
+        apply(&doc, &mut r, by(USER, 1)).unwrap();
+        r
+    };
+    let archived = |order: [u8; 2]| {
+        let mut doc = Import::new();
+        for n in order {
+            let mut item = item(n, None, None);
+            item.archived = true;
+            doc.items.push(item);
+        }
+        doc
+    };
+    let now = 31 * 24 * 60 * 60 * 1000;
+    let mut forward = make_replica();
+    let forward_doc = archived([13, 14]);
+    let preview = super::preview(&forward_doc, &forward, by(USER, now), &Merged).unwrap();
+    let applied = super::apply(&forward_doc, &mut forward, by(USER, now), &Merged).unwrap();
+    assert_eq!(preview, applied);
+
+    let mut reverse = make_replica();
+    super::preview(&archived([14, 13]), &reverse, by(USER, now), &Merged).unwrap();
+    super::apply(&archived([14, 13]), &mut reverse, by(USER, now), &Merged).unwrap();
+    for id in [id(13), id(14)] {
+        assert!(model(&forward).items[&id].is_archived_root());
+        assert!(model(&reverse).items[&id].is_archived_root());
+    }
 }

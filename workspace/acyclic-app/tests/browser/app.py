@@ -166,7 +166,7 @@ def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
     # A seed whose threads come in many waves with only small cycles among them, so arrows skip waves.
-    plan.write_text(
+    data = json.loads(
         subprocess.run(
             [FIXTURES, "--items", str(items), "--seed", "3"],
             capture_output=True,
@@ -174,12 +174,80 @@ def tracker(directory, env, items, remote=None):
             check=True,
         ).stdout
     )
+    archive_roots = [item["id"] for item in data["items"] if item.get("archived")]
+    assert archive_roots, f"the {items}-item fixture has no archived subtree"
+    bootstrap = json.loads(json.dumps(data))
+    for item in bootstrap["items"]:
+        item["archived"] = False
+    bootstrap_path = directory / f"plan-{items}-bootstrap.json"
+    bootstrap_path.write_text(json.dumps(bootstrap))
+
     remote_args = [] if remote is None else ["--remote", str(remote)]
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
+    archive_at = time.time_ns() // 1_000_000
+    done_at = archive_at - 31 * 24 * 60 * 60 * 1000
+    env["ACYCLIC_NOW"] = str(done_at)
+    run(env, "import", str(bootstrap_path))
+    seeded = Plan(env)
+
+    archive_items = set()
+    for root in archive_roots:
+        pending = [root]
+        while pending:
+            item = pending.pop()
+            if item in archive_items:
+                continue
+            archive_items.add(item)
+            pending.extend(seeded.children(item))
+    rows = seeded.items
+
+    def reads_done(row):
+        return row["state"] == "done" or row.get("progress", {}).get("state") == "done"
+    data_by_id = {item["id"]: item for item in data["items"]}
+    for item in data["items"]:
+        id = item["id"]
+        if id in archive_items:
+            assert reads_done(rows[id]), f"archived subtree item {id} isn't done"
+            evidence = item.get("evidence") or {}
+            evidence.pop("commit", None)
+            evidence["text"] = evidence.get("text") or "synthetic completion"
+            item["evidence"] = evidence
+        elif not reads_done(rows[id]) and item.get("waits_for"):
+            item["waits_for"] = [target for target in item["waits_for"] if target not in archive_items]
+    assert not any(
+        item.get("evidence", {}).get("commit")
+        for item in data["items"]
+        if item["id"] in archive_items
+    ), "archived subtree evidence must not need a code clone"
+    assert all(data_by_id[id]["evidence"]["text"] for id in archive_items)
+    assert not any(
+        not reads_done(rows[item["id"]]) and target in archive_items
+        for item in data["items"]
+        if item["id"] not in archive_items
+        for target in item.get("waits_for", [])
+    ), "open external work must not wait on an archived subtree"
+    expected_done_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(done_at / 1000))
+    assert all(rows[id]["done_at"] == expected_done_at for id in archive_items)
+
+    plan.write_text(json.dumps(data))
+    base = json.loads(json.dumps(data))
+    for item in base["items"]:
+        item["archived"] = False
+    base_path = directory / f"plan-{items}-base.json"
+    base_path.write_text(json.dumps(base))
+    run(env, "import", str(base_path))
+
+    env["ACYCLIC_NOW"] = str(archive_at)
     run(env, "import", str(plan))
+    env.pop("ACYCLIC_NOW", None)
     if remote is not None:
         run(env, "sync")
-    return Plan(env)
+    result = Plan(env)
+    assert all(result.items[id]["done_at"] == rows[id]["done_at"] for id in archive_items), (
+        "archiving must preserve the done time beyond the 30-day grace"
+    )
+    assert all(result.items[root]["archived"] for root in archive_roots)
+    return result
 
 
 def wait_drawn(page, nodes, timeout=20_000):

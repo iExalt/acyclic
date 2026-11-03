@@ -186,6 +186,7 @@ impl From<ApplyError> for CliError {
     fn from(err: ApplyError) -> Self {
         let message = err.to_string();
         match err {
+            ApplyError::Archive(err) => err.into(),
             ApplyError::Write(err) => err.into(),
             // Ids are judged first, and alone: an agent branching on the code sees the real reason.
             ApplyError::Invalid(errors) if errors.iter().any(ValidationError::is_invalid_id) => {

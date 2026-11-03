@@ -176,3 +176,28 @@ fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     );
     assert_eq!(reopen(&mut r, "b", user(3 * DAY)), Err(ArchiveError::NotDone("b".into())));
 }
+
+#[test]
+fn reopening_an_archived_rolled_up_parent_keeps_its_descendants_and_evidence() {
+    let mut r = setup();
+    model::set_state(&mut r, "g", ItemState::Backlog, user(2 * DAY)).unwrap();
+    let before = Model::read(&r.state).unwrap();
+    assert!(before.reads_done("g"));
+    assert!(!before.items["g"].is_done());
+    assert_eq!(reopen(&mut r, "g", user(3 * DAY)), Err(ArchiveError::NotDone("g".into())));
+
+    let now = DAY + ARCHIVE_GRACE;
+    archive(&mut r, &ByName, "g", user(now)).unwrap();
+    let before = Model::read(&r.state).unwrap();
+    let descendants = ["a", "b"]
+        .map(|id| (id, before.items[id].state.clone(), before.items[id].evidence.clone()));
+    reopen(&mut r, "g", user(now + 1)).unwrap();
+
+    let after = Model::read(&r.state).unwrap();
+    assert!(!after.is_archived("g"));
+    assert_eq!(after.items["g"].state, Value::One(ItemState::Backlog));
+    for (id, state, evidence) in descendants {
+        assert_eq!(after.items[id].state, state);
+        assert_eq!(after.items[id].evidence, evidence);
+    }
+}

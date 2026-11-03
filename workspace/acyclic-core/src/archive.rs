@@ -194,7 +194,9 @@ pub fn archive(
 pub fn reopen(replica: &mut Replica, id: &str, by: By<'_>) -> Result<(), ArchiveError> {
     model::existing(&replica.state, id)?;
     let model = Model::read(&replica.state)?;
-    if !model.items.get(id).is_some_and(model::Item::is_done) {
+    let done = model.items.get(id).is_some_and(model::Item::is_done)
+        || (model.is_archived(id) && model.reads_done(id));
+    if !done {
         return Err(ArchiveError::NotDone(id.to_owned()));
     }
     let archived = model.is_archived(id);
