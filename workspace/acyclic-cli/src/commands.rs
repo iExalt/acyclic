@@ -945,17 +945,23 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
 /// Whether the remote already has this replica's state ref, checked before `init` changes the destination.
 fn remote_has_replica(path: &Path, remote: &str, replica: &ReplicaId) -> Result<bool, CliError> {
     let remote_path = Path::new(remote);
+    let intended = canonical_init_path(path)?;
     let scp =
         remote.split_once(':').is_some_and(|(host, _)| !host.is_empty() && !host.contains('/'));
     let remote =
         if remote_path.is_absolute() || remote.contains("://") || remote.contains("::") || scp {
             remote.to_owned()
         } else {
-            let root = canonical_init_path(path)?;
-            normalized_path(&root.join(remote_path)).to_string_lossy().into_owned()
+            normalized_path(&intended.join(remote_path)).to_string_lossy().into_owned()
         };
     let reference = store::state_ref(replica);
-    let output = std::process::Command::new("git")
+    let root = intended
+        .ancestors()
+        .find(|ancestor| ancestor.is_dir())
+        .ok_or_else(|| CliError::new("config", exit::CONFIG, "can't resolve tracker path"))?;
+    let root = std::fs::canonicalize(root)
+        .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?;
+    let output = store::git_at(&root)
         .args(["ls-remote", "--refs", "--", &remote, &reference])
         .env("LC_ALL", "C")
         .output()
