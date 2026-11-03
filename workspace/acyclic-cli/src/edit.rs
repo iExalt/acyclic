@@ -17,7 +17,7 @@ use acyclic_core::write::{
 };
 use serde_json::json;
 
-use crate::error::{CliError, exit};
+use crate::error::{CliError, DOCTOR_HINT, exit};
 use crate::resolve::{self, Records};
 use crate::view;
 
@@ -433,7 +433,16 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             ),
         )
         .with(json!({"root": root})),
-        Rule::NotReady(status) => {
+        Rule::NotReady(None) => {
+            let id = record.map_or("", Record::id);
+            CliError::new(
+                "unreadable",
+                exit::UNREADABLE,
+                format!("can't read the claim needed to check item {id}'s readiness"),
+            )
+            .with(json!({"hint": DOCTOR_HINT}))
+        },
+        Rule::NotReady(status @ Some(_)) => {
             let id = record.map_or("", Record::id);
             CliError::refused(
                 "not-ready",

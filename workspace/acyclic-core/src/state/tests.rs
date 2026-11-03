@@ -285,7 +285,7 @@ fn reading_refuses_floats_and_non_canonical_files() {
     let value: Json = serde_json::from_str(&files[path]).unwrap();
     compact.insert(path.to_owned(), serde_json::to_string(&value).unwrap());
     assert!(
-        matches!(State::from_files(&compact), Err(Error::Format(m)) if m.contains("canonical"))
+        matches!(State::from_files(&compact), Err(Error::Format(m)) if m.contains(path) && m.contains("canonical"))
     );
 }
 

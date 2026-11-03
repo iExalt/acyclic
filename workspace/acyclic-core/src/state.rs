@@ -705,8 +705,14 @@ impl State {
     /// file not in canonical form.
     pub fn from_files(files: &BTreeMap<String, String>) -> Result<Self, Error> {
         let state = Self::from_own_files(files)?;
-        if state.to_files() != *files {
-            return Err(Error::Format("files are not in canonical form".to_owned()));
+        let canonical = state.to_files();
+        if canonical != *files {
+            let path = files
+                .keys()
+                .chain(canonical.keys())
+                .find(|path| files.get(*path) != canonical.get(*path))
+                .map_or(HEADER_PATH, String::as_str);
+            return Err(Error::Format(format!("{path} is not in canonical form")));
         }
         Ok(state)
     }

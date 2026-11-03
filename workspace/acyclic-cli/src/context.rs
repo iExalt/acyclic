@@ -107,7 +107,14 @@ pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use
                         })?
                         .clones
                 },
-                Err(_) => BTreeMap::new(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+                Err(error) => {
+                    return Err(CliError::new(
+                        "config",
+                        exit::CONFIG,
+                        format!("~/.config/acyclic/clones.toml: {error}"),
+                    ));
+                },
             }
         },
         None => BTreeMap::new(),

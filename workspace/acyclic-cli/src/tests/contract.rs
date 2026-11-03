@@ -401,6 +401,59 @@ fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
 }
 
 #[test]
+fn doctor_names_the_first_noncanonical_entity_file() {
+    let mut sh = Shell::new();
+    let items = [id("a1"), id("a2")];
+    sh.run("init tracker --replica mac", &[]);
+    for (index, item) in items.iter().enumerate() {
+        sh.run(&format!("item add --id {item} --title Item-{index}"), AGENT);
+    }
+    let tracker = sh.path().join("tracker");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&tracker)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "acyclic test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "acyclic test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    };
+
+    let mut entities: Vec<String> = items
+        .iter()
+        .map(|item| acyclic_core::state::Key::new("item", item).unwrap().path())
+        .collect();
+    entities.sort();
+    git(&["read-tree", "refs/heads/state/mac"]);
+    for (index, entity) in entities.iter().enumerate() {
+        let original = git(&["show", &format!("refs/heads/state/mac:{entity}")]);
+        let name = format!("noncanonical-{index}");
+        std::fs::write(tracker.join(&name), format!("{original} \n")).unwrap();
+        let blob = git(&["hash-object", "-w", &name]);
+        let cacheinfo = format!("100644,{blob},{entity}");
+        git(&["update-index", "--add", "--cacheinfo", &cacheinfo]);
+    }
+    let tree = git(&["write-tree"]);
+    let commit = git(&["commit-tree", &tree, "-p", "refs/heads/state/mac", "-m", "test"]);
+    git(&["update-ref", "refs/heads/state/mac", &commit]);
+
+    let (code, out) = sh.output("doctor", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (6, Some("unreadable")), "{out}");
+    assert_eq!(
+        out["error"]["message"],
+        format!("unreadable state: {} is not in canonical form", entities[0]),
+        "{out}"
+    );
+    assert_eq!(out["error"]["details"], json!(null), "doctor must not tell itself to run doctor");
+}
+
+#[test]
 fn an_unreadable_state_points_to_doctor() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
@@ -430,6 +483,29 @@ fn an_unreadable_state_points_to_doctor() {
     assert_eq!(sh.run("thread ready", AGENT), 6);
     assert_eq!(sh.run("doctor", AGENT), 0);
     insta::assert_snapshot!(sh.transcript);
+}
+
+#[test]
+fn finishing_with_an_unreadable_claim_exits_six() {
+    let mut sh = Shell::new();
+    let (thread, item) = (id("f1"), id("a1"));
+    sh.run("init tracker --replica mac", &[]);
+    sh.run(&format!("thread add --id {thread} --title Work"), AGENT);
+    sh.run(&format!("item add --id {item} --title First --thread {thread}"), AGENT);
+
+    let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
+    let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
+    let claim = acyclic_core::state::Key::new("thread", &thread).unwrap();
+    tracker
+        .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
+            replica.write(&claim, "claim", "actor/user", at, Some(json!("not a claim")))?;
+            Ok::<(), acyclic_core::state::Error>(())
+        })
+        .unwrap();
+
+    let (code, out) = sh.output(&format!("item done {item}"), AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (6, Some("unreadable")), "{out}");
+    assert_eq!(out["error"]["details"]["hint"], "run acyclic doctor");
 }
 
 #[test]

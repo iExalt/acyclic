@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use acyclic_core::archive;
 use acyclic_core::claim;
@@ -872,11 +872,40 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
     let git = |args: &[&str]| store::git_at(path).args(args).env("LC_ALL", "C").output();
     let is_repo =
         path.exists() && git(&["rev-parse", "--git-dir"]).is_ok_and(|out| out.status.success());
+    let configured = is_repo
+        .then(|| git(&["config", "--get", store::REPLICA_CONFIG]).ok())
+        .flatten()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    if let Some(existing) = &configured
+        && existing != replica
+    {
+        return Err(CliError::refused(
+            "already-exists",
+            format!("this clone is already replica {existing}"),
+        ));
+    }
+    let origin = is_repo
+        .then(|| git(&["remote", "get-url", store::REMOTE]).ok())
+        .flatten()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    let effective_remote = remote.or(origin.as_deref());
+    let is_same_clone =
+        configured.as_deref() == Some(replica) && effective_remote == origin.as_deref();
+    if !is_same_clone
+        && let Some(remote) = effective_remote
+        && remote_has_replica(path, remote, &id)?
+    {
+        return Err(CliError::refused(
+            "duplicate-replica",
+            format!(
+                "replica id {replica} already exists at the remote; choose a different --replica id"
+            ),
+        )
+        .with(json!({"replica": replica})));
+    }
     if is_repo {
-        let configured = git(&["config", "--get", store::REPLICA_CONFIG])
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
         match configured {
             Some(existing) if existing == replica => {
                 let changed = remote.map(|url| set_origin(&git, url)).transpose()?.unwrap_or(false);
@@ -911,6 +940,82 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
         set_origin(&git, url)?;
     }
     Ok(json!({"path": path, "replica": replica, "created": !is_repo, "changed": true}))
+}
+
+/// Whether the remote already has this replica's state ref, checked before `init` changes the destination.
+fn remote_has_replica(path: &Path, remote: &str, replica: &ReplicaId) -> Result<bool, CliError> {
+    let remote_path = Path::new(remote);
+    let scp =
+        remote.split_once(':').is_some_and(|(host, _)| !host.is_empty() && !host.contains('/'));
+    let remote =
+        if remote_path.is_absolute() || remote.contains("://") || remote.contains("::") || scp {
+            remote.to_owned()
+        } else {
+            let root = canonical_init_path(path)?;
+            normalized_path(&root.join(remote_path)).to_string_lossy().into_owned()
+        };
+    let reference = store::state_ref(replica);
+    let output = std::process::Command::new("git")
+        .args(["ls-remote", "--refs", "--", &remote, &reference])
+        .env("LC_ALL", "C")
+        .output()
+        .map_err(|e| {
+            CliError::new("git", exit::STORE, format!("can't check remote state refs: {e}"))
+        })?;
+    if !output.status.success() {
+        return Err(CliError::new(
+            "git",
+            exit::STORE,
+            format!(
+                "can't check remote state refs: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line.split_whitespace().nth(1) == Some(reference.as_str())))
+}
+
+/// The clone path's absolute location, resolving existing symlinks while allowing a not-yet-created suffix.
+fn canonical_init_path(path: &Path) -> Result<PathBuf, CliError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?
+            .join(path)
+    };
+    let mut existing = absolute.as_path();
+    while !existing.exists() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| CliError::new("config", exit::CONFIG, "can't resolve tracker path"))?;
+    }
+    let suffix = absolute
+        .strip_prefix(existing)
+        .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?;
+    let root = std::fs::canonicalize(existing)
+        .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?
+        .join(suffix);
+    Ok(normalized_path(&root))
+}
+
+/// Resolves `.` and `..` lexically after existing symlinks have been resolved.
+fn normalized_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {},
+            Component::ParentDir => {
+                normalized.pop();
+            },
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            },
+        }
+    }
+    normalized
 }
 
 /// Whether `path` is strictly inside an existing Git worktree or bare repository.
