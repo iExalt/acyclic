@@ -319,3 +319,41 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
         assert_eq!(thread["claims"], json!([]), "nothing left claimed: {thread}");
     }
 }
+
+#[test]
+fn init_refuses_paths_inside_a_repository_without_changing_it() {
+    let dir = TempDir::new().unwrap();
+    let repository = dir.path().join("repository");
+    git(dir.path(), &["init", "-q", "repository"]);
+    let plain = repository.join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    let missing = repository.join("new-tracker");
+    let config = git(&repository, &["config", "--local", "--list"]);
+    let files = git(&repository, &["status", "--porcelain", "--untracked-files=all"]);
+
+    for path in [&plain, &missing] {
+        let output = Command::new(BIN)
+            .args(["init", path.to_str().unwrap(), "--replica", "mac"])
+            .current_dir(dir.path())
+            .env("HOME", "/nonexistent")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["error"]["code"], "nested-repository");
+        assert_eq!(git(&repository, &["config", "--local", "--list"]), config);
+        assert_eq!(git(&repository, &["status", "--porcelain", "--untracked-files=all"]), files);
+    }
+    assert!(!missing.exists());
+
+    let bare = dir.path().join("tracker.git");
+    git(dir.path(), &["init", "-q", "--bare", "tracker.git"]);
+    let output = Command::new(BIN)
+        .args(["init", bare.to_str().unwrap(), "--replica", "mac"])
+        .current_dir(dir.path())
+        .env("HOME", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert_eq!(git(&bare, &["config", "--local", "--get", "acyclic.replica"]).trim(), "mac");
+}

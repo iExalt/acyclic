@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use acyclic_core::archive;
 use acyclic_core::claim;
@@ -640,18 +640,17 @@ impl<'a> Session<'a> {
             CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
         })?;
         let doc = Import::from_json(&text)?;
+        let ancestry = GitAncestry::new(context::clones(self.env)?);
         if dry_run {
             let (_, state) = self.tracker.load()?;
             let replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let report = import::preview(
-                &doc,
-                &Model::read(replica.state())?,
-                By { actor: &self.actor, at },
-            )?;
+            let report = import::preview(&doc, &replica, By { actor: &self.actor, at }, &ancestry)?;
             return Ok(import_json(&report, true));
         }
-        self.write(|replica, by| Ok(import_json(&import::apply(&doc, replica, by)?, false)))
+        self.write(|replica, by| {
+            Ok(import_json(&import::apply(&doc, replica, by, &ancestry)?, false))
+        })
     }
 
     fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
@@ -864,6 +863,12 @@ fn project_root(state: &State, key: &Key) -> Option<String> {
 /// Creates the tracker repository, or configures an existing clone, as a new replica. Adds no files or hooks.
 fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliError> {
     let id = ReplicaId::new(replica)?;
+    if nested_in_repository(path)? {
+        return Err(CliError::refused(
+            "nested-repository",
+            "the tracker path is inside another Git repository",
+        ));
+    }
     let git = |args: &[&str]| store::git_at(path).args(args).env("LC_ALL", "C").output();
     let is_repo =
         path.exists() && git(&["rev-parse", "--git-dir"]).is_ok_and(|out| out.status.success());
@@ -906,6 +911,45 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
         set_origin(&git, url)?;
     }
     Ok(json!({"path": path, "replica": replica, "created": !is_repo, "changed": true}))
+}
+
+/// Whether `path` is strictly inside an existing Git worktree or bare repository.
+fn nested_in_repository(path: &Path) -> Result<bool, CliError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?
+            .join(path)
+    };
+    let mut existing = absolute.as_path();
+    while !existing.exists() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| CliError::new("config", exit::CONFIG, "can't resolve tracker path"))?;
+    }
+    let destination = std::fs::canonicalize(existing)
+        .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?
+        .join(
+            absolute
+                .strip_prefix(existing)
+                .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?,
+        );
+    for args in [["rev-parse", "--show-toplevel"], ["rev-parse", "--absolute-git-dir"]] {
+        let result = store::git_at(existing)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+            .map_err(|e| CliError::new("git", exit::STORE, e.to_string()))?;
+        if !result.status.success() {
+            continue;
+        }
+        let root = PathBuf::from(String::from_utf8_lossy(&result.stdout).trim());
+        if let Ok(root) = std::fs::canonicalize(root) {
+            return Ok(destination.starts_with(&root) && destination != root);
+        }
+    }
+    Ok(false)
 }
 
 /// Points the clone's `origin` at `url`, adding it when missing; whether that changed anything.

@@ -41,6 +41,7 @@ expression: table
 1 already-exists
 1 already-done
 1 incomplete-repository
+1 nested-repository
 3 not-found
 2 usage
 2 invalid-commit

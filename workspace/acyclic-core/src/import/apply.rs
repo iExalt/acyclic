@@ -13,8 +13,10 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::model::{By, Evidence, ItemState, Model, Size, WriteError};
+use crate::archive::{self, ArchiveError};
+use crate::model::{By, Evidence, ItemState, Model, Size, Value, WriteError};
 use crate::place::Inherited;
+use crate::ready::{Ancestry, Readiness};
 use crate::schema::kind;
 use crate::state::{Error, Replica};
 use crate::write::{
@@ -105,6 +107,8 @@ pub enum ApplyError {
     Invalid(Vec<ValidationError>),
     /// On its own or with what is already there, the document closes these cycles of parents or waits-for.
     Cycles(Vec<Vec<String>>),
+    /// Archiving an imported item was refused.
+    Archive(ArchiveError),
     /// A write was refused.
     Write(WriteError),
 }
@@ -123,12 +127,19 @@ impl fmt::Display for ApplyError {
                     crate::say::few(&cycles, "cycle", "cycles", "; ")
                 )
             },
+            Self::Archive(err) => err.fmt(f),
             Self::Write(err) => err.fmt(f),
         }
     }
 }
 
 impl std::error::Error for ApplyError {}
+
+impl From<ArchiveError> for ApplyError {
+    fn from(err: ArchiveError) -> Self {
+        Self::Archive(err)
+    }
+}
 
 impl From<WriteError> for ApplyError {
     fn from(err: WriteError) -> Self {
@@ -146,30 +157,77 @@ impl From<Error> for ApplyError {
 ///
 /// # Errors
 ///
-/// Fails when the document is invalid, on its own or with the tracker, when the result would hold a cycle the tracker
-/// didn't, or when a write is refused.
-pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
+/// Fails when the document is invalid, would close a cycle, archives an ineligible subtree, or a write is refused.
+pub fn apply(
+    doc: &Import,
+    replica: &mut Replica,
+    by: By<'_>,
+    ancestry: &dyn Ancestry,
+) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
-    let before = Model::read(&replica.state)?;
+    let before = Model::read(replica.state())?;
     let outcome = judged(doc, &before, by)?;
+    archive_eligibility(&before, &outcome.after, replica.state(), by, ancestry)?;
     write::write(replica, &outcome, by)?;
     Ok(report(&before, &outcome))
 }
 
-/// What applying `doc` to a tracker whose model is `before` would do, writing nothing.
+/// What applying `doc` to `replica` would do, writing nothing.
 ///
 /// # Errors
 ///
 /// Fails as [`apply`] would.
-pub fn preview(doc: &Import, before: &Model, by: By<'_>) -> Result<Report, ApplyError> {
+pub fn preview(
+    doc: &Import,
+    replica: &Replica,
+    by: By<'_>,
+    ancestry: &dyn Ancestry,
+) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
-    Ok(report(before, &judged(doc, before, by)?))
+    let before = Model::read(replica.state())?;
+    let outcome = judged(doc, &before, by)?;
+    archive_eligibility(&before, &outcome.after, replica.state(), by, ancestry)?;
+    Ok(report(&before, &outcome))
+}
+
+fn archive_eligibility(
+    before: &Model,
+    after: &Model,
+    state: &crate::state::State,
+    by: By<'_>,
+    ancestry: &dyn Ancestry,
+) -> Result<(), ApplyError> {
+    let roots: Vec<&str> = after
+        .items
+        .iter()
+        .filter(|(id, item)| {
+            item.is_archived_root()
+                && !before.items.get(*id).is_some_and(crate::model::Item::is_archived_root)
+        })
+        .map(|(id, _)| id.as_str())
+        .collect();
+    if roots.is_empty() {
+        return Ok(());
+    }
+    // Clear them together so one candidate cannot hide another's merge or dependent checks.
+    let mut candidate = after.clone();
+    for root in &roots {
+        candidate.items.get_mut(*root).expect("candidate root exists").archived = Value::None;
+    }
+    let readiness = Readiness::new(state, &candidate, by.at, ancestry);
+    for root in roots {
+        let reasons = archive::eligibility(&readiness, &candidate, root, by.at)?;
+        if !reasons.is_empty() {
+            return Err(ArchiveError::Ineligible { item: root.to_owned(), reasons }.into());
+        }
+    }
+    Ok(())
 }
 
 fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {

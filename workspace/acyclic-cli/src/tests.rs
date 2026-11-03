@@ -126,6 +126,7 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
         CliError::refused("incomplete-repository", ""),
+        CliError::refused("nested-repository", ""),
         CliError::new("not-found", exit::NOT_FOUND, ""),
         CliError::new("usage", exit::USAGE, ""),
         CliError::new("invalid-commit", exit::USAGE, ""),
