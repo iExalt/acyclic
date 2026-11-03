@@ -528,3 +528,96 @@ fn pretty_output_names_a_record_the_command_just_added_among_the_rest() {
     let listed = pretty(&sh, "item list -o pretty".to_owned());
     assert!(listed.contains("00abc12") && listed.contains("10abc12"), "{listed}");
 }
+
+/// The needs list the app's tests read, made here so they read what this build sends, with a conflict for each way a
+/// value is kept. `UPDATE_EXAMPLES=1` writes it; otherwise it must match.
+#[test]
+fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_conflict() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let (a1, p1, e1, t1, r1, r2) = (id("a1"), id("b1"), id("e1"), id("f1"), id("c1"), id("c2"));
+    for line in [
+        format!("repository add --id {r1} --name me/code --default-branch main"),
+        format!("repository add --id {r2} --name me/app --default-branch main"),
+        format!("thread add --id {t1} --title Work"),
+        format!("item add --id {a1} --title First --thread {t1}"),
+        format!("item add --id {p1} --title Parent --thread {t1}"),
+        format!("item add --id {e1} --title Shipped --thread {t1}"),
+        format!("item done {e1} --commit me/code@abc1234 --force"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    // Each field written apart by another replica that hadn't seen this one's write.
+    let key = |kind: &str, id: &str| acyclic_core::state::Key::new(kind, id).unwrap();
+    let evidence = |sha: &str| json!({"repository": r1, "commit": sha});
+    let apart = [
+        (key("item", &a1), "title", json!("One"), json!("Two")),
+        (key("item", &a1), "state", json!("done"), json!("parked")),
+        (key("item", &a1), "parent", json!(p1), json!(null)),
+        (key("thread", &t1), "brief", json!("Why"), json!(null)),
+        (key("repository", &r2), "owner", json!("me"), json!("you")),
+        (key("item", &e1), "evidence", evidence("abc1234"), evidence("def5678")),
+    ];
+    let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
+    let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
+    tracker
+        .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
+            let id = acyclic_core::state::ReplicaId::new("pi").unwrap();
+            let mut other = acyclic_core::state::Replica::open(id, replica.state().clone());
+            for (key, name, mine, theirs) in &apart {
+                replica.write(key, name, "actor/user", at, Some(mine.clone()))?;
+                other.write(key, name, "actor/user", at, Some(theirs.clone()))?;
+            }
+            replica.join(other.state())
+        })
+        .unwrap();
+    let (_, needs) = sh.output("needs", AGENT);
+    let needs = &needs["data"]["needs"];
+    let conflicts: Vec<&serde_json::Value> =
+        needs.as_array().unwrap().iter().filter(|need| need["kind"] == "conflict").collect();
+    assert_eq!(conflicts.len(), apart.len(), "{needs}");
+
+    let examples = json!({
+        "about": "A needs-you list as this build sends it, with a conflict for each way a value is kept. Written by \
+                  the CLI's contract tests with UPDATE_EXAMPLES=1; the app's tests read it.",
+        "needs": needs,
+    });
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../acyclic-app/src/needs.examples.json");
+    let text = format!("{}\n", serde_json::to_string_pretty(&examples).unwrap());
+    if std::env::var_os("UPDATE_EXAMPLES").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap_or_default(),
+        text,
+        "run with UPDATE_EXAMPLES=1"
+    );
+
+    // Each command parses as the API reads it, and the first each conflict offers settles it.
+    let path = sh.path().join("tracker");
+    for conflict in conflicts {
+        let mut settled = false;
+        for kept in conflict["keeps"].as_array().unwrap() {
+            if kept["command"].is_null() {
+                assert!(kept["why"].is_string(), "{kept}");
+                continue;
+            }
+            let command: crate::args::Command =
+                serde_json::from_value(kept["command"].clone()).unwrap();
+            if !settled {
+                let (code, out) = crate::call(command, path.clone(), &sh.env(&[]));
+                assert_eq!(code, 0, "{kept}: {out}");
+                let (_, after) = sh.output("needs", AGENT);
+                let keys: Vec<&serde_json::Value> = after["data"]["needs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|need| &need["key"])
+                    .collect();
+                assert!(!keys.contains(&&conflict["key"]), "{kept} left {}", conflict["key"]);
+                settled = true;
+            }
+        }
+        assert!(settled || conflict["field"] == "state", "nothing keeps {}", conflict["key"]);
+    }
+}

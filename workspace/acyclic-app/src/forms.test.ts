@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
-import { changes, draftOf, itemEdit, reopenCommand, resolveCommand, stateHint, unsettledWhy } from "./forms";
+import { changes, draftOf, itemEdit, reopenCommand, stateHint } from "./forms";
 import { ID, item } from "./map/fixture";
 
 const example = (name: string) => {
@@ -19,9 +19,6 @@ describe("form commands", () => {
     expect(itemEdit(ID.c, draftOf(filled), { ...draftOf(filled), thread: "", notes: "", size: "" })).toEqual(
       example("clear an item's fields"),
     );
-    expect(resolveCommand("item", ID.d, "parent", null)).toEqual(example("settle an item's parent as a clear"));
-    expect(resolveCommand("thread", ID.t, "title", "T")).toEqual(example("settle a thread's title"));
-    expect(resolveCommand("thread", ID.t, "brief", null)).toEqual(example("settle a thread's brief as a clear"));
     expect(reopenCommand(ID.e)).toEqual(example("reopen"));
   });
 });
@@ -42,17 +39,6 @@ describe("itemEdit", () => {
     // Notes and size change elsewhere; the user changes only the title, and the editor still holds the old notes.
     expect(itemEdit("a", opened, { ...opened, title: "New" })).toEqual({ item: { edit: { item: "a", title: "New" } } });
     expect(changes(opened, { ...opened, title: " New ", notes: "" })).toEqual({ title: "New", notes: "" });
-  });
-});
-
-describe("resolveCommand", () => {
-  it("keeps a value the way the CLI's hint says, a clear as the no- form, and refuses what the app can't write", () => {
-    expect(resolveCommand("item", "a", "title", "B")).toEqual({ item: { edit: { item: "a", title: "B" } } });
-    expect(resolveCommand("item", "a", "thread", null)).toEqual({ item: { edit: { item: "a", "no-thread": true } } });
-    expect(resolveCommand("item", "a", "state", "done")).toBeNull();
-    expect(resolveCommand("item", "a", "title", null)).toBeNull();
-    expect(resolveCommand("thread", "t", "evidence", "x")).toBeNull();
-    expect(unsettledWhy("item", "state", "done")).toMatch(/acyclic item done/);
   });
 });
 

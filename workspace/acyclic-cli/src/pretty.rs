@@ -364,6 +364,18 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
 fn compact(value: &Json) -> String {
     match value {
         Json::Object(fields) if let Some(phrase) = readiness(fields) => phrase,
+        // A conflict's value with how it is kept: the line to run, or why nothing keeps it.
+        Json::Object(fields) if fields.contains_key("run") && fields.contains_key("why") => {
+            let value = match &fields["value"] {
+                Json::Null => "none".to_owned(),
+                Json::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            match (&fields["run"], &fields["why"]) {
+                (Json::String(run), _) => format!("keep {value}: {run}"),
+                (_, why) => format!("{value}: {}", compact(why)),
+            }
+        },
         Json::Null => String::new(),
         Json::Bool(yes) => (if *yes { "yes" } else { "no" }).to_owned(),
         Json::String(text) => text.clone(),

@@ -62,42 +62,6 @@ export function itemEdit(id: string, base: ItemDraft, draft: ItemDraft): Command
   return Object.keys(edit).length === 0 ? null : { item: { edit: { item: id, ...edit } } };
 }
 
-/** An entity whose field can be in conflict, as `needs` reports it. */
-export type Entity = "item" | "thread";
-
-/**
- * The command that settles a conflict by keeping one of its values (`null` for a clear), as the CLI's own hint for it
- * reads; none when the app can't write that field or value.
- */
-export function resolveCommand(entity: Entity, id: string, field: string, value: unknown): Command | null {
-  const text = typeof value === "string" ? value : null;
-  if (entity === "item") {
-    const edit = (fields: Record<string, unknown>) => ({ item: { edit: { item: id, ...fields } } });
-    if (field === "title") return text === null ? null : edit({ title: text });
-    if (field === "state")
-      return text !== null && (STATES as readonly string[]).includes(text) ? edit({ state: text }) : null;
-    if (["notes", "size", "parent", "thread"].includes(field)) {
-      if (value === null) return edit({ [`no-${field}`]: true });
-      return text === null ? null : edit({ [field]: text });
-    }
-    if (field === "reopened" && value === true) return reopenCommand(id);
-    return null;
-  }
-  const edit = (fields: Record<string, unknown>) => ({ thread: { edit: { thread: id, ...fields } } });
-  if (field === "title") return text === null ? null : edit({ title: text });
-  if (field === "brief")
-    return value === null ? edit({ "no-brief": true }) : text === null ? null : edit({ brief: text });
-  return null;
-}
-
-/** Why a value of a conflict can't be kept from the app, for a value `resolveCommand` gives no command for. */
-export function unsettledWhy(entity: Entity, field: string, value: unknown): string {
-  if (entity === "item" && field === "state" && value === "done")
-    return "Keep done in a terminal: run acyclic item done with its evidence";
-  if (value === null) return "This field can't be cleared";
-  return "Settle this one in a terminal: run acyclic needs to see how";
-}
-
 export function reopenCommand(item: string): Command {
   return { item: { reopen: { item } } };
 }
