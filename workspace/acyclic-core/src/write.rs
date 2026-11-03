@@ -10,11 +10,13 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::Value as Json;
 
+use crate::import::is_object_id;
 use crate::model::{
     self, By, Evidence, Item, ItemState, Model, Reopened, Repository, Size, Thread, Value,
     WriteError,
 };
 use crate::place::{Inherited, passed_down};
+use crate::ready::{Ancestry, Readiness, Status};
 use crate::schema::{item as field, kind, link, repository, set, thread};
 use crate::state::{Key, Millis, Replica};
 
@@ -296,6 +298,17 @@ pub enum Change {
     },
     /// Sets one field of a record that exists or that the change set adds.
     Set(Assign),
+    /// Finishes an item: marks it done, with this evidence when given. Unless forced, the item must be ready, or held
+    /// by the one finishing it, or a parent with no open work, or done already; and done work keeps the evidence it
+    /// was finished with.
+    Finish {
+        /// The item.
+        item: String,
+        /// The evidence it is finished with.
+        evidence: Option<Evidence>,
+        /// Finish it although it isn't ready or someone else holds it, or replace its evidence.
+        force: bool,
+    },
 }
 
 /// What a caller means to change, judged and written as a whole. The order of its changes doesn't matter, except to
@@ -388,6 +401,27 @@ pub enum Rule {
     RepeatDiffers,
     /// Two changes give this field different values.
     Contradicts,
+    /// The item isn't the finisher's to finish: not ready, or held by someone else. With no readiness to judge it by,
+    /// no status.
+    NotReady(Option<Status>),
+    /// A parent with these open children, or held back as a leaf would be, can't be finished yet.
+    OpenWork {
+        /// Its children neither done nor archived.
+        open: Vec<String>,
+        /// What would hold it back as a leaf.
+        held: Option<Status>,
+    },
+    /// Done work would get other evidence than it was finished with.
+    EvidenceDiffers,
+    /// Evidence names a commit that isn't an object id.
+    InvalidCommit,
+    /// Evidence names a repository record missing these fields, so it could never be verified.
+    IncompleteRepository {
+        /// The repository record.
+        repository: String,
+        /// The fields it lacks, as the CLI names them.
+        missing: Vec<&'static str>,
+    },
 }
 
 /// One thing a change set would break, where.
@@ -433,6 +467,15 @@ impl fmt::Display for Violation {
             Rule::EvidenceNotDone => write!(f, "{at}evidence on an item that isn't done"),
             Rule::RepeatDiffers => write!(f, "{at}it exists with another value"),
             Rule::Contradicts => write!(f, "{at}two changes give it different values"),
+            Rule::NotReady(_) => write!(f, "{at}it isn't ready, or someone else holds it"),
+            Rule::OpenWork { .. } => write!(f, "{at}it has open children or is held back"),
+            Rule::EvidenceDiffers => write!(f, "{at}it is done with other evidence"),
+            Rule::InvalidCommit => {
+                write!(f, "{at}a commit is 7 to 64 hexadecimal characters, as git prints it")
+            },
+            Rule::IncompleteRepository { repository, missing } => {
+                write!(f, "{at}repository {repository} is missing {}", missing.join(", "))
+            },
         }
     }
 }
@@ -442,8 +485,8 @@ impl fmt::Display for Violation {
 pub enum CommitError<E> {
     /// The caller couldn't say what to change.
     Build(E),
-    /// The change set would break these.
-    Refused(Vec<Violation>),
+    /// The change set would break these, judged against this model.
+    Refused(Vec<Violation>, Box<Model>),
     /// The tracker couldn't be read, or a write was refused below the judge.
     Write(WriteError),
 }
@@ -455,7 +498,8 @@ impl<E> From<WriteError> for CommitError<E> {
 }
 
 /// Reads the model once, asks `build` what to change in it, judges that, and writes it when accepted. Run it inside a
-/// store batch, after anything else the batch writes, so the model judged is the one the writes land on.
+/// store batch, after anything else the batch writes, so the model judged is the one the writes land on. Finishing
+/// work is judged by its readiness, which checks merges through `ancestry`; without it, only a forced finish passes.
 ///
 /// # Errors
 ///
@@ -463,12 +507,19 @@ impl<E> From<WriteError> for CommitError<E> {
 pub fn commit<E>(
     replica: &mut Replica,
     by: By<'_>,
+    ancestry: Option<&dyn Ancestry>,
     build: impl FnOnce(&Model) -> Result<ChangeSet, E>,
 ) -> Result<Outcome, CommitError<E>> {
     let before = Model::read(&replica.state).map_err(WriteError::from)?;
     crate::probe::mark("write: model read");
     let changes = build(&before).map_err(CommitError::Build)?;
-    let outcome = judge(&before, &changes, by).map_err(CommitError::Refused)?;
+    let judged = {
+        let readiness =
+            ancestry.map(|ancestry| Readiness::new(&replica.state, &before, by.at, ancestry));
+        judge(&before, &changes, by, readiness.as_ref())
+    };
+    let outcome =
+        judged.map_err(|violations| CommitError::Refused(violations, Box::new(before)))?;
     crate::probe::mark("write: judge");
     write(replica, &outcome, by)?;
     crate::probe::mark("write: write");
@@ -476,16 +527,24 @@ pub fn commit<E>(
 }
 
 /// Judges a change set against the model it would change: what it brings with it, the model it leaves, and every
-/// violation it would introduce. Nothing is read or written.
+/// violation it would introduce. Nothing is read or written. `readiness`, over the same model, judges finishing work;
+/// without it, only a forced finish passes.
 ///
 /// # Errors
 ///
 /// Fails with every violation the change set would introduce, in a fixed order.
-pub fn judge(before: &Model, changes: &ChangeSet, by: By<'_>) -> Result<Outcome, Vec<Violation>> {
+pub fn judge(
+    before: &Model,
+    changes: &ChangeSet,
+    by: By<'_>,
+    readiness: Option<&Readiness<'_>>,
+) -> Result<Outcome, Vec<Violation>> {
     let mut judging = Judging {
         before,
         after: before.clone(),
         at: by.at,
+        actor: by.actor,
+        readiness,
         steps: Vec::new(),
         violations: Vec::new(),
     };
@@ -502,15 +561,17 @@ pub fn judge(before: &Model, changes: &ChangeSet, by: By<'_>) -> Result<Outcome,
     }
 }
 
-struct Judging<'a> {
+struct Judging<'a, 'r> {
     before: &'a Model,
     after: Model,
     at: Millis,
+    actor: &'a str,
+    readiness: Option<&'a Readiness<'r>>,
     steps: Vec<Step>,
     violations: Vec<Violation>,
 }
 
-impl Judging<'_> {
+impl Judging<'_, '_> {
     fn refuse(&mut self, change: Option<usize>, at: Option<FieldAddr>, rule: Rule) {
         self.violations.push(Violation { change, at, rule });
     }
@@ -520,17 +581,27 @@ impl Judging<'_> {
         let mut created: BTreeSet<Record> = BTreeSet::new();
         let mut given: BTreeMap<FieldAddr, (usize, Json)> = BTreeMap::new();
         for (n, change) in changes.0.iter().enumerate() {
+            let finish;
             let (record, assigns, repeat) = match change {
                 Change::Add { record, on_repeat, with, .. } => {
                     (record.clone(), with.as_slice(), Some(*on_repeat))
                 },
                 Change::Set(assign) => (assign.at().record, std::slice::from_ref(assign), None),
+                Change::Finish { item, evidence, .. } => {
+                    finish = finishing(item, evidence.as_ref());
+                    (Record::Item(item.clone()), finish.as_slice(), None)
+                },
             };
             if record.key().is_ok_and(|key| self.before.is_deleted(&key)) {
                 self.refuse(Some(n), None, Rule::Deleted(record));
                 continue;
             }
             let exists = record.exists(self.before);
+            if let Change::Finish { item, evidence, force: false } = change
+                && exists
+            {
+                self.finishable(n, item, evidence.as_ref());
+            }
             match repeat {
                 Some(_) if !exists && created.insert(record.clone()) => {
                     self.create(n, &record);
@@ -573,6 +644,36 @@ impl Judging<'_> {
                     self.apply(n, true, Written::Assign(assign.clone()));
                 }
             }
+        }
+    }
+
+    /// Refuses to finish an item the actor may not finish without forcing, or to give done work other evidence. Judged
+    /// on the model before, as the actor saw it.
+    fn finishable(&mut self, n: usize, id: &str, evidence: Option<&Evidence>) {
+        let at =
+            || Some(FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::State });
+        match self.readiness.map(|readiness| (readiness, readiness.of(id))) {
+            // An unreadable claim leaves readiness unknown, which only forcing passes.
+            None | Some((_, Err(_))) => self.refuse(Some(n), at(), Rule::NotReady(None)),
+            Some((readiness, Ok(status))) => {
+                if status == Some(Status::Parent) {
+                    let (open, held) = readiness.unfinished(id);
+                    if !open.is_empty() || held.is_some() {
+                        self.refuse(Some(n), at(), Rule::OpenWork { open, held });
+                    }
+                } else if !status.as_ref().is_some_and(|status| status.finishable_by(self.actor)) {
+                    self.refuse(Some(n), at(), Rule::NotReady(status));
+                }
+            },
+        }
+        let item = &self.before.items[id];
+        if let Some(evidence) = evidence
+            && item.is_done()
+            && !item.evidence.all().is_empty()
+            && item.evidence.one() != Some(evidence)
+        {
+            let at = FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::Evidence };
+            self.refuse(Some(n), Some(at), Rule::EvidenceDiffers);
         }
     }
 
@@ -788,10 +889,30 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                     refuse(Rule::NoRecord(Record::Item(to.clone())));
                 },
                 ItemAssign::Evidence(Some(evidence)) => {
-                    if let Some(repository) = &evidence.repository
-                        && !after.repositories.contains_key(repository)
-                    {
-                        refuse(Rule::NoRecord(Record::Repository(repository.clone())));
+                    if evidence.commit.as_deref().is_some_and(|commit| !is_object_id(commit)) {
+                        refuse(Rule::InvalidCommit);
+                    }
+                    match evidence.repository.as_ref().map(|r| (r, after.repositories.get(r))) {
+                        Some((repository, None)) => {
+                            refuse(Rule::NoRecord(Record::Repository(repository.clone())));
+                        },
+                        Some((repository, Some(record))) => {
+                            let missing: Vec<&'static str> = [
+                                ("owner", record.owner.one().is_some()),
+                                ("name", record.name.one().is_some()),
+                                ("default-branch", record.default_branch.one().is_some()),
+                            ]
+                            .into_iter()
+                            .filter_map(|(field, set)| (!set).then_some(field))
+                            .collect();
+                            if !missing.is_empty() {
+                                refuse(Rule::IncompleteRepository {
+                                    repository: repository.clone(),
+                                    missing,
+                                });
+                            }
+                        },
+                        None => {},
                     }
                     if !after.items.get(id).is_some_and(Item::is_done) {
                         refuse(Rule::EvidenceNotDone);
@@ -995,6 +1116,15 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
         }
     }
     found
+}
+
+/// The writes finishing an item asks for: its evidence, when given, and done.
+fn finishing(id: &str, evidence: Option<&Evidence>) -> Vec<Assign> {
+    evidence
+        .map(|evidence| Assign::Item(id.to_owned(), ItemAssign::Evidence(Some(evidence.clone()))))
+        .into_iter()
+        .chain([Assign::Item(id.to_owned(), ItemAssign::State(ItemState::Done))])
+        .collect()
 }
 
 /// Whether an assign would change nothing: the field holds exactly its value and isn't in conflict, or a set already

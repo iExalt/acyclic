@@ -38,30 +38,32 @@ pub enum ScopeEdit {
     },
 }
 
-/// Applies a scope edit.
-///
-/// # Errors
-///
-/// Fails when the model layer refuses, such as for an unknown item or an invalid name.
-pub fn edit(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), WriteError> {
-    match change {
-        ScopeEdit::Member { item, thread } => {
-            model::existing(&replica.state, item)?;
-            if let Some(thread) = thread {
-                Key::new(kind::THREAD, thread)?;
-            }
-            let key = model::item_key(item)?;
-            model::put(replica, &key, field::THREAD, thread.as_ref(), by)
-        },
-        ScopeEdit::ItemRepository { item, repository, present } => {
-            model::existing(&replica.state, item)?;
-            let key = model::item_key(item)?;
-            model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
-        },
-        ScopeEdit::ThreadRepository { thread, repository, present } => {
-            let key = Key::new(kind::THREAD, thread)?;
-            model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
-        },
+fixture! {
+    /// Applies a scope edit.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the model layer refuses, such as for an unknown item or an invalid name.
+    fn edit(replica: &mut Replica, change: &ScopeEdit, by: By<'_>) -> Result<(), WriteError> {
+        match change {
+            ScopeEdit::Member { item, thread } => {
+                model::existing(&replica.state, item)?;
+                if let Some(thread) = thread {
+                    Key::new(kind::THREAD, thread)?;
+                }
+                let key = model::item_key(item)?;
+                model::put(replica, &key, field::THREAD, thread.as_ref(), by)
+            },
+            ScopeEdit::ItemRepository { item, repository, present } => {
+                model::existing(&replica.state, item)?;
+                let key = model::item_key(item)?;
+                model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
+            },
+            ScopeEdit::ThreadRepository { thread, repository, present } => {
+                let key = Key::new(kind::THREAD, thread)?;
+                model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
+            },
+        }
     }
 }
 

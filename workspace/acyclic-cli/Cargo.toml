@@ -19,6 +19,8 @@ toml.workspace = true
 probe = ["acyclic-core/probe"]
 
 [dev-dependencies]
+# Tests build states past the write judge; the shipped binary can't.
+acyclic-core = { workspace = true, features = ["fixtures"] }
 acyclic-fixtures.workspace = true
 insta.workspace = true
 tempfile.workspace = true

@@ -35,11 +35,11 @@ fn only_threads_with_a_record_are_claimed_and_their_claim_covers_every_member() 
         .unwrap();
     for missing in ["ghost", "x"] {
         assert_eq!(
-            claim(&mut r, missing, "session/s", 10, LEASE, LEASE),
-            Err(Error::NoThread(missing.into()))
+            claim(&mut r, missing, "session/s", 10, (LEASE, LEASE), None),
+            Err(Error::NoThread(missing.into()).into())
         );
     }
-    claim(&mut r, "t", "session/s", 10, LEASE, LEASE).unwrap();
+    claim(&mut r, "t", "session/s", 10, (LEASE, LEASE), None).unwrap();
     let model = Model::read(&r.state).unwrap();
     for id in ["x", "y"] {
         let covering = covering(&r.state, &model, id, 20).unwrap();
@@ -68,7 +68,7 @@ fn claims_older_versions_kept_on_items_are_never_read() {
     .unwrap();
     let model = Model::read(&r.state).unwrap();
     assert_eq!(covering(&r.state, &model, "x", 20).unwrap(), []);
-    claim(&mut r, "t", "session/new", 20, LEASE, LEASE).unwrap();
+    claim(&mut r, "t", "session/new", 20, (LEASE, LEASE), None).unwrap();
     // The old holder keeps writing, yet its item claim is never renewed.
     set(&mut r, &item_key("x").unwrap(), field::NOTES, Some(&"busy"), by("session/old", 900))
         .unwrap();
@@ -84,8 +84,8 @@ fn a_resource_older_versions_stored_on_items_holds_nothing() {
         let key = item_key(id).unwrap();
         r.write(&key, "resource/gpu", "actor/user", 1, Some(serde_json::json!(true))).unwrap();
     }
-    claim(&mut r, "one", "session/one", 10, LEASE, LEASE).unwrap();
-    claim(&mut r, "two", "session/two", 20, LEASE, LEASE).unwrap();
+    claim(&mut r, "one", "session/one", 10, (LEASE, LEASE), None).unwrap();
+    claim(&mut r, "two", "session/two", 20, (LEASE, LEASE), None).unwrap();
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn a_stored_claim_without_a_lease_holds_nothing() {
     r.write(&thread_key("t").unwrap(), FIELD, "run/r1", 10, Some(stored)).unwrap();
     assert_eq!(holder(&r, "t", 20), None);
     assert_eq!(live(&r.state, &thread_key("t").unwrap(), 20).unwrap(), []);
-    claim(&mut r, "t", "session/s", 30, LEASE, LEASE).unwrap();
+    claim(&mut r, "t", "session/s", 30, (LEASE, LEASE), None).unwrap();
     assert_eq!(holder(&r, "t", 30), Some("session/s".into()));
 }
 
@@ -110,9 +110,9 @@ fn sync_renews_only_the_leases_of_holders_still_at_work() {
     thread(&mut a, "idle", &["y"]);
     b.join(&a.state).unwrap();
     thread(&mut b, "theirs", &["z"]);
-    claim(&mut a, "busy", "session/busy", 0, LEASE, LEASE).unwrap();
-    claim(&mut a, "idle", "session/idle", 0, LEASE, LEASE).unwrap();
-    claim(&mut b, "theirs", "session/busy", 0, LEASE, LEASE).unwrap();
+    claim(&mut a, "busy", "session/busy", 0, (LEASE, LEASE), None).unwrap();
+    claim(&mut a, "idle", "session/idle", 0, (LEASE, LEASE), None).unwrap();
+    claim(&mut b, "theirs", "session/busy", 0, (LEASE, LEASE), None).unwrap();
     a.join(&b.state).unwrap();
     // Only the busy session writes anything else.
     set(&mut a, &item_key("x").unwrap(), field::NOTES, Some(&"progress"), by("session/busy", 600))
@@ -154,8 +154,8 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
         b.join(&a.state).unwrap();
         let mut c = replica("c");
         c.join(&a.state).unwrap();
-        claim(&mut a, "t", "session/one", 10, LEASE, LEASE).unwrap();
-        claim(&mut b, "t", "session/two", 20, LEASE, LEASE).unwrap();
+        claim(&mut a, "t", "session/one", 10, (LEASE, LEASE), None).unwrap();
+        claim(&mut b, "t", "session/two", 20, (LEASE, LEASE), None).unwrap();
         a.join(&b.state).unwrap();
         b.join(&a.state).unwrap();
         assert_eq!(holders(&a), ["session/one", "session/two"]);
@@ -165,7 +165,7 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
     let (mut a, mut b, _) = contest();
     assert!(release(&mut b, &t, "session/two"));
     assert!(!release(&mut b, &t, "session/two"), "nothing left to release");
-    claim(&mut a, "t", "session/one", 30, LEASE, LEASE).unwrap();
+    claim(&mut a, "t", "session/one", 30, (LEASE, LEASE), None).unwrap();
     a.join(&b.state).unwrap();
     b.join(&a.state).unwrap();
     assert_eq!(
@@ -174,7 +174,7 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
     );
     // A claim the release never saw survives it.
     let (_, mut b, mut c) = contest();
-    claim(&mut c, "t", "session/three", 40, LEASE, LEASE).unwrap();
+    claim(&mut c, "t", "session/three", 40, (LEASE, LEASE), None).unwrap();
     assert!(release(&mut b, &t, "session/two"));
     b.join(&c.state).unwrap();
     assert_eq!(holders(&b), ["session/one", "session/three"]);

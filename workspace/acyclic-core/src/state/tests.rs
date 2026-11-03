@@ -202,8 +202,8 @@ fn an_intact_replica_writes_offline() {
 fn concurrent_claims_contest_and_a_seen_claim_is_not_stolen() {
     let item = key("thread", "t1");
     let (mut mac, mut server) = (claimable("mac"), claimable("server"));
-    claim::claim(&mut mac, "t1", "session/mac", 100, 60_000, 600_000).unwrap();
-    claim::claim(&mut server, "t1", "session/server", 90, 60_000, 600_000).unwrap();
+    claim::claim(&mut mac, "t1", "session/mac", 100, (60_000, 600_000), None).unwrap();
+    claim::claim(&mut server, "t1", "session/server", 90, (60_000, 600_000), None).unwrap();
 
     let mut one = mac.state.clone();
     one.join(&server.state);
@@ -224,8 +224,8 @@ fn concurrent_claims_contest_and_a_seen_claim_is_not_stolen() {
 
     mac.join(&server.state).unwrap();
     assert_eq!(
-        claim::claim(&mut mac, "t1", "session/mac", 130, 60_000, 600_000),
-        Err(Error::Claimed(item.clone()))
+        claim::claim(&mut mac, "t1", "session/mac", 130, (60_000, 600_000), None),
+        Err(Error::Claimed(item.clone()).into())
     );
 }
 
@@ -233,19 +233,22 @@ fn concurrent_claims_contest_and_a_seen_claim_is_not_stolen() {
 fn a_contest_winner_renews_and_keeps_winning() {
     let item = key("thread", "t1");
     let (mut a, mut b) = (claimable("a"), claimable("b"));
-    claim::claim(&mut a, "t1", "ha", 0, 100, 1_000).unwrap();
-    claim::claim(&mut b, "t1", "hb", 5, 100, 1_000).unwrap();
+    claim::claim(&mut a, "t1", "ha", 0, (100, 1_000), None).unwrap();
+    claim::claim(&mut b, "t1", "hb", 5, (100, 1_000), None).unwrap();
     a.join(&b.state).unwrap();
     b.join(&a.state).unwrap();
     assert_eq!(claim::winner(&a.state, &item, 10).unwrap().unwrap().holder, "ha");
 
-    claim::claim(&mut a, "t1", "ha", 50, 100, 1_000).unwrap();
+    claim::claim(&mut a, "t1", "ha", 50, (100, 1_000), None).unwrap();
     let renewed = claim::winner(&a.state, &item, 120).unwrap().unwrap();
     assert_eq!(
         (renewed.holder.as_str(), renewed.lease_start, renewed.lease_expires),
         ("ha", 0, Some(150))
     );
-    assert_eq!(claim::claim(&mut b, "t1", "hb", 60, 100, 1_000), Err(Error::Claimed(item.clone())));
+    assert_eq!(
+        claim::claim(&mut b, "t1", "hb", 60, (100, 1_000), None),
+        Err(Error::Claimed(item.clone()).into())
+    );
 }
 
 #[test]
@@ -255,7 +258,7 @@ fn an_unreadable_claim_is_not_hidden() {
     a.write(&item, claim::FIELD, "future", 1, Some(json!({"holder": "x", "new-field": 1})))
         .unwrap();
     assert!(claim::live(&a.state, &item, 2).is_err());
-    assert!(claim::claim(&mut a, "t1", "me", 2, 10, 10).is_err());
+    assert!(claim::claim(&mut a, "t1", "me", 2, (10, 10), None).is_err());
 }
 
 #[test]
@@ -290,7 +293,7 @@ fn reading_refuses_floats_and_non_canonical_files() {
 fn leases_are_capped_and_expire() {
     let item = key("thread", "t1");
     let mut mac = claimable("mac");
-    claim::claim(&mut mac, "t1", "session/mac", 0, DAY, 1_000).unwrap();
+    claim::claim(&mut mac, "t1", "session/mac", 0, (DAY, 1_000), None).unwrap();
     let held = claim::winner(&mac.state, &item, 0).unwrap().unwrap();
     assert_eq!(held.lease_expires, Some(1_000));
     assert!(claim::winner(&mac.state, &item, 1_000).unwrap().is_none());
@@ -471,8 +474,8 @@ fn claim_winners_agree(tc: TestCase) {
     let lease = || tc.draw(gs::integers::<i64>().min_value(1).max_value(1_999));
     let item = key("thread", "t1");
     let (mut x, mut y) = (claimable("x"), claimable("y"));
-    claim::claim(&mut x, "t1", "session/x", start(), lease(), 10_000).unwrap();
-    claim::claim(&mut y, "t1", "session/y", start(), lease(), 10_000).unwrap();
+    claim::claim(&mut x, "t1", "session/x", start(), (lease(), 10_000), None).unwrap();
+    claim::claim(&mut y, "t1", "session/y", start(), (lease(), 10_000), None).unwrap();
     let now = tc.draw(gs::integers::<i64>().min_value(0).max_value(2_999));
     let one = joined(&[&x.state, &y.state]);
     let two = joined(&[&y.state, &x.state]);

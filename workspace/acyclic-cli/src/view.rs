@@ -457,7 +457,7 @@ mod tests {
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
-        claim::claim(&mut r, "t", "session/pi", NOW, 60_000, 480 * 60_000).unwrap();
+        claim::claim(&mut r, "t", "session/pi", NOW, (60_000, 480 * 60_000), None).unwrap();
         r
     }
 

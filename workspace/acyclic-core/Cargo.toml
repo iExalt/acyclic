@@ -14,6 +14,8 @@ uuid.workspace = true
 [features]
 # Timing marks for the store benchmark; see `probe`.
 probe = []
+# Writes past the write judge, for tests that build a state directly. Only dev-dependencies enable it.
+fixtures = []
 
 [dev-dependencies]
 hegeltest.workspace = true

@@ -12,11 +12,11 @@ use acyclic_core::ids;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
-use acyclic_core::ready::{Ancestry, GitAncestry, Readiness, Status};
+use acyclic_core::ready::{Ancestry, GitAncestry, Readiness};
 use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
-use serde::Serialize;
+use acyclic_core::write::{self, ChangeSet};
 use serde_json::{Value as Json, json};
 
 use crate::Env;
@@ -183,7 +183,7 @@ impl<'a> Session<'a> {
                         Some(given) => (edit::given_id(given)?, Adding::Given),
                         None => (acyclic_core::ids::new(), Adding::Minted),
                     };
-                    let outcome = edit::commit(replica, by, None, |model| {
+                    let outcome = edit::commit(replica, by, None, None, |model| {
                         let fields = fields.clone().resolve(model, &Records::of(model), None)?;
                         Ok(edit::item_changes(&id, &fields, adding))
                     })?;
@@ -221,7 +221,7 @@ impl<'a> Session<'a> {
                 let item = &edit.item;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, |model| {
+                    let outcome = edit::commit(replica, by, None, None, |model| {
                         let records = Records::of(model);
                         id = records.item(item)?;
                         let fields = fields.clone().resolve(model, &records, Some(&id))?;
@@ -244,34 +244,31 @@ impl<'a> Session<'a> {
                 let ancestry = GitAncestry::new(context::clones(self.env)?);
                 let commit = commit.as_deref().map(split_commit).transpose()?;
                 self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let records = Records::of(&model);
-                    let id = &records.item(item)?;
-                    let key = existing(replica, id)?;
-                    if !force {
-                        check_finish(replica, id, by, &ancestry)?;
-                    }
-                    if commit.is_some() || text.is_some() {
-                        let repository = commit.map(|(r, _)| records.repository(r)).transpose()?;
-                        let evidence = Evidence {
-                            repository,
-                            commit: commit.map(|(_, sha)| sha.to_owned()),
-                            text: text.clone(),
-                        };
-                        check_evidence(&model, &evidence)?;
-                        if !force && overwrites(&model.items[id], &evidence) {
-                            return Err(CliError::refused(
-                                "already-done",
-                                format!("item {id} is done with other evidence; pass --force to replace it"),
-                            )
-                            .with(json!({"evidence": view::evidence(&model, &model.items[id].evidence)})));
-                        }
-                        set_if(replica, &key, field::EVIDENCE, Some(&evidence), by)?;
-                    }
-                    model::set_state(replica, id, ItemState::Done, by)?;
+                    let mut id = String::new();
+                    let outcome = edit::commit(replica, by, None, Some(&ancestry), |model| {
+                        let records = Records::of(model);
+                        id = records.item(item)?;
+                        let evidence = (commit.is_some() || text.is_some())
+                            .then(|| -> Result<Evidence, CliError> {
+                                Ok(Evidence {
+                                    repository: commit
+                                        .map(|(r, _)| records.repository(r))
+                                        .transpose()?,
+                                    commit: commit.map(|(_, sha)| sha.to_owned()),
+                                    text: text.clone(),
+                                })
+                            })
+                            .transpose()?;
+                        Ok(ChangeSet(vec![write::Change::Finish {
+                            item: id.clone(),
+                            evidence,
+                            force: *force,
+                        }]))
+                    })?;
+                    self.remember(&outcome.after);
                     // The evidence it holds now, so a caller sees what was recorded.
-                    let model = Model::read(replica.state())?;
-                    let evidence = view::evidence(&model, &model.items[id].evidence);
+                    let evidence =
+                        view::evidence(&outcome.after, &outcome.after.items[&id].evidence);
                     Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
                 })
             },
@@ -300,7 +297,7 @@ impl<'a> Session<'a> {
                         Some(given) => (edit::given_id(given)?, Adding::Given),
                         None => (acyclic_core::ids::new(), Adding::Minted),
                     };
-                    let outcome = edit::commit(replica, by, None, |model| {
+                    let outcome = edit::commit(replica, by, None, None, |model| {
                         let fields = fields.clone().resolve(model, &Records::of(model), None)?;
                         Ok(edit::thread_changes(&id, &fields, adding))
                     })?;
@@ -320,7 +317,7 @@ impl<'a> Session<'a> {
                 let thread = &edit.thread;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, |model| {
+                    let outcome = edit::commit(replica, by, None, None, |model| {
                         let records = Records::of(model);
                         id = records.thread(thread)?;
                         let fields = fields.clone().resolve(model, &records, Some(&id))?;
@@ -342,7 +339,7 @@ impl<'a> Session<'a> {
                 self.write(|replica, by| {
                     let id = edit::new_repository_id(given.as_deref())?;
                     let adding = if given.is_some() { Adding::Given } else { Adding::Minted };
-                    let outcome = edit::commit(replica, by, Some(name), |_| {
+                    let outcome = edit::commit(replica, by, Some(name), None, |_| {
                         edit::repository_changes(&id, &fields, adding)
                     })?;
                     self.remember(&outcome.after);
@@ -354,7 +351,7 @@ impl<'a> Session<'a> {
                     RepositoryFields { name: name.clone(), default_branch: default_branch.clone() };
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, name.as_deref(), |model| {
+                    let outcome = edit::commit(replica, by, name.as_deref(), None, |model| {
                         id = Records::of(model).repository(repository)?;
                         edit::repository_changes(&id, &fields, Adding::No)
                     })?;
@@ -661,35 +658,23 @@ impl<'a> Session<'a> {
         self.write(|replica, by| {
             let (id, key) = existing_thread(replica, reference)?;
             let thread = id.as_str();
-            if !force {
-                let model = Model::read(replica.state())?;
-                let status = Readiness::new(replica.state(), &model, by.at, &ancestry).thread(thread)?;
-                if !status.claimable_by(by.actor) {
-                    return Err(CliError::refused(
+            let ready = (!force).then_some(&ancestry as &dyn Ancestry);
+            claim::claim(replica, thread, by.actor, by.at, (lease, MAX_LEASE), ready).map_err(
+                |error| match error {
+                    claim::ClaimError::NotReady(status) => CliError::refused(
                         "not-ready",
                         format!(
                             "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it; \
                              `acyclic thread show {thread}` says why"
                         ),
                     )
-                    .with(json!({"readiness": status})));
-                }
-            }
-            claim::claim(replica, thread, by.actor, by.at, lease, MAX_LEASE)?;
+                    .with(json!({"readiness": status})),
+                    claim::ClaimError::State(error) => error.into(),
+                },
+            )?;
             let held = claim::winner(replica.state(), &key, by.at)?;
             Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
-    }
-}
-
-/// Whether `actor` may work on an item in `status` without forcing: when it's ready, or when what stands in the way is
-/// the actor's own claim on its thread, alone or as winner of a contest.
-pub(crate) fn may_claim(status: Option<&Status>, actor: &str) -> bool {
-    match status {
-        Some(Status::Ready) => true,
-        Some(Status::Claimed { holder }) => holder == actor,
-        Some(Status::Contested { holders }) => holders.first().is_some_and(|h| h == actor),
-        _ => false,
     }
 }
 
@@ -720,89 +705,6 @@ fn split_commit(commit: &str) -> Result<(&str, &str), CliError> {
             ),
         )),
     }
-}
-
-/// Refuses evidence that could never verify, without asking the network: the commit must look like an object id and
-/// name a complete repository record.
-pub(crate) fn check_evidence(model: &Model, evidence: &Evidence) -> Result<(), CliError> {
-    if evidence.commit.as_ref().is_some_and(|commit| !acyclic_core::import::is_object_id(commit)) {
-        return Err(CliError::new(
-            "invalid-commit",
-            exit::USAGE,
-            "a commit is 7 to 64 hexadecimal characters, as git prints it",
-        ));
-    }
-    let Some(id) = &evidence.repository else { return Ok(()) };
-    let Some(record) = model.repositories.get(id) else {
-        return Err(CliError::new(
-            "not-found",
-            exit::NOT_FOUND,
-            format!("no repository {id}; `acyclic repository list` lists them"),
-        ));
-    };
-    let missing: Vec<&str> = [
-        ("owner", record.owner.one().is_some()),
-        ("name", record.name.one().is_some()),
-        ("default-branch", record.default_branch.one().is_some()),
-    ]
-    .into_iter()
-    .filter_map(|(field, set)| (!set).then_some(field))
-    .collect();
-    if missing.is_empty() {
-        return Ok(());
-    }
-    Err(CliError::refused(
-        "incomplete-repository",
-        format!(
-            "repository {id} is missing {}; set it with `acyclic repository edit {id}`",
-            missing.join(", ")
-        ),
-    )
-    .with(json!({"missing": missing.iter().map(|f| f.replace('-', "_")).collect::<Vec<_>>()})))
-}
-
-/// Whether recording `evidence` would replace different evidence on an item that is already done.
-pub(crate) fn overwrites(item: &model::Item, evidence: &Evidence) -> bool {
-    item.is_done() && !item.evidence.all().is_empty() && item.evidence.one() != Some(evidence)
-}
-
-/// Refuses to finish an item that isn't ready or that someone else holds, unless forced. A finished item may be finished
-/// again, which changes nothing.
-fn check_finish(
-    replica: &Replica,
-    id: &str,
-    by: By<'_>,
-    ancestry: &dyn Ancestry,
-) -> Result<(), CliError> {
-    let model = Model::read(replica.state())?;
-    let readiness = Readiness::new(replica.state(), &model, by.at, ancestry);
-    let status = readiness.of(id)?;
-    if may_finish(status.as_ref(), by.actor) {
-        return Ok(());
-    }
-    // A parent is finished once its children are, unless it would be held back as a leaf.
-    if status == Some(Status::Parent) {
-        let (open, held) = readiness.unfinished(id);
-        if open.is_empty() && held.is_none() {
-            return Ok(());
-        }
-        return Err(CliError::refused(
-            "not-ready",
-            format!("item {id} can't be finished yet: it has open children or is held back; `acyclic item show {id}` says which"),
-        )
-        .with(json!({"readiness": status, "open": open, "held": held})));
-    }
-    Err(CliError::refused(
-        "not-ready",
-        format!("item {id} isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show {id}` says which"),
-    )
-    .with(json!({"readiness": status})))
-}
-
-/// Whether an actor may finish an item in `status` without forcing: when it may claim it, or it is finished already.
-pub(crate) fn may_finish(status: Option<&Status>, actor: &str) -> bool {
-    matches!(status, Some(Status::Done | Status::InReview | Status::Unverified { .. }))
-        || may_claim(status, actor)
 }
 
 /// The agent block, with this build's version.
@@ -904,11 +806,6 @@ pub(crate) fn shell_word(word: &str) -> String {
     }
 }
 
-/// An item's key, refusing one that doesn't exist or was deleted.
-pub(crate) fn existing(replica: &Replica, id: &str) -> Result<Key, CliError> {
-    Ok(model::existing(replica.state(), id)?)
-}
-
 /// The thread a reference names, and its key, when the thread has a record; naming an item in a thread says which
 /// thread was meant.
 pub(crate) fn existing_thread(
@@ -935,32 +832,6 @@ pub(crate) fn existing_thread(
         },
         Err(error) => Err(error),
     }
-}
-
-/// A field's value when it holds exactly one; a clear holds none.
-pub(crate) fn single(register: Option<&acyclic_core::state::Register>) -> Option<Json> {
-    match register {
-        Some(register) if register.len() == 1 => {
-            register.values().next().map(|v| v.value.clone()).filter(|value| !value.is_null())
-        },
-        _ => None,
-    }
-}
-
-/// Sets a field unless it already holds exactly that value; `None` leaves it alone.
-pub(crate) fn set_if<T: Serialize>(
-    replica: &mut Replica,
-    key: &Key,
-    name: &str,
-    value: Option<&T>,
-    by: By<'_>,
-) -> Result<(), CliError> {
-    let Some(value) = value else { return Ok(()) };
-    let json = serde_json::to_value(value).expect("model values serialize");
-    if single(replica.state().field(key, name)) != Some(json) {
-        model::set(replica, key, name, Some(value), by)?;
-    }
-    Ok(())
 }
 
 /// The project root an entity's audit events go to: an item's topmost ancestor, or none for a top-level item and

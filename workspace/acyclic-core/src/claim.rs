@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::model::Model;
+use crate::ready::{Ancestry, Readiness, ThreadStatus};
 use crate::schema::kind;
 use crate::state::{CLOCK_SKEW_MS, Dot, Error, Key, Millis, Replica, State};
 
@@ -123,9 +124,12 @@ pub fn covering(
 ///
 /// Never: a claim always serializes and a write with a value always mints a dot.
 ///
+/// Unless forced, which `ready` of `None` is, the thread must be claimable by `holder`: ready, with merges checked
+/// through `ready`, or won by `holder` already.
+///
 /// # Errors
 ///
-/// Fails when the thread has no record, when another
+/// Fails when the thread has no record, when it isn't claimable and the claim isn't forced, when another
 /// holder wins the thread in this replica's view (so a claim never silently replaces one it has seen; only claims made
 /// without seeing each other contest), or on an unreadable claim.
 pub fn claim(
@@ -133,17 +137,23 @@ pub fn claim(
     thread: &str,
     holder: &str,
     at: Millis,
-    lease: Millis,
-    max_lease: Millis,
-) -> Result<Dot, Error> {
+    (lease, max_lease): (Millis, Millis),
+    ready: Option<&dyn Ancestry>,
+) -> Result<Dot, ClaimError> {
     let model = Model::read(&replica.state)?;
     if !model.threads.contains_key(thread) {
-        return Err(Error::NoThread(thread.to_owned()));
+        return Err(Error::NoThread(thread.to_owned()).into());
+    }
+    if let Some(ancestry) = ready {
+        let status = Readiness::new(&replica.state, &model, at, ancestry).thread(thread)?;
+        if !status.claimable_by(holder) {
+            return Err(ClaimError::NotReady(status));
+        }
     }
     let key = thread_key(thread)?;
     let current = winner(&replica.state, &key, at)?;
     if current.as_ref().is_some_and(|claim| claim.holder != holder) {
-        return Err(Error::Claimed(key));
+        return Err(Error::Claimed(key).into());
     }
     let claim = Claim {
         holder: holder.to_owned(),
@@ -154,6 +164,21 @@ pub fn claim(
     let value = serde_json::to_value(claim).expect("a claim always serializes");
     let dot = replica.write(&key, FIELD, holder, at, Some(value))?;
     Ok(dot.expect("a write with a value mints a dot"))
+}
+
+/// Why a [`claim`] wasn't made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimError {
+    /// The thread isn't the holder's to claim without forcing: it has no ready work, or someone else holds it.
+    NotReady(ThreadStatus),
+    /// The thread has no record, someone else wins it, or a claim can't be read or written.
+    State(Error),
+}
+
+impl From<Error> for ClaimError {
+    fn from(err: Error) -> Self {
+        Self::State(err)
+    }
 }
 
 /// Renews the time leases this replica recorded whose holders are still at work: each winning thread claim with less

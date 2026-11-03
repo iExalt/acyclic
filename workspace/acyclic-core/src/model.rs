@@ -1,5 +1,6 @@
-//! The model: items, links, threads and repositories, read as a typed snapshot of the state and written through
-//! checked writes. Nothing derived is stored: roles, membership, repository sets and cycles are computed on read.
+//! The model: items, links, threads and repositories, read as a typed snapshot of the state. Records are written
+//! through the write module's judge; the per-field writes here serve it, the archive, deletes and, with the
+//! `fixtures` feature, tests. Nothing derived is stored: roles, membership, repository sets and cycles are computed on read.
 //!
 //! Every field reads as a [`Value`], so a reader sees concurrent writes as a conflict and never silently picks one.
 
@@ -662,13 +663,6 @@ pub enum WriteError {
     ParentCycle(String),
     /// The link would close a cycle of blocks links, through these items.
     LinkCycle(Vec<String>),
-    /// The field has invariants: write it with its checked write.
-    Checked {
-        /// The field.
-        field: String,
-        /// The checked write to use.
-        write: &'static str,
-    },
     /// An item can't link to itself.
     SelfLink(String),
 }
@@ -686,9 +680,6 @@ impl fmt::Display for WriteError {
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
             Self::LinkCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
-            },
-            Self::Checked { field, write } => {
-                write!(f, "{field} has invariants: write it with {write}")
             },
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
         }
@@ -744,37 +735,21 @@ fn to_json<T: Serialize>(value: &T) -> Json {
     serde_json::to_value(value).expect("model values always serialize")
 }
 
-/// The fields only a checked write may set, with the write to use instead.
-const CHECKED: [(&str, &str, &str); 7] = [
-    (kind::ITEM, field::THREAD, "scope::edit"),
-    (kind::ITEM, field::ARCHIVED, "archive::archive"),
-    (kind::ITEM, field::DELETED, "delete::delete_item"),
-    (kind::ITEM, field::REOPENED, "archive::reopen"),
-    (kind::ITEM, field::PARENT, "set_parent"),
-    (kind::ITEM, field::STATE, "set_state"),
-    (kind::LINK, "", "link or unlink"),
-];
-
-/// Writes a field of any entity, or clears it with `None`. Fields with invariants (an item's parent, state, thread,
-/// archived flag and reopen flag, and a link's fields) are refused: use their checked writes.
-///
-/// # Errors
-///
-/// Fails on a checked field, or when the state layer refuses.
-pub fn set<T: Serialize>(
-    replica: &mut Replica,
-    key: &Key,
-    name: &str,
-    value: Option<&T>,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    let checked = CHECKED
-        .iter()
-        .find(|(kind, field, _)| key.kind == *kind && (field.is_empty() || name == *field));
-    if let Some((_, _, write)) = checked {
-        return Err(WriteError::Checked { field: name.to_owned(), write });
+fixture! {
+    /// Writes a field of any entity, or clears it with `None`, past every invariant the write judge keeps.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the state layer refuses.
+    fn set<T: Serialize>(
+        replica: &mut Replica,
+        key: &Key,
+        name: &str,
+        value: Option<&T>,
+        by: By<'_>,
+    ) -> Result<(), WriteError> {
+        put(replica, key, name, value, by)
     }
-    put(replica, key, name, value, by)
 }
 
 /// Writes a single-valued field. A clear writes `null` rather than nothing, so a set it never saw conflicts with it
@@ -805,108 +780,118 @@ pub(crate) fn put_element(
     Ok(())
 }
 
-/// Creates an item with a title, in the backlog.
-///
-/// # Errors
-///
-/// Fails on an invalid id, on the id of a deleted item, or when the state layer refuses.
-pub fn add_item(
-    replica: &mut Replica,
-    id: &str,
-    title: &str,
-    by: By<'_>,
-) -> Result<Key, WriteError> {
-    let key = item_key(id)?;
-    if is_deleted(&replica.state, &key) {
-        return Err(WriteError::Deleted(id.to_owned()));
-    }
-    put(replica, &key, field::TITLE, Some(&title), by)?;
-    put(replica, &key, field::STATE, Some(&ItemState::Backlog), by)?;
-    Ok(key)
-}
-
-/// Sets an item's state. Setting the state it already has, alone, writes nothing, so re-marking done never moves
-/// when it was done.
-///
-/// # Errors
-///
-/// Fails when the item doesn't exist or the state layer refuses.
-pub fn set_state(
-    replica: &mut Replica,
-    id: &str,
-    state: ItemState,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    let key = existing(&replica.state, id)?;
-    if value::<ItemState>(&replica.state, &key, field::STATE)? == Value::One(state) {
-        return Ok(());
-    }
-    if state == ItemState::Done && replica.state.field(&key, field::REOPENED).is_some() {
-        put::<Reopened>(replica, &key, field::REOPENED, None, by)?;
-    }
-    put(replica, &key, field::STATE, Some(&state), by)
-}
-
-/// Moves an item under `parent`, or to the top level with `None`.
-///
-/// # Errors
-///
-/// Fails when either item doesn't exist, when the move would put the item under itself or a descendant, or when the
-/// state layer refuses.
-pub fn set_parent(
-    replica: &mut Replica,
-    id: &str,
-    parent: Option<&str>,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    let key = existing(&replica.state, id)?;
-    if let Some(parent) = parent {
-        existing(&replica.state, parent)?;
-        let model = Model::read(&replica.state)?;
-        if parent == id || model.ancestors(parent).contains(&id) {
-            return Err(WriteError::ParentCycle(id.to_owned()));
+fixture! {
+    /// Creates an item with a title, in the backlog.
+    ///
+    /// # Errors
+    ///
+    /// Fails on an invalid id, on the id of a deleted item, or when the state layer refuses.
+    fn add_item(
+        replica: &mut Replica,
+        id: &str,
+        title: &str,
+        by: By<'_>,
+    ) -> Result<Key, WriteError> {
+        let key = item_key(id)?;
+        if is_deleted(&replica.state, &key) {
+            return Err(WriteError::Deleted(id.to_owned()));
         }
+        put(replica, &key, field::TITLE, Some(&title), by)?;
+        put(replica, &key, field::STATE, Some(&ItemState::Backlog), by)?;
+        Ok(key)
     }
-    put(replica, &key, field::PARENT, parent.map(str::to_owned).as_ref(), by)
 }
 
-/// Makes `from` wait for `to`.
-///
-/// # Errors
-///
-/// Fails when either item doesn't exist, when the link would close a cycle, or when the state layer refuses.
-pub fn link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<Key, WriteError> {
-    existing(&replica.state, from)?;
-    existing(&replica.state, to)?;
-    if from == to {
-        return Err(WriteError::SelfLink(from.to_owned()));
+fixture! {
+    /// Sets an item's state. Setting the state it already has, alone, writes nothing, so re-marking done never moves
+    /// when it was done.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the item doesn't exist or the state layer refuses.
+    fn set_state(
+        replica: &mut Replica,
+        id: &str,
+        state: ItemState,
+        by: By<'_>,
+    ) -> Result<(), WriteError> {
+        let key = existing(&replica.state, id)?;
+        if value::<ItemState>(&replica.state, &key, field::STATE)? == Value::One(state) {
+            return Ok(());
+        }
+        if state == ItemState::Done && replica.state.field(&key, field::REOPENED).is_some() {
+            put::<Reopened>(replica, &key, field::REOPENED, None, by)?;
+        }
+        put(replica, &key, field::STATE, Some(&state), by)
     }
-    let key = link_key(from, to)?;
-    if let Some(path) = Model::read(&replica.state)?.ordering_path(to, from) {
-        return Err(WriteError::LinkCycle(path));
-    }
-    if replica.state.field(&key, link::FROM).is_none() {
-        put(replica, &key, link::FROM, Some(&from), by)?;
-        put(replica, &key, link::TO, Some(&to), by)?;
-        put(replica, &key, link::KIND, Some(&link::BLOCKS), by)?;
-    }
-    put(replica, &key, link::PRESENT, Some(&true), by)?;
-    Ok(key)
 }
 
-/// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Returns whether it wrote.
-///
-/// # Errors
-///
-/// Fails on an invalid id or when the state layer refuses.
-pub fn unlink(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<bool, WriteError> {
-    let key = link_key(from, to)?;
-    if replica.state.field(&key, link::PRESENT).is_none() {
-        return Ok(false);
+fixture! {
+    /// Moves an item under `parent`, or to the top level with `None`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when either item doesn't exist, when the move would put the item under itself or a descendant, or when the
+    /// state layer refuses.
+    fn set_parent(
+        replica: &mut Replica,
+        id: &str,
+        parent: Option<&str>,
+        by: By<'_>,
+    ) -> Result<(), WriteError> {
+        let key = existing(&replica.state, id)?;
+        if let Some(parent) = parent {
+            existing(&replica.state, parent)?;
+            let model = Model::read(&replica.state)?;
+            if parent == id || model.ancestors(parent).contains(&id) {
+                return Err(WriteError::ParentCycle(id.to_owned()));
+            }
+        }
+        put(replica, &key, field::PARENT, parent.map(str::to_owned).as_ref(), by)
     }
-    // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
-    replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
-    Ok(true)
+}
+
+fixture! {
+    /// Makes `from` wait for `to`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when either item doesn't exist, when the link would close a cycle, or when the state layer refuses.
+    fn link(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<Key, WriteError> {
+        existing(&replica.state, from)?;
+        existing(&replica.state, to)?;
+        if from == to {
+            return Err(WriteError::SelfLink(from.to_owned()));
+        }
+        let key = link_key(from, to)?;
+        if let Some(path) = Model::read(&replica.state)?.ordering_path(to, from) {
+            return Err(WriteError::LinkCycle(path));
+        }
+        if replica.state.field(&key, link::FROM).is_none() {
+            put(replica, &key, link::FROM, Some(&from), by)?;
+            put(replica, &key, link::TO, Some(&to), by)?;
+            put(replica, &key, link::KIND, Some(&link::BLOCKS), by)?;
+        }
+        put(replica, &key, link::PRESENT, Some(&true), by)?;
+        Ok(key)
+    }
+}
+
+fixture! {
+    /// Removes a link, writing nothing when it is absent; a concurrent re-add survives. Returns whether it wrote.
+    ///
+    /// # Errors
+    ///
+    /// Fails on an invalid id or when the state layer refuses.
+    fn unlink(replica: &mut Replica, from: &str, to: &str, by: By<'_>) -> Result<bool, WriteError> {
+        let key = link_key(from, to)?;
+        if replica.state.field(&key, link::PRESENT).is_none() {
+            return Ok(false);
+        }
+        // A link is a set element: removing it leaves nothing, so an add it never saw keeps the link.
+        replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
+        Ok(true)
+    }
 }
 
 /// Whether an item has been deleted: its tombstone is set, and nothing clears it.

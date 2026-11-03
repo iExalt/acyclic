@@ -208,7 +208,7 @@ pub enum Wait {
 }
 
 /// An item's readiness.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "status")]
 pub enum Status {
     /// Ready to work on.
@@ -254,6 +254,21 @@ pub enum Status {
     },
     /// It or an ancestor is archived.
     Archived,
+}
+
+impl Status {
+    /// Whether `actor` may finish an item in this status without forcing: when it is ready, when what stands in the
+    /// way is the actor's own claim on its thread, alone or as winner of a contest, or when it is finished already,
+    /// which finishing again doesn't change. A parent is judged by its open work instead.
+    #[must_use]
+    pub fn finishable_by(&self, actor: &str) -> bool {
+        match self {
+            Self::Ready | Self::Done | Self::InReview | Self::Unverified { .. } => true,
+            Self::Claimed { holder } => holder == actor,
+            Self::Contested { holders } => holders.first().is_some_and(|h| h == actor),
+            _ => false,
+        }
+    }
 }
 
 /// A thread's readiness: whether it can be claimed, and its members that would be ready while it is held.
