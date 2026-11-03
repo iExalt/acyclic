@@ -507,3 +507,34 @@ fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its
     set_state(&mut a, "y", ItemState::Done, by(5)).unwrap();
     assert!(model(&a).reads_done("p"));
 }
+
+#[test]
+fn a_write_holds_only_a_lone_equal_value_or_for_a_clear_nothing() {
+    assert!(Value::<i32>::None.holds(None));
+    assert!(!Value::<i32>::None.holds(Some(&1)));
+    assert!(Value::One(1).holds(Some(&1)));
+    assert!(!Value::One(1).holds(Some(&2)));
+    assert!(!Value::One(1).holds(None));
+    // A conflict holds neither side, so writing either settles it.
+    let conflict = Value::Conflict(vec![Some(1), None]);
+    assert!(!conflict.holds(Some(&1)) && !conflict.holds(None));
+}
+
+#[test]
+fn a_deleted_record_is_gone_from_the_model_but_its_id_is_remembered() {
+    let (mut a, mut b) = pair(&["kept", "gone"]);
+    let thread = Key::new(kind::THREAD, "t").unwrap();
+    set(&mut a, &thread, thread::TITLE, Some(&"T"), by(2)).unwrap();
+    // Two replicas retitle the item apart, then one deletes it: its conflict goes with it.
+    set(&mut a, &item_key("gone").unwrap(), field::TITLE, Some(&"A"), by(3)).unwrap();
+    set(&mut b, &item_key("gone").unwrap(), field::TITLE, Some(&"B"), by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).conflicts().count(), 1);
+    crate::delete::delete_item(&mut a, "gone", by(4)).unwrap();
+    crate::delete::delete_thread(&mut a, "t", by(4)).unwrap();
+    let read = model(&a);
+    assert!(!read.items.contains_key("gone") && !read.threads.contains_key("t"));
+    assert!(read.is_deleted(&item_key("gone").unwrap()) && read.is_deleted(&thread));
+    assert!(!read.is_deleted(&item_key("kept").unwrap()));
+    assert_eq!(read.conflicts().count(), 0);
+}

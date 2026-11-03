@@ -44,7 +44,8 @@ Dividing a set of items into threads, or one thread into several.
 _Avoid_: partition, breakdown
 
 **Thread**:
-A bounded piece of work that one continuing agent conversation works through from start to finish.
+A bounded piece of work that one continuing agent conversation works through from start to finish. A thread exists
+while it has a record; an item that names any other thread holds a dangling reference.
 _Avoid_: workstream, track, lane, operation
 
 **Wave**:
@@ -84,6 +85,10 @@ _Avoid_: loose chat, orphan
 **Archived**:
 A finished subtree hidden from `thread ready` and the app by default; archiving hides, never deletes.
 _Avoid_: closed, deleted
+
+**Deleted**:
+An item or thread removed for good: gone from every view and every reader, and its id never used again.
+_Avoid_: archived (that only hides), closed
 
 **In review**:
 The state of finished code work whose commit is not yet on its repository's default branch.
@@ -143,6 +148,11 @@ relationship between items besides their parents.
 _Avoid_: blocker link, depends_on, blocks (in prose), hard dependency, relates to
 
 Stored data keeps the older kind name `blocks` for a waits-for link.
+
+**Dangling reference**:
+A parent, thread, repository or waits-for target that names a record that doesn't exist or was deleted. It lands on
+the needs-you list, and an item whose thread dangles counts as in no thread.
+_Avoid_: broken link, orphan
 
 ## Where the data lives
 

@@ -154,6 +154,13 @@ describe("needView", () => {
     // The waiting item itself gone leaves the older shape, kept as it was.
     const orphan = needView({ kind: "dangling", entity: "link", id: "x", field: "end", target: "q" }, none, titles);
     expect(orphan.text).toBe("x: its end names q, which doesn't exist");
+    // An item in a thread that is gone is opened from its row to choose another, as an item in none is.
+    const ghost = needView(
+      { kind: "dangling", entity: "item", id: "a", field: "thread", target: "t", item: item("a") },
+      none,
+      titles,
+    );
+    expect(ghost).toMatchObject({ items: ["a"], note: "Open it to choose its thread in its editor" });
   });
 
   it("shows a kind it has no command for with what it names and the CLI's hint", () => {

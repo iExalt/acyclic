@@ -270,11 +270,16 @@ fn prime_is_text_matched_to_the_version() {
 
 #[test]
 fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() {
-    use acyclic_core::model::{By, Model, add_item, link};
+    use acyclic_core::model::{By, Model, add_item, link, set};
+    use acyclic_core::schema::{kind, thread};
     use acyclic_core::scope::{ScopeEdit, USER, edit};
-    use acyclic_core::state::{Replica, State};
+    use acyclic_core::state::{Key, Replica, State};
     let user = By { actor: USER, at: 1 };
     let mut mac = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    for id in ["t", "u", "v"] {
+        set(&mut mac, &Key::new(kind::THREAD, id).unwrap(), thread::TITLE, Some(&id), user)
+            .unwrap();
+    }
     let join = |replica: &mut Replica, item: &str, thread: &str| {
         let member = ScopeEdit::Member { item: item.to_owned(), thread: Some(thread.to_owned()) };
         edit(replica, &member, user).unwrap();
@@ -296,8 +301,12 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
     join(&mut mac, "cleared", "u");
     edit(&mut pi, &ScopeEdit::Member { item: "cleared".to_owned(), thread: None }, user).unwrap();
     mac.join(pi.state()).unwrap();
+    // A thread an item names but that has no record is no thread: the item's reference dangles.
+    add_item(&mut mac, "ghostly", "ghostly", user).unwrap();
+    join(&mut mac, "ghostly", "w");
     let model = Model::read(mac.state()).unwrap();
     let threads = commands::thread_members(&model);
+    assert!(!threads.contains_key("w"));
     let listed = |thread: &str| -> Vec<(&str, bool)> {
         threads[thread].iter().map(|m| (m.item, m.conflict)).collect()
     };
@@ -305,8 +314,6 @@ fn a_thread_lists_its_members_in_run_order_and_a_raced_member_in_both_threads() 
         listed("t"),
         [("s-1", false), ("s-2", false), ("s-10", false), ("c-1", false), ("c-2", false)]
     );
-    // Neither u nor v has fields of its own: an item names each.
-    assert!(!model.threads.contains_key("u") && !model.threads.contains_key("v"));
     assert_eq!(listed("u"), [("cleared", true), ("raced", true)]);
     assert_eq!(listed("v"), [("raced", true)]);
 }

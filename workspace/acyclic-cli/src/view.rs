@@ -230,6 +230,10 @@ impl View<'_> {
                     if let Some(fix) = fix {
                         shown["fix"] = json!(fix);
                     }
+                    // An item's reference brings its row, as a conflict's does, so the app can open it.
+                    if kind == "item" && self.model.items.contains_key(id.as_str()) {
+                        shown["item"] = self.item_row(id)?;
+                    }
                     shown
                 },
                 Entry::Unverified { item, repository, reason } => json!({

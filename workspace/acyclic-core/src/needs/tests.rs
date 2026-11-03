@@ -126,16 +126,33 @@ fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
     model::set_state(&mut r, "parked", ItemState::Parked, by).unwrap();
     model::set_state(&mut r, "done", ItemState::Done, by).unwrap();
     set_parent(&mut r, "kid", Some("goal"), by).unwrap();
-    let listed: Vec<(String, String)> = list(&r)
-        .into_iter()
+    // A done item in the missing thread dangles too, but needs no thread, so it gets no fix.
+    edit(&mut r, &ScopeEdit::Member { item: "done".into(), thread: Some("ghost".into()) }, by)
+        .unwrap();
+    let entries = list(&r);
+    let listed: Vec<(String, String)> = entries
+        .iter()
         .filter_map(|e| match e {
-            Entry::Unthreaded { item, fix } => Some((item, fix)),
+            Entry::Unthreaded { item, fix } => Some((item.clone(), fix.clone())),
             _ => None,
         })
         .collect();
     let fix = |id: &str| (id.to_owned(), format!("acyclic item edit {id} --thread <THREAD>"));
     // Whatever else holds it back; never a parked or done item, a member or a parent.
-    assert_eq!(listed, [fix("ghostly"), fix("loose"), fix("waiting")]);
+    assert_eq!(listed, [fix("loose"), fix("waiting")]);
+    // A leaf in a thread with no record is listed once, as the reference it holds, with the same fix.
+    let ghosts: Vec<(&str, Option<&str>)> = entries
+        .iter()
+        .filter_map(|e| match e {
+            Entry::Dangling { id, field, target, fix, .. }
+                if field == "thread" && target == "ghost" =>
+            {
+                Some((id.as_str(), fix.as_deref()))
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ghosts, [("done", None), ("ghostly", Some(fix("ghostly").1.as_str()))]);
 }
 
 #[test]

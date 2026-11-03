@@ -16,7 +16,7 @@ use super::{Import, KeyKind, ValidationError, owner_name};
 use crate::model::{self, By, Evidence, ItemState, Model, WriteError};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::scope::{self, ScopeEdit};
-use crate::state::{Error, Key, Replica, State};
+use crate::state::{Error, Key, Replica};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -157,7 +157,7 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
         }
     }
     let before = Model::read(&replica.state)?;
-    let mut errors = unknown_references(doc, &before, &replica.state);
+    let mut errors = unknown_references(doc, &before);
     errors.extend(taken_names(doc, &before));
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
@@ -189,22 +189,16 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     Ok(writer.report)
 }
 
-/// The references that name no record of their kind, in the document or the tracker. A thread with no record that
-/// items still name counts, unless its record was deleted: the CLI refuses moving work into it too.
-fn unknown_references(doc: &Import, before: &Model, state: &State) -> Vec<ValidationError> {
+/// The references that name no record of their kind, in the document or the tracker. A thread items name but that has
+/// no record isn't one.
+fn unknown_references(doc: &Import, before: &Model) -> Vec<ValidationError> {
     let mine = |ids: Vec<&String>| ids.into_iter().cloned().collect::<BTreeSet<String>>();
     let items = mine(doc.items.iter().map(|i| &i.id).collect());
     let threads = mine(doc.threads.iter().map(|t| &t.id).collect());
     let repositories = mine(doc.repositories.iter().map(|r| &r.id).collect());
     let known = |kind: KeyKind, id: &String| match kind {
         KeyKind::Item => items.contains(id) || before.items.contains_key(id),
-        KeyKind::Thread => {
-            threads.contains(id)
-                || before.threads.contains_key(id)
-                || (before.items.values().any(|item| item.thread.all().contains(&id))
-                    && !crate::claim::thread_key(id)
-                        .is_ok_and(|key| model::is_deleted(state, &key)))
-        },
+        KeyKind::Thread => threads.contains(id) || before.threads.contains_key(id),
         KeyKind::Repository => repositories.contains(id) || before.repositories.contains_key(id),
     };
     let mut errors = Vec::new();
