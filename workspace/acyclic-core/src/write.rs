@@ -376,6 +376,8 @@ impl Outcome {
 pub enum Rule {
     /// The record it changes, or a record a field names, doesn't exist.
     NoRecord(Record),
+    /// A newly created record has no field write to persist it.
+    EmptyRecord(Record),
     /// The record it adds or changes was deleted, and its id isn't used again.
     Deleted(Record),
     /// An item would wait for itself.
@@ -442,6 +444,9 @@ impl fmt::Display for Violation {
         });
         match &self.rule {
             Rule::NoRecord(record) => write!(f, "{at}no {} {}", record.kind(), record.id()),
+            Rule::EmptyRecord(record) => {
+                write!(f, "{} {} has no field to write", record.kind(), record.id())
+            },
             Rule::Deleted(record) => {
                 write!(
                     f,
@@ -640,7 +645,14 @@ impl Judging<'_, '_> {
                     self.refuse(Some(n), Some(at), Rule::RepeatDiffers);
                     continue;
                 }
-                if !holds || !exists {
+                // Scope additions need a fresh dot so an unseen removal cannot erase this explicit intent.
+                let reasserts_scope = repeat.is_none()
+                    && matches!(
+                        assign,
+                        Assign::Item(_, ItemAssign::Repository(_, true))
+                            | Assign::Thread(_, ThreadAssign::Repository(_, true))
+                    );
+                if !holds || !exists || reasserts_scope {
                     self.apply(n, true, Written::Assign(assign.clone()));
                 }
             }
@@ -854,12 +866,37 @@ impl Judging<'_, '_> {
     fn rules(&mut self, changes: &ChangeSet) {
         let (after, steps) = (&self.after, &self.steps);
         let mut found = assign_rules(after, steps);
+        found.extend(empty_creates(steps));
         found.extend(open_under_archive(after, steps));
         found.extend(new_cycles(self.before, after, steps));
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
         self.violations.extend(found);
     }
+}
+
+/// New records need an emitted field write; a projected `Written::Create` alone has no effect when applied.
+fn empty_creates(steps: &[Step]) -> Vec<Violation> {
+    let writes: BTreeSet<Record> = steps
+        .iter()
+        .filter_map(|step| match &step.write {
+            Written::Assign(assign) => Some(assign.at().record),
+            Written::Reopened(id, _) | Written::Unarchive(id) => Some(Record::Item(id.clone())),
+            Written::Place(placed) => Some(Record::Item(placed.item.clone())),
+            Written::Create(_) => None,
+        })
+        .collect();
+    steps
+        .iter()
+        .filter_map(|step| match &step.write {
+            Written::Create(record) if !writes.contains(record) => Some(Violation {
+                change: Some(step.change),
+                at: None,
+                rule: Rule::EmptyRecord(record.clone()),
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The rules each asked-for field brings: what it names exists, an item never waits for itself, evidence is only on done

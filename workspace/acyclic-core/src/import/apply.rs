@@ -109,6 +109,8 @@ pub enum ApplyError {
     Cycles(Vec<Vec<String>>),
     /// Archiving an imported item was refused.
     Archive(ArchiveError),
+    /// The judge refused a change the import mapper does not understand.
+    Internal(Vec<Violation>),
     /// A write was refused.
     Write(WriteError),
 }
@@ -128,6 +130,10 @@ impl fmt::Display for ApplyError {
                 )
             },
             Self::Archive(err) => err.fmt(f),
+            Self::Internal(violations) => {
+                let violations: Vec<String> = violations.iter().map(ToString::to_string).collect();
+                write!(f, "internal error: import was refused for {}", violations.join("; "))
+            },
             Self::Write(err) => err.fmt(f),
         }
     }
@@ -368,12 +374,8 @@ fn list_changes(held: &BTreeSet<&String>, wanted: &[String], adding: bool) -> Ve
 /// The judge's refusal in the import's own terms, one kind at a time as the import has always told them: a deleted
 /// record, then references to nothing and names taken, then evidence and archiving on open work, then cycles.
 fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
-    if let Some(record) = violations.iter().find_map(|v| match &v.rule {
-        Rule::Deleted(record) => Some(record),
-        _ => None,
-    }) {
-        return WriteError::Deleted(record.id().to_owned()).into();
-    }
+    let mut deleted = None;
+    let mut internal = false;
     let mut unknown = Vec::new();
     let mut taken = Vec::new();
     let mut unfinished = Vec::new();
@@ -430,26 +432,18 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                 unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
             },
             (Rule::ParentCycle(cycle) | Rule::LinkCycle(cycle), _) => cycles.push(cycle.clone()),
-            // Told above.
-            (Rule::Deleted(_), _) => {},
-            // An import's adds name their ids, update what exists and finish nothing, once each: these can't arise,
-            // and naming each makes a new rule decide here.
-            (
-                Rule::NoRecord(_)
-                | Rule::NameTaken { .. }
-                | Rule::EvidenceNotDone
-                | Rule::InvalidCommit
-                | Rule::IncompleteRepository { .. }
-                | Rule::SelfLink
-                | Rule::TitleTaken(_)
-                | Rule::RepeatDiffers
-                | Rule::Contradicts
-                | Rule::NotReady(_)
-                | Rule::OpenWork { .. }
-                | Rule::EvidenceDiffers,
-                _,
-            ) => debug_assert!(false, "an import can't be refused for {violation:?}"),
+            (Rule::Deleted(record), _) => {
+                deleted.get_or_insert(record);
+            },
+            // Import must report a judge refusal it cannot express, including alongside mapped violations.
+            _ => internal = true,
         }
+    }
+    if internal {
+        return ApplyError::Internal(violations.to_vec());
+    }
+    if let Some(record) = deleted {
+        return WriteError::Deleted(record.id().to_owned()).into();
     }
     unknown.sort();
     unknown.dedup();

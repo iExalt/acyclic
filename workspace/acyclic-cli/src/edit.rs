@@ -419,6 +419,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             )
             .with(json!({"id": id}))
         },
+        Rule::EmptyRecord(_) => CliError::refused("refused", violation.to_string()),
         Rule::NameTaken { name: taken, other } => CliError::refused(
             "already-exists",
             format!("repository {other} is named {} already", name.unwrap_or(taken)),

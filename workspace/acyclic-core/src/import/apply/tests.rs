@@ -456,3 +456,21 @@ fn imported_archive_candidates_are_order_independent_and_preview_matches_apply()
         assert!(model(&reverse).items[&id].is_archived_root());
     }
 }
+
+#[test]
+fn an_unmapped_refusal_is_internal_even_with_mapped_violations() {
+    let violations = vec![
+        Violation { change: None, at: None, rule: Rule::Deleted(Record::Item("gone".into())) },
+        Violation { change: None, at: None, rule: Rule::LinkCycle(vec!["a".into(), "b".into()]) },
+        Violation {
+            change: None,
+            at: None,
+            rule: Rule::EmptyRecord(Record::Repository("r".into())),
+        },
+    ];
+    let error = refused(&Import::new(), &violations);
+    assert_eq!(error, ApplyError::Internal(violations.clone()));
+    for violation in violations {
+        assert!(error.to_string().contains(&violation.to_string()));
+    }
+}

@@ -99,6 +99,66 @@ fn a_change_that_holds_already_writes_nothing_but_a_conflict_takes_it() {
 }
 
 #[test]
+fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
+    let mut r = replica("empty");
+    for record in [Record::Thread("t".into()), Record::Repository("r".into())] {
+        let empty = Change::Add {
+            record: record.clone(),
+            minted: false,
+            on_repeat: Repeat::Update,
+            with: vec![],
+        };
+        assert_eq!(refused(&r, vec![empty.clone()]), [Rule::EmptyRecord(record.clone())]);
+
+        let before = r.state.clone();
+        let error =
+            commit(&mut r, by(1), None, |_| Ok::<_, ()>(ChangeSet(vec![empty]))).unwrap_err();
+        let CommitError::Refused(violations, _) = error else {
+            panic!("an empty record add should be refused");
+        };
+        assert_eq!(
+            violations.into_iter().map(|violation| violation.rule).collect::<Vec<_>>(),
+            [Rule::EmptyRecord(record)]
+        );
+        assert_eq!(r.state, before, "a refused empty add must leave the replica unchanged");
+    }
+
+    let thread = Change::Add {
+        record: Record::Thread("t".into()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: vec![],
+    };
+    let repository = Change::Add {
+        record: Record::Repository("r".into()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: vec![],
+    };
+    let item = Change::Add {
+        record: Record::Item("i".into()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: vec![],
+    };
+    let outcome = commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread,
+            Change::Set(Assign::Thread("t".into(), ThreadAssign::Brief(None))),
+            repository,
+            Change::Set(Assign::Repository("r".into(), RepositoryAssign::Owner("example".into()))),
+            item,
+        ],
+    );
+    assert_eq!(outcome.after, read(&r), "null fields and the item's implicit backlog persist");
+    assert!(read(&r).threads.contains_key("t"));
+    assert!(read(&r).repositories.contains_key("r"));
+    assert!(read(&r).items.contains_key("i"));
+}
+
+#[test]
 fn done_work_set_back_is_reopened_and_leaves_the_archive_keeping_its_evidence() {
     let mut r = done_tree();
     let evidence = Evidence { text: Some("shipped".into()), ..Evidence::default() };
