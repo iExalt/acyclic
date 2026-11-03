@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type Line, linesOf } from "./lines";
-import { countText, needView, threadLabel, together } from "./needs";
+import { countText, keepsIn, type Need, needView, threadLabel, together } from "./needs";
+import examples from "./needs.examples.json";
 import { PALETTES } from "./palette";
 
 const item = (id: string) => ({ id, title: id.toUpperCase() });
@@ -111,34 +112,34 @@ describe("needView", () => {
     expect(torn).toMatchObject({ line: undefined, thread: null, threads: [{ id: "t7", title: "Build it" }] });
   });
 
-  it("settles a conflict with each value it can keep, and says why for one it can't", () => {
-    const conflict = needView(
-      {
-        kind: "conflict",
-        entity: "item",
-        id: "a",
-        field: "state",
-        values: ["done", "parked"],
-        resolve: "acyclic item edit a --state <STATE>",
-      },
-      none,
-    );
-    expect(conflict.actions.map((one) => one.label)).toEqual(["Use parked"]);
-    expect(conflict.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
+  it("settles a conflict with the command the list gives for each value it can keep, and says why for the rest", () => {
+    const conflicts = (examples.needs as Need[]).filter((need) => need.kind === "conflict");
+    const field = (name: string) => {
+      const found = conflicts.find((need) => need.field === name);
+      if (found === undefined) throw new Error(`no ${name} conflict in needs.examples.json`);
+      return found;
+    };
+    for (const need of conflicts) {
+      const view = needView(need, none);
+      // Every command the list offers is an action, exactly as sent; every other value says why.
+      expect(view.actions.map((one) => one.command)).toEqual(
+        keepsIn(need)
+          .map((kept) => kept.command)
+          .filter((command) => command !== null),
+      );
+      expect(view.key).toBe(need.key);
+    }
+    const state = needView(field("state"), none);
+    expect(state.actions.map((one) => one.label)).toEqual(["Use parked"]);
+    expect(state.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
     // Named, and its values too where they are ids, while the command keeps the id.
-    const titles = (id: string) => id.toUpperCase();
-    const moved = needView(
-      { kind: "conflict", entity: "item", id: "a", field: "parent", values: ["p", null] },
-      none,
-      titles,
-    );
-    expect(moved.text).toBe("A: its parent was written differently on two machines");
-    expect(moved.actions.map((one) => [one.label, one.command])).toEqual([
-      ["Use P", { item: { edit: { item: "a", parent: "p" } } }],
-      ["Use the top level", { item: { edit: { item: "a", "no-parent": true } } }],
-    ]);
+    const parent = field("parent");
+    const titles = (id: string) => (id === parent.id ? "First" : "Parent");
+    const moved = needView(parent, none, titles);
+    expect(moved.text).toBe("First: its parent was written differently on two machines");
+    expect(moved.actions.map((one) => one.label)).toEqual(["Use Parent", "Use the top level"]);
     const gone = needView({ kind: "dangling", entity: "item", id: "a", field: "parent", target: "q" }, none, titles);
-    expect(gone.text).toBe("A: its parent names q, which doesn't exist");
+    expect(gone.text).toBe("Parent: its parent names q, which doesn't exist");
   });
 
   it("says a dangling waits-for as the plan reads, with the CLI's fix, and any other dangling field as before", () => {

@@ -1,0 +1,219 @@
+//! How each value of a conflict is kept, as the CLI and the app run it: the one place a [`Keep`] becomes a command,
+//! both as the API's body and as the line a terminal runs.
+
+use acyclic_core::model::Model;
+use acyclic_core::needs::{Keep, Kept, Unkept};
+use acyclic_core::write::{Assign, Change, ItemAssign, RepositoryAssign, ThreadAssign};
+use serde_json::{Map, Value as Json, json};
+
+use crate::commands::shell_word;
+use crate::resolve::repository_name;
+
+/// What no command keeps reads the same everywhere, and never sends the reader back to the list they came from.
+const IN_A_TERMINAL: &str =
+    "No command keeps this value: settle it in a terminal by writing the field you want";
+
+/// A value of a conflict in `field`, with the command that keeps it, as `command` (the API's body) and `run` (the
+/// terminal's line), or `why` none does.
+pub(crate) fn kept_json(model: &Model, field: &str, kept: &Kept) -> Json {
+    let (command, why) = match command(model, &kept.keep) {
+        Ok(command) => (Some(command), None),
+        Err(why) => (None, Some(why_not(field, why))),
+    };
+    json!({
+        "value": kept.value,
+        "command": command.as_ref().map(Command::body),
+        "run": command.as_ref().map(Command::line),
+        "why": why,
+    })
+}
+
+/// A command: its words, the record it is about, and its flags.
+struct Command {
+    words: [&'static str; 2],
+    /// The field the API names the record by, and the record.
+    subject: (&'static str, String),
+    flags: Vec<(&'static str, Flag)>,
+}
+
+enum Flag {
+    Text(String),
+    On,
+    /// A flag that may repeat, sent as a list.
+    Each(String),
+}
+
+impl Command {
+    fn body(&self) -> Json {
+        let mut fields = Map::new();
+        fields.insert(self.subject.0.to_owned(), json!(self.subject.1));
+        for (flag, value) in &self.flags {
+            let value = match value {
+                Flag::Text(text) => json!(text),
+                Flag::On => json!(true),
+                Flag::Each(text) => json!([text]),
+            };
+            fields.insert((*flag).to_owned(), value);
+        }
+        let mut inner = Map::new();
+        inner.insert(self.words[1].to_owned(), Json::Object(fields));
+        let mut outer = Map::new();
+        outer.insert(self.words[0].to_owned(), Json::Object(inner));
+        Json::Object(outer)
+    }
+
+    fn line(&self) -> String {
+        let mut words =
+            vec!["acyclic".to_owned(), self.words[0].to_owned(), self.words[1].to_owned()];
+        words.push(shell_word(&self.subject.1));
+        for (flag, value) in &self.flags {
+            words.push(format!("--{flag}"));
+            if let Flag::Text(text) | Flag::Each(text) = value {
+                words.push(shell_word(text));
+            }
+        }
+        words.join(" ")
+    }
+}
+
+/// The command a keep runs, or why there is none.
+fn command(model: &Model, keep: &Keep) -> Result<Command, Unkept> {
+    match keep {
+        Keep::Write(changes) => match changes.0.as_slice() {
+            [Change::Set(Assign::Item(id, assign))] => Ok(item_edit(id, assign)),
+            [Change::Set(Assign::Thread(id, assign))] => Ok(thread_edit(id, assign)),
+            [Change::Set(Assign::Repository(id, RepositoryAssign::DefaultBranch(branch)))] => {
+                Ok(Command {
+                    words: ["repository", "edit"],
+                    subject: ("repository", id.clone()),
+                    flags: vec![("default-branch", Flag::Text(branch.clone()))],
+                })
+            },
+            [
+                Change::Set(Assign::Repository(id, RepositoryAssign::Owner(owner))),
+                Change::Set(Assign::Repository(_, RepositoryAssign::Name(name))),
+            ] => Ok(Command {
+                words: ["repository", "edit"],
+                subject: ("repository", id.clone()),
+                flags: vec![("name", Flag::Text(format!("{owner}/{name}")))],
+            }),
+            [Change::Finish { item, evidence: Some(evidence), force: _ }] => {
+                let mut flags = Vec::new();
+                if let Some(commit) = &evidence.commit {
+                    let repository = evidence.repository.as_ref().map(|id| {
+                        model
+                            .repositories
+                            .get(id)
+                            .and_then(repository_name)
+                            .unwrap_or_else(|| id.clone())
+                    });
+                    let commit =
+                        repository.map_or_else(|| commit.clone(), |r| format!("{r}@{commit}"));
+                    flags.push(("commit", Flag::Text(commit)));
+                }
+                if let Some(text) = &evidence.text {
+                    flags.push(("evidence", Flag::Text(text.clone())));
+                }
+                flags.push(("force", Flag::On));
+                Ok(Command { words: ["item", "done"], subject: ("item", item.clone()), flags })
+            },
+            // `keeps` makes no other change set; a new one fails here, not silently.
+            other => {
+                debug_assert!(false, "no command keeps {other:?}");
+                Err(Unkept::NoCommand)
+            },
+        },
+        Keep::Reopen(item) => Ok(Command {
+            words: ["item", "reopen"],
+            subject: ("item", item.clone()),
+            flags: Vec::new(),
+        }),
+        Keep::Archive(item) => Ok(Command {
+            words: ["item", "archive"],
+            subject: ("item", item.clone()),
+            flags: Vec::new(),
+        }),
+        Keep::Not(why) => Err(why.clone()),
+    }
+}
+
+fn item_edit(id: &str, assign: &ItemAssign) -> Command {
+    let set = |flag: &'static str, value: &Option<String>| match value {
+        Some(value) => (flag, Flag::Text(value.clone())),
+        None => (clear(flag), Flag::On),
+    };
+    let flag = match assign {
+        ItemAssign::Title(title) => ("title", Flag::Text(title.clone())),
+        ItemAssign::State(state) => ("state", Flag::Text(word(state))),
+        ItemAssign::Notes(notes) => set("notes", notes),
+        ItemAssign::Parent(parent) => set("parent", parent),
+        ItemAssign::Thread(thread) => set("thread", thread),
+        ItemAssign::Size(size) => set("size", &size.as_ref().map(word)),
+        ItemAssign::WaitsFor(to, true) => ("waits-for", Flag::Each(to.clone())),
+        ItemAssign::WaitsFor(to, false) => ("no-waits-for", Flag::Each(to.clone())),
+        ItemAssign::Repository(repository, true) => ("repository", Flag::Each(repository.clone())),
+        ItemAssign::Repository(repository, false) => {
+            ("no-repository", Flag::Each(repository.clone()))
+        },
+        // Not edits: `keeps` keeps these by finishing or archiving.
+        ItemAssign::Evidence(_) | ItemAssign::Archive => {
+            unreachable!("an edit doesn't write {assign:?}")
+        },
+    };
+    Command { words: ["item", "edit"], subject: ("item", id.to_owned()), flags: vec![flag] }
+}
+
+fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
+    let flag = match assign {
+        ThreadAssign::Title(title) => ("title", Flag::Text(title.clone())),
+        ThreadAssign::Brief(Some(brief)) => ("brief", Flag::Text(brief.clone())),
+        ThreadAssign::Brief(None) => ("no-brief", Flag::On),
+        ThreadAssign::Repository(repository, true) => {
+            ("repository", Flag::Each(repository.clone()))
+        },
+        ThreadAssign::Repository(repository, false) => {
+            ("no-repository", Flag::Each(repository.clone()))
+        },
+    };
+    Command { words: ["thread", "edit"], subject: ("thread", id.to_owned()), flags: vec![flag] }
+}
+
+/// A value as the command line spells it, which is how it serializes.
+fn word<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+}
+
+const fn clear(flag: &str) -> &'static str {
+    match flag.as_bytes() {
+        b"notes" => "no-notes",
+        b"parent" => "no-parent",
+        b"thread" => "no-thread",
+        _ => "no-size",
+    }
+}
+
+/// Why no command keeps a value of `field`.
+fn why_not(field: &str, why: Unkept) -> String {
+    match why {
+        Unkept::NeedsEvidence => "Keep done in a terminal: run acyclic item done with its evidence".to_owned(),
+        Unkept::NoClear => "This field can't be cleared".to_owned(),
+        Unkept::NotDone if field == "evidence" => {
+            "Settle its state first, then keep this evidence".to_owned()
+        },
+        Unkept::NotDone => "Only done work is reopened".to_owned(),
+        Unkept::NameAlsoConflicted => {
+            "Its owner and name are both written apart: settle them together with acyclic repository edit, giving \
+             --name <OWNER/NAME>"
+                .to_owned()
+        },
+        Unkept::Ineligible(reasons) => {
+            let reasons: Vec<String> = reasons.iter().map(ToString::to_string).collect();
+            format!("It can't be archived: {}", reasons.join("; "))
+        },
+        Unkept::Refused(violations) => {
+            let violations: Vec<String> = violations.iter().map(ToString::to_string).collect();
+            format!("Keeping it would be refused: {}", violations.join("; "))
+        },
+        Unkept::Unsettled | Unkept::NoCommand | Unkept::Unreadable => IN_A_TERMINAL.to_owned(),
+    }
+}

@@ -1,0 +1,364 @@
+{
+  "about": "A needs-you list as this build sends it, with a conflict for each way a value is kept. Written by the CLI's contract tests with UPDATE_EXAMPLES=1; the app's tests read it.",
+  "needs": [
+    {
+      "entity": "item",
+      "field": "parent",
+      "id": "01900000-0000-7000-8000-0000000000a1",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a1",
+        "parent": {
+          "conflict": [
+            "01900000-0000-7000-8000-0000000000b1",
+            null
+          ]
+        },
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "status": "conflicted"
+        },
+        "stage": "blocked",
+        "state": {
+          "conflict": [
+            "done",
+            "parked"
+          ]
+        },
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": {
+          "conflict": [
+            "One",
+            "Two"
+          ]
+        }
+      },
+      "keeps": [
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a1",
+                "parent": "01900000-0000-7000-8000-0000000000b1"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --parent 01900000-0000-7000-8000-0000000000b1",
+          "value": "01900000-0000-7000-8000-0000000000b1",
+          "why": null
+        },
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a1",
+                "no-parent": true
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --no-parent",
+          "value": null,
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:parent",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        "01900000-0000-7000-8000-0000000000b1",
+        null
+      ]
+    },
+    {
+      "entity": "item",
+      "field": "state",
+      "id": "01900000-0000-7000-8000-0000000000a1",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a1",
+        "parent": {
+          "conflict": [
+            "01900000-0000-7000-8000-0000000000b1",
+            null
+          ]
+        },
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "status": "conflicted"
+        },
+        "stage": "blocked",
+        "state": {
+          "conflict": [
+            "done",
+            "parked"
+          ]
+        },
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": {
+          "conflict": [
+            "One",
+            "Two"
+          ]
+        }
+      },
+      "keeps": [
+        {
+          "command": null,
+          "run": null,
+          "value": "done",
+          "why": "Keep done in a terminal: run acyclic item done with its evidence"
+        },
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a1",
+                "state": "parked"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --state parked",
+          "value": "parked",
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:state",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        "done",
+        "parked"
+      ]
+    },
+    {
+      "entity": "item",
+      "field": "title",
+      "id": "01900000-0000-7000-8000-0000000000a1",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a1",
+        "parent": {
+          "conflict": [
+            "01900000-0000-7000-8000-0000000000b1",
+            null
+          ]
+        },
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "status": "conflicted"
+        },
+        "stage": "blocked",
+        "state": {
+          "conflict": [
+            "done",
+            "parked"
+          ]
+        },
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": {
+          "conflict": [
+            "One",
+            "Two"
+          ]
+        }
+      },
+      "keeps": [
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a1",
+                "title": "One"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --title One",
+          "value": "One",
+          "why": null
+        },
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a1",
+                "title": "Two"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --title Two",
+          "value": "Two",
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:title",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        "One",
+        "Two"
+      ]
+    },
+    {
+      "entity": "item",
+      "field": "evidence",
+      "id": "01900000-0000-7000-8000-0000000000e1",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000e1",
+        "parent": null,
+        "readiness": {
+          "reason": "no clone of the repository is mapped",
+          "repository": "01900000-0000-7000-8000-0000000000c1",
+          "status": "unverified"
+        },
+        "stage": "in-review",
+        "state": "done",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Shipped"
+      },
+      "keeps": [
+        {
+          "command": {
+            "item": {
+              "done": {
+                "commit": "me/code@abc1234",
+                "force": true,
+                "item": "01900000-0000-7000-8000-0000000000e1"
+              }
+            }
+          },
+          "run": "acyclic item done 01900000-0000-7000-8000-0000000000e1 --commit me/code@abc1234 --force",
+          "value": {
+            "commit": "abc1234",
+            "repository": "01900000-0000-7000-8000-0000000000c1"
+          },
+          "why": null
+        },
+        {
+          "command": {
+            "item": {
+              "done": {
+                "commit": "me/code@def5678",
+                "force": true,
+                "item": "01900000-0000-7000-8000-0000000000e1"
+              }
+            }
+          },
+          "run": "acyclic item done 01900000-0000-7000-8000-0000000000e1 --commit me/code@def5678 --force",
+          "value": {
+            "commit": "def5678",
+            "repository": "01900000-0000-7000-8000-0000000000c1"
+          },
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000e1:evidence",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        {
+          "commit": "abc1234",
+          "repository": "01900000-0000-7000-8000-0000000000c1"
+        },
+        {
+          "commit": "def5678",
+          "repository": "01900000-0000-7000-8000-0000000000c1"
+        }
+      ]
+    },
+    {
+      "entity": "repository",
+      "field": "owner",
+      "id": "01900000-0000-7000-8000-0000000000c2",
+      "keeps": [
+        {
+          "command": {
+            "repository": {
+              "edit": {
+                "name": "me/app",
+                "repository": "01900000-0000-7000-8000-0000000000c2"
+              }
+            }
+          },
+          "run": "acyclic repository edit 01900000-0000-7000-8000-0000000000c2 --name me/app",
+          "value": "me",
+          "why": null
+        },
+        {
+          "command": {
+            "repository": {
+              "edit": {
+                "name": "you/app",
+                "repository": "01900000-0000-7000-8000-0000000000c2"
+              }
+            }
+          },
+          "run": "acyclic repository edit 01900000-0000-7000-8000-0000000000c2 --name you/app",
+          "value": "you",
+          "why": null
+        }
+      ],
+      "key": "conflict:repository:01900000-0000-7000-8000-0000000000c2:owner",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        "me",
+        "you"
+      ]
+    },
+    {
+      "entity": "thread",
+      "field": "brief",
+      "id": "01900000-0000-7000-8000-0000000000f1",
+      "keeps": [
+        {
+          "command": {
+            "thread": {
+              "edit": {
+                "brief": "Why",
+                "thread": "01900000-0000-7000-8000-0000000000f1"
+              }
+            }
+          },
+          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --brief Why",
+          "value": "Why",
+          "why": null
+        },
+        {
+          "command": {
+            "thread": {
+              "edit": {
+                "no-brief": true,
+                "thread": "01900000-0000-7000-8000-0000000000f1"
+              }
+            }
+          },
+          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --no-brief",
+          "value": null,
+          "why": null
+        }
+      ],
+      "key": "conflict:thread:01900000-0000-7000-8000-0000000000f1:brief",
+      "kind": "conflict",
+      "notify": true,
+      "thread": {
+        "counts": {
+          "conflicted": 0,
+          "done": 1,
+          "members": 3
+        },
+        "heads": [
+          "01900000-0000-7000-8000-0000000000a1"
+        ],
+        "id": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Work"
+      },
+      "values": [
+        "Why",
+        null
+      ]
+    }
+  ]
+}

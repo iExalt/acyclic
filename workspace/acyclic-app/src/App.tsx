@@ -1290,6 +1290,7 @@ export function App() {
             }
             threads={sorted}
             lines={lines}
+            needs={load.needs}
             busy={busy}
           />
         )}

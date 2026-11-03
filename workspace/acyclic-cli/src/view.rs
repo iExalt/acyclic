@@ -10,7 +10,7 @@ use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{Readiness, ReadyThread};
-use acyclic_core::state::{Key, Millis, State};
+use acyclic_core::state::{Millis, State};
 use acyclic_core::time::rfc3339;
 use serde_json::{Map, Value as Json, json};
 
@@ -250,8 +250,8 @@ impl View<'_> {
         Ok(found)
     }
 
-    /// A conflict: the entity and field, the values written apart (a clear among them as `null`), the entity's
-    /// summary when it is an item or thread, and the command that settles it, if any command writes the field.
+    /// A conflict: the entity and field, the values written apart (a clear among them as `null`), how each is kept
+    /// (`keeps`: its command, or why none), and the entity's summary when it is an item or thread.
     fn conflict(
         &self,
         entity: &str,
@@ -259,16 +259,19 @@ impl View<'_> {
         field: &str,
         thread: &dyn Fn(&str) -> Json,
     ) -> Result<Json, CliError> {
-        let key = Key::new(entity, id)?;
-        let mut values: Vec<&Json> = Vec::new();
-        for (_, stamped) in self.state.field(&key, field).into_iter().flatten() {
-            if !values.contains(&&stamped.value) {
-                values.push(&stamped.value);
-            }
-        }
+        let by = acyclic_core::model::By { actor: acyclic_core::scope::USER, at: self.now };
+        let kept = acyclic_core::needs::keeps(
+            self.state,
+            self.model,
+            self.readiness,
+            (entity, id, field),
+            by,
+        )?;
+        let values: Vec<&Json> = kept.iter().map(|kept| &kept.value).collect();
+        let keeps: Vec<Json> =
+            kept.iter().map(|kept| crate::keep::kept_json(self.model, field, kept)).collect();
         let mut entry = json!({
-            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values,
-            "resolve": resolve(self.state, entity, id, field),
+            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values, "keeps": keeps,
         });
         match entity {
             "item" => entry["item"] = self.item_row(id)?,
@@ -276,45 +279,6 @@ impl View<'_> {
             _ => {},
         }
         Ok(entry)
-    }
-}
-
-/// The command that settles a conflict in `field` of an entity, with the choice left to fill in; none when no command
-/// writes the field.
-fn resolve(state: &State, entity: &str, id: &str, field: &str) -> Option<String> {
-    let edit = |flag: &str, clearable: bool| {
-        let clear = if clearable { format!(" (or --no-{flag})") } else { String::new() };
-        let command = match entity {
-            "item" => "item edit",
-            "thread" => "thread edit",
-            _ => "repository edit",
-        };
-        Some(format!(
-            "acyclic {command} {id} --{flag} <{}>{clear}",
-            flag.to_uppercase().replace('-', "_")
-        ))
-    };
-    match (entity, field) {
-        ("item" | "thread", "title") => edit(field, false),
-        ("repository", "owner" | "name") => edit("name", false),
-        ("item", "state") => edit("state", false),
-        ("item", "notes" | "size" | "parent" | "thread") | ("thread", "brief") => edit(field, true),
-        ("repository", "default-branch") => edit("default-branch", false),
-        ("item", "evidence") => Some(format!(
-            "acyclic item done {id} --force --commit <REPOSITORY>@<SHA> (or --evidence <TEXT>)"
-        )),
-        ("item", "archived") => Some(format!("acyclic item archive {id}")),
-        ("item", "reopened") => Some(format!("acyclic item reopen {id}")),
-        ("link", _) => {
-            let read = |name: &str| {
-                let key = Key::new("link", id).ok()?;
-                let found = state.field(&key, name)?.iter().next()?.1.value.clone();
-                found.as_str().map(str::to_owned)
-            };
-            let (from, to) = (read("from")?, read("to")?);
-            Some(format!("acyclic item edit {from} --waits-for|--no-waits-for {to}"))
-        },
-        _ => None,
     }
 }
 
@@ -474,7 +438,7 @@ mod tests {
     }
 
     /// The output conventions, for any JSON a command prints: keys in snake case, the adjectives always a boolean,
-    /// the times named `*_at`.
+    /// the times named `*_at`. A `command` is a request body to send back, in the request's own words.
     fn follows_the_conventions(value: &Json, path: &str) {
         match value {
             Json::Object(map) => {
@@ -485,6 +449,10 @@ mod tests {
                             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
                         "{here}: not snake case"
                     );
+                    // A command to send is the API's request body, in the request's own words.
+                    if name == "command" {
+                        continue;
+                    }
                     // What sits under `counts` is a number, whatever it is called.
                     if path.ends_with(".counts") {
                         assert!(inner.is_u64(), "{here}");
@@ -657,7 +625,16 @@ mod tests {
             assert_eq!(parent["entity"], "item");
             assert_eq!(parent["item"]["id"], "b");
             assert_eq!(parent["values"], json!([null, "a"]));
-            assert_eq!(parent["resolve"], "acyclic item edit b --parent <PARENT> (or --no-parent)");
+            // Each value with the command that keeps it.
+            let runs: Vec<&Json> =
+                parent["keeps"].as_array().unwrap().iter().map(|k| &k["run"]).collect();
+            assert_eq!(
+                runs,
+                [
+                    &json!("acyclic item edit b --no-parent"),
+                    &json!("acyclic item edit b --parent a")
+                ]
+            );
             // A thread cycle embeds each thread's summary.
             let cycle = of("thread-cycle")[0];
             let listed = thread_members(view.model);
@@ -685,19 +662,6 @@ mod tests {
                 follows_the_conventions(shown, "needs");
             }
         });
-    }
-
-    #[test]
-    fn a_conflicted_link_resolves_in_the_command_lines_words() {
-        let mut mac = tracker();
-        let link_key = key("link", "blocks-1-a-b");
-        for (field, value) in [("from", "a"), ("to", "b"), ("kind", "blocks")] {
-            mac.write(&link_key, field, USER, 1, Some(json!(value))).unwrap();
-        }
-        assert_eq!(
-            resolve(mac.state(), "link", "blocks-1-a-b", "present").as_deref(),
-            Some("acyclic item edit a --waits-for|--no-waits-for b")
-        );
     }
 
     #[test]

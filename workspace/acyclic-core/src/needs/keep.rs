@@ -47,7 +47,7 @@ pub enum Unkept {
     NoCommand,
     /// A repository's owner and name are written together, and the other one is in conflict too.
     NameAlsoConflicted,
-    /// Only done work is reopened, and the item isn't done.
+    /// Only done work is reopened or keeps evidence, and the item isn't done.
     NotDone,
     /// The item can't be archived, for these reasons.
     Ineligible(Vec<Reason>),
@@ -162,6 +162,8 @@ fn keep(
         },
         (kind::ITEM, field::EVIDENCE) => match value {
             Json::Null => Keep::Not(Unkept::NoCommand),
+            // Keeping evidence finishes the item again, which is more than keeping a value when it isn't done.
+            _ if !model.items.get(id).is_some_and(Item::is_done) => Keep::Not(Unkept::NotDone),
             _ => typed(value).map_or(Keep::Not(Unkept::Unreadable), |evidence: Evidence| {
                 let finish =
                     Change::Finish { item: id.to_owned(), evidence: Some(evidence), force: true };

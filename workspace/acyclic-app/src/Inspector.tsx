@@ -8,11 +8,12 @@ import type { Command, Item, Stage, Thread } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import type { Edited } from "./edits";
 import { useFocusIn } from "./focus";
-import { reopenCommand, resolveCommand, unsettledWhy } from "./forms";
+import { reopenCommand } from "./forms";
 import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
 import type { Line } from "./lines";
 import { Menu } from "./Menu";
+import { conflictOf, keepsIn, type Need } from "./needs";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
 import { StageCounts, StageIcon, StageLabel } from "./Stage";
@@ -50,6 +51,8 @@ export interface InspectorProps {
   threads: Thread[];
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
+  /** The needs-you list, whose conflict entries say how each of the item's conflicted values is kept. */
+  needs: readonly Need[];
   busy: boolean;
 }
 
@@ -74,6 +77,7 @@ export function Inspector({
   reopened,
   threads,
   lines,
+  needs,
   busy,
 }: InspectorProps) {
   const [editing, setEditing] = useState(reopened !== null);
@@ -242,7 +246,7 @@ export function Inspector({
           <code className="id">{item.id}</code>
         </dd>
       </dl>
-      <Conflicts item={item} titleOf={titleOf} busy={busy} onCommand={onCommand} />
+      <Conflicts item={item} needs={needs} titleOf={titleOf} busy={busy} onCommand={onCommand} />
       {editing ? (
         <ItemEditor
           item={item}
@@ -278,11 +282,13 @@ export function Inspector({
 /** Each conflicted field's values, written apart by different replicas, and a button to keep each one. */
 function Conflicts({
   item,
+  needs,
   titleOf,
   busy,
   onCommand,
 }: {
   item: Item;
+  needs: readonly Need[];
   titleOf: (id: string) => string;
   busy: boolean;
   onCommand: (command: Command) => void;
@@ -299,12 +305,17 @@ function Conflicts({
           <span className="field">{field}</span>
           <ul>
             {(values ?? []).map((value) => {
-              const settle = resolveCommand("item", item.id, field, value);
+              const kept = keepsIn(conflictOf(needs, "item", item.id, field)).find(
+                (one) => JSON.stringify(one.value) === JSON.stringify(value),
+              );
+              const settle = kept?.command ?? null;
               return (
                 <li key={JSON.stringify(value)}>
                   <span className="value">{shown(field, value)}</span>
                   {settle === null ? (
-                    <span className="why">{unsettledWhy("item", field, value)}</span>
+                    <span className="why">
+                      {kept?.why ?? "Settle this one in a terminal: run acyclic needs to see how"}
+                    </span>
                   ) : (
                     <button type="button" data-keep={value ?? ""} disabled={busy} onClick={() => onCommand(settle)}>
                       Use this

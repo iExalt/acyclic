@@ -130,39 +130,6 @@
       }
     },
     {
-      "name": "settle an item's parent as a clear",
-      "command": {
-        "item": {
-          "edit": {
-            "item": "01900000-0000-7000-8000-0000000000d1",
-            "no-parent": true
-          }
-        }
-      }
-    },
-    {
-      "name": "settle a thread's title",
-      "command": {
-        "thread": {
-          "edit": {
-            "thread": "01900000-0000-7000-8000-0000000000f1",
-            "title": "T"
-          }
-        }
-      }
-    },
-    {
-      "name": "settle a thread's brief as a clear",
-      "command": {
-        "thread": {
-          "edit": {
-            "thread": "01900000-0000-7000-8000-0000000000f1",
-            "no-brief": true
-          }
-        }
-      }
-    },
-    {
       "name": "reopen",
       "command": {
         "item": {

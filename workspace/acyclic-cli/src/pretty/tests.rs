@@ -137,6 +137,10 @@ fn a_lone_list_is_its_table_and_notes_keep_their_column() {
     let needs = json!({"needs": [
         {"kind": "thread-cycle", "threads": [{"id": "t1", "title": "T"}, {"id": "t2", "title": "U"}]},
         {"kind": "unthreaded", "item": {"id": "a1"}, "fix": "acyclic item edit a1 --thread <THREAD>"},
+        {"kind": "conflict", "entity": "item", "id": "a1", "field": "state", "keeps": [
+            {"value": "done", "command": null, "run": null, "why": "Keep done in a terminal"},
+            {"value": "parked", "command": {}, "run": "acyclic item edit a1 --state parked", "why": null},
+        ]},
     ]});
     let empty = json!({"repositories": []});
     let noted = json!([{"id": "a1", "notes": "first line\nsecond line"}]);

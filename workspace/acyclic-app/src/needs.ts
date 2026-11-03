@@ -2,8 +2,6 @@
 // has no command for say so and give the CLI's hint. Pure, so every kind is tested without a browser.
 
 import { type Command, titleOr } from "./api";
-import type { Entity } from "./forms";
-import { resolveCommand, unsettledWhy } from "./forms";
 import type { Line } from "./lines";
 
 /** The most items an entry lists before it says how many more. */
@@ -15,6 +13,25 @@ const EDIT_THREAD = "Open it to choose its thread in its editor";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
+
+/** A value of a conflict and how it is kept, as the needs-you list gives it: the command, or why there is none. */
+export interface Kept {
+  value: unknown;
+  command: Command | null;
+  run: string | null;
+  why: string | null;
+}
+
+/** The values a conflict entry holds, each with how it is kept. */
+export function keepsIn(need: Need | undefined): Kept[] {
+  return Array.isArray(need?.keeps) ? (need.keeps as Kept[]) : [];
+}
+
+/** The conflict entry for `field` of a record, by the key the list gives it. */
+export function conflictOf(needs: readonly Need[], entity: string, id: string, field: string): Need | undefined {
+  const key = `conflict:${entity}:${id}:${field}`;
+  return needs.find((need) => need.key === key);
+}
 
 export interface Action {
   label: string;
@@ -132,8 +149,6 @@ function viewOf(
       const entity = str(need.entity);
       const id = str(need.id);
       const field = str(need.field);
-      const values = Array.isArray(need.values) ? need.values : [];
-      const known = entity === "item" || entity === "thread";
       const actions: Action[] = [];
       const why: string[] = [];
       // A value naming an item or a thread by its name, as the command still sends the id.
@@ -149,23 +164,21 @@ function viewOf(
             : field === "thread"
               ? threadName(value)
               : value;
-      for (const value of values) {
-        const command = known ? resolveCommand(entity as Entity, id, field, value) : null;
-        if (command !== null)
+      for (const kept of keepsIn(need)) {
+        if (kept.command !== null)
           actions.push({
-            label: `Use ${said(value)}`,
-            command,
+            label: `Use ${said(kept.value)}`,
+            command: kept.command,
             action: "use",
-            done: `Used ${said(value)} for ${field}`,
+            done: `Used ${said(kept.value)} for ${field}`,
           });
-        else
-          why.push(`${said(value)}: ${known ? unsettledWhy(entity as Entity, field, value) : "settled in a terminal"}`);
+        else why.push(`${said(kept.value)}: ${kept.why ?? IN_A_TERMINAL}`);
       }
       return {
         ...base,
         text: `${nameOf(entity, id)}: its ${field} was written differently on two machines`,
         actions,
-        note: why.length === 0 ? null : [...why, str(need.resolve)].filter((one) => one !== "").join("; "),
+        note: why.length === 0 ? null : why.join("; "),
       };
     }
     case "thread-cycle":
@@ -213,7 +226,7 @@ function viewOf(
     }
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
-      const hint = str(need.fix) || str(need.resolve);
+      const hint = str(need.fix);
       return {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],
