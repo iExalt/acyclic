@@ -125,7 +125,9 @@ describe("a folded model on the Map", () => {
       folded.doneBoxes,
     );
     const node = view.nodes.find((one) => one.id === "~thread p a");
+    // Done, as everything it holds is: drawn as finished work, as core would tell a parent of it.
     expect(node).toMatchObject({
+      stage: "done",
       kind: "collapsed",
       parent: "p",
       note: "2 done",

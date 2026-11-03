@@ -66,7 +66,7 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       parent,
       thread,
       archived: false,
-      stage: null,
+      stage: "done",
       progress: counts,
       waitsFor: [],
     });

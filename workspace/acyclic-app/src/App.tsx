@@ -59,7 +59,7 @@ import { createSession, type Notice } from "./session";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
-import { threadCounts, wavesView } from "./waves";
+import { wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -194,11 +194,15 @@ export function App() {
           ),
     [model, sorted, showArchived],
   );
-  const counts = useMemo(() => threadCounts(shown), [shown]);
+  /** Each thread's leaves by stage, as core counts them: every one but those archived, read with the plan. */
+  const counts = useMemo(
+    () => new Map(loaded === null ? [] : loaded.threads.threads.map((one) => [one.id, one.counts])),
+    [loaded],
+  );
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
-    () => (loaded === null || outline === null ? null : wavesView(loaded.threads, shown, outline)),
-    [loaded, shown, outline],
+    () => (loaded === null || outline === null ? null : wavesView(loaded.threads, outline)),
+    [loaded, outline],
   );
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   worldNow.current = {

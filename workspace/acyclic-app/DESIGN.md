@@ -312,9 +312,10 @@ before what went wrong.
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
   stage's icon at the end.
-- **A project tells where it stands.** A box's title leads with the stage icon of its work as a whole (in progress while
-  any of it moves, else in review, done once all of it is, else ready, else blocked, else parked, else needs a thread),
-  after its chevron, and is muted once done or held up, as an item's title is.
+- **A project tells where it stands.** A box's title leads with the stage icon of its work as a whole, as core tells it
+  (once all of it is finished, in review while any still is, else done; else in progress once work under it has started
+  and some of what is left isn't parked; else ready, else blocked, else parked, else needs a thread), after its chevron,
+  and is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
