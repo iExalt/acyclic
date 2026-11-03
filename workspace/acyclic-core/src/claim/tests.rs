@@ -104,40 +104,38 @@ fn a_stored_claim_without_a_lease_holds_nothing() {
 }
 
 #[test]
-fn sync_renews_only_the_leases_of_holders_still_at_work() {
+fn renew_leases_extend_only_active_winners_to_the_default_lease() {
     let (mut a, mut b) = (replica("a"), replica("b"));
     thread(&mut a, "busy", &["x"]);
     thread(&mut a, "idle", &["y"]);
     b.join(&a.state).unwrap();
     thread(&mut b, "theirs", &["z"]);
-    claim(&mut a, "busy", "session/busy", 0, (LEASE, LEASE), None).unwrap();
+    claim(&mut a, "busy", "session/busy", 0, (LEASE / 5, LEASE), None).unwrap();
     claim(&mut a, "idle", "session/idle", 0, (LEASE, LEASE), None).unwrap();
     claim(&mut b, "theirs", "session/busy", 0, (LEASE, LEASE), None).unwrap();
     a.join(&b.state).unwrap();
     // Only the busy session writes anything else.
-    set(&mut a, &item_key("x").unwrap(), field::NOTES, Some(&"progress"), by("session/busy", 600))
+    set(&mut a, &item_key("x").unwrap(), field::NOTES, Some(&"progress"), by("session/busy", 50))
         .unwrap();
 
-    assert!(
-        renew_leases(&mut a, 400, LEASE, LEASE).unwrap().is_empty(),
-        "over half the lease is left"
-    );
     let busy = thread_key("busy").unwrap();
-    let renewed = renew_leases(&mut a, 900, LEASE, LEASE).unwrap();
+    let renewed = renew_leases(&mut a, 75, LEASE, LEASE).unwrap();
     assert_eq!(renewed, vec![busy.clone()], "not the idle one, nor another replica's");
-    let claim = winner(&a.state, &busy, 1_500).unwrap().unwrap();
-    assert_eq!((claim.lease_start, claim.lease_expires), (0, Some(1_900)));
+    let claim = winner(&a.state, &busy, 75).unwrap().unwrap();
+    assert_eq!((claim.lease_start, claim.lease_expires), (0, Some(75 + LEASE)));
     assert!(
         winner(&a.state, &thread_key("idle").unwrap(), 1_000).unwrap().is_none(),
         "expired after one lease"
     );
-    // Renewed once a burst of syncs, then not again until half the new lease has passed.
-    assert_eq!(renew_leases(&mut a, 950, LEASE, LEASE).unwrap(), Vec::<Key>::new());
-    // Renewals are the replica's writes, so they don't keep a holder looking busy.
-    assert_eq!(renew_leases(&mut a, 1_800, LEASE, LEASE).unwrap(), Vec::<Key>::new());
+    // Even the short initial lease renews to the default duration. It isn't due again at exactly half.
+    assert_eq!(renew_leases(&mut a, 575, LEASE, LEASE).unwrap(), Vec::<Key>::new());
+    assert_eq!(renew_leases(&mut a, 576, LEASE, LEASE).unwrap(), vec![busy.clone()]);
+    assert_eq!(winner(&a.state, &busy, 576).unwrap().unwrap().lease_expires, Some(576 + LEASE));
+    // Renewal writes don't keep a holder active once its last ordinary write leaves the window.
+    assert_eq!(renew_leases(&mut a, 1_100, LEASE, LEASE).unwrap(), Vec::<Key>::new());
     // A renewed claim is still its holder's to release, though the replica wrote it.
     assert!(release(&mut a, &busy, "session/busy"));
-    assert!(winner(&a.state, &busy, 1_500).unwrap().is_none());
+    assert!(winner(&a.state, &busy, 1_100).unwrap().is_none());
 }
 
 #[test]
