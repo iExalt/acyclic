@@ -4,9 +4,10 @@ use serde_json::json;
 use super::*;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent};
 use crate::ready::Ancestry;
-use crate::schema::{item as field, thread};
+use crate::schema::{item as field, repository, thread};
 use crate::scope::{ScopeEdit, USER, edit};
 use crate::state::{CLOCK_SKEW_MS, Replica, ReplicaId};
+use serde_json::Value as Json;
 
 const NOW: Millis = 10_000;
 
@@ -203,4 +204,138 @@ fn kinds_and_fields_no_reader_knows_are_skipped() {
     let model = Model::read(&r.state).unwrap();
     assert_eq!(model.thread_of("x"), Some("t"));
     assert_eq!(list(&r), [], "nothing about them reaches the list");
+}
+
+#[test]
+fn a_need_is_known_by_what_it_is_about_not_by_what_changes_while_it_stands() {
+    let reopened = |dependents: &[&str]| Entry::Reopened {
+        item: "a".into(),
+        dependents: dependents.iter().map(|&d| d.to_owned()).collect(),
+    };
+    assert_eq!(reopened(&[]).key(), "reopened:a");
+    assert_eq!(reopened(&["b"]).key(), reopened(&["b", "c"]).key());
+    let contest = |holders: &[&str]| Entry::Contest {
+        thread: "t".into(),
+        holders: holders.iter().map(|&h| h.to_owned()).collect(),
+    };
+    assert_eq!(contest(&["x", "y"]).key(), contest(&["y", "z"]).key());
+    let conflict = Entry::Conflict { kind: "item".into(), id: "a".into(), field: "title".into() };
+    assert_eq!(conflict.key(), "conflict:item:a:title");
+    // Two references from one item differ only in what they point at.
+    let dangling = |target: &str| Entry::Dangling {
+        kind: "item".into(),
+        id: "a".into(),
+        field: "repositories".into(),
+        target: target.into(),
+        fix: None,
+    };
+    assert_eq!(dangling("r").key(), "dangling:item:a:repositories:r");
+    assert_ne!(dangling("r").key(), dangling("s").key());
+    let cycle = Entry::ThreadCycle { threads: vec!["t".into(), "u".into()] };
+    assert_eq!(cycle.key(), "thread-cycle:t:u");
+}
+
+/// Writes `field` of `key` as `mine` here and as `theirs` on a replica that hasn't seen it, then joins them.
+fn apart(r: &mut Replica, key: &Key, field: &str, mine: &Json, theirs: &Json) {
+    // Each call writes from a replica of its own, as a replica's ids are its own.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut other = replica(&format!("other{n}"));
+    other.join(&r.state).unwrap();
+    r.write(key, field, USER, 5, Some(mine.clone())).unwrap();
+    other.write(key, field, USER, 5, Some(theirs.clone())).unwrap();
+    r.join(&other.state).unwrap();
+}
+
+fn kept(r: &Replica, entity: &str, id: &str, field: &str) -> Vec<(Json, Keep)> {
+    let model = Model::read(&r.state).unwrap();
+    let readiness = Readiness::new(&r.state, &model, NOW, &Unmapped);
+    keeps(&r.state, &model, &readiness, (entity, id, field), user(NOW))
+        .unwrap()
+        .into_iter()
+        .map(|kept| (kept.value, kept.keep))
+        .collect()
+}
+
+#[test]
+fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_not() {
+    use crate::write::{Assign, Change, ChangeSet, ItemAssign, RepositoryAssign, Rule};
+    let mut r = replica("a");
+    for id in ["x", "p", "kid"] {
+        add_item(&mut r, id, id, user(1)).unwrap();
+    }
+    set_parent(&mut r, "kid", Some("x"), user(1)).unwrap();
+    let x = item_key("x").unwrap();
+    let set = |assign: ItemAssign| {
+        Keep::Write(ChangeSet(vec![Change::Set(Assign::Item("x".into(), assign))]))
+    };
+    let values = |found: &[(Json, Keep)]| found.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
+    let keeps_in = |r: &Replica, field: &str| {
+        let mut found: Vec<(Json, Keep)> = kept(r, kind::ITEM, "x", field);
+        found.sort_by_key(|(value, _)| value.to_string());
+        found.into_iter().map(|(_, keep)| keep).collect::<Vec<_>>()
+    };
+
+    apart(&mut r, &x, field::TITLE, &json!("one"), &json!(null));
+    assert_eq!(values(&kept(&r, kind::ITEM, "x", field::TITLE)).len(), 2);
+    assert_eq!(
+        keeps_in(&r, field::TITLE),
+        [set(ItemAssign::Title("one".into())), Keep::Not(Unkept::NoClear)]
+    );
+
+    // Keeping done is left to a terminal, where evidence comes with it.
+    apart(&mut r, &x, field::STATE, &json!("done"), &json!("parked"));
+    assert_eq!(
+        keeps_in(&r, field::STATE),
+        [Keep::Not(Unkept::NeedsEvidence), set(ItemAssign::State(ItemState::Parked))]
+    );
+
+    // A clear is kept where the field can be cleared.
+    apart(&mut r, &x, field::SIZE, &json!("m"), &json!(null));
+    assert_eq!(
+        keeps_in(&r, field::SIZE),
+        [set(ItemAssign::Size(Some(model::Size::M))), set(ItemAssign::Size(None))]
+    );
+
+    // Putting x under its own child is refused by the judge, so no command is offered for it.
+    apart(&mut r, &x, field::PARENT, &json!("kid"), &json!("p"));
+    let found = keeps_in(&r, field::PARENT);
+    assert!(
+        matches!(&found[0], Keep::Not(Unkept::Refused(v)) if matches!(v[0].rule, Rule::ParentCycle(_))),
+        "{found:?}"
+    );
+    assert_eq!(found[1], set(ItemAssign::Parent(Some("p".into()))));
+
+    // Reopened holds which archive it left; only done work is reopened.
+    apart(&mut r, &x, field::REOPENED, &json!({"archived": false}), &json!(null));
+    assert_eq!(
+        keeps_in(&r, field::REOPENED),
+        [Keep::Not(Unkept::NoCommand), Keep::Not(Unkept::NotDone)]
+    );
+
+    // A repository's owner is kept with its name as it stands, and not while the name is in conflict too.
+    let repo = Key::new(kind::REPOSITORY, "r").unwrap();
+    for (field, value) in [(repository::OWNER, "o"), (repository::NAME, "n")] {
+        r.write(&repo, field, USER, 1, Some(json!(value))).unwrap();
+    }
+    apart(&mut r, &repo, repository::OWNER, &json!("o1"), &json!("o2"));
+    let with = |assign| Change::Set(Assign::Repository("r".into(), assign));
+    let owner = |owner: &str| {
+        Keep::Write(ChangeSet(vec![
+            with(RepositoryAssign::Owner(owner.into())),
+            with(RepositoryAssign::Name("n".into())),
+        ]))
+    };
+    let mut found = kept(&r, kind::REPOSITORY, "r", repository::OWNER);
+    found.sort_by_key(|(value, _)| value.to_string());
+    assert_eq!(
+        found.into_iter().map(|(_, keep)| keep).collect::<Vec<_>>(),
+        [owner("o1"), owner("o2")]
+    );
+    apart(&mut r, &repo, repository::NAME, &json!("n1"), &json!("n2"));
+    assert!(
+        kept(&r, kind::REPOSITORY, "r", repository::OWNER)
+            .iter()
+            .all(|(_, keep)| *keep == Keep::Not(Unkept::NameAlsoConflicted))
+    );
 }
