@@ -597,11 +597,14 @@ pub fn check_endpoint(endpoint: &str, transport: Transport) -> Result<(), Refuse
     }
 }
 
-/// A need's stable key: its kind and what it names, so the same need on the next look is known as told.
+/// A need's stable key: its kind and what it names, so the same need on the next look is known as told. Lists that
+/// change while the need stands, such as a contest's holders or a reopened item's dependents, stay out of it.
 #[must_use]
 pub fn key(entry: &Value) -> String {
     let mut parts = vec![entry["kind"].as_str().unwrap_or_default().to_owned()];
-    for field in ["id", "entity", "field"] {
+    // The fields after `field` name what a reference points at, a repository or a claim's holder: no kind that
+    // notifies has them, so adding them changed no key already told.
+    for field in ["id", "entity", "field", "target", "repository", "holder", "remote"] {
         if let Some(text) = entry[field].as_str() {
             parts.push(text.to_owned());
         }
@@ -681,6 +684,12 @@ mod tests {
         assert_eq!(line(&cycle(["t", "u"])), "T, U wait on each other");
         let conflict = json!({"kind": "conflict", "entity": "item", "id": "a", "field": "title"});
         assert_eq!(key(&conflict), "conflict:a:item:title");
+        // Two references from one item differ only in what they point at.
+        let dangling = |target: &str| json!({"kind": "dangling", "entity": "item", "id": "a", "field": "repository", "target": target});
+        assert_eq!(key(&dangling("r")), "dangling:a:item:repository:r");
+        assert_ne!(key(&dangling("r")), key(&dangling("s")));
+        let unverified = |repository: &str| json!({"kind": "unverified", "item": {"id": "a"}, "repository": repository});
+        assert_ne!(key(&unverified("r")), key(&unverified("s")));
         let long = json!({"kind": "reopened", "item": {"id": "a", "title": "x".repeat(500)}});
         assert_eq!(line(&long).chars().count(), 140);
     }
