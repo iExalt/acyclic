@@ -276,9 +276,12 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
     let item = "01900000-0000-7000-8000-0000000000a1";
     let thread = "01900000-0000-7000-8000-0000000000f1";
+    let target = "01900000-0000-7000-8000-0000000000b1";
     run(json!({"thread": {"add": {"id": thread, "title": "T"}}}));
     run(json!({"item": {"add": {"id": item, "title": "A", "thread": thread}}}));
-    run(json!({"thread": {"claim": {"thread": thread, "lease": 1}}}));
+    run(json!({"item": {"add": {"id": target, "title": "B"}}}));
+    run(json!({"item": {"edit": {"item": item, "waits-for": [target]}}}));
+    run(json!({"thread": {"claim": {"thread": thread, "lease": 1, "force": true}}}));
 
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
@@ -288,14 +291,15 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
             {"kind": "item-field", "item": item, "field": "title", "value": "A"},
             {"kind": "item-field", "item": item, "field": "notes", "value": null},
             {"kind": "thread-field", "thread": thread, "field": "title", "value": "T"},
-            {"kind": "thread-field", "thread": thread, "field": "brief", "value": null}
+            {"kind": "thread-field", "thread": thread, "field": "brief", "value": null},
+            {"kind": "waits-for", "item": item, "target": target, "present": true}
         ]
     });
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &accepted.to_string());
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // Leave a due claim so a post-renewal check would mutate persistent lease state before refusing.
-    run(json!({"thread": {"claim": {"thread": thread, "lease": 1}}}));
+    run(json!({"thread": {"claim": {"thread": thread, "lease": 1, "force": true}}}));
     let snapshot = || {
         let (store, _) = acyclic_core::store::Tracker::open(&tracker).unwrap();
         store.load().unwrap()
@@ -305,7 +309,8 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         "command": {"item": {"edit": {"item": item, "title": "C"}}},
         "expect": [
             {"kind": "item-field", "item": item, "field": "title", "value": "A"},
-            {"kind": "thread-field", "thread": thread, "field": "title", "value": "stale"}
+            {"kind": "thread-field", "thread": thread, "field": "title", "value": "stale"},
+            {"kind": "waits-for", "item": item, "target": target, "present": false}
         ]
     });
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &stale.to_string());
@@ -321,6 +326,13 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
             .unwrap()
             .iter()
             .any(|mismatch| mismatch["actual"] == json!("T"))
+    );
+    assert!(
+        refusal["error"]["details"]["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mismatch| mismatch["actual"] == json!(true))
     );
     assert_eq!(snapshot(), before, "a refused guard must not stamp the clock or renew a claim");
 

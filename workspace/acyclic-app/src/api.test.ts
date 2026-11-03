@@ -50,6 +50,22 @@ describe("command", () => {
     const fetcher = async () => new Response("forbidden", { status: 403 });
     await expect(command({ item: "list" }, fetcher)).rejects.toMatchObject({ code: "http" });
   });
+
+  it("sends Undo expectations beside the command", async () => {
+    let sent: unknown;
+    const fetcher = async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ ok: true, data: {} }));
+    };
+    const body = { item: { edit: { item: ID.a, title: "A" } } };
+    const conditions = [
+      { kind: "item-field" as const, item: ID.a, field: "title" as const, value: "B" },
+      { kind: "waits-for" as const, item: ID.a, target: ID.b, present: false },
+      { kind: "started-at-most" as const, item: ID.a, count: 0 },
+    ];
+    await command(body, fetcher, conditions);
+    expect(sent).toEqual({ command: body, expect: conditions });
+  });
 });
 
 describe("items", () => {

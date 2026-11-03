@@ -3,7 +3,18 @@
 // what a write does to where the user is goes through `nav`. Plain TypeScript with its ports passed in, so every
 // outcome of a write, a read and an undo is tested without a browser.
 
-import { type Command, command, type Fetch, failure, type Item, items, needs, type Threads, threads } from "./api";
+import {
+  type Command,
+  command,
+  type Expected,
+  type Fetch,
+  failure,
+  type Item,
+  items,
+  needs,
+  type Threads,
+  threads,
+} from "./api";
 import { landed, type Pending, redraft, type Sent, told, unanswered } from "./edits";
 import type { Intent } from "./nav";
 import type { Need } from "./needs";
@@ -206,7 +217,12 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
     if (!sending) set({ pending: null });
   }
 
-  async function write(body: Command, after: After, drawn: Pending | null = null): Promise<boolean> {
+  async function write(
+    body: Command,
+    after: After,
+    drawn: Pending | null = null,
+    expected?: readonly Expected[],
+  ): Promise<boolean> {
     // Any write sent while one is out was made through a control the busy state forgot to hold: dropped.
     if (sending) return false;
     sending = true;
@@ -221,7 +237,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
     }
     let sent: Sent;
     try {
-      await command(body, fetcher);
+      await command(body, fetcher, expected);
       // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
       if (drawn !== null) reads = answered(reads, drawn);
       try {
@@ -327,7 +343,13 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
       const plan = snap.plan;
       if (plan === null || !offered.holds(plan))
         tell({ text: "Changed since, so it can't be undone", offer: null, retry: null, lasts: "offer", at: null });
-      else await write(offered.command, { select: offered.shows ?? nav.item(), pin: null, undone: offered.undone });
+      else
+        await write(
+          offered.command,
+          { select: offered.shows ?? nav.item(), pin: null, undone: offered.undone },
+          null,
+          offered.expect,
+        );
     } finally {
       undoing = false;
     }

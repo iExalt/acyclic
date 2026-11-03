@@ -286,6 +286,16 @@ function shown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+/** A JSON value's key with object fields sorted and array order kept. */
+export function structuralKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(structuralKey).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const fields = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${fields.map(([key, child]) => `${JSON.stringify(key)}:${structuralKey(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? String(value);
+}
+
 /** A line for a kind the app only shows. */
 function describe(
   kind: string,

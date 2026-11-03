@@ -3,7 +3,7 @@ import { addCommand } from "./edits";
 import type { Intent } from "./nav";
 import { createSession, type Notice, type Ports, UNDO_KEY, UNDOING } from "./session";
 
-type Fault = "busy" | "archived" | "lost" | "lost-applied" | "500";
+type Fault = "busy" | "archived" | "changed-since" | "lost" | "lost-applied" | "500";
 
 /** A command's name, as the server's tests name it: `needs`, `item list`, `item edit`. */
 function nameOf(body: unknown): string {
@@ -20,6 +20,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
   const plan = new Map(Object.entries(titles));
   const faults: Record<string, Fault[]> = {};
   const writes: unknown[] = [];
+  const requests: unknown[] = [];
   const apply = (body: { item: { add?: { id: string; title: string }; edit?: { item: string; title?: string } } }) => {
     const { add, edit } = body.item;
     if (add) plan.set(add.id, add.title);
@@ -27,7 +28,9 @@ function server(titles: Record<string, string> = { a: "A" }) {
   };
   const answer = (data: unknown) => new Response(JSON.stringify({ ok: true, data }));
   const fetcher: Ports["fetcher"] = async (_url, init) => {
-    const body = JSON.parse(String(init.body));
+    const request = JSON.parse(String(init.body));
+    requests.push(request);
+    const body = typeof request === "object" && request !== null && "command" in request ? request.command : request;
     const name = nameOf(body);
     const fault = faults[name]?.shift();
     if (name === "item add" || name === "item edit") writes.push(body);
@@ -37,7 +40,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
       throw new TypeError("Failed to fetch");
     }
     if (fault === "500") return new Response("oops", { status: 500 });
-    if (fault === "busy" || fault === "archived")
+    if (fault === "busy" || fault === "archived" || fault === "changed-since")
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
     if (name === "item list") return answer({ items: [...plan.keys()].map((id) => ({ id })) });
     if (name === "item show")
@@ -62,7 +65,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
   const fail = (name: string, ...queued: Fault[]) => {
     faults[name] = [...(faults[name] ?? []), ...queued];
   };
-  return { plan, fetcher, fail, writes };
+  return { plan, fetcher, fail, requests, writes };
 }
 
 /** A tab's storage, in memory, or one that throws at every call. */
@@ -185,6 +188,22 @@ describe("a session's Undo", () => {
     await session.undo();
     expect(session.snapshot().notice?.text).toBe("Changed since, so it can't be undone");
     expect(tracker.writes).toHaveLength(1);
+  });
+
+  it("sends the checked scalar value and keeps a server changed-since refusal in the notice", async () => {
+    const { session, tracker } = await renamed();
+    tracker.fail("item edit", "changed-since");
+    await session.undo();
+    expect(tracker.requests.at(-1)).toEqual({
+      command: rename("a", "A"),
+      expect: [{ kind: "item-field", item: "a", field: "title", value: "B" }],
+    });
+    expect(tracker.plan.get("a")).toBe("B");
+    expect(session.snapshot().notice).toMatchObject({
+      text: "Changed since, so it can't be undone",
+      offer: null,
+      lasts: "refusal",
+    });
   });
 
   it("keeps the Undo on offer when the plan can't be read to check it", async () => {

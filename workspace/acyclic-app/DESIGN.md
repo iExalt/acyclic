@@ -369,17 +369,14 @@ before what went wrong.
   which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
   between the two, so it never runs through a title.
 
-## Open decisions
-
-- Undo checks what a write left against a plan read just before it, in the app: a write landing between that read
-  and the undo isn't caught. A compare-and-set on the server would close that window.
-
 ## Decision log
 
 - 2026-10-31: the quiet look over a familiar, header-and-tabs one; the user preferred it and wants more from Linear.
 - 2026-10-31: the Overview as home over the Map; the user preferred it.
 - 2026-10-31: Needs you open is marked lighter than the view shown, so only one place reads as current.
 - 2026-10-31: the scheme follows the system's.
+- 2026-11-03: The server checks Undo's field, link and started-work conditions under the batch lock, before lease
+  renewal. A mismatch leaves the tracker unchanged and keeps “Changed since, so it can't be undone” in the notice.
 - 2026-10-31: the Map's links bundled on the way out, in one column per chain; the user found it cleanest and liked it
   vertical, and showed that bundling both ends made links ambiguous. Wrapping long chains into columns is a non-goal.
 - 2026-11-01: Up next lists the approved threads with an item ready, Any time first, then by wave, over the next wave

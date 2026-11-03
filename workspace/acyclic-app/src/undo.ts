@@ -1,9 +1,8 @@
 // Undo: for a write that has an exact inverse, the write that takes it back, with what must still hold for that to be
 // safe. A move, an item's fields but its thread, and a waits-for added or removed undo; nothing else does: an add (the app
 // has no delete), a reopen, a conflict settled, a thread changed (an agent may have taken up its work). The guard is
-// checked against a plan read just before the undo is sent; the server has no compare-and-set, so a write landing
-// between that read and the undo isn't caught. Pure, so tested without a browser.
-import type { Command, Item, Stage } from "./api";
+// checked against a fresh plan and sent as conditions for the server's locked write. Pure, so tested without a browser.
+import type { Command, Expected, Item, Stage } from "./api";
 
 /** The plan a write was sent over, or the plan as it is when Undo is pressed. */
 export interface Plan {
@@ -16,6 +15,8 @@ export interface Undo {
   /** What the undo did, said once it has. */
   undone: string;
   command: Command;
+  /** The same field, link and started-work checks as `holds`, evaluated under the server's write lock. */
+  expect: Expected[];
   /** Whether the plan still holds what the write left, so the undo takes back that write and nothing done since. */
   holds: (now: Plan) => boolean;
   /** An item the undo puts somewhere else, to select and bring into view where it lands, as the write did. */
@@ -61,6 +62,10 @@ export function undoOf(command: Command, before: Plan): Undo | null {
       text: added ? now : longer,
       undone: added ? longer : again,
       command: { item: { edit: { item: id, [added ? "no-waits-for" : "waits-for"]: [waits] } } },
+      expect: [
+        { kind: "waits-for", item: id, target: waits, present: added },
+        ...(!added ? [{ kind: "started-at-most" as const, item: id, count: started(was) }] : []),
+      ],
       holds: (now) => waiting(now) === added && unstarted(now),
     };
   }
@@ -72,6 +77,7 @@ export function undoOf(command: Command, before: Plan): Undo | null {
       text: to === null ? `Moved ${titleOf(id)} to the top level` : `Moved ${titleOf(id)} into ${titleOf(to)}`,
       undone: `Moved ${titleOf(id)} back`,
       command: { item: { edit: back === null ? { item: id, "no-parent": true } : { item: id, parent: back } } },
+      expect: [{ kind: "item-field", item: id, field: "parent", value: to }],
       holds: (now) => (now.items.get(id)?.parent ?? null) === to,
       shows: id,
     };
@@ -105,6 +111,18 @@ export function undoOf(command: Command, before: Plan): Undo | null {
     text: `Edited ${named}${thread ? ". Its thread can't be changed back from here" : ""}`,
     undone: `Set ${titleOf(id)} back${thread ? ", except its thread" : ""}`,
     command: { item: { edit: back } },
+    expect: [
+      ...[...set].map(([field, value]): Expected => ({ kind: "item-field", item: id, field, value })),
+      ...(!set.has("state")
+        ? []
+        : waitersOf(before, id).map(
+            (one): Expected => ({
+              kind: "started-at-most",
+              item: one,
+              count: started(before.items.get(one)),
+            }),
+          )),
+    ],
     holds: (now) =>
       [...set].every(([field, value]) => held(now.items.get(id), field) === value) &&
       (!set.has("state") ||
