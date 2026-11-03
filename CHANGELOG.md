@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.6.0](https://github.com/iExalt/acyclic/compare/v0.5.2...v0.6.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **up:** `acyclic up --link` and `--rotate` are gone, and `up` no longer prints `session` or `link`. A Tailscale setup pointed at the old secret path must run the printed `tailscale serve` command again.
+* a conflict entry no longer has `resolve`; each value's `run` replaces it.
+* **core:** the `checked-field` error code is gone. When `item done` breaks several rules at once, the one reported follows the judge's order (usage, then not found, then refused), so an invalid commit on work that isn't ready now reports `invalid-commit` rather than `not-ready`.
+* **cli:** judge item, thread and repository adds and edits as change sets ([#135](https://github.com/iExalt/acyclic/issues/135))
+
+### Features
+
+* **app:** draw each parent's stage and each thread's counts as core rolls them up ([#145](https://github.com/iExalt/acyclic/issues/145)) ([890bb1b](https://github.com/iExalt/acyclic/commit/890bb1b6285a8d4c2b33f75b58d1a03eb83e221d))
+* **app:** fold each Map box's finished work into done boxes ([#143](https://github.com/iExalt/acyclic/issues/143)) ([ae06d6c](https://github.com/iExalt/acyclic/commit/ae06d6c31176b837e7a9d8631523ca16559cbe26))
+* **app:** restore where an item or thread was opened from on Forward, and frame a thread from its item ([#141](https://github.com/iExalt/acyclic/issues/141)) ([9dc81ad](https://github.com/iExalt/acyclic/commit/9dc81ad488a796b22897ee0c52fb9ab1e0cbee9f))
+* **cli:** judge item, thread and repository adds and edits as change sets ([#135](https://github.com/iExalt/acyclic/issues/135)) ([031de16](https://github.com/iExalt/acyclic/commit/031de16c1eb594fdcb0673ec6fb7c4cf3de49f08))
+* **core:** judge finishing work and claims, and keep record writes behind the judge ([#136](https://github.com/iExalt/acyclic/issues/136)) ([d7244c7](https://github.com/iExalt/acyclic/commit/d7244c73fe3700b1af9745634d3c724d92714527))
+* **core:** judge imports as one change set in a single write module ([#134](https://github.com/iExalt/acyclic/issues/134)) ([1d50274](https://github.com/iExalt/acyclic/commit/1d50274fed34d360410a11f75ca3d9b0cf969953))
+* **core:** key needs-you entries in core and say how each conflicted value is kept ([#138](https://github.com/iExalt/acyclic/issues/138)) ([67f49f2](https://github.com/iExalt/acyclic/commit/67f49f2f2edf9742a990d4e40105e6b6573b118b))
+* **core:** roll a parent's stage up from its leaves and count each thread's leaves by stage ([#142](https://github.com/iExalt/acyclic/issues/142)) ([dc21706](https://github.com/iExalt/acyclic/commit/dc217067120c93f7cf96857bdf3bf2634aeae35b))
+* offer the command that keeps each value of a conflict, from one renderer ([#139](https://github.com/iExalt/acyclic/issues/139)) ([ab1e1d4](https://github.com/iExalt/acyclic/commit/ab1e1d4bc22dcca674ba442f2207a0d532484f6b))
+* **up:** drop pairing and the session; trust local processes ([#147](https://github.com/iExalt/acyclic/issues/147)) ([dcf3f28](https://github.com/iExalt/acyclic/commit/dcf3f280820e41a0b39ad4f9c252d2f39630b778))
+
+
+### Bug Fixes
+
+* **app:** hold the Map's top level from its last packing, so opening and closing order doesn't move boxes ([#148](https://github.com/iExalt/acyclic/issues/148)) ([f71d67d](https://github.com/iExalt/acyclic/commit/f71d67d66d8b7541ed5815588985ef181a10e517))
+* **app:** keep the Map's top-level boxes in place when a box inside one opens ([#146](https://github.com/iExalt/acyclic/issues/146)) ([d20df25](https://github.com/iExalt/acyclic/commit/d20df250e74b406cdcdbec9450354e826b2f53f9))
+* **core:** refuse a write that settles a parent or link on a value closing a cycle ([#137](https://github.com/iExalt/acyclic/issues/137)) ([485ac36](https://github.com/iExalt/acyclic/commit/485ac366ec11e575c2af0bb0cf473f74702c8ecd))
+* count a thread only while it has a record, and list an item in a missing thread once on needs-you ([#133](https://github.com/iExalt/acyclic/issues/133)) ([0adeacc](https://github.com/iExalt/acyclic/commit/0adeacc1a98b2819df351768d3a3b3bd70c9d0e4))
+* **server:** key needs-you notifications by what each reference points at ([#131](https://github.com/iExalt/acyclic/issues/131)) ([c6cf185](https://github.com/iExalt/acyclic/commit/c6cf185f53fe354d38309beb36afcf494f286d1b))
+
 ## [0.5.2](https://github.com/iExalt/acyclic/compare/v0.5.1...v0.5.2) (2026-11-02)
 
 
