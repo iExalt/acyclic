@@ -1063,6 +1063,7 @@ export function App() {
             palette={palette}
             selected={selected}
             onSelect={(id) => go({ kind: "tap", id })}
+            onThread={toThread}
             focus={requests.focus}
             framed={requests.frame}
             onPick={

@@ -2,6 +2,7 @@
 // must come first to the item that waits. Pure functions, tested without a browser.
 
 import type { Counts, Item, Stage } from "../api";
+import { type DoneBox, noteOf } from "./fold";
 
 /** An item, with what the Map reads of it. */
 export interface MapItem {
@@ -148,6 +149,9 @@ export interface VisibleNode {
   thread: string | null;
   /** A parent's leaves by stage, as its item has them. */
   progress: Counts | null;
+  /** For a done box (see `fold.ts`), what it is and the words under its name; else absent. */
+  doneBox?: DoneBox;
+  note?: string;
 }
 
 /** An edge from the item that must come first to the one that waits for it, between visible nodes. */
@@ -214,7 +218,7 @@ export function impliedWithin(model: Model, shown: (id: string) => boolean) {
  * show. Edges that end up inside one node, or between a box and something it contains, are dropped: the box already
  * says the one holds the other.
  */
-export function visible(model: Model, state: ViewState): View {
+export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): View {
   // The visible item standing in for each item, absent when it is hidden in an archived subtree.
   const stand = new Map<string, string>();
   const nodes: VisibleNode[] = [];
@@ -245,6 +249,7 @@ export function visible(model: Model, state: ViewState): View {
       stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : null,
       thread: item.thread,
       progress: item.progress,
+      ...doneBoxOf(doneBoxes.get(id), item.progress),
     });
     for (const child of kids) walk(child, id, collapsed ? id : null, archived);
   };
@@ -283,6 +288,11 @@ export function visible(model: Model, state: ViewState): View {
   }
   for (const members of threads.values()) members.sort();
   return { nodes, edges, threads };
+}
+
+/** A done box's fields on its node, or none for an item. */
+function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { doneBox?: DoneBox; note?: string } {
+  return doneBox === undefined ? {} : { doneBox, note: noteOf(doneBox, progress?.leaves ?? 0) };
 }
 
 /**

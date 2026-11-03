@@ -2170,6 +2170,60 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 
 @timed
+def fold_journey(page, view, env, plan, name, failures):
+    """A finished thread's items in a box fold into one box, named after it, on the Map; the command menu still finds
+    one of them, opening every box above it."""
+    box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id) and plan.shown(id, False))
+    thread = json.loads(run(env, "thread", "add", "--title", "Folded away"))["data"]["thread"]
+    items = []
+    for title in ("Fold the first", "Fold the second"):
+        added = json.loads(run(env, "item", "add", "--title", title, "--parent", box, "--thread", thread))
+        items.append(added["data"]["item"])
+        run(env, "item", "done", items[-1], "--evidence", "folded by a journey")
+    to_map(page)
+    refresh(page)
+    folded = f"~thread {box} {thread}"
+    # Folded as a box of its own, or with the box's other finished work in its Done box.
+    page.wait_for_function(
+        "([folded, done]) => { const m = document.querySelector('[data-testid=map]');"
+        " return m?.dataset.state === 'drawn' && (m.cy.getElementById(folded).nonempty()"
+        " || m.cy.getElementById(done).nonempty()); }",
+        arg=[folded, f"~done {box}"],
+        timeout=20_000,
+    )
+    drawn = page.get_by_test_id("map").evaluate(
+        "(m, ids) => ids.filter(id => m.cy.getElementById(id).nonempty())", items
+    )
+    if drawn:
+        failures.append(f"{name}: a finished thread's items {drawn} were drawn rather than folded")
+    menu = page.get_by_test_id("command-menu")
+    if view.get("has_touch"):
+        page.locator("[data-action=search]").tap()
+    else:
+        page.keyboard.press("ControlOrMeta+k")
+    menu.wait_for(timeout=5_000)
+    page.keyboard.type("Fold the first")
+    row = page.locator(f".command-row[data-command='item:{items[0]}']")
+    row.wait_for(timeout=5_000)
+    row.tap() if view.get("has_touch") else row.click()
+    try:
+        page.wait_for_function(
+            "id => { const m = document.querySelector('[data-testid=map]');"
+            " return m?.dataset.state === 'drawn' && m.cy.getElementById(id).nonempty(); }",
+            arg=items[0],
+            timeout=10_000,
+        )
+        page.screenshot(path=SHOTS / f"app-{name}-fold.png")
+        print(f"{name}: a finished thread folded into one box, and the command menu unfolded it to {items[0]}")
+    except PlaywrightTimeout:
+        failures.append(f"{name}: the command menu's folded item {items[0]} wasn't unfolded into view")
+    finally:
+        # Reopened, so the views after, which count every item the plan holds, draw them as tiles.
+        for id in items:
+            run(env, "item", "reopen", id)
+
+
+@timed
 def needs_journey(page, env, plan, thread, name, failures):
     """Settles a conflict two clones wrote from Needs you's view, whose count follows, and names threads that wait on
     each other. A thread or an item an entry names goes to the Map, and closing it, by Escape or its ✕, comes back to
@@ -2508,6 +2562,7 @@ def main():
                     failed_add_journey(page, errors, name, failures)
                     thread_journey(page, env, plan, plan.first_thread, name, failures)
                     needs_journey(page, env, plan, plan.first_thread, name, failures)
+                    fold_journey(page, view, env, plan, name, failures)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:

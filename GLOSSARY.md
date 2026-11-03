@@ -129,6 +129,12 @@ _Avoid_: card, node (in the app's words)
 How the Map draws an item with children, holding their tiles and boxes; folded, it is drawn as a tile.
 _Avoid_: group (for this), container, lane
 
+**Done box**:
+A box the Map makes of finished work, which holds no item of its own: a finished thread's items in a box, named after
+the thread, or the box's other finished work that no link ties to anything left there, named Done, last in its
+columns. A thread is finished when every leaf it has, archived ones aside, is done.
+_Avoid_: pile, group, archive
+
 **Stage**:
 Where an item's work stands, said one way everywhere with its icon: in progress, in review, done, ready, blocked,
 parked, or needs a thread. A parent's comes from its leaves: once every leaf is finished, in review while any still is,

@@ -14,6 +14,7 @@ import { onChevron, STRIP } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
+import { foldDone, isDoneBox } from "./fold";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, type View, visible } from "./model";
 import {
@@ -30,6 +31,7 @@ import {
 } from "./reveal";
 import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
+import { tapAction } from "./tap";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -93,6 +95,8 @@ export interface PlanMapProps {
   framed?: Framed | undefined;
   /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
   onPick: ((item: string | null) => void) | null;
+  /** A finished thread's box tapped: its thread is picked, as the sidebar picks one. */
+  onThread?: (thread: string) => void;
 }
 
 export interface Framed {
@@ -115,11 +119,18 @@ export default function PlanMap({
   focus,
   framed,
   onPick,
+  onThread,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
-  const model = useMemo(() => buildModel(items), [items]);
+  // The threads' names, which name their doneBoxes of finished work; as a key, so a new palette doesn't fold afresh.
+  const names = JSON.stringify([...lines].map(([id, line]) => [id, line.name]));
+  // The plan as drawn, each box's finished work folded into doneBoxes, which only the Map holds.
+  const { model, doneBoxes } = useMemo(() => {
+    const named = new Map<string, string>(JSON.parse(names));
+    return foldDone(buildModel(items), (thread) => named.get(thread) ?? null);
+  }, [items, names]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
@@ -138,7 +149,10 @@ export default function PlanMap({
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
   const drawnModel = useRef<Model | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
-  const view = useMemo(() => visible(model, { collapsed, showArchived }), [model, collapsed, showArchived]);
+  const view = useMemo(
+    () => visible(model, { collapsed, showArchived }, doneBoxes),
+    [model, collapsed, showArchived, doneBoxes],
+  );
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
   const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
 
@@ -409,29 +423,45 @@ export default function PlanMap({
   }, [thread, drawn]);
 
   // The latest handlers, so the tap listener is added once.
-  const handlers = useRef({ onSelect, onPick });
-  handlers.current = { onSelect, onPick };
+  const handlers = useRef({ onSelect, onPick, onThread });
+  handlers.current = { onSelect, onPick, onThread };
   /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
   const taps = useRef(0);
   useEffect(() => {
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
-      const { onSelect, onPick } = handlers.current;
+      const { onSelect, onPick, onThread } = handlers.current;
       const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
       const node = target !== core && "isNode" in target && target.isNode() ? target : null;
-      if (onPick !== null) {
-        onPick(node === null ? null : node.id());
-        return;
-      }
       if (node === null) {
-        onSelect(null);
+        if (onPick !== null) onPick(null);
+        else onSelect(null);
         return;
       }
       const id = node.id();
       const kind = node.data("kind") as string;
-      if (onChevron(kind, node.boundingBox({ includeLabels: false }), event.position, core.zoom())) {
+      const doneBox = isDoneBox(id);
+      const thread = doneBox ? ((node.data("thread") as string | null) ?? null) : null;
+      const action = tapAction({
+        picking: onPick !== null,
+        doneBox,
+        kind,
+        // Without a way to pick a thread, a finished thread's box folds and unfolds as the Done box does.
+        thread: onThread === undefined ? null : thread,
+        chevron: onChevron(kind, node.boundingBox({ includeLabels: false }), event.position, core.zoom()),
+      });
+      if (action === "ignore") return;
+      if (action === "pick") {
+        onPick?.(id);
+        return;
+      }
+      if (action === "thread") {
+        if (thread !== null) onThread?.(thread);
+        return;
+      }
+      if (action === "toggle") {
         const corner = node.renderedBoundingBox({ includeLabels: false });
         anchor.current = { id, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";

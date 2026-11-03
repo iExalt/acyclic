@@ -344,6 +344,16 @@ before what went wrong.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.
+- **Finished work folds away** (`src/map/fold.ts`), so what is left reads first (the user: "it's hard to tell what's
+  done and what's not done"). In a box, a finished thread's items, two or more, are one done box named after the
+  thread, its stripe in the thread's colour, its name on two lines over how many are done; finished work that no link
+  ties, through other finished work, to anything left in the box goes into one box, Done, last in its columns ("37
+  done in 5 threads"), when it holds two or more and something stands beside it. Done boxes open folded and fold as
+  boxes do; unfolded, a finished thread's is a frame around its items with its name and chevron, the user's pick over a
+  Fold button in the thread's panel or a Fold tile. A tap on a finished thread's box anywhere but its chevron picks the
+  thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
+  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. With archived items
+  shown, an archived item stays outside them, beside them.
 - **The wheel zooms 12 % a notch** of a Mac's mouse, which scrolls 80 px, and in step with the pixels where a notch
   scrolls more (15 % for 100 px), with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past
@@ -393,3 +403,7 @@ before what went wrong.
   (the 44 px bar and tab bar, a panel's 144 px first height, a thread's status and counts on one line, and Needs you's
   items 32 px apart); C's shorter rows, reaching 44 px over their neighbours, were left out. Needs you's items went
   muted with it, on every screen.
+- 2026-11-03: finished work folds into done boxes, after the user found it "hard to tell what's done and what's not
+  done" in a box of interleaved tiles. They asked for finished threads with links to fold too, as one box "named after
+  the thread", rather than vanishing into Done, and chose a frame around an unfolded thread's items ("Approve, frame
+  around items") over a Fold button in its panel or a Fold tile.
