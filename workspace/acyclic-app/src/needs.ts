@@ -11,6 +11,7 @@ export const LISTED = 5;
 
 /** What the app says of what only a terminal settles; there, `acyclic needs` names the command. */
 const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see how";
+const EDIT_THREAD = "Open it to choose its thread in its editor";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
 export type Need = { kind: string } & Record<string, unknown>;
@@ -188,7 +189,8 @@ function viewOf(
         ...base,
         key,
         text: `${name}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
-        note: IN_A_TERMINAL,
+        // An item in a thread that is gone is in none, which its editor puts right.
+        note: str(need.entity) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
       };
     }
     case "unverified": {
@@ -211,7 +213,7 @@ function viewOf(
         key: `unthreaded:${item?.id ?? ""}`,
         text: "Needs a thread",
         detail: item === null ? null : titled(item),
-        note: "Open it to choose its thread in its editor",
+        note: EDIT_THREAD,
       };
     }
     default: {

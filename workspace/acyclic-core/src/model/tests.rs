@@ -507,3 +507,104 @@ fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its
     set_state(&mut a, "y", ItemState::Done, by(5)).unwrap();
     assert!(model(&a).reads_done("p"));
 }
+
+// TEMPORARY differential test: removed before merge.
+#[hegel::test(test_cases = 3000)]
+fn model_conflicts_match_the_old_state_walk(tc: hegel::TestCase) {
+    use hegel::generators as gs;
+    let below = |n: usize| tc.draw(gs::integers::<usize>().max_value(n - 1));
+    let kinds = ["item", "thread", "link", "repository", "proposal"];
+    let ids = ["01a00000-0000-7000-8000-000000000001", "01a00000-0000-7000-8000-000000000002"];
+    let fields = ["title", "notes", "deleted", "claim", "repository/r1", "future", "evidence"];
+    let mut replicas = [replica("a"), replica("b"), replica("c")];
+    let count = below(30);
+    for at in 0..count {
+        if below(4) == 0 {
+            let (into, from) = (below(3), below(3));
+            let other = replicas[from].state.clone();
+            replicas[into].join(&other).unwrap();
+            continue;
+        }
+        let kind = kinds[below(kinds.len())];
+        let field = fields[below(fields.len())];
+        let key = Key::new(kind, ids[below(2)]).unwrap();
+        let value = match (field, below(4)) {
+            (_, 0) => None,
+            ("deleted" | "repository/r1", _) => Some(json!(true)),
+            ("future" | "claim", n) => Some(json!(n)),
+            ("evidence", 1) => Some(json!({"text": "x"})),
+            ("evidence", 2) => Some(json!({"text": "x", "extra": 1})),
+            ("evidence", _) => Some(json!({"text": "y"})),
+            (_, 1) => Some(json!("a")),
+            _ => Some(json!("b")),
+        };
+        let r = below(3);
+        replicas[r]
+            .write(&key, field, "actor/user", Millis::try_from(at).unwrap() + 1, value)
+            .unwrap();
+    }
+    for replica in &replicas {
+        let state = &replica.state;
+        let mut expected = BTreeSet::new();
+        for (key, entity) in state.entities() {
+            if matches!(key.kind.as_str(), "item" | "thread") && is_deleted(state, key) {
+                continue;
+            }
+            for (name, register) in entity {
+                if name == crate::claim::FIELD || name.starts_with(set::REPOSITORY) {
+                    continue;
+                }
+                let distinct: BTreeSet<String> =
+                    register.values().map(|v| v.value.to_string()).collect();
+                if distinct.len() > 1 {
+                    expected.insert((key.kind.clone(), key.id.clone(), name.clone()));
+                }
+            }
+        }
+        let own = |m: &Model| -> BTreeSet<(String, String, String)> {
+            m.conflicts().map(|(k, i, f)| (k.to_owned(), i.to_owned(), f.to_owned())).collect()
+        };
+        if let Ok(read) = Model::read(state) {
+            assert_eq!(own(&read), expected);
+        }
+        let (lenient, unreadable) = Model::read_lenient(state);
+        let unread: BTreeSet<&Key> = unreadable.iter().map(|(k, _)| k).collect();
+        let expected_lenient: BTreeSet<_> = expected
+            .iter()
+            .filter(|(k, i, _)| !unread.contains(&Key::new(k, i).unwrap()))
+            .cloned()
+            .collect();
+        assert_eq!(own(&lenient), expected_lenient);
+    }
+}
+
+#[test]
+fn a_write_holds_only_a_lone_equal_value_or_for_a_clear_nothing() {
+    assert!(Value::<i32>::None.holds(None));
+    assert!(!Value::<i32>::None.holds(Some(&1)));
+    assert!(Value::One(1).holds(Some(&1)));
+    assert!(!Value::One(1).holds(Some(&2)));
+    assert!(!Value::One(1).holds(None));
+    // A conflict holds neither side, so writing either settles it.
+    let conflict = Value::Conflict(vec![Some(1), None]);
+    assert!(!conflict.holds(Some(&1)) && !conflict.holds(None));
+}
+
+#[test]
+fn a_deleted_record_is_gone_from_the_model_but_its_id_is_remembered() {
+    let (mut a, mut b) = pair(&["kept", "gone"]);
+    let thread = Key::new(kind::THREAD, "t").unwrap();
+    set(&mut a, &thread, thread::TITLE, Some(&"T"), by(2)).unwrap();
+    // Two replicas retitle the item apart, then one deletes it: its conflict goes with it.
+    set(&mut a, &item_key("gone").unwrap(), field::TITLE, Some(&"A"), by(3)).unwrap();
+    set(&mut b, &item_key("gone").unwrap(), field::TITLE, Some(&"B"), by(3)).unwrap();
+    a.join(&b.state).unwrap();
+    assert_eq!(model(&a).conflicts().count(), 1);
+    crate::delete::delete_item(&mut a, "gone", by(4)).unwrap();
+    crate::delete::delete_thread(&mut a, "t", by(4)).unwrap();
+    let read = model(&a);
+    assert!(!read.items.contains_key("gone") && !read.threads.contains_key("t"));
+    assert!(read.is_deleted(&item_key("gone").unwrap()) && read.is_deleted(&thread));
+    assert!(!read.is_deleted(&item_key("kept").unwrap()));
+    assert_eq!(read.conflicts().count(), 0);
+}

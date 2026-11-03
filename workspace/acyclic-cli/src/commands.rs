@@ -805,16 +805,18 @@ pub(crate) struct Member<'a> {
     pub conflict: bool,
 }
 
-/// Every thread by id, those with fields and those only named by an item, with its members in the order its blocks
-/// links run them: ties by id, and members on a cycle last. An item raced into two threads is in both.
+/// Every thread by id with its members in the order its blocks links run them: ties by id, and members on a cycle
+/// last. An item raced into two threads is in both; a thread with no record has no row, as the item's reference
+/// dangles.
 pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
     let mut threads: BTreeMap<&str, Vec<Member<'_>>> =
         model.threads.keys().map(|id| (id.as_str(), Vec::new())).collect();
     for item in model.items.values() {
         let named = item.thread.all();
         for thread in &named {
-            let member = Member { item: &item.id, conflict: item.thread.is_conflict() };
-            threads.entry(thread.as_str()).or_default().push(member);
+            if let Some(members) = threads.get_mut(thread.as_str()) {
+                members.push(Member { item: &item.id, conflict: item.thread.is_conflict() });
+            }
         }
     }
     // Each thread's blocks links among its own members, gathered in one pass rather than once per thread.

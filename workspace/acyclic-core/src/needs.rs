@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::claim;
 use crate::model::{self, Model, Value};
 use crate::ready::{Readiness, Status, Wait};
-use crate::schema::{kind, set};
+use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
 /// One entry on the needs-you list.
@@ -141,7 +141,13 @@ pub fn needs_you(
     now: Millis,
 ) -> Result<Vec<Entry>, Error> {
     let mut entries = BTreeSet::new();
-    conflicts(state, &mut entries);
+    for (kind, id, field) in model.conflicts() {
+        entries.insert(Entry::Conflict {
+            kind: kind.to_owned(),
+            id: id.to_owned(),
+            field: field.to_owned(),
+        });
+    }
     for items in model.link_cycles() {
         entries.insert(Entry::LinkCycle { items });
     }
@@ -170,40 +176,26 @@ pub fn needs_you(
     Ok(entries.into_iter().collect())
 }
 
-/// An open, unarchived, unparked leaf that no thread with a record holds, whatever else holds it back: `ready` never
-/// lists it. A conflicted thread is left to its conflict entry.
+/// Whether an item is an open, unarchived, unparked leaf whose thread isn't in conflict: one `ready` lists only
+/// while a thread with a record holds it. A conflicted thread is left to its conflict entry.
+fn wants_thread(model: &Model, item: &model::Item) -> bool {
+    !item.is_done()
+        && model.children(&item.id).is_empty()
+        && item.state != Value::One(model::ItemState::Parked)
+        && !item.thread.is_conflict()
+        && !model.is_archived(&item.id)
+}
+
+/// A leaf that wants a thread and names none, whatever else holds it back: `ready` never lists it. One that names a
+/// thread with no record is left to its dangling entry, which says so.
 fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) {
-    let parked = item.state == Value::One(model::ItemState::Parked);
-    if parked || item.thread.is_conflict() || model.is_archived(&item.id) {
-        return;
-    }
-    if item.thread.one().is_some_and(|thread| model.threads.contains_key(thread)) {
+    if !wants_thread(model, item) || item.thread.one().is_some() {
         return;
     }
     entries.insert(Entry::Unthreaded {
         fix: format!("acyclic item edit {} --thread <THREAD>", item.id),
         item: item.id.clone(),
     });
-}
-
-/// Fields with differing values, except claims (contests) and set elements (always `true`).
-fn conflicts(state: &State, entries: &mut BTreeSet<Entry>) {
-    for (key, entity) in state.entities() {
-        for (name, register) in entity {
-            if name == claim::FIELD || name.starts_with(set::REPOSITORY) {
-                continue;
-            }
-            let distinct: BTreeSet<String> =
-                register.values().map(|v| v.value.to_string()).collect();
-            if distinct.len() > 1 {
-                entries.insert(Entry::Conflict {
-                    kind: key.kind.clone(),
-                    id: key.id.clone(),
-                    field: name.clone(),
-                });
-            }
-        }
-    }
 }
 
 fn claims(
@@ -268,7 +260,9 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
             add(kind::ITEM, id, "parent", parent, None);
         }
         for thread in item.thread.all().into_iter().filter(|t| !model.threads.contains_key(*t)) {
-            add(kind::ITEM, id, "thread", thread, None);
+            let fix = wants_thread(model, item)
+                .then(|| format!("acyclic item edit {id} --thread <THREAD>"));
+            add(kind::ITEM, id, "thread", thread, fix);
         }
         for repository in item.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
         {

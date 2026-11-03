@@ -72,8 +72,8 @@ pub(crate) struct Records<'a> {
 }
 
 impl<'a> Records<'a> {
-    /// Every item, thread and repository record in `model`. A thread an item names but that has no record of its own
-    /// is a thread too, with no title.
+    /// Every item, thread and repository record in `model`. A thread an item names but that has no record is no
+    /// thread: the item's reference dangles.
     pub(crate) fn of(model: &'a Model) -> Self {
         let items = model
             .items
@@ -83,16 +83,14 @@ impl<'a> Records<'a> {
                 names: item.title.all().into_iter().cloned().collect(),
             })
             .collect();
-        let mut threads: BTreeMap<&str, Vec<String>> = model
+        let threads = model
             .threads
             .values()
-            .map(|thread| (thread.id.as_str(), thread.title.all().into_iter().cloned().collect()))
+            .map(|thread| Candidate {
+                id: &thread.id,
+                names: thread.title.all().into_iter().cloned().collect(),
+            })
             .collect();
-        for item in model.items.values() {
-            for thread in item.thread.all() {
-                threads.entry(thread.as_str()).or_default();
-            }
-        }
         let repositories = model
             .repositories
             .values()
@@ -101,11 +99,7 @@ impl<'a> Records<'a> {
                 names: repository_name(record).into_iter().collect(),
             })
             .collect();
-        Self {
-            items,
-            threads: threads.into_iter().map(|(id, names)| Candidate { id, names }).collect(),
-            repositories,
-        }
+        Self { items, threads, repositories }
     }
 
     /// The item `reference` names.

@@ -267,23 +267,13 @@ fn write_change<T: Serialize>(
     Ok(())
 }
 
-/// Whether a thread exists: it has fields of its own, or an item names it.
-fn thread_exists(state: &State, model: &Model, id: &str) -> bool {
-    // A deleted thread stays gone, though items another replica moved into it still name it.
-    let deleted = Key::new(kind::THREAD, id).is_ok_and(|key| model::is_deleted(state, &key));
-    !deleted
-        && (model.threads.contains_key(id)
-            || model.items.values().any(|item| item.thread.all().contains(&&id.to_owned())))
-}
-
-/// Refuses a thread or repository that isn't there, before anything is written; `model` is `state`'s.
+/// Refuses a thread or repository that isn't there, before anything is written.
 fn check_targets(
-    state: &State,
     model: &Model,
     thread: Option<&String>,
     repositories: &[String],
 ) -> Result<(), CliError> {
-    if let Some(thread) = thread.filter(|thread| !thread_exists(state, model, thread)) {
+    if let Some(thread) = thread.filter(|thread| !model.threads.contains_key(*thread)) {
         return Err(not_found(format!(
             "no thread {thread}; `acyclic thread add --title <TITLE>` adds one"
         )));
@@ -385,7 +375,7 @@ pub(crate) fn edit_item(
     let key = existing(replica, id)?;
     // Read once: what the steps below judge by is what none of the earlier ones changes.
     let model = Model::read(replica.state())?;
-    check_targets(replica.state(), &model, fields.thread.value(), &fields.repositories.add)?;
+    check_targets(&model, fields.thread.value(), &fields.repositories.add)?;
     set_if(replica, &key, field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, field::NOTES, &fields.notes, by)?;
     write_change(replica, &key, field::SIZE, &fields.size, by)?;
@@ -509,7 +499,7 @@ pub(crate) fn add_item(
     // Everything that can be refused is, before the item exists.
     if fields.thread.value().is_some() || !fields.repositories.add.is_empty() {
         let model = Model::read(replica.state())?;
-        check_targets(replica.state(), &model, fields.thread.value(), &fields.repositories.add)?;
+        check_targets(&model, fields.thread.value(), &fields.repositories.add)?;
     }
     model::add_item(replica, id, title, by)?;
     edit_item(replica, id, fields, by)
@@ -570,7 +560,7 @@ fn write_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<(), CliError> {
-    check_targets(replica.state(), model, None, &fields.repositories.add)?;
+    check_targets(model, None, &fields.repositories.add)?;
     let key = thread_key(id)?;
     set_if(replica, &key, thread_field::TITLE, fields.title.as_ref(), by)?;
     write_change(replica, &key, thread_field::BRIEF, &fields.brief, by)?;
@@ -585,7 +575,7 @@ pub(crate) fn edit_thread(
     by: By<'_>,
 ) -> Result<(), CliError> {
     let model = Model::read(replica.state())?;
-    if !thread_exists(replica.state(), &model, id) {
+    if !model.threads.contains_key(id) {
         return Err(not_found(format!("no thread {id}; `acyclic thread list` lists them")));
     }
     write_thread(replica, &model, id, fields, by)

@@ -73,6 +73,19 @@ impl<T> Value<T> {
     }
 }
 
+impl<T: PartialEq> Value<T> {
+    /// Whether writing `value` would change nothing: the field holds exactly it, or for `None`, nothing. A conflict
+    /// holds neither, so a write settles it.
+    #[must_use]
+    pub fn holds(&self, value: Option<&T>) -> bool {
+        match (self, value) {
+            (Self::None, None) => true,
+            (Self::One(held), Some(value)) => held == value,
+            _ => false,
+        }
+    }
+}
+
 /// An item's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -277,6 +290,10 @@ pub struct Model {
     pub threads: BTreeMap<String, Thread>,
     /// Repository records by id.
     pub repositories: BTreeMap<String, Repository>,
+    /// The keys of deleted items and threads, which no other field holds: an id deleted is never used again.
+    deleted: BTreeSet<Key>,
+    /// Each live entity's fields that hold different values, as `(kind, id, field)`.
+    conflicts: BTreeSet<(String, String, String)>,
     children: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -288,8 +305,9 @@ impl Model {
     /// Fails when a value can't be read, such as one written by a newer version: hiding it could hide a blocker.
     pub fn read(state: &State) -> Result<Self, Error> {
         let mut model = Self::default();
-        for (key, _) in state.entities() {
+        for (key, entity) in state.entities() {
             model.add(state, key)?;
+            model.note_conflicts(key, entity);
         }
         model.links.sort();
         Ok(model)
@@ -301,10 +319,13 @@ impl Model {
     pub fn read_lenient(state: &State) -> (Self, Vec<(Key, Error)>) {
         let mut model = Self::default();
         let mut unreadable = Vec::new();
-        for (key, _) in state.entities() {
+        for (key, entity) in state.entities() {
             let mut one = Self::default();
             match one.add(state, key) {
-                Ok(()) => model.merge(one),
+                Ok(()) => {
+                    one.note_conflicts(key, entity);
+                    model.merge(one);
+                },
                 Err(err) => unreadable.push((key.clone(), err)),
             }
         }
@@ -318,15 +339,44 @@ impl Model {
         self.links.extend(other.links);
         self.threads.extend(other.threads);
         self.repositories.extend(other.repositories);
+        self.deleted.extend(other.deleted);
+        self.conflicts.extend(other.conflicts);
         for (parent, children) in other.children {
             self.children.entry(parent).or_default().extend(children);
         }
     }
 
+    /// Notes each field of a live entity that holds different values, read or not, so a field a newer version wrote
+    /// still shows; claims contest rather than conflict, and a set's elements only ever hold `true`.
+    fn note_conflicts(&mut self, key: &Key, entity: &crate::state::Entity) {
+        if self.deleted.contains(key) {
+            return;
+        }
+        for (name, register) in entity {
+            if name == crate::claim::FIELD || name.starts_with(set::REPOSITORY) {
+                continue;
+            }
+            let mut values = register.values().map(|stamped| &stamped.value);
+            if let Some(first) = values.next()
+                && values.any(|value| value != first)
+            {
+                self.conflicts.insert((key.kind.clone(), key.id.clone(), name.clone()));
+            }
+        }
+    }
+
+    /// Every field of a live entity that holds different values written apart, as `(kind, id, field)`, sorted: the
+    /// fields this model reads and any it doesn't. A deleted record's are gone with it.
+    pub fn conflicts(&self) -> impl Iterator<Item = (&str, &str, &str)> {
+        self.conflicts.iter().map(|(kind, id, field)| (kind.as_str(), id.as_str(), field.as_str()))
+    }
+
     fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
         match key.kind.as_str() {
             // A deleted item or thread is gone from every reader; see `crate::delete`.
-            kind::ITEM | kind::THREAD if is_deleted(state, key) => {},
+            kind::ITEM | kind::THREAD if is_deleted(state, key) => {
+                self.deleted.insert(key.clone());
+            },
             kind::ITEM => {
                 let item = read_item(state, key)?;
                 for parent in item.parent.all() {
@@ -369,6 +419,13 @@ impl Model {
             _ => {},
         }
         Ok(())
+    }
+
+    /// Whether an item or thread was deleted. A deleted record is in none of the model's maps, so this is only for
+    /// keeping its id from being used again.
+    #[must_use]
+    pub fn is_deleted(&self, key: &Key) -> bool {
+        self.deleted.contains(key)
     }
 
     /// An item's children.
