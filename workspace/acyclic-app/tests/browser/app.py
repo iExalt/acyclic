@@ -630,6 +630,16 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         page.wait_for_function("() => location.search === ''", timeout=5_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: Back from an item opened on the Overview landed on {page.url}")
+    # Forward opens it again from the place its entry holds, where it came from too: closing it goes back to the
+    # Overview, not to the Map an address alone would leave.
+    page.go_forward()
+    try:
+        inspector.wait_for(timeout=5_000)
+        inspector.get_by_role("button", name="Close").click()
+        overview.wait_for(timeout=5_000)
+        page.wait_for_function("() => location.search === ''", timeout=5_000)
+    except PlaywrightTimeout:
+        failures.append(f"{name}: Forward to an item opened on the Overview didn't close back to it, at {page.url}")
     if phone:
         page.locator("[data-view=needs]").click()
         needs = page.get_by_test_id("needs")
@@ -1184,31 +1194,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
     pick_thread(page, plan, thread)
     panel.wait_for()
     if view.get("has_touch"):
-        # A phone's Back closes what's open one layer at a time, and stays in the app: the outline's sheet over the
-        # thread's panel, then the panel.
+        # Which layer a phone's Back closes, the outline's sheet over the thread's panel and then the panel, is
+        # nav.test.ts's; that Back moves through the history, the deep link journey's.
         sheet = page.get_by_test_id("projects")
-        page.get_by_test_id("projects-button").click()
-        sheet.wait_for()
-        page.go_back()
-        sheet.wait_for(state="detached")
-        try:
-            panel.wait_for(timeout=5_000)
-            stayed = True
-        except PlaywrightTimeout:
-            stayed = False
-        page.go_back()
-        try:
-            panel.wait_for(state="detached", timeout=5_000)
-        except PlaywrightTimeout:
-            stayed = False
-        # In the app, on the Map, the address saying so.
-        if not stayed or urlsplit(page.url).query != "view=map":
-            failures.append(
-                f"{name}: Back didn't close the outline's sheet, then the thread's panel, in the app: at {page.url}"
-            )
-        if not panel.count():
-            pick_thread(page, plan, thread)
-        panel.wait_for()
         # Closed in the app, a layer gives its entry back, so the next Back closes what's open then. Under the panel,
         # the Map, away from the Overview, holds an entry of its own.
         page.get_by_test_id("projects-button").click()
