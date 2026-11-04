@@ -121,7 +121,19 @@ fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
     let counts = |items: u64, links: u64| json!({"items": items, "threads": 1, "links": links, "repositories": 0, "fields": 14});
     let import = |dry_run: bool, counts: Json| {
         let line = if dry_run { "import plan.json -n" } else { "import plan.json" };
-        let data = json!({"changes": [{"entity": "item", "id": "a1", "action": "create"}], "counts": counts,
+        let changes: Vec<Json> = [("items", "item"), ("threads", "thread"), ("links", "link")]
+            .into_iter()
+            .flat_map(|(key, entity)| {
+                (0..counts[key].as_u64().unwrap()).map(move |id| {
+                    if entity == "link" {
+                        json!({"entity": entity, "from": "a1", "kind": "waits-for", "to": format!("b{id}"), "action": "create"})
+                    } else {
+                        json!({"entity": entity, "id": format!("{entity}{id}"), "action": "create"})
+                    }
+                })
+            })
+            .collect();
+        let data = json!({"changes": changes, "counts": counts,
             "dry_run": dry_run, "placed": []});
         render(&command(line), &data, None, &BTreeMap::new())
     };
@@ -147,6 +159,66 @@ fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
             &BTreeMap::new()
         )
     ));
+}
+
+#[test]
+fn import_summaries_count_updates_removals_and_placement_without_claiming_dry_run_writes() {
+    let update = json!({"entity": "item", "id": "a1", "action": "update",
+        "fields": {"title": {"from": "Old", "to": "New"}, "notes": {"from": null, "to": "Checked"}}});
+    let removal = json!({"entity": "link", "from": "a1", "kind": "waits-for", "to": "b1", "action": "remove"});
+    for (changes, fields, actual, dry) in [
+        (
+            json!([update]),
+            2,
+            "imported: updated 1 item (2 fields)",
+            "would import: update 1 item (2 fields)",
+        ),
+        (
+            json!([removal]),
+            1,
+            "imported: removed 1 waits-for (1 field)",
+            "would import: remove 1 waits-for (1 field)",
+        ),
+        (
+            json!([{"entity": "item", "id": "a2", "action": "create"}, update, removal]),
+            5,
+            "imported: created 1 item; updated 1 item; removed 1 waits-for (5 fields)",
+            "would import: create 1 item; update 1 item; remove 1 waits-for (5 fields)",
+        ),
+        (json!([]), 0, "no change", "would make no change"),
+    ] {
+        for (dry_run, expected) in [(false, actual), (true, dry)] {
+            let data = json!({"changes": changes, "counts": {"fields": fields}, "dry_run": dry_run, "placed": []});
+            assert_eq!(import(&data), expected);
+        }
+    }
+    for (dry_run, expected) in
+        [(false, "placed item a1, thread t1"), (true, "would place item a1, thread t1")]
+    {
+        let data = json!({"changes": [], "counts": {"fields": 0}, "dry_run": dry_run,
+            "placed": [{"item": "a1", "thread": "t1"}]});
+        assert_eq!(import(&data), expected);
+    }
+}
+
+#[test]
+fn init_and_sync_name_the_tracker_and_distinguish_local_changes_from_pushes() {
+    for (created, changed, verb) in
+        [(true, true, "created"), (false, true, "changed"), (false, false, "no change to")]
+    {
+        let data = json!({"path": "/tmp/example", "replica": "local", "created": created, "changed": changed});
+        assert_eq!(
+            render(&command("init /tmp/example --replica local"), &data, None, &BTreeMap::new()),
+            format!("{verb} tracker /tmp/example · replica local\n")
+        );
+    }
+    for (joined, pushed, word) in [(false, 0, "no"), (false, 2, "no"), (true, 1, "yes")] {
+        let data = json!({"remote": "origin", "fetched": 2, "joined": joined, "pushed": pushed, "changed": joined});
+        assert_eq!(
+            render(&command("sync"), &data, None, &BTreeMap::new()),
+            format!("synced tracker with origin · fetched 2 · joined {word} · pushed {pushed}\n")
+        );
+    }
 }
 
 #[test]
