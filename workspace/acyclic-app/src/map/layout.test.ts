@@ -184,6 +184,64 @@ describe("place", () => {
     ]);
   });
 
+  it("keeps a stale same-topology request from changing the displayed shrink comparison", async () => {
+    let releaseStale: ((layout: Awaited<ReturnType<LayBox>>) => void) | undefined;
+    let waitingForStale = false;
+    const sizes = new Map([
+      [1, 500],
+      [2, 400],
+      [3, 450],
+      [4, 430],
+    ]);
+    const layBox: LayBox = async (input) => {
+      if (input.id === "box") {
+        const height = sizes.get(input.children.length) ?? 100;
+        return {
+          width: 200,
+          height,
+          at: Object.fromEntries(input.children.map((child, index) => [child.id, { x: 12, y: 12 + index * 100 }])),
+        };
+      }
+      const box = input.children[0];
+      if (box?.height === 400) {
+        waitingForStale = true;
+        return new Promise((resolve) => {
+          releaseStale = resolve;
+        });
+      }
+      const y = (box?.height ?? 0) + 36;
+      return { width: 300, height: y + 64, at: { box: { x: 12, y: 12 }, other: { x: 12, y } } };
+    };
+    const cache = new LayoutCache();
+    let latest = 0;
+    const items = (count: number) => [
+      item("box"),
+      ...Array.from({ length: count }, (_, index) => item(`child-${index}`, "box")),
+      item("other"),
+    ];
+    const placeLatest = (count: number, source: string) => {
+      const request = ++latest;
+      return place(visible(buildModel(items(count)), open), cache, layBox, PORTRAIT, () => request === latest, source);
+    };
+
+    await placeLatest(1, "source-a");
+    const stale = placeLatest(2, "source-b");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(waitingForStale).toBe(true);
+
+    // The accepted C input is 450. When stale B (400) answers later, it must not replace that displayed comparator.
+    expect((await placeLatest(3, "source-c")).laidOut).toContain(ROOT);
+    releaseStale?.({
+      width: 300,
+      height: 500,
+      at: { box: { x: 12, y: 12 }, other: { x: 12, y: 436 } },
+    });
+    await stale;
+
+    // D at 430 shrinks from accepted C at 450, so root packing runs. A stale comparator of 400 would hold instead.
+    expect((await placeLatest(4, "source-d")).laidOut).toContain(ROOT);
+  });
+
   it("restores the matching aspect's packing after a turn", async () => {
     const engine = grid();
     const cache = new LayoutCache();
