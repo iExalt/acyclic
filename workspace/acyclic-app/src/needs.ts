@@ -12,7 +12,7 @@ const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see h
 const EDIT_THREAD = "Open it to choose its thread in its editor";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
-export type Need = { kind: string } & Record<string, unknown>;
+export type Need = { kind: string; identity?: string } & Record<string, unknown>;
 
 /** A value of a conflict and how it is kept, as the needs-you list gives it: the command, or why there is none. */
 export interface Kept {

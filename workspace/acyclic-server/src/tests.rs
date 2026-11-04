@@ -366,6 +366,19 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
     let legacy = json!({"item": {"edit": {"item": item, "title": "D"}}});
     let (status, body) = send(&router, Method::POST, "/api/command", &pass, &legacy.to_string());
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    let malformed_observed = json!({
+        "command": {"item": {"edit": {"item": item, "title": "E"}}},
+        "expect": [],
+        "observed": "not-an-identity-list"
+    });
+    let (status, body) =
+        send(&router, Method::POST, "/api/command", &pass, &malformed_observed.to_string());
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "optional observation metadata must not refuse a valid write: {body}"
+    );
 }
 
 #[test]

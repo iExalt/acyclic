@@ -109,10 +109,10 @@ pub struct Keys {
 pub struct Refused(pub String);
 
 /// What makes the server look at the needs-you list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Trigger {
-    /// The user wrote through the app: what is new now is the user's doing, and taken as seen.
-    Seen,
+    /// Exact notifying need identities the app observed or introduced with its own write.
+    Seen(Vec<String>),
     /// Something else may have changed: push what is new.
     Look,
     /// A device subscribed: a reason to try at once, even while backing off.
@@ -220,8 +220,10 @@ impl Push {
     }
 
     /// The user wrote through the app: what that brings about needs no push.
-    pub fn seen(&self) {
-        self.send(Trigger::Seen);
+    pub fn seen(&self, identities: Vec<String>) {
+        if !identities.is_empty() {
+            self.send(Trigger::Seen(identities));
+        }
     }
 
     /// Something besides the user may have changed the tracker: push what is new.
@@ -267,15 +269,20 @@ async fn work(
         if first == Trigger::Look && tokio::time::Instant::now() < resume {
             continue;
         }
-        let mut seen = first == Trigger::Seen;
-        if !seen {
+        let mut observed = BTreeSet::new();
+        if let Trigger::Seen(identities) = first {
+            observed.extend(identities);
+        } else {
             tokio::time::sleep(inner.settings.window).await;
         }
         while let Ok(trigger) = triggers.try_recv() {
-            seen |= trigger == Trigger::Seen;
+            if let Trigger::Seen(identities) = trigger {
+                observed.extend(identities);
+            }
         }
         let round = Arc::clone(&inner);
-        let Ok(Some(plan)) = tokio::task::spawn_blocking(move || round.plan(seen)).await else {
+        let Ok(Some(plan)) = tokio::task::spawn_blocking(move || round.plan(&observed)).await
+        else {
             continue;
         };
         let reached = inner.deliver(&plan).await;
@@ -303,15 +310,15 @@ async fn work(
 /// What one look found to push, and to whom.
 struct Plan {
     devices: Vec<Subscription>,
-    /// The keys of everything on the list that notifies, now.
+    /// The exact identities of everything on the list that notifies, now.
     now: BTreeSet<String>,
     /// The message, if anything new is to be told.
     message: Option<Value>,
 }
 
 impl Inner {
-    /// Reads the list and decides; with `seen`, takes what is new as seen and plans nothing.
-    fn plan(&self, seen: bool) -> Option<Plan> {
+    /// Reads the list, applies exact acknowledgments and decides what is new to push.
+    fn plan(&self, observed: &BTreeSet<String>) -> Option<Plan> {
         // The files are held only to read and write them, not while the list is read, so a device can subscribe
         // meanwhile.
         let devices = {
@@ -332,15 +339,34 @@ impl Inner {
             .as_array()
             .map(|all| all.iter().filter(|entry| entry["notify"] == true).collect())
             .unwrap_or_default();
-        let now: BTreeSet<String> = entries.iter().map(|entry| key(entry)).collect();
+        let mut current = Vec::with_capacity(entries.len());
+        let mut identity_bytes = 0usize;
+        for entry in &entries {
+            let Some(identity) = entry["identity"].as_str() else {
+                eprintln!("acyclic: a need has no core identity; skipping this push look");
+                return None;
+            };
+            identity_bytes = identity_bytes.checked_add(identity.len())?;
+            if identity_bytes > 16 * 1024 {
+                eprintln!(
+                    "acyclic: need identities exceed the push metadata limit; skipping this push look"
+                );
+                return None;
+            }
+            current.push((*entry, identity.to_owned()));
+        }
+        let now: BTreeSet<String> = current.iter().map(|(_, identity)| identity.clone()).collect();
         let _files = self.files.lock().ok()?;
         let told: BTreeSet<String> = self.load::<BTreeSet<String>>("sent.json").unwrap_or_default();
-        if seen {
-            let _ = self.save("sent.json", &now);
-            return None;
+        let kept = kept_identities(&told, &now, observed);
+        if kept != told {
+            let _ = self.save("sent.json", &kept);
         }
-        let new: Vec<&&Value> =
-            entries.iter().filter(|entry| !told.contains(&key(entry))).collect();
+        let new: Vec<&Value> = current
+            .iter()
+            .filter(|(_, identity)| !kept.contains(identity))
+            .map(|(entry, _)| *entry)
+            .collect();
         let message = new.first().map(|first| {
             let more = new.len() - 1;
             let body =
@@ -348,11 +374,7 @@ impl Inner {
             json!({"title": "Needs you", "body": body, "url": "/?needs", "count": now.len()})
         });
         if message.is_none() {
-            // Nothing new; what left the list is forgotten, so it is told again if it comes back.
-            let kept: BTreeSet<String> = told.intersection(&now).cloned().collect();
-            if kept != told {
-                let _ = self.save("sent.json", &kept);
-            }
+            // Disappeared entries are pruned; exact acknowledgments remain only while their identity is current.
             return None;
         }
         Some(Plan { devices, now, message })
@@ -597,7 +619,17 @@ pub fn check_endpoint(endpoint: &str, transport: Transport) -> Result<(), Refuse
     }
 }
 
-/// A need's stable key, as the needs-you list gives it, so the same need on the next look is known as told.
+/// What remains told: only identities still current, plus exact identities the client observed.
+fn kept_identities(
+    told: &BTreeSet<String>,
+    current: &BTreeSet<String>,
+    observed: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    told.intersection(current).chain(observed.intersection(current)).cloned().collect()
+}
+
+/// A need's stable key, as the needs-you list gives it, for tests of distinct display rows.
+#[cfg(test)]
 fn key(entry: &Value) -> String {
     entry["key"].as_str().unwrap_or_default().to_owned()
 }
@@ -634,9 +666,22 @@ pub fn line(entry: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use serde_json::json;
 
-    use super::{Transport, check_endpoint, key, line};
+    use super::{Transport, check_endpoint, kept_identities, key, line};
+
+    #[test]
+    fn acknowledgments_keep_only_exact_current_identities() {
+        let told = BTreeSet::from(["still-told".to_owned(), "gone".to_owned()]);
+        let current = BTreeSet::from(["still-told".to_owned(), "changed-payload".to_owned()]);
+        let observed = BTreeSet::from(["changed-payload".to_owned(), "stale-payload".to_owned()]);
+        assert_eq!(
+            kept_identities(&told, &current, &observed),
+            BTreeSet::from(["still-told".to_owned(), "changed-payload".to_owned()])
+        );
+    }
 
     #[test]
     fn an_endpoint_must_be_https_but_a_tests_transport_may_reach_this_machine() {

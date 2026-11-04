@@ -21,6 +21,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
   const faults: Record<string, Fault[]> = {};
   const writes: unknown[] = [];
   const requests: unknown[] = [];
+  const needsRows: { kind: string; identity?: string }[] = [];
   const apply = (body: { item: { add?: { id: string; title: string }; edit?: { item: string; title?: string } } }) => {
     const { add, edit } = body.item;
     if (add) plan.set(add.id, add.title);
@@ -72,14 +73,14 @@ function server(titles: Record<string, string> = { a: "A" }) {
         })),
       );
     if (name === "thread list") return answer({ threads: [], waves: [], anytime: [] });
-    if (name === "needs") return answer({ needs: [] });
+    if (name === "needs") return answer({ needs: needsRows });
     apply(body);
     return answer({});
   };
   const fail = (name: string, ...queued: Fault[]) => {
     faults[name] = [...(faults[name] ?? []), ...queued];
   };
-  return { plan, fetcher, fail, requests, writes };
+  return { plan, fetcher, fail, requests, writes, needsRows };
 }
 
 /** A tab's storage, in memory, or one that throws at every call. */
@@ -151,6 +152,25 @@ describe("a session's writes", () => {
     expect(tracker.plan.get("a")).toBe("B");
   });
 
+  it("sends only the observed opaque need identities and keeps them on busy retry", async () => {
+    const { session, tracker } = open();
+    tracker.needsRows.push({ kind: "reopened", identity: "opaque-core-entry" });
+    await session.refresh();
+    tracker.fail("item edit", "busy");
+    await session.send(rename("a", "B"), { select: "a", pin: null });
+    const writes = () =>
+      tracker.requests.filter((request) => typeof request === "object" && request !== null && "command" in request);
+    expect(writes().at(-1)).toEqual({
+      command: rename("a", "B"),
+      observed: ["opaque-core-entry"],
+    });
+    await session.retry();
+    expect(writes().at(-1)).toEqual({
+      command: rename("a", "B"),
+      observed: ["opaque-core-entry"],
+    });
+  });
+
   it("drops a write sent while another is out", async () => {
     const { session, tracker } = open();
     await session.refresh();
@@ -211,6 +231,7 @@ describe("a session's Undo", () => {
     expect(tracker.requests.at(-1)).toEqual({
       command: rename("a", "A"),
       expect: [{ kind: "item-field", item: "a", field: "title", value: "B" }],
+      observed: [],
     });
     expect(tracker.plan.get("a")).toBe("B");
     expect(session.snapshot().notice).toMatchObject({
@@ -230,6 +251,7 @@ describe("a session's Undo", () => {
     expect(tracker.requests.at(-1)).toEqual({
       command: rename("a", "A"),
       expect: [{ kind: "item-field", item: "a", field: "title", value: "B" }],
+      observed: [],
     });
     expect(tracker.plan.get("a")).toBe("C");
     expect(session.snapshot().notice).toMatchObject({

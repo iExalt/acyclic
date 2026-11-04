@@ -184,13 +184,26 @@ export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 export type Command = string | Record<string, unknown>;
 
 /** Runs one command as the user. */
-export async function command<T>(body: Command, fetcher: Fetch = fetch, expect?: readonly Expected[]): Promise<T> {
+export async function command<T>(
+  body: Command,
+  fetcher: Fetch = fetch,
+  expect?: readonly Expected[],
+  observed?: readonly string[],
+): Promise<T> {
   // A request that never reached the server says so in each browser's own words ("Failed to fetch", "Load
   // failed"…), so it's told in the app's.
   const response = await fetcher("/api/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(expect === undefined ? body : { command: body, expect }),
+    body: JSON.stringify(
+      expect === undefined && observed === undefined
+        ? body
+        : {
+            command: body,
+            ...(expect === undefined ? {} : { expect }),
+            ...(observed === undefined ? {} : { observed }),
+          },
+    ),
   }).catch(() => {
     throw new CommandError("network", "Can't reach the server");
   });

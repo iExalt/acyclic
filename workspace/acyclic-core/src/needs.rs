@@ -141,6 +141,12 @@ impl Entry {
         parts.join(":")
     }
 
+    /// A compact canonical identity for this exact core entry, before a CLI or app adds display details.
+    #[must_use]
+    pub fn identity(&self) -> String {
+        serde_json::to_string(self).expect("need entries serialize")
+    }
+
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
     /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked) and items in no
     /// thread, which agents leave routinely, stay on the list without a notification. With no catch-all arm, a new

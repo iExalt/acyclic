@@ -45,7 +45,7 @@ export interface Notice extends Raised {
   text: string;
   offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
   /** The write again, offered when the server was only busy. */
-  retry: { body: Command; after: After; expected?: readonly Expected[] } | null;
+  retry: { body: Command; after: After; expected?: readonly Expected[]; observed?: readonly string[] } | null;
   /** Said of a link waiting for a form to close: dismissing it drops the link. */
   held?: true;
   /** A link to copy by hand, where the browser offers no clipboard. */
@@ -222,6 +222,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
     after: After,
     drawn: Pending | null = null,
     expected?: readonly Expected[],
+    previouslyObserved?: readonly string[],
   ): Promise<boolean> {
     // Any write sent while one is out was made through a control the busy state forgot to hold: dropped.
     if (sending) return false;
@@ -235,9 +236,14 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
       set({ pending: drawn });
       bringIn();
     }
+    const observed =
+      previouslyObserved ??
+      (snap.load.state === "loaded"
+        ? snap.load.needs.flatMap((need) => (typeof need.identity === "string" ? [need.identity] : []))
+        : []);
     let sent: Sent;
     try {
-      await command(body, fetcher, expected);
+      await command(body, fetcher, expected, observed);
       // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
       if (drawn !== null) reads = answered(reads, drawn);
       try {
@@ -284,7 +290,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
       tell({
         text,
         offer,
-        retry: offer === "retry" ? { body, after, ...(expected === undefined ? {} : { expected }) } : null,
+        retry: offer === "retry" ? { body, after, ...(expected === undefined ? {} : { expected }), observed } : null,
         // A plan saved but not read again is out of date wherever the user goes; a refusal is the surface's.
         lasts: offer === "refresh" ? "stale" : "refusal",
         at: null,
@@ -365,7 +371,7 @@ export function createSession({ fetcher, storage, nav }: Ports): Session {
     send: write,
     retry() {
       const again = snap.notice?.retry;
-      return again ? write(again.body, again.after, null, again.expected) : Promise.resolve(false);
+      return again ? write(again.body, again.after, null, again.expected, again.observed) : Promise.resolve(false);
     },
     undo,
     tell,

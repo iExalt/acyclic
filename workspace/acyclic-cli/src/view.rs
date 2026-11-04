@@ -177,8 +177,8 @@ impl View<'_> {
 }
 
 impl View<'_> {
-    /// The needs-you list: each entry is `{kind, key, notify, …}`, with item and thread entries embedding their summaries,
-    /// and a conflict listing its `values` and how to `resolve` it.
+    /// The needs-you list: each entry is `{kind, key, identity, notify, …}`, with item and thread entries embedding
+    /// their summaries, and a conflict listing its `values` and how to `resolve` it.
     /// `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
@@ -248,6 +248,7 @@ impl View<'_> {
                 }),
             };
             shown["key"] = entry.key().into();
+            shown["identity"] = entry.identity().into();
             shown["notify"] = entry.notifies().into();
             found.push(shown);
         }
@@ -677,6 +678,7 @@ mod tests {
                 assert!(shown["kind"].is_string(), "{shown}");
                 // Each carries the core's key, which the app and pushes use as given.
                 assert_eq!(shown["key"], json!(entry.key()), "{shown}");
+                assert_eq!(shown["identity"], json!(entry.identity()), "{shown}");
                 follows_the_conventions(shown, "needs");
             }
         });

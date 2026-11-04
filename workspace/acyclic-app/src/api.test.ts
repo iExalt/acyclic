@@ -65,6 +65,8 @@ describe("command", () => {
     ];
     await command(body, fetcher, conditions);
     expect(sent).toEqual({ command: body, expect: conditions });
+    await command(body, fetcher, conditions, ["opaque-entry"]);
+    expect(sent).toEqual({ command: body, expect: conditions, observed: ["opaque-entry"] });
   });
 });
 

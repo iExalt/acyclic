@@ -34,6 +34,15 @@ fn list(r: &Replica) -> Vec<Entry> {
 }
 
 #[test]
+fn need_identity_includes_the_core_payload_even_when_its_stable_key_does_not() {
+    let first = Entry::Reopened { item: "a".into(), dependents: vec!["b".into()] };
+    let changed = Entry::Reopened { item: "a".into(), dependents: vec!["c".into()] };
+    assert_eq!(first.key(), changed.key());
+    assert_ne!(first.identity(), changed.identity());
+    assert_eq!(first.identity(), r#"{"entry":"reopened","item":"a","dependents":["b"]}"#);
+}
+
+#[test]
 fn the_state_puts_its_problems_on_the_list() {
     let (mut a, mut b) = (replica("a"), replica("b"));
     let by = user(1);

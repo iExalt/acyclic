@@ -61,6 +61,17 @@ pub fn run_expected(
     run_with(cli, env, false, Some(expected)).map(|(output, _)| output)
 }
 
+/// Runs one app write and reports exact needs acknowledged by this batch.
+pub fn run_observed(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> Result<(Output, Vec<String>), CliError> {
+    run_with_observed(cli, env, false, Some(expected), Some(observed))
+        .map(|(output, _, acknowledged)| (output, acknowledged))
+}
+
 /// Runs a parsed command, and says what pretty output calls each record the tracker holds once it is done: items and
 /// threads by the shortest ending of their ids that names them, and repositories by `owner/name`. They come from the
 /// state the command last read or wrote, so a record it added is named too, and from the tracker as it is after the
@@ -76,11 +87,21 @@ fn run_with(
     named: bool,
     expected: Option<Vec<acyclic_core::write::Expectation>>,
 ) -> Result<(Output, Names), CliError> {
-    let text = |text: String| (Output::Text(text), Names::new());
+    run_with_observed(cli, env, named, expected, None).map(|(output, names, _)| (output, names))
+}
+
+fn run_with_observed(
+    cli: &Cli,
+    env: &Env,
+    named: bool,
+    expected: Option<Vec<acyclic_core::write::Expectation>>,
+    observed: Option<Vec<String>>,
+) -> Result<(Output, Names, Vec<String>), CliError> {
+    let text = |text: String| (Output::Text(text), Names::new(), Vec::new());
     match (cli.command.class(), &cli.command) {
         (Class::Standalone, Command::Init { path, replica, remote }) => {
             init(&env.cwd.join(path), replica, remote.as_deref())
-                .map(|data| (Output::Json(data), Names::new()))
+                .map(|data| (Output::Json(data), Names::new(), Vec::new()))
         },
         (Class::Standalone, Command::Prime) => Ok(text(prime())),
         (Class::Standalone, Command::Id { count }) => {
@@ -100,9 +121,11 @@ fn run_with(
                     "write expectations require a write command",
                 ));
             }
-            let result = Session::open(cli, env, named, expected).and_then(|session| {
+            let result = Session::open(cli, env, named, expected, observed).and_then(|session| {
                 let data = session.dispatch(command)?;
-                Ok((Output::Json(data), if named { session.names() } else { Names::new() }))
+                let names = if named { session.names() } else { Names::new() };
+                let acknowledged = session.acknowledged.into_inner();
+                Ok((Output::Json(data), names, acknowledged))
             });
             result.map_err(|mut error| {
                 // Doctor doesn't point at itself.
@@ -139,6 +162,8 @@ struct Session<'a> {
     /// [`Session::write`], kept only when pretty output asked for them.
     named: Option<RefCell<Option<Names>>>,
     expected: Option<Vec<write::Expectation>>,
+    observed: Option<BTreeSet<String>>,
+    acknowledged: RefCell<Vec<String>>,
 }
 
 impl<'a> Session<'a> {
@@ -147,6 +172,7 @@ impl<'a> Session<'a> {
         env: &'a Env,
         named: bool,
         expected: Option<Vec<write::Expectation>>,
+        observed: Option<Vec<String>>,
     ) -> Result<Self, CliError> {
         let actor = context::actor(cli, env)?;
         let path = context::tracker(cli, env)?;
@@ -162,6 +188,8 @@ impl<'a> Session<'a> {
             env,
             named: named.then(|| RefCell::new(None)),
             expected,
+            observed: observed.map(|ids| ids.into_iter().collect()),
+            acknowledged: RefCell::new(Vec::new()),
         })
     }
 
@@ -466,12 +494,31 @@ impl<'a> Session<'a> {
             }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
+            let before_needs = self
+                .observed
+                .as_ref()
+                .and_then(|_| notifying_entries(replica.state(), at, self.env));
             let before = replica.changes();
             if let Some(named) = &self.named {
                 *named.borrow_mut() = None;
             }
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
+            if let (Some(observed), Some(before_needs), Some(after_needs)) =
+                (&self.observed, before_needs, notifying_entries(replica.state(), at, self.env))
+            {
+                let acknowledged = after_needs
+                    .iter()
+                    .filter(|(key, identity)| {
+                        !before_needs.contains_key(*key) || observed.contains(*identity)
+                    })
+                    .map(|(_, identity)| (*identity).clone())
+                    .collect::<Vec<_>>();
+                let bytes = acknowledged.iter().map(String::len).sum::<usize>();
+                if acknowledged.len() <= 256 && bytes <= 16 * 1024 {
+                    *self.acknowledged.borrow_mut() = acknowledged;
+                }
+            }
             // The names of the state the batch commits, unless the command kept those of the model its writes left.
             // Naming never fails a write: a model that can't be read leaves the names to the tracker afterwards.
             if let Some(named) = &self.named
@@ -718,6 +765,20 @@ impl<'a> Session<'a> {
             Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
+}
+
+/// The current notifying needs, keyed by the stable core key and carrying each exact compact identity.
+fn notifying_entries(state: &State, now: Millis, env: &Env) -> Option<BTreeMap<String, String>> {
+    let model = Model::read(state).ok()?;
+    let ancestry = GitAncestry::new(context::clones(env).ok()?);
+    let readiness = Readiness::new(state, &model, now, &ancestry);
+    needs::needs_you(state, &model, &readiness, now).ok().map(|entries| {
+        entries
+            .into_iter()
+            .filter(needs::Entry::notifies)
+            .map(|entry| (entry.key(), entry.identity()))
+            .collect()
+    })
 }
 
 /// The record a delete names: the one the resolver `found`, or, named by its full id, one deleted already, which

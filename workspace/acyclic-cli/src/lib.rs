@@ -230,6 +230,24 @@ pub fn call_expected(
     answer_with_expected(&cli, env, Some(expected))
 }
 
+/// Runs one app write, returning exact notifying needs acknowledged by its locked batch.
+#[must_use]
+pub fn call_observed(
+    command: Command,
+    tracker: PathBuf,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> (u8, Value, Vec<String>) {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(acyclic_core::scope::USER.to_owned()),
+        output: Some(Format::Json),
+        command,
+    };
+    answer_with_observed(&cli, env, expected, observed)
+}
+
 /// Runs one command as [`call`] does, as `actor`.
 #[must_use]
 pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u8, Value) {
@@ -261,6 +279,25 @@ fn answer_with_expected(
         Err(err) => (err.exit, err.envelope()),
     };
     (code, envelope)
+}
+
+fn answer_with_observed(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> (u8, Value, Vec<String>) {
+    let result =
+        cli.command.validate().and_then(|()| commands::run_observed(cli, env, expected, observed));
+    match result {
+        Ok((commands::Output::Json(data), acknowledged)) => {
+            (exit::OK, json!({"ok": true, "data": data}), acknowledged)
+        },
+        Ok((commands::Output::Text(text), acknowledged)) => {
+            (exit::OK, json!({"ok": true, "data": text}), acknowledged)
+        },
+        Err(err) => (err.exit, err.envelope(), Vec::new()),
+    }
 }
 
 fn render(value: &serde_json::Value) -> String {
