@@ -229,6 +229,12 @@ describe("fitPlan", () => {
     });
   });
 
+  it("centres below a reserved top strip", () => {
+    const fitted = fitPlan({ x1: -200, y1: 100, x2: 3800, y2: 3100 }, { x1: 0, y1: 64, x2: 384, y2: 599 }, 2);
+    expect(fitted?.zoom).toBeCloseTo(0.084);
+    expect(fitted?.pan.y).toBeCloseTo(197.1);
+  });
+
   it("declines an open area too small for its padding", () => {
     expect(fitPlan({ x1: 0, y1: 0, x2: 400, y2: 300 }, { x1: 0, y1: 0, x2: 40, y2: 40 }, 2)).toBeNull();
   });

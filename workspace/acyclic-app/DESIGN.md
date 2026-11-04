@@ -255,14 +255,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
   focused and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar (the picked thread's too, while one
-  of its items is open over it), the Thread button on an item's panel, or a link to a thread on the Map,
-  goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
-  further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
-  known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,
-  and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
-  sidebar, on the Map, unpicks it. A thread gone to from an item's panel keeps the item under it: closing the thread,
-  or Back, opens the item again, unless it has gone or been archived since.
+- **Going to a thread frames it.** A thread opened from the Overview, the sidebar, an item's panel, or a Map link opens
+  on the Map, picked with its panel. Its items fit beside the panel at up to 1:1, but no smaller than readable; when
+  they cannot all fit, the frame starts at the first item. Include their boxes' titles only when the titles and items
+  fit together. Otherwise keep the boxes and chevrons but hide their text until the user moves the Map or changes the
+  selection. A project's title may remain off-screen when its items are far from it; showing both would require a zoom
+  below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
+  underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
 - **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
   comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it. On a Map
   zoomed out past reading, one the user picked comes in at a zoom its title reads at, wherever it was, and one a write
@@ -350,8 +349,9 @@ before what went wrong.
   cross have none.
 - **Opening view.** The whole plan when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at
   0.85, a phone's titles read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
-- **Fit the whole plan.** A Fit button on the Map frames the whole drawn plan in the uncovered part of the Map, including
-  beside a panel or above a phone sheet. It changes only the viewport; selection and folds stay put. The button is a
+- **Fit the whole plan.** A Fit button on the Map frames the whole drawn plan in the uncovered part of the Map,
+  including beside a panel or above a phone sheet. Automatic views keep its top-left control strip clear, even if the
+  Map first draws under another view. Fit changes only the viewport; selection and folds stay put. The button is a
   standard control, 44 px on touch, and is absent from other views.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,

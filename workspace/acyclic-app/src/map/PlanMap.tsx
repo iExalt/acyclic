@@ -166,11 +166,39 @@ export default function PlanMap({
   viewNow.current = view;
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
   const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
+  const suppressedTitles = useRef<Set<string>>(new Set());
+
+  const clearSuppressedTitles = () => {
+    const core = cy.current;
+    if (core !== null)
+      for (const id of suppressedTitles.current) {
+        const node = core.getElementById(id);
+        if (node.nonempty()) node.removeStyle("text-opacity");
+      }
+    suppressedTitles.current.clear();
+  };
+
+  const suppressTitles = (ids: Iterable<string>) => {
+    const core = cy.current;
+    if (core === null) return;
+    for (const id of ids) {
+      const node = core.getElementById(id);
+      if (!node.empty()) {
+        node.style("text-opacity", 0);
+        suppressedTitles.current.add(id);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!active) clearSuppressedTitles();
+  }, [active]);
 
   const fit = () => {
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null) return;
+    clearSuppressedTitles();
     const plan = core.elements().boundingBox({ includeLabels: true });
     const fitted = fitPlan(plan, openPart(element), MAX_ZOOM);
     if (fitted === null) return;
@@ -279,10 +307,12 @@ export default function PlanMap({
     for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
       element.addEventListener(kind, touch, { capture: true, passive: true });
     core.on("viewport", () => {
+      clearSuppressedTitles();
       if (fingers !== null && core.zoom() < floorOf(core))
         core.zoom({ level: floorOf(core), renderedPosition: fingers });
     });
     return () => {
+      clearSuppressedTitles();
       above.removeEventListener("wheel", wheel as EventListener, { capture: true });
       for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
         element.removeEventListener(kind, touch, { capture: true });
@@ -300,6 +330,12 @@ export default function PlanMap({
     if (core === null || styled.current === palette) return;
     styled.current = palette;
     core.style(styleFor(palette));
+    for (const id of suppressedTitles.current) {
+      const node = core.getElementById(id);
+      if (node.nonempty()) {
+        node.style("text-opacity", 0);
+      }
+    }
   }, [palette]);
 
   // A phone's keyboard, or a window resized, changes the Map's size: the furthest zoom out follows. A strip taken from
@@ -318,6 +354,7 @@ export default function PlanMap({
       const was = size;
       size = { width: element.clientWidth, height: element.clientHeight };
       if (core === null || placedNow.current === null) return;
+      clearSuppressedTitles();
       core.resize();
       zoomOutTo(core, element, placedNow.current);
       const id = selectedNow.current;
@@ -345,13 +382,15 @@ export default function PlanMap({
     if (core === null || element === null || drawn === null || placed === null) return;
     const first = core.elements().length === 0;
     // Only what changed: on a large plan, a write changes a few elements of thousands.
+    clearSuppressedTitles();
     held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette));
     zoomOutTo(core, element, placed);
     if (first) {
       // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: the first box's
       // corner, and its first item.
       const least = Math.min(...drawn.nodes.map((node) => node.layer));
-      const screen = { width: element.clientWidth, height: element.clientHeight };
+      const open = openPart(element);
+      const screen = { width: open.x2 - open.x1, height: open.y2 - open.y1 };
       const start = startOf(
         drawn.nodes.flatMap((node) => {
           const at = placed.nodes.get(node.id);
@@ -362,7 +401,7 @@ export default function PlanMap({
         FIRST_ZOOM,
       );
       const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
-      core.viewport({ zoom: view.zoom, pan: view.pan });
+      core.viewport({ zoom: view.zoom, pan: { x: view.pan.x + open.x1, y: view.pan.y + open.y1 } });
     } else if (anchor.current !== null) {
       // Pan so the toggled box's top-level box has its corner where it was before the layout changed.
       const box = core.getElementById(anchor.current.id);
@@ -409,6 +448,7 @@ export default function PlanMap({
     if (asked === undefined || asked.thread !== thread) return;
     if (core === null || element === null || drawn === null) return;
     toFrame.current = undefined;
+    clearSuppressedTitles();
     sought.current = thread;
     const boxOf = (kind: (node: SceneNode) => boolean) =>
       drawn.nodes.flatMap((node) => {
@@ -423,13 +463,25 @@ export default function PlanMap({
       boxOf((node) => node.kind === "box"),
       STRIP,
     );
-    const view = frame(
-      framesAll(titled, open) ? titled : lit,
-      core.nodes().boundingBox({ includeLabels: false }),
-      open,
-      1,
-    );
-    if (view !== null) core.viewport(view);
+    const titlesFit = framesAll(titled, open);
+    const view = frame(titlesFit ? titled : lit, core.nodes().boundingBox({ includeLabels: false }), open, 1);
+    if (view !== null) {
+      core.viewport(view);
+      if (!titlesFit) {
+        const nodes = new Map(viewNow.current.nodes.map((node) => [node.id, node]));
+        const ancestors = new Set<string>();
+        for (const node of drawn.nodes) {
+          if (!node.lit) continue;
+          for (
+            let parent = nodes.get(node.id)?.parent ?? null;
+            parent !== null;
+            parent = nodes.get(parent)?.parent ?? null
+          )
+            if (nodes.get(parent)?.kind === "box") ancestors.add(parent);
+        }
+        suppressTitles(ancestors);
+      }
+    }
   }, [framed, thread, drawn]);
   useEffect(() => {
     const core = cy.current;
@@ -643,7 +695,11 @@ function typing(): boolean {
  */
 function openPart(element: HTMLElement) {
   const map = element.getBoundingClientRect();
-  return uncovered(map.width, map.height, coverOf(element));
+  const open = uncovered(map.width, map.height, coverOf(element));
+  // The Fit button sits 12 px from the top and leaves 8 px after its touch target.
+  const hit = Number.parseFloat(getComputedStyle(element).getPropertyValue("--hit")) || 44;
+  const top = 12 + hit + 8;
+  return { ...open, y1: Math.min(open.y2, Math.max(open.y1, top)) };
 }
 
 /** The sheets and panes that may cover the Map. */

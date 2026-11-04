@@ -28,6 +28,7 @@ import threading
 import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -1066,11 +1067,79 @@ def first_view_readable(page, name, failures):
         failures.append(
             f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
         )
+    if fit_control := fit_occlusion(page, lit_only=False):
+        if (
+            not fit_control["safe"]
+            or fit_control["item_overlaps"]
+            or fit_control["chevron_overlaps"]
+            or fit_control["title_overlaps"]
+            or fit_control["title_fragments"]
+        ):
+            failures.append(f"{name}: the Fit control covers first-view content: {fit_control}")
+    else:
+        failures.append(f"{name}: the Map's first view has no Fit control to keep clear")
     # One layout for a first load: a second, at a shape guessed before the Map was measured, would re-pack the plan
     # as it is first seen.
     asked = page.get_by_test_id("map").get_attribute("data-layouts")
     if asked != "1":
         failures.append(f"{name}: the first load asked for {asked} layouts, not one")
+
+
+def fit_occlusion(page, lit_only):
+    """Checks that automatic Map views keep their first item and ancestor chevrons clear of Fit."""
+    return page.get_by_test_id("map").evaluate(
+        """(m, litOnly) => {
+            const map = m.getBoundingClientRect();
+            const button = document.querySelector('.map-fit');
+            if (!button) return null;
+            const rect = button.getBoundingClientRect();
+            const fit = { x1: rect.left - map.left, y1: rect.top - map.top,
+                x2: rect.right - map.left, y2: rect.bottom - map.top };
+            const zoom = m.cy.zoom();
+            const hit = parseFloat(getComputedStyle(m).getPropertyValue('--hit')) || 44;
+            const safeTop = 12 + hit + 8;
+            const overlaps = (a, b) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+            const panel = m.parentElement.querySelector('.inspector, .sheet');
+            const panelRect = panel?.getBoundingClientRect();
+            const panelShift = panel ? new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42 : 0;
+            const sheet = panelRect && panelRect.width >= map.width * .9;
+            const open = { x1: 0, y1: Math.min(map.height, fit.y2 + 8), x2: panelRect && !sheet
+                ? panelRect.left - map.left : map.width, y2: panelRect && sheet
+                ? panelRect.top - panelShift - map.top : map.height };
+            const items = m.cy.nodes(litOnly ? '.lit' : '.leaf, .collapsed').map(n => {
+                const b = n.renderedBoundingBox({ includeLabels: true });
+                return { id: n.id(), b: { x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 } };
+            });
+            const itemOverlaps = items.filter(item => overlaps(item.b, fit)).map(item => item.id);
+            const chevronOverlaps = [];
+            const titleOverlaps = [];
+            const titleFragments = [];
+            const ctx = document.createElement('canvas').getContext('2d');
+            for (const node of m.cy.nodes('.box')) {
+                const b = node.renderedBoundingBox({ includeLabels: false });
+                const holdsItem = items.some(item => item.b.x1 >= b.x1 - 1 && item.b.x2 <= b.x2 + 1
+                    && item.b.y1 >= b.y1 - 1 && item.b.y2 <= b.y2 + 1);
+                if (!holdsItem) continue;
+                const chevron = { x1: b.x1 + 14 * zoom, x2: b.x1 + 22 * zoom,
+                    y1: b.y1 + 24 * zoom, y2: b.y1 + 28 * zoom };
+                if (overlaps(chevron, fit)) chevronOverlaps.push(node.id());
+                if (parseFloat(node.style('text-opacity') || '1') <= 0) continue;
+                const label = String(node.data('label') || '').split('\\n')[0];
+                ctx.font = `${node.style('font-weight')} ${node.style('font-size')} ${node.style('font-family')}`;
+                const x1 = b.x1 + (parseFloat(node.style('text-margin-x')) || 0) * zoom;
+                const width = ctx.measureText(label).width * zoom;
+                const y1 = b.y1 + (parseFloat(node.style('text-margin-y')) || 0) * zoom;
+                const height = (parseFloat(node.style('font-size')) || 13) * 1.25 * zoom;
+                const title = { x1, x2: x1 + width, y1, y2: y1 + height };
+                if (overlaps(title, fit)) titleOverlaps.push(node.id());
+                if (title.x1 < open.x1 && title.x2 > open.x1 && title.y1 < open.y2 && title.y2 > open.y1)
+                    titleFragments.push({ id: node.id(), label, title });
+            }
+            return { fit, safeTop, open, safe: Math.abs(fit.y1 - 12) < 0.5 && fit.y2 + 8 <= safeTop + 0.5,
+                itemOverlaps, chevronOverlaps, titleOverlaps, titleFragments };
+        }""",
+        lit_only,
+    )
 
 
 def stages_drawn(page, plan, name, failures):
@@ -1252,6 +1321,17 @@ def map_journey(page, view, plan, name, failures, hint=None):
         }"""
     ):
         failures.append(f"{name}: picking {thread} left all of its items out of view")
+    framed = fit_occlusion(page, lit_only=True)
+    if framed is None:
+        failures.append(f"{name}: the framed thread has no Fit control to keep clear")
+    elif (
+        not framed["safe"]
+        or framed["item_overlaps"]
+        or framed["chevron_overlaps"]
+        or framed["title_overlaps"]
+        or framed["title_fragments"]
+    ):
+        failures.append(f"{name}: the thread frame overlaps Fit or leaves a clipped ancestor title: {framed}")
     # Its links are its route, drawn in its line's colour.
     route = page.get_by_test_id("map").evaluate(
         "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector('[data-testid=thread-panel] .badge');"
@@ -1295,11 +1375,14 @@ def map_journey(page, view, plan, name, failures, hint=None):
         fitted = page.get_by_test_id("map").evaluate(
             "m => { const r = m.getBoundingClientRect(); const panel = m.parentElement.querySelector('.inspector, .sheet');"
             " const b = m.cy.elements().renderedBoundingBox({ includeLabels: true });"
+            " const fit = document.querySelector('.map-fit').getBoundingClientRect();"
             " const box = panel ? panel.getBoundingClientRect() : null;"
             " const sheet = box && box.width >= r.width * .9;"
             " const x2 = box && !sheet ? box.left - r.left : r.width;"
-            " const y2 = box && sheet ? box.top - r.top : r.height;"
-            " return { inside: b.x1 >= 22 && b.y1 >= 22 && b.x2 <= x2 - 22 && b.y2 <= y2 - 22,"
+            " const shift = panel ? new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42 : 0;"
+            " const y1 = fit.bottom - r.top + 8;"
+            " const y2 = box && sheet ? box.top - shift - r.top : r.height;"
+            " return { inside: b.x1 >= 22 && b.y1 >= y1 + 22 && b.x2 <= x2 - 22 && b.y2 <= y2 - 22,"
             " selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
             " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit }; }"
         )
@@ -1910,6 +1993,124 @@ def edit_journey(page, view, env, plan, box, name, failures):
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
     )
     return added
+
+
+@timed
+def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
+    """Unlinks the last edge of a tall box: its size shrinks, the next root repacks, and Undo restores both."""
+    plan = Plan(env)
+    roots = {id for id in plan.items if plan.depth(id) == 0 and plan.shown(id, False)}
+
+    def root_edges(plan):
+        return sorted(
+            {
+                (plan.chain(id)[-1], plan.chain(target)[-1])
+                for id, row in plan.items.items()
+                for target in row["links"]["waits_for"]
+                if target in plan.items and plan.chain(id)[-1] != plan.chain(target)[-1]
+            }
+        )
+
+    edges = root_edges(plan)
+    page.reload()
+    to_map(page)
+    count = len(plan.default())
+    wait_drawn(page, count)
+    centre(page, project)
+    tap_middle(page, view, chain[-2])
+    wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
+
+    def geometry(ids):
+        return page.get_by_test_id("map").evaluate(
+            """(m, ids) => ({
+                zoom: m.cy.zoom(), pan: m.cy.pan(),
+                nodes: Object.fromEntries(ids.map(id => {
+                    const n = m.cy.getElementById(id);
+                    const b = n.boundingBox();
+                    const r = n.renderedBoundingBox({ includeLabels: false });
+                    return [id, { x: b.x1, y: b.y1, w: b.w, h: b.h, sx: r.x1, sy: r.y1 }];
+                }))
+            })""",
+            ids,
+        )
+
+    before = geometry([project, other, chain[-2]])
+    layouts_before = int(page.get_by_test_id("map").get_attribute("data-layouts") or 0)
+    unlink(page, "waited-on-by")
+    wait_inspector(page, "[data-testid=waited-on-by]", state="detached")
+    page.get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.wait_for_function(
+        "([n, layouts, project, other, oldHeight, oldY]) => {"
+        " const m = document.querySelector('[data-testid=map]');"
+        " const p = m?.cy.getElementById(project).boundingBox();"
+        " const o = m?.cy.getElementById(other).boundingBox();"
+        " return m?.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
+        " && Number(m.dataset.layouts) > layouts && Number(m.dataset.layoutCalls) >= 2"
+        " && p && p.h < oldHeight - 20 && o && o.y < oldY - 2; }",
+        arg=[count, layouts_before, project, other, before["nodes"][project]["h"], before["nodes"][other]["y"]],
+        timeout=20_000,
+    )
+    after = geometry([project, other, chain[-2]])
+    updated = Plan(env)
+
+    if roots != {id for id in updated.items if updated.depth(id) == 0 and updated.shown(id, False)}:
+        failures.append(f"{name}: the unlink changed the top-level item set")
+    if edges != root_edges(updated):
+        failures.append(f"{name}: the unlink changed the top-level wait edges")
+    old, new = before["nodes"][project], after["nodes"][project]
+    if new["w"] > old["w"] + 2 or new["h"] >= old["h"] - 20:
+        failures.append(f"{name}: the unlink did not shrink only the tall box: {old} -> {new}")
+    if after["nodes"][other]["y"] >= before["nodes"][other]["y"] - 2:
+        failures.append(f"{name}: repacking did not move the other root up: {before['nodes'][other]} -> {after['nodes'][other]}")
+    if int(page.get_by_test_id("map").get_attribute("data-layout-calls") or 0) < 2:
+        failures.append(f"{name}: the inner box and the top level were not both laid out after the shrink")
+    if abs(after["zoom"] - before["zoom"]) > 0.001 or any(
+        abs(after["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ):
+        failures.append(f"{name}: the shrinking write changed the camera: {before['zoom']}/{before['pan']} -> {after['zoom']}/{after['pan']}")
+    if abs(after["nodes"][chain[-2]]["sx"] - before["nodes"][chain[-2]]["sx"]) > 2 or abs(
+        after["nodes"][chain[-2]]["sy"] - before["nodes"][chain[-2]]["sy"]
+    ) > 2:
+        failures.append(f"{name}: the selected item moved on screen during the shrink")
+
+    frame = settled_corner(page, project)
+    page.get_by_role("button", name="Undo").click()
+    wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
+    wait_drawn(page, count)
+    undone = geometry([project, other, chain[-2]])
+    same_node = lambda left, right: all(
+        abs(left[field] - right[field]) <= 1 for field in ("x", "y", "w", "h")
+    )
+    if not same_node(undone["nodes"][project], before["nodes"][project]) or not same_node(
+        undone["nodes"][other], before["nodes"][other]
+    ):
+        failures.append(f"{name}: Undo did not restore the original root packing")
+    held(page, project, frame, "Undoing the shrink", name, failures)
+    if undone["zoom"] != before["zoom"]:
+        failures.append(f"{name}: Undo changed the Map zoom from {before['zoom']} to {undone['zoom']}")
+
+    # A chevron fold after Undo still holds the restored packing; reopening returns to the same root positions.
+    centre(page, project)
+    page.get_by_test_id("map").evaluate(
+        "(m, id) => { const top = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false }).y1;"
+        " m.cy.panBy({ x: 0, y: 80 - top }); }",
+        project,
+    )
+    frame = settled_corner(page, project)
+    tap_box(page, view, project)
+    wait_drawn(page, count - len(plan.children(project)))
+    folded = geometry([project, other])
+    held(page, project, frame, "folding after Undo", name, failures)
+    frame = settled_corner(page, project)
+    tap_box(page, view, project)
+    wait_drawn(page, count)
+    reopened = geometry([project, other])
+    held(page, project, frame, "reopening after Undo", name, failures)
+    if not same_node(folded["nodes"][other], before["nodes"][other]) or not same_node(
+        reopened["nodes"][other], before["nodes"][other]
+    ):
+        failures.append(f"{name}: folding after Undo moved the other root")
+    print(f"{name}: a phone shrink repacked the roots, Undo restored them, and a later fold held them")
 
 
 @timed
@@ -2611,6 +2812,38 @@ def main():
             listening = json.loads(server.stdout.readline())["data"]["listening"]
             return plan, f"http://{listening}/", env, remote
 
+        def serve_shrink():
+            home = directory / "home-shrink"
+            home.mkdir()
+            env = {
+                **os.environ,
+                "HOME": str(home),
+                "ACYCLIC_TRACKER": str(directory / "tracker-shrink"),
+                "ACYCLIC_ACTOR": "session/browser",
+            }
+            run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            run(env, "thread", "add", "--title", "Shrink proof")
+            project = json.loads(run(env, "item", "add", "--title", "Tall chain"))["data"]["item"]
+            other = json.loads(run(env, "item", "add", "--title", "Other root"))["data"]["item"]
+            run(env, "item", "add", "--title", "Any time", "--parent", project)
+            chain = [
+                json.loads(
+                    run(env, "item", "add", "--title", f"Chain step {index}", "--parent", project)
+                )["data"]["item"]
+                for index in range(7)
+            ]
+            for before, after in pairwise(chain):
+                run(env, "item", "edit", after, "--waits-for", before)
+            server = subprocess.Popen(
+                [ACYCLIC, "up", "--port", "0"],
+                env=env,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            servers.append(server)
+            listening = json.loads(server.stdout.readline())["data"]["listening"]
+            return f"http://{listening}/", env, project, other, chain
+
         try:
             plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
@@ -2720,6 +2953,18 @@ def main():
                 )
             context.close()
             webkit.close()
+
+            # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
+            shrink_link, shrink_env, project, other, chain = serve_shrink()
+            context, page, _, errors = open_app(
+                chromium, VIEWS["phone"], shrink_link, failures, "phone shrink"
+            )
+            shrink_undo_journey(
+                page, VIEWS["phone"], shrink_env, project, other, chain, "phone shrink", failures
+            )
+            if errors:
+                failures.append(f"phone shrink: the page threw or logged errors: {errors}")
+            context.close()
 
             large, link, _, _ = serve(3500)
             context, page, _, errors = open_app(
