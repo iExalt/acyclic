@@ -319,26 +319,15 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         (status, refusal["error"]["code"].as_str()),
         (StatusCode::CONFLICT, Some("changed-since"))
     );
-    assert_eq!(refusal["error"]["details"]["mismatches"][0]["actual"], json!("B"));
-    assert!(
-        refusal["error"]["details"]["mismatches"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|mismatch| mismatch["actual"] == json!("T"))
-    );
-    assert!(
-        refusal["error"]["details"]["mismatches"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|mismatch| mismatch["actual"] == json!(true))
-    );
+    let mismatches = refusal["error"]["details"]["mismatches"].as_array().unwrap();
+    assert_eq!(mismatches[0]["actual"], json!("B"));
+    assert!(mismatches.iter().any(|mismatch| mismatch["actual"] == json!("T")));
+    assert!(mismatches.iter().any(|mismatch| mismatch["actual"] == json!(true)));
     assert_eq!(snapshot(), before, "a refused guard must not stamp the clock or renew a claim");
 
     let missing_edge = json!({
         "command": {"item": {"edit": {"item": item, "title": "C"}}},
-        "expect": [{"kind": "waits-for", "item": item, "target": "01900000-0000-7000-8000-0000000000b1", "present": false}]
+        "expect": [{"kind": "waits-for", "item": item, "target": "01900000-0000-7000-8000-0000000000c1", "present": false}]
     });
     let (status, body) =
         send(&router, Method::POST, "/api/command", &pass, &missing_edge.to_string());

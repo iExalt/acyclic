@@ -123,9 +123,9 @@ fn run_with_observed(
             }
             let result = Session::open(cli, env, named, expected, observed).and_then(|session| {
                 let data = session.dispatch(command)?;
-                let names = if named { session.names() } else { Names::new() };
+                let output_names = if named { session.names() } else { Names::new() };
                 let acknowledged = session.acknowledged.into_inner();
-                Ok((Output::Json(data), names, acknowledged))
+                Ok((Output::Json(data), output_names, acknowledged))
             });
             result.map_err(|mut error| {
                 // Doctor doesn't point at itself.
@@ -507,17 +507,8 @@ impl<'a> Session<'a> {
             if let (Some(observed), Some(before_needs)) = (&self.observed, before_needs)
                 && let Some(after_needs) = notifying_entries(replica.state(), at, self.env)
             {
-                let acknowledged = after_needs
-                    .iter()
-                    .filter(|(key, identity)| {
-                        !before_needs.contains_key(*key) || observed.contains(*identity)
-                    })
-                    .map(|(_, identity)| (*identity).clone())
-                    .collect::<Vec<_>>();
-                let bytes = acknowledged.iter().map(String::len).sum::<usize>();
-                if acknowledged.len() <= 256 && bytes <= 16 * 1024 {
-                    *self.acknowledged.borrow_mut() = acknowledged;
-                }
+                *self.acknowledged.borrow_mut() =
+                    acknowledged_entries(&before_needs, &after_needs, observed);
             }
             // The names of the state the batch commits, unless the command kept those of the model its writes left.
             // Naming never fails a write: a model that can't be read leaves the names to the tracker afterwards.
@@ -779,6 +770,42 @@ fn notifying_entries(state: &State, now: Millis, env: &Env) -> Option<BTreeMap<S
             .map(|entry| (entry.key(), entry.identity()))
             .collect()
     })
+}
+
+/// Exact current identities this write may acknowledge: new stable keys and exact identities the client observed.
+fn acknowledged_entries(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    observed: &BTreeSet<String>,
+) -> Vec<String> {
+    after
+        .iter()
+        .filter(|(key, identity)| !before.contains_key(*key) || observed.contains(*identity))
+        .map(|(_, identity)| identity.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod acknowledged_entries_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use acyclic_core::needs::Entry;
+
+    use super::acknowledged_entries;
+
+    #[test]
+    fn a_new_need_with_a_large_core_identity_is_still_acknowledged() {
+        let entry = Entry::Reopened {
+            item: "item".into(),
+            dependents: (0..1_000).map(|n| format!("dependent-{n:04}")).collect(),
+        };
+        let identity = entry.identity();
+        assert!(identity.len() > 16 * 1024);
+        let before = BTreeMap::new();
+        let after = BTreeMap::from([(entry.key(), identity.clone())]);
+
+        assert_eq!(acknowledged_entries(&before, &after, &BTreeSet::new()), [identity]);
+    }
 }
 
 /// The record a delete names: the one the resolver `found`, or, named by its full id, one deleted already, which

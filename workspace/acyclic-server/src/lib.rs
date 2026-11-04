@@ -397,7 +397,7 @@ async fn command(
             Ok(request) => (
                 request.command,
                 Some(request.expect),
-                request.observed.as_ref().and_then(observed_ids),
+                Some(request.observed.as_ref().and_then(observed_ids).unwrap_or_default()),
             ),
             Err(err) => {
                 let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));

@@ -1649,7 +1649,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(f"{name}: an add wasn't drawn until the server answered")
         return None
     # The app made the new item's id.
-    added = json.loads(waiting[0].request.post_data)["item"]["add"]["id"]
+    request = json.loads(waiting[0].request.post_data)
+    command = request.get("command", request) if isinstance(request, dict) else request
+    added = command["item"]["add"]["id"]
     # Drawn, its panel takes the focus the form had, and says it is saving rather than the state core hasn't placed.
     drawn = page.evaluate(
         """() => {

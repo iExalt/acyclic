@@ -5,6 +5,7 @@
       "entity": "item",
       "field": "parent",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"item\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"field\":\"parent\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -74,6 +75,7 @@
       "entity": "item",
       "field": "state",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"item\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"field\":\"state\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -136,6 +138,7 @@
       "entity": "item",
       "field": "title",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"item\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"field\":\"title\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -205,6 +208,7 @@
       "entity": "item",
       "field": "evidence",
       "id": "01900000-0000-7000-8000-0000000000e1",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"item\",\"id\":\"01900000-0000-7000-8000-0000000000e1\",\"field\":\"evidence\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000e1",
         "parent": null,
@@ -272,6 +276,7 @@
       "entity": "repository",
       "field": "owner",
       "id": "01900000-0000-7000-8000-0000000000c2",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"repository\",\"id\":\"01900000-0000-7000-8000-0000000000c2\",\"field\":\"owner\"}",
       "keeps": [
         {
           "command": {
@@ -312,6 +317,7 @@
       "entity": "thread",
       "field": "brief",
       "id": "01900000-0000-7000-8000-0000000000f1",
+      "identity": "{\"entry\":\"conflict\",\"kind\":\"thread\",\"id\":\"01900000-0000-7000-8000-0000000000f1\",\"field\":\"brief\"}",
       "keeps": [
         {
           "command": {

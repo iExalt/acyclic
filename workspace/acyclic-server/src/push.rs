@@ -361,10 +361,8 @@ impl Inner {
                 if more == 0 { line(first) } else { format!("{} (and {more} more)", line(first)) };
             json!({"title": "Needs you", "body": body, "url": "/?needs", "count": now.len()})
         });
-        if message.is_none() {
-            // Disappeared entries are pruned; exact acknowledgments remain only while their identity is current.
-            return None;
-        }
+        // Disappeared entries are pruned; exact acknowledgments remain only while their identity is current.
+        message.as_ref()?;
         Some(Plan { devices, now, message })
     }
 

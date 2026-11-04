@@ -142,6 +142,10 @@ impl Entry {
     }
 
     /// A compact canonical identity for this exact core entry, before a CLI or app adds display details.
+    ///
+    /// # Panics
+    ///
+    /// Never: every entry field is a string, an optional string, or a vector of strings, and always serializes.
     #[must_use]
     pub fn identity(&self) -> String {
         serde_json::to_string(self).expect("need entries serialize")

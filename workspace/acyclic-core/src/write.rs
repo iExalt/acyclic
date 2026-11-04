@@ -208,7 +208,7 @@ pub fn check_expected(
             }
             let mut started = Vec::new();
             for (waiter, at_most) in counts {
-                let count = started_count(&readiness, model, &waiter)?;
+                let count = started_count(&readiness, model, &waiter)?.unwrap_or(0);
                 if count > at_most {
                     started.push(
                         serde_json::json!({"item": waiter, "count": count, "at_most": at_most}),
@@ -300,19 +300,19 @@ fn started_count(
     readiness: &Readiness<'_>,
     model: &Model,
     item: &str,
-) -> Result<usize, StateError> {
+) -> Result<Option<usize>, StateError> {
     if !model.items.contains_key(item) {
-        return Ok(0);
+        return Ok(None);
     }
     if model.children(item).is_empty() {
-        Ok(usize::from(matches!(
+        Ok(Some(usize::from(matches!(
             readiness.stage(item)?,
             Some(Stage::InProgress | Stage::InReview | Stage::Done)
-        )))
+        ))))
     } else {
-        Ok(readiness.progress(item)?.map_or(0, |rollup| {
+        Ok(Some(readiness.progress(item)?.map_or(0, |rollup| {
             rollup.stages.in_progress + rollup.stages.in_review + rollup.stages.done
-        }))
+        })))
     }
 }
 

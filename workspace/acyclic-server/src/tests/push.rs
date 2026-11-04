@@ -163,7 +163,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     };
     // This unrelated need arrives after the client's read, so the app write must not acknowledge it.
     reopen(3);
-    let user = |command: Value| {
+    let user = |command: Value, observed: Value| {
         call(
             &router,
             Method::POST,
@@ -171,12 +171,17 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
             json!({"command": command, "expect": [], "observed": observed}).to_string(),
         )
     };
-    for command in [
+    for (index, command) in [
         json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000c1", "title": "M"}}}),
         json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000c1", "evidence": "n", "force": true}}}),
         json!({"item": {"reopen": {"item": "01900000-0000-7000-8000-0000000000c1"}}}),
-    ] {
-        assert_eq!(user(command).await.0, StatusCode::OK);
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // The final write still commits and acknowledges its new need when optional client metadata is malformed.
+        let observed = if index == 2 { json!("not a list") } else { json!(observed.clone()) };
+        assert_eq!(user(command, observed).await.0, StatusCode::OK);
     }
     assert_eq!(received(3).await.1["body"], "P3 was reopened");
     let sent = home.join(".config/acyclic/push/sent.json");
