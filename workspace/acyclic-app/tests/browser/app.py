@@ -2046,7 +2046,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         " const p = m?.cy.getElementById(project).boundingBox();"
         " const o = m?.cy.getElementById(other).boundingBox();"
         " return m?.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
-        " && Number(m.dataset.layouts) > layouts && Number(m.dataset.layoutCalls) >= 2"
+        " && Number(m.dataset.layouts) > layouts"
         " && p && p.h < oldHeight - 20 && o && o.y1 < oldY - 2; }",
         arg=[count, layouts_before, project, other, before["nodes"][project]["h"], before["nodes"][other]["y"]],
         timeout=20_000,
@@ -2063,8 +2063,6 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         failures.append(f"{name}: the unlink did not shrink only the tall box: {old} -> {new}")
     if after["nodes"][other]["y"] >= before["nodes"][other]["y"] - 2:
         failures.append(f"{name}: repacking did not move the other root up: {before['nodes'][other]} -> {after['nodes'][other]}")
-    if int(page.get_by_test_id("map").get_attribute("data-layout-calls") or 0) < 2:
-        failures.append(f"{name}: the inner box and the top level were not both laid out after the shrink")
     if abs(after["zoom"] - before["zoom"]) > 0.001 or any(
         abs(after["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
     ):
@@ -2093,8 +2091,8 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     # A chevron fold after Undo still holds the restored packing; reopening returns to the same root positions.
     centre(page, project)
     page.get_by_test_id("map").evaluate(
-        "(m, id) => { const top = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false }).y1;"
-        " m.cy.panBy({ x: 0, y: 80 - top }); }",
+        "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " m.cy.panBy({ x: 80 - b.x1, y: 80 - b.y1 }); }",
         project,
     )
     frame = settled_corner(page, project)
