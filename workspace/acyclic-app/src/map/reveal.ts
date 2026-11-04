@@ -172,6 +172,32 @@ function fitOf(boxes: readonly Box[], open: Box, padding: number): number {
   );
 }
 
+/** The viewport that fits the whole plan in `open`, even below the usual readable zoom. */
+export function fitPlan(
+  plan: Box,
+  open: Box,
+  most: number,
+  padding = 24,
+): { zoom: number; pan: { x: number; y: number } } | null {
+  const width = plan.x2 - plan.x1;
+  const height = plan.y2 - plan.y1;
+  const openWidth = open.x2 - open.x1;
+  const openHeight = open.y2 - open.y1;
+  const zoom = Math.min(
+    most,
+    (openWidth - 2 * padding) / Math.max(1, width),
+    (openHeight - 2 * padding) / Math.max(1, height),
+  );
+  if (zoom <= 0) return null;
+  return {
+    zoom,
+    pan: {
+      x: open.x1 + (openWidth - width * zoom) / 2 - plan.x1 * zoom,
+      y: open.y1 + (openHeight - height * zoom) / 2 - plan.y1 * zoom,
+    },
+  };
+}
+
 function spanOf(boxes: readonly Box[]): Box {
   return {
     x1: Math.min(...boxes.map((b) => b.x1)),

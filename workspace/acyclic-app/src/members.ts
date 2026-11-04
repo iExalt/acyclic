@@ -12,8 +12,17 @@ export function workOrder(
   const title = new Map(members.map((member) => [member.id, member.title]));
   const byTitle = (a: string, b: string) => natural(title.get(a) ?? a, title.get(b) ?? b) || natural(a, b);
   const waiting = new Map(members.map((member) => [member.id, waitsFor(member.id).filter((id) => inThread.has(id))]));
+  // The Map puts members with no in-thread links beside the graph. Keep that group ahead of linked work in the panel,
+  // even when a graph item would otherwise be ready at the same time.
+  const linked = new Set<string>();
+  for (const [id, firsts] of waiting) {
+    if (firsts.length === 0) continue;
+    linked.add(id);
+    for (const first of firsts) linked.add(first);
+  }
   const order: string[] = [];
-  const placed = new Set<string>();
+  const placed = new Set([...waiting.keys()].filter((id) => !linked.has(id)).sort(byTitle));
+  order.push(...placed);
   while (order.length < members.length) {
     const free = [...waiting.keys()].filter(
       (id) => !placed.has(id) && (waiting.get(id) ?? []).every((first) => placed.has(first)),

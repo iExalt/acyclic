@@ -142,8 +142,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
   stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
-  what it waits for in the thread), each with its stage's icon, the first eight and then how many more; "Starts with",
-  its first items alone, meant nothing to the user. Then its brief.
+  what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
+  more; "Starts with", its first items alone, meant nothing to the user. Then its brief.
 - **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the
@@ -276,8 +276,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page
-  of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out, rather
-  than show a blank canvas that reads as no plan.
+  of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out and marks
+  the canvas busy, rather than show a blank canvas that reads as no plan.
 
 ## Voice & copy
 
@@ -323,6 +323,8 @@ before what went wrong.
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed
   line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
   at a glance (the user's ask).
+- **Threads' waits stay named.** Every tile names the threads it waits on and any cycle peers. On wide screens, arrows
+  appear only for a hovered or picked thread; phone layouts keep the names without arrows.
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as
   the boxes allow (the user's ask: no gaps between rows), each box after those it waits on: below one, or level with
   it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
@@ -347,6 +349,9 @@ before what went wrong.
   cross have none.
 - **Opening view.** The whole plan when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at
   0.85, a phone's titles read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
+- **Fit the whole plan.** A Fit button on the Map frames the whole drawn plan in the uncovered part of the Map, including
+  beside a panel or above a phone sheet. It changes only the viewport; selection and folds stay put. The button is a
+  standard control, 44 px on touch, and is absent from other views.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.

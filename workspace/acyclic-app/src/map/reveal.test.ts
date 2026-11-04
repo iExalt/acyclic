@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   firstOf,
   firstView,
+  fitPlan,
   frame,
   framesAll,
   headed,
@@ -210,6 +211,26 @@ describe("frame", () => {
     const view = frame([{ x1: 1000, y1: 1000, x2: 1200, y2: 1048 }], big, phone, 1);
     expect(view).toEqual({ zoom: 1, pan: { x: 92 - 1000, y: 176 - 1000 } });
     expect(frame([], big, phone, 1)).toBeNull();
+  });
+});
+
+describe("fitPlan", () => {
+  it("fits the whole plan in the uncovered part, even below the readable zoom", () => {
+    const fitted = fitPlan({ x1: -200, y1: 100, x2: 3800, y2: 3100 }, { x1: 0, y1: 0, x2: 384, y2: 340 }, 2);
+    expect(fitted?.zoom).toBeCloseTo(0.084);
+    expect(fitted?.pan.x).toBeCloseTo(40.8);
+    expect(fitted?.pan.y).toBeCloseTo(35.6);
+  });
+
+  it("centres a small plan up to the Map's maximum zoom", () => {
+    expect(fitPlan({ x1: 10, y1: 20, x2: 110, y2: 120 }, { x1: 0, y1: 0, x2: 400, y2: 300 }, 2)).toEqual({
+      zoom: 2,
+      pan: { x: 80, y: 10 },
+    });
+  });
+
+  it("declines an open area too small for its padding", () => {
+    expect(fitPlan({ x1: 0, y1: 0, x2: 400, y2: 300 }, { x1: 0, y1: 0, x2: 40, y2: 40 }, 2)).toBeNull();
   });
 });
 

@@ -19,6 +19,7 @@ import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, topOf, type View, visible } from "./model";
 import {
   firstView,
+  fitPlan,
   frame,
   framesAll,
   headed,
@@ -97,6 +98,8 @@ export interface PlanMapProps {
   onPick: ((item: string | null) => void) | null;
   /** A finished thread's box tapped: its thread is picked, as the sidebar picks one. */
   onThread?: (thread: string) => void;
+  /** Whether the Map view is active, so its Fit control doesn't sit over another view. */
+  showFit: boolean;
 }
 
 export interface Framed {
@@ -120,6 +123,7 @@ export default function PlanMap({
   framed,
   onPick,
   onThread,
+  showFit,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
@@ -160,6 +164,19 @@ export default function PlanMap({
   viewNow.current = view;
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
   const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
+
+  const fit = () => {
+    const core = cy.current;
+    const element = host.current;
+    if (core === null || element === null) return;
+    const plan = core.elements().boundingBox({ includeLabels: true });
+    const fitted = fitPlan(plan, openPart(element), MAX_ZOOM);
+    if (fitted === null) return;
+    const floor = Math.min(1, fitted.zoom * 0.9);
+    core.scratch("floor", floor);
+    core.minZoom(floor * PINCH_SLACK);
+    core.viewport(fitted);
+  };
 
   // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
   useEffect(() => {
@@ -530,7 +547,18 @@ export default function PlanMap({
 
   return (
     <>
-      <div ref={host} className="map" data-testid="map" data-state="laying-out" />
+      <div
+        ref={host}
+        className="map"
+        data-testid="map"
+        data-state="laying-out"
+        aria-busy={!drawnOnce && items.length > 0 ? true : undefined}
+      />
+      {showFit && drawnOnce && placed !== null && items.length > 0 ? (
+        <button type="button" className="map-fit" aria-label="Fit the whole plan" onClick={fit}>
+          Fit
+        </button>
+      ) : null}
       {/* Until the plan is first drawn, which on a phone takes a second or two, a blank canvas would read as no plan. */}
       {drawnOnce || items.length === 0 ? null : (
         <p className="status map-status" role="status">
