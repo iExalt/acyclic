@@ -340,19 +340,11 @@ impl Inner {
             .map(|all| all.iter().filter(|entry| entry["notify"] == true).collect())
             .unwrap_or_default();
         let mut current = Vec::with_capacity(entries.len());
-        let mut identity_bytes = 0usize;
         for entry in &entries {
             let Some(identity) = entry["identity"].as_str() else {
                 eprintln!("acyclic: a need has no core identity; skipping this push look");
                 return None;
             };
-            identity_bytes = identity_bytes.checked_add(identity.len())?;
-            if identity_bytes > 16 * 1024 {
-                eprintln!(
-                    "acyclic: need identities exceed the push metadata limit; skipping this push look"
-                );
-                return None;
-            }
             current.push((*entry, identity.to_owned()));
         }
         let now: BTreeSet<String> = current.iter().map(|(_, identity)| identity.clone()).collect();
@@ -362,11 +354,7 @@ impl Inner {
         if kept != told {
             let _ = self.save("sent.json", &kept);
         }
-        let new: Vec<&Value> = current
-            .iter()
-            .filter(|(_, identity)| !kept.contains(identity))
-            .map(|(entry, _)| *entry)
-            .collect();
+        let new = new_entries(&current, &kept);
         let message = new.first().map(|first| {
             let more = new.len() - 1;
             let body =
@@ -619,6 +607,15 @@ pub fn check_endpoint(endpoint: &str, transport: Transport) -> Result<(), Refuse
     }
 }
 
+/// Current entries whose exact identity has not been told or acknowledged.
+fn new_entries<'a>(current: &'a [(&'a Value, String)], kept: &BTreeSet<String>) -> Vec<&'a Value> {
+    current
+        .iter()
+        .filter(|(_, identity)| !kept.contains(identity))
+        .map(|(entry, _)| *entry)
+        .collect()
+}
+
 /// What remains told: only identities still current, plus exact identities the client observed.
 fn kept_identities(
     told: &BTreeSet<String>,
@@ -670,7 +667,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Transport, check_endpoint, kept_identities, key, line};
+    use super::{Transport, check_endpoint, kept_identities, key, line, new_entries};
 
     #[test]
     fn acknowledgments_keep_only_exact_current_identities() {
@@ -681,6 +678,14 @@ mod tests {
             kept_identities(&told, &current, &observed),
             BTreeSet::from(["still-told".to_owned(), "changed-payload".to_owned()])
         );
+    }
+
+    #[test]
+    fn large_core_identities_still_make_new_needs_plannable() {
+        let entry = json!({"kind": "reopened", "item": {"id": "a"}});
+        let identity = "x".repeat(16 * 1024 + 1);
+        let current = [(&entry, identity.clone())];
+        assert_eq!(new_entries(&current, &BTreeSet::new()), [&entry]);
     }
 
     #[test]

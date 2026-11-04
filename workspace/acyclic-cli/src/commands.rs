@@ -504,8 +504,8 @@ impl<'a> Session<'a> {
             }
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
-            if let (Some(observed), Some(before_needs), Some(after_needs)) =
-                (&self.observed, before_needs, notifying_entries(replica.state(), at, self.env))
+            if let (Some(observed), Some(before_needs)) = (&self.observed, before_needs)
+                && let Some(after_needs) = notifying_entries(replica.state(), at, self.env)
             {
                 let acknowledged = after_needs
                     .iter()

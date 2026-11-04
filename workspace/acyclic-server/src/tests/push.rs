@@ -187,10 +187,11 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         dependents: Vec::new(),
     }
     .identity();
-    assert!(
-        !identities().contains(&own_reopen),
-        "the app's own new need is acknowledged without a push"
-    );
+    eventually("persisting the app's exact own-need acknowledgment", || {
+        identities().contains(&own_reopen).then_some(())
+    })
+    .await;
+    assert_eq!(service.sent.lock().unwrap().len(), 3, "the app's own need adds no push");
 
     // However long the service is down, the device stays, and the news arrives once it is back.
     let devices = home.join(".config/acyclic/push/subscriptions.json");
