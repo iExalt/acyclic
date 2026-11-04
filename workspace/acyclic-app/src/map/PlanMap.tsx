@@ -98,8 +98,8 @@ export interface PlanMapProps {
   onPick: ((item: string | null) => void) | null;
   /** A finished thread's box tapped: its thread is picked, as the sidebar picks one. */
   onThread?: (thread: string) => void;
-  /** Whether the Map view is active, so its Fit control doesn't sit over another view. */
-  showFit: boolean;
+  /** Whether the Map view is active, so its controls and loading message don't cover another view. */
+  active: boolean;
 }
 
 export interface Framed {
@@ -123,7 +123,7 @@ export default function PlanMap({
   framed,
   onPick,
   onThread,
-  showFit,
+  active,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
@@ -552,19 +552,19 @@ export default function PlanMap({
         className="map"
         data-testid="map"
         data-state="laying-out"
-        aria-busy={!drawnOnce && items.length > 0 ? true : undefined}
+        aria-busy={active && !drawnOnce && items.length > 0 ? true : undefined}
       />
-      {showFit && drawnOnce && placed !== null && items.length > 0 ? (
+      {active && drawnOnce && placed !== null && items.length > 0 ? (
         <button type="button" className="map-fit" aria-label="Fit the whole plan" onClick={fit}>
           Fit
         </button>
       ) : null}
       {/* Until the plan is first drawn, which on a phone takes a second or two, a blank canvas would read as no plan. */}
-      {drawnOnce || items.length === 0 ? null : (
+      {active && !drawnOnce && items.length > 0 ? (
         <p className="status map-status" role="status">
           Laying out the Map…
         </p>
-      )}
+      ) : null}
     </>
   );
 }

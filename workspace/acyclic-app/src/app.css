@@ -1440,11 +1440,32 @@ code {
 /* Over the Map until it is first drawn. */
 .map-status {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 50%;
+  left: 50%;
   z-index: 1;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
   pointer-events: none;
+}
+.map-status::before {
+  content: "";
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--accent);
+  border-radius: 50%;
 }
 
 /* The needs-you list: one entry after another, ruled apart. */

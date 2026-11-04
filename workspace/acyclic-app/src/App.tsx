@@ -816,7 +816,7 @@ export function App() {
             onThread={toThread}
             focus={requests.focus}
             framed={requests.frame}
-            showFit={view === "map"}
+            active={view === "map"}
             onPick={
               prompt === null ? null : (id) => choose(id === null ? { kind: "background" } : { kind: "item", id })
             }
