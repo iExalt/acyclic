@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { entries, entry, fold, isMac, MOST, opensMenu, type Plan, platformOf, rank, targets, undoes } from "./commands";
+import {
+  type Entry,
+  entries,
+  entry,
+  fold,
+  isMac,
+  MOST,
+  opensMenu,
+  type Plan,
+  platformOf,
+  rank,
+  targets,
+  undoes,
+} from "./commands";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 
@@ -48,6 +61,22 @@ describe("the command menu", () => {
     // In the id only: "resume" is the item's id, and its title too once accents are set aside.
     expect(titles("RESUME")).toEqual(["Résumé of the bed plan"]);
     expect(titles("garden")).toEqual(["Garden"]);
+  });
+
+  it("ranks normalized exact titles, prefixes and embedded phrases globally across groups", () => {
+    const one = (key: string, group: Entry["group"], title: string) =>
+      entry({ key, group, title, detail: null, also: "", run: { kind: "item", id: key } });
+    const found = rank(
+      "  PAINT   shelves ",
+      [
+        one("dispersed-item", "Items", "Paint the shelves"),
+        one("phrase-project", "Projects", "Quickly: paint   shelves"),
+        one("prefix-thread", "Threads", "Paint shelves plan"),
+        one("exact-item", "Items", "Paint shelves"),
+      ],
+      new Set(),
+    );
+    expect(found.map(({ key }) => key)).toEqual(["exact-item", "prefix-thread", "phrase-project", "dispersed-item"]);
   });
 
   it("finds an entry only when every word is in it, and gives a project, not its items, for its id", () => {

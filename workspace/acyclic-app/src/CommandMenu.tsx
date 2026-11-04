@@ -119,10 +119,11 @@ export function CommandMenu({
     }
   };
 
-  // Grouped under headings, which are only labels: ↑ and ↓ move across the groups as one list.
-  const groups: { name: string; rows: ReactNode[] }[] = [];
+  // Consecutive ranked results share a heading; when ranking returns to a group, its heading returns too.
+  const groups: { name: string; heading: string; rows: ReactNode[] }[] = [];
   found.forEach((entry, n) => {
-    if (groups.at(-1)?.name !== entry.group) groups.push({ name: entry.group, rows: [] });
+    if (groups.at(-1)?.name !== entry.group)
+      groups.push({ name: entry.group, heading: `${list}-group-${entry.key}`, rows: [] });
     groups.at(-1)?.rows.push(
       // biome-ignore lint/a11y/useKeyWithClickEvents: the field's keys choose and run; a pointer runs one directly.
       <div
@@ -191,8 +192,8 @@ export function CommandMenu({
         <div id={list} role="listbox" aria-label="Results" className="command-list">
           {groups.map((group) => (
             // biome-ignore lint/a11y/useSemanticElements: a group of a listbox's options; a fieldset groups form controls.
-            <div key={group.name} role="group" aria-labelledby={`${list}-${group.name}`}>
-              <div id={`${list}-${group.name}`} className="command-group">
+            <div key={group.heading} role="group" aria-labelledby={group.heading}>
+              <div id={group.heading} className="command-group">
                 {group.name}
               </div>
               {group.rows}
