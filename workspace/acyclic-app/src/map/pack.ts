@@ -62,16 +62,20 @@ function packTo(
   let [right, bottom] = [0, 0];
   for (const child of children) {
     const firsts = (waits.get(child.id) ?? []).flatMap((id) => placed.get(id) ?? []);
+    const byY = [...placed.values()].sort((a, b) => a.y - b.y);
     let spot: { x: number; y: number } | null = null;
     for (const x of new Set([0, ...[...placed.values()].map((box) => box.x + box.width + GAP)])) {
       if (x > 0 && x + child.width > limit) continue;
-      // Under whatever already stands across these columns.
-      let y = 0;
-      for (const box of placed.values())
-        if (box.x < x + child.width + GAP && x < box.x + box.width + GAP) y = Math.max(y, box.y + box.height + GAP);
       // After what it waits on: below it, or level with it or lower on its right.
+      let y = 0;
       for (const first of firsts)
         y = Math.max(y, x >= first.x + first.width + GAP ? first.y : first.y + first.height + GAP);
+      // Stop at the first open band: one box pushed down by a wait need not make a box above it fall below too.
+      for (const box of byY) {
+        if (box.x >= x + child.width + GAP || x >= box.x + box.width + GAP) continue;
+        if (y + child.height + GAP <= box.y) break;
+        if (box.y + box.height + GAP > y) y = box.y + box.height + GAP;
+      }
       if (spot === null || y < spot.y || (y === spot.y && x < spot.x)) spot = { x, y };
     }
     const { x, y } = spot ?? { x: 0, y: bottom };

@@ -44,6 +44,25 @@ describe("pack", () => {
       b.y >= a.y + tall || (b.y >= a.y && b.x >= a.x + wide);
     expect([after(first, then, 200, 400), after(then, small, 900, 100)]).toEqual([true, true]);
   });
+
+  it("fills a vertical band above a box pushed down by what it waits on", () => {
+    const kids = [box("p", 100, 100), box("a", 100, 300), box("b", 100, 100), box("c", 50, 100)];
+    const waits = new Map([
+      ["a", ["p"]],
+      ["b", ["a"]],
+      ["c", ["p"]],
+    ]);
+    expect(pack(kids, waits, 0.6)).toEqual({
+      width: 248,
+      height: 448,
+      at: {
+        p: { x: 12, y: 12 },
+        a: { x: 136, y: 12 },
+        b: { x: 12, y: 336 },
+        c: { x: 12, y: 136 },
+      },
+    });
+  });
 });
 
 describe("hold", () => {
