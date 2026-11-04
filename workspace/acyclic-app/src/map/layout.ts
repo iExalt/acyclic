@@ -222,7 +222,6 @@ export async function place(
   const boxes = new Map<string, BoxLayout>();
   const laidOut: string[] = [];
   const levels: string[][] = [];
-  let rootPromotion: { input: BoxInput; layout: BoxLayout } | null = null;
   const height = (id: string): number => {
     let h = 0;
     for (const child of scope.kids.get(id) ?? [])
@@ -261,14 +260,13 @@ export async function place(
             laidOut.push(id);
           }
         }
-        if (id === ROOT && !heldRoot && layout !== undefined) rootPromotion = { input, layout };
+        // ROOT is alone on the final level: after its last await, promote synchronously only if no newer request
+        // overtook it. A held layout stays derived from its original packing and never becomes a new baseline.
+        if (id === ROOT && !heldRoot && layout !== undefined && isCurrent()) cache.rememberRoot(input, layout);
         boxes.set(id, layout);
       }),
     );
   }
-  // `place` may overlap another request. Promote only the latest root packing, and never make a held layout its own
-  // baseline: the baseline describes an actual packing, not a path through intermediate sizes.
-  if (rootPromotion !== null && isCurrent()) cache.rememberRoot(rootPromotion.input, rootPromotion.layout);
   const root = boxes.get(ROOT) ?? { width: 0, height: 0, at: {} };
   const nodes = new Map<string, { x: number; y: number } & Size>();
   const routes = new Map<string, Point[]>();
