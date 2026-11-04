@@ -176,6 +176,16 @@ describe("settle", () => {
 });
 
 describe("failure", () => {
+  it.each(["no item never-added", "no item deleted", "no thread missing"])(
+    "does not guess why a reference is missing: %s",
+    (message) => {
+      expect(failure(new CommandError("not-found", message))).toEqual({
+        code: "not-found",
+        message: "It isn't in the plan",
+      });
+    },
+  );
+
   it("tells a request that never reached the server in the app's words, and keeps any other failure's own", async () => {
     const lost = async () => {
       throw new TypeError("Load failed");

@@ -165,7 +165,7 @@ const REFUSALS: Record<string, string> = {
   "self-link": "An item can't link to itself",
   archived: "That would leave unfinished work inside an archived project, where it would be hidden",
   deleted: "That item was deleted after it was added: send it again to add it anew",
-  "not-found": "It isn't in the plan any more: someone deleted or moved it meanwhile",
+  "not-found": "It isn't in the plan",
   "changed-since": "Changed since, so it can't be undone",
   locked: "The tracker is busy with another write: try again in a moment",
 };

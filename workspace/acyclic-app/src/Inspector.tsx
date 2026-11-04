@@ -344,14 +344,14 @@ function Conflicts({
   );
 }
 
-/** Where an item stands: a leaf's stage, or a parent's state from the work under it with its leaves by stage. */
+/** Where an item stands, with a parent's leaves counted by stage. */
 function ItemStatus({ item }: { item: Item }) {
   const archived = item.archived ? <span className="muted">, archived</span> : null;
   if (item.progress !== undefined)
     return (
       <>
         <span>
-          {stateWords(item.progress.state)}
+          {item.stage === undefined ? stateWords(item.progress.state) : <StageLabel stage={item.stage} />}
           {/* Everything under it archived says so; it being archived too goes without saying. */}
           {item.progress.counts.leaves === 0 ? " (all archived)" : archived}
         </span>
