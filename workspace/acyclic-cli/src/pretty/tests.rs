@@ -100,6 +100,23 @@ fn an_error_is_one_line_naming_its_code() {
 }
 
 #[test]
+fn cleared_conflict_sides_are_visible_but_unset_fields_stay_omitted() {
+    let shown = json!([{"id": "a1", "parent": {"conflict": [null, "ideas"]}, "notes": null}]);
+    let text = render(&command("item show a1"), &shown, None, &BTreeMap::new());
+    assert!(text.contains("conflict none, ideas"), "{text}");
+    assert!(!text.contains("notes"), "{text}");
+
+    let needs = json!({"needs": [{"kind": "conflict", "entity": "item", "id": "a1",
+    "field": "parent", "values": [null, "ideas"], "keeps": [
+        {"value": null, "command": {}, "run": "acyclic item edit a1 --no-parent", "why": null},
+    ]}]});
+    let text = render(&command("needs"), &needs, None, &BTreeMap::new());
+    assert!(text.contains("none, ideas"), "{text}");
+    assert!(text.contains("keep none: acyclic item edit a1 --no-parent"), "{text}");
+    assert_eq!(compact(&json!([null, "unrelated"])), ", unrelated");
+}
+
+#[test]
 fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
     let counts = |items: u64, links: u64| json!({"items": items, "threads": 1, "links": links, "repositories": 0, "fields": 14});
     let import = |dry_run: bool, counts: Json| {

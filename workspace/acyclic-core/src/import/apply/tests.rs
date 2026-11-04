@@ -242,6 +242,10 @@ fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
         panic!("cycle accepted")
     };
     assert_eq!(cycles, [[id(11), id(12)]]);
+    assert_eq!(
+        ApplyError::Cycles(cycles).to_string(),
+        format!("the import would close 1 cycle: {} -> {}", id(11), id(12))
+    );
 }
 
 #[test]
@@ -258,6 +262,7 @@ fn a_deleted_thread_is_refused_as_a_deleted_item_is() {
     assert!(crate::delete::delete_thread(&mut r, &id(21), by(USER, 2)).unwrap());
     let err = apply(&doc, &mut r, by(USER, 3)).unwrap_err();
     assert_eq!(err, ApplyError::Write(WriteError::Deleted(id(21))));
+    assert_eq!(err.to_string(), format!("{} was deleted, and its id isn't used again", id(21)));
 }
 
 #[test]

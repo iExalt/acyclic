@@ -486,7 +486,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             ),
         )
         .with(json!({"missing": missing.iter().map(|f| f.replace('-', "_")).collect::<Vec<_>>()})),
-        Rule::EvidenceNotDone | Rule::RepeatDiffers | Rule::Contradicts => {
+        Rule::EvidenceNotDone | Rule::RepeatDiffers | Rule::Contradicts | Rule::WrongRecord(_) => {
             CliError::refused("refused", violation.to_string())
         },
     }

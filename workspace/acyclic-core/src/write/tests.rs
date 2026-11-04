@@ -504,6 +504,30 @@ fn only_violations_the_change_set_introduces_are_refused() {
 }
 
 #[test]
+fn an_add_assignment_must_name_the_record_being_added() {
+    let mut r = replica("a");
+    let before = r.state.clone();
+    let changes = ChangeSet(vec![Change::Add {
+        record: Record::Item("new".into()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: vec![Assign::Item("other".into(), ItemAssign::Title("Wrong".into()))],
+    }]);
+    let Err(CommitError::Refused(violations, _)) =
+        commit(&mut r, by(1), None, |_| Ok::<_, ()>(changes))
+    else {
+        panic!("a misdirected assignment must be refused");
+    };
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].rule, Rule::WrongRecord(Record::Item("new".into())));
+    assert_eq!(
+        violations[0].to_string(),
+        "item other's title: the assignment must name the item new being added"
+    );
+    assert_eq!(r.state, before);
+}
+
+#[test]
 fn every_violation_is_named_at_once() {
     let mut r = done_tree();
     commit_ok(&mut r, 3, vec![add("gone", vec![])]);
@@ -528,6 +552,17 @@ fn every_violation_is_named_at_once() {
             Rule::Deleted(Record::Item("gone".into())),
         ]
     );
+}
+
+#[test]
+fn a_deleted_thread_refusal_names_the_thread() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![thread("gone")]);
+    crate::delete::delete_thread(&mut r, "gone", by(2)).unwrap();
+    let violations = judge(&read(&r), &ChangeSet(vec![thread("gone")]), by(3), None).unwrap_err();
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].rule, Rule::Deleted(Record::Thread("gone".into())));
+    assert_eq!(violations[0].to_string(), "thread gone was deleted, and its id isn't used again");
 }
 
 #[test]
