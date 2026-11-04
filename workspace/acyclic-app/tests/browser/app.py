@@ -1618,7 +1618,9 @@ def verify_thread_arrows(page, listed, want, name, failures):
         if dependency in want
     }
     seen = set()
-    skips = []
+    checked_geometry = set()
+    skips = set()
+    lit_screenshot = False
     for thread in sorted(want):
         incident = {pair for pair in expected if thread in pair}
         if not incident:
@@ -1632,9 +1634,11 @@ def verify_thread_arrows(page, listed, want, name, failures):
         drawn = page.locator(".arrows g").evaluate_all("rows => rows.map(g => [g.dataset.from, g.dataset.to])")
         if set(map(tuple, drawn)) != incident:
             failures.append(f"{name}: hovering {thread} drew {drawn}, expected its waits {sorted(incident)}")
-        skips.extend(arrows_clear(page, want, name, failures))
+        skips.update(arrows_clear(page, want, name, failures, checked_geometry))
         seen.update(map(tuple, drawn))
-        page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
+        if skips and not lit_screenshot:
+            page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
+            lit_screenshot = True
         page.mouse.move(0, 0)
         page.wait_for_function("() => document.querySelectorAll('.arrows g').length === 0", timeout=5_000)
     if seen != expected:
@@ -1643,22 +1647,34 @@ def verify_thread_arrows(page, listed, want, name, failures):
         failures.append(f"{name}: no selected connector skips a wave, so none was checked across it")
 
 
-def arrows_clear(page, want, name, failures):
-    """Checks every arrow as drawn, a point each 4 px along it, against the tiles' boxes as drawn: none crosses a tile,
-    other than its own two at its ends, and the view scrolls to all of it. One must skip a wave, or the check proves
-    little."""
+def arrows_clear(page, want, name, failures, checked_geometry):
+    """Checks each distinct arrow path against tiles at 4 px intervals and verifies the view scrolls to all of it."""
     found = page.evaluate(
-        """() => {
+        """(checked) => {
             const view = document.querySelector('.waves');
             const origin = view.getBoundingClientRect();
             const tiles = [...document.querySelectorAll('.wave [data-thread-tile]')].map(tile => [tile.dataset.threadTile,
                 tile.getBoundingClientRect()]);
+            const seen = new Set(checked);
+            const added = [];
+            const addedPairs = [];
             const crossed = [];
             let outside = 0;
             for (const arrow of document.querySelectorAll('.arrows g')) {
                 const line = arrow.querySelector('path:not(.head)');
                 const matrix = line.getScreenCTM();
+                const head = arrow.querySelector('path.head');
                 const length = line.getTotalLength();
+                const signature = JSON.stringify([
+                    arrow.dataset.from, arrow.dataset.to, line.getAttribute('d'), head?.getAttribute('d'),
+                    [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
+                    [origin.left, origin.top, origin.width, origin.height, view.clientWidth, view.clientHeight,
+                        view.scrollLeft, view.scrollTop, view.scrollWidth, view.scrollHeight]
+                ]);
+                if (seen.has(signature)) continue;
+                seen.add(signature);
+                added.push(signature);
+                addedPairs.push([arrow.dataset.from, arrow.dataset.to]);
                 for (let along = 0; along <= length; along += 4) {
                     const local = line.getPointAtLength(along);
                     const x = matrix.a * local.x + matrix.c * local.y + matrix.e;
@@ -1674,20 +1690,21 @@ def arrows_clear(page, want, name, failures):
                     }
                 }
             }
-            const pairs = [...document.querySelectorAll('.arrows g')].map(g => [g.dataset.from, g.dataset.to]);
-            return { crossed: [...new Set(crossed)], outside, pairs };
-        }"""
+            return { crossed: [...new Set(crossed)], outside, added, addedPairs };
+        }""",
+        sorted(checked_geometry),
     )
+    checked_geometry.update(found["added"])
     if found["crossed"]:
         failures.append(f"{name}: arrows cross tiles: {found['crossed'][:5]}")
     if found["outside"]:
         failures.append(f"{name}: {found['outside']} points of the arrows lie where the view doesn't scroll")
     skips = [
         (a, b)
-        for a, b in found["pairs"]
+        for a, b in found["addedPairs"]
         if want.get(a, "").isdigit() and want.get(b, "").isdigit() and int(want[b]) - int(want[a]) > 1
     ]
-    return skips
+    return set(skips)
 
 
 def item(env, id):
