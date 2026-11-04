@@ -1136,7 +1136,8 @@ def fit_occlusion(page, lit_only):
                     titleFragments.push({ id: node.id(), label, title });
             }
             return { fit, safeTop, open, safe: Math.abs(fit.y1 - 12) < 0.5 && fit.y2 + 8 <= safeTop + 0.5,
-                itemOverlaps, chevronOverlaps, titleOverlaps, titleFragments };
+                item_overlaps: itemOverlaps, chevron_overlaps: chevronOverlaps,
+                title_overlaps: titleOverlaps, title_fragments: titleFragments };
         }""",
         lit_only,
     )
