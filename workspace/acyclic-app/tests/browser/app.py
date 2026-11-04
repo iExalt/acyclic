@@ -770,6 +770,37 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             page.wait_for_function("() => location.search === ''", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
+    # A parent's status is its stage, not its stored progress state: finished work may still be in review, and
+    # unstarted work says whether it is ready or blocked. Reuse the fixture and the page already open for links.
+    parents = [row for row in plan.items.values() if row.get("progress") and not row["archived"]]
+    cases = {
+        "in-review": next((row for row in parents if row.get("stage") == "in-review"), None),
+        "unstarted": next((row for row in parents if row["progress"]["state"] == "backlog" and row.get("stage")), None),
+    }
+    for case, parent in cases.items():
+        if parent is None:
+            failures.append(f"{name}: fixture has no {case} parent, so its Status went unchecked")
+            continue
+        page.goto(f"{origin}/?item={quote(parent['id'])}")
+        title.wait_for(timeout=10_000)
+        open_full(page, "inspector")
+        shown = inspector.evaluate(
+            """panel => {
+                const status = [...panel.querySelectorAll('dt')].find(dt => dt.textContent === 'Status')?.nextElementSibling;
+                return {
+                    stage: status?.querySelector(':scope > span > [data-stage]')?.getAttribute('data-stage'),
+                    counts: Object.fromEntries([...status.querySelectorAll('.stage-counts [data-stage]')]
+                        .map(mark => [mark.dataset.stage, Number(mark.querySelector('.count').textContent)])),
+                };
+            }"""
+        )
+        counts = parent["progress"]["counts"]
+        expected = {stage.replace("_", "-"): count for stage, count in counts.items() if stage != "leaves"}
+        expected["done"] -= counts["in_review"]
+        expected = {stage: count for stage, count in expected.items() if count}
+        if shown != {"stage": parent["stage"], "counts": expected}:
+            failures.append(f"{name}: parent {parent['id']} Status {shown} disagrees with {parent['stage']}, {expected}")
+        page.screenshot(path=SHOTS / f"app-{name}-parent-{case}.png")
     if errors:
         failures.append(f"{name}: links threw {errors}")
     page.close()

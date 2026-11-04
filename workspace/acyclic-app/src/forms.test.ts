@@ -43,12 +43,12 @@ describe("itemEdit", () => {
 });
 
 describe("stateHint", () => {
-  it("says how a leaf in the backlog shows, by whether it is in a thread, and nothing for a parent or other states", () => {
+  it("distinguishes backlog from a leaf's status, and says nothing for a parent or other states", () => {
     expect(stateHint({ state: "backlog", thread: "thread-1" }, true)).toBe(
-      "Backlog shows as Ready or Blocked in Status, by what it waits on",
+      "Backlog is work still to do. Status also reflects its thread, waits and active claims",
     );
     expect(stateHint({ state: "backlog", thread: "" }, true)).toBe(
-      "Backlog shows as Needs a thread in Status until it's in one",
+      stateHint({ state: "backlog", thread: "thread-1" }, true),
     );
     expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
