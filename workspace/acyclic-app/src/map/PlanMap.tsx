@@ -630,12 +630,19 @@ export default function PlanMap({
     const element = host.current;
     const changed = priorThread.current !== thread;
     priorThread.current = thread;
-    if (changed && shown.current === shownBeforeRender && anchor.current === anchorBeforeRender) cancelViewIntent();
+    if (
+      changed &&
+      (shownBeforeRender !== null || anchorBeforeRender !== null) &&
+      shown.current === shownBeforeRender &&
+      anchor.current === anchorBeforeRender
+    )
+      cancelViewIntent();
     if (thread === null) {
       sought.current = null;
     }
     if (thread === null || sought.current === thread || core === null || element === null || drawn === null) return;
     sought.current = thread;
+    if (focus?.id === selected) return;
     const lit = drawn.nodes.flatMap((node) => {
       const drawnNode = core.getElementById(node.id);
       return node.lit && drawnNode.nonempty() ? [drawnNode.renderedBoundingBox({ includeLabels: false })] : [];
@@ -647,7 +654,7 @@ export default function PlanMap({
       const pan = reveal(target, open);
       if (pan !== null) core.panBy(pan);
     }
-  }, [thread, drawn]);
+  }, [thread, drawn, focus, selected]);
 
   // The latest handlers, so the tap listener is added once.
   const handlers = useRef({ onSelect, onPick, onThread });
