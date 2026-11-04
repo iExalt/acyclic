@@ -14,7 +14,8 @@ export type Expected =
   | { kind: "item-field"; item: string; field: "title" | "parent" | "state" | "notes" | "size"; value: Raw<string> }
   | { kind: "thread-field"; thread: string; field: "title" | "brief"; value: Raw<string> }
   | { kind: "waits-for"; item: string; target: string; present: boolean }
-  | { kind: "started-at-most"; item: string; count: number };
+  | { kind: "started-at-most"; item: string; count: number }
+  | { kind: "waiters-started-at-most"; item: string; baselines: { item: string; count: number }[] };
 
 /** An item as `item show` returns it, with the fields the app reads. */
 interface RawItem {

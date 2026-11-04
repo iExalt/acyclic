@@ -58,6 +58,13 @@ pub enum Expectation {
         /// The greatest number of started leaves that is safe.
         count: usize,
     },
+    /// Started counts for original waiters and every item that now waits on this item or a box above it.
+    WaitersStartedAtMost {
+        /// The item whose state is being undone.
+        item: String,
+        /// Counts from the plan before the original edit; current new waiters must still be unstarted.
+        baselines: StartedBaselines,
+    },
 }
 
 /// An item field an exact Undo can restore.
@@ -103,6 +110,40 @@ pub enum ExpectedValue {
 pub struct ExpectedConflict {
     /// The values in their model order.
     pub conflict: Vec<Option<String>>,
+}
+
+/// A captured waiter's started count.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartedBaseline {
+    /// The waiting item.
+    pub item: String,
+    /// Its started count before the original edit.
+    pub count: usize,
+}
+
+/// Original waiter counts for a state Undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct StartedBaselines(Vec<StartedBaseline>);
+
+impl<'de> Deserialize<'de> for StartedBaselines {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let baselines = Vec::<StartedBaseline>::deserialize(deserializer)?;
+        let mut ids = BTreeSet::new();
+        for baseline in &baselines {
+            if !ids.insert(baseline.item.as_str()) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate started baseline for {}",
+                    baseline.item
+                )));
+            }
+        }
+        Ok(Self(baselines))
+    }
 }
 
 impl<'de> Deserialize<'de> for ExpectedConflict {
@@ -156,6 +197,32 @@ pub fn check_expected(
     let readiness = Readiness::new(state, model, now, &ancestry);
     let mut mismatches = Vec::new();
     for expectation in expected {
+        if let Expectation::WaitersStartedAtMost { item, baselines } = expectation {
+            let mut counts: BTreeMap<String, usize> = baselines
+                .0
+                .iter()
+                .map(|baseline| (baseline.item.clone(), baseline.count))
+                .collect();
+            for waiter in current_waiters(model, item) {
+                counts.entry(waiter).or_insert(0);
+            }
+            let mut started = Vec::new();
+            for (waiter, at_most) in counts {
+                let count = started_count(&readiness, model, &waiter)?;
+                if count > at_most {
+                    started.push(
+                        serde_json::json!({"item": waiter, "count": count, "at_most": at_most}),
+                    );
+                }
+            }
+            if !started.is_empty() {
+                mismatches.push(Mismatch {
+                    expectation: expectation.clone(),
+                    actual: serde_json::json!({"started": started}),
+                });
+            }
+            continue;
+        }
         let actual = match expectation {
             Expectation::ItemField { item, field, .. } => {
                 let Some(item) = model.items.get(item) else {
@@ -199,23 +266,9 @@ pub fn check_expected(
                 Json::Bool(model.links.iter().any(|link| link.from == *item && link.to == *target))
             },
             Expectation::StartedAtMost { item, .. } => {
-                if !model.items.contains_key(item) {
-                    mismatches
-                        .push(Mismatch { expectation: expectation.clone(), actual: Json::Null });
-                    continue;
-                }
-                let count = if model.children(item).is_empty() {
-                    usize::from(matches!(
-                        readiness.stage(item)?,
-                        Some(Stage::InProgress | Stage::InReview | Stage::Done)
-                    ))
-                } else {
-                    readiness.progress(item)?.map_or(0, |rollup| {
-                        rollup.stages.in_progress + rollup.stages.in_review + rollup.stages.done
-                    })
-                };
-                Json::from(count)
+                Json::from(started_count(&readiness, model, item)?)
             },
+            Expectation::WaitersStartedAtMost { .. } => unreachable!("handled above"),
         };
         let matches = match expectation {
             Expectation::ItemField { value, .. } | Expectation::ThreadField { value, .. } => {
@@ -226,6 +279,7 @@ pub fn check_expected(
                 .as_u64()
                 .and_then(|actual| usize::try_from(actual).ok())
                 .is_some_and(|actual| actual <= *count),
+            Expectation::WaitersStartedAtMost { .. } => unreachable!("handled above"),
         };
         if !matches {
             mismatches.push(Mismatch { expectation: expectation.clone(), actual });
@@ -240,6 +294,36 @@ impl Ancestry for AssumeUnmerged {
     fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
         Ok(false)
     }
+}
+
+fn started_count(
+    readiness: &Readiness<'_>,
+    model: &Model,
+    item: &str,
+) -> Result<usize, StateError> {
+    if !model.items.contains_key(item) {
+        return Ok(0);
+    }
+    if model.children(item).is_empty() {
+        Ok(usize::from(matches!(
+            readiness.stage(item)?,
+            Some(Stage::InProgress | Stage::InReview | Stage::Done)
+        )))
+    } else {
+        Ok(readiness.progress(item)?.map_or(0, |rollup| {
+            rollup.stages.in_progress + rollup.stages.in_review + rollup.stages.done
+        }))
+    }
+}
+
+fn current_waiters(model: &Model, item: &str) -> BTreeSet<String> {
+    let targets = std::iter::once(item).chain(model.ancestors(item)).collect::<BTreeSet<_>>();
+    model
+        .links
+        .iter()
+        .filter(|link| targets.contains(link.to.as_str()) && model.items.contains_key(&link.from))
+        .map(|link| link.from.clone())
+        .collect()
 }
 
 /// A record a change is about.

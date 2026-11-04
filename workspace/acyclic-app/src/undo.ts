@@ -107,26 +107,25 @@ export function undoOf(command: Command, before: Plan): Undo | null {
   }
   // Named as it now reads: a title just changed is the new one.
   const named = set.get("title") ?? titleOf(id);
+  const baselines = set.has("state")
+    ? waitersOf(before, id).map((one) => ({ item: one, count: started(before.items.get(one)) }))
+    : [];
+  const stillSafeForWaiters = (now: Plan) => {
+    const counts = new Map(baselines.map(({ item, count }) => [item, count]));
+    const waiters = new Set([...counts.keys(), ...waitersOf(now, id)]);
+    return [...waiters].every((one) => started(now.items.get(one)) <= (counts.get(one) ?? 0));
+  };
   return {
     text: `Edited ${named}${thread ? ". Its thread can't be changed back from here" : ""}`,
     undone: `Set ${titleOf(id)} back${thread ? ", except its thread" : ""}`,
     command: { item: { edit: back } },
     expect: [
       ...[...set].map(([field, value]): Expected => ({ kind: "item-field", item: id, field, value })),
-      ...(!set.has("state")
-        ? []
-        : waitersOf(before, id).map(
-            (one): Expected => ({
-              kind: "started-at-most",
-              item: one,
-              count: started(before.items.get(one)),
-            }),
-          )),
+      ...(!set.has("state") ? [] : [{ kind: "waiters-started-at-most" as const, item: id, baselines }]),
     ],
     holds: (now) =>
       [...set].every(([field, value]) => held(now.items.get(id), field) === value) &&
-      (!set.has("state") ||
-        waitersOf(before, id).every((one) => started(now.items.get(one)) <= started(before.items.get(one)))),
+      (!set.has("state") || stillSafeForWaiters(now)),
   };
 }
 

@@ -153,6 +153,60 @@ fn expected_conflict_values_keep_their_order_and_malformed_conditions_are_reject
 }
 
 #[test]
+fn waiter_guard_covers_new_direct_and_ancestor_waiters_and_keeps_original_waiters() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("parent", vec![]),
+            add("done", vec![ItemAssign::Parent(Some("parent".into()))]),
+            add("direct", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("ancestor", vec![ItemAssign::Thread(Some("t".into()))]),
+        ],
+    );
+    let done = ItemAssign::State(ItemState::Done);
+    commit_ok(&mut r, 2, vec![item("parent", done.clone()), item("done", done)]);
+    let guard = |baselines| Expectation::WaitersStartedAtMost {
+        item: "done".into(),
+        baselines: StartedBaselines(baselines),
+    };
+    let empty = guard(vec![]);
+    assert_eq!(check_expected(&r.state, &read(&r), &[empty], 3).unwrap(), Vec::new());
+
+    commit_ok(
+        &mut r,
+        3,
+        vec![
+            item("direct", ItemAssign::WaitsFor("done".into(), true)),
+            item("ancestor", ItemAssign::WaitsFor("parent".into(), true)),
+        ],
+    );
+    assert_eq!(check_expected(&r.state, &read(&r), &[guard(vec![])], 4).unwrap(), Vec::new());
+    // A deleted original waiter has a current started count of zero.
+    let deleted = guard(vec![StartedBaseline { item: "gone".into(), count: 0 }]);
+    assert_eq!(check_expected(&r.state, &read(&r), &[deleted], 4).unwrap(), Vec::new());
+
+    crate::claim::claim(&mut r, "t", "session/test", 5, (60_000, 60_000), None).unwrap();
+    let mismatch = check_expected(&r.state, &read(&r), &[guard(vec![])], 6).unwrap();
+    assert_eq!(mismatch.len(), 1);
+    assert_eq!(mismatch[0].actual["started"].as_array().unwrap().len(), 2);
+
+    // Removing an original edge does not erase the conservative baseline captured by Undo.
+    let captured = guard(vec![StartedBaseline { item: "direct".into(), count: 0 }]);
+    commit_ok(&mut r, 7, vec![item("direct", ItemAssign::WaitsFor("done".into(), false))]);
+    assert_eq!(check_expected(&r.state, &read(&r), &[captured], 8).unwrap().len(), 1);
+
+    let duplicate = json!({
+        "kind": "waiters-started-at-most", "item": "done", "baselines": [
+            {"item": "direct", "count": 0}, {"item": "direct", "count": 1}
+        ]
+    });
+    assert!(serde_json::from_value::<Expectation>(duplicate).is_err());
+}
+
+#[test]
 fn started_at_most_includes_live_claims_on_leaf_and_parent() {
     let mut r = replica("a");
     commit_ok(

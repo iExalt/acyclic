@@ -103,7 +103,7 @@ describe("undo", () => {
     expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "backlog" } } });
     expect(done?.expect).toEqual([
       { kind: "item-field", item: "dig", field: "state", value: "done" },
-      { kind: "started-at-most", item: "sow", count: 0 },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
     ]);
     const dug = after("dig", { state: "done" });
     expect(done?.holds(dug)).toBe(true);
@@ -113,7 +113,7 @@ describe("undo", () => {
     const outer = undoOf({ item: { edit: { item: "dig", state: "done" } } }, boxed);
     expect(outer?.expect).toEqual([
       { kind: "item-field", item: "dig", field: "state", value: "done" },
-      { kind: "started-at-most", item: "sow", count: 0 },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
     ]);
     const boxDone = changed(boxed, "dig", { state: "done" });
     expect(outer?.holds(boxDone)).toBe(true);
@@ -146,7 +146,7 @@ describe("undo", () => {
     expect(kept?.holds(changed(after("dig", { state: "done" }), "sow", { stage: "in-progress" }))).toBe(false);
     expect(kept?.expect).toEqual([
       { kind: "item-field", item: "dig", field: "state", value: "done" },
-      { kind: "started-at-most", item: "sow", count: 0 },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
     ]);
   });
 });

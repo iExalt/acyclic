@@ -369,6 +369,59 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
 }
 
 #[test]
+fn app_state_undo_guard_refuses_a_new_started_waiter_without_mutating_the_tracker() {
+    let dir = tempfile::tempdir().unwrap();
+    let tracker = dir.path().join("tracker");
+    let run = |value: Value| {
+        let command: Command = serde_json::from_value(value).unwrap();
+        let (code, envelope) = acyclic_cli::call(command, tracker.clone(), &Env::default());
+        assert_eq!(code, exit::OK, "{envelope}");
+    };
+    run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    let thread = "01900000-0000-7000-8000-0000000000f2";
+    let done = "01900000-0000-7000-8000-0000000000a2";
+    let waiter = "01900000-0000-7000-8000-0000000000b2";
+    run(json!({"thread": {"add": {"id": thread, "title": "T"}}}));
+    run(json!({"item": {"add": {"id": done, "title": "Done", "thread": thread}}}));
+    run(json!({"item": {"done": {"item": done, "evidence": "finished"}}}));
+    run(json!({"item": {"add": {"id": waiter, "title": "Waiter", "thread": thread}}}));
+    run(json!({"item": {"edit": {"item": waiter, "waits-for": [done]}}}));
+    run(json!({"thread": {"claim": {"thread": thread, "lease": 1, "force": true}}}));
+
+    let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
+    let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
+    let snapshot = || {
+        let (store, _) = acyclic_core::store::Tracker::open(&tracker).unwrap();
+        store.load().unwrap()
+    };
+    let before = snapshot();
+    let stale = json!({
+        "command": {"item": {"edit": {"item": done, "state": "backlog"}}},
+        "expect": [
+            {"kind": "item-field", "item": done, "field": "state", "value": "done"},
+            {"kind": "waiters-started-at-most", "item": done, "baselines": []}
+        ]
+    });
+    let (status, body) = send(&router, Method::POST, "/api/command", &pass, &stale.to_string());
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "changed-since".into()));
+    assert_eq!(
+        snapshot(),
+        before,
+        "a newly started waiter must not be undone or stamp the tracker"
+    );
+
+    let malformed = json!({
+        "command": {"item": {"edit": {"item": done, "state": "backlog"}}},
+        "expect": [{"kind": "waiters-started-at-most", "item": done, "baselines": [
+            {"item": waiter, "count": 0}, {"item": waiter, "count": 1}
+        ]}]
+    });
+    let (status, body) = send(&router, Method::POST, "/api/command", &pass, &malformed.to_string());
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, "usage".into()));
+    assert_eq!(snapshot(), before, "duplicate waiter baselines must fail before dispatch");
+}
+
+#[test]
 fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
     let classify = |value: Value| serde_json::from_value::<Command>(value).unwrap().class();
     for read in [
