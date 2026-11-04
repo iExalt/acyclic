@@ -268,7 +268,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   zoom; internal layout may change, and the selected item pans only as far as needed if hidden. A distinct pin for an
   add or move keeps its existing behavior. A tapped item moves the least that shows it. A strip taken from the Map,
   such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
-  the Map too, leaves it where it is while the user types.
+  the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
+  waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.
 - **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is a
   UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
   item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state first;
