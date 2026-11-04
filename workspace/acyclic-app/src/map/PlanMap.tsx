@@ -85,8 +85,8 @@ export interface PlanMapProps {
   selected: string | null;
   onSelect: (item: string | null) => void;
   /**
-   * An item to bring into view, expanding the boxes above it, while `pin` (or its nearest drawn ancestor) holds still
-   * on screen. A new object asks again.
+   * An item to bring into view, expanding the boxes above it. Writes can preserve its existing root frame and zoom;
+   * otherwise `pin` (or its nearest drawn ancestor) holds still on screen. A new object asks again.
    */
   focus?: Focus | undefined;
   /**
@@ -109,6 +109,7 @@ export interface Framed {
 export interface Focus {
   id: string;
   pin: string | null;
+  preserveFrame?: true;
 }
 
 export default function PlanMap({
@@ -150,7 +151,7 @@ export default function PlanMap({
    */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
-  const shown = useRef<string | null>(null);
+  const shown = useRef<{ id: string; centered: boolean } | null>(null);
   // Whether that item was picked, which zooms a Map too far out to read in to it, rather than moved by a write.
   const picked = useRef(false);
   /** The elements the renderer holds, by id. */
@@ -208,19 +209,30 @@ export default function PlanMap({
     core.viewport(fitted);
   };
 
-  // Brought into view: the boxes above it open, and the pinned box held where it is now drawn.
+  // Brought into view: the boxes above it open, keeping a pinned box or a written item's prior root frame.
   useEffect(() => {
     const core = cy.current;
     if (focus === undefined) return;
+    const was = drawnModel.current;
+    const preserveFrame =
+      focus.preserveFrame === true &&
+      (focus.pin === null || focus.pin === focus.id) &&
+      was?.items.has(focus.id) === true;
+    anchor.current = null;
     if (core === null) {
       // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
-      shown.current = focus.id;
+      shown.current = { id: focus.id, centered: true };
       picked.current = focus.pin === null;
       setToggles((was) => expandTo(model, focus.id, was));
       return;
     }
-    const drawn =
-      focus.pin === null ? undefined : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
+    const drawn = preserveFrame
+      ? was === null
+        ? undefined
+        : [...chain(was, focus.id)].reverse().find((id) => core.getElementById(id).nonempty())
+      : focus.pin === null
+        ? undefined
+        : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
     if (drawn !== undefined) {
       const corner = core.getElementById(drawn).renderedBoundingBox({ includeLabels: false });
       anchor.current = { id: drawn, x: corner.x1, y: corner.y1 };
@@ -229,11 +241,12 @@ export default function PlanMap({
     if (next === toggles && model === drawnModel.current) {
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
-      if (host.current !== null) revealIn(core, host.current, focus.id, true, focus.pin === null);
+      if (host.current !== null)
+        revealIn(core, host.current, focus.id, !preserveFrame, !preserveFrame && focus.pin === null);
       return;
     }
-    shown.current = focus.id;
-    picked.current = focus.pin === null;
+    shown.current = { id: focus.id, centered: !preserveFrame };
+    picked.current = !preserveFrame && focus.pin === null;
     if (host.current !== null) host.current.dataset.state = "laying-out";
     setToggles(next);
   }, [focus]);
@@ -413,7 +426,7 @@ export default function PlanMap({
     }
     if (shown.current !== null) {
       // The pin holds still unless that leaves the item hidden.
-      revealIn(core, element, shown.current, true, picked.current);
+      revealIn(core, element, shown.current.id, shown.current.centered, picked.current);
       shown.current = null;
     }
     drawnModel.current = model;

@@ -262,12 +262,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   selection. A project's title may remain off-screen when its items are far from it; showing both would require a zoom
   below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
   underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
-- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
-  comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it. On a Map
-  zoomed out past reading, one the user picked comes in at a zoom its title reads at, wherever it was, and one a write
-  moved does only if it must move, so a zoom the user chose survives their edits; a tapped one moves the least that
-  shows it. A strip taken from the Map, such as the slot, or a window turned, shows the selected item again if it hid
-  it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user types.
+- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you or a link) comes to the middle
+  of the open Map if it was out of view. On a Map zoomed out past reading, one the user picked comes in at a zoom its
+  title reads at. A write to the selected item, and its Undo, keep the top-level box's screen corner and the chosen
+  zoom; internal layout may change, and the selected item pans only as far as needed if hidden. A distinct pin for an
+  add or move keeps its existing behavior. A tapped item moves the least that shows it. A strip taken from the Map,
+  such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
+  the Map too, leaves it where it is while the user types.
 - **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is a
   UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
   item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state first;

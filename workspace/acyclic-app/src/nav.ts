@@ -95,8 +95,8 @@ export interface World {
  * twice is two asks. Never kept in the history.
  */
 export interface Requests {
-  /** An item for the Map to bring into view, while `pin` (or its nearest drawn ancestor) holds still on screen. */
-  focus?: { id: string; pin: string | null };
+  /** An item for the Map to bring into view. A write may preserve its existing root frame and zoom. */
+  focus?: { id: string; pin: string | null; preserveFrame?: true };
   /** A thread for the Map to frame, its items fitted in the part of the Map nothing covers. */
   frame?: { thread: string };
   /** For the item's panel to open its editor, as Edit does. */
@@ -286,7 +286,7 @@ function move(place: Place, intent: Intent, world: World): Step {
       if (intent.select === null) return only(closed);
       return {
         place: { ...closed, item: intent.select },
-        requests: { focus: { id: intent.select, pin: intent.pin } },
+        requests: { focus: { id: intent.select, pin: intent.pin, preserveFrame: true } },
       };
     }
     case "added":

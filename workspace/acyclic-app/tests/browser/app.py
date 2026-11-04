@@ -1780,6 +1780,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(f"{name}: {box} has fewer than two leaves to edit around")
         return
     first, second = leaves
+    root = plan.chain(box)[-1]
     centre(page, box)
     tap_box(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
@@ -1946,16 +1947,49 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
+    # Undoing the link addition is also a write: it restores the same root frame while removing the edge.
+    frame = settled_corner(page, root)
+    zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    page.get_by_test_id("notice").get_by_role("button", name="Undo").click()
+    page.wait_for_function(
+        "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
+        arg=edge,
+        timeout=10_000,
+    )
+    held(page, root, frame, "undoing a new wait", name, failures)
+    after_undo_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_undo_zoom - zoom) > 0.001:
+        failures.append(f"{name}: undoing a new wait changed the Map zoom from {zoom} to {after_undo_zoom}")
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [],
+        f"{added} with the new wait undone",
+        failures,
+        name,
+    )
+    item_action(page, "waits-for")
+    tap_middle(page, view, first)
+    page.wait_for_function(
+        "([edge, source]) => { const e = document.querySelector('[data-testid=map]').cy.getElementById(edge);"
+        " return e.nonempty() && e.source().id() === source; }",
+        arg=[edge, first],
+        timeout=10_000,
+    )
     # Unlinked from the inspector: gone from the Map and the tracker. Its Undo waits in the slot at the stage's foot,
     # which takes its height from the Map without moving what the Map shows.
     page.locator(".slot [aria-label=Dismiss]").click()
     page.locator(".slot").wait_for(state="detached", timeout=5_000)
-    frame = settled_corner(page, box)
+    frame = settled_corner(page, root)
+    zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.locator(".slot [data-testid=notice]").wait_for(timeout=5_000)
     wait_drawn(page, base + 1)
-    held(page, box, frame, "unlinking a wait", name, failures)
+    held(page, root, frame, "unlinking a wait", name, failures)
+    after_unlink_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_unlink_zoom - zoom) > 0.001:
+        failures.append(f"{name}: unlinking a wait changed the Map zoom from {zoom} to {after_unlink_zoom}")
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
         arg=edge,
@@ -1971,11 +2005,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
     # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
     notice = page.get_by_test_id("notice")
-    frame = settled_corner(page, box)
+    frame = settled_corner(page, root)
     notice.get_by_role("button", name="Undo").click()
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
     wait_drawn(page, base + 1)
-    held(page, box, frame, "undoing a wait", name, failures)
+    held(page, root, frame, "undoing a wait", name, failures)
+    after_undo_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_undo_zoom - zoom) > 0.001:
+        failures.append(f"{name}: undoing a wait changed the Map zoom from {zoom} to {after_undo_zoom}")
     if "again" not in notice.inner_text():
         failures.append(f"{name}: undoing the unlink said {notice.inner_text()!r}")
     check_tracker(
@@ -2037,6 +2074,14 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     centre(page, project)
     tap_middle(page, view, chain[-2])
     wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
+    # Establish a deliberate zoom after the panel opens. Keep the root and selected item inside the open Map area.
+    page.get_by_test_id("map").evaluate(
+        "(m, id) => { m.cy.zoom(0.55); const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " m.cy.panBy({ x: 24 - b.x1, y: 16 - b.y1 }); }",
+        project,
+    )
+    if not in_open_view(page, project) or not in_open_view(page, chain[-2]):
+        failures.append(f"{name}: the chosen-zoom frame does not show the root and selected item together")
 
     def geometry(ids):
         return page.get_by_test_id("map").evaluate(
@@ -2053,6 +2098,48 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         )
 
     before = geometry([project, other, chain[-2]])
+    # A Notes-only write leaves layout inputs alone. Its save, Undo, and notice dismissal must leave both the selected
+    # corner and chosen camera where they were.
+    page.locator("[data-action=edit]").click()
+    editor = page.get_by_test_id("item-form")
+    editor.locator("textarea[name=notes]").fill("Frame proof notes")
+    editor.get_by_role("button", name="Save").click()
+    notice = page.get_by_test_id("notice")
+    notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    wait_drawn(page, count)
+    written_notes = geometry([project, other, chain[-2]])
+    if written_notes["zoom"] != before["zoom"] or any(
+        abs(written_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(written_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: a Notes-only save changed the selected frame: {before} -> {written_notes}")
+    notice.get_by_role("button", name="Undo").click()
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    wait_drawn(page, count)
+    undone_notes = geometry([project, other, chain[-2]])
+    if undone_notes["zoom"] != before["zoom"] or any(
+        abs(undone_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(undone_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: Undoing Notes changed the selected frame: {before} -> {undone_notes}")
+    page.locator(".slot [aria-label=Dismiss]").click()
+    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+    dismissed_notes = geometry([project, other, chain[-2]])
+    if dismissed_notes["zoom"] != before["zoom"] or any(
+        abs(dismissed_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(dismissed_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: dismissing the Notes notice changed the selected frame: {before} -> {dismissed_notes}")
     layouts_before = int(page.get_by_test_id("map").get_attribute("data-layouts") or 0)
     unlink(page, "waited-on-by")
     wait_inspector(page, "[data-testid=waited-on-by]", state="detached")
