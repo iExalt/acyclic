@@ -2047,7 +2047,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         " const o = m?.cy.getElementById(other).boundingBox();"
         " return m?.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
         " && Number(m.dataset.layouts) > layouts && Number(m.dataset.layoutCalls) >= 2"
-        " && p && p.h < oldHeight - 20 && o && o.y < oldY - 2; }",
+        " && p && p.h < oldHeight - 20 && o && o.y1 < oldY - 2; }",
         arg=[count, layouts_before, project, other, before["nodes"][project]["h"], before["nodes"][other]["y"]],
         timeout=20_000,
     )
