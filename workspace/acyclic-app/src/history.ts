@@ -15,6 +15,15 @@ export interface ReadHistory {
 
 export type Close = { kind: "go"; offset: number } | { kind: "replace"; cursor: Cursor };
 
+export type HistoryHint = "ordinary" | "visit" | "replaceTransient";
+
+export type HistoryEffect = { kind: "replace" | "push"; cursor: Cursor; place: Place } | { kind: "go"; offset: number };
+
+export interface HistoryPlan {
+  cursor: Cursor;
+  effects: HistoryEffect[];
+}
+
 const MAX_LAYERS = openLayers({
   command: true,
   mode: true,
@@ -131,4 +140,75 @@ export function close(cursor: Cursor, toLayers: number, historyLength: number): 
     return { kind: "go", offset };
   const replaced = replaceDepth(valid, toLayers);
   return replaced === null ? null : { kind: "replace", cursor: replaced };
+}
+
+function placesIn(places: readonly Place[], depth: number): Place[] | null {
+  if (!Array.isArray(places) || places.length !== depth + 1) return null;
+  const canonical: Place[] = [];
+  for (const place of places) {
+    try {
+      const stored = placeIn({ place });
+      if (stored === null) return null;
+      canonical.push(stored);
+    } catch {
+      return null;
+    }
+  }
+  return canonical;
+}
+
+function writes(cursor: Cursor, toLayers: number, places: readonly Place[]): HistoryPlan | null {
+  const pushed = pushDepths(cursor, toLayers);
+  if (pushed === null) return null;
+  const currentPlace = places[cursor.layers];
+  if (currentPlace === undefined) return null;
+  const effects: HistoryEffect[] = [{ kind: "replace", cursor, place: currentPlace }];
+  for (const next of pushed) {
+    const place = places[next.layers];
+    if (place === undefined) return null;
+    effects.push({ kind: "push", cursor: next, place });
+  }
+  return { cursor: pushed.at(-1) ?? cursor, effects };
+}
+
+/** Plans the minimal history writes for a landed place; browser effects stay with the caller. */
+export function plan(
+  cursor: Cursor,
+  projectedPlaces: readonly Place[],
+  hint: HistoryHint,
+  historyLength: number,
+): HistoryPlan | null {
+  const current = cursorIn(cursor);
+  if (current === null || !Number.isSafeInteger(historyLength) || historyLength < 0) return null;
+  if (hint !== "ordinary" && hint !== "visit" && hint !== "replaceTransient") return null;
+  const toLayers = projectedPlaces.length - 1;
+  if (boundary(toLayers) === null) return null;
+  const places = placesIn(projectedPlaces, toLayers);
+  if (places === null) return null;
+
+  if (hint === "visit" && toLayers <= current.layers) {
+    const replaced = replaceDepth(current, toLayers);
+    const branched = replaced === null ? null : visit(replaced);
+    const place = places[toLayers];
+    return branched === null || place === undefined
+      ? null
+      : { cursor: branched, effects: [{ kind: "push", cursor: branched, place }] };
+  }
+
+  if (hint === "replaceTransient") {
+    const base = replaceDepth(current, Math.min(current.layers, toLayers));
+    return base === null ? null : writes(base, toLayers, places);
+  }
+
+  if (toLayers < current.layers) {
+    const action = close(current, toLayers, historyLength);
+    if (action === null) return null;
+    if (action.kind === "go") return { cursor: current, effects: [action] };
+    const place = places[toLayers];
+    return place === undefined
+      ? null
+      : { cursor: action.cursor, effects: [{ kind: "replace", cursor: action.cursor, place }] };
+  }
+
+  return writes(current, toLayers, places);
 }
