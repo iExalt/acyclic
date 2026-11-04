@@ -41,6 +41,7 @@ const MAX_ZOOM = 2;
 const FIRST_ZOOM = 1;
 /** What the pointer shows the links of: a tile, or a collapsed box, which holds its tiles' links. */
 const HOVERABLE = "node.leaf, node.collapsed";
+type RevealIntent = { id: string; centered: boolean; picked: boolean };
 
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
 const fontLoaded: Promise<unknown> =
@@ -151,7 +152,11 @@ export default function PlanMap({
    */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
-  const shown = useRef<{ id: string; centered: boolean; picked: boolean } | null>(null);
+  const shown = useRef<RevealIntent | null>(null);
+  const shownBeforeRender = shown.current;
+  const anchorBeforeRender = anchor.current;
+  const waitingFor = useRef(new WeakMap<Animation, RevealIntent>());
+  const watchedAnimations = useRef(new WeakSet<Animation>());
   /** The elements the renderer holds, by id. */
   const held = useRef<ReadonlyMap<string, Drawn>>(new Map());
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
@@ -217,6 +222,14 @@ export default function PlanMap({
     core.minZoom(floor * PINCH_SLACK);
     core.viewport(fitted);
   };
+
+  const previousSelected = useRef(selected);
+  useEffect(() => {
+    const changed = previousSelected.current !== selected;
+    previousSelected.current = selected;
+    if (!changed || focus?.id === selected) return;
+    if (selected === null || shown.current !== null || anchor.current !== null) cancelViewIntent();
+  }, [selected, focus]);
 
   // Brought into view: the boxes above it open, keeping a pinned box or a written item's prior root frame.
   useEffect(() => {
@@ -429,7 +442,12 @@ export default function PlanMap({
       reconcilePanels();
       retryPending();
     });
-    mutations.observe(stage, { childList: true });
+    mutations.observe(stage, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-detent", "data-dragging"],
+    });
     return () => {
       mutations.disconnect();
       observer.disconnect();
@@ -461,6 +479,36 @@ export default function PlanMap({
     const core = cy.current;
     const element = host.current;
     if (request === null || core === null || element === null || !sceneIsApplied()) return false;
+    if (selectedNow.current !== request.id) {
+      if (shown.current === request) {
+        shown.current = null;
+        anchor.current = null;
+      }
+      return false;
+    }
+    const panels = panelsOver(element);
+    if (panels.some((panel) => panel.dataset.dragging === "true")) return false;
+    for (const panel of panels) {
+      const animation = panel.getAnimations().find((active) => {
+        const property = (active as CSSTransition).transitionProperty;
+        return (
+          (active.playState === "running" || active.pending) && (property === "height" || property === "max-height")
+        );
+      });
+      if (animation !== undefined) {
+        waitingFor.current.set(animation, request);
+        if (!watchedAnimations.current.has(animation)) {
+          watchedAnimations.current.add(animation);
+          const retry = () => {
+            const latest = waitingFor.current.get(animation);
+            waitingFor.current.delete(animation);
+            if (latest !== undefined && shown.current === latest) tryShow();
+          };
+          void animation.finished.then(retry, retry);
+        }
+        return false;
+      }
+    }
     if (revealIn(core, element, request.id, request.centered, request.picked) === null) return false;
     if (shown.current === request) shown.current = null;
     return true;
@@ -527,7 +575,6 @@ export default function PlanMap({
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
   // user came to the Map for is framed instead.
   const sought = useRef<string | null>(null);
-  const priorThread = useRef(thread);
   const toFrame = useRef(framed);
   const framedSeen = useRef(framed);
   useEffect(() => {
@@ -577,12 +624,13 @@ export default function PlanMap({
       }
     }
   }, [framed, thread, drawn]);
+  const priorThread = useRef(thread);
   useEffect(() => {
-    const changed = priorThread.current !== thread;
-    priorThread.current = thread;
     const core = cy.current;
     const element = host.current;
-    if (changed) cancelViewIntent();
+    const changed = priorThread.current !== thread;
+    priorThread.current = thread;
+    if (changed && shown.current === shownBeforeRender && anchor.current === anchorBeforeRender) cancelViewIntent();
     if (thread === null) {
       sought.current = null;
     }
@@ -690,12 +738,14 @@ export default function PlanMap({
     const release = () => {
       from = null;
     };
+    const dragged = () => cancelViewIntent();
     // A pointer over an item shows its links; touch has no hover, and gives none of these.
     const enter = (event: cytoscape.EventObject) => setHovered((event.target as cytoscape.NodeSingular).id());
     const leave = () => setHovered(null);
     core.on("tap", tap);
     core.on("tapstart", "node", press);
     core.on("tapdrag", drag);
+    core.on("dragpan", dragged);
     core.on("tapend", release);
     core.on("mouseover", HOVERABLE, enter);
     core.on("mouseout", HOVERABLE, leave);
@@ -709,6 +759,7 @@ export default function PlanMap({
       core.off("tap", tap);
       core.off("tapstart", "node", press);
       core.off("tapdrag", drag);
+      core.off("dragpan", dragged);
       core.off("tapend", release);
     };
   }, []);
