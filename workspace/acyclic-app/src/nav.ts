@@ -376,8 +376,6 @@ function itemUnder(place: Place, world: Pick<World, "has" | "archived">): string
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app.
 
-export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
-
 export interface Open {
   /** The command menu: over everything, as it can be opened from anywhere. */
   command: boolean;
@@ -398,6 +396,8 @@ export interface Open {
   away: boolean;
 }
 
+export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
+
 /** What of `place` is open as a layer: an item only once drawn; the projects' sheet and a view away only on a phone. */
 export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wide">): Open {
   return {
@@ -408,7 +408,10 @@ export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wi
     projects: place.overlays.projects && !world.wide,
     thread: place.thread !== null,
     under: itemUnder(place, world) !== null,
-    away: !world.wide && place.view !== HOME,
+    away:
+      !world.wide &&
+      place.view !== HOME &&
+      !(place.view === "map" && place.cameFrom?.view === HOME),
   };
 }
 
@@ -539,28 +542,86 @@ export function parse(search: string): Wanted {
 /** What a history entry holds of the place it was written at: never what passes, the overlays, nor any request. */
 export const stored = (place: Place): Place => ({ ...place, overlays: CLOSED });
 
-/** Whether two places are the same, as an entry holds them. */
-export const samePlace = (a: Place | null, b: Place | null): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** Whether two stored places match by the fields history persists. `stored` closes transient overlays first. */
+export const samePlace = (a: Place | null, b: Place | null): boolean =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.view === b.view &&
+    a.item === b.item &&
+    a.thread === b.thread &&
+    a.needsAt === b.needsAt &&
+    sameCameFrom(a.cameFrom, b.cameFrom) &&
+    sameNeedsLeft(a.needsLeft, b.needsLeft));
 
-const idOrNull = (value: unknown): value is string | null => value === null || typeof value === "string";
+const sameCameFrom = (a: CameFrom | null, b: CameFrom | null) =>
+  a === b || (a !== null && b !== null && a.view === b.view && a.by === b.by && a.item === b.item);
+const sameNeedsLeft = (a: NeedsLeft | null, b: NeedsLeft | null) =>
+  a === b || (a !== null && b !== null && a.top === b.top && a.entry === b.entry && a.control === b.control);
+
+const idOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && value.length > 0);
+const plainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const needsControl = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+function cameFromIn(value: unknown): CameFrom | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!plainObject(value) || !VIEWS.some((one) => one === value.view)) return undefined;
+  if (value.by !== "item" && value.by !== "thread") return undefined;
+  if (Object.hasOwn(value, "item") && (value.by !== "thread" || typeof value.item !== "string" || value.item === ""))
+    return undefined;
+  return value.by === "thread" && typeof value.item === "string"
+    ? { view: value.view as View, by: value.by, item: value.item }
+    : { view: value.view as View, by: value.by };
+}
+
+function needsLeftIn(value: unknown): NeedsLeft | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (
+    !plainObject(value) ||
+    typeof value.top !== "number" ||
+    !Number.isFinite(value.top) ||
+    value.top < 0 ||
+    typeof value.entry !== "string" ||
+    value.entry === "" ||
+    !needsControl(value.control)
+  )
+    return undefined;
+  return { top: value.top, entry: value.entry, control: value.control };
+}
 
 /**
  * The place a history entry holds, or null for one that holds none, as entries written before places were do, or one
  * not this app's: those open what their address names, as a link does.
  */
 export function placeIn(state: unknown): Place | null {
-  const place = (state as { place?: Partial<Place> } | null)?.place;
-  if (typeof place !== "object" || place === null) return null;
+  if (!plainObject(state) || !plainObject(state.place)) return null;
+  const place = state.place;
   const { view, item, thread, needsAt, cameFrom, needsLeft } = place;
-  if (!VIEWS.some((one) => one === view) || !idOrNull(item) || !idOrNull(thread)) return null;
+  const origin = cameFromIn(cameFrom);
+  const left = needsLeftIn(needsLeft);
+  if (
+    !VIEWS.some((one) => one === view) ||
+    !idOrNull(item) ||
+    !idOrNull(thread) ||
+    (needsAt !== undefined && !idOrNull(needsAt)) ||
+    origin === undefined ||
+    left === undefined
+  )
+    return null;
   return {
     ...START,
     view: view as View,
     item,
     thread,
-    needsAt: idOrNull(needsAt) ? needsAt : null,
-    cameFrom: typeof cameFrom === "object" && cameFrom !== null ? cameFrom : null,
-    needsLeft: typeof needsLeft === "object" && needsLeft !== null ? needsLeft : null,
+    needsAt: needsAt ?? null,
+    cameFrom: origin,
+    needsLeft: left,
   };
 }
 
