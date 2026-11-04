@@ -15,6 +15,7 @@ import {
   type Place,
   parse,
   placeIn,
+  placesByDepth,
   restored,
   START,
   type Step,
@@ -55,6 +56,57 @@ describe("select", () => {
     });
     expect(go(fromThreads, { kind: "select", id: "c", pin: null }).place.thread).toBeNull();
     expect(go(onMap, { kind: "select", id: "a", pin: null }).place.thread).toBeNull();
+  });
+});
+
+describe("follow", () => {
+  const phone = { ...world, wide: false };
+  const layers = (place: Place) => depth(openOf(place, phone));
+
+  it("preserves a home item origin through Search selection and Inspector follow", () => {
+    const homeItem = go(overview, { kind: "select", id: "a", pin: null }).place;
+    const followed = go(homeItem, { kind: "follow", id: "b", pin: null });
+    const searched = go(homeItem, { kind: "select", id: "b", pin: null });
+    expect(followed.place.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect(searched.place.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect([layers(followed.place), layers(searched.place)]).toEqual([1, 1]);
+    expect(followed.requests).toEqual({ focus: { id: "b", pin: null } });
+    expect(go(homeItem, { kind: "follow", id: "b", pin: null }, { dirty: true })).toEqual({
+      place: homeItem,
+      requests: { unsaved: true },
+    });
+  });
+
+  it("keeps a picked thread's under-item origin until following outside the thread", () => {
+    const thread = go(overview, { kind: "thread", id: "t" }).place;
+    const selected = go(thread, { kind: "select", id: "a", pin: null }).place;
+    const sameThread = go(selected, { kind: "follow", id: "b", pin: null }).place;
+    expect(sameThread.cameFrom).toEqual({ view: "overview", by: "thread" });
+    expect(sameThread.thread).toBe("t");
+
+    const under = go(go(overview, { kind: "select", id: "a", pin: null }).place, {
+      kind: "itemThread",
+      id: "t",
+    }).place;
+    expect(go(under, { kind: "follow", id: "b", pin: null }).place.cameFrom).toEqual({
+      view: "overview",
+      by: "thread",
+      item: "a",
+    });
+    const outside = go(under, { kind: "follow", id: "c", pin: null }).place;
+    expect(outside.thread).toBeNull();
+    expect(outside.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect(outside.cameFrom).not.toHaveProperty("item");
+    expect(go(outside, { kind: "close", count: 1 }).place).toEqual(overview);
+  });
+
+  it("keeps explicit Map navigation as its own layer while following items", () => {
+    const map = go(overview, { kind: "goTo", view: "map", at: null }).place;
+    const first = go(map, { kind: "follow", id: "a", pin: null }).place;
+    const second = go(first, { kind: "follow", id: "b", pin: null }).place;
+    expect(first.cameFrom).toBeNull();
+    expect(second.cameFrom).toBeNull();
+    expect([layers(first), layers(second)]).toEqual([2, 2]);
   });
 });
 
@@ -125,6 +177,14 @@ describe("goTo", () => {
       place: at({ view: "needs", needsAt: "e2" }),
       requests: {},
     });
+  });
+
+  it("clears an item origin when the user explicitly returns to the Map", () => {
+    const opened = go(overview, { kind: "select", id: "a", pin: null }).place;
+    expect(opened.cameFrom).toEqual({ view: "overview", by: "item" });
+    const map = go(opened, { kind: "goTo", view: "map", at: null }).place;
+    expect(map.cameFrom).toBeNull();
+    expect(go(map, { kind: "close", count: 1 }).place).toEqual(at({ view: "map" }));
   });
 });
 
@@ -341,6 +401,56 @@ describe("the history of layers", () => {
     const held = restored(forward.entries, 1);
     expect(held).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
     expect(follow(held.entries, 2)).toEqual({ entries: at(2), action: { kind: "push", from: 1, to: 2 } });
+  });
+});
+
+describe("history places by depth", () => {
+  const phone = { ...world, wide: false };
+  const left = { top: 40, entry: "need:one", control: "#need\\:one" };
+  const wanted = (place: Place): Wanted => ({
+    view: place.view,
+    item: place.item,
+    thread: place.thread,
+    needsAt: place.needsAt,
+  });
+
+  it("keeps Needs you restoration data in each projected entry", () => {
+    const needs = at({ view: "needs", needsAt: "need:one", needsLeft: left });
+    const opened = navigate(needs, { kind: "select", id: "a", pin: null }, phone).place;
+    const places = placesByDepth(opened, phone);
+    expect(places).toHaveLength(3);
+    expect(places.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2]);
+    expect(places[0]).toMatchObject({ view: "overview", item: null, needsLeft: left });
+    expect(places[1]).toMatchObject({ view: "needs", item: null, needsAt: "need:one", needsLeft: left });
+    expect(places[2]).toEqual(stored(opened));
+    expect(places.map((place) => place.needsLeft)).toEqual([left, left, left]);
+    expect(places.map((place) => addressOf(wanted(place)))).toEqual(["/", "/?view=needs&needs=need%3Aone", "/?item=a"]);
+  });
+
+  it("projects each open depth to its own stored place and address", () => {
+    const open = at({
+      view: "map",
+      item: "a",
+      thread: "t",
+      cameFrom: { view: "overview", by: "thread", item: "a" },
+      needsLeft: left,
+    });
+    const places = placesByDepth(open, phone);
+    expect(places).toHaveLength(4);
+    expect(places.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2, 3]);
+    expect(places.every((place) => !place.overlays.command && place.needsLeft === left)).toBe(true);
+    expect(new Set(places.map((place) => addressOf(wanted(place)))).size).toBe(places.length);
+    expect(places.map((place) => addressOf(wanted(place)))).toEqual([
+      "/",
+      "/?item=a",
+      "/?view=map&thread=t",
+      "/?item=a&thread=t",
+    ]);
+
+    const withCommand = placesByDepth({ ...open, overlays: { ...START.overlays, command: true } }, phone);
+    expect(withCommand.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2, 3, 3]);
+    expect(samePlace(withCommand[3] ?? null, withCommand[4] ?? null)).toBe(true);
+    expect(addressOf(wanted(withCommand[3] ?? START))).toBe(addressOf(wanted(withCommand[4] ?? START)));
   });
 });
 

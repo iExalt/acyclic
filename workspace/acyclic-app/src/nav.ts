@@ -117,6 +117,8 @@ export interface Step {
 export type Intent =
   /** An item chosen anywhere but on the Map, which goes to the Map for it, brought into view. */
   | { kind: "select"; id: string; pin: string | null }
+  /** A linked item followed from the Inspector, keeping the existing origin so Back retraces the visit. */
+  | { kind: "follow"; id: string; pin: string | null }
   /** A tap on the Map: an item, or the background (null), which makes the Map where the user is. */
   | { kind: "tap"; id: string | null }
   /** The item selected went away, deleted or hidden with archived items. */
@@ -191,18 +193,11 @@ function move(place: Place, intent: Intent, world: World): Step {
   const only = (next: Place): Step => ({ place: next, requests: {} });
   switch (intent.kind) {
     case "select": {
-      const { id, pin } = intent;
-      // An item chosen from a thread's panel keeps where the thread came from, for the thread's close.
-      const cameFrom =
-        place.view !== "map"
-          ? { view: place.view, by: "item" as const }
-          : place.thread !== null && place.cameFrom?.by === "thread"
-            ? place.cameFrom
-            : null;
-      return {
-        place: { ...place, item: id, thread: pickedAfter(place.thread, id, world), cameFrom, view: "map" },
-        requests: { focus: { id, pin } },
-      };
+      return selectItem(place, intent.id, intent.pin, world);
+    }
+    case "follow": {
+      if (world.dirty) return { place, requests: { unsaved: true } };
+      return selectItem(place, intent.id, intent.pin, world);
     }
     case "tap":
       return only({
@@ -246,7 +241,7 @@ function move(place: Place, intent: Intent, world: World): Step {
       // An item is shown on the Map, so going to another view leaves it. The Overview and Needs you are lists, over
       // which a thread's panel would only cover what the user went to see; the Threads view shows it picked.
       const to = intent.view;
-      let next: Place = { ...place, view: to };
+      let next: Place = { ...place, view: to, cameFrom: null };
       if (to !== "map") next = { ...next, item: null };
       if (to === "overview" || to === "needs") next = { ...next, thread: null };
       // Needs you from its top, or at the entry asked for: only closing what an entry opened comes back where it was.
@@ -331,6 +326,19 @@ function move(place: Place, intent: Intent, world: World): Step {
   }
 }
 
+/** A non-canvas item choice: preserve its origin, except when leaving a picked thread. */
+function selectItem(place: Place, id: string, pin: string | null, world: World): Step {
+  const thread = pickedAfter(place.thread, id, world);
+  const cameFrom =
+    place.cameFrom?.by === "thread" && thread === null
+      ? { view: place.cameFrom.view, by: "item" as const }
+      : (place.cameFrom ?? (place.view === "map" ? null : { view: place.view, by: "item" as const }));
+  return {
+    place: { ...place, item: id, thread, cameFrom, view: "map" },
+    requests: { focus: { id, pin } },
+  };
+}
+
 /**
  * Closes one layer: an item chosen from a thread's panel goes back to the thread, whose own close goes back further, to
  * the item it was opened from if that is still shown, brought into view.
@@ -408,10 +416,7 @@ export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wi
     projects: place.overlays.projects && !world.wide,
     thread: place.thread !== null,
     under: itemUnder(place, world) !== null,
-    away:
-      !world.wide &&
-      place.view !== HOME &&
-      !(place.view === "map" && place.cameFrom?.view === HOME),
+    away: !world.wide && place.view !== HOME && !(place.view === "map" && place.cameFrom?.view === HOME),
   };
 }
 
@@ -542,6 +547,17 @@ export function parse(search: string): Wanted {
 /** What a history entry holds of the place it was written at: never what passes, the overlays, nor any request. */
 export const stored = (place: Place): Place => ({ ...place, overlays: CLOSED });
 
+/** A history entry's place at each open-layer depth, with each state projected independently from the current one. */
+export function placesByDepth(place: Place, world: World): Place[] {
+  let current = place;
+  const projected = [stored(current)];
+  for (const layer of openLayers(openOf(place, world))) {
+    current = shut(current, layer, world).place;
+    projected.push(stored(current));
+  }
+  return projected.reverse();
+}
+
 /** Whether two stored places match by the fields history persists. `stored` closes transient overlays first. */
 export const samePlace = (a: Place | null, b: Place | null): boolean =>
   a === b ||
@@ -559,15 +575,15 @@ const sameCameFrom = (a: CameFrom | null, b: CameFrom | null) =>
 const sameNeedsLeft = (a: NeedsLeft | null, b: NeedsLeft | null) =>
   a === b || (a !== null && b !== null && a.top === b.top && a.entry === b.entry && a.control === b.control);
 
-const idOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && value.length > 0);
+const idOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && value.length > 0);
 const plainObject = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 };
 
-const needsControl = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0;
+const needsControl = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
 function cameFromIn(value: unknown): CameFrom | null | undefined {
   if (value === undefined || value === null) return null;
