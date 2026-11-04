@@ -37,6 +37,25 @@ pub(crate) fn render(
         Command::Thread(ThreadCommand::Ready { .. }) => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
+        Command::Init { .. } => format!(
+            "{} tracker {} · replica {}",
+            if data["created"] == true {
+                "created"
+            } else if data["changed"] == true {
+                "changed"
+            } else {
+                "no change to"
+            },
+            compact(&data["path"]),
+            compact(&data["replica"])
+        ),
+        Command::Sync => format!(
+            "synced tracker with {} · fetched {} · joined {} · pushed {}",
+            compact(&data["remote"]),
+            compact(&data["fetched"]),
+            compact(&data["joined"]),
+            compact(&data["pushed"])
+        ),
         Command::Item(ItemCommand::Add { waits_for, .. }) => waits(write(data), waits_for, &[]),
         Command::Item(ItemCommand::Edit(edit)) => {
             waits(write(data), &edit.waits_for, &edit.no_waits_for)
@@ -81,31 +100,51 @@ pub(crate) fn error(envelope: &Json) -> String {
 
 /// An import as one line: what it wrote, or would write on a dry run, by kind, and the threads items joined.
 fn import(data: &Json) -> String {
-    let counts = &data["counts"];
+    let dry = data["dry_run"] == true;
     let kinds = [
-        ("items", "item", "items"),
-        ("threads", "thread", "threads"),
-        ("links", "waits-for", "waits-for"),
-        ("repositories", "repository", "repositories"),
+        ("item", "item", "items"),
+        ("thread", "thread", "threads"),
+        ("link", "waits-for", "waits-for"),
+        ("repository", "repository", "repositories"),
     ];
-    let written: Vec<String> = kinds
-        .iter()
-        .filter_map(|(key, one, many)| {
-            let n = counts[*key].as_u64().filter(|n| *n > 0)?;
-            Some(if n == 1 { format!("1 {one}") } else { format!("{n} {many}") })
-        })
-        .collect();
-    let mut line = match (written.is_empty(), data["dry_run"] == true) {
-        (true, _) => "no change".to_owned(),
-        (false, dry) => format!(
-            "{}: {} ({} fields)",
+    let changes = rows(&data["changes"]);
+    let mut written = Vec::new();
+    for (action, past) in [("create", "created"), ("update", "updated"), ("remove", "removed")] {
+        let counts: Vec<String> = kinds
+            .iter()
+            .filter_map(|(kind, one, many)| {
+                let n = changes
+                    .iter()
+                    .filter(|change| change["entity"] == *kind && change["action"] == action)
+                    .count();
+                (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
+            })
+            .collect();
+        if !counts.is_empty() {
+            written.push(format!("{} {}", if dry { action } else { past }, counts.join(", ")));
+        }
+    }
+    let mut line = if written.is_empty() {
+        String::new()
+    } else {
+        let fields = &data["counts"]["fields"];
+        format!(
+            "{}: {} ({} {})",
             if dry { "would import" } else { "imported" },
-            written.join(", "),
-            compact(&counts["fields"])
-        ),
+            written.join("; "),
+            compact(fields),
+            if fields == 1 { "field" } else { "fields" }
+        )
     };
     if !empty(&data["placed"]) {
-        write!(line, " · placed {}", compact(&data["placed"])).expect("a String takes writes");
+        if !line.is_empty() {
+            line.push_str(" · ");
+        }
+        write!(line, "{} {}", if dry { "would place" } else { "placed" }, compact(&data["placed"]))
+            .expect("a String takes writes");
+    }
+    if line.is_empty() {
+        line.push_str(if dry { "would make no change" } else { "no change" });
     }
     line
 }

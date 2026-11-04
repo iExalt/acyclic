@@ -86,6 +86,7 @@ waits-for and thread it belongs with.
   command prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
   `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on `error.code`, not on the message.
   At a terminal it prints text for people instead; if your commands run in one, pass `-o json`.
+- `serve` and `up` print a JSON startup result even at a terminal, then keep running until stopped.
 - A bare group such as `acyclic item` prints its help.
 - A command line that doesn't parse prints its error as text on standard error, with exit code 2; run
   `acyclic <command> --help` to see the command's arguments. `acyclic help <command>` shows them too.

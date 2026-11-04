@@ -2,8 +2,8 @@
 source: workspace/acyclic-cli/src/pretty/tests.rs
 expression: "format!(\"{}{}{}{}{}{}{}\", import(false, counts(3, 1)),\nimport(true, counts(1, 2)), import(false, none),\nrender(&command(\"item edit a2 --waits-for b1 --waits-for b2\"), &edited(true),\nNone),\nrender(&command(\"item edit a2 --no-waits-for b1\"), &edited(true), None),\nrender(&command(\"item edit a2 --no-waits-for b1\"), &edited(false), None),\nrender(&command(\"item add a3 --title Sow --waits-for b1\"),\n&json!({\"changed\": true, \"item\": \"a3\", \"title\": \"Sow\", \"placed\": []}), None))"
 ---
-imported: 3 items, 1 thread, 1 waits-for (14 fields)
-would import: 1 item, 1 thread, 2 waits-for (14 fields)
+imported: created 3 items, 1 thread, 1 waits-for (14 fields)
+would import: create 1 item, 1 thread, 2 waits-for (14 fields)
 no change
 changed item a2 · waits for b1, b2
 changed item a2 · no longer waits for b1

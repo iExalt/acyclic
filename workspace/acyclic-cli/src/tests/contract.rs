@@ -557,14 +557,32 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
         "a repeat changes nothing"
     );
     assert_eq!(refs(&sh), before, "and commits nothing");
+    let show = format!("item show {}", plan.items[0].id);
+    let original = sh.output(&show, AGENT).1["data"][0].clone();
     plan.items[0].title.push_str(" renamed");
+    plan.items[0].notes = Some("Checked the update".into());
     std::fs::write(&file, plan.to_json()).unwrap();
+    let pretty = |sh: &Shell, extra: &str| {
+        let line = format!("acyclic import plan.json -o pretty{extra}");
+        let outcome = execute(line.split(' ').map(Into::into), &sh.env(&[]));
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        outcome.stdout
+    };
+    assert_eq!(pretty(&sh, " --dry-run"), "would import: update 1 item (2 fields)\n");
+    assert_eq!(sh.output(&show, AGENT).1["data"][0], original, "a dry run leaves the item alone");
+    assert_eq!(refs(&sh), before);
     let renamed = import(&mut sh, "");
     assert_eq!(
         (renamed["changed"].as_bool(), renamed["counts"]["fields"].as_u64()),
-        (Some(true), Some(1))
+        (Some(true), Some(2))
     );
+    assert_eq!(renamed["counts"]["items"], 0, "JSON counts still count creates");
+    assert_eq!(renamed["changes"].as_array().unwrap().len(), 1, "two fields update one item");
     assert_eq!(renamed["changes"][0]["fields"]["title"]["to"], plan.items[0].title);
+    let stored = &sh.output(&show, AGENT).1["data"][0];
+    assert_eq!(stored["title"], plan.items[0].title);
+    assert_eq!(stored["notes"], "Checked the update");
+    assert_eq!(pretty(&sh, ""), "no change\n");
     assert_eq!(sh.run("import missing.json", &[]), 3);
 }
 
