@@ -798,7 +798,13 @@ export function App() {
       </p>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads}>
-        <Suspense fallback={<p className="status">Loading the Map…</p>}>
+        <Suspense
+          fallback={
+            <p className="status" role="status">
+              Loading the Map…
+            </p>
+          }
+        >
           <PlanMap
             items={shown}
             showArchived={showArchived}
@@ -810,6 +816,7 @@ export function App() {
             onThread={toThread}
             focus={requests.focus}
             framed={requests.frame}
+            active={view === "map"}
             onPick={
               prompt === null ? null : (id) => choose(id === null ? { kind: "background" } : { kind: "item", id })
             }

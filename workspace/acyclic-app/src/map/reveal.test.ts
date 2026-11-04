@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   firstOf,
   firstView,
+  fitPlan,
   frame,
   framesAll,
   headed,
@@ -24,6 +25,16 @@ describe("reveal", () => {
 
   it("shows the start of a node too big to fit, where its title is", () => {
     expect(reveal({ x1: 100, y1: 100, x2: 900, y2: 1200 }, open)).toEqual({ x: -92, y: -92 });
+  });
+
+  it("does not try to reveal into a space with no interior after its margins", () => {
+    const node = { x1: 20, y1: 20, x2: 40, y2: 40 };
+    expect(reveal(node, { x1: 0, y1: 0, x2: 16, y2: 100 })).toBeNull();
+    expect(reveal(node, { x1: 0, y1: 0, x2: 100, y2: 16 })).toBeNull();
+    expect(reveal({ x1: 8, y1: 8, x2: 8.005, y2: 8.005 }, { x1: 0, y1: 0, x2: 16.01, y2: 16.01 })).toEqual({
+      x: 0,
+      y: 0,
+    });
   });
 
   it("brings a node from elsewhere to the middle, both ways, once it moves at all", () => {
@@ -60,6 +71,17 @@ describe("newlyCovered", () => {
         null,
       ),
     ).toBe(true);
+  });
+
+  it("does not reveal into a covered part with no margin-safe interior", () => {
+    expect(
+      newlyCovered(
+        { x1: 20, y1: 50, x2: 80, y2: 90 },
+        { width: 384, height: 200 },
+        { width: 384, height: 100 },
+        { x1: 0, y1: 0, x2: 384, y2: 100 },
+      ),
+    ).toBe(false);
   });
 });
 
@@ -210,6 +232,32 @@ describe("frame", () => {
     const view = frame([{ x1: 1000, y1: 1000, x2: 1200, y2: 1048 }], big, phone, 1);
     expect(view).toEqual({ zoom: 1, pan: { x: 92 - 1000, y: 176 - 1000 } });
     expect(frame([], big, phone, 1)).toBeNull();
+  });
+});
+
+describe("fitPlan", () => {
+  it("fits the whole plan in the uncovered part, even below the readable zoom", () => {
+    const fitted = fitPlan({ x1: -200, y1: 100, x2: 3800, y2: 3100 }, { x1: 0, y1: 0, x2: 384, y2: 340 }, 2);
+    expect(fitted?.zoom).toBeCloseTo(0.084);
+    expect(fitted?.pan.x).toBeCloseTo(40.8);
+    expect(fitted?.pan.y).toBeCloseTo(35.6);
+  });
+
+  it("centres a small plan up to the Map's maximum zoom", () => {
+    expect(fitPlan({ x1: 10, y1: 20, x2: 110, y2: 120 }, { x1: 0, y1: 0, x2: 400, y2: 300 }, 2)).toEqual({
+      zoom: 2,
+      pan: { x: 80, y: 10 },
+    });
+  });
+
+  it("centres below a reserved top strip", () => {
+    const fitted = fitPlan({ x1: -200, y1: 100, x2: 3800, y2: 3100 }, { x1: 0, y1: 64, x2: 384, y2: 599 }, 2);
+    expect(fitted?.zoom).toBeCloseTo(0.084);
+    expect(fitted?.pan.y).toBeCloseTo(197.1);
+  });
+
+  it("declines an open area too small for its padding", () => {
+    expect(fitPlan({ x1: 0, y1: 0, x2: 400, y2: 300 }, { x1: 0, y1: 0, x2: 40, y2: 40 }, 2)).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@ import type { Item } from "../api";
 import { expandTo } from "../edits";
 import { item } from "./fixture";
 import { foldDone } from "./fold";
-import { buildModel, collapsedWith, visible } from "./model";
+import { buildModel, collapsedWith, sourceKey, visible } from "./model";
 
 const done = (id: string, parent: string, thread: string | null, waitsFor: string[] = [], extra: Partial<Item> = {}) =>
   item(id, parent, waitsFor, { state: "done", stage: "done", thread, ...extra });
@@ -24,6 +24,23 @@ const chained = (xWaitsForR: boolean) => [
 ];
 
 describe("foldDone", () => {
+  it("keys the folded source structure without display text", () => {
+    const finished = chained(false);
+    const folded = fold(finished);
+    const renamed = fold(finished.map((one) => ({ ...one, title: `Changed ${one.title}`, notes: "Changed notes" })));
+    const reordered = fold(
+      [...finished].reverse().map((one) => ({
+        ...one,
+        links: { ...one.links, waits_for: [...one.links.waits_for].reverse() },
+      })),
+    );
+    const inReview = fold(finished.map((one) => (one.id === "a2" ? { ...one, stage: "in-review" as const } : one)));
+    expect(sourceKey(renamed.model)).toBe(sourceKey(folded.model));
+    expect(sourceKey(reordered.model)).toBe(sourceKey(folded.model));
+    // The raw item state/thread/parent are the same, but the merged stage means the finished thread no longer folds.
+    expect(sourceKey(inReview.model)).not.toBe(sourceKey(folded.model));
+  });
+
   it("folds a finished thread's leaves in a box into a box named after it, and those boxes into the Done box", () => {
     const folded = fold(chained(false));
     expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);

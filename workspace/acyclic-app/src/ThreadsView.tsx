@@ -1,6 +1,6 @@
 // The Threads view: the threads with work left in waves of what to start first, a column a wave, and those that can
-// start any time apart, first, on the left. Side by side, an arrow runs from each thread to every one waiting on it; the picked or
-// hovered thread's stand out. A tile always says what it comes after, so the arrows are never the only telling.
+// start any time apart, first, on the left. A tile names what it waits on; side by side, arrows show the picked or
+// hovered thread's links.
 
 import { useLayoutEffect, useMemo, useState } from "react";
 import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
@@ -95,7 +95,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
     <section className="waves" data-testid="threads-view" aria-label="Threads in waves">
       {empty ? <p className="status">No thread has work left.</p> : null}
       <div className="columns" ref={setColumns}>
-        {wide ? (
+        {wide && (hovered !== null || picked !== null) ? (
           <Arrows view={view} waits={waits} widths={widths} lines={lines} lit={hovered ?? picked} within={columns} />
         ) : null}
         {view.anytime.length === 0 ? null : (
@@ -195,8 +195,7 @@ function Arrows({
     return () => watch.disconnect();
   }, [view, waits, widths, within]);
   const on = (route: Route) => lit !== null && (route.from === lit || route.to === lit);
-  // The lit arrows last, so they cross over the rest.
-  const ordered = [...found.filter((route) => !on(route)), ...found.filter(on)];
+  const ordered = found.filter(on);
   return (
     <svg className="arrows" aria-hidden="true" width={size.width} height={size.height}>
       {ordered.map((route) => {
@@ -206,7 +205,7 @@ function Arrows({
             key={`${route.from}->${route.to}`}
             data-from={route.from}
             data-to={route.to}
-            className={[route.looped ? "looped" : "", on(route) ? "lit" : lit === null ? "" : "dim"].join(" ")}
+            className={[route.looped ? "looped" : "", "lit"].join(" ")}
             style={colour === undefined ? undefined : { color: colour }}
           >
             <path d={pathOf(route.points)} />

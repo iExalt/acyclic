@@ -196,11 +196,14 @@ describe("edit and reopen", () => {
 });
 
 describe("wrote", () => {
-  it("closes the add form and selects what the write shows, held still by its pin, leaving the thread", () => {
+  it("closes the add form, restores a written selection's frame, and leaves the thread", () => {
     const adding = at({ view: "map", thread: "t", overlays: { ...START.overlays, add: { parent: "c", draft: null } } });
     expect(go(adding, { kind: "wrote", select: "n", pin: "c" })).toEqual({
       place: at({ view: "map", thread: "t", item: "n" }),
-      requests: { focus: { id: "n", pin: "c" } },
+      requests: { focus: { id: "n", pin: "c", preserveFrame: true } },
+    });
+    expect(go(adding, { kind: "wrote", select: "n", pin: null }).requests).toEqual({
+      focus: { id: "n", pin: null, preserveFrame: true },
     });
     expect(go(adding, { kind: "wrote", select: null, pin: null })).toEqual({
       place: at({ view: "map", thread: "t" }),

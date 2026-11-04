@@ -142,8 +142,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
   stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
-  what it waits for in the thread), each with its stage's icon, the first eight and then how many more; "Starts with",
-  its first items alone, meant nothing to the user. Then its brief.
+  what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
+  more; "Starts with", its first items alone, meant nothing to the user. Then its brief.
 - **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the
@@ -255,20 +255,21 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
   focused and none of its actions.
-- **Going to a thread frames it.** A thread's row on the Overview or in the sidebar (the picked thread's too, while one
-  of its items is open over it), the Thread button on an item's panel, or a link to a thread on the Map,
-  goes to the Map with the thread picked and its panel open, its items fitted beside the panel (no closer than 1:1, no
-  further out than readable, else from its first item), with the titles of the boxes they are in when those fit too. A
-  known limit: a thread whose items sit far from its project's title, which is at the box's left edge, frames the items,
-  and the title is off-screen, as both together would need a zoom below readable. The picked thread's row in the
-  sidebar, on the Map, unpicks it. A thread gone to from an item's panel keeps the item under it: closing the thread,
-  or Back, opens the item again, unless it has gone or been archived since.
-- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you, a link, a write that moved it)
-  comes to the middle of the open Map if it was out of view, rather than to an edge with its links beyond it. On a Map
-  zoomed out past reading, one the user picked comes in at a zoom its title reads at, wherever it was, and one a write
-  moved does only if it must move, so a zoom the user chose survives their edits; a tapped one moves the least that
-  shows it. A strip taken from the Map, such as the slot, or a window turned, shows the selected item again if it hid
-  it; a phone's keyboard, which shortens the Map too, leaves the Map where it is while the user types.
+- **Going to a thread frames it.** A thread opened from the Overview, the sidebar, an item's panel, or a Map link opens
+  on the Map, picked with its panel. Its items fit beside the panel at up to 1:1, but no smaller than readable; when
+  they cannot all fit, the frame starts at the first item. Include their boxes' titles only when the titles and items
+  fit together. Otherwise keep the boxes and chevrons but hide their text until the user moves the Map or changes the
+  selection. A project's title may remain off-screen when its items are far from it; showing both would require a zoom
+  below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
+  underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
+- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you or a link) comes to the middle
+  of the open Map if it was out of view. On a Map zoomed out past reading, one the user picked comes in at a zoom its
+  title reads at. A write to the selected item, and its Undo, keep the top-level box's screen corner and the chosen
+  zoom; internal layout may change, and the selected item pans only as far as needed if hidden. A distinct pin for an
+  add or move keeps its existing behavior. A tapped item moves the least that shows it. A strip taken from the Map,
+  such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
+  the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
+  waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.
 - **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is a
   UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
   item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state first;
@@ -276,8 +277,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page
-  of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out, rather
-  than show a blank canvas that reads as no plan.
+  of their own. Until the Map is first drawn, which on a phone takes a second or two, it says it is laying out and marks
+  the canvas busy, rather than show a blank canvas that reads as no plan.
 
 ## Voice & copy
 
@@ -323,6 +324,8 @@ before what went wrong.
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed
   line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
   at a glance (the user's ask).
+- **Threads' waits stay named.** Every tile names the threads it waits on and any cycle peers. On wide screens, arrows
+  appear only for a hovered or picked thread; phone layouts keep the names without arrows.
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as
   the boxes allow (the user's ask: no gaps between rows), each box after those it waits on: below one, or level with
   it or lower on its right. Placed largest first, the narrower boxes fill the room beside the wide ones. The sidebar's
@@ -334,8 +337,9 @@ before what went wrong.
 - **Opening a box moves only what it covers.** Once packed, the top level keeps its boxes where they are: a box that
   grows, as one opening inside it makes it, stays at its corner, what it now covers makes way, right if it stood on its
   right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Where a box
-  stands depends only on the last packing and the boxes' sizes now, so what made way goes back when the box that moved
-  it closes, whatever was opened in between; a reload packs afresh.
+  stands depends on the source snapshot's packing and the boxes' sizes now, so what made way goes back when the box
+  that moved it closes, whatever was opened in between. A source update that shrinks top-level boxes without growing
+  any others packs them again; a chevron fold still holds their places. Undo restores the earlier source's packing.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
@@ -347,6 +351,10 @@ before what went wrong.
   cross have none.
 - **Opening view.** The whole plan when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at
   0.85, a phone's titles read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
+- **Fit the whole plan.** A Fit button on the Map frames the whole drawn plan in the uncovered part of the Map,
+  including beside a panel or above a phone sheet. Automatic views keep its top-left control strip clear, even if the
+  Map first draws under another view. Fit changes only the viewport; selection and folds stay put. The button is a
+  standard control, 44 px on touch, and is absent from other views.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.
@@ -412,3 +420,5 @@ before what went wrong.
   around items") over a Fold button in its panel or a Fold tile.
 - 2026-11-03: opening a box no longer packs the top level afresh, after the user found that unfolding a thread's done
   box made "the entire map … shift over".
+- 2026-11-04: source updates that only shrink top-level boxes repack them automatically; chevron folds still hold their
+  places, and Undo restores the earlier source's packing.

@@ -110,13 +110,161 @@ describe("place", () => {
     expect(fresh.laidOut).toContain(ROOT);
   });
 
-  it("places the top level by its sizes alone, whatever order its boxes were opened and closed in", async () => {
+  it("restores a topology's held packing across an add and undo, and later folds", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const model = buildModel(plan);
+    const folded = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
+
+    // Undoing the top-level add restores the original topology, but the top box is now expanded from its folded
+    // baseline. A signature-only cache has never seen this expanded root input.
+    const undone = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const corner = (placed: typeof folded, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
+    for (const id of ["top", "far"]) expect(corner(undone, id)).toEqual(corner(folded, id));
+
+    // The held expanded result must not become the baseline: a subsequent fold and reopen retain the original packing.
+    const foldedAgain = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    const reopened = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    for (const id of ["top", "far"]) {
+      expect(corner(foldedAgain, id)).toEqual(corner(folded, id));
+      expect(corner(reopened, id)).toEqual(corner(folded, id));
+    }
+  });
+
+  it("repacks an actual shrink and restores the held view and packing on Undo", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const foldedView = visible(buildModel(plan), { collapsed: new Set(["top"]), showArchived: false });
+    const openView = visible(buildModel(plan), open);
+    const reduced = plan.filter((one) => one.id !== "l3");
+    const shrinkView = visible(buildModel(reduced), open);
+    const folded = await place(foldedView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    const expanded = await place(openView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(expanded.laidOut).not.toContain(ROOT);
+    const shrunk = await place(shrinkView, cache, engine.layBox, PORTRAIT, undefined, "source-b");
+    expect(shrunk.laidOut).toContain(ROOT);
+
+    // Undo returns to the old source key, whose original folded packing reproduces the held expanded view.
+    const undone = await place(openView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(undone.nodes).toEqual(expanded.nodes);
+    const refolded = await place(foldedView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(refolded.nodes).toEqual(folded.nodes);
+  });
+
+  it("inherits the original hold baseline for a new source that only grows", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const before = buildModel(plan);
+    const grown = buildModel([...plan, item("l4", "left"), item("l5", "left")]);
+    const first = await place(visible(before, open), cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    const next = await place(visible(grown, open), cache, engine.layBox, PORTRAIT, undefined, "source-b");
+    expect(next.laidOut).not.toContain(ROOT);
+    const folded = await place(
+      visible(grown, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+      undefined,
+      "source-b",
+    );
+    expect([folded.nodes.get("top")?.x, folded.nodes.get("top")?.y]).toEqual([
+      first.nodes.get("top")?.x,
+      first.nodes.get("top")?.y,
+    ]);
+  });
+
+  it("keeps a stale same-topology request from changing the displayed shrink comparison", async () => {
+    let releaseStale: ((layout: Awaited<ReturnType<LayBox>>) => void) | undefined;
+    let waitingForStale = false;
+    const sizes = new Map([
+      [1, 500],
+      [2, 400],
+      [3, 450],
+      [4, 430],
+    ]);
+    const layBox: LayBox = async (input) => {
+      if (input.id === "box") {
+        const height = sizes.get(input.children.length) ?? 100;
+        return {
+          width: 200,
+          height,
+          at: Object.fromEntries(input.children.map((child, index) => [child.id, { x: 12, y: 12 + index * 100 }])),
+        };
+      }
+      const box = input.children[0];
+      if (box?.height === 400) {
+        waitingForStale = true;
+        return new Promise((resolve) => {
+          releaseStale = resolve;
+        });
+      }
+      const y = (box?.height ?? 0) + 36;
+      return { width: 300, height: y + 64, at: { box: { x: 12, y: 12 }, other: { x: 12, y } } };
+    };
+    const cache = new LayoutCache();
+    let latest = 0;
+    const items = (count: number) => [
+      item("box"),
+      ...Array.from({ length: count }, (_, index) => item(`child-${index}`, "box")),
+      item("other"),
+    ];
+    const placeLatest = (count: number, source: string) => {
+      const request = ++latest;
+      return place(visible(buildModel(items(count)), open), cache, layBox, PORTRAIT, () => request === latest, source);
+    };
+
+    await placeLatest(1, "source-a");
+    const stale = placeLatest(2, "source-b");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(waitingForStale).toBe(true);
+
+    // The accepted C input is 450. When stale B (400) answers later, it must not replace that displayed comparator.
+    expect((await placeLatest(3, "source-c")).laidOut).toContain(ROOT);
+    releaseStale?.({
+      width: 300,
+      height: 500,
+      at: { box: { x: 12, y: 12 }, other: { x: 12, y: 436 } },
+    });
+    await stale;
+
+    // D at 430 shrinks from accepted C at 450, so root packing runs. A stale comparator of 400 would hold instead.
+    expect((await placeLatest(4, "source-d")).laidOut).toContain(ROOT);
+  });
+
+  it("restores the matching aspect's packing after a turn", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const model = buildModel(plan);
+    const folded = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    await place(visible(model, open), cache, engine.layBox, 1.4);
+    const turnedBack = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const corner = (placed: typeof folded, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
+    for (const id of ["top", "far"]) expect(corner(turnedBack, id)).toEqual(corner(folded, id));
+  });
+
+  it("keeps a box's position after the other box opens and closes", async () => {
     // Two top-level boxes, both collapsed at first, each opened and closed in turn.
     const two = buildModel([item("x"), item("x1", "x"), item("x2", "x"), item("x3", "x"), item("y"), item("y1", "y")]);
     const at = (collapsed: string[]) => visible(two, { collapsed: new Set(collapsed), showArchived: false });
     const engine = grid();
     const direct = new LayoutCache();
-    const shut = await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
+    await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
     const yOpen = await place(at(["x"]), direct, engine.layBox, PORTRAIT);
     const walked = new LayoutCache();
     await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT);
@@ -124,7 +272,6 @@ describe("place", () => {
     await place(at([]), walked, engine.layBox, PORTRAIT);
     // Reached by way of x opening and closing, y open stands as it does opened alone, and both closed as at first.
     expect((await place(at(["x"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(yOpen.nodes);
-    expect((await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(shut.nodes);
   });
 
   it("finds every layout in the cache on returning to a view", async () => {
@@ -369,5 +516,25 @@ describe("LayoutCache", () => {
     cache.set("c", layout);
     expect([cache.get("a"), cache.get("b"), cache.get("c")].map(Boolean)).toEqual([true, false, true]);
     expect(cache.size).toBe(2);
+  });
+
+  it("bounds root packing history independently and evicts its least recently used topology", () => {
+    const cache = new LayoutCache(2, 2);
+    const input = (id: string) => ({ id: ROOT, children: [{ id, width: 1, height: 1 }], edges: [], aspect: 1 });
+    const layout = { width: 1, height: 1, at: {} };
+    const a = input("a");
+    const b = input("b");
+    const c = input("c");
+    const baseline = (one: typeof a) => ({ input: one, layout });
+    cache.rememberRoot(a, "source", baseline(a));
+    cache.rememberRoot(b, "source", baseline(b));
+    cache.root(a, "source");
+    cache.rememberRoot(c, "source", baseline(c));
+    expect([cache.root(a, "source"), cache.root(b, "source"), cache.root(c, "source")].map(Boolean)).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    expect(cache.rootSize).toBe(2);
   });
 });

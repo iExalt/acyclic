@@ -44,6 +44,25 @@ describe("pack", () => {
       b.y >= a.y + tall || (b.y >= a.y && b.x >= a.x + wide);
     expect([after(first, then, 200, 400), after(then, small, 900, 100)]).toEqual([true, true]);
   });
+
+  it("fills a vertical band above a box pushed down by what it waits on", () => {
+    const kids = [box("p", 100, 100), box("a", 100, 300), box("b", 100, 100), box("c", 50, 100)];
+    const waits = new Map([
+      ["a", ["p"]],
+      ["b", ["a"]],
+      ["c", ["p"]],
+    ]);
+    expect(pack(kids, waits, 0.6)).toEqual({
+      width: 248,
+      height: 448,
+      at: {
+        p: { x: 12, y: 12 },
+        a: { x: 136, y: 12 },
+        b: { x: 12, y: 336 },
+        c: { x: 12, y: 136 },
+      },
+    });
+  });
 });
 
 describe("hold", () => {
@@ -90,7 +109,7 @@ describe("hold", () => {
     expect(sized({ e: [200, 300] }, new Map([["c", ["e"]]])).at).toEqual(was.layout.at);
     // Wider, e meets d, which stands on its right from higher up: d makes way, and e stays where it was.
     expect(grown("e", 300, 100).at).toEqual({ ...was.layout.at, d: { x: 560, y: 12 } });
-    // b, moved right by a, grows too: it stays where a moved it, rather than go back and push a down.
+    // b grows after a moves it right, and d makes way for b's new width.
     expect(sized({ a: [300, 100], b: [250, 100] }).at).toEqual({
       ...was.layout.at,
       b: { x: 336, y: 12 },
@@ -106,7 +125,7 @@ describe("hold, over random packings", () => {
     return seed / 2147483648;
   };
 
-  it("never leaves two boxes crowded, nor a box before what it stood after", () => {
+  it("keeps boxes clear and after their waits when sizes shrink and grow together", () => {
     for (let seed = 1; seed <= 300; seed++) {
       const next = random(seed);
       const size = () => 50 + Math.floor(next() * 400);
@@ -122,7 +141,12 @@ describe("hold, over random packings", () => {
       expect(hold({ children: kids, layout: packed }, kids, waits)?.at, `seed ${seed}: held as packed`).toEqual(
         packed.at,
       );
-      const now = kids.map((kid) => (next() < 0.3 ? box(kid.id, kid.width + size(), kid.height + size()) : kid));
+      const now = kids.map((kid, index) => {
+        const delta = size();
+        return index % 2 === 0
+          ? box(kid.id, Math.max(20, kid.width - delta), Math.max(20, kid.height - delta))
+          : box(kid.id, kid.width + delta, kid.height + delta);
+      });
       const held = hold({ children: kids, layout: packed }, now, waits);
       // A plan whose moves don't settle packs afresh; none of these should come to that.
       expect(held, `seed ${seed}: settles`).toBeDefined();

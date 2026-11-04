@@ -28,6 +28,7 @@ import threading
 import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -1066,11 +1067,80 @@ def first_view_readable(page, name, failures):
         failures.append(
             f"{name}: the Map opened unreadably small or showing nothing whole: {view}"
         )
+    if fit_control := fit_occlusion(page, lit_only=False):
+        if (
+            not fit_control["safe"]
+            or fit_control["item_overlaps"]
+            or fit_control["chevron_overlaps"]
+            or fit_control["title_overlaps"]
+            or fit_control["title_fragments"]
+        ):
+            failures.append(f"{name}: the Fit control covers first-view content: {fit_control}")
+    else:
+        failures.append(f"{name}: the Map's first view has no Fit control to keep clear")
     # One layout for a first load: a second, at a shape guessed before the Map was measured, would re-pack the plan
     # as it is first seen.
     asked = page.get_by_test_id("map").get_attribute("data-layouts")
     if asked != "1":
         failures.append(f"{name}: the first load asked for {asked} layouts, not one")
+
+
+def fit_occlusion(page, lit_only):
+    """Checks that automatic Map views keep their first item and ancestor chevrons clear of Fit."""
+    return page.get_by_test_id("map").evaluate(
+        """(m, litOnly) => {
+            const map = m.getBoundingClientRect();
+            const button = document.querySelector('.map-fit');
+            if (!button) return null;
+            const rect = button.getBoundingClientRect();
+            const fit = { x1: rect.left - map.left, y1: rect.top - map.top,
+                x2: rect.right - map.left, y2: rect.bottom - map.top };
+            const zoom = m.cy.zoom();
+            const hit = parseFloat(getComputedStyle(m).getPropertyValue('--hit')) || 44;
+            const safeTop = 12 + hit + 8;
+            const overlaps = (a, b) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+            const panel = m.parentElement.querySelector('.inspector, .sheet');
+            const panelRect = panel?.getBoundingClientRect();
+            const panelShift = panel ? new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42 : 0;
+            const sheet = panelRect && panelRect.width >= map.width * .9;
+            const open = { x1: 0, y1: Math.min(map.height, fit.y2 + 8), x2: panelRect && !sheet
+                ? panelRect.left - map.left : map.width, y2: panelRect && sheet
+                ? panelRect.top - panelShift - map.top : map.height };
+            const items = m.cy.nodes(litOnly ? '.lit' : '.leaf, .collapsed').map(n => {
+                const b = n.renderedBoundingBox({ includeLabels: true });
+                return { id: n.id(), b: { x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 } };
+            });
+            const itemOverlaps = items.filter(item => overlaps(item.b, fit)).map(item => item.id);
+            const chevronOverlaps = [];
+            const titleOverlaps = [];
+            const titleFragments = [];
+            const ctx = document.createElement('canvas').getContext('2d');
+            for (const node of m.cy.nodes('.box')) {
+                const b = node.renderedBoundingBox({ includeLabels: false });
+                const holdsItem = items.some(item => item.b.x1 >= b.x1 - 1 && item.b.x2 <= b.x2 + 1
+                    && item.b.y1 >= b.y1 - 1 && item.b.y2 <= b.y2 + 1);
+                if (!holdsItem) continue;
+                const chevron = { x1: b.x1 + 14 * zoom, x2: b.x1 + 22 * zoom,
+                    y1: b.y1 + 24 * zoom, y2: b.y1 + 28 * zoom };
+                if (overlaps(chevron, fit)) chevronOverlaps.push(node.id());
+                if (parseFloat(node.style('text-opacity') || '1') <= 0) continue;
+                const label = String(node.data('label') || '').split('\\n')[0];
+                ctx.font = `${node.style('font-weight')} ${node.style('font-size')} ${node.style('font-family')}`;
+                const x1 = b.x1 + (parseFloat(node.style('text-margin-x')) || 0) * zoom;
+                const width = ctx.measureText(label).width * zoom;
+                const y1 = b.y1 + (parseFloat(node.style('text-margin-y')) || 0) * zoom;
+                const height = (parseFloat(node.style('font-size')) || 13) * 1.25 * zoom;
+                const title = { x1, x2: x1 + width, y1, y2: y1 + height };
+                if (overlaps(title, fit)) titleOverlaps.push(node.id());
+                if (title.x1 < open.x1 && title.x2 > open.x1 && title.y1 < open.y2 && title.y2 > open.y1)
+                    titleFragments.push({ id: node.id(), label, title });
+            }
+            return { fit, safeTop, open, safe: Math.abs(fit.y1 - 12) < 0.5 && fit.y2 + 8 <= safeTop + 0.5,
+                item_overlaps: itemOverlaps, chevron_overlaps: chevronOverlaps,
+                title_overlaps: titleOverlaps, title_fragments: titleFragments };
+        }""",
+        lit_only,
+    )
 
 
 def stages_drawn(page, plan, name, failures):
@@ -1252,6 +1322,17 @@ def map_journey(page, view, plan, name, failures, hint=None):
         }"""
     ):
         failures.append(f"{name}: picking {thread} left all of its items out of view")
+    framed = fit_occlusion(page, lit_only=True)
+    if framed is None:
+        failures.append(f"{name}: the framed thread has no Fit control to keep clear")
+    elif (
+        not framed["safe"]
+        or framed["item_overlaps"]
+        or framed["chevron_overlaps"]
+        or framed["title_overlaps"]
+        or framed["title_fragments"]
+    ):
+        failures.append(f"{name}: the thread frame overlaps Fit or leaves a clipped ancestor title: {framed}")
     # Its links are its route, drawn in its line's colour.
     route = page.get_by_test_id("map").evaluate(
         "m => { const lit = m.cy.edges('.lit'); const badge = document.querySelector('[data-testid=thread-panel] .badge');"
@@ -1283,6 +1364,34 @@ def map_journey(page, view, plan, name, failures, hint=None):
         )
     pick_thread(page, plan, thread)
     panel.wait_for()
+    fit_button = page.get_by_role("button", name="Fit the whole plan")
+    if fit_button.count() != 1 or not fit_button.is_visible():
+        failures.append(f"{name}: the Map has no available Fit control beside the thread panel")
+    else:
+        before = page.get_by_test_id("map").evaluate(
+            "m => ({ selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
+            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit })"
+        )
+        fit_button.click()
+        fitted = page.get_by_test_id("map").evaluate(
+            "m => { const r = m.getBoundingClientRect(); const panel = m.parentElement.querySelector('.inspector, .sheet');"
+            " const b = m.cy.elements().renderedBoundingBox({ includeLabels: true });"
+            " const fit = document.querySelector('.map-fit').getBoundingClientRect();"
+            " const box = panel ? panel.getBoundingClientRect() : null;"
+            " const sheet = box && box.width >= r.width * .9;"
+            " const x2 = box && !sheet ? box.left - r.left : r.width;"
+            " const shift = panel ? new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42 : 0;"
+            " const y1 = fit.bottom - r.top + 8;"
+            " const y2 = box && sheet ? box.top - shift - r.top : r.height;"
+            " return { inside: b.x1 >= 22 && b.y1 >= y1 + 22 && b.x2 <= x2 - 22 && b.y2 <= y2 - 22,"
+            " selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
+            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit }; }"
+        )
+        if not fitted["inside"]:
+            failures.append(f"{name}: Fit left part of the whole plan outside the uncovered Map: {fitted}")
+        if any(before[key] != fitted[key] for key in ("selected", "collapsed", "lit")):
+            failures.append(f"{name}: Fit changed selection, folds or the picked thread: {before} -> {fitted}")
+        page.screenshot(path=SHOTS / f"app-{name}-fit.png")
     if view.get("has_touch"):
         # Which layer a phone's Back closes, the outline's sheet over the thread's panel and then the panel, is
         # nav.test.ts's; that Back moves through the history, the deep link journey's.
@@ -1406,8 +1515,14 @@ def outline_journey(page, view, plan, name, failures):
 
 @timed
 def threads_journey(page, view, env, name, failures):
-    """The Threads view puts each thread in the wave `thread list` gives it, with an arrow for each wait side by side
-    and none on a phone; picking a tile goes to the Map with its thread's panel open, and closing it comes back."""
+    """The Threads view names every wait, and shows related arrows on hover when wide; picking a tile opens its panel."""
+    if page.locator("[data-testid=thread-panel], [data-testid=inspector]").count():
+        page.keyboard.press("Escape")
+        page.wait_for_function(
+            "() => !document.querySelector('[data-testid=thread-panel], [data-testid=inspector]')",
+            timeout=5_000,
+        )
+    to_map(page)
     listed = json.loads(run(env, "thread", "list"))["data"]
     want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
     want |= {id: "anytime" for id in listed["anytime"]}
@@ -1418,22 +1533,17 @@ def threads_journey(page, view, env, name, failures):
     )
     if dict(got) != want or len(got) != len(want):
         failures.append(f"{name}: the Threads view's waves {got} aren't the tracker's {want}")
+    if page.get_by_role("button", name="Fit the whole plan").count():
+        failures.append(f"{name}: the Map's Fit control appeared over the Threads view")
     waits = sum(len(row["waits_for"]) for row in listed["threads"] if row["id"] in want)
     arrows = 0 if view.get("has_touch") else waits
-    try:
-        page.wait_for_function(
-            f"() => document.querySelectorAll('.arrows g').length === {arrows}", timeout=5_000
-        )
-    except PlaywrightTimeout:
-        drawn = page.locator(".arrows g").count()
-        failures.append(f"{name}: the Threads view drew {drawn} arrows, expected {arrows}")
+    if page.locator(".arrows g").count():
+        failures.append(f"{name}: the Threads view showed connectors before a tile was hovered")
+    page.screenshot(path=SHOTS / f"app-{name}-threads.png")
     if arrows:
-        page.screenshot(path=SHOTS / f"app-{name}-threads.png")
-        if skips := arrows_clear(page, want, name, failures):
-            # Lit, an arrow that skips a wave, for a look at how it passes the tiles.
-            page.locator(f"[data-thread-tile='{skips[0][0]}']").hover()
-            page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
-            page.mouse.move(0, 0)
+        verify_thread_arrows(page, listed, want, name, failures)
+    elif page.locator(".arrows g").count():
+        failures.append(f"{name}: the phone drew connectors without hover support")
     # A thread with work to start, whose panel offers it. Its tile goes to the Map with the panel open, as a thread's
     # row anywhere does.
     ready = [row["id"] for row in json.loads(run(env, "thread", "ready"))["data"]["ready"] if row["id"] in want]
@@ -1498,22 +1608,73 @@ def threads_journey(page, view, env, name, failures):
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
-def arrows_clear(page, want, name, failures):
-    """Checks every arrow as drawn, a point each 4 px along it, against the tiles' boxes as drawn: none crosses a tile,
-    other than its own two at its ends, and the view scrolls to all of it. One must skip a wave, or the check proves
-    little."""
+def verify_thread_arrows(page, listed, want, name, failures):
+    """Shows every expected wait by hovering its endpoints, checking all routes and their union."""
+    expected = {
+        (dependency, row["id"])
+        for row in listed["threads"]
+        if row["id"] in want
+        for dependency in row["waits_for"]
+        if dependency in want
+    }
+    seen = set()
+    checked_geometry = set()
+    skips = set()
+    lit_screenshot = False
+    for thread in sorted(want):
+        incident = {pair for pair in expected if thread in pair}
+        if not incident:
+            continue
+        page.locator(f"[data-thread-tile='{thread}']").hover()
+        page.wait_for_function(
+            "count => document.querySelectorAll('.arrows g').length === count",
+            arg=len(incident),
+            timeout=5_000,
+        )
+        drawn = page.locator(".arrows g").evaluate_all("rows => rows.map(g => [g.dataset.from, g.dataset.to])")
+        if set(map(tuple, drawn)) != incident:
+            failures.append(f"{name}: hovering {thread} drew {drawn}, expected its waits {sorted(incident)}")
+        skips.update(arrows_clear(page, want, name, failures, checked_geometry))
+        seen.update(map(tuple, drawn))
+        if skips and not lit_screenshot:
+            page.screenshot(path=SHOTS / f"app-{name}-threads-lit.png")
+            lit_screenshot = True
+        page.mouse.move(0, 0)
+        page.wait_for_function("() => document.querySelectorAll('.arrows g').length === 0", timeout=5_000)
+    if seen != expected:
+        failures.append(f"{name}: hovering endpoints exposed {sorted(seen)}, expected every wait {sorted(expected)}")
+    if expected and not skips:
+        failures.append(f"{name}: no selected connector skips a wave, so none was checked across it")
+
+
+def arrows_clear(page, want, name, failures, checked_geometry):
+    """Checks each distinct arrow path against tiles at 4 px intervals and verifies the view scrolls to all of it."""
     found = page.evaluate(
-        """() => {
+        """(checked) => {
             const view = document.querySelector('.waves');
             const origin = view.getBoundingClientRect();
             const tiles = [...document.querySelectorAll('.wave [data-thread-tile]')].map(tile => [tile.dataset.threadTile,
                 tile.getBoundingClientRect()]);
+            const seen = new Set(checked);
+            const added = [];
+            const addedPairs = [];
             const crossed = [];
             let outside = 0;
             for (const arrow of document.querySelectorAll('.arrows g')) {
                 const line = arrow.querySelector('path:not(.head)');
                 const matrix = line.getScreenCTM();
+                const head = arrow.querySelector('path.head');
                 const length = line.getTotalLength();
+                const signature = JSON.stringify([
+                    arrow.dataset.from, arrow.dataset.to, line.getAttribute('d'), head?.getAttribute('d'),
+                    [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
+                    [origin.left, origin.top, origin.width, origin.height, view.clientWidth, view.clientHeight,
+                        view.scrollLeft, view.scrollTop, view.scrollWidth, view.scrollHeight]
+                ]);
+                if (seen.has(signature)) continue;
+                seen.add(signature);
+                added.push(signature);
+                addedPairs.push([arrow.dataset.from, arrow.dataset.to]);
                 for (let along = 0; along <= length; along += 4) {
                     const local = line.getPointAtLength(along);
                     const x = matrix.a * local.x + matrix.c * local.y + matrix.e;
@@ -1529,22 +1690,21 @@ def arrows_clear(page, want, name, failures):
                     }
                 }
             }
-            const pairs = [...document.querySelectorAll('.arrows g')].map(g => [g.dataset.from, g.dataset.to]);
-            return { crossed: [...new Set(crossed)], outside, pairs };
-        }"""
+            return { crossed: [...new Set(crossed)], outside, added, addedPairs };
+        }""",
+        sorted(checked_geometry),
     )
+    checked_geometry.update(found["added"])
     if found["crossed"]:
         failures.append(f"{name}: arrows cross tiles: {found['crossed'][:5]}")
     if found["outside"]:
         failures.append(f"{name}: {found['outside']} points of the arrows lie where the view doesn't scroll")
     skips = [
         (a, b)
-        for a, b in found["pairs"]
+        for a, b in found["addedPairs"]
         if want.get(a, "").isdigit() and want.get(b, "").isdigit() and int(want[b]) - int(want[a]) > 1
     ]
-    if not skips:
-        failures.append(f"{name}: no arrow skips a wave, so none was checked crossing one")
-    return skips
+    return set(skips)
 
 
 def item(env, id):
@@ -1620,6 +1780,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(f"{name}: {box} has fewer than two leaves to edit around")
         return
     first, second = leaves
+    root = plan.chain(box)[-1]
     centre(page, box)
     tap_box(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
@@ -1786,15 +1947,49 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures,
         name,
     )
+    # Undoing the link addition is also a write: it restores the same root frame while removing the edge.
+    frame = settled_corner(page, root)
+    zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    page.get_by_test_id("notice").get_by_role("button", name="Undo").click()
+    page.wait_for_function(
+        "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
+        arg=edge,
+        timeout=10_000,
+    )
+    held(page, root, frame, "undoing a new wait", name, failures)
+    after_undo_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_undo_zoom - zoom) > 0.001:
+        failures.append(f"{name}: undoing a new wait changed the Map zoom from {zoom} to {after_undo_zoom}")
+    check_tracker(
+        env,
+        added,
+        lambda row: row["links"]["waits_for"] == [],
+        f"{added} with the new wait undone",
+        failures,
+        name,
+    )
+    item_action(page, "waits-for")
+    tap_middle(page, view, first)
+    page.wait_for_function(
+        "([edge, source]) => { const e = document.querySelector('[data-testid=map]').cy.getElementById(edge);"
+        " return e.nonempty() && e.source().id() === source; }",
+        arg=[edge, first],
+        timeout=10_000,
+    )
     # Unlinked from the inspector: gone from the Map and the tracker. Its Undo waits in the slot at the stage's foot,
     # which takes its height from the Map without moving what the Map shows.
     page.locator(".slot [aria-label=Dismiss]").click()
     page.locator(".slot").wait_for(state="detached", timeout=5_000)
-    before = settled_corner(page, added)
+    frame = settled_corner(page, root)
+    zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.locator(".slot [data-testid=notice]").wait_for(timeout=5_000)
-    held(page, added, before, "Undo's slot appearing", name, failures)
+    wait_drawn(page, base + 1)
+    held(page, root, frame, "unlinking a wait", name, failures)
+    after_unlink_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_unlink_zoom - zoom) > 0.001:
+        failures.append(f"{name}: unlinking a wait changed the Map zoom from {zoom} to {after_unlink_zoom}")
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
         arg=edge,
@@ -1810,8 +2005,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
     # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
     notice = page.get_by_test_id("notice")
+    frame = settled_corner(page, root)
     notice.get_by_role("button", name="Undo").click()
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
+    wait_drawn(page, base + 1)
+    held(page, root, frame, "undoing a wait", name, failures)
+    after_undo_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
+    if abs(after_undo_zoom - zoom) > 0.001:
+        failures.append(f"{name}: undoing a wait changed the Map zoom from {zoom} to {after_undo_zoom}")
     if "again" not in notice.inner_text():
         failures.append(f"{name}: undoing the unlink said {notice.inner_text()!r}")
     check_tracker(
@@ -1847,6 +2048,172 @@ def edit_journey(page, view, env, plan, box, name, failures):
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
     )
     return added
+
+
+@timed
+def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
+    """Unlinks the last edge of a tall box: its size shrinks, the next root repacks, and Undo restores both."""
+    plan = Plan(env)
+    roots = {id for id in plan.items if plan.depth(id) == 0 and plan.shown(id, False)}
+
+    def root_edges(plan):
+        return sorted(
+            {
+                (plan.chain(id)[-1], plan.chain(target)[-1])
+                for id, row in plan.items.items()
+                for target in row["links"]["waits_for"]
+                if target in plan.items and plan.chain(id)[-1] != plan.chain(target)[-1]
+            }
+        )
+
+    edges = root_edges(plan)
+    page.reload()
+    to_map(page)
+    count = len(plan.default())
+    wait_drawn(page, count)
+    centre(page, project)
+    tap_middle(page, view, chain[-2])
+    wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
+    # Establish a deliberate zoom after the panel opens. Keep the root and selected item inside the open Map area.
+    page.get_by_test_id("map").evaluate(
+        "(m, id) => { m.cy.zoom(0.55); const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " m.cy.panBy({ x: 24 - b.x1, y: 16 - b.y1 }); }",
+        project,
+    )
+    if not in_open_view(page, project) or not in_open_view(page, chain[-2]):
+        failures.append(f"{name}: the chosen-zoom frame does not show the root and selected item together")
+
+    def geometry(ids):
+        return page.get_by_test_id("map").evaluate(
+            """(m, ids) => ({
+                zoom: m.cy.zoom(), pan: m.cy.pan(),
+                nodes: Object.fromEntries(ids.map(id => {
+                    const n = m.cy.getElementById(id);
+                    const b = n.boundingBox();
+                    const r = n.renderedBoundingBox({ includeLabels: false });
+                    return [id, { x: b.x1, y: b.y1, w: b.w, h: b.h, sx: r.x1, sy: r.y1 }];
+                }))
+            })""",
+            ids,
+        )
+
+    before = geometry([project, other, chain[-2]])
+    # A Notes-only write leaves layout inputs alone. Its save, Undo, and notice dismissal must leave both the selected
+    # corner and chosen camera where they were.
+    page.locator("[data-action=edit]").click()
+    editor = page.get_by_test_id("item-form")
+    editor.locator("textarea[name=notes]").fill("Frame proof notes")
+    editor.get_by_role("button", name="Save").click()
+    notice = page.get_by_test_id("notice")
+    notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    wait_drawn(page, count)
+    written_notes = geometry([project, other, chain[-2]])
+    if written_notes["zoom"] != before["zoom"] or any(
+        abs(written_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(written_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: a Notes-only save changed the selected frame: {before} -> {written_notes}")
+    notice.get_by_role("button", name="Undo").click()
+    page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+    wait_drawn(page, count)
+    undone_notes = geometry([project, other, chain[-2]])
+    if undone_notes["zoom"] != before["zoom"] or any(
+        abs(undone_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(undone_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: Undoing Notes changed the selected frame: {before} -> {undone_notes}")
+    page.locator(".slot [aria-label=Dismiss]").click()
+    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+    dismissed_notes = geometry([project, other, chain[-2]])
+    if dismissed_notes["zoom"] != before["zoom"] or any(
+        abs(dismissed_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ) or any(
+        abs(dismissed_notes["nodes"][id][axis] - before["nodes"][id][axis]) > 1
+        for id in (project, chain[-2])
+        for axis in ("sx", "sy")
+    ):
+        failures.append(f"{name}: dismissing the Notes notice changed the selected frame: {before} -> {dismissed_notes}")
+    layouts_before = int(page.get_by_test_id("map").get_attribute("data-layouts") or 0)
+    unlink(page, "waited-on-by")
+    wait_inspector(page, "[data-testid=waited-on-by]", state="detached")
+    page.get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    page.wait_for_function(
+        "([n, layouts, project, other, oldHeight, oldY]) => {"
+        " const m = document.querySelector('[data-testid=map]');"
+        " const p = m?.cy.getElementById(project).boundingBox();"
+        " const o = m?.cy.getElementById(other).boundingBox();"
+        " return m?.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
+        " && Number(m.dataset.layouts) > layouts"
+        " && p && p.h < oldHeight - 20 && o && o.y1 < oldY - 2; }",
+        arg=[count, layouts_before, project, other, before["nodes"][project]["h"], before["nodes"][other]["y"]],
+        timeout=20_000,
+    )
+    after = geometry([project, other, chain[-2]])
+    updated = Plan(env)
+
+    if roots != {id for id in updated.items if updated.depth(id) == 0 and updated.shown(id, False)}:
+        failures.append(f"{name}: the unlink changed the top-level item set")
+    if edges != root_edges(updated):
+        failures.append(f"{name}: the unlink changed the top-level wait edges")
+    old, new = before["nodes"][project], after["nodes"][project]
+    if new["w"] > old["w"] + 2 or new["h"] >= old["h"] - 20:
+        failures.append(f"{name}: the unlink did not shrink only the tall box: {old} -> {new}")
+    if after["nodes"][other]["y"] >= before["nodes"][other]["y"] - 2:
+        failures.append(f"{name}: repacking did not move the other root up: {before['nodes'][other]} -> {after['nodes'][other]}")
+    if abs(after["zoom"] - before["zoom"]) > 0.001 or any(
+        abs(after["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
+    ):
+        failures.append(f"{name}: the shrinking write changed the camera: {before['zoom']}/{before['pan']} -> {after['zoom']}/{after['pan']}")
+    if abs(after["nodes"][chain[-2]]["sx"] - before["nodes"][chain[-2]]["sx"]) > 2 or abs(
+        after["nodes"][chain[-2]]["sy"] - before["nodes"][chain[-2]]["sy"]
+    ) > 2:
+        failures.append(f"{name}: the selected item moved on screen during the shrink")
+
+    frame = settled_corner(page, project)
+    page.get_by_role("button", name="Undo").click()
+    wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
+    wait_drawn(page, count)
+    undone = geometry([project, other, chain[-2]])
+    same_node = lambda left, right: all(
+        abs(left[field] - right[field]) <= 1 for field in ("x", "y", "w", "h")
+    )
+    if not same_node(undone["nodes"][project], before["nodes"][project]) or not same_node(
+        undone["nodes"][other], before["nodes"][other]
+    ):
+        failures.append(f"{name}: Undo did not restore the original root packing")
+    held(page, project, frame, "Undoing the shrink", name, failures)
+    if undone["zoom"] != before["zoom"]:
+        failures.append(f"{name}: Undo changed the Map zoom from {before['zoom']} to {undone['zoom']}")
+
+    # A chevron fold after Undo still holds the restored packing; reopening returns to the same root positions.
+    centre(page, project)
+    page.get_by_test_id("map").evaluate(
+        "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
+        " m.cy.panBy({ x: 80 - b.x1, y: 80 - b.y1 }); }",
+        project,
+    )
+    frame = settled_corner(page, project)
+    tap_box(page, view, project)
+    wait_drawn(page, count - len(plan.children(project)))
+    folded = geometry([project, other])
+    held(page, project, frame, "folding after Undo", name, failures)
+    frame = settled_corner(page, project)
+    tap_box(page, view, project)
+    wait_drawn(page, count)
+    reopened = geometry([project, other])
+    held(page, project, frame, "reopening after Undo", name, failures)
+    if not same_node(folded["nodes"][other], before["nodes"][other]) or not same_node(
+        reopened["nodes"][other], before["nodes"][other]
+    ):
+        failures.append(f"{name}: folding after Undo moved the other root")
+    print(f"{name}: a phone shrink repacked the roots, Undo restored them, and a later fold held them")
 
 
 @timed
@@ -2548,6 +2915,38 @@ def main():
             listening = json.loads(server.stdout.readline())["data"]["listening"]
             return plan, f"http://{listening}/", env, remote
 
+        def serve_shrink():
+            home = directory / "home-shrink"
+            home.mkdir()
+            env = {
+                **os.environ,
+                "HOME": str(home),
+                "ACYCLIC_TRACKER": str(directory / "tracker-shrink"),
+                "ACYCLIC_ACTOR": "session/browser",
+            }
+            run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            run(env, "thread", "add", "--title", "Shrink proof")
+            project = json.loads(run(env, "item", "add", "--title", "Tall chain"))["data"]["item"]
+            other = json.loads(run(env, "item", "add", "--title", "Other root"))["data"]["item"]
+            run(env, "item", "add", "--title", "Any time", "--parent", project)
+            chain = [
+                json.loads(
+                    run(env, "item", "add", "--title", f"Chain step {index}", "--parent", project)
+                )["data"]["item"]
+                for index in range(7)
+            ]
+            for before, after in pairwise(chain):
+                run(env, "item", "edit", after, "--waits-for", before)
+            server = subprocess.Popen(
+                [ACYCLIC, "up", "--port", "0"],
+                env=env,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            servers.append(server)
+            listening = json.loads(server.stdout.readline())["data"]["listening"]
+            return f"http://{listening}/", env, project, other, chain
+
         try:
             plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
@@ -2639,7 +3038,7 @@ def main():
                     f"webkit phone: the page threw or logged errors: {errors}"
                 )
             context.close()
-            # WebKit draws the Threads view's arrows where Chromium does, clear of the tiles.
+            # WebKit draws the picked thread's Threads arrows where Chromium does, clear of the tiles.
             context, page, _, errors = open_app(
                 webkit,
                 {**VIEWS["desktop"], "color_scheme": "light"},
@@ -2650,14 +3049,25 @@ def main():
             listed = json.loads(run(env, "thread", "list"))["data"]
             want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
             page.locator("[data-view=threads]").click()
-            page.locator(".arrows g").first.wait_for(timeout=10_000)
-            arrows_clear(page, want, "webkit desktop", failures)
+            verify_thread_arrows(page, listed, want, "webkit desktop", failures)
             if errors:
                 failures.append(
                     f"webkit desktop: the page threw or logged errors: {errors}"
                 )
             context.close()
             webkit.close()
+
+            # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
+            shrink_link, shrink_env, project, other, chain = serve_shrink()
+            context, page, _, errors = open_app(
+                chromium, VIEWS["phone"], shrink_link, failures, "phone shrink"
+            )
+            shrink_undo_journey(
+                page, VIEWS["phone"], shrink_env, project, other, chain, "phone shrink", failures
+            )
+            if errors:
+                failures.append(f"phone shrink: the page threw or logged errors: {errors}")
+            context.close()
 
             large, link, _, _ = serve(3500)
             context, page, _, errors = open_app(

@@ -14,7 +14,8 @@ export interface Box {
  * least that shows it, for a node tapped, which the eye is already on; or, `centred`, to the middle of `open`, for one
  * brought in from elsewhere, which would otherwise land at an edge with its links beyond it.
  */
-export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: number; y: number } {
+export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: number; y: number } | null {
+  if (open.x2 - open.x1 <= 2 * margin || open.y2 - open.y1 <= 2 * margin) return null;
   const big = (start: number, end: number, from: number, to: number) => end - start > to - from - 2 * margin;
   const along = (start: number, end: number, from: number, to: number) => {
     // Too big to fit: show its start, where its title is.
@@ -57,11 +58,10 @@ export function newlyCovered(
   const dx = was.width - now.width;
   const dy = was.height - now.height;
   const before = cover === null ? null : { x1: cover.x1 + dx, y1: cover.y1 + dy, x2: cover.x2 + dx, y2: cover.y2 + dy };
-  const still = (pan: { x: number; y: number }) => pan.x === 0 && pan.y === 0;
-  return (
-    still(reveal(node, uncovered(was.width, was.height, before))) &&
-    !still(reveal(node, uncovered(now.width, now.height, cover)))
-  );
+  const beforePan = reveal(node, uncovered(was.width, was.height, before));
+  const afterPan = reveal(node, uncovered(now.width, now.height, cover));
+  const still = (pan: { x: number; y: number } | null) => pan !== null && pan.x === 0 && pan.y === 0;
+  return beforePan !== null && afterPan !== null && still(beforePan) && !still(afterPan);
 }
 
 /** The furthest the first view zooms out: 13 px titles drawn at 11 px, about the least a phone's reader can read. */
@@ -170,6 +170,32 @@ function fitOf(boxes: readonly Box[], open: Box, padding: number): number {
     (open.x2 - open.x1 - 2 * padding) / Math.max(1, all.x2 - all.x1),
     (open.y2 - open.y1 - 2 * padding) / Math.max(1, all.y2 - all.y1),
   );
+}
+
+/** The viewport that fits the whole plan in `open`, even below the usual readable zoom. */
+export function fitPlan(
+  plan: Box,
+  open: Box,
+  most: number,
+  padding = 24,
+): { zoom: number; pan: { x: number; y: number } } | null {
+  const width = plan.x2 - plan.x1;
+  const height = plan.y2 - plan.y1;
+  const openWidth = open.x2 - open.x1;
+  const openHeight = open.y2 - open.y1;
+  const zoom = Math.min(
+    most,
+    (openWidth - 2 * padding) / Math.max(1, width),
+    (openHeight - 2 * padding) / Math.max(1, height),
+  );
+  if (zoom <= 0) return null;
+  return {
+    zoom,
+    pan: {
+      x: open.x1 + (openWidth - width * zoom) / 2 - plan.x1 * zoom,
+      y: open.y1 + (openHeight - height * zoom) / 2 - plan.y1 * zoom,
+    },
+  };
 }
 
 function spanOf(boxes: readonly Box[]): Box {
