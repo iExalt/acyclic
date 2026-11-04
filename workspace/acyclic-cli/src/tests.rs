@@ -147,6 +147,7 @@ fn every_error_has_a_stable_code_and_exit() {
         DeleteError::NoThread("t".into()).into(),
         // Raised by the commands themselves.
         CliError::refused("not-ready", ""),
+        CliError::refused("changed-since", ""),
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
         CliError::refused("incomplete-repository", ""),

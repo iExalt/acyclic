@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::import::is_object_id;
@@ -16,9 +16,315 @@ use crate::model::{
     WriteError,
 };
 use crate::place::{Inherited, passed_down};
-use crate::ready::{Ancestry, Readiness, Status};
+use crate::ready::{Ancestry, Readiness, Stage, Status};
 use crate::schema::{item as field, kind, link, repository, set, thread};
-use crate::state::{Key, Millis, Replica};
+use crate::state::{Error as StateError, Key, Millis, Replica, State};
+
+/// A condition an app write requires to still hold in the tracker's current state.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Expectation {
+    /// An item's field as read by the model; null means unset.
+    ItemField {
+        /// The item.
+        item: String,
+        /// A field an exact Undo can restore.
+        field: ExpectedItemField,
+        /// Its expected value, including the ordered values of a conflict.
+        value: ExpectedValue,
+    },
+    /// A thread's title or brief as read by the model; null means unset.
+    ThreadField {
+        /// The thread.
+        thread: String,
+        /// A field an exact edit can restore.
+        field: ExpectedThreadField,
+        /// Its expected value, including the ordered values of a conflict.
+        value: ExpectedValue,
+    },
+    /// Whether one item waits for one other item.
+    WaitsFor {
+        /// The waiting item.
+        item: String,
+        /// The item it waits for.
+        target: String,
+        /// Whether the link must be present.
+        present: bool,
+    },
+    /// The number of started leaves under an item, or whether a leaf has started.
+    StartedAtMost {
+        /// The item.
+        item: String,
+        /// The greatest number of started leaves that is safe.
+        count: usize,
+    },
+    /// Started counts for original waiters and every item that now waits on this item or a box above it.
+    WaitersStartedAtMost {
+        /// The item whose state is being undone.
+        item: String,
+        /// Counts from the plan before the original edit; current new waiters must still be unstarted.
+        baselines: StartedBaselines,
+    },
+}
+
+/// An item field an exact Undo can restore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExpectedItemField {
+    /// The title.
+    Title,
+    /// The parent item.
+    Parent,
+    /// The state.
+    State,
+    /// The notes.
+    Notes,
+    /// The size.
+    Size,
+}
+
+/// A thread field an exact edit can restore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExpectedThreadField {
+    /// The title.
+    Title,
+    /// The brief.
+    Brief,
+}
+
+/// A model value, serialized as null, one scalar, or a conflict with ordered sides.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ExpectedValue {
+    /// Concurrent values, including clears, in write order.
+    Conflict(ExpectedConflict),
+    /// One value.
+    One(String),
+    /// No value, or one clear.
+    Unset(()),
+}
+
+/// Ordered scalar values in a conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExpectedConflict {
+    /// The values in their model order.
+    pub conflict: Vec<Option<String>>,
+}
+
+/// A captured waiter's started count.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartedBaseline {
+    /// The waiting item.
+    pub item: String,
+    /// Its started count before the original edit.
+    pub count: usize,
+}
+
+/// Original waiter counts for a state Undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct StartedBaselines(Vec<StartedBaseline>);
+
+impl<'de> Deserialize<'de> for StartedBaselines {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let baselines = Vec::<StartedBaseline>::deserialize(deserializer)?;
+        let mut ids = BTreeSet::new();
+        for baseline in &baselines {
+            if !ids.insert(baseline.item.as_str()) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate started baseline for {}",
+                    baseline.item
+                )));
+            }
+        }
+        Ok(Self(baselines))
+    }
+}
+
+impl<'de> Deserialize<'de> for ExpectedConflict {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            conflict: Vec<Option<String>>,
+        }
+
+        let Wire { conflict } = Wire::deserialize(deserializer)?;
+        let distinct: BTreeSet<_> = conflict.iter().collect();
+        if conflict.len() < 2 || distinct.len() < 2 {
+            return Err(serde::de::Error::custom("a conflict needs at least two different values"));
+        }
+        Ok(Self { conflict })
+    }
+}
+
+/// A failed expectation and the current value that did not match it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Mismatch {
+    /// The condition that did not hold.
+    pub expectation: Expectation,
+    /// The current value, or null when the named item is gone.
+    pub actual: Json,
+}
+
+/// Checks the small set of app Undo conditions against one locked state snapshot.
+///
+/// Started counts treat every completed leaf as started whether its evidence is merged or not; ancestry can change
+/// `done` to `in-review`, but cannot change the count used by Undo.
+///
+/// # Errors
+///
+/// Fails when readiness cannot read a live claim.
+///
+/// # Panics
+///
+/// Never: the checked model fields are strings or enums and always serialize to JSON.
+pub fn check_expected(
+    state: &State,
+    model: &Model,
+    expected: &[Expectation],
+    now: Millis,
+) -> Result<Vec<Mismatch>, StateError> {
+    let ancestry = AssumeUnmerged;
+    let readiness = Readiness::new(state, model, now, &ancestry);
+    let mut mismatches = Vec::new();
+    for expectation in expected {
+        if let Expectation::WaitersStartedAtMost { item, baselines } = expectation {
+            let mut counts: BTreeMap<String, usize> = baselines
+                .0
+                .iter()
+                .map(|baseline| (baseline.item.clone(), baseline.count))
+                .collect();
+            for waiter in current_waiters(model, item) {
+                counts.entry(waiter).or_insert(0);
+            }
+            let mut started = Vec::new();
+            for (waiter, at_most) in counts {
+                let count = started_count(&readiness, model, &waiter)?.unwrap_or(0);
+                if count > at_most {
+                    started.push(
+                        serde_json::json!({"item": waiter, "count": count, "at_most": at_most}),
+                    );
+                }
+            }
+            if !started.is_empty() {
+                mismatches.push(Mismatch {
+                    expectation: expectation.clone(),
+                    actual: serde_json::json!({"started": started}),
+                });
+            }
+            continue;
+        }
+        let actual = match expectation {
+            Expectation::ItemField { item, field, .. } => {
+                let Some(item) = model.items.get(item) else {
+                    mismatches
+                        .push(Mismatch { expectation: expectation.clone(), actual: Json::Null });
+                    continue;
+                };
+                match field {
+                    ExpectedItemField::Title => serde_json::to_value(&item.title),
+                    ExpectedItemField::Parent => serde_json::to_value(&item.parent),
+                    ExpectedItemField::State => serde_json::to_value(&item.state),
+                    ExpectedItemField::Notes => serde_json::to_value(&item.notes),
+                    ExpectedItemField::Size => serde_json::to_value(&item.size),
+                }
+                .expect("model values serialize")
+            },
+            Expectation::ThreadField { thread, field, .. } => {
+                let Some(thread) = model.threads.get(thread) else {
+                    mismatches
+                        .push(Mismatch { expectation: expectation.clone(), actual: Json::Null });
+                    continue;
+                };
+                match field {
+                    ExpectedThreadField::Title => serde_json::to_value(&thread.title),
+                    ExpectedThreadField::Brief => serde_json::to_value(&thread.brief),
+                }
+                .expect("model values serialize")
+            },
+            Expectation::WaitsFor { item, target, .. } => {
+                if !model.items.contains_key(item) || !model.items.contains_key(target) {
+                    let missing = [item, target]
+                        .into_iter()
+                        .filter(|id| !model.items.contains_key(*id))
+                        .collect::<Vec<_>>();
+                    mismatches.push(Mismatch {
+                        expectation: expectation.clone(),
+                        actual: serde_json::json!({"missing_items": missing}),
+                    });
+                    continue;
+                }
+                Json::Bool(model.links.iter().any(|link| link.from == *item && link.to == *target))
+            },
+            Expectation::StartedAtMost { item, .. } => {
+                Json::from(started_count(&readiness, model, item)?)
+            },
+            Expectation::WaitersStartedAtMost { .. } => unreachable!("handled above"),
+        };
+        let matches = match expectation {
+            Expectation::ItemField { value, .. } | Expectation::ThreadField { value, .. } => {
+                actual == serde_json::to_value(value).expect("expected values serialize")
+            },
+            Expectation::WaitsFor { present, .. } => actual == Json::Bool(*present),
+            Expectation::StartedAtMost { count, .. } => actual
+                .as_u64()
+                .and_then(|actual| usize::try_from(actual).ok())
+                .is_some_and(|actual| actual <= *count),
+            Expectation::WaitersStartedAtMost { .. } => unreachable!("handled above"),
+        };
+        if !matches {
+            mismatches.push(Mismatch { expectation: expectation.clone(), actual });
+        }
+    }
+    Ok(mismatches)
+}
+
+struct AssumeUnmerged;
+
+impl Ancestry for AssumeUnmerged {
+    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+}
+
+fn started_count(
+    readiness: &Readiness<'_>,
+    model: &Model,
+    item: &str,
+) -> Result<Option<usize>, StateError> {
+    if !model.items.contains_key(item) {
+        return Ok(None);
+    }
+    if model.children(item).is_empty() {
+        Ok(Some(usize::from(matches!(
+            readiness.stage(item)?,
+            Some(Stage::InProgress | Stage::InReview | Stage::Done)
+        ))))
+    } else {
+        Ok(Some(readiness.progress(item)?.map_or(0, |rollup| {
+            rollup.stages.in_progress + rollup.stages.in_review + rollup.stages.done
+        })))
+    }
+}
+
+fn current_waiters(model: &Model, item: &str) -> BTreeSet<String> {
+    let targets = std::iter::once(item).chain(model.ancestors(item)).collect::<BTreeSet<_>>();
+    model
+        .links
+        .iter()
+        .filter(|link| targets.contains(link.to.as_str()) && model.items.contains_key(&link.from))
+        .map(|link| link.from.clone())
+        .collect()
+}
 
 /// A record a change is about.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

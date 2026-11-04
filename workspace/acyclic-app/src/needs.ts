@@ -12,7 +12,7 @@ const IN_A_TERMINAL = "Settle this one in a terminal: run acyclic needs to see h
 const EDIT_THREAD = "Open it to choose its thread in its editor";
 
 /** An entry as `acyclic needs` reports it: a kind, and fields that depend on it. */
-export type Need = { kind: string } & Record<string, unknown>;
+export type Need = { kind: string; identity?: string } & Record<string, unknown>;
 
 /** A value of a conflict and how it is kept, as the needs-you list gives it: the command, or why there is none. */
 export interface Kept {
@@ -284,6 +284,16 @@ function unverifiedWhy(repository: string, reason: string): string {
 function shown(value: unknown): string {
   if (value === null || value === undefined) return "none";
   return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** A JSON value's key with object fields sorted and array order kept. */
+export function structuralKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(structuralKey).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const fields = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${fields.map(([key, child]) => `${JSON.stringify(key)}:${structuralKey(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? String(value);
 }
 
 /** A line for a kind the app only shows. */

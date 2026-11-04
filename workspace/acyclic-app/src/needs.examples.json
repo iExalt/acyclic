@@ -5,6 +5,7 @@
       "entity": "item",
       "field": "parent",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"parent\":\"01900000-0000-7000-8000-0000000000b1\"}}},\"value\":\"01900000-0000-7000-8000-0000000000b1\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"no-parent\":true}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"parent\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -74,6 +75,7 @@
       "entity": "item",
       "field": "state",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"choices\":[{\"command\":null,\"value\":\"done\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -136,6 +138,7 @@
       "entity": "item",
       "field": "title",
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"One\"}}},\"value\":\"One\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"Two\"}}},\"value\":\"Two\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"title\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": {
@@ -205,6 +208,7 @@
       "entity": "item",
       "field": "evidence",
       "id": "01900000-0000-7000-8000-0000000000e1",
+      "identity": "{\"choices\":[{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@abc1234\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"abc1234\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}},{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@def5678\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"def5678\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}}],\"entry\":{\"entry\":\"conflict\",\"field\":\"evidence\",\"id\":\"01900000-0000-7000-8000-0000000000e1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000e1",
         "parent": null,
@@ -272,6 +276,7 @@
       "entity": "repository",
       "field": "owner",
       "id": "01900000-0000-7000-8000-0000000000c2",
+      "identity": "{\"choices\":[{\"command\":{\"repository\":{\"edit\":{\"name\":\"me/app\",\"repository\":\"01900000-0000-7000-8000-0000000000c2\"}}},\"value\":\"me\"},{\"command\":{\"repository\":{\"edit\":{\"name\":\"you/app\",\"repository\":\"01900000-0000-7000-8000-0000000000c2\"}}},\"value\":\"you\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"owner\",\"id\":\"01900000-0000-7000-8000-0000000000c2\",\"kind\":\"repository\"}}",
       "keeps": [
         {
           "command": {
@@ -312,6 +317,7 @@
       "entity": "thread",
       "field": "brief",
       "id": "01900000-0000-7000-8000-0000000000f1",
+      "identity": "{\"choices\":[{\"command\":{\"thread\":{\"edit\":{\"brief\":\"Why\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":\"Why\"},{\"command\":{\"thread\":{\"edit\":{\"no-brief\":true,\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"brief\",\"id\":\"01900000-0000-7000-8000-0000000000f1\",\"kind\":\"thread\"}}",
       "keeps": [
         {
           "command": {

@@ -13,7 +13,7 @@ import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
 import type { Line } from "./lines";
 import { Menu } from "./Menu";
-import { conflictOf, keepsIn, type Need } from "./needs";
+import { conflictOf, keepsIn, type Need, structuralKey } from "./needs";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
 import { StageCounts, StageIcon, StageLabel } from "./Stage";
@@ -317,12 +317,13 @@ function Conflicts({
           <span className="field">{field}</span>
           <ul>
             {(values ?? []).map((value) => {
+              const key = structuralKey(value);
               const kept = keepsIn(conflictOf(needs, "item", item.id, field)).find(
-                (one) => JSON.stringify(one.value) === JSON.stringify(value),
+                (one) => structuralKey(one.value) === key,
               );
               const settle = kept?.command ?? null;
               return (
-                <li key={JSON.stringify(value)}>
+                <li key={key}>
                   <span className="value">{shown(field, value)}</span>
                   {settle === null ? (
                     <span className="why">

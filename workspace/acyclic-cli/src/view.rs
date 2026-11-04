@@ -177,8 +177,8 @@ impl View<'_> {
 }
 
 impl View<'_> {
-    /// The needs-you list: each entry is `{kind, key, notify, …}`, with item and thread entries embedding their summaries,
-    /// and a conflict listing its `values` and how to `resolve` it.
+    /// The needs-you list: each entry is `{kind, key, identity, notify, …}`, with item and thread entries embedding
+    /// their summaries, and a conflict listing its `values` and how to `resolve` it.
     /// `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let members = thread_members(self.model);
@@ -200,7 +200,9 @@ impl View<'_> {
         let mut found = Vec::with_capacity(entries.len());
         for entry in entries {
             let mut shown = match entry {
-                Entry::Conflict { kind, id, field } => self.conflict(kind, id, field, &thread)?,
+                Entry::Conflict { kind, id, field } => {
+                    self.conflict(entry, kind, id, field, &thread)?
+                },
                 Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
                 Entry::LinkCycle { items: ids } => {
                     json!({"kind": "link-cycle", "items": items(ids)?})
@@ -248,6 +250,9 @@ impl View<'_> {
                 }),
             };
             shown["key"] = entry.key().into();
+            if !matches!(entry, Entry::Conflict { .. }) {
+                shown["identity"] = entry.identity().into();
+            }
             shown["notify"] = entry.notifies().into();
             found.push(shown);
         }
@@ -258,6 +263,7 @@ impl View<'_> {
     /// (`keeps`: its command, or why none), and the entity's summary when it is an item or thread.
     fn conflict(
         &self,
+        entry: &Entry,
         entity: &str,
         id: &str,
         field: &str,
@@ -274,15 +280,17 @@ impl View<'_> {
         let values: Vec<&Json> = kept.iter().map(|kept| &kept.value).collect();
         let keeps: Vec<Json> =
             kept.iter().map(|kept| crate::keep::kept_json(self.model, field, kept)).collect();
-        let mut entry = json!({
-            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values, "keeps": keeps,
+        let identity = crate::keep::conflict_identity(self.model, entry, &kept);
+        let mut shown = json!({
+            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values,
+            "keeps": keeps, "identity": identity,
         });
         match entity {
-            "item" => entry["item"] = self.item_row(id)?,
-            "thread" => entry["thread"] = thread(id),
+            "item" => shown["item"] = self.item_row(id)?,
+            "thread" => shown["thread"] = thread(id),
             _ => {},
         }
-        Ok(entry)
+        Ok(shown)
     }
 }
 
@@ -677,6 +685,20 @@ mod tests {
                 assert!(shown["kind"].is_string(), "{shown}");
                 // Each carries the core's key, which the app and pushes use as given.
                 assert_eq!(shown["key"], json!(entry.key()), "{shown}");
+                if matches!(entry, Entry::Conflict { .. }) {
+                    let identity: Json =
+                        serde_json::from_str(shown["identity"].as_str().unwrap()).unwrap();
+                    assert_eq!(identity["entry"], json!(entry), "{shown}");
+                    let choices = identity["choices"].as_array().unwrap();
+                    let displayed = shown["keeps"].as_array().unwrap();
+                    assert_eq!(choices.len(), displayed.len(), "{shown}");
+                    for (choice, keep) in choices.iter().zip(displayed) {
+                        assert_eq!(choice["value"], keep["value"], "{shown}");
+                        assert_eq!(choice["command"], keep["command"], "{shown}");
+                    }
+                } else {
+                    assert_eq!(shown["identity"], json!(entry.identity()), "{shown}");
+                }
                 follows_the_conventions(shown, "needs");
             }
         });

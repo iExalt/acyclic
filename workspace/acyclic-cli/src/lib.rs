@@ -213,6 +213,41 @@ pub fn call(command: Command, tracker: PathBuf, env: &Env) -> (u8, Value) {
     call_as(command, tracker, acyclic_core::scope::USER, env)
 }
 
+/// Runs one command as [`call`], requiring these write conditions to hold under the tracker lock.
+#[must_use]
+pub fn call_expected(
+    command: Command,
+    tracker: PathBuf,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+) -> (u8, Value) {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(acyclic_core::scope::USER.to_owned()),
+        output: Some(Format::Json),
+        command,
+    };
+    answer_with_expected(&cli, env, Some(expected))
+}
+
+/// Runs one app write, returning exact notifying needs acknowledged by its locked batch.
+#[must_use]
+pub fn call_observed(
+    command: Command,
+    tracker: PathBuf,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> (u8, Value, Vec<String>) {
+    let cli = Cli {
+        tracker: Some(tracker),
+        actor: Some(acyclic_core::scope::USER.to_owned()),
+        output: Some(Format::Json),
+        command,
+    };
+    answer_with_observed(&cli, env, expected, observed)
+}
+
 /// Runs one command as [`call`] does, as `actor`.
 #[must_use]
 pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u8, Value) {
@@ -226,13 +261,43 @@ pub fn call_as(command: Command, tracker: PathBuf, actor: &str, env: &Env) -> (u
 }
 
 fn answer(cli: &Cli, env: &Env) -> (u8, Value) {
-    let result = cli.command.validate().and_then(|()| commands::run(cli, env));
+    answer_with_expected(cli, env, None)
+}
+
+fn answer_with_expected(
+    cli: &Cli,
+    env: &Env,
+    expected: Option<Vec<acyclic_core::write::Expectation>>,
+) -> (u8, Value) {
+    let result = cli.command.validate().and_then(|()| match expected {
+        Some(expected) => commands::run_expected(cli, env, expected),
+        None => commands::run(cli, env),
+    });
     let (code, envelope) = match result {
         Ok(commands::Output::Json(data)) => (exit::OK, json!({"ok": true, "data": data})),
         Ok(commands::Output::Text(text)) => (exit::OK, json!({"ok": true, "data": text})),
         Err(err) => (err.exit, err.envelope()),
     };
     (code, envelope)
+}
+
+fn answer_with_observed(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> (u8, Value, Vec<String>) {
+    let result =
+        cli.command.validate().and_then(|()| commands::run_observed(cli, env, expected, observed));
+    match result {
+        Ok((commands::Output::Json(data), acknowledged)) => {
+            (exit::OK, json!({"ok": true, "data": data}), acknowledged)
+        },
+        Ok((commands::Output::Text(text), acknowledged)) => {
+            (exit::OK, json!({"ok": true, "data": text}), acknowledged)
+        },
+        Err(err) => (err.exit, err.envelope(), Vec::new()),
+    }
 }
 
 fn render(value: &serde_json::Value) -> String {

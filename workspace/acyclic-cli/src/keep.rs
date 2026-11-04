@@ -2,7 +2,7 @@
 //! both as the API's body and as the line a terminal runs.
 
 use acyclic_core::model::Model;
-use acyclic_core::needs::{Keep, Kept, Unkept};
+use acyclic_core::needs::{Entry, Keep, Kept, Unkept};
 use acyclic_core::write::{Assign, Change, ItemAssign, RepositoryAssign, ThreadAssign};
 use serde_json::{Map, Value as Json, json};
 
@@ -26,6 +26,21 @@ pub(crate) fn kept_json(model: &Model, field: &str, kept: &Kept) -> Json {
         "run": command.as_ref().map(Command::line),
         "why": why,
     })
+}
+
+/// The exact conflict payload and executable resolution choices, without presentation text.
+pub(crate) fn conflict_identity(model: &Model, entry: &Entry, kept: &[Kept]) -> String {
+    let choices: Vec<Json> = kept
+        .iter()
+        .map(|kept| {
+            json!({
+                "value": &kept.value,
+                "command": command(model, &kept.keep).ok().map(|command| command.body()),
+            })
+        })
+        .collect();
+    serde_json::to_string(&json!({"entry": entry, "choices": choices}))
+        .expect("conflict identities serialize")
 }
 
 /// A command: its words, the record it is about, and its flags.
@@ -215,5 +230,46 @@ fn why_not(field: &str, why: Unkept) -> String {
             format!("Keeping it would be refused: {}", violations.join("; "))
         },
         Unkept::Unsettled | Unkept::NoCommand | Unkept::Unreadable => IN_A_TERMINAL.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use acyclic_core::model::Model;
+    use acyclic_core::needs::{Entry, Keep, Kept, Unkept};
+    use serde_json::{Map, Value as Json, json};
+
+    use super::conflict_identity;
+
+    fn identity(values: Vec<Json>) -> String {
+        let entry =
+            Entry::Conflict { kind: "item".into(), id: "x".into(), field: "evidence".into() };
+        let kept = values
+            .into_iter()
+            .map(|value| Kept { value, keep: Keep::Not(Unkept::Unreadable) })
+            .collect::<Vec<_>>();
+        conflict_identity(&Model::default(), &entry, &kept)
+    }
+
+    #[test]
+    fn conflict_identity_canonicalizes_object_keys_and_preserves_array_order() {
+        let mut first = Map::new();
+        first.insert("z".into(), json!({"values": [1, 2]}));
+        first.insert("a".into(), json!(true));
+        let mut second = Map::new();
+        second.insert("a".into(), json!(true));
+        second.insert("z".into(), json!({"values": [1, 2]}));
+        assert_eq!(identity(vec![Json::Object(first)]), identity(vec![Json::Object(second)]));
+
+        assert_ne!(
+            identity(vec![json!({"values": [1, 2]})]),
+            identity(vec![json!({"values": [2, 1]})]),
+            "array order is part of the conflict payload"
+        );
+        assert_ne!(
+            identity(vec![json!("first"), json!("second")]),
+            identity(vec![json!("second"), json!("first")]),
+            "the ordered choice list preserves the matching between values and actions"
+        );
     }
 }

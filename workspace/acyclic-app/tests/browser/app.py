@@ -913,14 +913,16 @@ def keys_journey(page, plan, name, failures):
     page.get_by_test_id("notice").get_by_role("button", name="Undo").wait_for(timeout=10_000)
     page.evaluate("() => document.activeElement?.blur()")
     writes = []
-    page.on(
-        "request",
-        lambda request: (
+
+    def wrote_edit(request):
+        if not request.url.endswith("/api/command") or not request.post_data:
+            return
+        body = json.loads(request.post_data)
+        command = body.get("command", body) if isinstance(body, dict) else body
+        if isinstance(command, dict) and isinstance(command.get("item"), dict) and "edit" in command["item"]:
             writes.append(request.post_data)
-            if request.url.endswith("/api/command") and (request.post_data or "").startswith('{"item":{"edit"')
-            else None
-        ),
-    )
+
+    page.on("request", wrote_edit)
     page.keyboard.press("ControlOrMeta+z")
     page.keyboard.press("ControlOrMeta+z")
     page.get_by_text(f"Set {was} back").wait_for(timeout=10_000)
@@ -1647,7 +1649,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(f"{name}: an add wasn't drawn until the server answered")
         return None
     # The app made the new item's id.
-    added = json.loads(waiting[0].request.post_data)["item"]["add"]["id"]
+    request = json.loads(waiting[0].request.post_data)
+    command = request.get("command", request) if isinstance(request, dict) else request
+    added = command["item"]["add"]["id"]
     # Drawn, its panel takes the focus the form had, and says it is saving rather than the state core hasn't placed.
     drawn = page.evaluate(
         """() => {
@@ -1812,6 +1816,79 @@ def edit_journey(page, view, env, plan, box, name, failures):
         f"{name}: added, moved, linked and unlinked {added}, the pinned boxes holding still"
     )
     return added
+
+
+@timed
+def guarded_undo_race(page, view, env, plan, name, failures, errors):
+    """Changes an item after Undo's fresh read but before its guarded request reaches the server."""
+    page.reload()
+    to_map(page)
+    wait_drawn(page, len(plan.default()))
+    candidates = [id for id in plan.default() if not plan.children(id)]
+    if not candidates:
+        failures.append(f"{name}: no visible leaf was available for the guarded Undo race")
+        return
+    id = candidates[0]
+    centre(page, id)
+    tap_middle(page, view, id)
+    inspector = page.get_by_test_id("inspector")
+    inspector.wait_for(timeout=10_000)
+    was = item(env, id)["title"]
+    page.locator("[data-action=edit]").click()
+    form = page.get_by_test_id("item-form")
+    title = form.locator("input[name=title]")
+    changed = f"{was} for guarded Undo"
+    elsewhere = f"Concurrent edit {id[-6:]}"
+    title.fill(changed)
+    form.locator("button[type=submit]").click()
+    notice = page.get_by_test_id("notice")
+    notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
+
+    requests = []
+    responses = []
+    errors_before = len(errors)
+
+    def guarded_response(response):
+        body = json.loads(response.request.post_data or "{}")
+        command = body.get("command", body) if isinstance(body, dict) else body
+        if command == {"item": {"edit": {"item": id, "title": was}}} and isinstance(body, dict) and body.get("expect"):
+            responses.append(response.status)
+
+    page.on("response", guarded_response)
+
+    def interleave(route):
+        body = json.loads(route.request.post_data or "{}")
+        command = body.get("command") if isinstance(body, dict) else None
+        item_command = command.get("item") if isinstance(command, dict) else None
+        edit = item_command.get("edit", {}) if isinstance(item_command, dict) else {}
+        if edit.get("item") == id and edit.get("title") == was:
+            requests.append(body)
+            run(env, "item", "edit", id, "--title", elsewhere)
+        route.continue_()
+
+    page.route("**/api/command", interleave)
+    try:
+        notice.get_by_role("button", name="Undo").click()
+        page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
+    finally:
+        page.unroute("**/api/command", interleave)
+        page.remove_listener("response", guarded_response)
+
+    if responses != [409]:
+        failures.append(f"{name}: the stale guarded Undo response was {responses}, not one 409")
+    else:
+        for index in range(errors_before, len(errors)):
+            if "409" in errors[index] and "Conflict" in errors[index]:
+                del errors[index]
+                break
+    if len(requests) != 1 or not any(
+        condition == {"kind": "item-field", "item": id, "field": "title", "value": changed}
+        for condition in requests[0].get("expect", [])
+    ):
+        failures.append(f"{name}: Undo didn't send the checked title with its guarded request: {requests}")
+    check_tracker(env, id, lambda row: row["title"] == elsewhere, f"{id} kept its concurrent title", failures, name)
+    page.screenshot(path=SHOTS / f"app-{name}-undo-race.png")
+    print(f"{name}: a title edit after Undo's read stayed intact when the guarded request was refused")
 
 
 @timed
@@ -2481,6 +2558,8 @@ def main():
                     thread_journey(page, env, plan, plan.first_thread, name, failures)
                     needs_journey(page, env, plan, plan.first_thread, name, failures)
                     fold_journey(page, view, env, plan, name, failures)
+                    plan = Plan(env)
+                    guarded_undo_race(page, view, env, plan, name, failures, errors)
                     plan = Plan(env)
                 page.screenshot(path=SHOTS / f"app-{name}.png")
                 if errors:

@@ -49,7 +49,27 @@ pub type Names = BTreeMap<String, String>;
 
 /// Runs a parsed command.
 pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
-    run_with(cli, env, false).map(|(output, _)| output)
+    run_with(cli, env, false, None).map(|(output, _)| output)
+}
+
+/// Runs one app write with conditions checked under the store lock before the batch changes anything.
+pub fn run_expected(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+) -> Result<Output, CliError> {
+    run_with(cli, env, false, Some(expected)).map(|(output, _)| output)
+}
+
+/// Runs one app write and reports exact needs acknowledged by this batch.
+pub fn run_observed(
+    cli: &Cli,
+    env: &Env,
+    expected: Vec<acyclic_core::write::Expectation>,
+    observed: Vec<String>,
+) -> Result<(Output, Vec<String>), CliError> {
+    run_with_observed(cli, env, false, Some(expected), Some(observed))
+        .map(|(output, _, acknowledged)| (output, acknowledged))
 }
 
 /// Runs a parsed command, and says what pretty output calls each record the tracker holds once it is done: items and
@@ -58,15 +78,30 @@ pub fn run(cli: &Cli, env: &Env) -> Result<Output, CliError> {
 /// command when it neither read nor wrote through the model; none for a command with no tracker, or one that can't
 /// be read.
 pub fn run_named(cli: &Cli, env: &Env) -> Result<(Output, Names), CliError> {
-    run_with(cli, env, true)
+    run_with(cli, env, true, None)
 }
 
-fn run_with(cli: &Cli, env: &Env, named: bool) -> Result<(Output, Names), CliError> {
-    let text = |text: String| (Output::Text(text), Names::new());
+fn run_with(
+    cli: &Cli,
+    env: &Env,
+    named: bool,
+    expected: Option<Vec<acyclic_core::write::Expectation>>,
+) -> Result<(Output, Names), CliError> {
+    run_with_observed(cli, env, named, expected, None).map(|(output, names, _)| (output, names))
+}
+
+fn run_with_observed(
+    cli: &Cli,
+    env: &Env,
+    named: bool,
+    expected: Option<Vec<acyclic_core::write::Expectation>>,
+    observed: Option<Vec<String>>,
+) -> Result<(Output, Names, Vec<String>), CliError> {
+    let text = |text: String| (Output::Text(text), Names::new(), Vec::new());
     match (cli.command.class(), &cli.command) {
         (Class::Standalone, Command::Init { path, replica, remote }) => {
             init(&env.cwd.join(path), replica, remote.as_deref())
-                .map(|data| (Output::Json(data), Names::new()))
+                .map(|data| (Output::Json(data), Names::new(), Vec::new()))
         },
         (Class::Standalone, Command::Prime) => Ok(text(prime())),
         (Class::Standalone, Command::Id { count }) => {
@@ -79,9 +114,18 @@ fn run_with(cli: &Cli, env: &Env, named: bool) -> Result<(Output, Names), CliErr
             Err(CliError::new("no-server", exit::CONFIG, "this build of acyclic has no server"))
         },
         (Class::Clone | Class::Read | Class::Write, command) => {
-            let result = Session::open(cli, env, named).and_then(|session| {
+            if expected.is_some() && command.class() != Class::Write {
+                return Err(CliError::new(
+                    "usage",
+                    exit::USAGE,
+                    "write expectations require a write command",
+                ));
+            }
+            let result = Session::open(cli, env, named, expected, observed).and_then(|session| {
                 let data = session.dispatch(command)?;
-                Ok((Output::Json(data), if named { session.names() } else { Names::new() }))
+                let output_names = if named { session.names() } else { Names::new() };
+                let acknowledged = session.acknowledged.into_inner();
+                Ok((Output::Json(data), output_names, acknowledged))
             });
             result.map_err(|mut error| {
                 // Doctor doesn't point at itself.
@@ -117,10 +161,19 @@ struct Session<'a> {
     /// The names of the records in the state the command last read or wrote through [`Session::read`] or
     /// [`Session::write`], kept only when pretty output asked for them.
     named: Option<RefCell<Option<Names>>>,
+    expected: Option<Vec<write::Expectation>>,
+    observed: Option<BTreeSet<String>>,
+    acknowledged: RefCell<Vec<String>>,
 }
 
 impl<'a> Session<'a> {
-    fn open(cli: &Cli, env: &'a Env, named: bool) -> Result<Self, CliError> {
+    fn open(
+        cli: &Cli,
+        env: &'a Env,
+        named: bool,
+        expected: Option<Vec<write::Expectation>>,
+        observed: Option<Vec<String>>,
+    ) -> Result<Self, CliError> {
         let actor = context::actor(cli, env)?;
         let path = context::tracker(cli, env)?;
         let (tracker, renamed) = Tracker::open(&path)?;
@@ -134,6 +187,9 @@ impl<'a> Session<'a> {
             now: context::now(env),
             env,
             named: named.then(|| RefCell::new(None)),
+            expected,
+            observed: observed.map(|ids| ids.into_iter().collect()),
+            acknowledged: RefCell::new(Vec::new()),
         })
     }
 
@@ -423,15 +479,37 @@ impl<'a> Session<'a> {
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
         let meta = Meta { actor: self.actor.clone() };
+        let expected = self.expected.as_deref();
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
+            if let Some(expected) = expected {
+                let model = Model::read(replica.state())?;
+                let mismatches = write::check_expected(replica.state(), &model, expected, at)?;
+                if !mismatches.is_empty() {
+                    return Err(CliError::refused(
+                        "changed-since",
+                        "the state changed since the app read it",
+                    )
+                    .with(json!({"mismatches": mismatches})));
+                }
+            }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
+            let before_needs = self
+                .observed
+                .as_ref()
+                .and_then(|_| notifying_entries(replica.state(), at, self.env));
             let before = replica.changes();
             if let Some(named) = &self.named {
                 *named.borrow_mut() = None;
             }
             let data = apply(replica, By { actor: &self.actor, at })?;
             *result.borrow_mut() = (data, replica.changes() != before);
+            if let (Some(observed), Some(before_needs)) = (&self.observed, before_needs)
+                && let Some(after_needs) = notifying_entries(replica.state(), at, self.env)
+            {
+                *self.acknowledged.borrow_mut() =
+                    acknowledged_entries(&before_needs, &after_needs, observed);
+            }
             // The names of the state the batch commits, unless the command kept those of the model its writes left.
             // Naming never fails a write: a model that can't be read leaves the names to the tracker afterwards.
             if let Some(named) = &self.named
@@ -677,6 +755,208 @@ impl<'a> Session<'a> {
             let held = claim::winner(replica.state(), &key, by.at)?;
             Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
         })
+    }
+}
+
+/// The current notifying needs, keyed by the stable core key and carrying each exact compact identity.
+fn notifying_entries(state: &State, now: Millis, env: &Env) -> Option<BTreeMap<String, String>> {
+    let model = Model::read(state).ok()?;
+    let ancestry = GitAncestry::new(context::clones(env).ok()?);
+    let readiness = Readiness::new(state, &model, now, &ancestry);
+    let entries = needs::needs_you(state, &model, &readiness, now).ok()?;
+    let mut current = BTreeMap::new();
+    for entry in entries.into_iter().filter(needs::Entry::notifies) {
+        let identity = match &entry {
+            needs::Entry::Conflict { kind, id, field } => {
+                let by = acyclic_core::model::By { actor: acyclic_core::scope::USER, at: now };
+                let kept = needs::keeps(state, &model, &readiness, (kind, id, field), by).ok()?;
+                crate::keep::conflict_identity(&model, &entry, &kept)
+            },
+            _ => entry.identity(),
+        };
+        current.insert(entry.key(), identity);
+    }
+    Some(current)
+}
+
+/// Exact current identities this write may acknowledge: new stable keys and exact identities the client observed.
+fn acknowledged_entries(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    observed: &BTreeSet<String>,
+) -> Vec<String> {
+    after
+        .iter()
+        .filter(|(key, identity)| !before.contains_key(*key) || observed.contains(*identity))
+        .map(|(_, identity)| identity.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod acknowledged_entries_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use acyclic_core::model::{By, add_item};
+    use acyclic_core::needs::Entry;
+    use acyclic_core::schema::{item, kind, repository};
+    use acyclic_core::scope::USER;
+    use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
+    use serde_json::{Value, json};
+
+    use super::{GitAncestry, Model, Readiness, acknowledged_entries, needs, notifying_entries};
+    use crate::Env;
+
+    const NOW: Millis = 10_000;
+    const ITEM_CONFLICT: &str = "conflict:item:x:title";
+    const REPOSITORY_CONFLICT: &str = "conflict:repository:r:owner";
+
+    fn title_conflict() -> (Replica, Replica) {
+        let mut first = Replica::open(ReplicaId::new("first").unwrap(), State::new());
+        add_item(&mut first, "x", "Base", By { actor: USER, at: 1 }).unwrap();
+        let mut second = Replica::open(ReplicaId::new("second").unwrap(), State::new());
+        second.join(first.state()).unwrap();
+        let mut third = Replica::open(ReplicaId::new("third").unwrap(), State::new());
+        third.join(first.state()).unwrap();
+
+        first
+            .write(&Key::new(kind::ITEM, "x").unwrap(), item::TITLE, USER, 2, Some(json!("one")))
+            .unwrap();
+        second
+            .write(&Key::new(kind::ITEM, "x").unwrap(), item::TITLE, USER, 2, Some(json!("two")))
+            .unwrap();
+        first.join(second.state()).unwrap();
+        (first, third)
+    }
+
+    fn repository_conflict() -> Replica {
+        let mut first = Replica::open(ReplicaId::new("first").unwrap(), State::new());
+        let key = Key::new(kind::REPOSITORY, "r").unwrap();
+        for (field, value) in [
+            (repository::OWNER, json!("base")),
+            (repository::NAME, json!("base")),
+            (repository::DEFAULT_BRANCH, json!("main")),
+        ] {
+            first.write(&key, field, USER, 1, Some(value)).unwrap();
+        }
+        let mut second = Replica::open(ReplicaId::new("second").unwrap(), State::new());
+        second.join(first.state()).unwrap();
+
+        first.write(&key, repository::OWNER, USER, 2, Some(json!("one"))).unwrap();
+        first.write(&key, repository::NAME, USER, 2, Some(json!("app-one"))).unwrap();
+        second.write(&key, repository::OWNER, USER, 2, Some(json!("two"))).unwrap();
+        second.write(&key, repository::NAME, USER, 2, Some(json!("app-two"))).unwrap();
+        first.join(second.state()).unwrap();
+        first
+    }
+
+    fn identity(map: &BTreeMap<String, String>, key: &str) -> String {
+        map.get(key).unwrap_or_else(|| panic!("missing {key}: {map:?}")).clone()
+    }
+
+    fn choice_values(identity: &str) -> Vec<Value> {
+        serde_json::from_str::<Value>(identity).unwrap()["choices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|choice| choice["value"].clone())
+            .collect()
+    }
+
+    fn view_identity(state: &State, key: &str) -> String {
+        let env = Env::default();
+        let model = Model::read(state).unwrap();
+        let ancestry = GitAncestry::new(crate::context::clones(&env).unwrap());
+        let readiness = Readiness::new(state, &model, NOW, &ancestry);
+        let entries = needs::needs_you(state, &model, &readiness, NOW).unwrap();
+        let view = crate::view::View { state, model: &model, readiness: &readiness, now: NOW };
+        view.needs(&entries)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry["key"] == key)
+            .unwrap()["identity"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn a_new_need_with_a_large_core_identity_is_still_acknowledged() {
+        let entry = Entry::Reopened {
+            item: "item".into(),
+            dependents: (0..1_000).map(|n| format!("dependent-{n:04}")).collect(),
+        };
+        let identity = entry.identity();
+        assert!(identity.len() > 16 * 1024);
+        let before = BTreeMap::new();
+        let after = BTreeMap::from([(entry.key(), identity.clone())]);
+
+        assert_eq!(acknowledged_entries(&before, &after, &BTreeSet::new()), [identity]);
+    }
+
+    #[test]
+    fn a_third_conflict_value_changes_the_shared_view_and_ack_identity() {
+        let (mut replica, mut third) = title_conflict();
+        assert_eq!(Model::read(replica.state()).unwrap().conflicts().count(), 1);
+        let env = Env::default();
+        let before = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let old = identity(&before, ITEM_CONFLICT);
+        assert_eq!(choice_values(&old), [json!("one"), json!("two")]);
+        assert_eq!(view_identity(replica.state(), ITEM_CONFLICT), old);
+
+        third
+            .write(&Key::new(kind::ITEM, "x").unwrap(), item::TITLE, USER, 3, Some(json!("three")))
+            .unwrap();
+        replica.join(third.state()).unwrap();
+
+        let after = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let new = identity(&after, ITEM_CONFLICT);
+        assert_eq!(choice_values(&new), [json!("one"), json!("two"), json!("three")]);
+        assert_ne!(old, new);
+        assert_eq!(view_identity(replica.state(), ITEM_CONFLICT), new);
+        assert!(
+            acknowledged_entries(&before, &after, &BTreeSet::from([old])).is_empty(),
+            "an old observation must not acknowledge the changed conflict"
+        );
+    }
+
+    #[test]
+    fn unchanged_conflict_values_get_a_new_identity_when_resolution_becomes_available() {
+        let mut replica = repository_conflict();
+        let env = Env::default();
+        let before = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let old = identity(&before, REPOSITORY_CONFLICT);
+        let old_payload: Value = serde_json::from_str(&old).unwrap();
+        let old_values = choice_values(&old);
+        assert!(
+            old_payload["choices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|choice| choice["command"].is_null())
+        );
+
+        replica
+            .write(
+                &Key::new(kind::REPOSITORY, "r").unwrap(),
+                repository::NAME,
+                USER,
+                3,
+                Some(json!("app-one")),
+            )
+            .unwrap();
+        let after = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let new = identity(&after, REPOSITORY_CONFLICT);
+        let new_payload: Value = serde_json::from_str(&new).unwrap();
+        assert_eq!(choice_values(&new), old_values, "only resolution eligibility changed");
+        assert_ne!(old, new);
+        assert!(
+            new_payload["choices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|choice| choice["command"].is_object())
+        );
+        assert_eq!(view_identity(replica.state(), REPOSITORY_CONFLICT), new);
     }
 }
 

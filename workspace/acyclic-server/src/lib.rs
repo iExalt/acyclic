@@ -18,6 +18,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::OwnedMutexGuard;
 use tower::ServiceExt as _;
@@ -261,15 +262,51 @@ impl Server {
 
     /// Runs a command as the user, off the async threads, and returns its exit code and envelope. A turn, if given,
     /// is kept until the command finishes, even if the request is dropped meanwhile.
+    async fn call_observed(
+        self: &Arc<Self>,
+        command: Command,
+        expected: Vec<acyclic_core::write::Expectation>,
+        observed: Vec<String>,
+        turn: OwnedMutexGuard<()>,
+    ) -> (u8, Value, Vec<String>) {
+        let server = Arc::clone(self);
+        let run = tokio::task::spawn_blocking(move || {
+            let _turn = turn;
+            acyclic_cli::call_observed(
+                command,
+                server.config.tracker.clone(),
+                &server.config.env,
+                expected,
+                observed,
+            )
+        });
+        run.await.unwrap_or_else(|_| {
+            let err =
+                CliError::new("internal", exit::UNREADABLE, "the command failed unexpectedly");
+            (err.exit, err.envelope(), Vec::new())
+        })
+    }
+
     async fn call(
         self: &Arc<Self>,
         command: Command,
+        expected: Option<Vec<acyclic_core::write::Expectation>>,
         turn: Option<OwnedMutexGuard<()>>,
     ) -> (u8, Value) {
         let server = Arc::clone(self);
         let run = tokio::task::spawn_blocking(move || {
             let _turn = turn;
-            acyclic_cli::call(command, server.config.tracker.clone(), &server.config.env)
+            match expected {
+                Some(expected) => acyclic_cli::call_expected(
+                    command,
+                    server.config.tracker.clone(),
+                    &server.config.env,
+                    expected,
+                ),
+                None => {
+                    acyclic_cli::call(command, server.config.tracker.clone(), &server.config.env)
+                },
+            }
         });
         run.await.unwrap_or_else(|_| {
             let err =
@@ -277,6 +314,16 @@ impl Server {
             (err.exit, err.envelope())
         })
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppWrite {
+    command: Command,
+    #[serde(default)]
+    expect: Vec<acyclic_core::write::Expectation>,
+    #[serde(default)]
+    observed: Option<Value>,
 }
 
 /// A listener's state: the server and who the listener lets in.
@@ -302,6 +349,34 @@ fn page(status: StatusCode, text: &'static str) -> Response {
     (status, [(CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
+fn observed_ids(value: &Value) -> Option<Vec<String>> {
+    let ids = value.as_array()?;
+    if ids.len() > 256 || ids.iter().any(|id| !id.is_string()) {
+        return None;
+    }
+    let ids = ids.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+    if ids.iter().map(|id| id.len()).sum::<usize>() > 16 * 1024 {
+        return None;
+    }
+    Some(ids.into_iter().map(str::to_owned).collect())
+}
+
+#[cfg(test)]
+mod observed_tests {
+    use serde_json::json;
+
+    use super::observed_ids;
+
+    #[test]
+    fn malformed_or_oversized_observed_metadata_is_omitted() {
+        assert_eq!(observed_ids(&json!(["a", "b"])), Some(vec!["a".into(), "b".into()]));
+        assert_eq!(observed_ids(&json!("not a list")), None);
+        assert_eq!(observed_ids(&json!(["a", 1])), None);
+        assert_eq!(observed_ids(&json!(["x".repeat(16 * 1024 + 1)])), None);
+        assert_eq!(observed_ids(&json!(vec!["x"; 257])), None);
+    }
+}
+
 async fn command(
     State(listener): State<Arc<Listener>>,
     headers: HeaderMap,
@@ -310,31 +385,67 @@ async fn command(
     if let Err(refusal) = listener.access.same_origin(&headers) {
         return refusal.into_response();
     }
-    let command: Command = match serde_json::from_slice(&body) {
-        Ok(command) => command,
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
         Err(err) => {
             let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
             return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
         },
+    };
+    let (command, expected, observed) = if value.get("command").is_some() {
+        match serde_json::from_value::<AppWrite>(value) {
+            Ok(request) => (
+                request.command,
+                Some(request.expect),
+                Some(request.observed.as_ref().and_then(observed_ids).unwrap_or_default()),
+            ),
+            Err(err) => {
+                let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
+                return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+            },
+        }
+    } else {
+        match serde_json::from_value::<Command>(value) {
+            Ok(command) => (command, None, None),
+            Err(err) => {
+                let err = CliError::new("usage", exit::USAGE, format!("not a command: {err}"));
+                return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+            },
+        }
     };
     let server = &listener.server;
     // Reads run beside anything and writes wait for the other writes and the sync loop. The server runs nothing
     // else for a request: nothing that sets up or syncs the clone, reads or writes files on the server, or starts
     // another server.
     let class = command.class();
-    let (code, envelope) = match class {
-        Class::Read => server.call(command, None).await,
+    if expected.is_some() && class != Class::Write {
+        let err = CliError::new("usage", exit::USAGE, "write expectations require a write command");
+        return (StatusCode::BAD_REQUEST, Json(err.envelope())).into_response();
+    }
+    let (code, envelope, acknowledged) = match class {
+        Class::Read => {
+            let (code, envelope) = server.call(command, None, None).await;
+            (code, envelope, Vec::new())
+        },
         Class::Write => match server.turn().await {
-            Ok(turn) => server.call(command, Some(turn)).await,
-            Err(err) => (err.exit, err.envelope()),
+            Ok(turn) => match (expected, observed) {
+                (Some(expected), Some(observed)) => {
+                    server.call_observed(command, expected, observed, turn).await
+                },
+                (Some(expected), None) => {
+                    let (code, envelope) = server.call(command, Some(expected), Some(turn)).await;
+                    (code, envelope, Vec::new())
+                },
+                (None, _) => server.call_observed(command, Vec::new(), Vec::new(), turn).await,
+            },
+            Err(err) => (err.exit, err.envelope(), Vec::new()),
         },
         Class::Standalone | Class::Server | Class::Clone => {
             return Refusal::NotAllowed.into_response();
         },
     };
-    // What the user's own write brings about is theirs, and needs no push.
     if code == exit::OK && class == Class::Write {
-        server.push.seen();
+        server.push.seen(acknowledged);
     }
     (status(code), Json(envelope)).into_response()
 }
@@ -666,7 +777,7 @@ async fn sync(server: Arc<Server>, every: Duration) {
         ticks.tick().await;
         // A sync waits as long as it must: it is the server's own, and the next tick would only queue behind it.
         let turn = server.turns.clone().lock_owned().await;
-        let (code, envelope) = server.call(Command::Sync, Some(turn)).await;
+        let (code, envelope) = server.call(Command::Sync, None, Some(turn)).await;
         if code == exit::OK {
             server.push.look();
             continue;

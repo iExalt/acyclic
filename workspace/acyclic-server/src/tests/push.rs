@@ -1,5 +1,6 @@
 //! Pushing, against a stand-in push service on this machine that decrypts what it is sent as the device would.
 
+use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Mutex as StdMutex;
 
@@ -148,24 +149,54 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     server.push.look();
     assert_eq!(received(2).await.1["body"], "P2 was reopened");
 
-    // The user's own writes through the app bring news of their own doing, which is taken as seen.
-    let user = |command: Value| call(&router, Method::POST, "/api/command", command.to_string());
-    for command in [
+    // The client sends exact identities from the Needs response it last showed.
+    let observed = {
+        let (code, envelope) = acyclic_cli::call(Command::Needs, tracker.clone(), &env);
+        assert_eq!(code, 0, "{envelope}");
+        envelope["data"]["needs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["notify"] == true)
+            .map(|entry| entry["identity"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    // This unrelated need arrives after the client's read, so the app write must not acknowledge it.
+    reopen(3);
+    let user = |command: Value, observed: Value| {
+        call(
+            &router,
+            Method::POST,
+            "/api/command",
+            json!({"command": command, "expect": [], "observed": observed}).to_string(),
+        )
+    };
+    for (index, command) in [
         json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000c1", "title": "M"}}}),
         json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000c1", "evidence": "n", "force": true}}}),
         json!({"item": {"reopen": {"item": "01900000-0000-7000-8000-0000000000c1"}}}),
-    ] {
-        assert_eq!(user(command).await.0, StatusCode::OK);
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // The final write still commits and acknowledges its new need when optional client metadata is malformed.
+        let observed = if index == 2 { json!("not a list") } else { json!(observed.clone()) };
+        assert_eq!(user(command, observed).await.0, StatusCode::OK);
     }
+    assert_eq!(received(3).await.1["body"], "P3 was reopened");
     let sent = home.join(".config/acyclic/push/sent.json");
     let read = |file: &std::path::Path| std::fs::read_to_string(file).unwrap();
-    eventually("taking M as seen", || {
-        read(&sent).contains("reopened:01900000-0000-7000-8000-0000000000c1").then_some(())
+    let identities = || serde_json::from_str::<BTreeSet<String>>(&read(&sent)).unwrap();
+    let own_reopen = acyclic_core::needs::Entry::Reopened {
+        item: "01900000-0000-7000-8000-0000000000c1".into(),
+        dependents: Vec::new(),
+    }
+    .identity();
+    eventually("persisting the app's exact own-need acknowledgment", || {
+        identities().contains(&own_reopen).then_some(())
     })
     .await;
-    reopen(3);
-    server.push.look();
-    assert_eq!(received(3).await.1["body"], "P3 was reopened");
+    assert_eq!(service.sent.lock().unwrap().len(), 3, "the app's own need adds no push");
 
     // However long the service is down, the device stays, and the news arrives once it is back.
     let devices = home.join(".config/acyclic/push/subscriptions.json");
@@ -187,10 +218,12 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     assert_eq!(message["body"], "P4 was reopened");
     // The service has it, but the server records it as told only once it hears back: a restart before then would
     // tell it again.
-    eventually("recording P4 as told", || {
-        read(&sent).contains("reopened:01900000-0000-7000-8000-000000000004").then_some(())
-    })
-    .await;
+    let p4 = acyclic_core::needs::Entry::Reopened {
+        item: "01900000-0000-7000-8000-000000000004".into(),
+        dependents: Vec::new(),
+    }
+    .identity();
+    eventually("recording P4 as told", || identities().contains(&p4).then_some(())).await;
     let told = service.sent.lock().unwrap().len();
 
     // A restart on the same files tells nothing again, and a device the service says is gone is dropped.

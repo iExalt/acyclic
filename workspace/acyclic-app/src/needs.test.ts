@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Line, linesOf } from "./lines";
-import { countText, keepsIn, type Need, needView, threadLabel, together } from "./needs";
+import { countText, keepsIn, type Need, needView, structuralKey, threadLabel, together } from "./needs";
 import examples from "./needs.examples.json";
 import { PALETTES } from "./palette";
 
@@ -205,6 +205,15 @@ describe("needView", () => {
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
     expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");
+  });
+});
+
+describe("structuralKey", () => {
+  it("ignores object key order and keeps array order", () => {
+    expect(structuralKey({ evidence: { commit: "abc", repository: "r" } })).toBe(
+      structuralKey({ evidence: { repository: "r", commit: "abc" } }),
+    );
+    expect(structuralKey(["a", "b"])).not.toBe(structuralKey(["b", "a"]));
   });
 });
 

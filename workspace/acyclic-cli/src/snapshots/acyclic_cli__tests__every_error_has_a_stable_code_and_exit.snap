@@ -39,6 +39,7 @@ expression: table
 1 in-use
 3 not-found
 1 not-ready
+1 changed-since
 1 already-exists
 1 already-done
 1 incomplete-repository

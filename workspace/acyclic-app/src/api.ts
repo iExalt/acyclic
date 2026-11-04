@@ -9,6 +9,14 @@ export type Envelope<T> =
 /** A scalar field as the tracker reports it: unset, one value, or concurrent writes that conflict. */
 export type Raw<T> = T | null | { conflict: (T | null)[] };
 
+/** A condition the server checks with an app write under the tracker lock. */
+export type Expected =
+  | { kind: "item-field"; item: string; field: "title" | "parent" | "state" | "notes" | "size"; value: Raw<string> }
+  | { kind: "thread-field"; thread: string; field: "title" | "brief"; value: Raw<string> }
+  | { kind: "waits-for"; item: string; target: string; present: boolean }
+  | { kind: "started-at-most"; item: string; count: number }
+  | { kind: "waiters-started-at-most"; item: string; baselines: { item: string; count: number }[] };
+
 /** An item as `item show` returns it, with the fields the app reads. */
 interface RawItem {
   id: string;
@@ -158,6 +166,7 @@ const REFUSALS: Record<string, string> = {
   archived: "That would leave unfinished work inside an archived project, where it would be hidden",
   deleted: "That item was deleted after it was added: send it again to add it anew",
   "not-found": "It isn't in the plan any more: someone deleted or moved it meanwhile",
+  "changed-since": "Changed since, so it can't be undone",
   locked: "The tracker is busy with another write: try again in a moment",
 };
 
@@ -175,13 +184,26 @@ export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 export type Command = string | Record<string, unknown>;
 
 /** Runs one command as the user. */
-export async function command<T>(body: Command, fetcher: Fetch = fetch): Promise<T> {
+export async function command<T>(
+  body: Command,
+  fetcher: Fetch = fetch,
+  expect?: readonly Expected[],
+  observed?: readonly string[],
+): Promise<T> {
   // A request that never reached the server says so in each browser's own words ("Failed to fetch", "Load
   // failed"…), so it's told in the app's.
   const response = await fetcher("/api/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(
+      expect === undefined && observed === undefined
+        ? body
+        : {
+            command: body,
+            ...(expect === undefined ? {} : { expect }),
+            ...(observed === undefined ? {} : { observed }),
+          },
+    ),
   }).catch(() => {
     throw new CommandError("network", "Can't reach the server");
   });

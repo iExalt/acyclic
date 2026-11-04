@@ -25,6 +25,7 @@ describe("undo", () => {
     // Put back elsewhere on the Map, it is brought into view there, as the move brought it.
     expect(undo?.shows).toBe("dig");
     expect(undo?.command).toEqual({ item: { edit: { item: "dig", parent: "garden" } } });
+    expect(undo?.expect).toEqual([{ kind: "item-field", item: "dig", field: "parent", value: "beds" }]);
     expect(undo?.holds(after("dig", { parent: "beds" }))).toBe(true);
     expect(undo?.holds(after("dig", { parent: null }))).toBe(false);
     const top = undoOf({ item: { edit: { item: "garden", parent: "beds" } } }, before);
@@ -37,6 +38,11 @@ describe("undo", () => {
   it("sets an item's fields back, clearing one that was empty, while each still holds what was set", () => {
     const undo = undoOf({ item: { edit: { item: "dig", title: "Dig deep", "no-notes": true, size: "m" } } }, before);
     expect(undo?.command).toEqual({ item: { edit: { item: "dig", title: "Dig", notes: "deep", "no-size": true } } });
+    expect(undo?.expect).toEqual([
+      { kind: "item-field", item: "dig", field: "title", value: "Dig deep" },
+      { kind: "item-field", item: "dig", field: "notes", value: null },
+      { kind: "item-field", item: "dig", field: "size", value: "m" },
+    ]);
     expect(undo?.holds(after("dig", { title: "Dig deep", notes: null, size: "m" }))).toBe(true);
     // Someone else changed one of them since: the undo would take back their change too.
     expect(undo?.holds(after("dig", { title: "Dig deeper", notes: null, size: "m" }))).toBe(false);
@@ -45,12 +51,17 @@ describe("undo", () => {
   it("takes back a waits-for added or removed, as item edits, while it is still so", () => {
     const added = undoOf(linkCommand("sow", "garden"), before);
     expect(added?.command).toEqual(unlinkCommand("sow", "garden"));
+    expect(added?.expect).toEqual([{ kind: "waits-for", item: "sow", target: "garden", present: true }]);
     expect(added?.holds(before)).toBe(false);
     expect(added?.holds(after("sow", { links: { ...links, waits_for: ["dig", "garden"] } }))).toBe(true);
     // Said as the link reads, so which way it runs is plain.
     expect([added?.text, added?.undone]).toEqual(["Sow now waits for Garden", "Sow no longer waits for Garden"]);
     const removed = undoOf(unlinkCommand("sow", "dig"), before);
     expect(removed?.command).toEqual(linkCommand("sow", "dig"));
+    expect(removed?.expect).toEqual([
+      { kind: "waits-for", item: "sow", target: "dig", present: false },
+      { kind: "started-at-most", item: "sow", count: 0 },
+    ]);
     expect(removed?.holds(before)).toBe(false);
     const gone = after("sow", { links });
     expect(removed?.holds(gone)).toBe(true);
@@ -90,12 +101,20 @@ describe("undo", () => {
   it("sets a state back only while nothing waiting on the item, or on a box above it, has started since", () => {
     const done = undoOf({ item: { edit: { item: "dig", state: "done" } } }, before);
     expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "backlog" } } });
+    expect(done?.expect).toEqual([
+      { kind: "item-field", item: "dig", field: "state", value: "done" },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
+    ]);
     const dug = after("dig", { state: "done" });
     expect(done?.holds(dug)).toBe(true);
     expect(done?.holds(changed(dug, "sow", { stage: "in-progress" }))).toBe(false);
     // Here Sow waits on Dig's box, Garden, which Dig being done may complete.
     const boxed = changed(before, "sow", { links: { ...links, waits_for: ["garden"] } });
     const outer = undoOf({ item: { edit: { item: "dig", state: "done" } } }, boxed);
+    expect(outer?.expect).toEqual([
+      { kind: "item-field", item: "dig", field: "state", value: "done" },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
+    ]);
     const boxDone = changed(boxed, "dig", { state: "done" });
     expect(outer?.holds(boxDone)).toBe(true);
     expect(outer?.holds(changed(boxDone, "sow", { stage: "in-progress" }))).toBe(false);
@@ -115,6 +134,7 @@ describe("undo", () => {
       { item: { edit: { item: "dig", parent: "garden" } } },
     ]);
     expect([kept?.holds(after("dig", { parent: "beds" })), kept?.holds(before)]).toEqual([true, false]);
+    expect(kept?.expect).toEqual([{ kind: "item-field", item: "dig", field: "parent", value: "beds" }]);
     // Only what an undo of an edit reads is kept, not the whole plan: the item, its boxes, what waits on them.
     expect(keep(command, before, "", "").items.map((one) => one.id)).toEqual(["beds", "dig", "garden", "sow"]);
   });
@@ -124,5 +144,9 @@ describe("undo", () => {
     const kept = unkeep(JSON.parse(JSON.stringify(keep(command, before, "Edited Dig", "Set Dig back"))));
     expect(kept?.holds(after("dig", { state: "done" }))).toBe(true);
     expect(kept?.holds(changed(after("dig", { state: "done" }), "sow", { stage: "in-progress" }))).toBe(false);
+    expect(kept?.expect).toEqual([
+      { kind: "item-field", item: "dig", field: "state", value: "done" },
+      { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },
+    ]);
   });
 });
