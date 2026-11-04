@@ -136,7 +136,13 @@ fn table(rows: Vec<&Json>, columns: &[String], width: Option<u16>) -> String {
     }
     table.set_header(columns.iter().map(|column| column.to_uppercase()));
     for row in rows {
-        table.add_row(columns.iter().map(|column| compact(&row[column])));
+        table.add_row(columns.iter().map(|column| {
+            if row["kind"] == "conflict" && column == "values" {
+                conflict_values(&row[column])
+            } else {
+                compact(&row[column])
+            }
+        }));
     }
     let mut text = table.to_string();
     if width.is_none() {
@@ -364,6 +370,9 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
 fn compact(value: &Json) -> String {
     match value {
         Json::Object(fields) if let Some(phrase) = readiness(fields) => phrase,
+        Json::Object(fields) if fields.len() == 1 && fields.contains_key("conflict") => {
+            format!("conflict {}", conflict_values(&fields["conflict"]))
+        },
         // A conflict's value with how it is kept: the line to run, or why nothing keeps it.
         Json::Object(fields) if fields.contains_key("run") && fields.contains_key("why") => {
             let value = match &fields["value"] {
@@ -411,6 +420,17 @@ fn compact(value: &Json) -> String {
             }
         },
     }
+}
+
+/// A cleared side is a choice, not a missing value to leave out.
+fn conflict_values(values: &Json) -> String {
+    values
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|value| if value.is_null() { "none".to_owned() } else { compact(value) })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

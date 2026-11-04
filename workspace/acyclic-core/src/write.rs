@@ -709,6 +709,8 @@ pub enum Rule {
     RepeatDiffers,
     /// Two changes give this field different values.
     Contradicts,
+    /// An assignment in an add names a different record.
+    WrongRecord(Record),
     /// The item isn't the finisher's to finish: not ready, or held by someone else. With no readiness to judge it by,
     /// no status.
     NotReady(Option<Status>),
@@ -778,6 +780,14 @@ impl fmt::Display for Violation {
             Rule::EvidenceNotDone => write!(f, "{at}evidence on an item that isn't done"),
             Rule::RepeatDiffers => write!(f, "{at}it exists with another value"),
             Rule::Contradicts => write!(f, "{at}two changes give it different values"),
+            Rule::WrongRecord(record) => {
+                write!(
+                    f,
+                    "{at}the assignment must name the {} {} being added",
+                    record.kind(),
+                    record.id()
+                )
+            },
             Rule::NotReady(_) => write!(f, "{at}it isn't ready, or someone else holds it"),
             Rule::OpenWork { .. } => write!(f, "{at}it has open children or is held back"),
             Rule::EvidenceDiffers => write!(f, "{at}it is done with other evidence"),
@@ -926,7 +936,7 @@ impl Judging<'_, '_> {
             for assign in assigns {
                 let at = assign.at();
                 if at.record != record {
-                    self.refuse(Some(n), Some(at), Rule::Contradicts);
+                    self.refuse(Some(n), Some(at), Rule::WrongRecord(record.clone()));
                     continue;
                 }
                 let value = assign.value();

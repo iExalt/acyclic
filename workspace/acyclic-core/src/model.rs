@@ -948,7 +948,7 @@ pub(crate) fn value<T: DeserializeOwned + PartialEq>(
     let mut values: Vec<Option<T>> = Vec::new();
     for stamped in state.field(key, name).into_iter().flatten().map(|(_, v)| v) {
         let value: Option<T> = serde_json::from_value(stamped.value.clone()).map_err(|e| {
-            Error::Format(format!("unreadable {name} on {} {}: {e}", key.kind, key.id))
+            Error::Format(format!("invalid {name} on {} {}: {e}", key.kind, key.id))
         })?;
         if !values.contains(&value) {
             values.push(value);

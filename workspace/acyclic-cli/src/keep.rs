@@ -115,15 +115,13 @@ fn command(model: &Model, keep: &Keep) -> Result<Command, Unkept> {
             [Change::Finish { item, evidence: Some(evidence), force: _ }] => {
                 let mut flags = Vec::new();
                 if let Some(commit) = &evidence.commit {
-                    let repository = evidence.repository.as_ref().map(|id| {
-                        model
-                            .repositories
-                            .get(id)
-                            .and_then(repository_name)
-                            .unwrap_or_else(|| id.clone())
-                    });
-                    let commit =
-                        repository.map_or_else(|| commit.clone(), |r| format!("{r}@{commit}"));
+                    let id = evidence.repository.as_ref().ok_or(Unkept::NoCommand)?;
+                    let repository = model
+                        .repositories
+                        .get(id)
+                        .and_then(repository_name)
+                        .unwrap_or_else(|| id.clone());
+                    let commit = format!("{repository}@{commit}");
                     flags.push(("commit", Flag::Text(commit)));
                 }
                 if let Some(text) = &evidence.text {
@@ -240,6 +238,48 @@ mod identity_tests {
     use serde_json::{Map, Value as Json, json};
 
     use super::conflict_identity;
+
+    #[test]
+    fn evidence_without_a_repository_offers_no_command() {
+        use acyclic_core::model::{Evidence, Repository, Value};
+        use acyclic_core::write::{Change, ChangeSet};
+
+        let mut model = Model::default();
+        model.repositories.insert(
+            "r".into(),
+            Repository {
+                id: "r".into(),
+                owner: Value::One("me".into()),
+                name: Value::One("code".into()),
+                default_branch: Value::One("main".into()),
+                installation: Value::None,
+            },
+        );
+        for (repository, commit, executable) in
+            [(None, Some("abc1234"), false), (Some("r"), Some("abc1234"), true), (None, None, true)]
+        {
+            let evidence = Evidence {
+                repository: repository.map(str::to_owned),
+                commit: commit.map(str::to_owned),
+                text: Some("Checked".into()),
+            };
+            let kept = Kept {
+                value: json!(evidence),
+                keep: Keep::Write(ChangeSet(vec![Change::Finish {
+                    item: "a".into(),
+                    evidence: Some(evidence),
+                    force: true,
+                }])),
+            };
+            let shown = super::kept_json(&model, "evidence", &kept);
+            assert_eq!(!shown["command"].is_null(), executable, "{shown}");
+            assert_eq!(shown["run"].is_string(), executable, "{shown}");
+            assert_eq!(shown["why"].is_string(), !executable, "{shown}");
+            if repository.is_some() {
+                assert_eq!(shown["command"]["item"]["done"]["commit"], "me/code@abc1234");
+            }
+        }
+    }
 
     fn identity(values: Vec<Json>) -> String {
         let entry =

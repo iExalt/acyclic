@@ -46,7 +46,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
     "details": {
       "hint": "run acyclic doctor"
     },
-    "message": "unreadable state: unreadable state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`"
+    "message": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`"
   },
   "ok": false
 }
@@ -64,12 +64,12 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "unreadable": [
       {
         "entity": "item",
-        "error": "unreadable state: unreadable state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`",
+        "error": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `parked`, `done`",
         "id": "01900000-0000-7000-8000-0000000000a1"
       },
       {
         "entity": "link",
-        "error": "unreadable state: unreadable kind on link relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1: unknown variant `relates`, expected `blocks`",
+        "error": "unreadable state: invalid kind on link relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1: unknown variant `relates`, expected `blocks`",
         "id": "relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1"
       }
     ]

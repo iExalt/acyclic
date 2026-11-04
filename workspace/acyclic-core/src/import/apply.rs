@@ -125,7 +125,7 @@ impl fmt::Display for ApplyError {
                 let cycles: Vec<String> = cycles.iter().map(|cycle| cycle.join(" -> ")).collect();
                 write!(
                     f,
-                    "the import would close {} with the tracker",
+                    "the import would close {}",
                     crate::say::few(&cycles, "cycle", "cycles", "; ")
                 )
             },
