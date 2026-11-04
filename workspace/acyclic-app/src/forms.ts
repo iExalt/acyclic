@@ -6,16 +6,10 @@ import type { Command, Item } from "./api";
 /** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
 export const STATES = ["backlog", "parked"] as const;
 export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
-/**
- * How a state the editor shows reads elsewhere, where that differs from its word: a leaf in the backlog shows as Ready
- * or Blocked by its waits, or as Needs a thread while it is in none; null for a parent, which has no stage, and for
- * every other state.
- */
+/** Explain stored backlog separately from the status computed for a leaf. */
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
   if (!isLeaf || draft.state !== "backlog") return null;
-  return draft.thread === ""
-    ? "Backlog shows as Needs a thread in Status until it's in one"
-    : "Backlog shows as Ready or Blocked in Status, by what it waits on";
+  return "Backlog is work still to do. Status also reflects its thread, waits and active claims";
 }
 
 /** The item's fields the editor changes; an empty string is a clear. */
