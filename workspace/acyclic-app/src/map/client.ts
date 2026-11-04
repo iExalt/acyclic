@@ -14,9 +14,9 @@ export class Layouts {
 
   constructor(private readonly layBox: LayBox) {}
 
-  async layout(view: View, aspect: number): Promise<Placed | null> {
+  async layout(view: View, aspect: number, source = ""): Promise<Placed | null> {
     const request = ++this.latest;
-    const placed = await place(view, this.cache, this.layBox, aspect, () => request === this.latest);
+    const placed = await place(view, this.cache, this.layBox, aspect, () => request === this.latest, source);
     return request === this.latest ? placed : null;
   }
 }

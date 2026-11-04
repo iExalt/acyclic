@@ -142,6 +142,48 @@ describe("place", () => {
     }
   });
 
+  it("repacks an actual shrink and restores the held view and packing on Undo", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const foldedView = visible(buildModel(plan), { collapsed: new Set(["top"]), showArchived: false });
+    const openView = visible(buildModel(plan), open);
+    const reduced = plan.filter((one) => one.id !== "l3");
+    const shrinkView = visible(buildModel(reduced), open);
+    const folded = await place(foldedView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    const expanded = await place(openView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(expanded.laidOut).not.toContain(ROOT);
+    const shrunk = await place(shrinkView, cache, engine.layBox, PORTRAIT, undefined, "source-b");
+    expect(shrunk.laidOut).toContain(ROOT);
+
+    // Undo returns to the old source key, whose original folded packing reproduces the held expanded view.
+    const undone = await place(openView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(undone.nodes).toEqual(expanded.nodes);
+    const refolded = await place(foldedView, cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    expect(refolded.nodes).toEqual(folded.nodes);
+  });
+
+  it("inherits the original hold baseline for a new source that only grows", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const before = buildModel(plan);
+    const grown = buildModel([...plan, item("l4", "left"), item("l5", "left")]);
+    const first = await place(visible(before, open), cache, engine.layBox, PORTRAIT, undefined, "source-a");
+    const next = await place(visible(grown, open), cache, engine.layBox, PORTRAIT, undefined, "source-b");
+    expect(next.laidOut).not.toContain(ROOT);
+    const folded = await place(
+      visible(grown, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+      undefined,
+      "source-b",
+    );
+    expect([folded.nodes.get("top")?.x, folded.nodes.get("top")?.y]).toEqual([
+      first.nodes.get("top")?.x,
+      first.nodes.get("top")?.y,
+    ]);
+  });
+
   it("restores the matching aspect's packing after a turn", async () => {
     const engine = grid();
     const cache = new LayoutCache();
@@ -425,11 +467,16 @@ describe("LayoutCache", () => {
     const a = input("a");
     const b = input("b");
     const c = input("c");
-    cache.rememberRoot(a, layout);
-    cache.rememberRoot(b, layout);
-    cache.root(a);
-    cache.rememberRoot(c, layout);
-    expect([cache.root(a), cache.root(b), cache.root(c)].map(Boolean)).toEqual([true, false, true]);
+    const baseline = (one: typeof a) => ({ input: one, layout });
+    cache.rememberRoot(a, "source", baseline(a));
+    cache.rememberRoot(b, "source", baseline(b));
+    cache.root(a, "source");
+    cache.rememberRoot(c, "source", baseline(c));
+    expect([cache.root(a, "source"), cache.root(b, "source"), cache.root(c, "source")].map(Boolean)).toEqual([
+      true,
+      false,
+      true,
+    ]);
     expect(cache.rootSize).toBe(2);
   });
 });

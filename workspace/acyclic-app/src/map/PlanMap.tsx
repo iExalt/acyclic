@@ -16,7 +16,7 @@ import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import { foldDone, isDoneBox } from "./fold";
 import type { Placed } from "./layout";
-import { buildModel, collapsedWith, type Model, topOf, type View, visible } from "./model";
+import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
 import {
   firstView,
   fitPlan,
@@ -135,6 +135,8 @@ export default function PlanMap({
     const named = new Map<string, string>(JSON.parse(names));
     return foldDone(buildModel(items), (thread) => named.get(thread) ?? null);
   }, [items, names]);
+  // The folded source model carries geometry changes but not the Map's local chevron toggles.
+  const source = useMemo(() => sourceKey(model), [model]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
@@ -215,7 +217,7 @@ export default function PlanMap({
     // How many layouts the Map has asked for, so a journey can tell that a first load asks for one; a development
     // build's StrictMode runs effects twice, and counts two.
     if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
-    Promise.all([layouts.layout(view, aspect), fontLoaded]).then(([result]) => {
+    Promise.all([layouts.layout(view, aspect, source), fontLoaded]).then(([result]) => {
       if (!live || result === null) return;
       // How long the layout took and how many boxes it laid out afresh, for timing runs.
       if (host.current !== null) {
@@ -227,7 +229,7 @@ export default function PlanMap({
     return () => {
       live = false;
     };
-  }, [layouts, view, aspect]);
+  }, [layouts, view, aspect, source]);
 
   useEffect(() => {
     if (host.current === null) return;

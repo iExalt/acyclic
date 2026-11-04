@@ -336,8 +336,9 @@ before what went wrong.
 - **Opening a box moves only what it covers.** Once packed, the top level keeps its boxes where they are: a box that
   grows, as one opening inside it makes it, stays at its corner, what it now covers makes way, right if it stood on its
   right and down if not, and the rest stays still, as does the screen, held at that top-level box's corner. Where a box
-  stands depends only on the last packing and the boxes' sizes now, so what made way goes back when the box that moved
-  it closes, whatever was opened in between; a reload packs afresh.
+  stands depends on the source snapshot's packing and the boxes' sizes now, so what made way goes back when the box
+  that moved it closes, whatever was opened in between. A source update that shrinks top-level boxes without growing
+  any others packs them again; a chevron fold still holds their places. Undo restores the earlier source's packing.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
 - **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
@@ -417,3 +418,5 @@ before what went wrong.
   around items") over a Fold button in its panel or a Fold tile.
 - 2026-11-03: opening a box no longer packs the top level afresh, after the user found that unfolding a thread's done
   box made "the entire map … shift over".
+- 2026-11-04: source updates that only shrink top-level boxes repack them automatically; chevron folds still hold their
+  places, and Undo restores the earlier source's packing.

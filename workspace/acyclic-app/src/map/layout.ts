@@ -121,8 +121,15 @@ export function withinOneBox(view: View): (edge: { source: string; target: strin
 /** A bounded cache of box layouts by signature, evicting the least recently used. */
 export class LayoutCache {
   private readonly entries = new Map<string, BoxLayout>();
-  /** Baselines by top-level topology and shape, retained across edits that change sizes or folds. */
+  /** Each source snapshot's original packing, retained across folds and edits that change sizes. */
   private readonly roots = new Map<string, { input: BoxInput; layout: BoxLayout }>();
+  /** Last accepted root view, including a held fold, for detecting a shrink in the next source snapshot. */
+  private displayed: {
+    topology: string;
+    source: string;
+    input: BoxInput;
+    baseline: { input: BoxInput; layout: BoxLayout };
+  } | null = null;
 
   constructor(
     private readonly limit = 4096,
@@ -153,8 +160,8 @@ export class LayoutCache {
     return this.entries.size;
   }
 
-  root(input: BoxInput): { input: BoxInput; layout: BoxLayout } | undefined {
-    const key = rootKey(input);
+  root(input: BoxInput, source: string): { input: BoxInput; layout: BoxLayout } | undefined {
+    const key = historyKey(input, source);
     const hit = this.roots.get(key);
     if (hit !== undefined) {
       this.roots.delete(key);
@@ -163,15 +170,20 @@ export class LayoutCache {
     return hit;
   }
 
-  rememberRoot(input: BoxInput, layout: BoxLayout) {
-    const key = rootKey(input);
+  displayedRoot(input: BoxInput) {
+    return this.displayed?.topology === rootKey(input) ? this.displayed : undefined;
+  }
+
+  rememberRoot(input: BoxInput, source: string, baseline: { input: BoxInput; layout: BoxLayout }) {
+    const key = historyKey(input, source);
     this.roots.delete(key);
-    this.roots.set(key, { input, layout });
+    this.roots.set(key, baseline);
     while (this.roots.size > this.rootLimit) {
       const oldest = this.roots.keys().next().value;
       if (oldest === undefined) break;
       this.roots.delete(oldest);
     }
+    this.displayed = { topology: rootKey(input), source, input, baseline };
   }
 
   get rootSize() {
@@ -179,9 +191,25 @@ export class LayoutCache {
   }
 }
 
-/** A fold or size edit keeps its topology's original packing; a new topology or shape starts another history. */
+/** A root's source snapshot and topology/shape identify its original packing, independent of size and folds. */
 function rootKey(input: BoxInput): string {
   return JSON.stringify([input.children.map(({ id }) => id), input.edges, input.aspect]);
+}
+
+function historyKey(input: BoxInput, source: string): string {
+  return JSON.stringify([source, rootKey(input)]);
+}
+
+/** A new source is shrink-only when no root child grew in either dimension and at least one got smaller. */
+function shrinkOnly(was: BoxInput, now: BoxInput): boolean {
+  if (was.children.length !== now.children.length) return false;
+  let shrank = false;
+  for (const [index, child] of now.children.entries()) {
+    const before = was.children[index];
+    if (before?.id !== child.id || child.width > before.width || child.height > before.height) return false;
+    if (child.width < before.width || child.height < before.height) shrank = true;
+  }
+  return shrank;
 }
 
 /** Where every visible node sits, in the view's own coordinates, and the whole drawing's size. */
@@ -217,6 +245,7 @@ export async function place(
   layBox: LayBox,
   aspect: number,
   isCurrent: () => boolean = () => true,
+  source = "",
 ): Promise<Placed> {
   const scope = scopes(view);
   const boxes = new Map<string, BoxLayout>();
@@ -246,11 +275,18 @@ export async function place(
         };
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
         const signature = JSON.stringify([input.children, input.edges, input.aspect]);
-        // A top level of the same boxes, as a box collapsing or expanding makes it, is held from its last packing: every
-        // box where it was packed but for what one that grew now covers, rather than packed again, which moved the rest
-        // of the plan out of view. Kept out of the cache, so a reload packs afresh.
-        const lastRoot = id === ROOT ? cache.root(input) : undefined;
-        let layout = id === ROOT && lastRoot !== undefined ? held(lastRoot, input) : undefined;
+        // Folds hold their source snapshot's packing. A new source that only shrank packs afresh; Undo can then find
+        // the earlier source baseline and recreate a held view, even though that view was never freshly packed.
+        const exactRoot = id === ROOT ? cache.root(input, source) : undefined;
+        const displayed = id === ROOT ? cache.displayedRoot(input) : undefined;
+        const baseline = exactRoot ?? displayed?.baseline;
+        const shrink =
+          id === ROOT &&
+          exactRoot === undefined &&
+          displayed !== undefined &&
+          displayed.source !== source &&
+          shrinkOnly(displayed.input, input);
+        let layout = id === ROOT && !shrink && baseline !== undefined ? held(baseline, input) : undefined;
         const heldRoot = layout !== undefined;
         if (layout === undefined) {
           layout = cache.get(signature);
@@ -260,9 +296,10 @@ export async function place(
             laidOut.push(id);
           }
         }
-        // ROOT is alone on the final level: after its last await, promote synchronously only if no newer request
-        // overtook it. A held layout stays derived from its original packing and never becomes a new baseline.
-        if (id === ROOT && !heldRoot && layout !== undefined && isCurrent()) cache.rememberRoot(input, layout);
+        // ROOT is alone on the final level: after its last await, save the baseline and displayed-size comparator
+        // together only if no newer request overtook it. A held result is never promoted as a packing baseline.
+        const nextBaseline = heldRoot ? baseline : layout === undefined ? undefined : { input, layout };
+        if (id === ROOT && nextBaseline !== undefined && isCurrent()) cache.rememberRoot(input, source, nextBaseline);
         boxes.set(id, layout);
       }),
     );

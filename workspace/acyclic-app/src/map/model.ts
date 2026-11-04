@@ -28,6 +28,23 @@ export interface Model {
   depth: Map<string, number>;
 }
 
+/** A canonical key for layout-relevant source structure, before the user's local fold toggles. */
+export function sourceKey(model: Model): string {
+  return JSON.stringify(
+    [...model.items.values()]
+      .map(({ id, parent, thread, archived, state, stage, waitsFor }) => ({
+        id,
+        parent,
+        thread,
+        archived,
+        state,
+        stage,
+        waitsFor: [...waitsFor].sort(),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  );
+}
+
 export function buildModel(items: Item[]): Model {
   const byId = new Map<string, MapItem>(
     items.map((item) => [

@@ -1849,11 +1849,12 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # which takes its height from the Map without moving what the Map shows.
     page.locator(".slot [aria-label=Dismiss]").click()
     page.locator(".slot").wait_for(state="detached", timeout=5_000)
-    before = settled_corner(page, added)
+    frame = settled_corner(page, box)
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.locator(".slot [data-testid=notice]").wait_for(timeout=5_000)
-    held(page, added, before, "Undo's slot appearing", name, failures)
+    wait_drawn(page, base + 1)
+    held(page, box, frame, "unlinking a wait", name, failures)
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
         arg=edge,
@@ -1869,8 +1870,11 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
     # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
     notice = page.get_by_test_id("notice")
+    frame = settled_corner(page, box)
     notice.get_by_role("button", name="Undo").click()
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
+    wait_drawn(page, base + 1)
+    held(page, box, frame, "undoing a wait", name, failures)
     if "again" not in notice.inner_text():
         failures.append(f"{name}: undoing the unlink said {notice.inner_text()!r}")
     check_tracker(
