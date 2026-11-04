@@ -144,7 +144,7 @@ fn import(data: &Json) -> String {
             .expect("a String takes writes");
     }
     if line.is_empty() {
-        line = if dry { "would make no change" } else { "no change" }.to_owned();
+        line.push_str(if dry { "would make no change" } else { "no change" });
     }
     line
 }
