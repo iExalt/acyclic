@@ -14,7 +14,8 @@ export interface Box {
  * least that shows it, for a node tapped, which the eye is already on; or, `centred`, to the middle of `open`, for one
  * brought in from elsewhere, which would otherwise land at an edge with its links beyond it.
  */
-export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: number; y: number } {
+export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: number; y: number } | null {
+  if (open.x2 - open.x1 <= 2 * margin || open.y2 - open.y1 <= 2 * margin) return null;
   const big = (start: number, end: number, from: number, to: number) => end - start > to - from - 2 * margin;
   const along = (start: number, end: number, from: number, to: number) => {
     // Too big to fit: show its start, where its title is.
@@ -57,11 +58,10 @@ export function newlyCovered(
   const dx = was.width - now.width;
   const dy = was.height - now.height;
   const before = cover === null ? null : { x1: cover.x1 + dx, y1: cover.y1 + dy, x2: cover.x2 + dx, y2: cover.y2 + dy };
-  const still = (pan: { x: number; y: number }) => pan.x === 0 && pan.y === 0;
-  return (
-    still(reveal(node, uncovered(was.width, was.height, before))) &&
-    !still(reveal(node, uncovered(now.width, now.height, cover)))
-  );
+  const beforePan = reveal(node, uncovered(was.width, was.height, before));
+  const afterPan = reveal(node, uncovered(now.width, now.height, cover));
+  const still = (pan: { x: number; y: number } | null) => pan !== null && pan.x === 0 && pan.y === 0;
+  return beforePan !== null && afterPan !== null && still(beforePan) && !still(afterPan);
 }
 
 /** The furthest the first view zooms out: 13 px titles drawn at 11 px, about the least a phone's reader can read. */

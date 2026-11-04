@@ -27,6 +27,16 @@ describe("reveal", () => {
     expect(reveal({ x1: 100, y1: 100, x2: 900, y2: 1200 }, open)).toEqual({ x: -92, y: -92 });
   });
 
+  it("does not try to reveal into a space with no interior after its margins", () => {
+    const node = { x1: 20, y1: 20, x2: 40, y2: 40 };
+    expect(reveal(node, { x1: 0, y1: 0, x2: 16, y2: 100 })).toBeNull();
+    expect(reveal(node, { x1: 0, y1: 0, x2: 100, y2: 16 })).toBeNull();
+    expect(reveal({ x1: 8, y1: 8, x2: 8.005, y2: 8.005 }, { x1: 0, y1: 0, x2: 16.01, y2: 16.01 })).toEqual({
+      x: 0,
+      y: 0,
+    });
+  });
+
   it("brings a node from elsewhere to the middle, both ways, once it moves at all", () => {
     expect(reveal({ x1: 50, y1: 50, x2: 150, y2: 90 }, open, 8, true)).toEqual({ x: 0, y: 0 });
     // Hidden below: to the middle, and across too, where it was in view already.
@@ -61,6 +71,17 @@ describe("newlyCovered", () => {
         null,
       ),
     ).toBe(true);
+  });
+
+  it("does not reveal into a covered part with no margin-safe interior", () => {
+    expect(
+      newlyCovered(
+        { x1: 20, y1: 50, x2: 80, y2: 90 },
+        { width: 384, height: 200 },
+        { width: 384, height: 100 },
+        { x1: 0, y1: 0, x2: 384, y2: 100 },
+      ),
+    ).toBe(false);
   });
 });
 

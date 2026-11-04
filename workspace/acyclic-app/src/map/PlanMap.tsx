@@ -30,7 +30,7 @@ import {
   startOf,
   uncovered,
 } from "./reveal";
-import { type Fonts, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
+import { type Fonts, type Scene, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { FONT, styleFor, WEIGHT } from "./style";
 import { tapAction } from "./tap";
 import { wheelZoom } from "./wheel";
@@ -143,7 +143,7 @@ export default function PlanMap({
   const [hovered, setHovered] = useState<string | null>(null);
   const [drawnOnce, setDrawnOnce] = useState(false);
   /** The last layout, with the view and the top level's shape it was computed for. */
-  const [laid, setLaid] = useState<{ view: View; aspect: number; placed: Placed } | null>(null);
+  const [laid, setLaid] = useState<{ view: View; aspect: number; source: string; placed: Placed } | null>(null);
   const aspect = useAspect(host);
   /**
    * The top-level box holding the box last toggled, and where its top-left corner was on screen, to hold it there: the
@@ -151,13 +151,20 @@ export default function PlanMap({
    */
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null);
   /** An item brought into view: once drawn, it is panned out from under whatever covers the Map, if anything does. */
-  const shown = useRef<{ id: string; centered: boolean } | null>(null);
-  // Whether that item was picked, which zooms a Map too far out to read in to it, rather than moved by a write.
-  const picked = useRef(false);
+  const shown = useRef<{ id: string; centered: boolean; picked: boolean } | null>(null);
   /** The elements the renderer holds, by id. */
   const held = useRef<ReadonlyMap<string, Drawn>>(new Map());
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
   const drawnModel = useRef<Model | null>(null);
+  /** The full scene last applied, so a pending reveal never flushes against a stale view or source layout. */
+  const applied = useRef<{
+    model: Model;
+    view: View;
+    aspect: number | null;
+    source: string;
+    placed: Placed;
+    drawn: Scene;
+  } | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
   const view = useMemo(
     () => visible(model, { collapsed, showArchived }, doneBoxes),
@@ -166,7 +173,8 @@ export default function PlanMap({
   const viewNow = useRef(view);
   viewNow.current = view;
   // Only the layout for the view on screen is drawn: one from before the last change would put boxes where they were.
-  const placed = laid !== null && laid.view === view && laid.aspect === aspect ? laid.placed : null;
+  const placed =
+    laid !== null && laid.view === view && laid.aspect === aspect && laid.source === source ? laid.placed : null;
   const suppressedTitles = useRef<Set<string>>(new Set());
 
   const clearSuppressedTitles = () => {
@@ -199,6 +207,7 @@ export default function PlanMap({
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null) return;
+    cancelViewIntent();
     clearSuppressedTitles();
     const plan = core.elements().boundingBox({ includeLabels: true });
     const fitted = fitPlan(plan, openPart(element), MAX_ZOOM);
@@ -213,6 +222,7 @@ export default function PlanMap({
   useEffect(() => {
     const core = cy.current;
     if (focus === undefined) return;
+    cancelViewIntent();
     const was = drawnModel.current;
     const preserveFrame =
       focus.preserveFrame === true &&
@@ -221,8 +231,7 @@ export default function PlanMap({
     anchor.current = null;
     if (core === null) {
       // Focused before the renderer is made, as when a link opens the app on an item: shown once first drawn.
-      shown.current = { id: focus.id, centered: true };
-      picked.current = focus.pin === null;
+      shown.current = { id: focus.id, centered: true, picked: focus.pin === null };
       setToggles((was) => expandTo(model, focus.id, was));
       return;
     }
@@ -241,12 +250,12 @@ export default function PlanMap({
     if (next === toggles && model === drawnModel.current) {
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
-      if (host.current !== null)
-        revealIn(core, host.current, focus.id, !preserveFrame, !preserveFrame && focus.pin === null);
+      const intent = { id: focus.id, centered: !preserveFrame, picked: !preserveFrame && focus.pin === null };
+      shown.current = intent;
+      tryShow();
       return;
     }
-    shown.current = { id: focus.id, centered: !preserveFrame };
-    picked.current = !preserveFrame && focus.pin === null;
+    shown.current = { id: focus.id, centered: !preserveFrame, picked: !preserveFrame && focus.pin === null };
     if (host.current !== null) host.current.dataset.state = "laying-out";
     setToggles(next);
   }, [focus]);
@@ -265,7 +274,7 @@ export default function PlanMap({
         host.current.dataset.layoutMs = String(Math.round(performance.now() - start));
         host.current.dataset.layoutCalls = String(result.laidOut.length);
       }
-      setLaid({ view, aspect, placed: result });
+      setLaid({ view, aspect, source, placed: result });
     });
     return () => {
       live = false;
@@ -295,6 +304,7 @@ export default function PlanMap({
       if (!(event.target instanceof Node) || !element.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
+      cancelViewIntent();
       const at = element.getBoundingClientRect();
       core.zoom({
         level: wheelZoom(core.zoom(), event, floorOf(core), core.maxZoom(), element.clientHeight),
@@ -314,6 +324,7 @@ export default function PlanMap({
         fingers = null;
         return;
       }
+      cancelViewIntent();
       const at = element.getBoundingClientRect();
       fingers = { x: (one.clientX + two.clientX) / 2 - at.left, y: (one.clientY + two.clientY) / 2 - at.top };
     };
@@ -356,13 +367,31 @@ export default function PlanMap({
   // resizes the Map too, leaves it, as the user is typing.
   const placedNow = useRef<Placed | null>(null);
   placedNow.current = placed;
+  const modelNow = useRef(model);
+  modelNow.current = model;
+  const sourceNow = useRef(source);
+  sourceNow.current = source;
+  const aspectNow = useRef(aspect);
+  aspectNow.current = aspect;
+  const drawnNow = useRef<Scene | null>(null);
   const selectedNow = useRef(selected);
   selectedNow.current = selected;
   useEffect(() => {
     const element = host.current;
-    if (element === null) return;
+    const stage = element?.parentElement;
+    if (element === null || stage === null || stage === undefined) return;
     let size: { width: number; height: number } | null = null;
-    const observer = new ResizeObserver(() => {
+    const retryPending = () => {
+      tryShow();
+    };
+    const panels = new Set<HTMLElement>();
+    const observer = new ResizeObserver((entries) => {
+      const hostChanged = entries.some((entry) => entry.target === element);
+      const panelChanged = entries.some((entry) => entry.target !== element);
+      if (!hostChanged) {
+        if (panelChanged) retryPending();
+        return;
+      }
       const core = cy.current;
       const was = size;
       size = { width: element.clientWidth, height: element.clientHeight };
@@ -372,12 +401,39 @@ export default function PlanMap({
       zoomOutTo(core, element, placedNow.current);
       const id = selectedNow.current;
       const node = id === null ? null : core.getElementById(id);
-      if (was === null || id === null || node === null || node.empty() || typing()) return;
-      if (newlyCovered(node.renderedBoundingBox({ includeLabels: false }), was, size, coverOf(element)))
-        revealIn(core, element, id);
+      if (shown.current !== null) retryPending();
+      else if (was !== null && id !== null && node !== null && !node.empty() && !typing()) {
+        if (newlyCovered(node.renderedBoundingBox({ includeLabels: false }), was, size, coverOf(element))) {
+          const request = { id, centered: false, picked: false };
+          shown.current = request;
+          tryShow();
+        }
+      }
     });
-    observer.observe(element);
-    return () => observer.disconnect();
+    observer.observe(element, { box: "border-box" });
+    const reconcilePanels = () => {
+      const current = new Set(panelsOver(element));
+      for (const panel of panels)
+        if (!current.has(panel)) {
+          observer.unobserve(panel);
+          panels.delete(panel);
+        }
+      for (const panel of current)
+        if (!panels.has(panel)) {
+          panels.add(panel);
+          observer.observe(panel, { box: "border-box" });
+        }
+    };
+    reconcilePanels();
+    const mutations = new MutationObserver(() => {
+      reconcilePanels();
+      retryPending();
+    });
+    mutations.observe(stage, { childList: true });
+    return () => {
+      mutations.disconnect();
+      observer.disconnect();
+    };
   }, []);
 
   const fonts = useMemo(measuring, []);
@@ -386,6 +442,29 @@ export default function PlanMap({
     const selection: Selection = { item: selected, thread, hovered };
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts);
   }, [view, placed, selected, thread, hovered, model, fonts]);
+  drawnNow.current = drawn;
+  function sceneIsApplied() {
+    const last = applied.current;
+    return (
+      last !== null &&
+      placedNow.current !== null &&
+      last.model === modelNow.current &&
+      last.source === sourceNow.current &&
+      last.view === viewNow.current &&
+      last.aspect === aspectNow.current &&
+      last.placed === placedNow.current &&
+      last.drawn === drawnNow.current
+    );
+  }
+  function tryShow(): boolean {
+    const request = shown.current;
+    const core = cy.current;
+    const element = host.current;
+    if (request === null || core === null || element === null || !sceneIsApplied()) return false;
+    if (revealIn(core, element, request.id, request.centered, request.picked) === null) return false;
+    if (shown.current === request) shown.current = null;
+    return true;
+  }
 
   // Only the lit thread's colour, so a reload that leaves it alone doesn't redraw.
   const colour = drawn === null || drawn.thread === null ? undefined : lines.get(drawn.thread)?.colour;
@@ -424,12 +503,10 @@ export default function PlanMap({
       }
       anchor.current = null;
     }
-    if (shown.current !== null) {
-      // The pin holds still unless that leaves the item hidden.
-      revealIn(core, element, shown.current.id, shown.current.centered, picked.current);
-      shown.current = null;
-    }
     drawnModel.current = model;
+    applied.current = { model, view, aspect, source, placed, drawn };
+    // Keep the request until the open Map can show it; a fully covered Map cannot satisfy a reveal.
+    tryShow();
     // What the renderer holds, for the journeys to compare with the plan.
     element.dataset.nodes = String(core.nodes().not(".junction, .divider").length);
     element.dataset.edges = String(core.edges().length);
@@ -445,15 +522,19 @@ export default function PlanMap({
         setDrawnOnce(true);
       }),
     );
-  }, [drawn, placed, colour, lines, palette]);
+  }, [drawn, placed, colour, lines, palette, model, view, aspect, source]);
 
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
   // user came to the Map for is framed instead.
   const sought = useRef<string | null>(null);
+  const priorThread = useRef(thread);
   const toFrame = useRef(framed);
   const framedSeen = useRef(framed);
   useEffect(() => {
-    if (framed !== undefined && framed !== framedSeen.current) toFrame.current = framed;
+    if (framed !== undefined && framed !== framedSeen.current) {
+      toFrame.current = framed;
+      cancelViewIntent();
+    }
     framedSeen.current = framed;
     const core = cy.current;
     const element = host.current;
@@ -497,9 +578,14 @@ export default function PlanMap({
     }
   }, [framed, thread, drawn]);
   useEffect(() => {
+    const changed = priorThread.current !== thread;
+    priorThread.current = thread;
     const core = cy.current;
     const element = host.current;
-    if (thread === null) sought.current = null;
+    if (changed) cancelViewIntent();
+    if (thread === null) {
+      sought.current = null;
+    }
     if (thread === null || sought.current === thread || core === null || element === null || drawn === null) return;
     sought.current = thread;
     const lit = drawn.nodes.flatMap((node) => {
@@ -508,7 +594,11 @@ export default function PlanMap({
     });
     const open = openPart(element);
     const target = nearest(lit, open);
-    if (target !== null) core.panBy(reveal(target, open));
+    if (target !== null) {
+      cancelViewIntent();
+      const pan = reveal(target, open);
+      if (pan !== null) core.panBy(pan);
+    }
   }, [thread, drawn]);
 
   // The latest handlers, so the tap listener is added once.
@@ -516,6 +606,11 @@ export default function PlanMap({
   handlers.current = { onSelect, onPick, onThread };
   /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
   const taps = useRef(0);
+  function cancelViewIntent() {
+    shown.current = null;
+    anchor.current = null;
+    taps.current++;
+  }
   useEffect(() => {
     const core = cy.current;
     if (core === null) return;
@@ -525,6 +620,7 @@ export default function PlanMap({
       const target = event.target as cytoscape.NodeSingular | Core;
       const node = target !== core && "isNode" in target && target.isNode() ? target : null;
       if (node === null) {
+        cancelViewIntent();
         if (onPick !== null) onPick(null);
         else onSelect(null);
         return;
@@ -542,6 +638,8 @@ export default function PlanMap({
         chevron: onChevron(kind, node.boundingBox({ includeLabels: false }), event.position, core.zoom()),
       });
       if (action === "ignore") return;
+      shown.current = null;
+      anchor.current = null;
       if (action === "pick") {
         onPick?.(id);
         return;
@@ -567,8 +665,10 @@ export default function PlanMap({
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           const still = cy.current?.zoom() === zoom && cy.current.pan().x === pan.x && cy.current.pan().y === pan.y;
-          if (taps.current === now && still && cy.current !== null && host.current !== null)
-            revealIn(cy.current, host.current, id);
+          if (taps.current === now && still && cy.current !== null && host.current !== null) {
+            shown.current = { id, centered: false, picked: false };
+            tryShow();
+          }
         }),
       );
     };
@@ -582,6 +682,7 @@ export default function PlanMap({
       const touches = (event.originalEvent as Partial<TouchEvent> | undefined)?.touches;
       if (touches !== undefined && touches.length > 1) from = null;
       if (from === null) return;
+      cancelViewIntent();
       const at = event.renderedPosition;
       core.panBy({ x: at.x - from.x, y: at.y - from.y });
       from = { x: at.x, y: at.y };
@@ -682,18 +783,28 @@ function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
  * middle of what is left, for one brought in from elsewhere. One the user `picked`, on a Map zoomed out past reading,
  * comes in at a zoom its title reads at, wherever it was; one a write moved keeps the user's zoom unless it must move.
  */
-function revealIn(core: Core, element: HTMLElement, id: string, centred = false, picked = false) {
+function revealIn(
+  core: Core,
+  element: HTMLElement,
+  id: string,
+  centred = false,
+  picked = false,
+): { x: number; y: number } | null | undefined {
   const node = core.getElementById(id);
-  if (node.empty()) return;
+  if (node.empty()) return undefined;
   const open = openPart(element);
   const box = () => node.renderedBoundingBox({ includeLabels: false });
   const pan = reveal(box(), open, 8, centred);
+  if (pan === null) return null;
   if ((picked || pan.x !== 0 || pan.y !== 0) && centred && core.zoom() < READABLE) {
     core.zoom({ level: READABLE, renderedPosition: node.renderedPosition() });
-    core.panBy(reveal(box(), open, 8, true));
-    return;
+    const zoomed = reveal(box(), open, 8, true);
+    if (zoomed === null) return null;
+    core.panBy(zoomed);
+    return zoomed;
   }
   core.panBy(pan);
+  return pan;
 }
 
 /** Whether the user is typing, as a phone's keyboard, which takes from the Map's height, is up for. */
