@@ -1239,31 +1239,6 @@ def map_journey(page, view, plan, name, failures, hint=None):
         arg=plan.lit(thread),
     )
     page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for()
-    fit_button = page.get_by_role("button", name="Fit the whole plan")
-    if fit_button.count() != 1 or not fit_button.is_visible():
-        failures.append(f"{name}: the Map has no available Fit control beside the thread panel")
-    else:
-        before = page.get_by_test_id("map").evaluate(
-            "m => ({ selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
-            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit })"
-        )
-        fit_button.click()
-        fitted = page.get_by_test_id("map").evaluate(
-            "m => { const r = m.getBoundingClientRect(); const panel = m.parentElement.querySelector('.inspector, .sheet');"
-            " const b = m.cy.elements().renderedBoundingBox({ includeLabels: true });"
-            " const box = panel ? panel.getBoundingClientRect() : null;"
-            " const sheet = box && box.width >= r.width * .9;"
-            " const x2 = box && !sheet ? box.left - r.left : r.width;"
-            " const y2 = box && sheet ? box.top - r.top : r.height;"
-            " return { inside: b.x1 >= 22 && b.y1 >= 22 && b.x2 <= x2 - 22 && b.y2 <= y2 - 22,"
-            " selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
-            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit }; }"
-        )
-        if not fitted["inside"]:
-            failures.append(f"{name}: Fit left part of the whole plan outside the uncovered Map: {fitted}")
-        if any(before[key] != fitted[key] for key in ("selected", "collapsed", "lit")):
-            failures.append(f"{name}: Fit changed selection, folds or the picked thread: {before} -> {fitted}")
-        page.screenshot(path=SHOTS / f"app-{name}-fit.png")
     if not page.get_by_test_id("map").evaluate(
         """m => {
             const r = m.getBoundingClientRect();
@@ -1308,6 +1283,31 @@ def map_journey(page, view, plan, name, failures, hint=None):
         )
     pick_thread(page, plan, thread)
     panel.wait_for()
+    fit_button = page.get_by_role("button", name="Fit the whole plan")
+    if fit_button.count() != 1 or not fit_button.is_visible():
+        failures.append(f"{name}: the Map has no available Fit control beside the thread panel")
+    else:
+        before = page.get_by_test_id("map").evaluate(
+            "m => ({ selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
+            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit })"
+        )
+        fit_button.click()
+        fitted = page.get_by_test_id("map").evaluate(
+            "m => { const r = m.getBoundingClientRect(); const panel = m.parentElement.querySelector('.inspector, .sheet');"
+            " const b = m.cy.elements().renderedBoundingBox({ includeLabels: true });"
+            " const box = panel ? panel.getBoundingClientRect() : null;"
+            " const sheet = box && box.width >= r.width * .9;"
+            " const x2 = box && !sheet ? box.left - r.left : r.width;"
+            " const y2 = box && sheet ? box.top - r.top : r.height;"
+            " return { inside: b.x1 >= 22 && b.y1 >= 22 && b.x2 <= x2 - 22 && b.y2 <= y2 - 22,"
+            " selected: m.cy.nodes('.selected').map(n => n.id()).sort(),"
+            " collapsed: m.cy.nodes('.collapsed').map(n => n.id()).sort(), lit: m.dataset.lit }; }"
+        )
+        if not fitted["inside"]:
+            failures.append(f"{name}: Fit left part of the whole plan outside the uncovered Map: {fitted}")
+        if any(before[key] != fitted[key] for key in ("selected", "collapsed", "lit")):
+            failures.append(f"{name}: Fit changed selection, folds or the picked thread: {before} -> {fitted}")
+        page.screenshot(path=SHOTS / f"app-{name}-fit.png")
     if view.get("has_touch"):
         # Which layer a phone's Back closes, the outline's sheet over the thread's panel and then the panel, is
         # nav.test.ts's; that Back moves through the history, the deep link journey's.
