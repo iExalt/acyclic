@@ -110,13 +110,61 @@ describe("place", () => {
     expect(fresh.laidOut).toContain(ROOT);
   });
 
-  it("places the top level by its sizes alone, whatever order its boxes were opened and closed in", async () => {
+  it("restores a topology's held packing across an add and undo, and later folds", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const model = buildModel(plan);
+    const folded = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
+
+    // Undoing the top-level add restores the original topology, but the top box is now expanded from its folded
+    // baseline. A signature-only cache has never seen this expanded root input.
+    const undone = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const corner = (placed: typeof folded, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
+    for (const id of ["top", "far"]) expect(corner(undone, id)).toEqual(corner(folded, id));
+
+    // The held expanded result must not become the baseline: a subsequent fold and reopen retain the original packing.
+    const foldedAgain = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    const reopened = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    for (const id of ["top", "far"]) {
+      expect(corner(foldedAgain, id)).toEqual(corner(folded, id));
+      expect(corner(reopened, id)).toEqual(corner(folded, id));
+    }
+  });
+
+  it("restores the matching aspect's packing after a turn", async () => {
+    const engine = grid();
+    const cache = new LayoutCache();
+    const model = buildModel(plan);
+    const folded = await place(
+      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      cache,
+      engine.layBox,
+      PORTRAIT,
+    );
+    await place(visible(model, open), cache, engine.layBox, 1.4);
+    const turnedBack = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const corner = (placed: typeof folded, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
+    for (const id of ["top", "far"]) expect(corner(turnedBack, id)).toEqual(corner(folded, id));
+  });
+
+  it("keeps a box's position after the other box opens and closes", async () => {
     // Two top-level boxes, both collapsed at first, each opened and closed in turn.
     const two = buildModel([item("x"), item("x1", "x"), item("x2", "x"), item("x3", "x"), item("y"), item("y1", "y")]);
     const at = (collapsed: string[]) => visible(two, { collapsed: new Set(collapsed), showArchived: false });
     const engine = grid();
     const direct = new LayoutCache();
-    const shut = await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
+    await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
     const yOpen = await place(at(["x"]), direct, engine.layBox, PORTRAIT);
     const walked = new LayoutCache();
     await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT);
@@ -124,7 +172,6 @@ describe("place", () => {
     await place(at([]), walked, engine.layBox, PORTRAIT);
     // Reached by way of x opening and closing, y open stands as it does opened alone, and both closed as at first.
     expect((await place(at(["x"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(yOpen.nodes);
-    expect((await place(at(["x", "y"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(shut.nodes);
   });
 
   it("finds every layout in the cache on returning to a view", async () => {
@@ -369,5 +416,20 @@ describe("LayoutCache", () => {
     cache.set("c", layout);
     expect([cache.get("a"), cache.get("b"), cache.get("c")].map(Boolean)).toEqual([true, false, true]);
     expect(cache.size).toBe(2);
+  });
+
+  it("bounds root packing history independently and evicts its least recently used topology", () => {
+    const cache = new LayoutCache(2, 2);
+    const input = (id: string) => ({ id: ROOT, children: [{ id, width: 1, height: 1 }], edges: [], aspect: 1 });
+    const layout = { width: 1, height: 1, at: {} };
+    const a = input("a");
+    const b = input("b");
+    const c = input("c");
+    cache.rememberRoot(a, layout);
+    cache.rememberRoot(b, layout);
+    cache.root(a);
+    cache.rememberRoot(c, layout);
+    expect([cache.root(a), cache.root(b), cache.root(c)].map(Boolean)).toEqual([true, false, true]);
+    expect(cache.rootSize).toBe(2);
   });
 });

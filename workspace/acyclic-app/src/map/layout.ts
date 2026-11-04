@@ -121,13 +121,13 @@ export function withinOneBox(view: View): (edge: { source: string; target: strin
 /** A bounded cache of box layouts by signature, evicting the least recently used. */
 export class LayoutCache {
   private readonly entries = new Map<string, BoxLayout>();
-  /**
-   * The top level as last packed, which every top level of the same boxes is held from: so where a box stands depends
-   * only on that packing and the boxes' sizes now, never on the order boxes were opened and closed in.
-   */
-  root: { input: BoxInput; layout: BoxLayout } | null = null;
+  /** Baselines by top-level topology and shape, retained across edits that change sizes or folds. */
+  private readonly roots = new Map<string, { input: BoxInput; layout: BoxLayout }>();
 
-  constructor(private readonly limit = 4096) {}
+  constructor(
+    private readonly limit = 4096,
+    private readonly rootLimit = 64,
+  ) {}
 
   get(signature: string): BoxLayout | undefined {
     const hit = this.entries.get(signature);
@@ -152,6 +152,36 @@ export class LayoutCache {
   get size() {
     return this.entries.size;
   }
+
+  root(input: BoxInput): { input: BoxInput; layout: BoxLayout } | undefined {
+    const key = rootKey(input);
+    const hit = this.roots.get(key);
+    if (hit !== undefined) {
+      this.roots.delete(key);
+      this.roots.set(key, hit);
+    }
+    return hit;
+  }
+
+  rememberRoot(input: BoxInput, layout: BoxLayout) {
+    const key = rootKey(input);
+    this.roots.delete(key);
+    this.roots.set(key, { input, layout });
+    while (this.roots.size > this.rootLimit) {
+      const oldest = this.roots.keys().next().value;
+      if (oldest === undefined) break;
+      this.roots.delete(oldest);
+    }
+  }
+
+  get rootSize() {
+    return this.roots.size;
+  }
+}
+
+/** A fold or size edit keeps its topology's original packing; a new topology or shape starts another history. */
+function rootKey(input: BoxInput): string {
+  return JSON.stringify([input.children.map(({ id }) => id), input.edges, input.aspect]);
 }
 
 /** Where every visible node sits, in the view's own coordinates, and the whole drawing's size. */
@@ -181,11 +211,18 @@ function sizeOf(kind: Kind | undefined, boxes: Map<string, BoxLayout>, id: strin
  * a box with no boxes inside) don't depend on each other, so each height's boxes are asked for at once and the engine
  * never waits for the next request; a box is asked for only once every box inside it has its size.
  */
-export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspect: number): Promise<Placed> {
+export async function place(
+  view: View,
+  cache: LayoutCache,
+  layBox: LayBox,
+  aspect: number,
+  isCurrent: () => boolean = () => true,
+): Promise<Placed> {
   const scope = scopes(view);
   const boxes = new Map<string, BoxLayout>();
   const laidOut: string[] = [];
   const levels: string[][] = [];
+  let rootPromotion: { input: BoxInput; layout: BoxLayout } | null = null;
   const height = (id: string): number => {
     let h = 0;
     for (const child of scope.kids.get(id) ?? [])
@@ -213,7 +250,9 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
         // A top level of the same boxes, as a box collapsing or expanding makes it, is held from its last packing: every
         // box where it was packed but for what one that grew now covers, rather than packed again, which moved the rest
         // of the plan out of view. Kept out of the cache, so a reload packs afresh.
-        let layout = id === ROOT ? held(cache.root, input) : undefined;
+        const lastRoot = id === ROOT ? cache.root(input) : undefined;
+        let layout = id === ROOT && lastRoot !== undefined ? held(lastRoot, input) : undefined;
+        const heldRoot = layout !== undefined;
         if (layout === undefined) {
           layout = cache.get(signature);
           if (layout === undefined) {
@@ -221,12 +260,15 @@ export async function place(view: View, cache: LayoutCache, layBox: LayBox, aspe
             cache.set(signature, layout);
             laidOut.push(id);
           }
-          if (id === ROOT) cache.root = { input, layout };
         }
+        if (id === ROOT && !heldRoot && layout !== undefined) rootPromotion = { input, layout };
         boxes.set(id, layout);
       }),
     );
   }
+  // `place` may overlap another request. Promote only the latest root packing, and never make a held layout its own
+  // baseline: the baseline describes an actual packing, not a path through intermediate sizes.
+  if (rootPromotion !== null && isCurrent()) cache.rememberRoot(rootPromotion.input, rootPromotion.layout);
   const root = boxes.get(ROOT) ?? { width: 0, height: 0, at: {} };
   const nodes = new Map<string, { x: number; y: number } & Size>();
   const routes = new Map<string, Point[]>();

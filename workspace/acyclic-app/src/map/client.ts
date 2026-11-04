@@ -16,7 +16,7 @@ export class Layouts {
 
   async layout(view: View, aspect: number): Promise<Placed | null> {
     const request = ++this.latest;
-    const placed = await place(view, this.cache, this.layBox, aspect);
+    const placed = await place(view, this.cache, this.layBox, aspect, () => request === this.latest);
     return request === this.latest ? placed : null;
   }
 }
