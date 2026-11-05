@@ -28,18 +28,30 @@ interface Shot {
   archived?: boolean;
   selection?: Selection;
   colour?: string;
+  routed?: boolean;
 }
 
 /** The elements for a plan as the Map would draw it, with every node placed by its index. */
-function elements({ items, collapsed = [], archived = false, selection, colour }: Shot): Drawn[] {
+function elements({ items, collapsed = [], archived = false, selection, colour, routed = false }: Shot): Drawn[] {
   const model = buildModel(items);
   const view = visible(model, { collapsed: new Set(collapsed), showArchived: archived });
   const placed: Placed = {
     width: 500,
     height: 500,
     laidOut: [],
-    routes: new Map(),
-    junctions: new Map(),
+    routes: routed
+      ? new Map([
+          [
+            "dig->sow",
+            [
+              { x: 0, y: 0 },
+              { x: 20, y: 10 },
+              { x: 40, y: 20 },
+            ],
+          ],
+        ])
+      : new Map(),
+    junctions: routed ? new Map([["dig->sow", [{ x: 20, y: 10 }]]]) : new Map(),
     dividers: new Map(),
     redundant: new Set(),
     nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: i * 7, width: 20 + i, height: 10 }])),
@@ -122,6 +134,84 @@ describe("draw", () => {
       remove: [],
       update: [{ id: "sow", data: { label: "Sow seeds" }, unset: [], position: null, classes: null }],
     });
+  });
+
+  it("changes an unthreaded selection in classes only, and leaves unlit color out of data", () => {
+    const before = elements(start);
+    const selected = elements({ items: base, selection: { item: "sow", thread: null } });
+    for (const element of selected) {
+      expect(element.data).not.toHaveProperty("lit");
+      expect(element.data).not.toHaveProperty("dim");
+      expect(element.data).not.toHaveProperty("selected");
+    }
+    const changes = diff(new Map(before.map((element) => [element.data.id, element])), selected);
+    expect(changes.add).toEqual([]);
+    expect(changes.remove).toEqual([]);
+    expect(changes.update).toEqual([
+      {
+        id: "sow",
+        data: null,
+        unset: [],
+        position: null,
+        classes: selected.find((element) => element.data.id === "sow")?.classes,
+      },
+    ]);
+
+    const recoloured = elements({ items: base, colour: "#123456" });
+    expect(diff(new Map(before.map((element) => [element.data.id, element])), recoloured)).toEqual({
+      add: [],
+      remove: [],
+      update: [],
+    });
+  });
+
+  it("keeps computed lit styles through lit, unlit and recoloured transitions", () => {
+    const items = base.map((one) => (one.id === "sow" ? { ...one, thread: "t" } : one));
+    const shots: Shot[] = [
+      { items, routed: true, selection: { item: null, thread: "t" }, colour: "#ff0000" },
+      { items, routed: true, selection: { item: null, thread: null }, colour: "#123456" },
+      { items, routed: true, selection: { item: null, thread: "t" }, colour: "#00ff00" },
+    ];
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let drawn = new Map<string, Drawn>();
+    const computed = (renderer: cytoscape.Core) => {
+      const pstyle = (id: string, property: string) =>
+        (
+          renderer.getElementById(id) as unknown as {
+            pstyle(name: string): { strValue: string };
+          }
+        ).pstyle(property).strValue;
+      return {
+        node: [pstyle("dig", "border-color"), pstyle("dig", "border-width")],
+        edge: [pstyle("dig->sow", "line-color"), pstyle("dig->sow", "width")],
+        junction: [pstyle("junction 20,10", "background-color"), pstyle("junction 20,10", "width")],
+      };
+    };
+    const snapshots: ReturnType<typeof computed>[] = [];
+    for (const shot of shots) {
+      const next = elements(shot);
+      for (const element of next) {
+        const stylesLine = element.classes.split(" ").some((one) => one === "lit" || one === "junction-lit");
+        expect("line" in element.data).toBe(stylesLine);
+      }
+      drawn = apply(core, drawn, next);
+      snapshots.push(computed(core));
+      const reference = cytoscape({
+        headless: true,
+        styleEnabled: true,
+        style: styleFor(PALETTES.dark),
+        elements: next,
+      });
+      expect(computed(core)).toEqual(computed(reference));
+      reference.destroy();
+    }
+    expect(snapshots[0]?.node[0]).not.toEqual(snapshots[2]?.node[0]);
+    expect(snapshots[0]?.edge[0]).not.toEqual(snapshots[2]?.edge[0]);
+    expect(snapshots[0]?.junction[0]).not.toEqual(snapshots[2]?.junction[0]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    core.destroy();
   });
 
   it("measures a node it gives a new title at once, so its label isn't kept at the old one's height", () => {

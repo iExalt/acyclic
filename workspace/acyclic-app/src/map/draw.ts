@@ -27,11 +27,11 @@ export function elementsOf(
   const layers = new Map(scene.nodes.map((node) => [node.id, node.layer]));
   const line = colour ?? palette.ink;
   return [
-    ...scene.nodes.map((node) => ({
+    ...scene.nodes.map(({ lit, dim, selected, ...node }) => ({
       group: "nodes" as const,
       data: {
         ...node,
-        line,
+        ...(lit ? { line } : {}),
         mark:
           node.kind === "leaf"
             ? markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette)
@@ -40,9 +40,9 @@ export function elementsOf(
       position: { x: node.x, y: node.y },
       classes: [
         node.kind,
-        node.lit ? "lit" : "",
-        node.dim ? "dim" : "",
-        node.selected ? "selected" : "",
+        lit ? "lit" : "",
+        dim ? "dim" : "",
+        selected ? "selected" : "",
         node.archived ? "archived" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
         node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
@@ -53,7 +53,7 @@ export function elementsOf(
     ...scene.junctions.map((junction) => ({
       group: "nodes" as const,
       // No label, but the width every node's label is wrapped to, so the style's mapper has a number to read.
-      data: { id: junction.id, line, textWidth: 0 },
+      data: { id: junction.id, ...(junction.lit ? { line } : {}), textWidth: 0 },
       position: { x: junction.x, y: junction.y },
       // Not "lit": that names the thread's items, which a dot isn't.
       classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
@@ -71,7 +71,7 @@ export function elementsOf(
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        line,
+        ...(edge.lit ? { line } : {}),
         // A link across boxes is drawn over every box, as it is drawn only for the selected item or the lit thread, to
         // be seen; and under the tiles, so it never runs through a title.
         z: edge.crossing ? TILES - 1 : 2 * Math.min(layers.get(edge.source) ?? 0, layers.get(edge.target) ?? 0) - 1,
