@@ -1397,7 +1397,14 @@ def map_journey(page, view, plan, name, failures, hint=None):
     # The canvas draws labels in whatever face is loaded, so the first draw waits for the app's own.
     if wait_drawn(page, expected).get("font") != "true":
         failures.append(f"{name}: the Map drew before its font loaded")
-    first_view_readable(page, name, failures)
+    origin = "{0.scheme}://{0.netloc}".format(urlsplit(page.url))
+    fresh = page.context.new_page()
+    try:
+        fresh.goto(f"{origin}/?view=map")
+        wait_drawn(fresh, expected)
+        first_view_readable(fresh, name, failures)
+    finally:
+        fresh.close()
     # Dragging pans from anywhere, an item or a box as well as the background.
     for id in [
         next(id for id in plan.default() if plan.depth(id) == 1),
