@@ -1359,7 +1359,7 @@ def search_selection_journey(context, origin, plan, name, failures):
         page.screenshot(path=SHOTS / f"app-{name}-search-cold.png")
 
         # Keep the current selected target fully inside the actual open area, but away from its centre.
-        page.get_by_test_id("map").evaluate("m => m.cy.zoom(0.32)")
+        page.get_by_test_id("map").evaluate("m => { m.cy.zoom(0.32); }")
         fit = fit_occlusion(page, lit_only=False)
         if fit is None:
             failures.append(f"{name}: the already-visible Search setup has no open Map area")
