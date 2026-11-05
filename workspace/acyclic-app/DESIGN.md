@@ -267,7 +267,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
   underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
 - **The selection stays in view.** An item brought in from elsewhere (Search, Needs you or a link) comes to the middle
-  of the open Map if it was out of view. On a Map zoomed out past reading, one the user picked comes in at a zoom its
+  of the open Map. On a Map zoomed out past reading, one the user picked comes in at a zoom its
   title reads at. A write to the selected item, and its Undo, keep the top-level box's screen corner and the chosen
   zoom; internal layout may change, and the selected item pans only as far as needed if hidden. A distinct pin for an
   add or move keeps its existing behavior. A tapped item moves the least that shows it. A strip taken from the Map,

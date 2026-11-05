@@ -37,8 +37,11 @@ describe("reveal", () => {
     });
   });
 
-  it("brings a node from elsewhere to the middle, both ways, once it moves at all", () => {
-    expect(reveal({ x1: 50, y1: 50, x2: 150, y2: 90 }, open, 8, true)).toEqual({ x: 0, y: 0 });
+  it("centres a requested node even when it is already in view", () => {
+    expect(reveal({ x1: 50, y1: 50, x2: 150, y2: 90 }, open, 8, true)).toEqual({ x: 100, y: 180 });
+  });
+
+  it("brings a requested node from elsewhere to the middle, both ways", () => {
     // Hidden below: to the middle, and across too, where it was in view already.
     expect(reveal({ x1: 50, y1: 600, x2: 150, y2: 640 }, open, 8, true)).toEqual({ x: 100, y: -370 });
     // Too tall to fit: its start, and the middle across.

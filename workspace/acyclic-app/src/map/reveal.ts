@@ -25,8 +25,8 @@ export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: 
     return 0;
   };
   const least = { x: along(node.x1, node.x2, open.x1, open.x2), y: along(node.y1, node.y2, open.y1, open.y2) };
-  if (!centred || (least.x === 0 && least.y === 0)) return least;
-  // Once it moves at all, to the middle both ways, rather than along one to an edge.
+  if (!centred) return least;
+  // A requested centre stays central even when the node was already in view.
   const middle = (start: number, end: number, from: number, to: number) =>
     big(start, end, from, to) ? from + margin - start : (from + to) / 2 - (start + end) / 2;
   return { x: middle(node.x1, node.x2, open.x1, open.x2), y: middle(node.y1, node.y2, open.y1, open.y2) };

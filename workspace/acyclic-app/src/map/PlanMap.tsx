@@ -478,7 +478,15 @@ export default function PlanMap({
     const request = shown.current;
     const core = cy.current;
     const element = host.current;
-    if (request === null || core === null || element === null || !sceneIsApplied()) return false;
+    if (request === null || core === null || element === null) return false;
+    if (!modelNow.current.items.has(request.id)) {
+      if (shown.current === request) {
+        shown.current = null;
+        anchor.current = null;
+      }
+      return false;
+    }
+    if (!sceneIsApplied()) return false;
     if (selectedNow.current !== request.id) {
       if (shown.current === request) {
         shown.current = null;
@@ -509,7 +517,8 @@ export default function PlanMap({
         return false;
       }
     }
-    if (revealIn(core, element, request.id, request.centered, request.picked) === null) return false;
+    const revealed = revealIn(core, element, request.id, request.centered, request.picked);
+    if (revealed === null || revealed === undefined) return false;
     if (shown.current === request) shown.current = null;
     return true;
   }
