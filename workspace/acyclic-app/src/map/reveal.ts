@@ -9,6 +9,18 @@ export interface Box {
   y2: number;
 }
 
+export interface RevealIntent {
+  id: string;
+  centered: boolean;
+  picked: boolean;
+}
+
+/** How a selection should be brought into view once its prior-frame purpose is known. */
+export function focusReveal(focus: { id: string; pin: string | null }, preserveFrame: boolean): RevealIntent {
+  const picked = focus.pin === null && !preserveFrame;
+  return { id: focus.id, centered: picked, picked };
+}
+
 /**
  * The pan, in screen pixels, that brings `node` inside `open` with `margin` to spare: none if it is already in. The
  * least that shows it, for a node tapped, which the eye is already on; or, `centred`, to the middle of `open`, for one

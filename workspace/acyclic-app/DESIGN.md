@@ -266,11 +266,12 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   selection. A project's title may remain off-screen when its items are far from it; showing both would require a zoom
   below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
   underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
-- **The selection stays in view.** An item brought in from elsewhere (Search, Needs you or a link) comes to the middle
-  of the open Map. On a Map zoomed out past reading, one the user picked comes in at a zoom its
-  title reads at. A write to the selected item, and its Undo, keep the top-level box's screen corner and the chosen
-  zoom; internal layout may change, and the selected item pans only as far as needed if hidden. A distinct pin for an
-  add or move keeps its existing behavior. A tapped item moves the least that shows it. A strip taken from the Map,
+- **The selection stays in view.** An unpinned item from Search, Needs you or a direct link, and a top-level add, comes
+  to the middle of the open Map. Below readable zoom, its title comes in at a readable size. An explicit pin—the parent
+  of an add or move, or the current item when following a link in the Inspector—holds that drawn box in place and
+  reveals the selection only as much as needed. A write to the same selected item, and its Undo, keep the top-level
+  box's screen corner and the chosen zoom; internal layout may change, and the selected item pans only as far as needed
+  if hidden. A tapped item moves the least that shows it. A strip taken from the Map,
   such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
   the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
   waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.

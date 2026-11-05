@@ -3,6 +3,7 @@ import {
   firstOf,
   firstView,
   fitPlan,
+  focusReveal,
   frame,
   framesAll,
   headed,
@@ -13,6 +14,17 @@ import {
   startOf,
   uncovered,
 } from "./reveal";
+
+describe("focusReveal", () => {
+  it.each([
+    ["external or top-level selection without an eligible old frame", { id: "new", pin: null }, false, true],
+    ["selection pinned to a different item", { id: "new", pin: "parent" }, false, false],
+    ["same-item write with an eligible frame", { id: "existing", pin: null }, true, false],
+    ["write pinned to itself with an eligible frame", { id: "existing", pin: "existing" }, true, false],
+  ])("chooses a reveal for %s", (_, focus, preserveFrame, centered) => {
+    expect(focusReveal(focus, preserveFrame)).toEqual({ id: focus.id, centered, picked: centered });
+  });
+});
 
 describe("reveal", () => {
   const open = { x1: 0, y1: 0, x2: 400, y2: 500 };
