@@ -1,116 +1,99 @@
-//! A thin layer over the `git` command: plumbing only, never a work tree.
+//! The repository operations the store needs, over `gix`: plumbing only, never a work tree, and no `git` process.
 
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
-use std::fmt::Write as _;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::OnceLock;
+
+use gix::refs::Target;
+use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
 use super::StoreError;
 
+/// An error with its causes, as one line.
+pub(crate) fn describe(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.contains(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+    text
+}
+
+fn failed(err: impl std::error::Error + 'static) -> StoreError {
+    StoreError::Git(describe(&err))
+}
+
+fn parse_id(text: &str) -> Result<gix::ObjectId, StoreError> {
+    gix::ObjectId::from_hex(text.as_bytes())
+        .map_err(|e| StoreError::Git(format!("{text} isn't an object id: {e}")))
+}
+
+/// Finds the repository from the path alone, as `git -C <path>` does, taking no repository or settings from the
+/// environment, and without reflogs for the tracker's refs.
+fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
+    let options = || {
+        gix::open::Options::default().ignore_repository_environment(true).cli_overrides([
+            "core.logAllRefUpdates=false",
+            "gitoxide.core.nativeLocalTransport=true",
+        ])
+    };
+    let mapping = gix::sec::trust::Mapping { full: options(), reduced: options() };
+    gix::ThreadSafeRepository::discover_opts(
+        path,
+        gix::discover::upwards::Options::default(),
+        mapping,
+    )
+    .map_err(|e| format!("can't open {}: {}", path.display(), describe(&e)))
+}
+
 /// A repository addressed by its path.
-#[derive(Debug, Clone)]
+///
+/// It is opened once and found by that path alone, taking no repository or settings from the environment, even when
+/// the process runs inside a git hook, and without reflogs for the tracker's refs: each would be another fsynced append
+/// per batch, the remote holds the history, and a squash makes it moot.
+#[derive(Debug)]
 pub(crate) struct Git {
     pub(crate) repo: PathBuf,
-    zero: std::sync::OnceLock<String>,
-    common: std::sync::OnceLock<PathBuf>,
+    opened: OnceLock<Result<gix::ThreadSafeRepository, String>>,
 }
 
 impl Git {
     pub(crate) fn new(repo: &Path) -> Self {
-        Self {
-            repo: repo.to_owned(),
-            zero: std::sync::OnceLock::new(),
-            common: std::sync::OnceLock::new(),
+        Self { repo: repo.to_owned(), opened: OnceLock::new() }
+    }
+
+    /// The repository on this thread.
+    pub(crate) fn handle(&self) -> Result<gix::Repository, StoreError> {
+        let opened = self.opened.get_or_init(|| discover(&self.repo));
+        match opened {
+            Ok(repo) => Ok(repo.to_thread_local()),
+            Err(message) => Err(StoreError::Git(message.clone())),
         }
     }
 
-    fn command(&self) -> Command {
-        let mut command = super::git_at(&self.repo);
-        command.args(["-c", "core.quotePath=false"]);
-        // No reflogs for the tracker's refs: each would be another fsynced append per batch, the remote holds the
-        // history, and a squash makes it moot.
-        command.args(["-c", "core.logAllRefUpdates=false"]);
-        // Errors are classified by their text, so keep git's messages untranslated.
-        command.env("LC_ALL", "C").env("LANGUAGE", "");
-        command
-    }
-
-    /// Runs git and returns its standard output, failing on a nonzero exit.
-    pub(crate) fn run<I, S>(
-        &self,
-        args: I,
-        input: Option<&[u8]>,
-        env: &[(&str, &OsStr)],
-    ) -> Result<Vec<u8>, StoreError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let mut command = self.command();
-        command.args(args).envs(env.iter().copied());
-        command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child =
-            command.spawn().map_err(|e| StoreError::Git(format!("git can't run: {e}")))?;
-        if let Some(input) = input {
-            let mut stdin = child.stdin.take().expect("stdin is piped");
-            let input = input.to_vec();
-            // Write on a thread so a large input can't deadlock against a full output pipe.
-            let writer = std::thread::spawn(move || stdin.write_all(&input));
-            let output = child.wait_with_output().map_err(|e| StoreError::Git(e.to_string()))?;
-            writer
-                .join()
-                .expect("the writer thread doesn't panic")
-                .map_err(|e| StoreError::Git(e.to_string()))?;
-            return check(output);
+    /// The repository as it is now, with the packs that were written since it was opened. A fetch or a push judges
+    /// what the local refs lead to without looking for new packs, so it needs this.
+    fn fresh_handle(&self) -> Result<gix::Repository, StoreError> {
+        match discover(&self.repo) {
+            Ok(repo) => Ok(repo.to_thread_local()),
+            Err(message) => Err(StoreError::Git(message)),
         }
-        check(child.wait_with_output().map_err(|e| StoreError::Git(e.to_string()))?)
     }
 
-    /// Runs git and returns its output whatever the exit status.
-    pub(crate) fn output<I, S>(&self, args: I) -> Result<std::process::Output, StoreError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        self.command()
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| StoreError::Git(format!("git can't run: {e}")))
-    }
-
-    pub(crate) fn text<I, S>(&self, args: I) -> Result<String, StoreError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        Ok(String::from_utf8_lossy(&self.run(args, None, &[])?).trim().to_owned())
-    }
-
-    /// A ref's object id, or `None` when the ref doesn't exist.
-    /// The first call also learns the common Git directory, saving [`Git::common_dir`] a process.
+    /// A ref's commit id, or `None` when the ref doesn't exist or doesn't lead to a commit.
     pub(crate) fn resolve(&self, reference: &str) -> Result<Option<String>, StoreError> {
-        let learn = self.common.get().is_none();
-        let mut command = self.command();
-        command.arg("rev-parse");
-        if learn {
-            command.arg("--git-common-dir");
-        }
-        let output = command
-            .args(["--verify", "--quiet", &format!("{reference}^{{commit}}")])
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| StoreError::Git(e.to_string()))?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut lines = text.lines();
-        if learn && let Some(dir) = lines.next() {
-            let dir = PathBuf::from(dir);
-            let _ = self.common.set(if dir.is_absolute() { dir } else { self.repo.join(dir) });
-        }
-        Ok(output.status.success().then(|| lines.next().unwrap_or_default().trim().to_owned()))
+        let repo = self.handle()?;
+        let Some(mut found) = repo.try_find_reference(reference).map_err(failed)? else {
+            return Ok(None);
+        };
+        let id = found.peel_to_id().map_err(failed)?.detach();
+        let header = repo.find_header(id).map_err(failed)?;
+        Ok((header.kind() == gix::object::Kind::Commit).then(|| id.to_string()))
     }
 
     /// Refs under a prefix with their object ids.
@@ -118,52 +101,33 @@ impl Git {
         self.refs_under(&[prefix])
     }
 
-    /// Refs under any of several prefixes, or named exactly, with their object ids, in one process.
+    /// Refs under any of several prefixes (ending in `/`), or named exactly, with their object ids.
     pub(crate) fn refs_under(
         &self,
         prefixes: &[&str],
     ) -> Result<BTreeMap<String, String>, StoreError> {
-        let mut args = vec!["for-each-ref", "--format=%(refname) %(objectname)"];
-        args.extend(prefixes);
-        let text = self.text(args)?;
-        Ok(text
-            .lines()
-            .filter_map(|line| line.split_once(' '))
-            .map(|(name, id)| (name.to_owned(), id.to_owned()))
-            .collect())
+        let repo = self.handle()?;
+        let platform = repo.references().map_err(failed)?;
+        let mut found = BTreeMap::new();
+        for pattern in prefixes {
+            let name = pattern.trim_end_matches('/');
+            for reference in platform.under(name).map_err(failed)? {
+                let reference = reference.map_err(failed)?;
+                if let Some(id) = reference.try_id() {
+                    found.insert(reference.name().as_bstr().to_string(), id.to_string());
+                }
+            }
+        }
+        Ok(found)
     }
 
     /// Every file in a commit's tree, by path.
     pub(crate) fn read_tree(&self, commit: &str) -> Result<BTreeMap<String, Vec<u8>>, StoreError> {
-        let listing = self.run(["ls-tree", "-r", "-z", "--full-tree", commit], None, &[])?;
-        let mut entries = Vec::new();
-        for record in listing.split(|&b| b == 0).filter(|r| !r.is_empty()) {
-            let record = String::from_utf8_lossy(record);
-            let (meta, path) =
-                record.split_once('\t').ok_or_else(|| StoreError::Git("bad ls-tree".into()))?;
-            let id = meta.rsplit(' ').next().unwrap_or_default().to_owned();
-            entries.push((path.to_owned(), id));
-        }
-        if entries.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        let request = entries.iter().fold(String::new(), |mut out, (_, id)| {
-            let _ = writeln!(out, "{id}");
-            out
-        });
-        let contents = self.cat_file(&request, entries.len())?;
-        // A tree names its own objects, so one missing is a damaged object store: read on, and the state would lose
-        // that record with nothing to say so.
-        entries
-            .into_iter()
-            .zip(contents)
-            .map(|((path, id), content)| match content {
-                Some(content) => Ok((path, content)),
-                None => Err(StoreError::Git(format!(
-                    "{commit} lists {path}, but its object {id} is missing from the repository"
-                ))),
-            })
-            .collect()
+        let repo = self.handle()?;
+        let tree = repo.find_commit(parse_id(commit)?).map_err(failed)?.tree().map_err(failed)?;
+        let mut files = BTreeMap::new();
+        read_blobs(&repo, &tree, &mut String::new(), commit, &mut files)?;
+        Ok(files)
     }
 
     /// The contents of the given paths in a commit's tree; missing paths are left out.
@@ -175,115 +139,77 @@ impl Git {
         if paths.is_empty() {
             return Ok(BTreeMap::new());
         }
-        let request = paths.iter().fold(String::new(), |mut out, path| {
-            let _ = writeln!(out, "{commit}:{path}");
-            out
-        });
-        let contents = self.cat_file(&request, paths.len())?;
-        Ok(paths
-            .iter()
-            .zip(contents)
-            .filter_map(|(path, content)| Some((path.clone(), content?)))
-            .collect())
-    }
-
-    /// The objects `request` names, one per line, through one `git cat-file --batch`: `count` of them in order, `None`
-    /// for one that is missing.
-    fn cat_file(&self, request: &str, count: usize) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
-        let output = self.run(["cat-file", "--batch"], Some(request.as_bytes()), &[])?;
-        let mut rest = &output[..];
-        let mut contents = Vec::with_capacity(count);
-        for _ in 0..count {
-            let newline = rest
-                .iter()
-                .position(|&b| b == b'\n')
-                .ok_or_else(|| StoreError::Git("bad cat-file".into()))?;
-            let header = String::from_utf8_lossy(&rest[..newline]).into_owned();
-            if header.ends_with(" missing") {
-                rest = &rest[newline + 1..];
-                contents.push(None);
-                continue;
+        let repo = self.handle()?;
+        let Some(commit) = repo.try_find_object(parse_id(commit)?).map_err(failed)? else {
+            return Ok(BTreeMap::new());
+        };
+        let tree = commit.try_into_commit().map_err(failed)?.tree().map_err(failed)?;
+        let mut files = BTreeMap::new();
+        for path in paths {
+            let Some(entry) = tree.lookup_entry_by_path(path).map_err(failed)? else { continue };
+            if entry.mode().is_blob() {
+                let blob = repo.find_object(entry.object_id()).map_err(failed)?;
+                files.insert(path.clone(), blob.detach().data);
             }
-            let size: usize = header
-                .split_whitespace()
-                .nth(2)
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| StoreError::Git(format!("bad cat-file header: {header}")))?;
-            let start = newline + 1;
-            let content = rest
-                .get(start..start + size)
-                .ok_or_else(|| StoreError::Git("short cat-file".into()))?;
-            contents.push(Some(content.to_vec()));
-            rest = &rest[(start + size + 1).min(rest.len())..];
         }
-        Ok(contents)
+        Ok(files)
     }
 
     /// Writes a tree from `base` (a commit, or none) with `changes` applied: `Some` content adds or replaces a file and
-    /// `None` removes it. Uses a private index, so no work tree or shared index is touched.
+    /// `None` removes it. No index, work tree or shared file is touched.
     pub(crate) fn write_tree(
         &self,
         base: Option<&str>,
         changes: &BTreeMap<String, Option<Vec<u8>>>,
     ) -> Result<String, StoreError> {
-        let scratch = tempdir()?;
-        let _cleanup = RemoveOnDrop(scratch.clone());
-        let index = scratch.join("index");
-        let env = [("GIT_INDEX_FILE", index.as_os_str())];
-        match base {
-            Some(base) => self.run(["read-tree", base], None, &env)?,
-            None => self.run(["read-tree", "--empty"], None, &env)?,
-        };
-        let mut info = String::new();
-        let blobs: Vec<(&String, &Vec<u8>)> = changes
-            .iter()
-            .filter_map(|(path, content)| content.as_ref().map(|c| (path, c)))
-            .collect();
-        if !blobs.is_empty() {
-            let mut list = String::new();
-            for (n, (_, content)) in blobs.iter().enumerate() {
-                let file = scratch.join(format!("blob{n}"));
-                std::fs::write(&file, content).map_err(|e| StoreError::Git(e.to_string()))?;
-                let _ = writeln!(list, "{}", file.display());
-            }
-            let ids = self.run(
-                ["hash-object", "-w", "--stdin-paths", "--no-filters"],
-                Some(list.as_bytes()),
-                &[],
-            )?;
-            for ((path, _), id) in blobs.iter().zip(String::from_utf8_lossy(&ids).lines()) {
-                let _ = writeln!(info, "100644 {id}\t{path}");
-            }
-        }
-        let zero = self.zero_id();
-        for path in changes.iter().filter(|(_, content)| content.is_none()).map(|(path, _)| path) {
-            let _ = writeln!(info, "0 {zero}\t{path}");
-        }
-        self.run(["update-index", "--index-info"], Some(info.as_bytes()), &env)?;
-        self.run(["write-tree"], None, &env)
-            .map(|out| String::from_utf8_lossy(&out).trim().to_owned())
+        let repo = self.handle()?;
+        Ok(edit_tree(&repo, &repo, base, changes)?.to_string())
     }
 
-    /// The all-zero object id of the repository's hash.
-    fn zero_id(&self) -> &str {
-        self.zero.get_or_init(|| {
-            let format =
-                self.text(["rev-parse", "--show-object-format=storage"]).unwrap_or_default();
-            "0".repeat(if format == "sha256" { 64 } else { 40 })
-        })
+    /// The tree of a commit.
+    pub(crate) fn tree_of(&self, commit: &str) -> Result<String, StoreError> {
+        let repo = self.handle()?;
+        Ok(repo
+            .find_commit(parse_id(commit)?)
+            .map_err(failed)?
+            .tree_id()
+            .map_err(failed)?
+            .to_string())
+    }
+
+    /// When a commit was committed, in seconds since the epoch; zero when that can't be read.
+    pub(crate) fn commit_seconds(&self, commit: &str) -> Result<i64, StoreError> {
+        let repo = self.handle()?;
+        let commit = repo.find_commit(parse_id(commit)?).map_err(failed)?;
+        Ok(commit.time().map_or(0, |time| time.seconds))
     }
 
     /// The repository's common Git directory, shared by its worktrees.
     pub(crate) fn common_dir(&self) -> Result<PathBuf, StoreError> {
-        if let Some(dir) = self.common.get() {
-            return Ok(dir.clone());
-        }
-        let dir = PathBuf::from(self.text(["rev-parse", "--git-common-dir"])?);
-        let dir = if dir.is_absolute() { dir } else { self.repo.join(dir) };
-        Ok(self.common.get_or_init(|| dir).clone())
+        Ok(self.handle()?.common_dir().to_owned())
     }
 
-    /// A commit of `tree` with an optional parent, authored as the replica at `seconds` since the epoch.
+    /// Whether `ancestor` is `descendant` or one of its ancestors; an object that can't be read is no ancestor.
+    pub(crate) fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
+        let (Ok(ancestor), Ok(descendant)) = (parse_id(ancestor), parse_id(descendant)) else {
+            return false;
+        };
+        self.handle()
+            .and_then(|repo| repo.is_ancestor(ancestor, descendant).map_err(failed))
+            .unwrap_or(false)
+    }
+
+    /// Whether `ancestor` is `descendant` or one of its ancestors, failing when either can't be read.
+    pub(crate) fn is_ancestor_checked(
+        &self,
+        ancestor: &str,
+        descendant: &str,
+    ) -> Result<bool, StoreError> {
+        self.handle()?.is_ancestor(parse_id(ancestor)?, parse_id(descendant)?).map_err(failed)
+    }
+
+    /// A commit of `tree` with an optional parent, authored as the replica at `seconds` since the epoch; written as
+    /// `git commit-tree -m` does, with a newline after the message.
     pub(crate) fn commit(
         &self,
         tree: &str,
@@ -292,34 +218,17 @@ impl Git {
         seconds: i64,
         message: &str,
     ) -> Result<String, StoreError> {
-        let mut args =
-            vec!["commit-tree".to_owned(), tree.to_owned(), "-m".to_owned(), message.to_owned()];
-        if let Some(parent) = parent {
-            args.extend(["-p".to_owned(), parent.to_owned()]);
-        }
-        let name = format!("acyclic {replica}");
-        let email = format!("{replica}@acyclic.invalid");
-        let date = format!("@{seconds} +0000");
-        let env = [
-            ("GIT_AUTHOR_NAME", OsStr::new(&name)),
-            ("GIT_AUTHOR_EMAIL", OsStr::new(&email)),
-            ("GIT_AUTHOR_DATE", OsStr::new(&date)),
-            ("GIT_COMMITTER_NAME", OsStr::new(&name)),
-            ("GIT_COMMITTER_EMAIL", OsStr::new(&email)),
-            ("GIT_COMMITTER_DATE", OsStr::new(&date)),
-        ];
-        let out = self.run(&args, None, &env)?;
-        Ok(String::from_utf8_lossy(&out).trim().to_owned())
+        let repo = self.handle()?;
+        new_commit(&repo, tree, parent, replica, seconds, &format!("{message}\n"))
     }
 
-    /// Writes commits with one `git fast-import`, so a batch's objects land in a single pack and no temporary
-    /// files are written. Each commit goes to its own scratch ref, forced, since only the
-    /// holder of the batch lock writes them. Returns the commits' ids in order.
+    /// Writes commits, so a batch's objects land in a single pack and no loose files are written. Returns the commits'
+    /// ids in order. The commits are what `git fast-import` made of the same input, byte for byte: the message has no
+    /// newline added.
     ///
     /// # Errors
     ///
-    /// Fails when git fails, and refuses a path fast-import would read differently: an empty one, or one holding a
-    /// newline or starting with a quote.
+    /// Fails when the objects can't be written, and refuses an empty path.
     pub(crate) fn import_commits(
         &self,
         commits: &[NewCommit<'_>],
@@ -331,89 +240,150 @@ impl Git {
         {
             return Err(StoreError::Git(format!("can't import the path {path:?}")));
         }
-        let mut stream: Vec<u8> = b"feature done\n".to_vec();
-        for (n, commit) in commits.iter().enumerate() {
-            let name = format!("acyclic {}", commit.replica);
-            let email = format!("{}@acyclic.invalid", commit.replica);
-            let _ = write!(
-                Bytes(&mut stream),
-                "reset {scratch}\ncommit {scratch}\nmark :{}\nauthor {name} <{email}> {seconds} +0000\ncommitter {name} <{email}> {seconds} \
-                 +0000\ndata {}\n{}\n",
-                n + 1,
-                commit.message.len(),
+        // Objects are made in memory first, then written as one pack.
+        let mut staging = self.handle()?.with_object_memory();
+        let mut ids = Vec::with_capacity(commits.len());
+        for commit in commits {
+            let tree = edit_tree(&staging, &staging, commit.parent, commit.files)?;
+            ids.push(new_commit(
+                &staging,
+                &tree.to_string(),
+                commit.parent,
+                commit.replica,
+                commit.seconds,
                 commit.message,
-                scratch = commit.scratch,
-                seconds = commit.seconds,
-            );
-            if let Some(parent) = commit.parent {
-                let _ = writeln!(Bytes(&mut stream), "from {parent}");
-            }
-            for (path, content) in commit.files {
-                match content {
-                    Some(content) => {
-                        let _ = write!(
-                            Bytes(&mut stream),
-                            "M 100644 inline {path}\ndata {}\n",
-                            content.len()
-                        );
-                        stream.extend_from_slice(content);
-                        stream.push(b'\n');
-                    },
-                    None => {
-                        let _ = writeln!(Bytes(&mut stream), "D {path}");
-                    },
-                }
-            }
-            stream.push(b'\n');
+            )?);
         }
-        for n in 1..=commits.len() {
-            let _ = writeln!(Bytes(&mut stream), "get-mark :{n}");
-        }
-        stream.extend_from_slice(b"done\n");
-        // Keep even a small batch as a pack: unpacking a few objects into loose files costs more than the pack,
-        // and the store's upkeep repacks once packs pile up.
-        let out = self.run(
-            ["-c", "fastimport.unpackLimit=0", "fast-import", "--quiet", "--force"],
-            Some(&stream),
-            &[],
-        )?;
-        let ids: Vec<String> = String::from_utf8_lossy(&out).lines().map(str::to_owned).collect();
-        if ids.len() == commits.len() {
-            Ok(ids)
-        } else {
-            Err(StoreError::Git(format!(
-                "fast-import returned {} ids for {} commits",
-                ids.len(),
-                commits.len()
-            )))
-        }
+        let objects: Vec<(gix::object::Kind, Vec<u8>)> = staging
+            .objects
+            .take_object_memory()
+            .map(|storage| storage.values().cloned().collect())
+            .unwrap_or_default();
+        let repo = self.handle()?;
+        repo.write_objects_as_pack(objects, &std::sync::atomic::AtomicBool::new(false))
+            .map_err(failed)?;
+        Ok(ids)
     }
 
-    /// Starts an interactive `git update-ref --stdin` transaction.
+    /// Starts a transaction on refs, which applies all of its changes or none.
     pub(crate) fn transaction(&self) -> Result<Transaction, StoreError> {
-        let mut child = self
-            .command()
-            .args(["update-ref", "--stdin"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| StoreError::Git(format!("git can't run: {e}")))?;
-        let stdin = child.stdin.take().expect("stdin is piped");
-        let stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
-        let mut transaction =
-            Transaction { child, stdin: Some(stdin), stdout, repo: self.repo.clone() };
-        transaction.send("start")?;
-        transaction.expect("start")?;
-        Ok(transaction)
+        Ok(Transaction { repo: self.handle()?, edits: Vec::new(), root: self.repo.clone() })
     }
+
+    /// Points `reference` at `new`, whatever it held.
+    pub(crate) fn set_ref(&self, reference: &str, new: &str) -> Result<(), StoreError> {
+        let mut transaction = self.transaction()?;
+        transaction.set(reference, new)?;
+        transaction.commit(None)
+    }
+
+    /// Deletes `reference`, which must be at `old` when given, and does nothing when it doesn't exist.
+    pub(crate) fn delete_ref(&self, reference: &str, old: Option<&str>) -> Result<(), StoreError> {
+        if self.resolve(reference)?.is_none() {
+            return Ok(());
+        }
+        let mut transaction = self.transaction()?;
+        match old {
+            Some(old) => transaction.delete(reference, old)?,
+            None => transaction.delete_any(reference)?,
+        }
+        transaction.commit(None)
+    }
+}
+
+/// Reads the blobs below `tree` into `files`, by their paths below `prefix`.
+fn read_blobs(
+    repo: &gix::Repository,
+    tree: &gix::Tree<'_>,
+    prefix: &mut String,
+    commit: &str,
+    files: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), StoreError> {
+    for entry in tree.iter() {
+        let entry = entry.map_err(failed)?;
+        let name = entry.filename().to_string();
+        let length = prefix.len();
+        prefix.push_str(&name);
+        if entry.mode().is_tree() {
+            prefix.push('/');
+            let subtree = repo.find_tree(entry.oid()).map_err(failed)?;
+            read_blobs(repo, &subtree, prefix, commit, files)?;
+        } else {
+            // A tree names its own objects, so one missing is a damaged object store: read on, and the state would
+            // lose that record with nothing to say so.
+            let Some(object) = repo.try_find_object(entry.oid()).map_err(failed)? else {
+                return Err(StoreError::Git(format!(
+                    "{commit} lists {prefix}, but its object {} is missing from the repository",
+                    entry.oid()
+                )));
+            };
+            files.insert(prefix.clone(), object.detach().data);
+        }
+        prefix.truncate(length);
+    }
+    Ok(())
+}
+
+/// A tree made from the tree of `base` (a commit, or none for an empty tree) with `changes` applied, written to
+/// `repo`'s object database (or its memory).
+fn edit_tree(
+    reading: &gix::Repository,
+    writing: &gix::Repository,
+    base: Option<&str>,
+    changes: &BTreeMap<String, Option<Vec<u8>>>,
+) -> Result<gix::ObjectId, StoreError> {
+    let start = match base {
+        Some(base) => reading
+            .find_commit(parse_id(base)?)
+            .map_err(failed)?
+            .tree_id()
+            .map_err(failed)?
+            .detach(),
+        None => gix::ObjectId::empty_tree(reading.object_hash()),
+    };
+    let mut editor = reading.edit_tree(start).map_err(failed)?;
+    for (path, content) in changes {
+        match content {
+            Some(content) => {
+                let blob = writing.write_blob(content).map_err(failed)?.detach();
+                editor
+                    .upsert(path.as_str(), gix::object::tree::EntryKind::Blob, blob)
+                    .map_err(failed)?;
+            },
+            None => {
+                editor.remove(path.as_str()).map_err(failed)?;
+            },
+        }
+    }
+    Ok(editor.write().map_err(failed)?.detach())
+}
+
+fn new_commit(
+    repo: &gix::Repository,
+    tree: &str,
+    parent: Option<&str>,
+    replica: &str,
+    seconds: i64,
+    message: &str,
+) -> Result<String, StoreError> {
+    let name = format!("acyclic {replica}");
+    let email = format!("{replica}@acyclic.invalid");
+    let time = format!("{seconds} +0000");
+    let signature = gix::actor::SignatureRef {
+        name: name.as_str().into(),
+        email: email.as_str().into(),
+        time: &time,
+    };
+    let parents = parent.map(parse_id).transpose()?;
+    let id = repo
+        .new_commit_as(signature, signature, message, parse_id(tree)?, parents)
+        .map_err(failed)?;
+    Ok(id.id.to_string())
 }
 
 /// A commit for [`Git::import_commits`]: `files` applied to `parent`'s tree (or to an empty tree), where `Some`
 /// content adds or replaces a file and `None` removes it.
 pub(crate) struct NewCommit<'a> {
-    /// The scratch ref fast-import moves to the commit.
-    pub(crate) scratch: &'a str,
     pub(crate) parent: Option<&'a str>,
     pub(crate) files: &'a BTreeMap<String, Option<Vec<u8>>>,
     pub(crate) replica: &'a str,
@@ -421,45 +391,26 @@ pub(crate) struct NewCommit<'a> {
     pub(crate) message: &'a str,
 }
 
-/// Lets `write!` append to a byte buffer.
-struct Bytes<'a>(&'a mut Vec<u8>);
-
-impl std::fmt::Write for Bytes<'_> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.0.extend_from_slice(s.as_bytes());
-        Ok(())
-    }
-}
-
-/// An open `update-ref --stdin` transaction.
+/// Ref changes, applied together by [`Transaction::commit`].
 pub(crate) struct Transaction {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
-    repo: PathBuf,
+    repo: gix::Repository,
+    edits: Vec<RefEdit>,
+    root: PathBuf,
 }
 
 impl Transaction {
-    fn send(&mut self, line: &str) -> Result<(), StoreError> {
-        let stdin = self.stdin.as_mut().expect("the transaction is open");
-        writeln!(stdin, "{line}").and_then(|()| stdin.flush()).map_err(|_| self.failure())
-    }
-
-    fn expect(&mut self, verb: &str) -> Result<(), StoreError> {
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).map_err(|e| StoreError::Git(e.to_string()))?;
-        if line.trim() == format!("{verb}: ok") { Ok(()) } else { Err(self.failure()) }
-    }
-
-    /// Reads git's error and classifies it as a lost race, a held lock or another failure.
-    fn failure(&mut self) -> StoreError {
-        drop(self.stdin.take());
-        let mut stderr = String::new();
-        if let Some(mut pipe) = self.child.stderr.take() {
-            pipe.read_to_string(&mut stderr).ok();
+    fn log() -> LogChange {
+        LogChange {
+            mode: RefLog::AndReference,
+            force_create_reflog: false,
+            message: "acyclic".into(),
         }
-        let _ = self.child.wait();
-        classify(&stderr, &self.repo)
+    }
+
+    fn push(&mut self, reference: &str, change: Change) -> Result<(), StoreError> {
+        let name = gix::refs::FullName::try_from(reference).map_err(failed)?;
+        self.edits.push(RefEdit { change, name, deref: false });
+        Ok(())
     }
 
     /// Moves `reference` from `old` (or creates it when `None`) to `new`.
@@ -469,93 +420,476 @@ impl Transaction {
         new: &str,
         old: Option<&str>,
     ) -> Result<(), StoreError> {
-        match old {
-            Some(old) => self.send(&format!("update {reference} {new} {old}")),
-            None => self.send(&format!("create {reference} {new}")),
-        }
+        let expected = match old {
+            Some(old) => PreviousValue::MustExistAndMatch(Target::Object(parse_id(old)?)),
+            None => PreviousValue::MustNotExist,
+        };
+        let change =
+            Change::Update { log: Self::log(), expected, new: Target::Object(parse_id(new)?) };
+        self.push(reference, change)
     }
 
     /// Points `reference` at `new`, whatever it held.
     pub(crate) fn set(&mut self, reference: &str, new: &str) -> Result<(), StoreError> {
-        self.send(&format!("update {reference} {new}"))
+        let change = Change::Update {
+            log: Self::log(),
+            expected: PreviousValue::Any,
+            new: Target::Object(parse_id(new)?),
+        };
+        self.push(reference, change)
     }
 
     /// Deletes `reference`, which must be at `old`.
     pub(crate) fn delete(&mut self, reference: &str, old: &str) -> Result<(), StoreError> {
-        self.send(&format!("delete {reference} {old}"))
+        let expected = PreviousValue::MustExistAndMatch(Target::Object(parse_id(old)?));
+        self.push(reference, Change::Delete { expected, log: RefLog::AndReference })
     }
 
-    /// Locks every ref and checks every old value.
-    pub(crate) fn prepare(&mut self) -> Result<(), StoreError> {
-        self.send("prepare")?;
-        self.expect("prepare")
+    /// Deletes `reference`, whatever it holds.
+    pub(crate) fn delete_any(&mut self, reference: &str) -> Result<(), StoreError> {
+        self.push(
+            reference,
+            Change::Delete { expected: PreviousValue::Any, log: RefLog::AndReference },
+        )
     }
 
-    /// Applies the prepared updates.
-    pub(crate) fn commit(mut self) -> Result<(), StoreError> {
-        self.send("commit")?;
-        self.expect("commit")?;
-        drop(self.stdin.take());
-        let status = self.child.wait().map_err(|e| StoreError::Git(e.to_string()))?;
-        if status.success() {
-            Ok(())
+    /// Locks every ref, checks every old value and applies the changes, running the `reference-transaction` hook as
+    /// `git update-ref` does. `between` runs after the refs are locked and checked, before anything changes; it
+    /// is for tests that crash there, and skips the hook.
+    pub(crate) fn commit(self, between: Option<&dyn Fn()>) -> Result<(), StoreError> {
+        let Self { repo, edits, root } = self;
+        let fallback = gix::actor::SignatureRef {
+            name: "acyclic".into(),
+            email: "acyclic@acyclic.invalid".into(),
+            time: "0 +0000",
+        };
+        let result = match between {
+            None => repo.edit_references_with_hooks(edits, Some(fallback)).map(|_| ()),
+            Some(between) => {
+                let lock = gix::lock::acquire::Fail::AfterDurationWithBackoff(
+                    std::time::Duration::from_millis(100),
+                );
+                let prepared = repo
+                    .ref_store()
+                    .transaction()
+                    .prepare(edits, gix::refs::view::transaction::LockOptions::new(lock, lock));
+                match prepared {
+                    Ok(prepared) => {
+                        between();
+                        prepared.commit(Some(fallback)).map(|_| ())
+                    },
+                    Err(e) => Err(e),
+                }
+            },
+        };
+        result.map_err(|e| classify(&e, &root))
+    }
+}
+
+/// A failed ref transaction as the store reports it: a lost race, a held lock or another failure.
+fn classify(err: &gix::Error, root: &Path) -> StoreError {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(current) = cause {
+        if current.is::<gix::refs::file::transaction::prepare::ReferenceOutOfDate>()
+            || current.is::<gix::refs::file::transaction::prepare::MustNotExist>()
+        {
+            return StoreError::Conflict;
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::AlreadyExists
+        {
+            let text = describe(err);
+            if let Some(path) = lock_path_in(&text) {
+                let path = if path.is_absolute() { path } else { root.join(path) };
+                let age = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d.as_secs());
+                return StoreError::Locked { path, age_seconds: age };
+            }
+        }
+        cause = current.source();
+    }
+    StoreError::Git(describe(err))
+}
+
+/// The lock file an error message names, as `The lockfile at "<path>" might need manual deletion`.
+fn lock_path_in(text: &str) -> Option<PathBuf> {
+    let start = text.find("lockfile at \"")? + "lockfile at \"".len();
+    let end = text[start..].find('"')?;
+    Some(PathBuf::from(&text[start..start + end]))
+}
+
+impl Git {
+    /// The first value, in git's order of its sources, of each of `keys`, as git lists them; a key without a value
+    /// isn't in the map.
+    pub(crate) fn config_values(
+        &self,
+        keys: &[&str],
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let repo = self.handle()?;
+        let config = repo.config_snapshot();
+        let mut values = BTreeMap::new();
+        for key in keys {
+            if let Ok(found) = config.plumbing().raw_values(key)
+                && let Some(first) = found.first()
+            {
+                values.insert((*key).to_owned(), first.to_string());
+            }
+        }
+        Ok(values)
+    }
+
+    /// Sets keys in the clone's own configuration file, as `git config <key> <value>` does.
+    pub(crate) fn set_config(&self, values: &[(&str, &str)]) -> Result<(), StoreError> {
+        let repo = self.handle()?;
+        let mut file = repo.config_file_mut(repo.common_dir().join("config")).map_err(failed)?;
+        for (key, value) in values {
+            file.set_raw_value(key, *value).map_err(failed)?;
+        }
+        file.commit().map_err(failed)
+    }
+
+    /// Removes a key from the clone's own configuration file, as `git config --unset` does.
+    pub(crate) fn unset_config(&self, key: &str) -> Result<(), StoreError> {
+        let repo = self.handle()?;
+        let mut file = repo.config_file_mut(repo.common_dir().join("config")).map_err(failed)?;
+        if let Ok(mut values) = file.raw_values_mut(key) {
+            values.delete_all();
+        }
+        file.commit().map_err(failed)
+    }
+
+    /// Repacks when the store's thresholds are crossed, as `git gc --auto` does, here and now. Best effort.
+    pub(crate) fn auto_maintenance(&self) {
+        let Ok(repo) = self.handle() else { return };
+        let mut options = gix::maintenance::gc::Options::default();
+        options.auto = true;
+        let _ = repo.gc(options, &std::sync::atomic::AtomicBool::new(false));
+    }
+}
+
+/// A ref for [`Git::push`]: `new` is the id it ends at, or `None` to delete it; `lease` is the id the remote's copy
+/// has, or `None` when it has none. `rewrite` lets the update replace history, as a forced push does.
+pub(crate) struct PushRef {
+    pub(crate) name: String,
+    pub(crate) lease: Option<String>,
+    pub(crate) new: Option<String>,
+    pub(crate) rewrite: bool,
+}
+
+/// Why a push moved nothing.
+pub(crate) enum Refused {
+    /// The remote's ref isn't what the push expected.
+    Stale(String),
+    /// The remote refused a ref, with its reason.
+    Rejected(String, String),
+}
+
+impl Git {
+    /// The remote by name, or at a URL or path; a relative path counts from the repository.
+    fn remote<'r>(
+        &self,
+        repo: &'r gix::Repository,
+        remote: &str,
+    ) -> Result<gix::Remote<'r>, StoreError> {
+        if let Some(found) = repo.try_find_remote(remote) {
+            let found = found.map_err(failed)?;
+            // A relative path counts from the top of the work tree, where git runs a fetch or a push.
+            let relative = found.url(gix::remote::Direction::Fetch).and_then(|url| {
+                let path = gix::path::from_byte_slice(&url.path).ok()?.to_owned();
+                (url.scheme == gix::url::Scheme::File && path.is_relative()).then_some(path)
+            });
+            return match relative {
+                Some(path) => {
+                    let top = repo.workdir().unwrap_or_else(|| repo.git_dir());
+                    repo.remote_at(top.join(path).to_string_lossy().into_owned()).map_err(failed)
+                },
+                None => Ok(found),
+            };
+        }
+        let path = Path::new(remote);
+        let at = if path.is_relative() && self.repo.join(path).exists() {
+            self.repo.join(path).to_string_lossy().into_owned()
         } else {
-            Err(StoreError::Git(format!("update-ref failed: {status}")))
+            remote.to_owned()
+        };
+        repo.remote_at(at).map_err(failed)
+    }
+
+    /// The refs of `remote` named by `patterns`: exactly, or under one ending in `/`; by name with their ids.
+    pub(crate) fn list_remote(
+        &self,
+        remote: &str,
+        patterns: &[String],
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let repo = self.handle()?;
+        self.list_remote_with(&repo, remote, patterns)
+    }
+
+    fn list_remote_with(
+        &self,
+        repo: &gix::Repository,
+        remote: &str,
+        patterns: &[String],
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let mut remote = self.remote(repo, remote)?;
+        let specs: Vec<String> = patterns
+            .iter()
+            .map(|pattern| match pattern.strip_suffix('/') {
+                Some(_) => {
+                    format!("{pattern}*:refs/acyclic/listing/{}*", &pattern["refs/".len()..])
+                },
+                None => format!("{pattern}:refs/acyclic/listing/{}", &pattern["refs/".len()..]),
+            })
+            .collect();
+        remote
+            .replace_refspecs(specs.iter().map(String::as_str), gix::remote::Direction::Fetch)
+            .map_err(failed)?;
+        let connection = remote.connect(gix::remote::Direction::Fetch).map_err(failed)?;
+        let map = connection
+            .ref_map(gix::progress::Discard, gix::remote::ref_map::Options::default())
+            .map_err(failed)?;
+        let mut found = BTreeMap::new();
+        for reference in &map.0.remote_refs {
+            let (name, id, _) = reference.unpack();
+            let Some(id) = id else { continue };
+            let name = name.to_string();
+            let wanted = patterns.iter().any(|pattern| {
+                if pattern.ends_with('/') {
+                    name.starts_with(pattern.as_str())
+                } else {
+                    name == *pattern
+                }
+            });
+            if wanted {
+                found.insert(name, id.to_string());
+            }
+        }
+        Ok(found)
+    }
+
+    /// Fetches `refspecs` from `remote`, pruning the local refs that the specs map and the remote no longer has,
+    /// and following no tags.
+    pub(crate) fn fetch(&self, remote: &str, refspecs: &[String]) -> Result<(), StoreError> {
+        let repo = self.fresh_handle()?;
+        let mut remote =
+            self.remote(&repo, remote)?.with_fetch_tags(gix::remote::fetch::Tags::None);
+        remote
+            .replace_refspecs(refspecs.iter().map(String::as_str), gix::remote::Direction::Fetch)
+            .map_err(failed)?;
+        let connection = remote.connect(gix::remote::Direction::Fetch).map_err(failed)?;
+        connection
+            .prepare_fetch(gix::progress::Discard, gix::remote::ref_map::Options::default())
+            .map_err(failed)?
+            .with_prune(true)
+            .receive(gix::progress::Discard, &std::sync::atomic::AtomicBool::new(false))
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    /// Pushes `refs` to `remote` in one atomic push, running the `pre-push` hook. Returns what was refused when the
+    /// push moved nothing, and the number of refs it updated or deleted otherwise.
+    pub(crate) fn push(
+        &self,
+        remote: &str,
+        refs: &[PushRef],
+    ) -> Result<Result<usize, Vec<Refused>>, StoreError> {
+        use gix::remote::push::{Lease, Refusal, Status, Update};
+        let repo = self.fresh_handle()?;
+        let remote = self.remote(&repo, remote)?;
+        let mut updates = Vec::with_capacity(refs.len());
+        for r in refs {
+            let name = gix::refs::FullName::try_from(r.name.as_str()).map_err(failed)?;
+            let lease = r.lease.as_deref().map(parse_id).transpose()?;
+            let new = r.new.as_deref().map(parse_id).transpose()?;
+            let update = match (lease, new) {
+                (None, Some(new)) => Update::create(name, new),
+                (Some(lease), Some(new)) => Update::change(name, lease, new),
+                (Some(lease), None) => Update::delete(name, lease),
+                (None, None) => continue,
+            };
+            let update = if r.rewrite {
+                update.with_policy(gix::remote::push::Policy::Rewrite)
+            } else {
+                update
+            };
+            updates.push(update);
+        }
+        let _ = Lease::Absent;
+        let connection = remote.connect(gix::remote::Direction::Push).map_err(failed)?;
+        let prepared = connection
+            .prepare_push(gix::progress::Discard, updates, gix::remote::push::Options::default())
+            .map_err(failed)?
+            .with_pre_push_hook();
+        // An atomic push moves nothing when any update is refused.
+        let refused: Vec<Refused> = prepared
+            .plan()
+            .refused()
+            .map(|(entry, refusal)| {
+                let name = entry.update.name().as_bstr().to_string();
+                match refusal {
+                    Refusal::StaleLease { .. } => Refused::Stale(name),
+                    other => Refused::Rejected(name, format!("{other:?}")),
+                }
+            })
+            .collect();
+        if !refused.is_empty() {
+            return Ok(Err(refused));
+        }
+        let outcome = prepared.send(&std::sync::atomic::AtomicBool::new(false)).map_err(failed)?;
+        let mut pushed = 0;
+        for entry in &outcome.entries {
+            match &entry.status {
+                Status::Rejected { reason } => {
+                    return Ok(Err(vec![Refused::Rejected(
+                        entry.update.name().as_bstr().to_string(),
+                        reason.to_string(),
+                    )]));
+                },
+                Status::Applied { .. } => pushed += 1,
+                _ => {},
+            }
+        }
+        if let Some(uncertain) = &outcome.uncertain {
+            return Err(StoreError::Git(describe(uncertain)));
+        }
+        Ok(Ok(pushed))
+    }
+}
+
+impl Git {
+    /// The root of the work tree, which is an error for a bare repository.
+    pub(crate) fn toplevel(&self) -> Result<PathBuf, StoreError> {
+        let repo = self.handle()?;
+        repo.workdir()
+            .map(Path::to_owned)
+            .ok_or_else(|| StoreError::Git("this operation must be run in a work tree".to_owned()))
+    }
+
+    /// The commits reachable from `tip`, at most `limit` of them.
+    pub(crate) fn recent_commits(
+        &self,
+        tip: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, StoreError> {
+        let repo = self.handle()?;
+        let walk = repo.rev_walk([parse_id(tip)?]).all().map_err(failed)?;
+        let mut commits = Vec::new();
+        for info in walk.take(limit) {
+            commits.push(info.map_err(failed)?.id.to_string());
+        }
+        Ok(commits)
+    }
+
+    /// The commit an abbreviated id names, in full, or `None` when it names none, several objects or another kind.
+    pub(crate) fn full_commit(&self, abbreviated: &str) -> Option<String> {
+        let repo = self.handle().ok()?;
+        let prefix = gix::hash::Prefix::from_hex(abbreviated).ok()?;
+        let id = repo.objects.lookup_prefix(prefix, None).ok()??.ok()?;
+        let header = repo.find_header(id).ok()?;
+        (header.kind() == gix::object::Kind::Commit).then(|| id.to_string())
+    }
+
+    /// The `remote.<name>.url` values of the repository's own configuration file, by remote name, and whether a key
+    /// is set there.
+    pub(crate) fn local_urls_and_key(
+        &self,
+        key: (&str, &str),
+    ) -> Result<(Vec<(String, String)>, bool), StoreError> {
+        let repo = self.handle()?;
+        let config = repo.config_snapshot();
+        let file = config.plumbing();
+        let mut urls = Vec::new();
+        for section in file.sections_by_name("remote").into_iter().flatten() {
+            if section.meta().source != gix::config::Source::Local {
+                continue;
+            }
+            let Some(name) = section.header().subsection_name() else { continue };
+            for value in section.values("url") {
+                urls.push((name.to_string(), value.to_string()));
+            }
+        }
+        let mut found = false;
+        for section in file.sections_by_name(key.0).into_iter().flatten() {
+            found |= section.meta().source == gix::config::Source::Local
+                && section.value(key.1).is_some();
+        }
+        Ok((urls, found))
+    }
+}
+
+impl Git {
+    /// The value of a key as git reads it, from every source: the last one.
+    pub(crate) fn config_value(&self, key: &str) -> Result<Option<String>, StoreError> {
+        let repo = self.handle()?;
+        Ok(repo.config_snapshot().string(key).map(|value| value.to_string()))
+    }
+
+    /// The URL of a remote as git fetches it, with `url.<base>.insteadOf` applied.
+    pub(crate) fn remote_url(&self, name: &str) -> Result<Option<String>, StoreError> {
+        let repo = self.handle()?;
+        let Some(found) = repo.try_find_remote(name) else { return Ok(None) };
+        let remote = found.map_err(failed)?;
+        Ok(remote.url(gix::remote::Direction::Fetch).map(|url| url.to_bstring().to_string()))
+    }
+
+    /// Points the remote `name` at `url`, adding it when it doesn't exist, as `git remote add` and `set-url` do.
+    pub(crate) fn set_remote_url(&self, name: &str, url: &str) -> Result<(), StoreError> {
+        let repo = self.handle()?;
+        let exists = repo.try_find_remote(name).is_some();
+        let mut file = repo.config_file_mut(repo.common_dir().join("config")).map_err(failed)?;
+        file.set_raw_value(&format!("remote.{name}.url"), url).map_err(failed)?;
+        if !exists {
+            file.set_raw_value(
+                &format!("remote.{name}.fetch"),
+                format!("+refs/heads/*:refs/remotes/{name}/*").as_str(),
+            )
+            .map_err(failed)?;
+        }
+        file.commit().map_err(failed)
+    }
+
+    /// The repository's own directory, absolute.
+    pub(crate) fn git_dir(&self) -> Result<PathBuf, StoreError> {
+        Ok(self.handle()?.git_dir().to_owned())
+    }
+}
+
+/// Creates a repository with a work tree at `path`, as `git init` does.
+pub(crate) fn init(path: &Path) -> Result<(), StoreError> {
+    gix::init(path).map(|_| ()).map_err(failed)
+}
+
+/// The refs of `remote` named by `patterns`, asked from a repository that exists only for the question, so that it
+/// works anywhere. A relative `remote` counts from `base`.
+pub(crate) fn list_remote_anywhere(
+    base: &Path,
+    remote: &str,
+    patterns: &[String],
+) -> Result<BTreeMap<String, String>, StoreError> {
+    struct RemoveOnDrop(PathBuf);
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-}
-
-fn classify(stderr: &str, repo: &Path) -> StoreError {
-    if let Some(start) = stderr.find("Unable to create '") {
-        let rest = &stderr[start + "Unable to create '".len()..];
-        let path = PathBuf::from(rest.split('\'').next().unwrap_or_default());
-        let path = if path.is_absolute() { path } else { repo.join(path) };
-        let age = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .map(|d| d.as_secs());
-        return StoreError::Locked { path, age_seconds: age };
-    }
-    if stderr.contains("but expected")
-        || stderr.contains("reference already exists")
-        || stderr.contains("is at ")
-    {
-        return StoreError::Conflict;
-    }
-    StoreError::Git(stderr.trim().to_owned())
-}
-
-fn check(output: std::process::Output) -> Result<Vec<u8>, StoreError> {
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(StoreError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()))
-    }
-}
-
-/// Removes a directory when dropped, on every return path.
-struct RemoveOnDrop(PathBuf);
-
-impl Drop for RemoveOnDrop {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// A fresh private directory under the system's temporary directory.
-fn tempdir() -> Result<PathBuf, StoreError> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    let path = std::env::temp_dir().join(format!(
-        "acyclic-store-{}-{nanos}-{}",
+    let scratch = std::env::temp_dir().join(format!(
+        "acyclic-listing-{}-{nanos}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::create_dir(&path)
-        .map_err(|e| StoreError::Git(format!("can't create {}: {e}", path.display())))?;
-    Ok(path)
+    let _cleanup = RemoveOnDrop(scratch.clone());
+    gix::init_bare(&scratch).map_err(failed)?;
+    let options = gix::open::Options::default()
+        .ignore_repository_environment(true)
+        .cli_overrides(["gitoxide.core.nativeLocalTransport=true"]);
+    let repo = gix::open_opts(&scratch, options).map_err(failed)?;
+    Git::new(base).list_remote_with(&repo, remote, patterns)
 }

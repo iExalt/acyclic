@@ -6,6 +6,10 @@ readme = "README.md"
 license.workspace = true
 
 [dependencies]
+gix = { git = "https://github.com/iExalt/gitoxide", rev = "8444049f7163e5fcf958526e4ab4a1f6785dbf31", default-features = false, features = [
+  "sha1", "sha256", "reftable", "zlib-sirocco", "revision", "parallel", "hook", "maintenance",
+  "blocking-network-client", "blocking-http-transport-reqwest-rust-tls-ring", "receive", "upload",
+] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

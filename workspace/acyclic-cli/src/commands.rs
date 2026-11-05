@@ -1152,14 +1152,12 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
             "the tracker path is inside another Git repository",
         ));
     }
-    let git = |args: &[&str]| store::git_at(path).args(args).env("LC_ALL", "C").output();
-    let is_repo =
-        path.exists() && git(&["rev-parse", "--git-dir"]).is_ok_and(|out| out.status.success());
-    let configured = is_repo
-        .then(|| git(&["config", "--get", store::REPLICA_CONFIG]).ok())
-        .flatten()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    let is_repo = store::setup::is_repository(path);
+    let configured = if is_repo {
+        store::setup::config_value(path, store::REPLICA_CONFIG).ok().flatten()
+    } else {
+        None
+    };
     if let Some(existing) = &configured
         && existing != replica
     {
@@ -1168,11 +1166,8 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
             format!("this clone is already replica {existing}"),
         ));
     }
-    let origin = is_repo
-        .then(|| git(&["remote", "get-url", store::REMOTE]).ok())
-        .flatten()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    let origin =
+        if is_repo { store::setup::remote_url(path, store::REMOTE).ok().flatten() } else { None };
     let effective_remote = remote.or(origin.as_deref());
     let is_same_clone =
         configured.as_deref() == Some(replica) && effective_remote == origin.as_deref();
@@ -1191,7 +1186,10 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
     if is_repo {
         match configured {
             Some(existing) if existing == replica => {
-                let changed = remote.map(|url| set_origin(&git, url)).transpose()?.unwrap_or(false);
+                let changed = remote
+                    .map(|url| store::setup::set_remote_url(path, store::REMOTE, url))
+                    .transpose()?
+                    .unwrap_or(false);
                 return Ok(
                     json!({"path": path, "replica": replica, "created": false, "changed": changed}),
                 );
@@ -1208,19 +1206,11 @@ fn init(path: &Path, replica: &str, remote: Option<&str>) -> Result<Json, CliErr
         std::fs::create_dir_all(path).map_err(|e| {
             CliError::new("config", exit::CONFIG, format!("can't create {}: {e}", path.display()))
         })?;
-        let out =
-            git(&["init", "-q"]).map_err(|e| CliError::new("git", exit::STORE, e.to_string()))?;
-        if !out.status.success() {
-            return Err(CliError::new(
-                "git",
-                exit::STORE,
-                String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-            ));
-        }
+        store::setup::init_repository(path)?;
     }
     store::init_replica(path, &id)?;
     if let Some(url) = remote {
-        set_origin(&git, url)?;
+        store::setup::set_remote_url(path, store::REMOTE, url)?;
     }
     Ok(json!({"path": path, "replica": replica, "created": !is_repo, "changed": true}))
 }
@@ -1244,26 +1234,9 @@ fn remote_has_replica(path: &Path, remote: &str, replica: &ReplicaId) -> Result<
         .ok_or_else(|| CliError::new("config", exit::CONFIG, "can't resolve tracker path"))?;
     let root = std::fs::canonicalize(root)
         .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?;
-    let output = store::git_at(&root)
-        .args(["ls-remote", "--refs", "--", &remote, &reference])
-        .env("LC_ALL", "C")
-        .output()
-        .map_err(|e| {
-            CliError::new("git", exit::STORE, format!("can't check remote state refs: {e}"))
-        })?;
-    if !output.status.success() {
-        return Err(CliError::new(
-            "git",
-            exit::STORE,
-            format!(
-                "can't check remote state refs: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .any(|line| line.split_whitespace().nth(1) == Some(reference.as_str())))
+    store::setup::remote_has_ref(&root, &remote, &reference).map_err(|e| {
+        CliError::new("git", exit::STORE, format!("can't check remote state refs: {e}"))
+    })
 }
 
 /// The clone path's absolute location, resolving existing symlinks while allowing a not-yet-created suffix.
@@ -1329,46 +1302,12 @@ fn nested_in_repository(path: &Path) -> Result<bool, CliError> {
                 .strip_prefix(existing)
                 .map_err(|e| CliError::new("config", exit::CONFIG, e.to_string()))?,
         );
-    for args in [["rev-parse", "--show-toplevel"], ["rev-parse", "--absolute-git-dir"]] {
-        let result = store::git_at(existing)
-            .args(args)
-            .env("LC_ALL", "C")
-            .output()
-            .map_err(|e| CliError::new("git", exit::STORE, e.to_string()))?;
-        if !result.status.success() {
-            continue;
-        }
-        let root = PathBuf::from(String::from_utf8_lossy(&result.stdout).trim());
-        if let Ok(root) = std::fs::canonicalize(root) {
-            return Ok(destination.starts_with(&root) && destination != root);
-        }
+    if let Some(root) = store::setup::enclosing_repository(existing)
+        && let Ok(root) = std::fs::canonicalize(root)
+    {
+        return Ok(destination.starts_with(&root) && destination != root);
     }
     Ok(false)
-}
-
-/// Points the clone's `origin` at `url`, adding it when missing; whether that changed anything.
-fn set_origin(
-    git: &impl Fn(&[&str]) -> std::io::Result<std::process::Output>,
-    url: &str,
-) -> Result<bool, CliError> {
-    let current = git(&["remote", "get-url", store::REMOTE])
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
-    let args = match current {
-        Some(current) if current == url => return Ok(false),
-        Some(_) => ["remote", "set-url", store::REMOTE, url],
-        None => ["remote", "add", store::REMOTE, url],
-    };
-    let out = git(&args).map_err(|e| CliError::new("git", exit::STORE, e.to_string()))?;
-    if !out.status.success() {
-        return Err(CliError::new(
-            "git",
-            exit::STORE,
-            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        ));
-    }
-    Ok(true)
 }
 
 /// An import's result: what it changed, in counts and field by field, and the threads items joined, as

@@ -342,7 +342,7 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
     std::fs::write(
         &hook,
         format!(
-            "#!/bin/sh\nlines=$(cat | tr '\\n' '|')\necho \"$1 $lines\" >> '{}'\n",
+            "#!/bin/sh\nlines=''\nwhile read -r old new name; do lines=\"$lines$name|\"; done\necho \"$1 $lines\" >> '{}'\n",
             log.display()
         ),
     )
@@ -367,8 +367,12 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
 
 /// No production code names `git` or starts a process, except by exact line: the stable error code that says Git
 /// failed, which callers match on. The tests, which use Git as an oracle, and the maintainers' own scripts are exempt.
-const ALLOWED: [&str; 3] =
-    ["CliError::new(\"git\", exit::STORE,", "Self::new(\"git\", exit::STORE,", "\"git\","];
+const ALLOWED: [&str; 4] = [
+    "CliError::new(\"git\", exit::STORE,",
+    "Self::new(\"git\", exit::STORE,",
+    "StoreError::Git(_) => Self::new(\"git\", exit::STORE,",
+    "\"git\",",
+];
 
 #[test]
 fn no_production_code_runs_git() {

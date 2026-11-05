@@ -230,7 +230,19 @@ fn crash_at(point: &str) {
         .unwrap();
     assert!(!status.success(), "the child aborted");
     assert_eq!(refs(), before, "neither the state ref nor the log ref moved");
-    // git aborts an unfinished transaction when its input closes, so no lock is left and the next batch succeeds.
+    // The transaction ran in the dead process, as one of git does when it is killed, so its locks stay until they are
+    // deleted. The next batch says so, and moves nothing.
+    let key = item("a1");
+    let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
+        replica.write(&key, "f", "actor/user", at, Some(json!("after"))).map(|_| ())
+    });
+    let Err(BatchError::Store(StoreError::Locked { path: lock, .. })) = result else {
+        panic!("expected the dead process's lock to be reported, got {result:?}");
+    };
+    assert!(lock.starts_with(path.join(".git/refs/heads")), "{}", lock.display());
+    for lock in ["state/mac.lock", "log/mac/2026-10/0001.lock"] {
+        let _ = std::fs::remove_file(path.join(".git/refs/heads").join(lock));
+    }
     write(&tracker, "a1", "f", json!("after"));
     let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_/15.jsonl");
     assert_eq!(events.len(), 2, "the crashed batch left no event");
