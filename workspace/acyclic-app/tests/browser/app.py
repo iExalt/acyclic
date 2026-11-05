@@ -28,12 +28,13 @@ import tempfile
 import threading
 import time
 from collections import Counter
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import pairwise
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from playwright.sync_api import Locator, sync_playwright
+from playwright.sync_api import Locator, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -82,6 +83,29 @@ LARGE_LIMIT_MS = 60_000
 BUDGET_S, LIMIT_S = 60, 120
 # Each timed step's name and seconds, for the run's summary.
 TIMES = []
+# Details are included in the whole run and may overlap the named steps; never add them to TIMES.
+DETAILS = []
+
+
+@contextmanager
+def detail(label):
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        DETAILS.append((label, time.monotonic() - start))
+
+
+_screenshot = Page.screenshot
+
+
+def _capture_time(self, *args, **kwargs):
+    # Capture wall time includes rendering, transport and writing the original image, not just encoding it.
+    with detail(f"capture {Path(kwargs.get('path') or 'unnamed').name}"):
+        return _screenshot(self, *args, **kwargs)
+
+
+Page.screenshot = _capture_time
 
 
 def timed(step):
@@ -206,14 +230,15 @@ def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
     # A seed whose threads come in many waves with only small cycles among them, so arrows skip waves.
-    data = json.loads(
-        subprocess.run(
-            [FIXTURES, "--items", str(items), "--seed", "3"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    )
+    with detail(f"tracker {items}: generate"):
+        data = json.loads(
+            subprocess.run(
+                [FIXTURES, "--items", str(items), "--seed", "3"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
     archive_roots = [item["id"] for item in data["items"] if item.get("archived")]
     assert archive_roots, f"the {items}-item fixture has no archived subtree"
     bootstrap = json.loads(json.dumps(data))
@@ -227,8 +252,10 @@ def tracker(directory, env, items, remote=None):
     archive_at = time.time_ns() // 1_000_000
     done_at = archive_at - 31 * 24 * 60 * 60 * 1000
     env["ACYCLIC_NOW"] = str(done_at)
-    run(env, "import", str(bootstrap_path))
-    seeded = Plan(env)
+    with detail(f"tracker {items}: bootstrap import"):
+        run(env, "import", str(bootstrap_path))
+    with detail(f"tracker {items}: bootstrap read"):
+        seeded = Plan(env)
 
     archive_items = set()
     for root in archive_roots:
@@ -275,14 +302,17 @@ def tracker(directory, env, items, remote=None):
         item["archived"] = False
     base_path = directory / f"plan-{items}-base.json"
     base_path.write_text(json.dumps(base))
-    run(env, "import", str(base_path))
+    with detail(f"tracker {items}: base import"):
+        run(env, "import", str(base_path))
 
     env["ACYCLIC_NOW"] = str(archive_at)
-    run(env, "import", str(plan))
+    with detail(f"tracker {items}: archive import"):
+        run(env, "import", str(plan))
     env.pop("ACYCLIC_NOW", None)
     if remote is not None:
         run(env, "sync")
-    result = Plan(env)
+    with detail(f"tracker {items}: final read"):
+        result = Plan(env)
     assert all(result.items[id]["done_at"] == rows[id]["done_at"] for id in archive_items), (
         "archiving must preserve the done time beyond the 30-day grace"
     )
@@ -3428,6 +3458,18 @@ def report(took, failures):
         steps[label] += seconds
     rows = steps.most_common()
     print(f"took {took:.1f} s; slowest: " + ", ".join(f"{label} {s:.1f} s" for label, s in rows[:5]))
+    print("All step durations:")
+    for label, seconds in rows:
+        print(f"  {label}: {seconds:.3f} s")
+    details, counts = Counter(), Counter()
+    for label, seconds in DETAILS:
+        details[label] += seconds
+        counts[label] += 1
+    captures = [entry for entry in DETAILS if entry[0].startswith("capture ")]
+    print(f"Capture subset: {len(captures)} calls, {sum(seconds for _, seconds in captures):.3f} s")
+    print("Detail durations (included in the whole run; overlap steps, so are not additive):")
+    for label, seconds in details.most_common():
+        print(f"  {label}: {seconds:.3f} s ({counts[label]} calls)")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a") as out:
             out.write(f"### The app's journeys: {took:.1f} s (budget {BUDGET_S} s, limit {LIMIT_S} s)\n\n")
@@ -3650,6 +3692,7 @@ def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
     began = time.monotonic()
+    print(f"Journeys optimization override: {os.environ.get('CARGO_PROFILE_JOURNEYS_OPT_LEVEL', 'unset (Cargo config)')}")
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as playwright:
         directory = Path(temp)
         servers = []
@@ -3678,6 +3721,7 @@ def main():
             servers.append(server)
             return plan, server_origin(server), env, remote
 
+        @timed
         def serve_shrink():
             home = directory / "home-shrink"
             home.mkdir()
@@ -3709,6 +3753,7 @@ def main():
             servers.append(server)
             return server_origin(server), env, project, other, chain
 
+        @timed
         def serve_labels():
             home = directory / "home-labels"
             home.mkdir()
@@ -3759,6 +3804,7 @@ def main():
         try:
             plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
+            print(f"Chromium default headless: {chromium.version}")
             label_link, label_ids, label_titles = serve_labels()
             labels_journey(chromium, label_link, label_ids, label_titles)
             hint = None
@@ -3811,6 +3857,7 @@ def main():
                 context.close()
             # The full build supports push delivery; the journey records display calls before sending a push.
             notifying = playwright.chromium.launch(channel="chromium")
+            print(f"Chromium full headless: {notifying.version}")
             context, page, origin, errors = open_app(
                 notifying, VIEWS["phone"], link, failures, "notifying phone"
             )
@@ -3822,6 +3869,7 @@ def main():
             context.close()
             notifying.close()
             webkit = playwright.webkit.launch()
+            print(f"WebKit headless: {webkit.version}")
             context, page, origin, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )
