@@ -9,6 +9,18 @@ export interface Box {
   y2: number;
 }
 
+export interface RevealIntent {
+  id: string;
+  centered: boolean;
+  picked: boolean;
+}
+
+/** How a selection should be brought into view once its prior-frame purpose is known. */
+export function focusReveal(focus: { id: string; pin: string | null }, preserveFrame: boolean): RevealIntent {
+  const picked = focus.pin === null && !preserveFrame;
+  return { id: focus.id, centered: picked, picked };
+}
+
 /**
  * The pan, in screen pixels, that brings `node` inside `open` with `margin` to spare: none if it is already in. The
  * least that shows it, for a node tapped, which the eye is already on; or, `centred`, to the middle of `open`, for one
@@ -25,8 +37,8 @@ export function reveal(node: Box, open: Box, margin = 8, centred = false): { x: 
     return 0;
   };
   const least = { x: along(node.x1, node.x2, open.x1, open.x2), y: along(node.y1, node.y2, open.y1, open.y2) };
-  if (!centred || (least.x === 0 && least.y === 0)) return least;
-  // Once it moves at all, to the middle both ways, rather than along one to an edge.
+  if (!centred) return least;
+  // A requested centre stays central even when the node was already in view.
   const middle = (start: number, end: number, from: number, to: number) =>
     big(start, end, from, to) ? from + margin - start : (from + to) / 2 - (start + end) / 2;
   return { x: middle(node.x1, node.x2, open.x1, open.x2), y: middle(node.y1, node.y2, open.y1, open.y2) };

@@ -20,12 +20,14 @@ import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, vis
 import {
   firstView,
   fitPlan,
+  focusReveal,
   frame,
   framesAll,
   headed,
   nearest,
   newlyCovered,
   READABLE,
+  type RevealIntent,
   reveal,
   startOf,
   uncovered,
@@ -41,8 +43,6 @@ const MAX_ZOOM = 2;
 const FIRST_ZOOM = 1;
 /** What the pointer shows the links of: a tile, or a collapsed box, which holds its tiles' links. */
 const HOVERABLE = "node.leaf, node.collapsed";
-type RevealIntent = { id: string; centered: boolean; picked: boolean };
-
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
 const fontLoaded: Promise<unknown> =
   typeof document === "undefined" || !("fonts" in document)
@@ -248,6 +248,7 @@ export default function PlanMap({
       setToggles((was) => expandTo(model, focus.id, was));
       return;
     }
+    const intent = focusReveal(focus, preserveFrame);
     const drawn = preserveFrame
       ? was === null
         ? undefined
@@ -263,12 +264,11 @@ export default function PlanMap({
     if (next === toggles && model === drawnModel.current) {
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
-      const intent = { id: focus.id, centered: !preserveFrame, picked: !preserveFrame && focus.pin === null };
       shown.current = intent;
       tryShow();
       return;
     }
-    shown.current = { id: focus.id, centered: !preserveFrame, picked: !preserveFrame && focus.pin === null };
+    shown.current = intent;
     if (host.current !== null) host.current.dataset.state = "laying-out";
     setToggles(next);
   }, [focus]);
@@ -478,7 +478,15 @@ export default function PlanMap({
     const request = shown.current;
     const core = cy.current;
     const element = host.current;
-    if (request === null || core === null || element === null || !sceneIsApplied()) return false;
+    if (request === null || core === null || element === null) return false;
+    if (!modelNow.current.items.has(request.id)) {
+      if (shown.current === request) {
+        shown.current = null;
+        anchor.current = null;
+      }
+      return false;
+    }
+    if (!sceneIsApplied()) return false;
     if (selectedNow.current !== request.id) {
       if (shown.current === request) {
         shown.current = null;
@@ -509,7 +517,8 @@ export default function PlanMap({
         return false;
       }
     }
-    if (revealIn(core, element, request.id, request.centered, request.picked) === null) return false;
+    const revealed = revealIn(core, element, request.id, request.centered, request.picked);
+    if (revealed === null || revealed === undefined) return false;
     if (shown.current === request) shown.current = null;
     return true;
   }
