@@ -246,7 +246,7 @@ fn a_lone_list_is_its_table_and_notes_keep_their_column() {
 
 #[test]
 fn every_readiness_reads_as_a_phrase() {
-    use acyclic_core::ready::{Status, ThreadStatus, Wait};
+    use acyclic_core::ready::{Readiness, ThreadReadiness, Wait};
     let phrase = |status: Json| readiness(status.as_object().unwrap());
     let s = |text: &str| text.to_owned();
     let waiting = [
@@ -255,44 +255,44 @@ fn every_readiness_reads_as_a_phrase() {
         (s("c"), Wait::Unverified { repository: s("r"), reason: s("no clone") }),
     ];
     let items: Vec<(Json, &str)> = vec![
-        (json!(Status::Ready), "ready"),
+        (json!(Readiness::Ready), "ready"),
         (
-            json!(Status::Blocked { waiting: waiting.into_iter().collect() }),
+            json!(Readiness::Blocked { waiting: waiting.into_iter().collect() }),
             "blocked by a (not done), b (in review), c (merge unverified: no clone)",
         ),
-        (json!(Status::Unthreaded), "unthreaded"),
-        (json!(Status::Claimed { holder: s("session/s") }), "claimed by session/s"),
+        (json!(Readiness::Unthreaded), "unthreaded"),
+        (json!(Readiness::Claimed { holder: s("session/s") }), "claimed by session/s"),
         (
-            json!(Status::Contested { holders: vec![s("session/1"), s("session/2")] }),
+            json!(Readiness::Contested { holders: vec![s("session/1"), s("session/2")] }),
             "contested by session/1, session/2",
         ),
-        (json!(Status::InCycle), "in a cycle"),
+        (json!(Readiness::InCycle), "in a cycle"),
         (
-            json!(Status::Conflicted { fields: vec![s("state"), s("thread")] }),
+            json!(Readiness::Conflicted { fields: vec![s("state"), s("thread")] }),
             "conflicted: state, thread",
         ),
-        (json!(Status::Parent), "parent"),
-        (json!(Status::Parked), "parked"),
-        (json!(Status::Done), "done"),
-        (json!(Status::InReview), "in review"),
+        (json!(Readiness::Parent), "parent"),
+        (json!(Readiness::Parked), "parked"),
+        (json!(Readiness::Done), "done"),
+        (json!(Readiness::InReview), "in review"),
         (
-            json!(Status::Unverified { repository: s("r"), reason: s("no clone") }),
+            json!(Readiness::Unverified { repository: s("r"), reason: s("no clone") }),
             "done, merge unverified: no clone (r)",
         ),
-        (json!(Status::Archived), "archived"),
-        (json!(ThreadStatus::Missing), "missing"),
-        (json!(ThreadStatus::Ready { items: vec![s("a"), s("b")] }), "ready: a, b"),
-        (json!(ThreadStatus::NothingReady), "nothing ready"),
+        (json!(Readiness::Archived), "archived"),
+        (json!(ThreadReadiness::Missing), "missing"),
+        (json!(ThreadReadiness::Ready { items: vec![s("a"), s("b")] }), "ready: a, b"),
+        (json!(ThreadReadiness::NothingReady), "nothing ready"),
         (
-            json!(ThreadStatus::Claimed { holder: s("session/s"), items: vec![s("a")] }),
+            json!(ThreadReadiness::Claimed { holder: s("session/s"), items: vec![s("a")] }),
             "claimed by session/s; ready: a",
         ),
         (
-            json!(ThreadStatus::Claimed { holder: s("session/s"), items: vec![] }),
+            json!(ThreadReadiness::Claimed { holder: s("session/s"), items: vec![] }),
             "claimed by session/s",
         ),
         (
-            json!(ThreadStatus::Contested {
+            json!(ThreadReadiness::Contested {
                 holders: vec![s("session/1"), s("session/2")],
                 items: vec![s("a")]
             }),

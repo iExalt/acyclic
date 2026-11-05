@@ -29,7 +29,7 @@ fn replica(name: &str) -> Replica {
 
 fn list(r: &Replica) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = Readiness::new(&r.state, &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &Unmapped);
     needs_you(&r.state, &model, &readiness, NOW).unwrap()
 }
 
@@ -258,7 +258,7 @@ fn apart(r: &mut Replica, key: &Key, field: &str, mine: &Json, theirs: &Json) {
 
 fn kept(r: &Replica, entity: &str, id: &str, field: &str) -> Vec<(Json, Keep)> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = Readiness::new(&r.state, &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &Unmapped);
     keeps(&r.state, &model, &readiness, (entity, id, field), user(NOW))
         .unwrap()
         .into_iter()

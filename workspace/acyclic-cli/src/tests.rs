@@ -381,6 +381,38 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
         assert_eq!(refused(json!({"id": {"count": count}})), Err("usage"), "{count}");
     }
     assert_eq!(refused(json!({"id": {}})), Ok(()));
+    for state in ["backlog", "parked"] {
+        assert!(
+            serde_json::from_value::<args::Command>(json!({
+                "item": {"add": {"title": "T", "state": state}}
+            }))
+            .is_ok(),
+            "{state}"
+        );
+        assert!(
+            serde_json::from_value::<args::Command>(json!({
+                "item": {"edit": {"item": "a", "state": state}}
+            }))
+            .is_ok(),
+            "{state}"
+        );
+    }
+    for state in ["done", "in-progress", "unknown"] {
+        assert!(
+            serde_json::from_value::<args::Command>(json!({
+                "item": {"add": {"title": "T", "state": state}}
+            }))
+            .is_err(),
+            "{state}"
+        );
+        assert!(
+            serde_json::from_value::<args::Command>(json!({
+                "item": {"edit": {"item": "a", "state": state}}
+            }))
+            .is_err(),
+            "{state}"
+        );
+    }
     // Unknown fields and the server's own command are refused when deserializing.
     assert!(
         serde_json::from_value::<args::Command>(

@@ -2,7 +2,7 @@ use crate::archive;
 use crate::claim;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_state};
 use crate::needs::{Entry, needs_you};
-use crate::ready::{Ancestry, Readiness};
+use crate::ready::{Ancestry, ReadinessEvaluator};
 use crate::schema::kind;
 use crate::scope::USER;
 use crate::scope::{ScopeEdit, edit};
@@ -133,7 +133,7 @@ impl Ancestry for Unmapped {
 /// What a reader sees of `r`: its needs, with every other reader run on it to show none of them fails.
 fn needs_of(r: &Replica) -> Vec<Entry> {
     let model = Model::read(r.state()).unwrap();
-    let readiness = Readiness::new(r.state(), &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(r.state(), &model, NOW, &Unmapped);
     let _ = readiness.ready(false, "session/mac").unwrap();
     for id in model.items.keys() {
         let _ = readiness.of(id).unwrap();

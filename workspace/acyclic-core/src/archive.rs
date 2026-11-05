@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::model::{self, By, ItemState, Model, Reopened, Value, WriteError};
-use crate::ready::{Ancestry, Readiness, Status};
+use crate::ready::{Ancestry, Readiness, ReadinessEvaluator};
 use crate::schema::item as field;
 use crate::state::{Error, Millis, Replica};
 
@@ -69,7 +69,7 @@ impl std::fmt::Display for Reason {
 ///
 /// Fails when a claim can't be read.
 pub fn eligibility(
-    readiness: &Readiness<'_>,
+    readiness: &ReadinessEvaluator<'_>,
     model: &Model,
     root: &str,
     now: Millis,
@@ -91,7 +91,7 @@ pub fn eligibility(
             continue;
         }
         last_done = last_done.max(item.done_at.unwrap_or(Millis::MIN));
-        if !matches!(readiness.of(id)?, Some(Status::Done | Status::Archived)) {
+        if !matches!(readiness.of(id)?, Some(Readiness::Done | Readiness::Archived)) {
             reasons.insert(Reason::Unmerged { item: (*id).to_owned() });
         }
     }
@@ -174,7 +174,7 @@ pub fn archive(
     model::existing(&replica.state, root)?;
     let model = Model::read(&replica.state)?;
     let reasons = {
-        let readiness = Readiness::new(&replica.state, &model, by.at, ancestry);
+        let readiness = ReadinessEvaluator::new(&replica.state, &model, by.at, ancestry);
         eligibility(&readiness, &model, root, by.at)?
     };
     if !reasons.is_empty() {

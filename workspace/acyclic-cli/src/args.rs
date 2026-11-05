@@ -391,28 +391,36 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
     }
 }
 
-/// The states a command may set: not `done`, which `acyclic item done` sets with its evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[serde(rename_all = "kebab-case")]
-#[expect(
-    missing_docs,
-    reason = "clap prints a value's doc as its help, which switches help to its long layout"
-)]
-pub enum StateWord {
-    // Not started.
-    Backlog,
-    // Set aside on purpose.
-    Parked,
+/// A state a command may set: not `done`, which `acyclic item done` sets with its evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ItemState", into = "ItemState")]
+pub struct StateWord(ItemState);
+
+impl TryFrom<ItemState> for StateWord {
+    type Error = &'static str;
+
+    fn try_from(state: ItemState) -> Result<Self, Self::Error> {
+        match state {
+            ItemState::Backlog | ItemState::Parked => Ok(Self(state)),
+            ItemState::Done => Err("done must be set with `acyclic item done`"),
+        }
+    }
+}
+
+impl From<StateWord> for ItemState {
+    fn from(word: StateWord) -> Self {
+        word.0
+    }
 }
 
 impl StateWord {
+    const BACKLOG: Self = Self(ItemState::Backlog);
+    const PARKED: Self = Self(ItemState::Parked);
+
     /// The model's state for the word.
     #[must_use]
     pub fn state(self) -> ItemState {
-        match self {
-            Self::Backlog => ItemState::Backlog,
-            Self::Parked => ItemState::Parked,
-        }
+        self.0
     }
 }
 
@@ -436,7 +444,7 @@ pub enum ItemCommand {
         #[arg(long)]
         thread: Option<String>,
         /// Its state; backlog by default.
-        #[arg(short = 's', long, value_enum)]
+        #[arg(short = 's', long, value_parser = values(&[StateWord::BACKLOG, StateWord::PARKED]))]
         state: Option<StateWord>,
         /// Its notes.
         #[arg(long)]
@@ -523,7 +531,7 @@ pub struct ItemEdit {
     #[serde(default)]
     pub no_thread: bool,
     /// Set its state: not `done`, which `acyclic item done` sets.
-    #[arg(short = 's', long, value_enum)]
+    #[arg(short = 's', long, value_parser = values(&[StateWord::BACKLOG, StateWord::PARKED]))]
     pub state: Option<StateWord>,
     /// New notes.
     #[arg(long)]

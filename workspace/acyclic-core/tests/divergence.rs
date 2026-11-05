@@ -14,7 +14,7 @@ use std::process::Command;
 
 use acyclic_core::model::{self, By, Model};
 use acyclic_core::needs::{self, Entry};
-use acyclic_core::ready::{Ancestry, Readiness};
+use acyclic_core::ready::{Ancestry, ReadinessEvaluator};
 use acyclic_core::schema::kind;
 
 use acyclic_core::state::{Millis, Replica, ReplicaId, State};
@@ -136,7 +136,7 @@ impl Pair {
         let list = |tracker: &Tracker| {
             let (_, state) = tracker.load().unwrap();
             let model = Model::read(&state).unwrap();
-            let readiness = Readiness::new(&state, &model, now, &Unmapped);
+            let readiness = ReadinessEvaluator::new(&state, &model, now, &Unmapped);
             needs::needs_you(&state, &model, &readiness, now).unwrap()
         };
         let mac = list(&self.mac);
@@ -265,7 +265,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
     // Every walk up the tree ends: readiness and placing new work under the cycle.
     let model = Model::read(&state).unwrap();
-    let readiness = Readiness::new(&state, &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(&state, &model, NOW, &Unmapped);
     assert_eq!(
         readiness.thread_cycles().unwrap(),
         Vec::<std::collections::BTreeSet<String>>::new()

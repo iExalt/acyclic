@@ -41,11 +41,12 @@ fn roles_follow_children_and_the_top_level() {
     let m = model(&r);
     assert_eq!(m.role("top"), Role::Project);
     assert_eq!(m.role("plain"), Role::Group);
-    assert_eq!(m.role("leaf"), Role::Item);
-    // An unplaced leaf is an item, not a project.
+    assert_eq!(m.role("leaf"), Role::Leaf);
+    assert_eq!(json!(Role::Leaf), json!("item"));
+    // An unplaced leaf keeps its leaf role.
     let mut r = replica("b");
     items(&mut r, &["alone"]);
-    assert_eq!(model(&r).role("alone"), Role::Item);
+    assert_eq!(model(&r).role("alone"), Role::Leaf);
 }
 
 #[test]

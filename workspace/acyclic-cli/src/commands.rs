@@ -12,7 +12,7 @@ use acyclic_core::ids;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
-use acyclic_core::ready::{Ancestry, GitAncestry, Readiness};
+use acyclic_core::ready::{Ancestry, GitAncestry, ReadinessEvaluator};
 use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -121,12 +121,13 @@ fn run_with_observed(
                     "write expectations require a write command",
                 ));
             }
-            let result = Session::open(cli, env, named, expected, observed).and_then(|session| {
-                let data = session.dispatch(command)?;
-                let output_names = if named { session.names() } else { Names::new() };
-                let acknowledged = session.acknowledged.into_inner();
-                Ok((Output::Json(data), output_names, acknowledged))
-            });
+            let result =
+                CommandContext::open(cli, env, named, expected, observed).and_then(|context| {
+                    let data = context.dispatch(command)?;
+                    let output_names = if named { context.names() } else { Names::new() };
+                    let acknowledged = context.acknowledged.into_inner();
+                    Ok((Output::Json(data), output_names, acknowledged))
+                });
             result.map_err(|mut error| {
                 // Doctor doesn't point at itself.
                 if matches!(command, Command::Doctor)
@@ -153,20 +154,20 @@ fn names_of(model: &Model) -> Names {
     names
 }
 
-struct Session<'a> {
+struct CommandContext<'a> {
     tracker: Tracker,
     actor: String,
     now: Millis,
     env: &'a Env,
-    /// The names of the records in the state the command last read or wrote through [`Session::read`] or
-    /// [`Session::write`], kept only when pretty output asked for them.
+    /// The names of the records in the state the command last read or wrote through [`CommandContext::read`] or
+    /// [`CommandContext::write`], kept only when pretty output asked for them.
     named: Option<RefCell<Option<Names>>>,
     expected: Option<Vec<write::Expectation>>,
     observed: Option<BTreeSet<String>>,
     acknowledged: RefCell<Vec<String>>,
 }
 
-impl<'a> Session<'a> {
+impl<'a> CommandContext<'a> {
     fn open(
         cli: &Cli,
         env: &'a Env,
@@ -458,8 +459,8 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// The names [`Session::remember`] kept; else, for a command that neither read nor wrote through the model, such
-    /// as `sync` or `doctor`, those of the tracker as it is now, read through the tracker this session opened.
+    /// The names [`CommandContext::remember`] kept; else, for a command that neither read nor wrote through the model, such
+    /// as `sync` or `doctor`, those of the tracker as it is now, read through the tracker this command opened.
     fn names(&self) -> Names {
         if let Some(names) = self.named.as_ref().and_then(|named| named.borrow_mut().take()) {
             return names;
@@ -570,7 +571,7 @@ impl<'a> Session<'a> {
     ) -> Result<T, CliError> {
         let (state, model) = self.read()?;
         let ancestry = GitAncestry::new(context::clones(self.env)?);
-        let readiness = Readiness::new(&state, &model, self.now, &ancestry);
+        let readiness = ReadinessEvaluator::new(&state, &model, self.now, &ancestry);
         read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
     }
 
@@ -762,7 +763,7 @@ impl<'a> Session<'a> {
 fn notifying_entries(state: &State, now: Millis, env: &Env) -> Option<BTreeMap<String, String>> {
     let model = Model::read(state).ok()?;
     let ancestry = GitAncestry::new(context::clones(env).ok()?);
-    let readiness = Readiness::new(state, &model, now, &ancestry);
+    let readiness = ReadinessEvaluator::new(state, &model, now, &ancestry);
     let entries = needs::needs_you(state, &model, &readiness, now).ok()?;
     let mut current = BTreeMap::new();
     for entry in entries.into_iter().filter(needs::Entry::notifies) {
@@ -803,7 +804,9 @@ mod acknowledged_entries_tests {
     use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
     use serde_json::{Value, json};
 
-    use super::{GitAncestry, Model, Readiness, acknowledged_entries, needs, notifying_entries};
+    use super::{
+        GitAncestry, Model, ReadinessEvaluator, acknowledged_entries, needs, notifying_entries,
+    };
     use crate::Env;
 
     const NOW: Millis = 10_000;
@@ -866,7 +869,7 @@ mod acknowledged_entries_tests {
         let env = Env::default();
         let model = Model::read(state).unwrap();
         let ancestry = GitAncestry::new(crate::context::clones(&env).unwrap());
-        let readiness = Readiness::new(state, &model, NOW, &ancestry);
+        let readiness = ReadinessEvaluator::new(state, &model, NOW, &ancestry);
         let entries = needs::needs_you(state, &model, &readiness, NOW).unwrap();
         let view = crate::view::View { state, model: &model, readiness: &readiness, now: NOW };
         view.needs(&entries)

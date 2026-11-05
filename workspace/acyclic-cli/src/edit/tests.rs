@@ -32,7 +32,7 @@ fn an_unreadable_readiness_on_item_done_is_exit_six_not_a_not_ready_refusal() {
     assert_eq!(unreadable.details["hint"], DOCTOR_HINT);
 
     let not_ready = violation_error(
-        &Violation { change: None, at: None, rule: Rule::NotReady(Some(Status::Unthreaded)) },
+        &Violation { change: None, at: None, rule: Rule::NotReady(Some(Readiness::Unthreaded)) },
         None,
         &before,
     );
@@ -273,7 +273,7 @@ fn an_explicit_repository_add_reasserts_while_clearing_a_thread_remains_a_noop()
 #[test]
 fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() {
     use acyclic_core::needs::{Entry, needs_you};
-    use acyclic_core::ready::{Ancestry, Readiness};
+    use acyclic_core::ready::{Ancestry, ReadinessEvaluator};
     struct NoClones;
     impl Ancestry for NoClones {
         fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
@@ -282,7 +282,7 @@ fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() 
     }
     let dangling = |r: &Replica| -> Vec<Entry> {
         let model = Model::read(r.state()).unwrap();
-        let readiness = Readiness::new(r.state(), &model, 3, &NoClones);
+        let readiness = ReadinessEvaluator::new(r.state(), &model, 3, &NoClones);
         let needs = needs_you(r.state(), &model, &readiness, 3).unwrap();
         needs.into_iter().filter(|entry| matches!(entry, Entry::Dangling { .. })).collect()
     };
