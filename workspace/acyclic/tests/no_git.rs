@@ -22,7 +22,11 @@ const NOW: &str = "1792022400000";
 
 /// The whole calls to `git` that don't come from acyclic: the library's own probes for where Git's system
 /// configuration and programs are, which find no Git and carry on.
-const PROBES: [&str; 2] = ["git --exec-path", "git config -lz --show-origin"];
+const PROBES: [&str; 3] = [
+    "git --exec-path",
+    "git config -lz --show-origin --no-includes --name-only",
+    "git config -lz --show-origin --no-includes --show-scope --name-only",
+];
 
 /// Programs that Git, or a transport it speaks, would start. Each is as missing as `git` is.
 const PROGRAMS: [&str; 7] = [
@@ -337,7 +341,10 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
     std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
     std::fs::write(
         &hook,
-        format!("#!/bin/sh\nread -r line\necho \"$1 $line\" >> '{}'\n", log.display()),
+        format!(
+            "#!/bin/sh\nlines=$(cat | tr '\\n' '|')\necho \"$1 $lines\" >> '{}'\n",
+            log.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -347,7 +354,7 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
     let seen = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(
         seen.lines()
-            .any(|line| line.starts_with("committed ") && line.ends_with(" refs/heads/state/mac")),
+            .any(|line| line.starts_with("committed ") && line.contains(" refs/heads/state/mac|")),
         "the hook saw the state ref move: {seen:?}"
     );
     assert!(
@@ -358,8 +365,11 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
     tripwire.assert_no_git_was_called();
 }
 
-/// No production code starts or builds a `git` command. The tests, which use Git as an oracle, are the exception, and
-/// so are the maintainers' own scripts.
+/// No production code names `git` or starts a process, except by exact line: the stable error code that says Git
+/// failed, which callers match on. The tests, which use Git as an oracle, and the maintainers' own scripts are exempt.
+const ALLOWED: [&str; 3] =
+    ["CliError::new(\"git\", exit::STORE,", "Self::new(\"git\", exit::STORE,", "\"git\","];
+
 #[test]
 fn no_production_code_runs_git() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -379,15 +389,17 @@ fn no_production_code_runs_git() {
             } else if path.extension().is_some_and(|ext| ext == "rs") && name != "tests.rs" {
                 let text = std::fs::read_to_string(&path).unwrap();
                 for (n, line) in text.lines().enumerate() {
-                    if line.contains("\"git\"")
-                        || line.contains("git_at(")
+                    let line = line.trim();
+                    let spawns = line.contains("Command::new(")
                         || line.contains("process::Command")
-                    {
+                        || line.contains("git_at(");
+                    let names_git = line.contains("\"git\"")
+                        && !ALLOWED.iter().any(|allowed| line.starts_with(allowed));
+                    if spawns || names_git {
                         found.push(format!(
-                            "{}:{}: {}",
+                            "{}:{}: {line}",
                             path.strip_prefix(&root).unwrap().display(),
-                            n + 1,
-                            line.trim()
+                            n + 1
                         ));
                     }
                 }
