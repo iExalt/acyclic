@@ -1041,6 +1041,7 @@ def command_journey(page, view, origin, plan, name, failures):
     """The command menu finds an item by its title and opens it, the address saying so, and gives the focus back when
     dismissed; on a phone, from the Map, Back then closes the item and comes home. Wide, it goes to Needs you, whose
     entries take the page's width in columns, and a thread one names goes to the Map and closes back."""
+    search_selection_journey(page.context, origin, plan, name, failures)
     id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
     title = plan.items[id]["title"]
     to_map(page)
@@ -1115,6 +1116,150 @@ def command_journey(page, view, origin, plan, name, failures):
             failures.append(f"{name}: a thread picked in Needs you didn't open, or close back to Needs you")
         to_map(page)
     print(f"{name}: the command menu found {id} by its title and opened it")
+
+
+def search_selection_journey(context, origin, plan, name, failures):
+    """Search opens a deep item before its canvas node exists, and recentres one already visible but off centre."""
+    parents = set(plan.parent.values())
+    titles = Counter(row["title"] for row in plan.items.values())
+    leaves = sorted(
+        id
+        for id, row in plan.items.items()
+        if plan.shown(id, False)
+        and id not in parents
+        and plan.depth(id) > 1
+        and titles[row["title"]] == 1
+    )
+    if not leaves:
+        failures.append(f"{name}: fixture has no unique visible deep leaf for Search framing")
+        return
+    item = next((id for id in leaves if plan.items[id].get("thread") is None), leaves[0])
+    title = plan.items[item]["title"]
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def search_item():
+        page.locator("[data-action=search]").click()
+        menu = page.get_by_test_id("command-menu")
+        menu.wait_for(timeout=5_000)
+        menu.get_by_role("combobox").fill(title)
+        row = menu.locator(f"[data-command='item:{item}']")
+        row.wait_for(timeout=5_000)
+        row.click(timeout=5_000)
+        menu.wait_for(state="detached", timeout=5_000)
+
+    def opened_and_framed(phase):
+        page.wait_for_function(
+            "([id,title]) => { const m=document.querySelector('[data-testid=map]'), c=m?.cy, n=c?.getElementById(id);"
+            " const selected=c?.nodes('.selected').map(one=>one.id())??[], fit=document.querySelector('.map-fit');"
+            " const panel=m?.parentElement.querySelector('.inspector,.sheet');"
+            " if (!m || !n || n.empty() || !fit || selected.length!==1 || selected[0]!==id ||"
+            " new URLSearchParams(location.search).get('item')!==id ||"
+            " document.querySelector('[data-testid=inspector] h2')?.textContent?.trim()!==title || c.zoom()<.85) return false;"
+            " const mr=m.getBoundingClientRect(), fr=fit.getBoundingClientRect(), pr=panel?.getBoundingClientRect();"
+            " const shift=panel?new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42:0;"
+            " const sheet=pr && pr.width>=mr.width*.9;"
+            " const open={x1:0,y1:fr.bottom-mr.top+8,x2:pr&&!sheet?pr.left-mr.left:mr.width,"
+            " y2:pr&&sheet?pr.top-shift-mr.top:mr.height};"
+            " const b=n.renderedBoundingBox({includeLabels:false}), cx=(b.x1+b.x2-open.x1-open.x2)/2,"
+            " cy=(b.y1+b.y2-open.y1-open.y2)/2;"
+            " return b.x1>=open.x1+8 && b.y1>=open.y1+8 && b.x2<=open.x2-8 && b.y2<=open.y2-8 &&"
+            " Math.max(Math.abs(cx),Math.abs(cy))<=1; }",
+            arg=[item, title],
+            timeout=7_000,
+        )
+        fit = fit_occlusion(page, lit_only=False)
+        geometry = page.get_by_test_id("map").evaluate(
+            """(m,id) => { const n=m.cy.getElementById(id),b=n.renderedBoundingBox({includeLabels:false});
+              return {zoom:m.cy.zoom(),box:{x1:b.x1,y1:b.y1,x2:b.x2,y2:b.y2}}; }""",
+            item,
+        )
+        if fit is None:
+            failures.append(f"{name}: {phase} has no Fit control or open Map area")
+            return
+        open_box = fit["open"]
+        box = geometry["box"]
+        center_error = {
+            "x": (box["x1"] + box["x2"] - open_box["x1"] - open_box["x2"]) / 2,
+            "y": (box["y1"] + box["y2"] - open_box["y1"] - open_box["y2"]) / 2,
+        }
+        contained = (
+            box["x1"] >= open_box["x1"] + 8
+            and box["y1"] >= open_box["y1"] + 8
+            and box["x2"] <= open_box["x2"] - 8
+            and box["y2"] <= open_box["y2"] - 8
+        )
+        if geometry["zoom"] < 0.85 or not contained or max(map(abs, center_error.values())) > 1:
+            failures.append(
+                f"{name}: {phase} left Search target {item} at zoom {geometry['zoom']}, "
+                f"contained={contained}, center_error={center_error}, open={open_box}"
+            )
+
+    try:
+        page.goto(origin)
+        page.get_by_test_id("overview").wait_for(timeout=7_000)
+        missing_before = page.evaluate(
+            "id => { const c=document.querySelector('[data-testid=map]')?.cy;"
+            " return !c || c.getElementById(id).empty(); }",
+            item,
+        )
+        if not missing_before:
+            failures.append(f"{name}: deep Search fixture target {item} was already in the cold Map core")
+        search_item()
+        opened_and_framed("cold Overview Search")
+        page.screenshot(path=SHOTS / f"app-{name}-search-cold.png")
+
+        # Keep the current selected target fully inside the actual open area, but away from its centre.
+        page.get_by_test_id("map").evaluate("m => m.cy.zoom(0.32)")
+        fit = fit_occlusion(page, lit_only=False)
+        if fit is None:
+            failures.append(f"{name}: the already-visible Search setup has no open Map area")
+            return
+        open_box = fit["open"]
+        page.get_by_test_id("map").evaluate(
+            """(m,args) => { const [id,x1,x2,y1,y2]=args,n=m.cy.getElementById(id);
+              const b=n.renderedBoundingBox({includeLabels:false}), cx=(b.x1+b.x2)/2, cy=(b.y1+b.y2)/2;
+              const max=(x2-x1-(b.x2-b.x1))/2-12, offset=Math.min(60,max);
+              if(offset<24 || y2-y1-(b.y2-b.y1)<24) throw new Error('target cannot be placed visibly off-centre');
+              m.cy.panBy({x:(x1+x2)/2+offset-cx,y:(y1+y2)/2-cy}); }""",
+            [item, open_box["x1"], open_box["x2"], open_box["y1"], open_box["y2"]],
+        )
+        setup = page.get_by_test_id("map").evaluate(
+            """(m,id) => { const n=m.cy.getElementById(id),b=n.renderedBoundingBox({includeLabels:false});
+              return {zoom:m.cy.zoom(),box:{x1:b.x1,y1:b.y1,x2:b.x2,y2:b.y2}}; }""",
+            item,
+        )
+        setup_fit = fit_occlusion(page, lit_only=False)
+        setup_open = setup_fit["open"] if setup_fit is not None else None
+        if setup_open is None:
+            failures.append(f"{name}: lost the open Map area while setting the visible Search target")
+            return
+        setup_box = setup["box"]
+        setup_error = {
+            "x": (setup_box["x1"] + setup_box["x2"] - setup_open["x1"] - setup_open["x2"]) / 2,
+            "y": (setup_box["y1"] + setup_box["y2"] - setup_open["y1"] - setup_open["y2"]) / 2,
+        }
+        if (
+            abs(setup["zoom"] - 0.32) > 0.001
+            or setup_box["x1"] < setup_open["x1"] + 8
+            or setup_box["y1"] < setup_open["y1"] + 8
+            or setup_box["x2"] > setup_open["x2"] - 8
+            or setup_box["y2"] > setup_open["y2"] - 8
+            or abs(setup_error["x"]) < 24
+        ):
+            failures.append(f"{name}: already-visible Search precondition failed: {setup}, {setup_open}, {setup_error}")
+        page.screenshot(path=SHOTS / f"app-{name}-search-visible-before.png")
+        search_item()
+        opened_and_framed("already-visible Search")
+        page.screenshot(path=SHOTS / f"app-{name}-search-visible-after.png")
+    except Exception as error:
+        failures.append(f"{name}: Search selection framing failed: {error}")
+        page.screenshot(path=SHOTS / f"app-{name}-search-selection-failure.png")
+    finally:
+        if errors:
+            failures.append(f"{name}: Search selection page errors: {errors}")
+        page.close()
 
 
 @timed
