@@ -1,8 +1,8 @@
 // Where the user is in the app, and how each thing they do moves them: the view, the item and the thread open, what
 // those were opened from, and what is open over them. Each way of moving is one intent, which `navigate` turns into
 // the next place and the requests it makes of what is drawn (an item to bring into view, a thread to frame, an editor
-// to open). Then the layers the place stacks, which Escape and Back close one by one, the history entries that follow
-// them, and the address that names what is open. Pure, so the rules are tested without a browser.
+// to open). Then the layers the place stacks, which Escape and Back close one by one, what a history entry remembers
+// of the place, and the address that names what is open. Pure, so the rules are tested without a browser.
 
 import type { Edited, Mode, NewItem } from "./edits";
 import { HOME, type View } from "./Shell";
@@ -433,65 +433,6 @@ export const topLayer = (open: Open): Layer | null => openLayers(open)[0] ?? nul
 
 /** How many layers are open, each with its own history entry. */
 export const depth = (open: Open): number => openLayers(open).length;
-
-/**
- * The app's entries in the history: one per layer open, each holding how many layers it stands for, so Back lands on
- * one saying how many should stay open. `waiting` while a move back the app made itself hasn't landed yet: pushing
- * then would put the new entry where that move is about to leave.
- */
-export interface Entries {
-  pushed: number;
-  waiting: boolean;
-  /**
-   * Forward landed on an entry whose layers open again from its address. Once they have, the entry is relabelled with
-   * how many did, as one may stand for layers no address names, such as the command menu: going back from there would
-   * only meet Forward again.
-   */
-  restoring?: boolean;
-}
-
-export type HistoryAction =
-  | { kind: "push"; from: number; to: number }
-  | { kind: "back"; by: number }
-  /** Back, over `by` entries, closes as many layers from the top. */
-  | { kind: "close"; by: number }
-  /** Forward: open what the entry's address names. */
-  | { kind: "restore" }
-  /** The entry shown stands for `layers` layers. */
-  | { kind: "relabel"; layers: number }
-  | null;
-
-/** Brings the entries to `open` layers: pushing more as they open, going back over the extra as the app closes them. */
-export function follow(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
-  if (entries.restoring) return restored(entries, open);
-  if (entries.waiting || open === entries.pushed) return { entries, action: null };
-  if (open > entries.pushed)
-    return { entries: { pushed: open, waiting: false }, action: { kind: "push", from: entries.pushed, to: open } };
-  return { entries: { pushed: open, waiting: true }, action: { kind: "back", by: entries.pushed - open } };
-}
-
-/**
- * Where a move through the history landed, on an entry standing for `at` layers, with `open` layers open: the app's
- * own move back done, which may let a push it held wait go ahead; Back, which closes the layer on top; or Forward,
- * which opens again what the entry's address names.
- */
-export function arrived(entries: Entries, at: number, open: number): { entries: Entries; action: HistoryAction } {
-  if (entries.waiting) return follow({ ...entries, waiting: false }, open);
-  if (at > entries.pushed)
-    return { entries: { pushed: at, waiting: false, restoring: true }, action: { kind: "restore" } };
-  if (at === entries.pushed) return { entries, action: null };
-  return { entries: { pushed: at, waiting: false }, action: { kind: "close", by: entries.pushed - at } };
-}
-
-/**
- * The entries once what Forward restored is open, or once its address waits behind a form: the entry shown says how
- * many layers are open, never moving through the history, and a layer more than it counted takes an entry of its own.
- */
-export function restored(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
-  const settled = { pushed: open, waiting: false };
-  if (open > entries.pushed) return { entries: settled, action: { kind: "push", from: entries.pushed, to: open } };
-  return { entries: settled, action: open < entries.pushed ? { kind: "relabel", layers: open } : null };
-}
 
 // The app's address: what is open, in the query, so the address bar always says it and a link opens it again. Only
 // what a link should bring back is in it: the view (Needs you at an entry), an item and a thread. The add form, the

@@ -231,7 +231,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   panel carries it beside the title, ticking in place.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you among them, New item, the archived switch, Refresh,
-  and every thread, project and item by title or id, grouped, the best first: exact titles, then prefixes, then
+  threads by title, and projects and items by title or id, grouped, the best first: exact titles, then prefixes, then
   contiguous title phrases, then the remaining matches. While a move or link waits for its target, it finds the target
   instead. Choosing a result replaces Search with its destination in history; the same destination just closes Search,
   without adding a duplicate visit. It leaves what's under it as it is, never closes a form holding typing, and gives
