@@ -5,7 +5,9 @@ use std::process::Command;
 use std::sync::Arc;
 
 use acyclic_core::state::{Error as StateError, Key, Millis, ReplicaId, State};
-use acyclic_core::store::{self, BatchError, Hooks, Meta, Outcome, StoreError, Tracker};
+use acyclic_core::store::{
+    self, BatchError, Hooks, Maintenance, Meta, Outcome, StoreError, Tracker,
+};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -288,9 +290,72 @@ fn the_store_repacks_once_packs_pile_up() {
     assert!(packs <= 3, "each batch writes a pack, and gc folds them: {counts}");
 }
 
+/// The repack runs beside the command, not inside it: the batch that crosses the threshold returns with the packs
+/// still piled up, and they are folded soon after. A second repack isn't started while a run began lately.
+#[test]
+fn a_detached_repack_leaves_the_command_alone_and_follows_soon() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    let tracker = tracker.with_maintenance(Maintenance::Thread);
+    let packs = || -> u32 {
+        let counts = git(&path, &["count-objects", "-v"]);
+        counts.lines().find_map(|l| l.strip_prefix("packs:")).unwrap().trim().parse().unwrap()
+    };
+    // The batch that makes the 51st pack, the first past git's limit of 50, starts the repack and returns.
+    for n in 0..51 {
+        write(&tracker, "a1", "f", json!(n));
+    }
+    let marker = path.join(".git/acyclic/maintenance");
+    assert!(marker.exists() || packs() <= 3, "a run began, and is under way or done");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while packs() > 3 {
+        assert!(std::time::Instant::now() < deadline, "the packs were folded: {}", packs());
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    while marker.exists() {
+        assert!(std::time::Instant::now() < deadline, "the finished run cleared its marker");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    git(&path, &["fsck", "--strict", "--full"]);
+}
+
 #[test]
 fn a_crash_after_prepare_moves_nothing() {
     crash_at("after-prepare");
+}
+
+/// A linked worktree of the clone is the same tracker: its configuration, refs, cache and writer lock live in the common
+/// directory, so a batch from either sees the other's.
+#[test]
+fn a_linked_worktree_is_the_same_tracker() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    git(&path, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    let linked = dir.path().join("linked");
+    git(&path, &["worktree", "add", "-q", linked.to_str().unwrap()]);
+    let (main, _) = Tracker::open(&path).unwrap();
+    let (other, renamed) = Tracker::open(&linked).unwrap();
+    assert_eq!(renamed, None, "the replica id is in the shared configuration");
+    assert_eq!(other.replica(), main.replica());
+    write(&main, "a1", "f", json!(1));
+    write(&other, "a1", "g", json!(2));
+    assert_eq!(
+        other.local_dir().unwrap().canonicalize().unwrap_or_default(),
+        path.join(".git").canonicalize().unwrap().join("acyclic"),
+        "local files live in the common directory"
+    );
+    let (_, state) = main.load().unwrap();
+    assert!(
+        format!("{state:?}").contains('2') && format!("{state:?}").contains('1'),
+        "both worktrees' writes are in one state"
+    );
+    assert_eq!(git(&path, &["rev-list", "--count", "refs/heads/state/mac"]), "2");
+    assert_eq!(
+        git(&linked, &["rev-list", "--count", "refs/heads/state/mac"]),
+        "2",
+        "git sees the same refs"
+    );
 }
 
 #[test]

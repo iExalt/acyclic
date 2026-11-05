@@ -374,6 +374,13 @@ const ALLOWED: [&str; 4] = [
     "\"git\",",
 ];
 
+/// The lines by which the binary starts itself, not Git, to repack in the background after a command: the one process it
+/// ever starts. It runs `std::env::current_exe()` and nothing else.
+const SELF_SPAWN: [&str; 2] = [
+    "let mut child = std::process::Command::new(exe);",
+    "use std::os::unix::process::CommandExt as _;",
+];
+
 #[test]
 fn no_production_code_runs_git() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -394,9 +401,10 @@ fn no_production_code_runs_git() {
                 let text = std::fs::read_to_string(&path).unwrap();
                 for (n, line) in text.lines().enumerate() {
                     let line = line.trim();
-                    let spawns = line.contains("Command::new(")
+                    let spawns = (line.contains("Command::new(")
                         || line.contains("process::Command")
-                        || line.contains("git_at(");
+                        || line.contains("git_at("))
+                        && !SELF_SPAWN.contains(&line);
                     let names_git = line.contains("\"git\"")
                         && !ALLOWED.iter().any(|allowed| line.starts_with(allowed));
                     if spawns || names_git {

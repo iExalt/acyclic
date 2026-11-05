@@ -2,12 +2,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::OnceLock;
 
 use gix::refs::Target;
 use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
-use super::StoreError;
+use super::{Maintenance, StoreError};
 
 /// An error with its causes, as one line.
 pub(crate) fn describe(err: &(dyn std::error::Error + 'static)) -> String {
@@ -561,13 +562,102 @@ impl Git {
         file.commit().map_err(failed)
     }
 
-    /// Repacks when the store's thresholds are crossed, as `git gc --auto` does, here and now. Best effort.
-    pub(crate) fn auto_maintenance(&self) {
-        let Ok(repo) = self.handle() else { return };
-        let mut options = gix::maintenance::gc::Options::default();
-        options.auto = true;
-        let _ = repo.gc(options, &std::sync::atomic::AtomicBool::new(false));
+    /// Repacks when the store's thresholds are crossed, as `git gc --auto` does, in the way `how` says. Best effort.
+    pub(crate) fn auto_maintenance(&self, how: Maintenance) {
+        match how {
+            Maintenance::Inline => run_gc(&self.repo),
+            Maintenance::Thread => self.detached(|path| {
+                let path = path.to_owned();
+                std::thread::spawn(move || run_gc_and_clear_marker(&path));
+            }),
+            Maintenance::Process => self.detached(|path| {
+                let Ok(exe) = std::env::current_exe() else { return };
+                let mut child = std::process::Command::new(exe);
+                child
+                    .env(MAINTAIN_ENV, path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt as _;
+                    // Its own process group, so the terminal's signals for the command don't reach it.
+                    child.process_group(0);
+                }
+                let _ = child.spawn();
+            }),
+        }
     }
+
+    /// Starts `start` unless a run began lately: the marker file's age says a run is under way or failed, and either
+    /// way the next command shouldn't start another.
+    fn detached(&self, start: impl FnOnce(&Path)) {
+        let Ok(common) = self.common_dir() else { return };
+        let marker = common.join("acyclic").join("maintenance");
+        let lately = std::fs::metadata(&marker)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age < BACKOFF);
+        if lately {
+            return;
+        }
+        if let Some(dir) = marker.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::write(&marker, b"").is_ok() {
+            start(&self.repo);
+        }
+    }
+}
+
+/// How long after a detached run began another isn't started.
+const BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The longest a detached run goes on before it is told to stop.
+const BOUND: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The variable that makes the binary run the repack for the clone it names instead of its command.
+pub(crate) const MAINTAIN_ENV: &str = "ACYCLIC_MAINTAIN_STORE";
+
+/// Repacks the clone at `path` when git's thresholds are crossed, here and now. Best effort.
+fn run_gc(path: &Path) {
+    let git = Git::new(path);
+    let Ok(repo) = git.fresh_handle() else { return };
+    let mut options = gix::maintenance::gc::Options::default();
+    options.auto = true;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&stop);
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let finished = std::sync::Arc::clone(&done);
+    // A repack that goes on past its bound is told to stop, so a stuck one doesn't hold the clone for good.
+    let watchdog = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        while !finished.load(std::sync::atomic::Ordering::Relaxed) {
+            if started.elapsed() > BOUND {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+    let _ = repo.gc(options, &stop);
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = watchdog.join();
+}
+
+fn run_gc_and_clear_marker(path: &Path) {
+    run_gc(path);
+    if let Ok(common) = Git::new(path).common_dir() {
+        let _ = std::fs::remove_file(common.join("acyclic").join("maintenance"));
+    }
+}
+
+/// Runs the repack a parent asked for with [`MAINTAIN_ENV`], and says whether this process was started for that.
+pub(crate) fn maintenance_child() -> bool {
+    let Some(path) = std::env::var_os(MAINTAIN_ENV) else { return false };
+    run_gc_and_clear_marker(Path::new(&path));
+    true
 }
 
 /// A ref for [`Git::push`]: `new` is the id it ends at, or `None` to delete it; `lease` is the id the remote's copy
@@ -671,11 +761,10 @@ impl Git {
     }
 
     /// Fetches `refspecs` from `remote`, pruning the local refs that the specs map and the remote no longer has,
-    /// and following no tags.
+    /// and following the tags that point into what it receives, as `git fetch` does.
     pub(crate) fn fetch(&self, remote: &str, refspecs: &[String]) -> Result<(), StoreError> {
         let repo = self.fresh_handle()?;
-        let mut remote =
-            self.remote(&repo, remote)?.with_fetch_tags(gix::remote::fetch::Tags::None);
+        let mut remote = self.remote(&repo, remote)?;
         remote
             .replace_refspecs(refspecs.iter().map(String::as_str), gix::remote::Direction::Fetch)
             .map_err(failed)?;
@@ -893,3 +982,6 @@ pub(crate) fn list_remote_anywhere(
     let repo = gix::open_opts(&scratch, options).map_err(failed)?;
     Git::new(base).list_remote_with(&repo, remote, patterns)
 }
+
+#[cfg(test)]
+mod tests;

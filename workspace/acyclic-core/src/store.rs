@@ -258,6 +258,50 @@ pub struct Tracker {
     origin: bool,
     /// Whether every write ends with a push: `acyclic.pushAfterWrite` in the clone's git config.
     push_after_write: bool,
+    /// How the repack runs once it is due.
+    maintenance: Maintenance,
+}
+
+/// How the store repacks itself once git's thresholds are crossed. `git gc --auto` detached into the background and
+/// outlived the command; a repack inside the command would make it wait, once in dozens of writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Maintenance {
+    /// Repack before the command returns: simple and deterministic, but the command waits for it.
+    Inline,
+    /// Repack on a thread and go on, for a process that lives on, such as the server.
+    Thread,
+    /// Repack in a process of its own that outlives the command, for the command line. The binary must call
+    /// [`run_maintenance_child`] first thing in `main`; a run began less than 30 seconds ago keeps the next from starting.
+    Process,
+}
+
+static MAINTENANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn default_maintenance() -> Maintenance {
+    match MAINTENANCE.load(Ordering::Relaxed) {
+        1 => Maintenance::Thread,
+        2 => Maintenance::Process,
+        _ => Maintenance::Inline,
+    }
+}
+
+/// Sets how trackers opened from now on repack: the process's choice, made once at startup.
+pub fn set_maintenance(how: Maintenance) {
+    MAINTENANCE.store(
+        match how {
+            Maintenance::Inline => 0,
+            Maintenance::Thread => 1,
+            Maintenance::Process => 2,
+        },
+        Ordering::Relaxed,
+    );
+}
+
+/// Runs the repack that a parent started with [`Maintenance::Process`], when this process was started for it: call
+/// this first thing in `main` and return when it says so.
+#[must_use]
+pub fn run_maintenance_child() -> bool {
+    git::maintenance_child()
 }
 
 /// What a sync did.
@@ -489,6 +533,7 @@ impl Tracker {
             upkeep,
             origin,
             push_after_write,
+            maintenance: default_maintenance(),
         };
         if tip.is_some() {
             return Ok((tracker(git, id, false, tip), None));
@@ -508,6 +553,13 @@ impl Tracker {
         };
         init_replica(path, &fresh)?;
         Ok((tracker(git, fresh.clone(), true, None), Some(fresh)))
+    }
+
+    /// Chooses how this tracker repacks, instead of the process's choice.
+    #[must_use]
+    pub fn with_maintenance(mut self, how: Maintenance) -> Self {
+        self.maintenance = how;
+        self
     }
 
     /// This replica's id.
@@ -598,7 +650,7 @@ impl Tracker {
         });
         let Upkeep { loose: max_loose, packs: max_packs } = self.upkeep;
         if max_loose > 0 && (loose * 256 > max_loose || (max_packs > 0 && packs > max_packs)) {
-            self.git.auto_maintenance();
+            self.git.auto_maintenance(self.maintenance);
         }
     }
 
