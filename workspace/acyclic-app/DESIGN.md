@@ -62,8 +62,10 @@ two in step.
 
 ## Typography
 
-Overpass, variable, for the app and the Map's canvas. 15 px base; wide, the sidebar a step smaller, at 14 px.
-Sentence case. Tabular figures where counts are compared. Monospace only for ids.
+Overpass, variable, for the app and the Map's canvas. The Map measures and draws with one settled face: it waits for
+Overpass to load, and uses `system-ui, sans-serif` if Overpass is unavailable, so a later font load cannot change its
+label widths. 15 px base; wide, the sidebar a step smaller, at 14 px. Sentence case. Tabular figures where counts are
+compared. Monospace only for ids.
 
 A phone is set as compactly as Linear's and Slack's apps, in px on each element rather than a smaller base, which
 would shrink every size set in rem with it: the bar's view name 17 px at 650, the tab bar's names 11 px, the Overview's
@@ -120,8 +122,10 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Needs you's view** is a page over the Map, as the Overview is: wide, its entries stand in columns of at least 360
   px, as many as fit; on a phone, one column. (As a narrow pane on the right it left most of a
   desktop empty, and only the Overview made room for it.)
-- **Up next** lists the threads that can start now: not at work, with an item ready; Any time first, then by wave. A
-  wave all blocked has nothing to start. (The next wave,
+- **Up next** lists the threads that can start now: not at work, with an item ready; Any time first, then by wave. The
+  Open Threads link opens Threads. Any time means no threads to wait for or hold up, covering incoming and outgoing
+  waits.
+  A wave all blocked has nothing to start. (The next wave,
   listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
 
 ## Shapes
@@ -179,13 +183,15 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   width; Move, Reopen, Add inside, Waits for and Copy link in the ⋯ menu, each but Reopen and Copy link with
   its key. Links as rows cut to a line, the full title on hover, a section only when it holds one; a row's remove button
   shows on hover or with focus in the row, and always where there may be no hover. (Chosen by the user over one row of
-  quiet buttons and over today's layout unboxed, as the calmest.) While it edits, the form's State and Thread stand in
-  for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker names each
-  thread by its title alone, as text names a thread without a badge.
+  quiet buttons and over today's layout unboxed, as the calmest.) A project with no thread omits the Thread row; one
+  with a thread keeps its chip. Other items with no thread say None. While it edits, the form's State and Thread stand
+  in for the Status and Thread rows, which would only repeat them; Parent and Id stay. The form's thread picker names
+  each thread by its title alone, as text names a thread without a badge.
 - **A phone's bar** names the view alone, as a line under the name cost the bar its height.
-- **The ⋯ menu, on a phone,** is a list of plain rows, as Slack's is, 260 px wide: each switch a row, its name at the
-  start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme ruled
-  off, a muted caption over the value as a quiet row whose caret ends where the switches do; Refresh a row last.
+- **The ⋯ menu:** the bar and sidebar footer share plain settings rows, each switch's name at the start and switch at
+  the end, with the whole row as its target. Footer controls are at least 32 px with a fine pointer and at least 44 px
+  on touch; the bar keeps 44 px targets. On a phone the menu is 260 px wide. Long notification labels wrap within
+  their row. Theme stays a native select under a muted caption, and Refresh stays a button in its own ruled row.
 - **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px (14 px at
   650 on a phone), then what
   it names as rows, muted, at 14 px (13 px on a phone), regular and 32 px apart on touch, so the head leads and they
@@ -199,18 +205,19 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   and grouped unconfirmed merges start with a two-line heading and Show details; one tap reveals their unchanged
   explanation and records. Entries with decisions and single-record entries stay open. Opening an entry from the
   Overview or returning to one of its records expands it before restoring focus and scroll.
-- **Phone Threads tiles** use 14 px titles at 500 and 13 px details, with less padding and space between tiles. Their
-  project names, stage counts and dependency information stay available, and each tile keeps its own 44 px target.
+- **Threads tiles** use 14 px titles at 500 and 13 px details on a phone, with less padding and space between tiles.
+  Project names, stage counts and dependency information stay available, and each tile keeps its own 44 px target. A
+  project label matching the thread name after trimming whitespace and ignoring case is omitted; distinct names remain.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
   the pointer.
 - **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
   emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
-  at the field's end. A thread's row is its badge and name. An item's row says the project it
-  is in, not its id, which finds it but would only be plumbing under its title. A waiting move or link offers its
-  targets with the projects in their own group, first before anything is typed, never the item itself, nor, for a move,
-  where it is already or anything inside it.
+  at the field's end. A thread's row is its badge and name. An item's or target's context names its parent and root
+  project when they differ, and wraps in full; the title may still truncate. Context does not change result ranking or
+  dispatch. A waiting move or link offers its targets with the projects in their own group, first before anything is
+  typed, never the item itself, nor, for a move, where it is already or anything inside it.
 - **Lists:** the Overview's rows a finger's height, ruled apart, each opening what it names, a chevron at its end. Rows
   inside an entry or a panel, such as Needs you's items and a thread's Items, are text that opens what it names, with
   no chevron.
@@ -243,8 +250,10 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   than guessing browser history. A link to something gone says so; one to an archived item shows
   archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's
   panel carries it beside the title, ticking in place.
-- **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
-  Search) opens the command menu over everything: views, Needs you among them, New item, the archived switch, Refresh,
+- **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's visible Search… with accessible name
+  Search or jump to…; its optional keyboard hint does not change the row height; the phone bar's Search) opens the
+  command menu over everything: views, Needs you among them,
+  New item, the archived switch, Refresh,
   threads by title, and projects and items by title or id, grouped, the best first: exact titles, then prefixes, then
   contiguous title phrases, then the remaining matches. While a move or link waits for its target, it finds the target
   instead. Choosing a result replaces Search with its destination in history; the same destination just closes Search,
@@ -333,12 +342,15 @@ before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its title, then its
-  stage's icon at the end.
-- **A project tells where it stands.** A box's title leads with the stage icon of its work as a whole, as core tells it
-  (once all of it is finished, in review while any still is, else done; else in progress once work under it has started
-  and some of what is left isn't parked; else ready, else blocked, else parked, else needs a thread), after its chevron,
-  and is muted once done or held up, as an item's title is.
+- **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its full title, then its
+  stage icon and word. Stage words use the canonical vocabulary: Done, In review, In progress, Ready, Blocked, Parked
+  and Needs a thread.
+- **A project tells where it stands.** An open box's chevron and stage icon stay in the first 52 px strip; its full
+  title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
+  fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (once all of it is
+  finished, in review while any still is, else done; else in progress once work under it has started and some of what
+  is left isn't parked; else ready, else blocked, else parked, else needs a thread), and its title is muted once done
+  or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
@@ -398,9 +410,12 @@ before what went wrong.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past
   it, a pinch holds the zoom there about the fingers' midpoint and still follows the fingers, where Cytoscape on its
   own drops each step that would pass it, pan and all, so the plan stuck short of the floor and then jumped.
-- **Titles read whole.** An item's title takes up to three lines on its tile, cut short only past that; backticks,
-  which set code in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes
-  between the two, so it never runs through a title.
+- **Map labels fit their words.** Tiles are 200 px wide and at least 64 px high; their full titles wrap without a line
+  cap or ellipsis, followed by the stage word when one applies. Box labels wrap the full title and any stage word,
+  counts, hidden count or done-box note. An open box's header grows to fit those lines while its chevron and stage
+  glyph stay in the first strip, keeping the fold target stable. Backticks, which set code in the panels, are dropped
+  on the canvas. Tiles are drawn over every box, and a link across boxes between the two, so it never runs through a
+  title.
 
 ## Decision log
 

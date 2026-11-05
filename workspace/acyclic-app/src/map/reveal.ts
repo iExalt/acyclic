@@ -7,6 +7,7 @@ export interface Box {
   y1: number;
   x2: number;
   y2: number;
+  header?: number;
 }
 
 export interface RevealIntent {
@@ -165,7 +166,9 @@ export function headed(boxes: readonly Box[], holders: readonly Box[], strip: nu
     const holder = holders
       .filter((one) => around(box, one))
       .reduce<Box | null>((best, one) => (best === null || area(one) < area(best) ? one : best), null);
-    return holder === null ? [] : [{ x1: holder.x1, y1: holder.y1, x2: holder.x1, y2: holder.y1 + strip }];
+    return holder === null
+      ? []
+      : [{ x1: holder.x1, y1: holder.y1, x2: holder.x1, y2: holder.y1 + (holder.header ?? strip) }];
   });
   return [...boxes, ...titles];
 }

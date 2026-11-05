@@ -30,7 +30,7 @@ export interface Entry {
   key: string;
   group: Group;
   title: string;
-  /** A second, quieter line: an item's id and project. */
+  /** A second, quieter line: an item's parent and root project. */
   detail: string | null;
   /** Searched beside the title: an item's or project's id. */
   also: string;
@@ -124,7 +124,7 @@ export function entries(plan: Plan): Entry[] {
   );
   const projects: Entry[] = [];
   const items: Entry[] = [];
-  for (const { id, title, project, isProject } of listed(plan))
+  for (const { id, title, parent, project, isProject } of listed(plan))
     if (isProject)
       projects.push(
         entry({ key: `project:${id}`, group: "Projects", title, detail: null, also: id, run: { kind: "project", id } }),
@@ -135,7 +135,7 @@ export function entries(plan: Plan): Entry[] {
           key: `item:${id}`,
           group: "Items",
           title,
-          detail: where(project),
+          detail: where(project, parent),
           also: id,
           run: { kind: "item", id },
         }),
@@ -177,12 +177,12 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
     ...top,
     ...listed(plan)
       .filter(({ id }) => left(id))
-      .map(({ id, title, project, isProject }) =>
+      .map(({ id, title, parent: itemParent, project, isProject }) =>
         entry({
           key: `target:${id}`,
           group: isProject ? "Projects" : "Items",
           title,
-          detail: where(project),
+          detail: where(project, itemParent),
           also: id,
           run: { kind: "target", id },
         }),
@@ -190,16 +190,20 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
   ];
 }
 
-/** Where an item is; its id, which finds it too, would only be plumbing under its title. */
-const where = (project: string | null) => (project === null ? null : `in ${project}`);
+/** Where an item is; its IDs, which find it too, would only be plumbing under its title. */
+const where = (project: { id: string; title: string } | null, parent: { id: string; title: string } | null) =>
+  project === null
+    ? null
+    : parent !== null && parent.id !== project.id
+      ? `in ${parent.title} · ${project.title}`
+      : `in ${project.title}`;
 
 /**
- * Every item shown, with the title of the project it is in, and whether it is a project: a top-level item with
- * children.
+ * Every item shown, with its parent, root project and whether it is a project: a top-level item with children.
  */
 function listed({ model, showArchived }: Plan) {
   const shown = (id: string) => showArchived || !inArchived(model, id);
-  /** The title of the project an item is in, from its top-level ancestor; parents that loop end the walk. */
+  /** The root project an item is in, from its top-level ancestor; parents that loop end the walk. */
   const projectOf = (id: string) => {
     const seen = new Set([id]);
     let top = id;
@@ -208,17 +212,22 @@ function listed({ model, showArchived }: Plan) {
       top = up;
       up = model.items.get(up)?.parent ?? null;
     }
-    return top === id ? null : (model.items.get(top)?.title ?? null);
+    const project = model.items.get(top);
+    return top === id || project === undefined ? null : { id: top, title: project.title };
   };
   const roots = new Set(model.roots);
   return [...model.items.values()]
     .filter((item) => shown(item.id))
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      project: projectOf(item.id),
-      isProject: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
-    }));
+    .map((item) => {
+      const parent = item.parent === null ? null : (model.items.get(item.parent) ?? null);
+      return {
+        id: item.id,
+        title: item.title,
+        parent: parent === null ? null : { id: parent.id, title: parent.title },
+        project: projectOf(item.id),
+        isProject: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
+      };
+    });
 }
 
 /** Folded for matching: case and accents set aside, so "resume" finds "Résumé". */

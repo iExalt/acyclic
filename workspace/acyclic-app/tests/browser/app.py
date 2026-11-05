@@ -21,6 +21,7 @@ import inspect
 import json
 import os
 import re
+import select
 import subprocess
 import sys
 import tempfile
@@ -2793,7 +2794,7 @@ def guarded_undo_race(page, view, env, plan, name, failures, errors):
 @timed
 def failed_add_journey(page, errors, name, failures):
     """A form holding typing survives Escape and Back; a refused edit opens the editor again with what was typed, the
-    session's smoke test in the browser. What else a write, a read and an Undo come to is session.test.ts's."""
+    tracker's smoke test in the browser. What else a write, a read and an Undo come to is tracker.test.ts's."""
     refusal = json.dumps(
         {
             "ok": False,
@@ -3435,6 +3436,212 @@ def report(took, failures):
         print(f"::warning title=The app's journeys::took {took:.1f} s, over their {BUDGET_S} s budget")
 
 
+def server_origin(server):
+    """Reads the server's own listening receipt within a bounded startup deadline."""
+    deadline = time.monotonic() + 10
+    line = b""
+    while b"\n" not in line:
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([server.stdout], [], [], left)[0]:
+            raise TimeoutError(
+                "the fixture server did not report its listening address"
+            )
+        chunk = os.read(server.stdout.fileno(), 4096)
+        if not chunk:
+            raise AssertionError(
+                f"the fixture server exited before listening: {server.poll()}"
+            )
+        line += chunk
+    return f"http://{json.loads(line.splitlines()[0])['data']['listening']}/"
+
+
+@timed
+def labels_journey(browser, link, ids, titles):
+    """Measured labels fit their nodes; a failed font settles on the face that was measured."""
+    origin = link.rstrip("/")
+
+    def fresh(view, mode=None):
+        context = browser.new_context(**view)
+        blocked = []
+
+        def local_only(route):
+            if route.request.url.startswith(origin + "/"):
+                route.continue_()
+            else:
+                blocked.append(route.request.url)
+                route.abort()
+
+        context.route(
+            "**/*",
+            local_only,
+        )
+        page = context.new_page()
+        page.set_default_timeout(10_000)
+        errors, messages, fonts = [], [], []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on(
+            "console",
+            lambda message: (
+                messages.append({"text": message.text, "url": message.location.get("url", "")})
+                if message.type in ("error", "warning")
+                else None
+            ),
+        )
+        if mode is not None:
+
+            def font_route(route):
+                fonts.append(route)
+                if mode == "abort":
+                    route.abort()
+
+            context.route(re.compile(r"^" + re.escape(origin) + r"/[^?#]*\.woff2(?:\?[^#]*)?$"), font_route)
+        return context, page, errors, messages, fonts, blocked
+
+    def check_errors(errors, messages, fonts, blocked):
+        assert not errors, errors
+        assert not blocked, blocked
+        font_urls = {route.request.url for route in fonts}
+        unexpected = [
+            message
+            for message in messages
+            if not (message["url"] in font_urls and message["text"].startswith("Failed to load resource:"))
+        ]
+        assert not unexpected, unexpected
+
+    def read(page):
+        return page.get_by_test_id("map").evaluate(
+            r"""(m, ids) => {
+                const core=m.cy, canvas=document.createElement('canvas'), measure=canvas.getContext('2d');
+                return {zoom:core.zoom(),viewport:{width:m.clientWidth,height:m.clientHeight}, nodes:ids.map(id=>{
+                    const n=core.getElementById(id), body=n.boundingBox({includeLabels:false}), ink=n.boundingBox({includeLabels:true});
+                    const family=n.style('font-family');
+                    measure.font=`${n.style('font-weight')} ${n.style('font-size')} ${family}`;
+                    return {id,rendered:n.renderedBoundingBox({includeLabels:true}),label:n.data('label'),family,header:n.data('header'),body,ink,
+                        textWidth:n.data('textWidth'), widths:n.data('label').split('\n').map(line=>measure.measureText(line.trimEnd()).width)};
+                })};
+            }""",
+            ids,
+        )
+
+    def check_labels(found):
+        for node, title in zip(found["nodes"], titles):
+            assert re.sub(r"\s", "", title) in re.sub(r"\s", "", node["label"]), node
+            assert all(width <= node["textWidth"] + 1 for width in node["widths"]), node
+            body, ink = node["body"], node["ink"]
+            assert ink["x1"] >= body["x1"] - 1 and ink["x2"] <= body["x2"] + 1, node
+            assert ink["y1"] >= body["y1"] - 1 and ink["y2"] <= body["y2"] + 1, node
+        root, long, ready = found["nodes"]
+        assert "Needs a thread" in long["label"] and "Ready" in ready["label"], found
+        assert root["header"] > 72, root
+        assert all(
+            child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1
+            for child in (long, ready)
+        ), found
+
+    for name, view in VIEWS.items():
+        context, page, errors, messages, fonts, blocked = fresh(view)
+        point = None
+        try:
+            page.goto(link + "?view=map")
+            wait_drawn(page, 3)
+            page.screenshot(path=SHOTS / f"app-{name}-full-labels.png")
+            found = read(page)
+            assert FIRST_ZOOM <= found["zoom"] <= 2, found
+            ink = found["nodes"][1]["rendered"]
+            assert ink["x1"] >= 0 and ink["y1"] >= 0, found
+            assert ink["x2"] <= found["viewport"]["width"] and ink["y2"] <= found["viewport"]["height"], found
+            assert all("Overpass" in node["family"] for node in found["nodes"]), found
+            check_labels(found)
+            point = page.get_by_test_id("map").evaluate(
+                r"""(m,id)=>{
+                    const n=m.cy.getElementById(id), box=n.renderedBoundingBox({includeLabels:false}), rect=m.getBoundingClientRect();
+                    const svg=decodeURIComponent(n.data('mark').split(',').slice(1).join(','));
+                    const transform=new DOMParser().parseFromString(svg,'image/svg+xml').querySelector('path').getAttribute('transform');
+                    const [,x,y]=transform.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
+                    return {x:rect.x+box.x1+(Number(x)+6)*m.cy.zoom(),y:rect.y+box.y1+(Number(y)+6)*m.cy.zoom()};
+                }""",
+                ids[0],
+            )
+            assert page.get_by_test_id("map").evaluate(
+                """(m,p)=>{const r=m.getBoundingClientRect(), hit=document.elementFromPoint(p.x,p.y);
+                return p.x>=r.left && p.x<r.right && p.y>=r.top && p.y<r.bottom
+                    && hit && m.contains(hit) && !hit.closest('button');}""", point
+            ), point
+            if view.get("has_touch"):
+                page.touchscreen.tap(point["x"], point["y"])
+            else:
+                page.mouse.click(point["x"], point["y"])
+            wait_drawn(page, 1)
+            assert page.get_by_test_id("map").evaluate(
+                "(m,id)=>m.cy.getElementById(id).hasClass('collapsed')", ids[0]
+            )
+            assert page.get_by_test_id("inspector").count() == 0
+            check_errors(errors, messages, fonts, blocked)
+        except (AssertionError, PlaywrightTimeout):
+            page.screenshot(path=SHOTS / f"app-{name}-labels-failure.png")
+            state = page.evaluate(
+                """id=>{const m=document.querySelector('[data-testid=map]'),core=m?.cy;
+                return {dataset:m?{...m.dataset}:null,root:core?.getElementById(id).data(),
+                nodes:core?.nodes().map(n=>({id:n.id(),kind:n.data('kind')})),font:document.fonts.status,
+                inspector:document.querySelector('[data-testid=inspector] code.id')?.textContent};}""", ids[0]
+            )
+            (SHOTS / f"app-{name}-labels-failure.json").write_text(json.dumps({"point":point,"state":state}, indent=2))
+            raise
+        finally:
+            context.close()
+
+    context, page, errors, messages, fonts, blocked = fresh(VIEWS["desktop"], "abort")
+    try:
+        page.goto(link + "?view=map")
+        wait_drawn(page, 3)
+        page.screenshot(path=SHOTS / "app-font-fallback.png")
+        assert fonts, "the font-failure case did not intercept a font"
+        check_labels(read(page))
+        assert all("Overpass" not in node["family"] for node in read(page)["nodes"])
+        from_menu(page, lambda: page.get_by_test_id("theme").select_option("light"))
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'light'")
+        colour = page.evaluate(r"""() => {
+            const probe=document.body.appendChild(document.createElement('i'));probe.style.color='var(--box)';
+            const colour=getComputedStyle(probe).color.replace(/\s/g,'');probe.remove();return colour;
+        }""")
+        page.wait_for_function(
+            r"""([id,colour]) => {
+            const n=document.querySelector('[data-testid=map]')?.cy?.getElementById(id);
+            return n?.nonempty() && n.style('background-color').replace(/\s/g,'')===colour;
+        }""",
+            arg=[ids[0], colour],
+        )
+        assert all("Overpass" not in node["family"] for node in read(page)["nodes"])
+        check_errors(errors, messages, fonts, blocked)
+    finally:
+        context.close()
+
+    context, page, errors, messages, fonts, blocked = fresh(VIEWS["desktop"], "hold")
+    try:
+        with page.expect_request(
+            lambda request: urlsplit(request.url).path.endswith(".woff2"),
+            timeout=10_000,
+        ):
+            page.goto(link + "?view=map", wait_until="domcontentloaded", timeout=15_000)
+        page.get_by_test_id("map").wait_for(state="attached")
+        page.wait_for_function("() => document.fonts.status === 'loading'")
+        assert fonts, "the font-wait case did not hold a font"
+        assert page.get_by_test_id("map").evaluate(
+            "m=>Number(m.dataset.layouts ?? 0)===0"
+        )
+        page.goto("about:blank", timeout=10_000)
+        check_errors(errors, messages, fonts, blocked)
+    finally:
+        # The old document is gone; resolve the deliberately held routes before draining their handlers.
+        # This proves lifetime cleanup, without inspecting the old document's cache.
+        try:
+            for route in fonts:
+                route.abort()
+            context.unroute_all(behavior="wait")
+        finally:
+            context.close()
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -3465,8 +3672,7 @@ def main():
                 text=True,
             )
             servers.append(server)
-            listening = json.loads(server.stdout.readline())["data"]["listening"]
-            return plan, f"http://{listening}/", env, remote
+            return plan, server_origin(server), env, remote
 
         def serve_shrink():
             home = directory / "home-shrink"
@@ -3497,12 +3703,60 @@ def main():
                 text=True,
             )
             servers.append(server)
-            listening = json.loads(server.stdout.readline())["data"]["listening"]
-            return f"http://{listening}/", env, project, other, chain
+            return server_origin(server), env, project, other, chain
+
+        def serve_labels():
+            home = directory / "home-labels"
+            home.mkdir()
+            env = {
+                **os.environ,
+                "HOME": str(home),
+                "ACYCLIC_TRACKER": str(directory / "tracker-labels"),
+                "ACYCLIC_ACTOR": "session/browser",
+            }
+            run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            thread = json.loads(run(env, "thread", "add", "--title", "Label proof"))[
+                "data"
+            ]["thread"]
+            titles = [
+                "Keep the whole project title readable while its header grows",
+                "Read every word including 🧑🏽‍🚀 and "
+                + "supercalifragilisticexpialidocious" * 2,
+                "Ordinary item",
+            ]
+            root = json.loads(run(env, "item", "add", "--title", titles[0]))["data"][
+                "item"
+            ]
+            long = json.loads(
+                run(env, "item", "add", "--title", titles[1], "--parent", root)
+            )["data"]["item"]
+            ready = json.loads(
+                run(
+                    env,
+                    "item",
+                    "add",
+                    "--title",
+                    titles[2],
+                    "--parent",
+                    root,
+                    "--thread",
+                    thread,
+                )
+            )["data"]["item"]
+            server = subprocess.Popen(
+                [ACYCLIC, "up", "--port", "0"],
+                env=env,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            servers.append(server)
+            return server_origin(server), [root, long, ready], titles
 
         try:
             plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
+            label_link, label_ids, label_titles = serve_labels()
+            labels_journey(chromium, label_link, label_ids, label_titles)
             hint = None
             for name, view in VIEWS.items():
                 context, page, origin, errors = open_app(

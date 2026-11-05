@@ -42,20 +42,25 @@ export function faded(colour: string, under: string): string {
     .join("")}`;
 }
 
-const made = new WeakMap<Palette, cytoscape.StylesheetJson>();
+const made = new WeakMap<Palette, Map<string, cytoscape.StylesheetJson>>();
 
 /** The Map's stylesheet in a palette, made once for each. */
-export function styleFor(p: Palette): cytoscape.StylesheetJson {
-  let style = made.get(p);
+export function styleFor(p: Palette, family = FONT): cytoscape.StylesheetJson {
+  let styles = made.get(p);
+  if (styles === undefined) {
+    styles = new Map();
+    made.set(p, styles);
+  }
+  let style = styles.get(family);
   if (style === undefined) {
-    style = sheetOf(p);
-    made.set(p, style);
+    style = sheetOf(p, family);
+    styles.set(family, style);
   }
   return style;
 }
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
-function sheetOf(p: Palette): cytoscape.StylesheetJson {
+function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
   const HATCH = hatchOf(p);
   return [
     // Cytoscape darkens where a press lands, a grey disc on the background and a shade over a node; a press here
@@ -71,10 +76,10 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         height: "data(height)",
         label: "data(label)",
         color: p.ink,
-        "font-family": FONT,
+        "font-family": family,
         "font-size": 13,
         "font-weight": WEIGHT.regular,
-        // Labels come cut to fit, a line at a time; the slack keeps the renderer from wrapping a line again.
+        // Labels already wrap to fit, a line at a time; the slack keeps the renderer from wrapping a line again.
         "text-wrap": "wrap",
         "text-max-width": (node: cytoscape.NodeSingular) => `${node.data("textWidth") + 4}px`,
         "line-height": 1.25,
@@ -99,7 +104,7 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
         "font-weight": WEIGHT.bold,
         "text-valign": "top",
         // The label's foot sits on the box's top edge; this brings it down into the title strip.
-        "text-margin-y": STRIP - 8,
+        "text-margin-y": (node: cytoscape.NodeSingular) => Number(node.data("header") ?? STRIP) - 8,
       },
     },
     // A box's marks, its chevron and the icon of where its work stands, drawn over its title strip; its title in ink
@@ -116,7 +121,10 @@ function sheetOf(p: Palette): cytoscape.StylesheetJson {
     },
     { selector: "node.box.quiet, node.collapsed.quiet", style: { color: p.muted } },
     // A box's title alone, with no counts under it, sits half a line lower: in the middle of the strip.
-    { selector: "node.box.one-line", style: { "text-margin-y": STRIP / 2 + 8 } },
+    {
+      selector: "node.box.one-line",
+      style: { "text-margin-y": (node: cytoscape.NodeSingular) => Number(node.data("header") ?? STRIP) / 2 + 8 },
+    },
     // A tile's marks, its thread's stripe and badge and its stage's icon, with its title between them.
     {
       selector: "node.leaf",

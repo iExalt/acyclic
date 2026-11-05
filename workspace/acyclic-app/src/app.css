@@ -691,6 +691,13 @@ button.icon[aria-pressed="true"] {
   font-size: 13px;
   color: var(--muted);
 }
+/* The bar and footer menus share their switch and field rows; scope them away from menus elsewhere. */
+.bar .menu-body,
+.sidebar-foot .menu-body {
+  gap: 0;
+  padding: 4px 0;
+  font-size: 14px;
+}
 .menu.up .menu-body {
   top: auto;
   right: auto;
@@ -706,99 +713,6 @@ button.icon[aria-pressed="true"] {
     font-size: 14px;
   }
 }
-/* A phone's menu is a list of plain rows, as Slack's channel menu is: 260 px wide, each row its own 44 px target. */
-@media (max-width: 899px) {
-  .bar .menu-body {
-    gap: 0;
-    width: min(260px, calc(100vw - 16px));
-    padding: 4px 0;
-    font-size: 14px;
-  }
-  /* A switch row: its name at the start, the switch at the end, the whole row the target. */
-  .bar .menu-body label:has(> input[type="checkbox"]) {
-    flex-direction: row-reverse;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 44px;
-    padding: 0 14px;
-  }
-  .bar .menu-body label:has(> input[type="checkbox"]):hover {
-    background: var(--hover);
-  }
-  /* The checkbox drawn as a switch, in CSS alone: a track, and a knob that slides to the end when on. */
-  .bar .menu-body input[type="checkbox"] {
-    appearance: none;
-    flex: none;
-    width: 34px;
-    height: 20px;
-    border-radius: 10px;
-    background: radial-gradient(circle at 10px 50%, var(--ink) 6px, transparent 6.5px), var(--edge);
-    cursor: pointer;
-  }
-  .bar .menu-body input[type="checkbox"]:checked {
-    background:
-      radial-gradient(circle at calc(100% - 10px) 50%, var(--accent-ink) 6px, transparent 6.5px), var(--accent);
-  }
-  .bar .menu-body input[type="checkbox"]:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  /* A setting picked from a list, Theme: ruled off, a muted caption, the value as a quiet row whose caret
-     ends where the switches do, then what the value means. */
-  .bar .menu-body label:not(:has(> input[type="checkbox"])) {
-    gap: 0;
-    margin-top: 4px;
-    padding: 8px 14px 0;
-    border-top: 1px solid var(--rule);
-    font-size: 12px;
-  }
-  .bar .menu-body label:not(:has(> input[type="checkbox"])) + label {
-    margin-top: 0;
-  }
-  .bar .menu-body label > .hint {
-    padding-bottom: 6px;
-  }
-  /* Across the whole row, past the label's inset, so the caret ends 14 px from the row's end, where the switches'
-     tracks do: a field's usual cap at its container's width would leave it short of them. */
-  .bar .menu-body select {
-    width: calc(100% + 28px);
-    max-width: none;
-    min-height: 44px;
-    margin: 0 -14px;
-    padding: 0 38px 0 14px;
-    border: none;
-    border-radius: 0;
-    background-color: transparent;
-    font-size: 14px;
-  }
-  .bar .menu-body select:hover {
-    background-color: var(--hover);
-  }
-  /* Notify this device's reason, when it can't: under its row, inset as the row's name is. */
-  .bar .menu-body .notify .why {
-    padding: 0 14px 8px;
-    font-size: 12px;
-  }
-  /* Refresh, a quiet row ruled off from the settings above it. */
-  .bar .menu-body > button {
-    min-height: 44px;
-    padding: 0 14px;
-    border: none;
-    border-top: 1px solid var(--rule);
-    border-radius: 0;
-    font-weight: 500;
-    text-align: left;
-  }
-}
-/* iOS Safari zooms into a field under 16 px; only there does a phone's menu's select keep 16 px. */
-@supports (-webkit-touch-callout: none) {
-  @media (max-width: 899px) {
-    .bar .menu-body select {
-      font-size: 16px;
-    }
-  }
-}
-
 /* A thread's row in the outline: its badge and name, wrapping rather than cut off. */
 .thread {
   display: flex;
@@ -2149,8 +2063,7 @@ button.more {
   flex-direction: column;
   min-width: 0;
 }
-.command-title,
-.command-detail {
+.command-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2158,6 +2071,8 @@ button.more {
 .command-detail {
   color: var(--muted);
   font-size: 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .command-key {
   flex: none;
@@ -2444,4 +2359,111 @@ button.notice-backdrop {
 }
 button.notice-backdrop:hover {
   background: transparent;
+}
+
+.bar .menu-body label:has(> input[type="checkbox"]),
+.sidebar-foot .menu-body label:has(> input[type="checkbox"]) {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+}
+.bar .menu-body label:has(> input[type="checkbox"]):hover,
+.sidebar-foot .menu-body label:has(> input[type="checkbox"]):hover {
+  background: var(--hover);
+}
+/* The checkbox drawn as a switch, in CSS alone: a track, and a knob that slides to the end when on. */
+.bar .menu-body input[type="checkbox"],
+.sidebar-foot .menu-body input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: radial-gradient(circle at 10px 50%, var(--ink) 6px, transparent 6.5px), var(--edge);
+  cursor: pointer;
+}
+.bar .menu-body input[type="checkbox"]:checked,
+.sidebar-foot .menu-body input[type="checkbox"]:checked {
+  background: radial-gradient(circle at calc(100% - 10px) 50%, var(--accent-ink) 6px, transparent 6.5px), var(--accent);
+}
+.bar .menu-body input[type="checkbox"]:disabled,
+.sidebar-foot .menu-body input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* A setting picked from a list, Theme: ruled off, a muted caption, the value as a quiet row whose caret
+   ends where the switches do, then what the value means. */
+.bar .menu-body label:not(:has(> input[type="checkbox"])),
+.sidebar-foot .menu-body label:not(:has(> input[type="checkbox"])) {
+  gap: 0;
+  margin-top: 4px;
+  padding: 8px 14px 0;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+}
+.bar .menu-body label:not(:has(> input[type="checkbox"])) + label,
+.sidebar-foot .menu-body label:not(:has(> input[type="checkbox"])) + label {
+  margin-top: 0;
+}
+.bar .menu-body label > .hint,
+.sidebar-foot .menu-body label > .hint {
+  padding-bottom: 6px;
+}
+/* Across the whole row, past the label's inset, so the caret ends 14 px from the row's end, where the switches'
+   tracks do: a field's usual cap at its container's width would leave it short of them. */
+.bar .menu-body select,
+.sidebar-foot .menu-body select {
+  width: calc(100% + 28px);
+  max-width: none;
+  min-height: 44px;
+  margin: 0 -14px;
+  padding: 0 38px 0 14px;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  font-size: 14px;
+}
+.bar .menu-body select:hover,
+.sidebar-foot .menu-body select:hover {
+  background-color: var(--hover);
+}
+/* Notify this device's reason, when it can't: under its row, inset as the row's name is. */
+.bar .menu-body .notify .why,
+.sidebar-foot .menu-body .notify .why {
+  padding: 0 14px 8px;
+  font-size: 12px;
+}
+/* Refresh, a quiet row ruled off from the settings above it. */
+.bar .menu-body > button,
+.sidebar-foot .menu-body > button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: none;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  font-weight: 500;
+  text-align: left;
+}
+/* A phone's menu is 260 px wide, with each control a 44 px target. */
+@media (max-width: 899px) {
+  .bar .menu-body {
+    width: min(260px, calc(100vw - 16px));
+  }
+}
+@media (pointer: fine) {
+  .sidebar-foot .menu-body label:has(> input[type="checkbox"]),
+  .sidebar-foot .menu-body select,
+  .sidebar-foot .menu-body > button {
+    min-height: 32px;
+  }
+}
+/* iOS Safari zooms into a field under 16 px; only there does a phone's menu's select keep 16 px. */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 899px) {
+    .bar .menu-body select {
+      font-size: 16px;
+    }
+  }
 }

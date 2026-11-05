@@ -21,6 +21,12 @@ export interface WavesView {
   anytime: ThreadTile[];
 }
 
+/** Project labels for a tile, excluding a project whose title merely repeats the thread's name. */
+export function projectLabels(projects: string[], threadName: string): string[] {
+  const name = threadName.trim().toLowerCase();
+  return projects.filter((project) => project.trim().toLowerCase() !== name);
+}
+
 /** The tiles for `listed`'s waves, with core's counts of each thread's leaves, placed in `outline`'s projects. */
 export function wavesView(listed: Threads, outline: Outline): WavesView {
   const counts = new Map(listed.threads.map((thread) => [thread.id, thread.counts]));

@@ -26,6 +26,10 @@ export interface BoxInput {
   edges: { source: string; target: string }[];
   /** The width over height the top level is packed to; only the top level has one. */
   aspect?: number;
+  /** This box's independently measured title strip, also used above its graph and aside. */
+  header?: number;
+  /** Minimum outer width measured with the label so this box's own geometry participates in its cache key. */
+  minWidth?: number;
 }
 
 /** A box's layout: its size, where each child sits within it, and the route of each link between its children. */
@@ -228,10 +232,15 @@ export interface Placed extends Size {
 }
 
 /** A child's size: a box's from its own layout, without where its children sit, which its parent doesn't depend on. */
-function sizeOf(kind: Kind | undefined, boxes: Map<string, BoxLayout>, id: string): Size {
-  if (kind === "collapsed") return COLLAPSED;
+function sizeOf(
+  kind: Kind | undefined,
+  boxes: Map<string, BoxLayout>,
+  id: string,
+  sizes: ReadonlyMap<string, Size>,
+): Size {
+  if (kind === "collapsed" || kind === "leaf") return sizes.get(id) ?? (kind === "collapsed" ? COLLAPSED : LEAF);
   const box = kind === "box" ? boxes.get(id) : undefined;
-  return box === undefined ? LEAF : { width: box.width, height: box.height };
+  return box === undefined ? (sizes.get(id) ?? LEAF) : { width: box.width, height: box.height };
 }
 
 /**
@@ -246,6 +255,8 @@ export async function place(
   aspect: number,
   isCurrent: () => boolean = () => true,
   source = "",
+  sizes: ReadonlyMap<string, Size> = new Map(),
+  headers: ReadonlyMap<string, number> = new Map(),
 ): Promise<Placed> {
   const scope = scopes(view);
   const boxes = new Map<string, BoxLayout>();
@@ -268,13 +279,21 @@ export async function place(
           id,
           children: (scope.kids.get(id) ?? []).map((child) => ({
             id: child,
-            ...sizeOf(scope.kind.get(child), boxes, child),
+            ...sizeOf(scope.kind.get(child), boxes, child, sizes),
           })),
           edges: scope.edges.get(id) ?? [],
           ...(id === ROOT ? { aspect } : {}),
+          header: headers.get(id) ?? 52,
+          minWidth: sizes.get(id)?.width ?? 200,
         };
         // The box's own id isn't part of what its layout depends on, so equal content shares one entry.
-        const signature = JSON.stringify([input.children, input.edges, input.aspect]);
+        const signature = JSON.stringify([
+          input.children,
+          input.edges,
+          input.aspect,
+          input.header ?? 52,
+          input.minWidth ?? 200,
+        ]);
         // Folds hold their source snapshot's packing. A new source that only shrank packs afresh; Undo can then find
         // the earlier source baseline and recreate a held view, even though that view was never freshly packed.
         const exactRoot = id === ROOT ? cache.root(input, source) : undefined;
@@ -321,7 +340,7 @@ export async function place(
       const at = box.at[child] ?? { x: 0, y: 0 };
       const x = ox + at.x;
       const y = oy + at.y;
-      nodes.set(child, { x, y, ...sizeOf(scope.kind.get(child), boxes, child) });
+      nodes.set(child, { x, y, ...sizeOf(scope.kind.get(child), boxes, child, sizes) });
       if (scope.kind.get(child) === "box") absolute(child, x, y);
     }
   };

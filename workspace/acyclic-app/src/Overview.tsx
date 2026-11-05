@@ -170,7 +170,7 @@ export function Overview({
             <span className="count muted">{next.length}</span>
             <span className="grow" />
             <button type="button" className="quiet" onClick={() => onView("threads")}>
-              All waves
+              Open Threads
             </button>
           </header>
           {next.length === 0 ? (

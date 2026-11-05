@@ -32,7 +32,6 @@ const LAYERED = {
   // as each pulls it equally, not under whichever the first placement favoured.
   "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   // Room at the top for the box's title strip.
-  "elk.padding": `[top=${STRIP},left=${PAD},bottom=${PAD},right=${PAD}]`,
 };
 
 /** The top level's shape, width over height, on a phone: portrait. A wider screen gives its own. */
@@ -95,14 +94,18 @@ export function topOrder(model: Model, showArchived: boolean): string[] {
  * moved right past them, or none when nothing in the box is linked. A column holds as many as fit the graph's height,
  * or a near-square grid's when that is taller, so a box of only unlinked tiles is about as tall as it is wide in tiles.
  */
-export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string } & Size)[]): BoxLayout {
-  const empty = { width: 2 * PAD, height: STRIP + PAD, at: {} };
+export function beside(
+  graph: BoxLayout | null,
+  unlinked: readonly ({ id: string } & Size)[],
+  header = STRIP,
+): BoxLayout {
+  const empty = { width: 2 * PAD, height: header + PAD, at: {} };
   if (unlinked.length === 0) return graph ?? empty;
-  const inner = graph === null ? 0 : graph.height - STRIP - PAD;
+  const inner = graph === null ? 0 : graph.height - header - PAD;
   const cap = Math.max(inner, Math.ceil(Math.sqrt(unlinked.length)) * (LEAF.height + GAP) - GAP);
   // Filled to the cap, the last column could hold one; so the columns that takes share the children evenly.
   const share = Math.ceil(unlinked.length / stack(unlinked, cap, Infinity, 0, 0).columns);
-  const placed = stack(unlinked, cap, share, PAD, STRIP);
+  const placed = stack(unlinked, cap, share, PAD, header);
   const height = Math.max(graph?.height ?? 0, placed.bottom + PAD);
   if (graph === null) return { width: placed.right + PAD, height, at: placed.at };
   // The graph's own padding stays on its left, so its first child stands the wider gap from the last column.
@@ -122,7 +125,7 @@ export function beside(graph: BoxLayout | null, unlinked: readonly ({ id: string
     at,
     // Halfway across the wider gap, from under the title to the padding at the foot: the items that can start any
     // time stand apart from the ones their links order, as the Threads view's Any time column does.
-    divider: { x: placed.right + ASIDE / 2, top: STRIP, bottom: height - PAD },
+    divider: { x: placed.right + ASIDE / 2, top: header, bottom: height - PAD },
     ...(routes === undefined ? {} : { routes }),
     ...(junctions === undefined ? {} : { junctions }),
   };
@@ -148,6 +151,7 @@ function stack(children: readonly ({ id: string } & Size)[], cap: number, share:
 
 export function elkLayBox(engine: Engine): LayBox {
   return async (input) => {
+    const header = input.header ?? STRIP;
     const size = new Map(input.children.map(({ id, width, height }) => [id, { id, width, height }]));
     if (input.id === ROOT) {
       const waits = new Map<string, string[]>();
@@ -165,7 +169,7 @@ export function elkLayBox(engine: Engine): LayBox {
         : laid(
             await engine.layout({
               id: input.id,
-              layoutOptions: LAYERED,
+              layoutOptions: { ...LAYERED, "elk.padding": `[top=${header},left=${PAD},bottom=${PAD},right=${PAD}]` },
               children: [...size.values()]
                 .filter((child) => linked.has(child.id))
                 .map((child) => ({
@@ -183,7 +187,12 @@ export function elkLayBox(engine: Engine): LayBox {
           );
     // The Done box last, after what can start.
     const aside = input.children.filter((child) => !linked.has(child.id));
-    return beside(graph, [...aside.filter((child) => !isRest(child.id)), ...aside.filter((child) => isRest(child.id))]);
+    const box = beside(
+      graph,
+      [...aside.filter((child) => !isRest(child.id)), ...aside.filter((child) => isRest(child.id))],
+      header,
+    );
+    return { ...box, width: Math.max(box.width, input.minWidth ?? 200) };
   };
 }
 

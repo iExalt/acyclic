@@ -8,7 +8,7 @@ import { Badge, lineStyle } from "./Badge";
 import type { Line } from "./lines";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
-import type { ThreadTile, WavesView } from "./waves";
+import { projectLabels, type ThreadTile, type WavesView } from "./waves";
 
 /** The room between columns when wide, as app.css sets it. */
 const GAP = 64;
@@ -41,6 +41,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
     });
   const tile = (one: ThreadTile) => {
     const line = lines.get(one.id);
+    const projects = projectLabels(one.projects, line?.name ?? one.id);
     return (
       <li key={one.id}>
         <button
@@ -56,7 +57,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         >
           <span className="head">
             <Badge line={line} />
-            <span className="projects">{one.projects.join(", ")}</span>
+            {projects.length === 0 ? null : <span className="projects">{projects.join(", ")}</span>}
           </span>
           <span className="name">
             <Prose text={line?.name ?? one.id} />
@@ -101,7 +102,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
         {view.anytime.length === 0 ? null : (
           <section className="wave anytime" data-wave="anytime" aria-label="Any time">
             <h2>
-              Any time <small>no waits either way</small>
+              Any time <small>No threads to wait for or hold up</small>
             </h2>
             <ul>{view.anytime.map(tile)}</ul>
           </section>

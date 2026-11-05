@@ -59,10 +59,10 @@ import { Projects, ProjectsSheet } from "./Projects";
 import { PALETTES, setTheme, type Theme, useScheme, useTheme } from "./palette";
 import { drawn as drawnOver } from "./reads";
 import { Shell, type View, Wordmark } from "./Shell";
-import { createSession, type Notice } from "./session";
 import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
+import { createTracker, type Notice } from "./tracker";
 import { wavesView } from "./waves";
 import { useWide } from "./wide";
 
@@ -179,20 +179,20 @@ export function App() {
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
   const wide = useWide();
   /**
-   * The session with the server: the plan, the write out, and the one notice slot. Its moves of where the user is go
+   * The tracker: the plan, the write out, and the one notice slot. Its moves of where the user is go
    * through `goNow`, so they start from where the user is by then.
    */
   const goNow = useRef<(intent: Intent) => void>(go);
   goNow.current = go;
-  const [session] = useState(() =>
-    createSession({
+  const [tracker] = useState(() =>
+    createTracker({
       fetcher: (input, init) => fetch(input, init),
       storage: storageOrNull(),
       nav: { go: (intent) => goNow.current(intent), item: () => placeNow.current.item },
     }),
   );
-  const { load, notice, busy, pending, version, reads } = useSyncExternalStore(session.subscribe, session.snapshot);
-  const { refresh, send, tell } = session;
+  const { load, notice, busy, pending, version, reads } = useSyncExternalStore(tracker.subscribe, tracker.snapshot);
+  const { refresh, send, tell } = tracker;
   /**
    * An address to open: the one the app was opened at, one a notification sent the app already open, or the place a
    * history entry Forward landed on holds, with what it names. It waits for the plan to load, and for a form holding
@@ -280,7 +280,7 @@ export function App() {
       go({ kind: "mode", mode: step.mode });
       const refusal = step.refusal;
       // A target refused says why where the user chose it; one taken drops what an earlier choice was refused.
-      const was = session.snapshot().notice;
+      const was = tracker.snapshot().notice;
       tell(
         refusal !== null
           ? { text: refusal, offer: null, retry: null, lasts: "refusal", at: null }
@@ -293,7 +293,7 @@ export function App() {
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
       send(step.command, { select: mode.item, pin, undo: true });
     },
-    [model, mode, send, go, session, tell],
+    [model, mode, send, go, tracker, tell],
   );
   const open = openOf(place, worldNow.current);
   /**
@@ -314,9 +314,9 @@ export function App() {
   }, [showCommand, model, sorted, lines, working, showArchived, mode, panel, selected]);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
-    session.event({ kind: "form-closed" });
+    tracker.event({ kind: "form-closed" });
     setFormsClosed((was) => was + 1);
-  }, [session]);
+  }, [tracker]);
   // What's on top changing takes the add form, or the item's editor, with it.
   useEffect(formClosed, [panel]);
   /** Where the user is, which says how long a notice stays. */
@@ -325,8 +325,8 @@ export function App() {
   // A notice is first shown where the user is, and kept or dropped as they move. As an update of the notice as it
   // is by then, so it never brings back one another effect of the same move cleared, such as a closed form's.
   useEffect(() => {
-    if (notice !== null) session.event({ kind: "moved", to: seen });
-  }, [notice, seen, session]);
+    if (notice !== null) tracker.event({ kind: "moved", to: seen });
+  }, [notice, seen, tracker]);
   /**
    * Closes `count` layers from the top, as Escape (one) and Back (one per entry it went back over) do, but never a
    * form holding what the user typed: that says how to leave it instead. How many it closed.
@@ -336,7 +336,7 @@ export function App() {
     const closing = openLayers(openOf(placeNow.current, worldNow.current)).slice(0, count);
     if (go({ kind: "close", count }).requests.unsaved) {
       // A link waiting for the form says so already, and dismissing that drops it.
-      if (!session.snapshot().notice?.held) tell(UNSAVED);
+      if (!tracker.snapshot().notice?.held) tell(UNSAVED);
       return 0;
     }
     return closing.length;
@@ -362,7 +362,7 @@ export function App() {
         const blocked = undo === null || keysSee.current.menu || typingIn(event.target) || dirtyForm();
         if (!blocked) {
           event.preventDefault();
-          session.undo();
+          tracker.undo();
         }
       } else if (opensMenu(event, mac)) {
         event.preventDefault();
@@ -557,7 +557,7 @@ export function App() {
     setWanted(null);
     const gone = found.missing.join(" and ");
     // An offered Undo waits wherever the user goes, a link included, and one a reload kept is offered again.
-    const was = session.snapshot().notice;
+    const was = tracker.snapshot().notice;
     tell(
       found.missing.length > 0
         ? {
@@ -741,7 +741,7 @@ export function App() {
           {notice.text}
         </span>
         {notice.retry === null ? null : (
-          <button type="button" disabled={busy} onClick={() => session.retry()}>
+          <button type="button" disabled={busy} onClick={() => tracker.retry()}>
             Try again
           </button>
         )}
@@ -763,7 +763,7 @@ export function App() {
             type="button"
             disabled={busy}
             aria-keyshortcuts={onMac() ? "Meta+Z" : "Control+Z"}
-            onClick={() => session.undo()}
+            onClick={() => tracker.undo()}
           >
             Undo
           </button>
@@ -772,7 +772,7 @@ export function App() {
           <button
             type="button"
             onClick={() => {
-              session.dismiss();
+              tracker.dismiss();
               setShowArchived(false);
             }}
           >
@@ -783,7 +783,7 @@ export function App() {
           <button
             type="button"
             onClick={() => {
-              session.dismiss();
+              tracker.dismiss();
               refresh();
             }}
           >
@@ -804,7 +804,7 @@ export function App() {
               if (destination !== undefined && cursor.current !== null)
                 writeEntry("replace", cursor.current, destination);
             }
-            session.dismiss();
+            tracker.dismiss();
           }}
         >
           <Icon of={X} />
@@ -1002,6 +1002,7 @@ export function App() {
           <Inspector
             key={chosen.id}
             item={chosen}
+            isProject={outline?.projects.some((project) => project.id === chosen.id) ?? false}
             reopen={requests.reopenEditor?.id === chosen.id ? requests.reopenEditor : undefined}
             titleOf={titleOf}
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}

@@ -15,6 +15,7 @@ import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import { foldDone, isDoneBox } from "./fold";
+import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
 import {
@@ -33,7 +34,7 @@ import {
   uncovered,
 } from "./reveal";
 import { type Fonts, type Scene, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
-import { FONT, styleFor, WEIGHT } from "./style";
+import { styleFor, WEIGHT } from "./style";
 import { tapAction } from "./tap";
 import { wheelZoom } from "./wheel";
 
@@ -44,19 +45,29 @@ const FIRST_ZOOM = 1;
 /** What the pointer shows the links of: a tile, or a collapsed box, which holds its tiles' links. */
 const HOVERABLE = "node.leaf, node.collapsed";
 /** The face labels are drawn in, loaded first: the canvas draws with whatever is loaded. */
-const fontLoaded: Promise<unknown> =
+const FALLBACK_FONT = "system-ui, sans-serif";
+const fontReady: Promise<string> =
   typeof document === "undefined" || !("fonts" in document)
-    ? Promise.resolve()
+    ? Promise.resolve(FALLBACK_FONT)
     : Promise.all([
         document.fonts.load(`${WEIGHT.regular} 13px Overpass`),
         document.fonts.load(`${WEIGHT.bold} 13px Overpass`),
-      ]).catch(() => undefined);
+      ])
+        .then(([regular, bold]) =>
+          regular.length > 0 &&
+          bold.length > 0 &&
+          document.fonts.check(`${WEIGHT.regular} 13px Overpass`) &&
+          document.fonts.check(`${WEIGHT.bold} 13px Overpass`)
+            ? "Overpass, system-ui, sans-serif"
+            : FALLBACK_FONT,
+        )
+        .catch(() => FALLBACK_FONT);
 
 /**
  * Measures labels as the renderer draws them, once the face is loaded, which the layout waits for before anything is
  * drawn. Each text is measured once.
  */
-function measuring(): Fonts {
+function measuring(family: string): Fonts {
   const context = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
   if (context === null) return UNMEASURED;
   const face = (weight: number) => {
@@ -64,7 +75,7 @@ function measuring(): Fonts {
     return (text: string) => {
       let width = known.get(text);
       if (width === undefined) {
-        context.font = `${weight} 13px ${FONT}`;
+        context.font = `${weight} 13px ${family}`;
         width = context.measureText(text).width;
         known.set(text, width);
       }
@@ -138,11 +149,21 @@ export default function PlanMap({
     return foldDone(buildModel(items), (thread) => named.get(thread) ?? null);
   }, [items, names]);
   // The folded source model carries geometry changes but not the Map's local chevron toggles.
-  const source = useMemo(() => sourceKey(model), [model]);
+  const source = useMemo(() => sourceKey(model, doneBoxes), [model, doneBoxes]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
   const [drawnOnce, setDrawnOnce] = useState(false);
+  const [fontFamily, setFontFamily] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void fontReady.then((family) => {
+      if (live) setFontFamily(family);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   /** The last layout, with the view and the top level's shape it was computed for. */
   const [laid, setLaid] = useState<{ view: View; aspect: number; source: string; placed: Placed } | null>(null);
   const aspect = useAspect(host);
@@ -174,6 +195,11 @@ export default function PlanMap({
   const view = useMemo(
     () => visible(model, { collapsed, showArchived }, doneBoxes),
     [model, collapsed, showArchived, doneBoxes],
+  );
+  const fonts = useMemo(() => (fontFamily === null ? UNMEASURED : measuring(fontFamily)), [fontFamily]);
+  const labelMetrics = useMemo(
+    () => new Map(view.nodes.map((node) => [node.id, metricsOf(node, fonts, TILE_WIDTH)] as const)),
+    [view, fonts],
   );
   const viewNow = useRef(view);
   viewNow.current = view;
@@ -276,29 +302,36 @@ export default function PlanMap({
   useEffect(() => {
     let live = true;
     const start = performance.now();
-    if (aspect === null) return;
-    // How many layouts the Map has asked for, so a journey can tell that a first load asks for one; a development
-    // build's StrictMode runs effects twice, and counts two.
-    if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
-    Promise.all([layouts.layout(view, aspect, source), fontLoaded]).then(([result]) => {
+    if (aspect === null || fontFamily === null) return;
+    const sizes = new Map<string, { width: number; height: number }>(
+      [...labelMetrics].map(([id, metric]) => [id, { width: metric.width, height: metric.height }] as const),
+    );
+    const headers = new Map<string, number>(
+      [...labelMetrics].map(([id, metric]) => [id, metric.header || metric.height] as const),
+    );
+    void (async () => {
+      await fontReady;
+      if (!live) return;
+      // Only submitted layout requests count; an unmounted font wait never enters the layout queue.
+      if (host.current !== null) host.current.dataset.layouts = String(Number(host.current.dataset.layouts ?? 0) + 1);
+      const result = await layouts.layout(view, aspect, source, sizes, headers, () => live);
       if (!live || result === null) return;
-      // How long the layout took and how many boxes it laid out afresh, for timing runs.
       if (host.current !== null) {
         host.current.dataset.layoutMs = String(Math.round(performance.now() - start));
         host.current.dataset.layoutCalls = String(result.laidOut.length);
       }
       setLaid({ view, aspect, source, placed: result });
-    });
+    })();
     return () => {
       live = false;
     };
-  }, [layouts, view, aspect, source]);
+  }, [layouts, view, aspect, source, fontFamily, labelMetrics]);
 
   useEffect(() => {
-    if (host.current === null) return;
+    if (host.current === null || fontFamily === null) return;
     const core = cytoscape({
       container: host.current,
-      style: styleFor(palette),
+      style: styleFor(palette, fontFamily),
       autoungrabify: true,
       // The app marks the selected item itself; Cytoscape's own selection would only be a second, unstyled one.
       autounselectify: true,
@@ -357,7 +390,7 @@ export default function PlanMap({
       cy.current = null;
       held.current = new Map();
     };
-  }, []);
+  }, [fontFamily]);
 
   // A scheme changed restyles what is drawn in place, keeping the view, the selection and the boxes open; the elements'
   // own colours, their marks and lines, follow with the scene below.
@@ -366,7 +399,7 @@ export default function PlanMap({
     const core = cy.current;
     if (core === null || styled.current === palette) return;
     styled.current = palette;
-    core.style(styleFor(palette));
+    core.style(styleFor(palette, fontFamily ?? FALLBACK_FONT));
     for (const id of suppressedTitles.current) {
       const node = core.getElementById(id);
       if (node.nonempty()) {
@@ -454,12 +487,11 @@ export default function PlanMap({
     };
   }, []);
 
-  const fonts = useMemo(measuring, []);
   const drawn = useMemo(() => {
     if (placed === null) return null;
     const selection: Selection = { item: selected, thread, hovered };
-    return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts);
-  }, [view, placed, selected, thread, hovered, model, fonts]);
+    return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts, labelMetrics);
+  }, [view, placed, selected, thread, hovered, model, fonts, labelMetrics]);
   drawnNow.current = drawn;
   function sceneIsApplied() {
     const last = applied.current;
@@ -603,7 +635,9 @@ export default function PlanMap({
     const boxOf = (kind: (node: SceneNode) => boolean) =>
       drawn.nodes.flatMap((node) => {
         const drawnNode = core.getElementById(node.id);
-        return kind(node) && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
+        return kind(node) && drawnNode.nonempty()
+          ? [{ ...drawnNode.boundingBox({ includeLabels: false }), header: node.header }]
+          : [];
       });
     const lit = boxOf((node) => node.lit);
     const open = openPart(element);
@@ -699,7 +733,12 @@ export default function PlanMap({
         kind,
         // Without a way to pick a thread, a finished thread's box folds and unfolds as the Done box does.
         thread: onThread === undefined ? null : thread,
-        chevron: onChevron(kind, node.boundingBox({ includeLabels: false }), event.position, core.zoom()),
+        chevron: onChevron(
+          kind,
+          { ...node.boundingBox({ includeLabels: false }), header: Number(node.data("header") ?? STRIP) },
+          event.position,
+          core.zoom(),
+        ),
       });
       if (action === "ignore") return;
       shown.current = null;
@@ -778,7 +817,7 @@ export default function PlanMap({
       core.off("dragpan", dragged);
       core.off("tapend", release);
     };
-  }, []);
+  }, [fontFamily]);
 
   return (
     <>

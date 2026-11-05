@@ -21,6 +21,6 @@ export function onChevron(kind: string, node: Box, point: { x: number; y: number
   const reach = Math.max(TITLE, FINGER / zoom);
   const wide = Math.min(reach, (node.x2 - node.x1) / 2);
   // Below an open box's title strip are what it holds, drawn over it, so a fingertip's reach there takes nothing.
-  const tall = kind === "box" ? Math.min(reach, (node.y2 - node.y1) / 2) : node.y2 - node.y1;
+  const tall = kind === "box" ? Math.min(reach, node.header ?? (node.y2 - node.y1) / 2) : node.y2 - node.y1;
   return point.x >= node.x1 && point.x - node.x1 <= wide && point.y >= node.y1 && point.y - node.y1 <= tall;
 }

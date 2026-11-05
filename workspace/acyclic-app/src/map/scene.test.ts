@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
 import type { Placed } from "./layout";
 import { buildModel, visible } from "./model";
-import { labelOf, scene } from "./scene";
+import { scene } from "./scene";
 
 // top: a, b (waits for a); c (waits for a), in thread t with a
 const plan = [
@@ -146,30 +146,6 @@ describe("scene", () => {
       ["a", 1, 45],
       ["b", 1, 65],
     ]);
-  });
-});
-
-describe("labelOf", () => {
-  // Every character 1 wide.
-  const fonts = { regular: (text: string) => text.length, bold: (text: string) => text.length };
-  const counts = { done: 9, leaves: 15, in_review: 0, in_progress: 2, ready: 3, blocked: 1, parked: 0, unthreaded: 0 };
-
-  it("titles a box on one line, its leaves by stage on the next, and ends a collapsed one with what it hides", () => {
-    const node = { title: "Patch two of the plan", kind: "box" as const, hidden: 0, progress: counts };
-    expect(labelOf(node, 60, fonts)).toBe("Patch two of the plan\n9 done, 2 in progress, 3 ready, 1 blocked");
-    expect(labelOf({ ...node, kind: "collapsed", hidden: 20 }, 16, fonts)).toBe("Patch two… (+20)\n9 done, 2 in pr…");
-    expect(labelOf({ ...node, progress: null }, 60, fonts)).toBe("Patch two of the plan");
-  });
-
-  it("wraps a tile's title over three lines and cuts the third short", () => {
-    const leaf = { title: "Route the links inside a box and out", kind: "leaf" as const, hidden: 0, progress: null };
-    expect(labelOf(leaf, 12, fonts)).toBe("Route the\nlinks inside\na box and o…");
-  });
-
-  it("drops the backticks that set a run as code, which the canvas can't", () => {
-    const leaf = { title: "Run `acyclic up` on the Mac", kind: "leaf" as const, hidden: 0, progress: null };
-    expect(labelOf(leaf, 40, fonts)).toBe("Run acyclic up on the Mac");
-    expect(labelOf({ ...leaf, kind: "box", progress: null }, 40, fonts)).toBe("Run acyclic up on the Mac");
   });
 });
 

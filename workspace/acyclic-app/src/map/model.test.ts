@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, topOf, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, sourceKey, topOf, visible } from "./model";
 
 // garden
 //   beds: dig, edge
@@ -19,6 +19,23 @@ const plan = [
   item("paint", "shed", ["sow"], { thread: "spring" }),
   item("tools", null, ["paint"]),
 ];
+
+describe("layout source identity", () => {
+  it("tracks title and progress changes while remaining independent of visible fold toggles", () => {
+    const original = buildModel([item("box"), item("one", "box", [], { title: "Short" })]);
+    const renamed = buildModel([item("box"), item("one", "box", [], { title: "A much longer title" })]);
+    expect(sourceKey(original)).not.toBe(sourceKey(renamed));
+    const toggled = visible(original, { collapsed: new Set(["box"]), showArchived: true });
+    expect(sourceKey(original)).toBe(sourceKey(buildModel([item("box"), item("one", "box", [], { title: "Short" })])));
+    expect(toggled.nodes.find((node) => node.id === "box")?.kind).toBe("collapsed");
+    const counts = { done: 0, leaves: 1, in_review: 0, in_progress: 0, ready: 1, blocked: 0, parked: 0, unthreaded: 0 };
+    const progressed = buildModel([item("box", null, [], { progress: { state: "ready", counts } })]);
+    const advanced = buildModel([
+      item("box", null, [], { progress: { state: "in-progress", counts: { ...counts, ready: 0, in_progress: 1 } } }),
+    ]);
+    expect(sourceKey(progressed)).not.toBe(sourceKey(advanced));
+  });
+});
 const model = buildModel(plan);
 const ids = (view: ReturnType<typeof visible>) => view.nodes.map((node) => `${node.id}:${node.kind}`);
 

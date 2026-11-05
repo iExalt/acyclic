@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 import { outlineOf } from "./outline";
-import { wavesView } from "./waves";
+import { projectLabels, wavesView } from "./waves";
 
 // Project p holds a's work and some of b's, project q the rest of b's; c waits on b, and b and d on each other.
 const items = [
@@ -42,5 +42,15 @@ describe("wavesView", () => {
     expect(view.anytime[0]?.counts).toBe(listed.threads[0]?.counts);
     expect(view.waves[0]?.[0]?.counts).toMatchObject({ leaves: 3, ready: 1, in_progress: 1, parked: 1 });
     expect(view.anytime[1]?.counts.leaves).toBe(0);
+  });
+});
+
+describe("projectLabels", () => {
+  it.each(["Alpha", "alpha", "  ALPHA  "])("omits a project matching the thread name: %s", (name) => {
+    expect(projectLabels([name], "Alpha")).toEqual([]);
+  });
+
+  it("keeps other project labels in their original order", () => {
+    expect(projectLabels(["Beta", " alpha ", "Gamma"], "Alpha")).toEqual(["Beta", "Gamma"]);
   });
 });

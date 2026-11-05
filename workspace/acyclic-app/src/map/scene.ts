@@ -1,11 +1,12 @@
 // What the Map draws for a laid-out view and the user's selection: every node at its place, the edges worth
 // drawing, and which nodes and links the selected thread lights up. Pure, so the rules are tested without a canvas.
 
-import { countsText, type Stage } from "../api";
-import { cut, type Measure, wrap } from "./fit";
+import type { Stage } from "../api";
+import type { Measure } from "./fit";
+import { metricsOf } from "./labelmetrics";
 import { type Placed, withinOneBox } from "./layout";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
-import type { Kind, View, VisibleNode } from "./model";
+import type { Kind, View } from "./model";
 import { type Segments, segmentsOf } from "./route";
 
 /** What the user has picked: an item, a thread, or neither. An item's thread lights up unless a thread is picked. */
@@ -15,12 +16,12 @@ export interface Selection {
   /** The item under the pointer, whose links show, as the selection's do, while the rest recede. */
   hovered?: string | null;
 }
-
 export interface SceneNode {
   id: string;
-  /** Its label, a line at a time, each cut to fit `textWidth`. */
+  /** Its full label, wrapped at grapheme boundaries to fit `textWidth`. */
   label: string;
   textWidth: number;
+  header: number;
   kind: Kind;
   /** A tile's stage and thread, which its marks show; null for a box. */
   stage: Stage | null;
@@ -112,6 +113,7 @@ export function scene(
   selection: Selection,
   threadOf: (id: string) => string | null,
   fonts: Fonts = UNMEASURED,
+  measured?: ReadonlyMap<string, ReturnType<typeof metricsOf>>,
 ): Scene {
   const thread = selection.thread ?? (selection.item === null ? null : threadOf(selection.item));
   const lit = new Set(thread === null ? [] : (view.threads.get(thread) ?? []));
@@ -122,11 +124,12 @@ export function scene(
     if (at === undefined) continue;
     const depth = node.parent === null ? 0 : (layer.get(node.parent) ?? 0) + 1;
     layer.set(node.id, depth);
-    const textWidth = textWidthOf(node.kind, at.width);
+    const metrics = measured?.get(node.id) ?? metricsOf(node, fonts, 200);
     nodes.push({
       id: node.id,
-      label: labelOf(node, textWidth, fonts),
-      textWidth,
+      label: metrics.lines.join("\n"),
+      textWidth: metrics.textWidth,
+      header: metrics.header || metrics.height,
       kind: node.kind,
       // A box's, where its work stands as a whole, as core tells it.
       stage: node.stage,
@@ -197,26 +200,4 @@ export function scene(
     if (line !== undefined) dividers.push({ id: `divider ${node.id}`, ...line, layer: node.layer });
   }
   return { nodes, edges, junctions: [...junctions.values()], dividers, thread };
-}
-
-/**
- * A node's label, in lines cut to fit `width`. A tile's title takes three lines. A box's takes one, ending, when it is
- * collapsed, with how many items it hides, and a parent's leaves by stage take the line under it.
- */
-export function labelOf(
-  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "progress" | "note" | "doneBox">,
-  width: number,
-  fonts: Fonts,
-): string {
-  // Backticks set a run as code in the panels; the canvas draws only plain text, so it drops them.
-  const text = node.title.replace(/`([^`]+)`/g, "$1");
-  if (node.kind === "leaf") return wrap(text, width, 3, fonts.regular).join("\n");
-  // A done box says what it holds under its name instead.
-  const hidden = node.kind === "collapsed" && node.note === undefined ? ` (+${node.hidden})` : "";
-  const title = cut(text, width - fonts.bold(hidden), fonts.bold) + hidden;
-  // A folded thread's name takes two lines, as it names what the tile stands for, as a tile's title does.
-  const named =
-    node.kind === "collapsed" && node.doneBox?.kind === "thread" ? wrap(text, width, 2, fonts.bold).join("\n") : title;
-  if (node.note !== undefined) return `${named}\n${cut(node.note, width, fonts.bold)}`;
-  return node.progress === null ? title : `${title}\n${cut(countsText(node.progress), width, fonts.bold)}`;
 }

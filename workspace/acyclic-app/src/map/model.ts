@@ -29,16 +29,19 @@ export interface Model {
 }
 
 /** A canonical key for layout-relevant source structure, before the user's local fold toggles. */
-export function sourceKey(model: Model): string {
+export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): string {
   return JSON.stringify(
     [...model.items.values()]
-      .map(({ id, parent, thread, archived, state, stage, waitsFor }) => ({
+      .map(({ id, title, parent, thread, archived, state, stage, progress, waitsFor }) => ({
         id,
+        title,
         parent,
         thread,
         archived,
         state,
         stage,
+        progress,
+        doneBox: doneBoxes.get(id) ?? null,
         waitsFor: [...waitsFor].sort(),
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
