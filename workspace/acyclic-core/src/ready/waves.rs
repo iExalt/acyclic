@@ -110,7 +110,7 @@ impl ReadinessEvaluator<'_> {
         self.model.thread_of(id).filter(|thread| self.model.threads.contains_key(*thread))
     }
 
-    /// Whether `id` is a leaf with work left: any stage but done, so work in review counts.
+    /// Whether `id` is a leaf with work left: any stage but done.
     fn has_work_left(&self, id: &str) -> Result<bool, Error> {
         Ok(self.stage(id)?.is_some_and(|stage| stage != Stage::Done))
     }

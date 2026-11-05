@@ -213,11 +213,9 @@
         "id": "01900000-0000-7000-8000-0000000000e1",
         "parent": null,
         "readiness": {
-          "reason": "no clone of the repository is mapped",
-          "repository": "01900000-0000-7000-8000-0000000000c1",
-          "status": "unverified"
+          "status": "done"
         },
-        "stage": "in-review",
+        "stage": "done",
         "state": "done",
         "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "Shipped"

@@ -78,8 +78,8 @@ impl View<'_> {
     /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` unless it is archived (a
     /// parent's rolled up from its leaves, none with no leaf to count), and a parent's `progress`, `{state, counts}`,
     /// from the leaves under it and the claims on their threads. `counts`
-    /// has its leaves, those `done`, and every other leaf by stage, so they add up to `leaves`; `in_review` counts the
-    /// done ones not merged yet. An id the model lacks has only its id.
+    /// has its leaves, and each leaf under its stage, so the stages add up to `leaves`. An id the model lacks has only its
+    /// id.
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
         let Some(item) = self.model.items.get(id) else {
             return Ok(json!({
@@ -242,12 +242,6 @@ impl View<'_> {
                     }
                     shown
                 },
-                Entry::Unverified { item, repository, reason } => json!({
-                    "kind": "unverified", "item": self.item_row(item)?, "repository": repository,
-                    "repository_name": self.model.repositories.get(repository)
-                        .and_then(crate::resolve::repository_name),
-                    "reason": reason,
-                }),
             };
             shown["key"] = entry.key().into();
             if !matches!(entry, Entry::Conflict { .. }) {
@@ -270,13 +264,7 @@ impl View<'_> {
         thread: &dyn Fn(&str) -> Json,
     ) -> Result<Json, CliError> {
         let by = acyclic_core::model::By { actor: acyclic_core::scope::USER, at: self.now };
-        let kept = acyclic_core::needs::keeps(
-            self.state,
-            self.model,
-            self.readiness,
-            (entity, id, field),
-            by,
-        )?;
+        let kept = acyclic_core::needs::keeps(self.state, self.model, (entity, id, field), by)?;
         let values: Vec<&Json> = kept.iter().map(|kept| &kept.value).collect();
         let keeps: Vec<Json> =
             kept.iter().map(|kept| crate::keep::kept_json(self.model, field, kept)).collect();
@@ -317,12 +305,11 @@ fn links(all: &[Link], id: &str) -> Json {
     Json::Object(map)
 }
 
-/// Leaves by stage, as a parent's or a thread's `progress.counts` gives them: `leaves` in all, those `done`
-/// (merged or in review), and every other leaf by stage, so they add up to `leaves`; `in_review` counts the done ones
-/// not merged yet.
+/// Leaves by stage, as a parent's or a thread's `progress.counts` gives them: `leaves` in all, and each leaf under its
+/// stage, so the stages add up to `leaves`.
 fn stage_counts(stages: &Stages) -> Json {
     json!({
-        "done": stages.done + stages.in_review, "leaves": stages.total(), "in_review": stages.in_review,
+        "done": stages.done, "leaves": stages.total(),
         "in_progress": stages.in_progress, "ready": stages.ready, "blocked": stages.blocked,
         "parked": stages.parked, "unthreaded": stages.unthreaded,
     })
@@ -388,20 +375,11 @@ pub(crate) fn repo_show(model: &Model, record: &acyclic_core::model::Repository)
 mod tests {
 
     use acyclic_core::model::{self, By, add_item, link, set_parent, set_state};
-    use acyclic_core::ready::Ancestry;
     use acyclic_core::schema::{kind, repository};
     use acyclic_core::scope::{self, ScopeEdit, USER};
     use acyclic_core::state::{Key, Replica, ReplicaId};
 
     use super::*;
-
-    struct NoAncestry;
-
-    impl Ancestry for NoAncestry {
-        fn merged(&self, _: &acyclic_core::model::Repository, _: &str) -> Result<bool, String> {
-            Err("none".into())
-        }
-    }
 
     const NOW: Millis = 1_000;
 
@@ -446,7 +424,7 @@ mod tests {
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
         r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
-        claim::claim(&mut r, "t", "session/pi", NOW, (60_000, 480 * 60_000), None).unwrap();
+        claim::claim(&mut r, "t", "session/pi", NOW, (60_000, 480 * 60_000), false).unwrap();
         r
     }
 
@@ -457,7 +435,7 @@ mod tests {
     /// Runs `check` over a view of `replica`.
     fn viewing<T>(replica: &Replica, check: impl FnOnce(&View<'_>) -> T) -> T {
         let model = Model::read(replica.state()).unwrap();
-        let readiness = ReadinessEvaluator::new(replica.state(), &model, NOW, &NoAncestry);
+        let readiness = ReadinessEvaluator::new(replica.state(), &model, NOW);
         check(&View { state: replica.state(), model: &model, readiness: &readiness, now: NOW })
     }
 
@@ -520,7 +498,7 @@ mod tests {
             // none is started; a leaf's has none.
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
-                json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_review": 0, "in_progress": 2,
+                json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_progress": 2,
                        "ready": 0, "blocked": 0, "parked": 0, "unthreaded": 0}})
             );
             // And its stage, rolled up from them under the key a leaf's has.
@@ -621,19 +599,6 @@ mod tests {
         add_item(&mut mac, "e", "E", user).unwrap();
         scope::edit(&mut mac, &member("e", Some("t")), user).unwrap();
         link(&mut mac, "e", "c", user).unwrap();
-        // `h` waits for `f`, done in `r`, and `g`, done in a repository with no record, neither merge confirmed.
-        add_item(&mut mac, "h", "H", user).unwrap();
-        for (id, repository) in [("f", "r"), ("g", "gone")] {
-            add_item(&mut mac, id, &id.to_uppercase(), user).unwrap();
-            let evidence = acyclic_core::model::Evidence {
-                repository: Some(repository.into()),
-                commit: Some("abc1234".into()),
-                text: None,
-            };
-            model::set(&mut mac, &key(kind::ITEM, id), "evidence", Some(&evidence), user).unwrap();
-            set_state(&mut mac, id, ItemState::Done, user).unwrap();
-            link(&mut mac, "h", id, user).unwrap();
-        }
         // Two replicas disagree about an item's parent.
         let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
         set_parent(&mut mac, "b", None, user).unwrap();
@@ -669,18 +634,6 @@ mod tests {
                 json!(["t", "u"].map(|id| thread_row(&view.model.heads_index(), id, &listed[id])))
             );
             assert_eq!(cycle["notify"], true);
-            // An unconfirmed merge names its repository by id, and by `owner/name` when it has a record.
-            let named: Vec<(&Json, &Json, &Json)> = of("unverified")
-                .into_iter()
-                .map(|n| (&n["item"]["id"], &n["repository"], &n["repository_name"]))
-                .collect();
-            assert_eq!(
-                named,
-                [
-                    (&json!("f"), &json!("r"), &json!("me/code")),
-                    (&json!("g"), &json!("gone"), &json!(null))
-                ]
-            );
             for (entry, shown) in entries.iter().zip(&needs) {
                 assert!(shown["kind"].is_string(), "{shown}");
                 // Each carries the core's key, which the app and pushes use as given.

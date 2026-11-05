@@ -26,6 +26,7 @@ pub mod graph;
 pub mod ids;
 pub mod import;
 pub mod locate;
+pub mod merged;
 pub mod model;
 pub mod natural;
 pub mod needs;

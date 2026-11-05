@@ -7,6 +7,7 @@ pub mod args;
 mod commands;
 mod context;
 mod edit;
+mod evidence;
 mod keep;
 mod pretty;
 mod resolve;

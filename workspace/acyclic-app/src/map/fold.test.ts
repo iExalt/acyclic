@@ -34,11 +34,11 @@ describe("foldDone", () => {
         links: { ...one.links, waits_for: [...one.links.waits_for].reverse() },
       })),
     );
-    const inReview = fold(finished.map((one) => (one.id === "a2" ? { ...one, stage: "in-review" as const } : one)));
+    const reopened = fold(finished.map((one) => (one.id === "a2" ? { ...one, stage: "in-progress" as const } : one)));
     expect(sourceKey(renamed.model)).not.toBe(sourceKey(folded.model));
     expect(sourceKey(reordered.model)).toBe(sourceKey(folded.model));
-    // The raw item state/thread/parent are the same, but the merged stage means the finished thread no longer folds.
-    expect(sourceKey(inReview.model)).not.toBe(sourceKey(folded.model));
+    // The raw item state/thread/parent are the same, but a stage under way means the thread no longer folds.
+    expect(sourceKey(reopened.model)).not.toBe(sourceKey(folded.model));
   });
 
   it("folds a finished thread's leaves in a box into a box named after it, and those boxes into the Done box", () => {
@@ -69,7 +69,7 @@ describe("foldDone", () => {
       ready("a3", "q", "a"),
       done("b1", "p", "b"),
       done("b2", "p", "b"),
-      item("b3", "q", [], { state: "in-progress", stage: "in-review", thread: "b" }),
+      item("b3", "q", [], { state: "in-progress", stage: "in-progress", thread: "b" }),
       ready("x", "p", null),
     ]);
     expect(folded.doneBoxes.size).toBe(0);

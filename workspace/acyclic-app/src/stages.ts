@@ -6,7 +6,6 @@ import type { Counts, Stage } from "./api";
 /** Each stage's icon, drawn in a 16-unit square. */
 export const STAGE_ICONS: Record<Stage, string> = {
   done: '<path d="M3 8.5l3.2 3.2L13 5"/>',
-  "in-review": '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
   "in-progress": '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/>',
   ready: '<circle cx="8" cy="8" r="6"/>',
   blocked: '<circle cx="8" cy="8" r="6"/><path d="M4.5 8h7"/>',
@@ -18,7 +17,6 @@ export const STAGE_ICONS: Record<Stage, string> = {
 /** Each stage's word, as a sentence starts it. */
 export const STAGE_WORDS: Record<Stage, string> = {
   done: "Done",
-  "in-review": "In review",
   "in-progress": "In progress",
   ready: "Ready",
   blocked: "Blocked",
@@ -36,14 +34,10 @@ export function stageCountWords(stage: Stage, count: number): string {
 /** The stages whose work is finished or set aside, drawn quieter. */
 export const QUIET: ReadonlySet<Stage> = new Set(["done", "blocked", "parked", "unthreaded"]);
 
-/**
- * A parent's leaves by stage, in the order work moves through them, leaving out stages with none: done apart from
- * those in review, which `done` counts too.
- */
+/** A parent's leaves by stage, in the order work moves through them, leaving out stages with none. */
 export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
   const all: [Stage, number][] = [
-    ["done", counts.done - counts.in_review],
-    ["in-review", counts.in_review],
+    ["done", counts.done],
     ["in-progress", counts.in_progress],
     ["ready", counts.ready],
     ["blocked", counts.blocked],

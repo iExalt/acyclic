@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Line, linesOf } from "./lines";
-import { countText, isCollapsible, keepsIn, type Need, needView, structuralKey, threadLabel, together } from "./needs";
+import { countText, isCollapsible, keepsIn, type Need, needView, structuralKey, threadLabel } from "./needs";
 import examples from "./needs.examples.json";
 import { PALETTES } from "./palette";
 
@@ -9,66 +9,6 @@ const none = new Map<string, Line>();
 const thread = (id: string, heads: string[] = []) => ({ id, title: id.toUpperCase(), heads });
 
 describe("needView", () => {
-  it("says which merge it can't confirm, in which repository by its owner/name, and what to do about it", () => {
-    const unverified = (reason: string, name: string | null = "me/app") =>
-      needView(
-        {
-          kind: "unverified",
-          key: "unverified:i1:r1",
-          item: { id: "i1", title: "Move in" },
-          repository: "r1",
-          repository_name: name,
-          reason,
-        },
-        none,
-      );
-    expect(unverified("no clone of the repository is mapped")).toMatchObject({
-      key: "unverified:i1:r1",
-      text: "Can't confirm its merge into me/app",
-      detail: "Move in",
-      items: ["i1"],
-      note: "This machine has no clone of me/app to look for merged commits in: add the clone's path to ~/.config/acyclic/clones.toml",
-    });
-    expect(unverified("the clone has no main branch").note).toBe(
-      "Looking for merged commits in this machine's clone of me/app failed (the clone has no main branch): fetch in that clone, or check its path in ~/.config/acyclic/clones.toml",
-    );
-    // A repository with no record is named by its id.
-    expect(unverified("x", null).text).toBe("Can't confirm its merge into r1");
-  });
-
-  it("puts the merges one cause leaves unconfirmed in one repository in one entry, where the first was", () => {
-    const unverified = (id: string, repository: string, reason: string) =>
-      needView(
-        {
-          kind: "unverified",
-          key: `unverified:${id}:${repository}`,
-          item: { id, title: id },
-          repository,
-          repository_name: `me/${repository}`,
-          reason,
-        },
-        none,
-      );
-    const views = [
-      unverified("i1", "app", "the clone has no main branch"),
-      unverified("i2", "cli", "the clone has no main branch"),
-      ...["i3", "i4", "i5", "i6", "i7", "i8"].map((id) => unverified(id, "app", "the clone has no main branch")),
-      unverified("i9", "app", "not a commit id"),
-    ];
-    const shown = together(views);
-    expect(shown[0]?.merged).toEqual(["i3", "i4", "i5", "i6", "i7", "i8"].map((id) => `unverified:${id}:app`));
-    // One with no item names nothing to count, so two stay two.
-    const bare = needView({ kind: "unverified", item: null, repository: "app", reason: "x" }, none);
-    expect(together([bare, bare])).toHaveLength(2);
-    expect(shown.map((view) => [view.key, view.text, view.items.length, view.more])).toEqual([
-      ["unverified:i1:app", "Can't confirm 7 items' merges into me/app", 5, 2],
-      ["unverified:i2:cli", "Can't confirm its merge into me/cli", 1, 0],
-      ["unverified:i9:app", "Can't confirm its merge into me/app", 1, 0],
-    ]);
-    expect(shown[0] && isCollapsible(shown[0])).toBe(true);
-    expect(shown[2] && isCollapsible(shown[2])).toBe(false);
-  });
-
   it("names a thread as the thread list does, with its badge, and as the entry gives it where the list lacks it", () => {
     const lines = linesOf(
       [

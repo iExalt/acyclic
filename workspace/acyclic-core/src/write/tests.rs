@@ -188,7 +188,7 @@ fn waiter_guard_covers_new_direct_and_ancestor_waiters_and_keeps_original_waiter
     let deleted = guard(vec![StartedBaseline { item: "gone".into(), count: 0 }]);
     assert_eq!(check_expected(&r.state, &read(&r), &[deleted], 4).unwrap(), Vec::new());
 
-    crate::claim::claim(&mut r, "t", "session/test", 5, (60_000, 60_000), None).unwrap();
+    crate::claim::claim(&mut r, "t", "session/test", 5, (60_000, 60_000), false).unwrap();
     let mismatch = check_expected(&r.state, &read(&r), &[guard(vec![])], 6).unwrap();
     assert_eq!(mismatch.len(), 1);
     assert_eq!(mismatch[0].actual["started"].as_array().unwrap().len(), 2);
@@ -227,7 +227,7 @@ fn started_at_most_includes_live_claims_on_leaf_and_parent() {
     ];
     assert_eq!(check_expected(&r.state, &read(&r), &no_started, 2).unwrap(), Vec::new());
 
-    crate::claim::claim(&mut r, "t", "session/test", 3, (60_000, 60_000), None).unwrap();
+    crate::claim::claim(&mut r, "t", "session/test", 3, (60_000, 60_000), false).unwrap();
     let mismatch = check_expected(&r.state, &read(&r), &no_started, 4).unwrap();
     assert_eq!(mismatch.len(), 2);
     assert!(mismatch.iter().all(|one| one.actual.as_u64() == Some(1)));
@@ -266,7 +266,7 @@ fn thread(id: &str) -> Change {
 
 /// Commits `changes` at `at`, panicking on a refusal.
 fn commit_ok(replica: &mut Replica, at: Millis, changes: Vec<Change>) -> Outcome {
-    commit(replica, by(at), None, |_| Ok::<_, ()>(ChangeSet(changes))).unwrap()
+    commit(replica, by(at), false, |_| Ok::<_, ()>(ChangeSet(changes))).unwrap()
 }
 
 /// The rules a refused change set breaks.
@@ -336,7 +336,7 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
 
         let before = r.state.clone();
         let error =
-            commit(&mut r, by(1), None, |_| Ok::<_, ()>(ChangeSet(vec![empty]))).unwrap_err();
+            commit(&mut r, by(1), false, |_| Ok::<_, ()>(ChangeSet(vec![empty]))).unwrap_err();
         let CommitError::Refused(violations, _) = error else {
             panic!("an empty record add should be refused");
         };
@@ -514,7 +514,7 @@ fn an_add_assignment_must_name_the_record_being_added() {
         with: vec![Assign::Item("other".into(), ItemAssign::Title("Wrong".into()))],
     }]);
     let Err(CommitError::Refused(violations, _)) =
-        commit(&mut r, by(1), None, |_| Ok::<_, ()>(changes))
+        commit(&mut r, by(1), false, |_| Ok::<_, ()>(changes))
     else {
         panic!("a misdirected assignment must be refused");
     };
@@ -675,15 +675,6 @@ fn refused_or_none(replica: &Replica, change: Change) -> Vec<Rule> {
         .collect()
 }
 
-/// Ancestry with no clones, so no merge can be checked.
-struct Unmapped;
-
-impl crate::ready::Ancestry for Unmapped {
-    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
-        Err("no clone".into())
-    }
-}
-
 /// The rules finishing `id` breaks, judged with readiness or without it, or none when it is accepted.
 fn finishing(
     r: &Replica,
@@ -693,7 +684,7 @@ fn finishing(
     ready: bool,
 ) -> Vec<Rule> {
     let before = read(r);
-    let readiness = ready.then(|| ReadinessEvaluator::new(&r.state, &before, 99, &Unmapped));
+    let readiness = ready.then(|| ReadinessEvaluator::new(&r.state, &before, 99));
     let finish = Change::Finish { item: id.into(), evidence, force };
     judge(&before, &ChangeSet(vec![finish]), by(99), readiness.as_ref())
         .err()
@@ -731,7 +722,7 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
     );
     assert_eq!(finishing(&r, "lone", None, true, true), []);
     // Someone else's claim holds the thread's work back from the finisher.
-    crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), None).unwrap();
+    crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), false).unwrap();
     let held = Readiness::Claimed { holder: "session/other".into() };
     assert_eq!(finishing(&r, "free", None, false, true), [Rule::NotReady(Some(held))]);
     // A parent whose work is done may be finished.

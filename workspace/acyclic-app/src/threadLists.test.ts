@@ -6,7 +6,6 @@ import type { ThreadTile } from "./waves";
 const NONE: Counts = {
   done: 0,
   leaves: 0,
-  in_review: 0,
   in_progress: 0,
   ready: 0,
   blocked: 0,
@@ -20,16 +19,16 @@ const lists = (...ids: string[][]) => ({ waves: ids.map((one) => one.map(tile)),
 describe("the Overview's threads", () => {
   it("lists threads at work, and to start those with an item ready, Any time first, then by wave", () => {
     const counts = new Map([
-      ["thread-10", { ...NONE, leaves: 3, in_review: 1, done: 1 }],
+      ["thread-10", { ...NONE, leaves: 3, in_progress: 1, done: 1 }],
       ["thread-2", { ...NONE, leaves: 2, in_progress: 1, ready: 1 }],
-      ["thread-8", { ...NONE, leaves: 2, in_review: 1, done: 1, ready: 1 }],
+      ["thread-8", { ...NONE, leaves: 3, in_progress: 1, done: 1, ready: 1 }],
       ["thread-3", { ...NONE, leaves: 2, ready: 2 }],
       ["thread-4", { ...NONE, leaves: 1, blocked: 1 }],
       ["thread-5", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-6", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-7", { ...NONE, leaves: 1, ready: 1 }],
     ]);
-    // Wave 1 is at work (in progress, or in review with an item ready) or blocked, so nothing in it is to start;
+    // Wave 1 is at work (in progress, with or without an item ready) or blocked, so nothing in it is to start;
     // thread-7, any time, comes first.
     const view = { ...lists(["thread-2", "thread-8", "thread-4"], ["thread-10", "thread-6", "thread-3", "thread-5"]) };
     view.anytime = [tile("thread-7")];

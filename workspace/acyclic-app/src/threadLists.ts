@@ -5,7 +5,7 @@ import type { Counts } from "./api";
 import type { WavesView } from "./waves";
 
 export interface ThreadLists {
-  /** Threads with work in progress or in review, by id in natural order. */
+  /** Threads with work in progress, by id in natural order. */
   working: string[];
   /**
    * Threads to start: not at work, with an item ready, the Any time ones first (what can start now reads first, as on
@@ -14,10 +14,10 @@ export interface ThreadLists {
   next: string[];
 }
 
-/** Threads with work in progress or in review, by id in natural order. */
+/** Threads with work in progress, by id in natural order. */
 export function workingThreads(counts: ReadonlyMap<string, Counts>): string[] {
   return [...counts.entries()]
-    .filter(([, one]) => one.in_progress + one.in_review > 0)
+    .filter(([, one]) => one.in_progress > 0)
     .map(([id]) => id)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }

@@ -356,7 +356,7 @@ fn a_merged_commit_counts_done_from_another_thread_through_the_clone_mapped_by_o
     let (code, out) = sh.output(&done, &at_home);
     assert_eq!(code, 0, "{out}");
     let (_, made) = sh.output("item show Made", &at_home);
-    assert_eq!(made["data"][0]["readiness"]["status"], "done", "merged, not in review: {made}");
+    assert_eq!(made["data"][0]["readiness"]["status"], "done", "{made}");
     let (_, used) = sh.output("item show Used", &at_home);
     assert_eq!(used["data"][0]["readiness"]["status"], "ready", "{used}");
 }

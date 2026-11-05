@@ -163,7 +163,6 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
 const NONE: Counts = {
   done: 0,
   leaves: 0,
-  in_review: 0,
   in_progress: 0,
   ready: 0,
   blocked: 0,

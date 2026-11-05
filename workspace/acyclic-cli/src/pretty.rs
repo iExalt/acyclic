@@ -68,7 +68,17 @@ pub(crate) fn render(
             _ => block(data, width),
         },
     };
-    if text.ends_with('\n') { text } else { format!("{text}\n") }
+    let mut text = if text.ends_with('\n') { text } else { format!("{text}\n") };
+    for unchecked in rows(&data["unchecked_commits"]) {
+        let _ = writeln!(
+            text,
+            "warning: {}@{} isn't checked on this machine: {}",
+            compact(&unchecked["repository"]),
+            compact(&unchecked["commit"]),
+            compact(&unchecked["reason"])
+        );
+    }
+    text
 }
 
 /// `value` with every string, and every key, that is an id in `names` replaced by its name.
@@ -379,8 +389,6 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
             let each = waiting.iter().map(|(id, wait)| {
                 let why = match wait["why"].as_str() {
                     Some("open") => "not done".to_owned(),
-                    Some("in-review") => "in review".to_owned(),
-                    Some("unverified") => format!("merge unverified: {}", compact(&wait["reason"])),
                     _ => compact(wait),
                 };
                 format!("{id} ({why})")
@@ -392,9 +400,6 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
         "claimed" => format!("claimed by {}{ready}", text("holder")),
         "contested" => format!("contested by {}{ready}", text("holders")),
         "conflicted" => format!("conflicted: {}", text("fields")),
-        "unverified" => {
-            format!("done, merge unverified: {} ({})", text("reason"), text("repository"))
-        },
         "in-cycle" => "in a cycle".to_owned(),
         "nothing-ready" => "nothing ready".to_owned(),
         // The rest say all there is in their name.

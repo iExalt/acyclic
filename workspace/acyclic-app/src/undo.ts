@@ -152,14 +152,14 @@ function above(plan: Plan, id: string): Set<string> {
   return up;
 }
 
-const STARTED: ReadonlySet<Stage> = new Set(["in-progress", "in-review", "done"]);
+const STARTED: ReadonlySet<Stage> = new Set(["in-progress", "done"]);
 
 /** How much of the work an item is, or holds, has been started: a leaf's own, or a parent's leaves under way or done. */
 function started(item: Item | undefined): number {
   if (item === undefined) return 0;
   if (item.progress !== undefined) {
     const { counts } = item.progress;
-    return counts.in_progress + counts.in_review + counts.done;
+    return counts.in_progress + counts.done;
   }
   return item.stage !== undefined && STARTED.has(item.stage) ? 1 : 0;
 }

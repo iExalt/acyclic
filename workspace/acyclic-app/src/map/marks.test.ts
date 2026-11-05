@@ -8,7 +8,7 @@ import { buildModel, fallbackStage, visible } from "./model";
 
 const thread = { colour: "#4ec695", ink: "#141a1f" };
 const DARK = PALETTES.dark;
-const STAGES: Stage[] = ["done", "in-review", "in-progress", "ready", "blocked", "parked", "unthreaded"];
+const STAGES: Stage[] = ["done", "in-progress", "ready", "blocked", "parked", "unthreaded"];
 
 describe("markSvg", () => {
   it("draws a different icon for every stage, with the thread's stripe and dot", () => {

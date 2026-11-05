@@ -87,7 +87,7 @@ pub struct Repository {
     pub default_branch: String,
 }
 
-/// The item's state. "In review" and readiness are derived on read, never imported.
+/// The item's state. Stage and readiness are derived on read, never imported.
 ///
 /// This compatibility re-export keeps import documents and the model on the same state type.
 pub use crate::model::ItemState as State;
@@ -112,7 +112,8 @@ pub enum Size {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Evidence {
-    /// The commit that completed the item, as `<repository id>@<sha>`.
+    /// The commit that completed the item, as `<owner>/<name>@<sha>`, naming a repository in the document or the
+    /// tracker, or as `<repository id>@<sha>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     /// Evidence in words, such as where a record lives.
@@ -282,7 +283,7 @@ pub enum ValidationError {
         /// The other repository that has it.
         other: String,
     },
-    /// An evidence commit that isn't `<repository id>@<sha>`.
+    /// An evidence commit that isn't `<owner>/<name>@<sha>` or `<repository id>@<sha>`.
     InvalidCommit {
         /// The item.
         item: String,
@@ -478,7 +479,9 @@ impl Import {
                 check(at("waits_for"), id);
             }
             let commit = item.evidence.as_ref().and_then(|e| e.commit.as_ref());
-            if let Some((repository, _)) = commit.and_then(|commit| commit.rsplit_once('@')) {
+            if let Some((repository, _)) = commit.and_then(|commit| commit.rsplit_once('@'))
+                && owner_name(repository).is_none()
+            {
                 check(at("evidence"), repository);
             }
         }

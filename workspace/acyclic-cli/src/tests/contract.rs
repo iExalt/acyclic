@@ -715,3 +715,123 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         assert!(settled || conflict["field"] == "state", "nothing keeps {}", conflict["key"]);
     }
 }
+
+/// Git in `dir` with no user or system settings and a fixed identity; its trimmed output.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@example.test")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example.test")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A code repository `origin` and its clone, the clone on a branch `work` that `origin` never merges, and a home
+/// whose `clones.toml` maps `me/code` to the clone. Returns the home and the commit only `work` has.
+fn code(sh: &Shell) -> (String, String) {
+    let (origin, clone, home) =
+        (sh.path().join("origin"), sh.path().join("clone"), sh.path().join("home"));
+    git(sh.path(), &["init", "-q", "-b", "main", origin.to_str().unwrap()]);
+    git(&origin, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(sh.path(), &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
+    git(&clone, &["switch", "-q", "-c", "work"]);
+    git(&clone, &["commit", "-q", "--allow-empty", "-m", "unmerged"]);
+    let work = git(&clone, &["rev-parse", "HEAD"]);
+    std::fs::create_dir_all(home.join(".config/acyclic")).unwrap();
+    let mapping = format!("[clones]\n\"me/code\" = \"{}\"\n", clone.display());
+    std::fs::write(home.join(".config/acyclic/clones.toml"), mapping).unwrap();
+    (home.to_str().unwrap().to_owned(), work)
+}
+
+#[test]
+fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
+    let mut sh = Shell::new();
+    let (home, work) = code(&sh);
+    let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
+    sh.run("init tracker --replica mac", &[]);
+    sh.run("repository add --name me/code --default-branch main", mapped);
+    sh.run("repository add --name me/other --default-branch main", mapped);
+    for (n, title) in [("a1", "Ship"), ("a2", "Elsewhere"), ("a3", "Later")] {
+        sh.run(&format!("item add --id {} --title {title}", id(n)), mapped);
+    }
+    let refused = |sh: &mut Shell, line: &str| {
+        let (code, out) = sh.output(line, mapped);
+        assert_eq!((code, &out["error"]["code"]), (1, &json!("unmerged")), "{out}");
+        out["error"]["details"].clone()
+    };
+    // A branch's commit and a typo are refused, forced or not, and nothing is written.
+    let details = refused(&mut sh, &format!("item done Ship --force --commit me/code@{work}"));
+    assert_eq!(details["reason"], "not-merged");
+    let details = refused(&mut sh, "item done Ship --force --commit me/code@abcdef1");
+    assert_eq!(details["reason"], "unknown-commit");
+    assert_eq!(sh.output("item show Ship", mapped).1["data"][0]["state"], "backlog");
+    // A squash commit merged since the clone last fetched is fetched and passes, abbreviated, with the checkout
+    // untouched.
+    let origin = sh.path().join("origin");
+    git(&origin, &["commit", "-q", "--allow-empty", "-m", "squashed"]);
+    let squashed = git(&origin, &["rev-parse", "HEAD"]);
+    let (code, out) =
+        sh.output(&format!("item done Ship --force --commit me/code@{}", &squashed[..7]), mapped);
+    assert_eq!(code, 0, "{out}");
+    assert!(out["data"].get("unchecked_commits").is_none(), "{out}");
+    assert_eq!(git(&sh.path().join("clone"), &["branch", "--show-current"]), "work");
+    // A repository this machine has no clone of is written, and says it couldn't be checked.
+    let (code, out) = sh.output("item done Elsewhere --force --commit me/other@abcdef1", mapped);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["data"]["unchecked_commits"][0]["repository"], "me/other");
+    // A fetch that fails refuses, saying so, and writes nothing.
+    git(&origin, &["commit", "-q", "--allow-empty", "-m", "later"]);
+    let later = git(&origin, &["rev-parse", "HEAD"]);
+    std::fs::rename(&origin, sh.path().join("gone")).unwrap();
+    let details = refused(&mut sh, &format!("item done Later --force --commit me/code@{later}"));
+    assert_eq!(details["reason"], "fetch-failed");
+    assert!(details["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{details}");
+    assert_eq!(sh.output("item show Later", mapped).1["data"][0]["state"], "backlog");
+    // Doctor checks what is stored as last fetched, fetching nothing: the unmapped commit isn't counted as checked.
+    let doctor = sh.output("doctor", mapped).1;
+    assert_eq!(doctor["data"]["commits"], json!({"checked": 1, "unchecked": 1, "unmerged": []}));
+    // Reads run no git: with every clone mapped to a path that doesn't exist, they read the same.
+    std::fs::write(
+        sh.path().join("home/.config/acyclic/clones.toml"),
+        "[clones]\n\"me/code\" = \"/nonexistent\"\n\"me/other\" = \"/nonexistent\"\n",
+    )
+    .unwrap();
+    for line in ["item list", "thread ready", "needs", "item show Ship"] {
+        assert_eq!(sh.output(line, mapped).1, sh.output(line, AGENT).1, "{line}");
+    }
+}
+
+#[test]
+fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
+    let mut sh = Shell::new();
+    let (home, work) = code(&sh);
+    let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
+    sh.run("init tracker --replica mac", &[]);
+    let plan = |commit: &str| {
+        json!({
+            "format": "acyclic-import", "version": 3,
+            "repositories": [{"id": id("c1"), "name": "me/code", "default_branch": "main"}],
+            "items": [{"id": id("a1"), "title": "Ship", "state": "done",
+                       "evidence": {"commit": format!("me/code@{commit}")}}],
+        })
+        .to_string()
+    };
+    std::fs::write(sh.path().join("plan.json"), plan(&work)).unwrap();
+    for line in ["import plan.json --dry-run", "import plan.json"] {
+        let (code, out) = sh.output(line, mapped);
+        assert_eq!((code, &out["error"]["details"]["reason"]), (1, &json!("not-merged")), "{out}");
+    }
+    assert_eq!(sh.output("doctor", mapped).1["data"]["counts"]["items"], 0, "nothing written");
+    let base = git(&sh.path().join("origin"), &["rev-parse", "HEAD"]);
+    std::fs::write(sh.path().join("plan.json"), plan(&base)).unwrap();
+    let (code, out) = sh.output("import plan.json", mapped);
+    assert_eq!(code, 0, "{out}");
+}

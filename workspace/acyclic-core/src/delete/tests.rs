@@ -2,7 +2,7 @@ use crate::archive;
 use crate::claim;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_state};
 use crate::needs::{Entry, needs_you};
-use crate::ready::{Ancestry, ReadinessEvaluator};
+use crate::ready::ReadinessEvaluator;
 use crate::schema::kind;
 use crate::scope::USER;
 use crate::scope::{ScopeEdit, edit};
@@ -57,7 +57,7 @@ fn only_an_item_nothing_refers_to_is_deleted() {
         )
         .unwrap();
     }
-    claim::claim(&mut r, "held", "session/pi", NOW, (60_000, 480 * 60_000), None).unwrap();
+    claim::claim(&mut r, "held", "session/pi", NOW, (60_000, 480 * 60_000), false).unwrap();
     assert_eq!(refusal(&mut r, "parent", user(NOW)), ["has-children"]);
     // A link either way, and a link of any kind.
     assert_eq!(refusal(&mut r, "a", user(NOW)), ["linked"]);
@@ -116,24 +116,16 @@ fn a_deleted_item_is_missing_to_every_checked_write_and_its_id_is_retired() {
         Err(archive::ArchiveError::Write(WriteError::NoItem(_)))
     ));
     assert!(matches!(
-        archive::archive(&mut r, &Unmapped, "gone", user(3)),
+        archive::archive(&mut r, "gone", user(3)),
         Err(archive::ArchiveError::Write(WriteError::NoItem(_)))
     ));
     assert!(matches!(add_item(&mut r, "gone", "Again", user(3)), Err(WriteError::Deleted(_))));
 }
 
-struct Unmapped;
-
-impl Ancestry for Unmapped {
-    fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
-        Err("no clone".into())
-    }
-}
-
 /// What a reader sees of `r`: its needs, with every other reader run on it to show none of them fails.
 fn needs_of(r: &Replica) -> Vec<Entry> {
     let model = Model::read(r.state()).unwrap();
-    let readiness = ReadinessEvaluator::new(r.state(), &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(r.state(), &model, NOW);
     let _ = readiness.ready(false, "session/mac").unwrap();
     for id in model.items.keys() {
         let _ = readiness.of(id).unwrap();
@@ -197,7 +189,7 @@ fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
     }
     edit(&mut r, &ScopeEdit::Member { item: "a".into(), thread: Some("t".into()) }, user(2))
         .unwrap();
-    claim::claim(&mut r, "u", USER, NOW, (60_000, 480 * 60_000), None).unwrap();
+    claim::claim(&mut r, "u", USER, NOW, (60_000, 480 * 60_000), false).unwrap();
     let why = |r: &mut Replica, id: &str| match delete_thread(r, id, user(NOW)) {
         Err(DeleteError::ThreadInUse { reasons, .. }) => reasons
             .into_iter()

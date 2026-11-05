@@ -55,6 +55,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
 # exit 0
 {
   "data": {
+    "commits": {
+      "checked": 0,
+      "unchecked": 0,
+      "unmerged": []
+    },
     "counts": {
       "items": 1,
       "links": 0,

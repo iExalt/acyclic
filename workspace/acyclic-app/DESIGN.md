@@ -343,14 +343,13 @@ before what went wrong.
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its full title, then its
-  stage icon and word. Stage words use the canonical vocabulary: Done, In review, In progress, Ready, Blocked, Parked
-  and Needs a thread.
+  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Blocked, Parked and Needs a
+  thread.
 - **A project tells where it stands.** An open box's chevron and stage icon stay in the first 52 px strip; its full
   title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
-  fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (once all of it is
-  finished, in review while any still is, else done; else in progress once work under it has started and some of what
-  is left isn't parked; else ready, else blocked, else parked, else needs a thread), and its title is muted once done
-  or held up, as an item's title is.
+  fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (done once all of it
+  is; else in progress once work under it has started and some of what is left isn't parked; else ready, else blocked,
+  else parked, else needs a thread), and its title is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and

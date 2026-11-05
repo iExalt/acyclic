@@ -38,21 +38,17 @@ interface RawItem {
 }
 
 /**
- * Where a leaf stands: core's seven stages, which tell every leaf apart. A parent takes one from its leaves: once all
- * are finished, in review while any still is, else done; else in progress once work under it has started and some of
- * what is left isn't parked; else the first of ready, blocked, parked and needs a thread that its leaves have.
+ * Where a leaf stands: core's six stages, which tell every leaf apart. A parent takes one from its leaves: done once
+ * all are; else in progress once work under it has started and some of what is left isn't parked; else the first of
+ * ready, blocked, parked and needs a thread that its leaves have.
  */
 
-export type Stage = "done" | "in-review" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
+export type Stage = "done" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
 
-/**
- * A parent's leaves: all of them, those `done` (the ones in review among them), and every other one by stage, so
- * `done` and the other five add up to `leaves`.
- */
+/** A parent's leaves: all of them, and each under its stage, so the stages add up to `leaves`. */
 export interface Counts {
   done: number;
   leaves: number;
-  in_review: number;
   in_progress: number;
   ready: number;
   blocked: number;
@@ -64,7 +60,6 @@ export interface Counts {
 export const NO_COUNTS: Counts = {
   done: 0,
   leaves: 0,
-  in_review: 0,
   in_progress: 0,
   ready: 0,
   blocked: 0,

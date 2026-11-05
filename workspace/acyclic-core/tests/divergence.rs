@@ -14,7 +14,7 @@ use std::process::Command;
 
 use acyclic_core::model::{self, By, Model};
 use acyclic_core::needs::{self, Entry};
-use acyclic_core::ready::{Ancestry, ReadinessEvaluator};
+use acyclic_core::ready::ReadinessEvaluator;
 use acyclic_core::schema::kind;
 
 use acyclic_core::state::{Millis, Replica, ReplicaId, State};
@@ -27,14 +27,6 @@ const NOW: Millis = 1_792_022_400_000;
 const USER: &str = "actor/user";
 
 type Edit<'a> = &'a dyn Fn(&mut Replica, By<'_>) -> Result<(), Box<dyn std::error::Error>>;
-
-struct Unmapped;
-
-impl Ancestry for Unmapped {
-    fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
-        Err("no clone".into())
-    }
-}
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -136,7 +128,7 @@ impl Pair {
         let list = |tracker: &Tracker| {
             let (_, state) = tracker.load().unwrap();
             let model = Model::read(&state).unwrap();
-            let readiness = ReadinessEvaluator::new(&state, &model, now, &Unmapped);
+            let readiness = ReadinessEvaluator::new(&state, &model, now);
             needs::needs_you(&state, &model, &readiness, now).unwrap()
         };
         let mac = list(&self.mac);
@@ -151,7 +143,7 @@ fn commit(
     by: By<'_>,
     changes: Vec<Change>,
 ) -> Result<Outcome, Box<dyn std::error::Error>> {
-    write::commit(replica, by, None, |_| Ok::<_, ()>(ChangeSet(changes)))
+    write::commit(replica, by, false, |_| Ok::<_, ()>(ChangeSet(changes)))
         .map_err(|error| format!("{error:?}").into())
 }
 
@@ -265,7 +257,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
     // Every walk up the tree ends: readiness and placing new work under the cycle.
     let model = Model::read(&state).unwrap();
-    let readiness = ReadinessEvaluator::new(&state, &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(&state, &model, NOW);
     assert_eq!(
         readiness.thread_cycles().unwrap(),
         Vec::<std::collections::BTreeSet<String>>::new()

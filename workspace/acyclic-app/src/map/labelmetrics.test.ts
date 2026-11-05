@@ -35,7 +35,6 @@ describe("map label metrics", () => {
     const progress = {
       done: 1,
       leaves: 4,
-      in_review: 0,
       in_progress: 1,
       ready: 1,
       blocked: 1,

@@ -8,7 +8,7 @@ import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
 import type { NeedsLeft } from "./nav";
-import { isCollapsible, type Need, needView, threadLabel, together } from "./needs";
+import { isCollapsible, type Need, needView, threadLabel } from "./needs";
 import { Prose } from "./Prose";
 import { useWide } from "./wide";
 
@@ -42,10 +42,8 @@ export function NeedsList({
   onLeave,
   restore,
 }: NeedsListProps) {
-  // Same-cause entries as one.
-  const views = together(needs.map((need) => needView(need, lines, titleOf)));
-  // The entry asked for, or the one it was shown as part of.
-  const target = at === null ? null : (views.find((view) => view.merged?.includes(at))?.key ?? at);
+  const views = needs.map((need) => needView(need, lines, titleOf));
+  const target = at;
   const wide = useWide();
   const [disclosures, setDisclosures] = useState<{
     target: string | null;
@@ -56,7 +54,7 @@ export function NeedsList({
   if (disclosures.target !== target || disclosures.restore !== restore) {
     const expanded = new Set(disclosures.expanded);
     const include = (key: string | null | undefined) => {
-      const view = views.find((one) => one.key === key || one.merged?.includes(key ?? ""));
+      const view = views.find((one) => one.key === key);
       if (view !== undefined && isCollapsible(view)) expanded.add(view.key);
     };
     include(target);

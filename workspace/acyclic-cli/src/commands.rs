@@ -12,7 +12,7 @@ use acyclic_core::ids;
 use acyclic_core::import::{self, Import};
 use acyclic_core::model::{self, By, Evidence, ItemState, Model};
 use acyclic_core::needs;
-use acyclic_core::ready::{Ancestry, GitAncestry, ReadinessEvaluator};
+use acyclic_core::ready::ReadinessEvaluator;
 use acyclic_core::schema::{item as field, kind};
 use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
 use acyclic_core::store::{self, Meta, Tracker};
@@ -240,7 +240,7 @@ impl<'a> CommandContext<'a> {
                         Some(given) => (edit::given_id(given)?, Adding::Given),
                         None => (acyclic_core::ids::new(), Adding::Minted),
                     };
-                    let outcome = edit::commit(replica, by, None, None, |model| {
+                    let outcome = edit::commit(replica, by, None, false, |model| {
                         let fields = fields.clone().resolve(model, &Records::of(model), None)?;
                         Ok(edit::item_changes(&id, &fields, adding))
                     })?;
@@ -278,7 +278,7 @@ impl<'a> CommandContext<'a> {
                 let item = &edit.item;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, None, |model| {
+                    let outcome = edit::commit(replica, by, None, false, |model| {
                         let records = Records::of(model);
                         id = records.item(item)?;
                         let fields = fields.clone().resolve(model, &records, Some(&id))?;
@@ -298,11 +298,10 @@ impl<'a> CommandContext<'a> {
                 })
             },
             Command::Item(ItemCommand::Done { item, commit, evidence: text, force }) => {
-                let ancestry = GitAncestry::new(context::clones(self.env)?);
                 let commit = commit.as_deref().map(split_commit).transpose()?;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, Some(&ancestry), |model| {
+                    let outcome = edit::commit(replica, by, None, true, |model| {
                         let records = Records::of(model);
                         id = records.item(item)?;
                         let evidence = (commit.is_some() || text.is_some())
@@ -354,7 +353,7 @@ impl<'a> CommandContext<'a> {
                         Some(given) => (edit::given_id(given)?, Adding::Given),
                         None => (acyclic_core::ids::new(), Adding::Minted),
                     };
-                    let outcome = edit::commit(replica, by, None, None, |model| {
+                    let outcome = edit::commit(replica, by, None, false, |model| {
                         let fields = fields.clone().resolve(model, &Records::of(model), None)?;
                         Ok(edit::thread_changes(&id, &fields, adding))
                     })?;
@@ -374,7 +373,7 @@ impl<'a> CommandContext<'a> {
                 let thread = &edit.thread;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, None, |model| {
+                    let outcome = edit::commit(replica, by, None, false, |model| {
                         let records = Records::of(model);
                         id = records.thread(thread)?;
                         let fields = fields.clone().resolve(model, &records, Some(&id))?;
@@ -396,7 +395,7 @@ impl<'a> CommandContext<'a> {
                 self.write(|replica, by| {
                     let id = edit::new_repository_id(given.as_deref())?;
                     let adding = if given.is_some() { Adding::Given } else { Adding::Minted };
-                    let outcome = edit::commit(replica, by, Some(name), None, |_| {
+                    let outcome = edit::commit(replica, by, Some(name), false, |_| {
                         edit::repository_changes(&id, &fields, adding)
                     })?;
                     self.remember(&outcome.after);
@@ -408,7 +407,7 @@ impl<'a> CommandContext<'a> {
                     RepositoryFields { name: name.clone(), default_branch: default_branch.clone() };
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, name.as_deref(), None, |model| {
+                    let outcome = edit::commit(replica, by, name.as_deref(), false, |model| {
                         id = Records::of(model).repository(repository)?;
                         edit::repository_changes(&id, &fields, Adding::No)
                     })?;
@@ -429,18 +428,14 @@ impl<'a> CommandContext<'a> {
                 delete::delete_item(replica, &id, by)?;
                 Ok(json!({"item": id}))
             }),
-            Command::Item(ItemCommand::Archive { item }) => {
-                let clones = context::clones(self.env)?;
-                let ancestry = GitAncestry::new(clones);
-                self.write(|replica, by| {
-                    let model = Model::read(replica.state())?;
-                    let id = Records::of(&model).item(item)?;
-                    if !model.items[&id].is_archived_root() {
-                        archive::archive(replica, &ancestry, &id, by)?;
-                    }
-                    Ok(json!({"item": id}))
-                })
-            },
+            Command::Item(ItemCommand::Archive { item }) => self.write(|replica, by| {
+                let model = Model::read(replica.state())?;
+                let id = Records::of(&model).item(item)?;
+                if !model.items[&id].is_archived_root() {
+                    archive::archive(replica, &id, by)?;
+                }
+                Ok(json!({"item": id}))
+            }),
         }
     }
 
@@ -479,6 +474,7 @@ impl<'a> CommandContext<'a> {
         apply: impl FnOnce(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
+        let unchecked = RefCell::new(Vec::new());
         let meta = Meta { actor: self.actor.clone() };
         let expected = self.expected.as_deref();
         self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
@@ -495,18 +491,25 @@ impl<'a> CommandContext<'a> {
             }
             claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
             acyclic_core::probe::mark("batch: renew leases");
-            let before_needs = self
-                .observed
-                .as_ref()
-                .and_then(|_| notifying_entries(replica.state(), at, self.env));
+            let before_needs =
+                self.observed.as_ref().and_then(|_| notifying_entries(replica.state(), at));
             let before = replica.changes();
             if let Some(named) = &self.named {
                 *named.borrow_mut() = None;
             }
+            let commits_before = crate::evidence::commits(&Model::read(replica.state())?);
             let data = apply(replica, By { actor: &self.actor, at })?;
-            *result.borrow_mut() = (data, replica.changes() != before);
+            let changed = replica.changes() != before;
+            if changed {
+                *unchecked.borrow_mut() = crate::evidence::check(
+                    self.env,
+                    &commits_before,
+                    &Model::read(replica.state())?,
+                )?;
+            }
+            *result.borrow_mut() = (data, changed);
             if let (Some(observed), Some(before_needs)) = (&self.observed, before_needs)
-                && let Some(after_needs) = notifying_entries(replica.state(), at, self.env)
+                && let Some(after_needs) = notifying_entries(replica.state(), at)
             {
                 *self.acknowledged.borrow_mut() =
                     acknowledged_entries(&before_needs, &after_needs, observed);
@@ -523,6 +526,10 @@ impl<'a> CommandContext<'a> {
         let (mut data, changed) = result.into_inner();
         if let Json::Object(map) = &mut data {
             map.insert("changed".to_owned(), Json::Bool(changed));
+            let unchecked = unchecked.into_inner();
+            if !unchecked.is_empty() {
+                map.insert("unchecked_commits".to_owned(), Json::Array(unchecked));
+            }
             // Asked to push every write: a failed push doesn't fail the write, which `acyclic sync` carries later.
             if changed
                 && self.tracker.push_after_write()
@@ -564,14 +571,13 @@ impl<'a> CommandContext<'a> {
         }
     }
 
-    /// Reads the tracker and hands `read` a view of it: its items' readiness is judged against the clones' history.
+    /// Reads the tracker and hands `read` a view of it.
     fn with_view<T>(
         &self,
         read: impl FnOnce(&View<'_>) -> Result<T, CliError>,
     ) -> Result<T, CliError> {
         let (state, model) = self.read()?;
-        let ancestry = GitAncestry::new(context::clones(self.env)?);
-        let readiness = ReadinessEvaluator::new(&state, &model, self.now, &ancestry);
+        let readiness = ReadinessEvaluator::new(&state, &model, self.now);
         read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
     }
 
@@ -710,6 +716,8 @@ impl<'a> CommandContext<'a> {
                 "threads": model.threads.len(),
             },
             "unreadable": unreadable,
+            // As each clone was last fetched: doctor reads, so it fetches nothing.
+            "commits": crate::evidence::audit(self.env, &model),
         }))
     }
 
@@ -719,28 +727,32 @@ impl<'a> CommandContext<'a> {
             CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
         })?;
         let doc = Import::from_json(&text)?;
-        let ancestry = GitAncestry::new(context::clones(self.env)?);
         if dry_run {
             let (_, state) = self.tracker.load()?;
             let replica = Replica::open(self.tracker.replica().clone(), state);
             let at = replica.stamp(self.now, false)?;
-            let report = import::preview(&doc, &replica, By { actor: &self.actor, at }, &ancestry)?;
-            return Ok(import_json(&report, true));
+            let by = By { actor: &self.actor, at };
+            let report = import::preview(&doc, &replica, by)?;
+            // Its commits are checked as a write would check them, on a copy that is never stored.
+            let before = crate::evidence::commits(&Model::read(replica.state())?);
+            let mut copy = replica;
+            import::apply(&doc, &mut copy, by)?;
+            let unchecked = crate::evidence::check(self.env, &before, &Model::read(copy.state())?)?;
+            let mut shown = import_json(&report, true);
+            if !unchecked.is_empty() {
+                shown["unchecked_commits"] = Json::Array(unchecked);
+            }
+            return Ok(shown);
         }
-        self.write(|replica, by| {
-            Ok(import_json(&import::apply(&doc, replica, by, &ancestry)?, false))
-        })
+        self.write(|replica, by| Ok(import_json(&import::apply(&doc, replica, by)?, false)))
     }
 
     fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
         let lease = lease.map_or(LEASE, |minutes| Millis::from(minutes) * MINUTE);
-        let clones = context::clones(self.env)?;
-        let ancestry = GitAncestry::new(clones);
         self.write(|replica, by| {
             let (id, key) = existing_thread(replica, reference)?;
             let thread = id.as_str();
-            let ready = (!force).then_some(&ancestry as &dyn Ancestry);
-            claim::claim(replica, thread, by.actor, by.at, (lease, MAX_LEASE), ready).map_err(
+            claim::claim(replica, thread, by.actor, by.at, (lease, MAX_LEASE), !force).map_err(
                 |error| match error {
                     claim::ClaimError::NotReady(status) => CliError::refused(
                         "not-ready",
@@ -760,17 +772,16 @@ impl<'a> CommandContext<'a> {
 }
 
 /// The current notifying needs, keyed by the stable core key and carrying each exact compact identity.
-fn notifying_entries(state: &State, now: Millis, env: &Env) -> Option<BTreeMap<String, String>> {
+fn notifying_entries(state: &State, now: Millis) -> Option<BTreeMap<String, String>> {
     let model = Model::read(state).ok()?;
-    let ancestry = GitAncestry::new(context::clones(env).ok()?);
-    let readiness = ReadinessEvaluator::new(state, &model, now, &ancestry);
+    let readiness = ReadinessEvaluator::new(state, &model, now);
     let entries = needs::needs_you(state, &model, &readiness, now).ok()?;
     let mut current = BTreeMap::new();
     for entry in entries.into_iter().filter(needs::Entry::notifies) {
         let identity = match &entry {
             needs::Entry::Conflict { kind, id, field } => {
                 let by = acyclic_core::model::By { actor: acyclic_core::scope::USER, at: now };
-                let kept = needs::keeps(state, &model, &readiness, (kind, id, field), by).ok()?;
+                let kept = needs::keeps(state, &model, (kind, id, field), by).ok()?;
                 crate::keep::conflict_identity(&model, &entry, &kept)
             },
             _ => entry.identity(),
@@ -804,10 +815,7 @@ mod acknowledged_entries_tests {
     use acyclic_core::state::{Key, Millis, Replica, ReplicaId, State};
     use serde_json::{Value, json};
 
-    use super::{
-        GitAncestry, Model, ReadinessEvaluator, acknowledged_entries, needs, notifying_entries,
-    };
-    use crate::Env;
+    use super::{Model, ReadinessEvaluator, acknowledged_entries, needs, notifying_entries};
 
     const NOW: Millis = 10_000;
     const ITEM_CONFLICT: &str = "conflict:item:x:title";
@@ -866,10 +874,8 @@ mod acknowledged_entries_tests {
     }
 
     fn view_identity(state: &State, key: &str) -> String {
-        let env = Env::default();
         let model = Model::read(state).unwrap();
-        let ancestry = GitAncestry::new(crate::context::clones(&env).unwrap());
-        let readiness = ReadinessEvaluator::new(state, &model, NOW, &ancestry);
+        let readiness = ReadinessEvaluator::new(state, &model, NOW);
         let entries = needs::needs_you(state, &model, &readiness, NOW).unwrap();
         let view = crate::view::View { state, model: &model, readiness: &readiness, now: NOW };
         view.needs(&entries)
@@ -900,8 +906,7 @@ mod acknowledged_entries_tests {
     fn a_third_conflict_value_changes_the_shared_view_and_ack_identity() {
         let (mut replica, mut third) = title_conflict();
         assert_eq!(Model::read(replica.state()).unwrap().conflicts().count(), 1);
-        let env = Env::default();
-        let before = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let before = notifying_entries(replica.state(), NOW).unwrap();
         let old = identity(&before, ITEM_CONFLICT);
         assert_eq!(choice_values(&old), [json!("one"), json!("two")]);
         assert_eq!(view_identity(replica.state(), ITEM_CONFLICT), old);
@@ -911,7 +916,7 @@ mod acknowledged_entries_tests {
             .unwrap();
         replica.join(third.state()).unwrap();
 
-        let after = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let after = notifying_entries(replica.state(), NOW).unwrap();
         let new = identity(&after, ITEM_CONFLICT);
         assert_eq!(choice_values(&new), [json!("one"), json!("two"), json!("three")]);
         assert_ne!(old, new);
@@ -925,8 +930,7 @@ mod acknowledged_entries_tests {
     #[test]
     fn unchanged_conflict_values_get_a_new_identity_when_resolution_becomes_available() {
         let mut replica = repository_conflict();
-        let env = Env::default();
-        let before = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let before = notifying_entries(replica.state(), NOW).unwrap();
         let old = identity(&before, REPOSITORY_CONFLICT);
         let old_payload: Value = serde_json::from_str(&old).unwrap();
         let old_values = choice_values(&old);
@@ -947,7 +951,7 @@ mod acknowledged_entries_tests {
                 Some(json!("app-one")),
             )
             .unwrap();
-        let after = notifying_entries(replica.state(), NOW, &env).unwrap();
+        let after = notifying_entries(replica.state(), NOW).unwrap();
         let new = identity(&after, REPOSITORY_CONFLICT);
         let new_payload: Value = serde_json::from_str(&new).unwrap();
         assert_eq!(choice_values(&new), old_values, "only resolution eligibility changed");
