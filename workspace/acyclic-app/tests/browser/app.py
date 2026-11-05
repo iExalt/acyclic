@@ -2955,29 +2955,33 @@ def form_journey(page, view, env, remote, id, name, failures):
                 page.evaluate("() => { window.noticeSubmitProof.cleanup(); delete window.noticeSubmitProof; }")
                 if form.count():
                     form.locator("input[name=title]").focus()
-        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
-        # must stay in it.
         size = page.viewport_size
         drawn = page.get_by_test_id("map")
-        widest = drawn.evaluate("m => m.cy.minZoom()")
-        page.set_viewport_size({"width": size["width"], "height": 360})
-        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now; a plan that fits at full
-        # zoom can't show it, since zooming out stops there.
-        if widest >= 1:
-            failures.append(
-                f"{name}: the plan fits the Map at full zoom, so a resize can't show its furthest zoom out following"
+        before = drawn.evaluate("m => ({width: m.clientWidth, height: m.clientHeight, min: m.cy.minZoom()})")
+        # Shrink both Map dimensions in the same portrait layout: its fit floor must follow whichever axis limits it.
+        # A height-only shrink need not change the floor when width already limits how far out the plan can zoom.
+        smaller = {axis: round(before[axis] * 0.75) for axis in ("width", "height")}
+        page.set_viewport_size({axis: size[axis] - before[axis] + smaller[axis] for axis in smaller})
+        try:
+            page.wait_for_function(
+                """([before, smaller]) => {
+                    const m = document.querySelector('[data-testid=map]');
+                    const sx = m.clientWidth / before.width, sy = m.clientHeight / before.height;
+                    const min = m.cy.minZoom();
+                    return Math.abs(m.clientWidth - smaller.width) <= 1 && Math.abs(m.clientHeight - smaller.height) <= 1
+                        && before.min > 0 && before.min < 0.5 && sx > 0 && sx < 1 && sy > 0 && sy < 1
+                        && min >= before.min * Math.min(sx, sy) - 1e-7
+                        && min <= before.min * Math.max(sx, sy) + 1e-7;
+                }""",
+                arg=[before, smaller],
+                timeout=5_000,
             )
-        else:
-            try:
-                page.wait_for_function(
-                    "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
-                    arg=widest,
-                    timeout=5_000,
-                )
-            except PlaywrightTimeout:
-                failures.append(
-                    f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
-                )
+        except PlaywrightTimeout:
+            after = drawn.evaluate("m => ({width: m.clientWidth, height: m.clientHeight, min: m.cy.minZoom()})")
+            failures.append(f"{name}: the Map's fit floor did not follow a proportional resize: {before} -> {after}")
+        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
+        # must stay in it.
+        page.set_viewport_size({"width": size["width"], "height": 360})
         reachable = form.evaluate(
             "f => { f.querySelector('input[name=title]').focus();"
             " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
