@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use super::{Readiness, Stage};
+use super::{ReadinessEvaluator, Stage};
 use crate::graph;
 use crate::natural;
 use crate::state::Error;
@@ -27,7 +27,7 @@ pub struct Waves {
 /// The threads with work left, and each wait between two of them, as (waited on, waiting).
 type ThreadWaits<'m> = (BTreeSet<&'m str>, Vec<(&'m str, &'m str)>);
 
-impl Readiness<'_> {
+impl ReadinessEvaluator<'_> {
     /// The threads with work left, in waves.
     ///
     /// # Errors

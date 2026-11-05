@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, Model, Value};
-use crate::ready::{Readiness, Status, Wait};
+use crate::ready::{Readiness, ReadinessEvaluator, Wait};
 use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
@@ -182,7 +182,7 @@ impl Entry {
 pub fn needs_you(
     state: &State,
     model: &Model,
-    readiness: &Readiness<'_>,
+    readiness: &ReadinessEvaluator<'_>,
     now: Millis,
 ) -> Result<Vec<Entry>, Error> {
     let mut entries = BTreeSet::new();
@@ -210,7 +210,7 @@ pub fn needs_you(
             continue;
         }
         unthreaded(model, item, &mut entries);
-        if let Some(Status::Blocked { waiting }) = readiness.of(id)? {
+        if let Some(Readiness::Blocked { waiting }) = readiness.of(id)? {
             for (dependency, wait) in waiting {
                 if let Wait::Unverified { repository, reason } = wait {
                     entries.insert(Entry::Unverified { item: dependency, repository, reason });

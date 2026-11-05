@@ -210,10 +210,10 @@ pub enum Wait {
 /// An item's readiness.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "status")]
-pub enum Status {
+pub enum Readiness {
     /// Ready to work on.
     Ready,
-    /// Waiting on hard dependencies, by item id.
+    /// Waiting on waits-for targets, by item id.
     Blocked {
         /// What each unmet dependency waits for.
         waiting: BTreeMap<String, Wait>,
@@ -256,8 +256,8 @@ pub enum Status {
     Archived,
 }
 
-impl Status {
-    /// Whether `actor` may finish an item in this status without forcing: when it is ready, when what stands in the
+impl Readiness {
+    /// Whether `actor` may finish an item with this readiness without forcing: when it is ready, when what stands in the
     /// way is the actor's own claim on its thread, alone or as winner of a contest, or when it is finished already,
     /// which finishing again doesn't change. A parent is judged by its open work instead.
     #[must_use]
@@ -274,7 +274,7 @@ impl Status {
 /// A thread's readiness: whether it can be claimed, and its members that would be ready while it is held.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "status")]
-pub enum ThreadStatus {
+pub enum ThreadReadiness {
     /// No thread has this id.
     Missing,
     /// Unclaimed, with members ready to work on.
@@ -300,7 +300,7 @@ pub enum ThreadStatus {
     },
 }
 
-impl ThreadStatus {
+impl ThreadReadiness {
     /// Whether `actor` may claim the thread without forcing: when it is ready, or when `actor` already wins it.
     #[must_use]
     pub fn claimable_by(&self, actor: &str) -> bool {
@@ -414,7 +414,7 @@ impl Stages {
     ///
     /// Fails when a claim can't be read.
     pub fn of_leaves<'i>(
-        readiness: &Readiness<'_>,
+        readiness: &ReadinessEvaluator<'_>,
         items: impl IntoIterator<Item = &'i str>,
     ) -> Result<Self, Error> {
         let mut stages = Self::default();
@@ -450,15 +450,15 @@ pub struct Rollup {
     pub stage: Option<Stage>,
 }
 
-/// Readiness over one state, with ancestry checks cached by repository and commit.
-pub struct Readiness<'a> {
+/// Computes readiness over one state, with ancestry checks cached by repository and commit.
+pub struct ReadinessEvaluator<'a> {
     state: &'a State,
     model: &'a Model,
     now: Millis,
     ancestry: &'a dyn Ancestry,
     merged: RefCell<BTreeMap<(String, String), Result<bool, String>>>,
     cyclic: BTreeSet<String>,
-    /// Blocks links' targets by the item they start from.
+    /// Waits-for links' targets by the item they start from.
     links_from: BTreeMap<String, Vec<String>>,
     archived: RefCell<BTreeMap<String, bool>>,
     /// Each thread's members, built on first use.
@@ -469,8 +469,8 @@ pub struct Readiness<'a> {
     stages: RefCell<BTreeMap<String, Option<Stage>>>,
 }
 
-impl<'a> Readiness<'a> {
-    /// Readiness at `now`.
+impl<'a> ReadinessEvaluator<'a> {
+    /// Evaluates readiness at `now`.
     #[must_use]
     pub fn new(
         state: &'a State,
@@ -504,23 +504,23 @@ impl<'a> Readiness<'a> {
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn of(&self, id: &str) -> Result<Option<Status>, Error> {
+    pub fn of(&self, id: &str) -> Result<Option<Readiness>, Error> {
         let Some(item) = self.model.items.get(id) else { return Ok(None) };
         if let Some(status) = self.unclaimed(id, item) {
             return Ok(Some(status));
         }
         let mut holders = claim::holders(&claim::covering(self.state, self.model, id, self.now)?);
         Ok(Some(match holders.len() {
-            0 => Status::Ready,
-            1 => Status::Claimed { holder: holders.remove(0) },
-            _ => Status::Contested { holders },
+            0 => Readiness::Ready,
+            1 => Readiness::Claimed { holder: holders.remove(0) },
+            _ => Readiness::Contested { holders },
         }))
     }
 
     /// An item's readiness as though no thread were claimed, or `None` when it would be ready.
-    fn unclaimed(&self, id: &str, item: &Item) -> Option<Status> {
+    fn unclaimed(&self, id: &str, item: &Item) -> Option<Readiness> {
         if self.is_archived(id) {
-            return Some(Status::Archived);
+            return Some(Readiness::Archived);
         }
         let fields: Vec<String> =
             [("state", item.state.is_conflict()), ("thread", item.thread.is_conflict())]
@@ -529,33 +529,33 @@ impl<'a> Readiness<'a> {
                 .map(|(name, _)| name.to_owned())
                 .collect();
         if !fields.is_empty() {
-            return Some(Status::Conflicted { fields });
+            return Some(Readiness::Conflicted { fields });
         }
         if item.is_done() {
             return Some(match self.own_wait(item) {
-                None => Status::Done,
-                Some(Wait::InReview | Wait::Open) => Status::InReview,
+                None => Readiness::Done,
+                Some(Wait::InReview | Wait::Open) => Readiness::InReview,
                 Some(Wait::Unverified { repository, reason }) => {
-                    Status::Unverified { repository, reason }
+                    Readiness::Unverified { repository, reason }
                 },
             });
         }
         if !self.model.children(id).is_empty() {
-            return Some(Status::Parent);
+            return Some(Readiness::Parent);
         }
         if self.cyclic.contains(id) {
-            return Some(Status::InCycle);
+            return Some(Readiness::InCycle);
         }
         if item.state == Value::One(ItemState::Parked) {
-            return Some(Status::Parked);
+            return Some(Readiness::Parked);
         }
         let waiting = self.waiting(id);
         if !waiting.is_empty() {
-            return Some(Status::Blocked { waiting });
+            return Some(Readiness::Blocked { waiting });
         }
         let threaded =
             item.thread.one().is_some_and(|thread| self.model.threads.contains_key(thread));
-        (!threaded).then_some(Status::Unthreaded)
+        (!threaded).then_some(Readiness::Unthreaded)
     }
 
     /// A thread's readiness.
@@ -563,9 +563,9 @@ impl<'a> Readiness<'a> {
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn thread(&self, thread: &str) -> Result<ThreadStatus, Error> {
+    pub fn thread(&self, thread: &str) -> Result<ThreadReadiness, Error> {
         if !self.model.threads.contains_key(thread) {
-            return Ok(ThreadStatus::Missing);
+            return Ok(ThreadReadiness::Missing);
         }
         let members = self.members.get_or_init(|| {
             let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -589,15 +589,15 @@ impl<'a> Readiness<'a> {
         let key = claim::thread_key(thread)?;
         let mut holders = claim::holders(&claim::live(self.state, &key, self.now)?);
         if holders.len() > 1 {
-            return Ok(ThreadStatus::Contested { holders, items });
+            return Ok(ThreadReadiness::Contested { holders, items });
         }
         if let Some(holder) = holders.pop() {
-            return Ok(ThreadStatus::Claimed { holder, items });
+            return Ok(ThreadReadiness::Claimed { holder, items });
         }
         Ok(if items.is_empty() {
-            ThreadStatus::NothingReady
+            ThreadReadiness::NothingReady
         } else {
-            ThreadStatus::Ready { items }
+            ThreadReadiness::Ready { items }
         })
     }
 
@@ -614,7 +614,7 @@ impl<'a> Readiness<'a> {
             for item in model.items.values_mut() {
                 item.archived = Value::None;
             }
-            let unarchived = Readiness::new(self.state, &model, self.now, self.ancestry);
+            let unarchived = ReadinessEvaluator::new(self.state, &model, self.now, self.ancestry);
             return unarchived.ready(false, actor);
         }
         let title =
@@ -625,7 +625,7 @@ impl<'a> Readiness<'a> {
             if !status.claimable_by(actor) || status.items().is_empty() {
                 continue;
             }
-            let own = !matches!(status, ThreadStatus::Ready { .. });
+            let own = !matches!(status, ThreadReadiness::Ready { .. });
             let mut items: Vec<(String, &String)> = status
                 .items()
                 .iter()
@@ -662,14 +662,14 @@ impl<'a> Readiness<'a> {
             Some(if self.own_wait(item).is_none() { Stage::Done } else { Stage::InReview })
         } else {
             self.of(id)?.and_then(|status| match status {
-                Status::Archived | Status::Parent => None,
-                Status::Done => Some(Stage::Done),
-                Status::InReview | Status::Unverified { .. } => Some(Stage::InReview),
-                Status::Parked => Some(Stage::Parked),
-                Status::Claimed { .. } | Status::Contested { .. } => Some(Stage::InProgress),
-                Status::Ready => Some(Stage::Ready),
-                Status::Unthreaded => Some(Stage::Unthreaded),
-                Status::Blocked { .. } | Status::InCycle | Status::Conflicted { .. } => {
+                Readiness::Archived | Readiness::Parent => None,
+                Readiness::Done => Some(Stage::Done),
+                Readiness::InReview | Readiness::Unverified { .. } => Some(Stage::InReview),
+                Readiness::Parked => Some(Stage::Parked),
+                Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
+                Readiness::Ready => Some(Stage::Ready),
+                Readiness::Unthreaded => Some(Stage::Unthreaded),
+                Readiness::Blocked { .. } | Readiness::InCycle | Readiness::Conflicted { .. } => {
                     Some(Stage::Blocked)
                 },
             })
@@ -762,11 +762,11 @@ impl<'a> Readiness<'a> {
         Ok(false)
     }
 
-    /// The unmet hard dependencies of an item and its ancestors.
+    /// The unmet waits-for targets of an item and its ancestors.
     /// What keeps a parent from being finished: its children that are neither done nor archived, and what would hold
     /// it back as a leaf (a cycle, being parked, or unmet dependencies).
     #[must_use]
-    pub fn unfinished(&self, id: &str) -> (Vec<String>, Option<Status>) {
+    pub fn unfinished(&self, id: &str) -> (Vec<String>, Option<Readiness>) {
         let open = self
             .model
             .children(id)
@@ -777,13 +777,13 @@ impl<'a> Readiness<'a> {
             .map(str::to_owned)
             .collect();
         let held = if self.cyclic.contains(id) {
-            Some(Status::InCycle)
+            Some(Readiness::InCycle)
         } else if self.model.items.get(id).is_some_and(|i| i.state == Value::One(ItemState::Parked))
         {
-            Some(Status::Parked)
+            Some(Readiness::Parked)
         } else {
             let waiting = self.waiting(id);
-            (!waiting.is_empty()).then_some(Status::Blocked { waiting })
+            (!waiting.is_empty()).then_some(Readiness::Blocked { waiting })
         };
         (open, held)
     }

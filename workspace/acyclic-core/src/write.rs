@@ -16,7 +16,7 @@ use crate::model::{
     WriteError,
 };
 use crate::place::{Inherited, passed_down};
-use crate::ready::{Ancestry, Readiness, Stage, Status};
+use crate::ready::{Ancestry, Readiness, ReadinessEvaluator, Stage};
 use crate::schema::{item as field, kind, link, repository, set, thread};
 use crate::state::{Error as StateError, Key, Millis, Replica, State};
 
@@ -194,7 +194,7 @@ pub fn check_expected(
     now: Millis,
 ) -> Result<Vec<Mismatch>, StateError> {
     let ancestry = AssumeUnmerged;
-    let readiness = Readiness::new(state, model, now, &ancestry);
+    let readiness = ReadinessEvaluator::new(state, model, now, &ancestry);
     let mut mismatches = Vec::new();
     for expectation in expected {
         if let Expectation::WaitersStartedAtMost { item, baselines } = expectation {
@@ -297,7 +297,7 @@ impl Ancestry for AssumeUnmerged {
 }
 
 fn started_count(
-    readiness: &Readiness<'_>,
+    readiness: &ReadinessEvaluator<'_>,
     model: &Model,
     item: &str,
 ) -> Result<Option<usize>, StateError> {
@@ -713,13 +713,13 @@ pub enum Rule {
     WrongRecord(Record),
     /// The item isn't the finisher's to finish: not ready, or held by someone else. With no readiness to judge it by,
     /// no status.
-    NotReady(Option<Status>),
+    NotReady(Option<Readiness>),
     /// A parent with these open children, or held back as a leaf would be, can't be finished yet.
     OpenWork {
         /// Its children neither done nor archived.
         open: Vec<String>,
         /// What would hold it back as a leaf.
-        held: Option<Status>,
+        held: Option<Readiness>,
     },
     /// Done work would get other evidence than it was finished with.
     EvidenceDiffers,
@@ -835,8 +835,8 @@ pub fn commit<E>(
     crate::probe::mark("write: model read");
     let changes = build(&before).map_err(CommitError::Build)?;
     let judged = {
-        let readiness =
-            ancestry.map(|ancestry| Readiness::new(&replica.state, &before, by.at, ancestry));
+        let readiness = ancestry
+            .map(|ancestry| ReadinessEvaluator::new(&replica.state, &before, by.at, ancestry));
         judge(&before, &changes, by, readiness.as_ref())
     };
     let outcome =
@@ -858,7 +858,7 @@ pub fn judge(
     before: &Model,
     changes: &ChangeSet,
     by: By<'_>,
-    readiness: Option<&Readiness<'_>>,
+    readiness: Option<&ReadinessEvaluator<'_>>,
 ) -> Result<Outcome, Vec<Violation>> {
     let mut judging = Judging {
         before,
@@ -887,7 +887,7 @@ struct Judging<'a, 'r> {
     after: Model,
     at: Millis,
     actor: &'a str,
-    readiness: Option<&'a Readiness<'r>>,
+    readiness: Option<&'a ReadinessEvaluator<'r>>,
     steps: Vec<Step>,
     violations: Vec<Violation>,
 }
@@ -984,7 +984,7 @@ impl Judging<'_, '_> {
             // An unreadable claim leaves readiness unknown, which only forcing passes.
             None | Some((_, Err(_))) => self.refuse(Some(n), at(), Rule::NotReady(None)),
             Some((readiness, Ok(status))) => {
-                if status == Some(Status::Parent) {
+                if status == Some(Readiness::Parent) {
                     let (open, held) = readiness.unfinished(id);
                     if !open.is_empty() || held.is_some() {
                         self.refuse(Some(n), at(), Rule::OpenWork { open, held });

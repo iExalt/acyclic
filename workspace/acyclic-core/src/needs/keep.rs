@@ -5,7 +5,7 @@ use serde_json::Value as Json;
 
 use crate::archive::{self, Reason};
 use crate::model::{By, Evidence, Item, ItemState, Model, Reopened, Size, Value};
-use crate::ready::Readiness;
+use crate::ready::ReadinessEvaluator;
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
@@ -66,7 +66,7 @@ pub enum Unkept {
 pub fn keeps(
     state: &State,
     model: &Model,
-    readiness: &Readiness<'_>,
+    readiness: &ReadinessEvaluator<'_>,
     (entity, id, name): (&str, &str, &str),
     by: By<'_>,
 ) -> Result<Vec<Kept>, Error> {

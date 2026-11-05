@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use acyclic_core::claim::{self, Claim};
 use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value};
 use acyclic_core::needs::Entry;
-use acyclic_core::ready::{Readiness, ReadyThread, Stages};
+use acyclic_core::ready::{ReadinessEvaluator, ReadyThread, Stages};
 use acyclic_core::state::{Millis, State};
 use acyclic_core::time::rfc3339;
 use serde_json::{Map, Value as Json, json};
@@ -70,7 +70,7 @@ pub(crate) fn claim_json(claim: &Claim) -> Json {
 pub(crate) struct View<'a> {
     pub state: &'a State,
     pub model: &'a Model,
-    pub readiness: &'a Readiness<'a>,
+    pub readiness: &'a ReadinessEvaluator<'a>,
     pub now: Millis,
 }
 
@@ -457,7 +457,7 @@ mod tests {
     /// Runs `check` over a view of `replica`.
     fn viewing<T>(replica: &Replica, check: impl FnOnce(&View<'_>) -> T) -> T {
         let model = Model::read(replica.state()).unwrap();
-        let readiness = Readiness::new(replica.state(), &model, NOW, &NoAncestry);
+        let readiness = ReadinessEvaluator::new(replica.state(), &model, NOW, &NoAncestry);
         check(&View { state: replica.state(), model: &model, readiness: &readiness, now: NOW })
     }
 

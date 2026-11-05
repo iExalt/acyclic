@@ -9,13 +9,13 @@ nothing runs agents in a cluster.
 
 - Decentralized and Git-native: every machine keeps its own replica and works offline; replicas merge through Git.
 - Items form a DAG whose edges are waits-for: work that holds other work back until it is done.
-- "Automatic" (well, model- or agent-assisted) placement and connection of new bugs, issues and feature requests as
+- "Automatic" (well, model- or agent-assisted) placement and connection of new items as
   leaves in the DAG.
-- Agent runs: spawn agents to tackle an issue, a thread, or a whole (sub)tree of issues, each run in its own pod in
+- Agent runs: spawn agents to tackle an item, a thread, or a whole (sub)tree of items, each run in its own pod in
   a Kubernetes cluster, with a dispatcher that starts ready work on its own. The design takes inspiration from
   [Paseo](https://github.com/getpaseo/paseo).
 - A CLI for agents and terminal interaction, and explicitly no MCP.
-- One app, installable on a phone, for browsing, editing and adding issues and for the agents working on them: an
+- One app, installable on a phone, for browsing, editing and adding items and for the agents working on them: an
   operations center that moves between the remaining work on the graph and the runs implementing it.
 
 The tracker is a library with a CLI, and works without the app or the cluster.

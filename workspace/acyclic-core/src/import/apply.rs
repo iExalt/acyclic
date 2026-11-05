@@ -14,9 +14,9 @@ use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
 use crate::archive::{self, ArchiveError};
-use crate::model::{By, Evidence, ItemState, Model, Size, Value, WriteError};
+use crate::model::{By, Evidence, Model, Size, Value, WriteError};
 use crate::place::Inherited;
-use crate::ready::{Ancestry, Readiness};
+use crate::ready::{Ancestry, ReadinessEvaluator};
 use crate::schema::kind;
 use crate::state::{Error, Replica};
 use crate::write::{
@@ -226,7 +226,7 @@ fn archive_eligibility(
     for root in &roots {
         candidate.items.get_mut(*root).expect("candidate root exists").archived = Value::None;
     }
-    let readiness = Readiness::new(state, &candidate, by.at, ancestry);
+    let readiness = ReadinessEvaluator::new(state, &candidate, by.at, ancestry);
     for root in roots {
         let reasons = archive::eligibility(&readiness, &candidate, root, by.at)?;
         if !reasons.is_empty() {
@@ -338,7 +338,7 @@ fn item_fields(item: &super::Item) -> Vec<Assign> {
         with.push(field(ItemAssign::Notes(Some(notes.clone()))));
     }
     if let Some(state) = item.state {
-        with.push(field(ItemAssign::State(state.into())));
+        with.push(field(ItemAssign::State(state)));
     }
     if let Some(parent) = &item.parent {
         with.push(field(ItemAssign::Parent(Some(parent.clone()))));
@@ -615,17 +615,6 @@ impl From<super::Size> for Size {
             super::Size::M => Self::M,
             super::Size::L => Self::L,
             super::Size::Xl => Self::Xl,
-        }
-    }
-}
-
-/// The model's state for an imported one.
-impl From<super::State> for ItemState {
-    fn from(state: super::State) -> Self {
-        match state {
-            super::State::Backlog => Self::Backlog,
-            super::State::Parked => Self::Parked,
-            super::State::Done => Self::Done,
         }
     }
 }

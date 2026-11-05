@@ -87,17 +87,10 @@ pub struct Repository {
     pub default_branch: String,
 }
 
-/// An item's state. "In review" and readiness are derived on read, never imported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum State {
-    /// Not started.
-    Backlog,
-    /// Set aside on purpose.
-    Parked,
-    /// Finished.
-    Done,
-}
+/// The item's state. "In review" and readiness are derived on read, never imported.
+///
+/// This compatibility re-export keeps import documents and the model on the same state type.
+pub use crate::model::ItemState as State;
 
 /// A rough size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::model::Model;
-use crate::ready::{Ancestry, Readiness, ThreadStatus};
+use crate::ready::{Ancestry, ReadinessEvaluator, ThreadReadiness};
 use crate::schema::kind;
 use crate::state::{CLOCK_SKEW_MS, Dot, Error, Key, Millis, Replica, State};
 
@@ -18,7 +18,7 @@ pub const FIELD: &str = "claim";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Claim {
-    /// Who holds it, such as an interactive session.
+    /// Who holds it, such as an agent conversation.
     pub holder: String,
     /// The replica that recorded it.
     pub replica: String,
@@ -145,7 +145,8 @@ pub fn claim(
         return Err(Error::NoThread(thread.to_owned()).into());
     }
     if let Some(ancestry) = ready {
-        let status = Readiness::new(&replica.state, &model, at, ancestry).thread(thread)?;
+        let status =
+            ReadinessEvaluator::new(&replica.state, &model, at, ancestry).thread(thread)?;
         if !status.claimable_by(holder) {
             return Err(ClaimError::NotReady(status));
         }
@@ -170,7 +171,7 @@ pub fn claim(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClaimError {
     /// The thread isn't the holder's to claim without forcing: it has no ready work, or someone else holds it.
-    NotReady(ThreadStatus),
+    NotReady(ThreadReadiness),
     /// The thread has no record, someone else wins it, or a claim can't be read or written.
     State(Error),
 }
@@ -184,7 +185,7 @@ impl From<Error> for ClaimError {
 /// Renews the time leases this replica recorded whose holders are still at work: each winning thread claim with less
 /// than half of `lease` left whose holder wrote something other than a claim within the last `lease`. The CLI calls it
 /// at the start of each of its write batches, whoever writes; a sync doesn't. A holder that stopped writing, such as a
-/// session that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
+/// conversation that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
 ///
 /// # Panics
 ///

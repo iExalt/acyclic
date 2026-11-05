@@ -172,7 +172,8 @@ pub struct Reopened {
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     /// No children.
-    Item,
+    #[serde(rename = "item")]
+    Leaf,
     /// Children, under a parent.
     Group,
     /// Top level with children.
@@ -476,9 +477,9 @@ impl Model {
     /// An item's role. A conflicted parent isn't top level.
     #[must_use]
     pub fn role(&self, id: &str) -> Role {
-        let Some(item) = self.items.get(id) else { return Role::Item };
+        let Some(item) = self.items.get(id) else { return Role::Leaf };
         if self.children(id).is_empty() {
-            Role::Item
+            Role::Leaf
         } else if item.parent == Value::None {
             Role::Project
         } else {

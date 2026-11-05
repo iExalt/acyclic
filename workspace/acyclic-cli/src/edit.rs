@@ -9,7 +9,7 @@
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
 use acyclic_core::model::{By, ItemState, Model, Size, WriteError};
-use acyclic_core::ready::{Ancestry, Status};
+use acyclic_core::ready::{Ancestry, Readiness};
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
     self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
@@ -462,7 +462,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
                      says which"
                 ),
             )
-            .with(json!({"readiness": Status::Parent, "open": open, "held": held}))
+            .with(json!({"readiness": Readiness::Parent, "open": open, "held": held}))
         },
         Rule::EvidenceDiffers => {
             let id = record.map_or("", Record::id);

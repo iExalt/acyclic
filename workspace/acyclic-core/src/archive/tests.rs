@@ -54,7 +54,7 @@ fn done(r: &mut Replica, id: &str, commit: Option<&str>, at: Millis) {
 
 fn reasons(r: &Replica, root: &str, now: Millis) -> Vec<Reason> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = Readiness::new(&r.state, &model, now, &ByName);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, now, &ByName);
     eligibility(&readiness, &model, root, now).unwrap()
 }
 
@@ -130,13 +130,13 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
 
 fn needs(r: &Replica, now: Millis) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = Readiness::new(&r.state, &model, now, &ByName);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, now, &ByName);
     needs::needs_you(&r.state, &model, &readiness, now).unwrap()
 }
 
-fn status(r: &Replica, id: &str, now: Millis) -> Status {
+fn status(r: &Replica, id: &str, now: Millis) -> Readiness {
     let model = Model::read(&r.state).unwrap();
-    Readiness::new(&r.state, &model, now, &ByName).of(id).unwrap().unwrap()
+    ReadinessEvaluator::new(&r.state, &model, now, &ByName).of(id).unwrap().unwrap()
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
     reopen(&mut r, "a", user(now)).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(!model.is_archived("a"), "the archived root above it is cleared");
-    assert_eq!(status(&r, "outside", now), Status::Ready);
+    assert_eq!(status(&r, "outside", now), Readiness::Ready);
     assert!(
         needs(&r, now)
             .contains(&Entry::Reopened { item: "a".into(), dependents: vec!["outside".into()] })
@@ -162,13 +162,13 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
 fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     let mut r = setup();
     link(&mut r, "outside", "b", user(2)).unwrap();
-    assert_eq!(status(&r, "outside", 2 * DAY), Status::Ready);
+    assert_eq!(status(&r, "outside", 2 * DAY), Readiness::Ready);
     // Any actor may reopen: an agent may find a defect in finished work.
     reopen(&mut r, "b", By { actor: "session/worker", at: 2 * DAY }).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert_eq!(model.items["b"].state, Value::One(ItemState::Backlog), "reopen sets backlog");
     assert!(
-        matches!(status(&r, "outside", 2 * DAY), Status::Blocked { waiting } if waiting["b"] == Wait::Open)
+        matches!(status(&r, "outside", 2 * DAY), Readiness::Blocked { waiting } if waiting["b"] == Wait::Open)
     );
     assert!(
         needs(&r, 2 * DAY)

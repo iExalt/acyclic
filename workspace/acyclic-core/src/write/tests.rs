@@ -693,7 +693,7 @@ fn finishing(
     ready: bool,
 ) -> Vec<Rule> {
     let before = read(r);
-    let readiness = ready.then(|| Readiness::new(&r.state, &before, 99, &Unmapped));
+    let readiness = ready.then(|| ReadinessEvaluator::new(&r.state, &before, 99, &Unmapped));
     let finish = Change::Finish { item: id.into(), evidence, force };
     judge(&before, &ChangeSet(vec![finish]), by(99), readiness.as_ref())
         .err()
@@ -723,7 +723,7 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
     assert_eq!(finishing(&r, "free", None, true, false), []);
     assert_eq!(
         finishing(&r, "lone", None, false, true),
-        [Rule::NotReady(Some(Status::Unthreaded))]
+        [Rule::NotReady(Some(Readiness::Unthreaded))]
     );
     assert_eq!(
         finishing(&r, "parent", None, false, true),
@@ -732,7 +732,7 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
     assert_eq!(finishing(&r, "lone", None, true, true), []);
     // Someone else's claim holds the thread's work back from the finisher.
     crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), None).unwrap();
-    let held = Status::Claimed { holder: "session/other".into() };
+    let held = Readiness::Claimed { holder: "session/other".into() };
     assert_eq!(finishing(&r, "free", None, false, true), [Rule::NotReady(Some(held))]);
     // A parent whose work is done may be finished.
     commit_ok(&mut r, 3, vec![item("child", ItemAssign::State(ItemState::Done))]);
