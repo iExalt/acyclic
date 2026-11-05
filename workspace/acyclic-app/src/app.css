@@ -637,7 +637,7 @@ button.icon[aria-pressed="true"] {
   padding: 8px 0;
 }
 
-/* The menu of what's changed rarely: archived items, the theme, a refresh. */
+/* The menu of what's changed rarely: the theme, a refresh. */
 .menu {
   position: relative;
   width: var(--hit);

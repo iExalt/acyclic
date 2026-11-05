@@ -105,19 +105,7 @@ fn evidence_naming_no_repository_record_still_meets_its_dependents() {
 }
 
 #[test]
-fn an_archived_dependency_is_met() {
-    let mut r = replica("a");
-    items(&mut r, &["goal", "dep", "x"]);
-    set_parent(&mut r, "dep", Some("goal"), by(2)).unwrap();
-    link(&mut r, "x", "dep", by(2)).unwrap();
-    done_with(&mut r, "dep", Some("c1"));
-    model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
-    assert_eq!(status(&r, "x"), Readiness::Ready);
-    assert_eq!(status(&r, "dep"), Readiness::Archived);
-}
-
-#[test]
-fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_met() {
+fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_leaves() {
     let mut r = replica("a");
     items(&mut r, &["goal", "child", "dep", "after-goal"]);
     set_parent(&mut r, "child", Some("goal"), by(2)).unwrap();
@@ -126,21 +114,16 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_me
     assert_eq!(status(&r, "child"), blocked(&[("dep", Wait::Open)]));
     assert_eq!(status(&r, "goal"), Readiness::Parent);
     assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
-    // Finishing the parent waits on its child, and on its own dependency once the child is done.
-    let unfinished = |r: &Replica| {
-        let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, 5).unfinished("goal")
-    };
-    assert_eq!(unfinished(&r), (vec!["child".to_owned()], Some(blocked(&[("dep", Wait::Open)]))));
-    done_with(&mut r, "child", None);
-    assert_eq!(unfinished(&r), (vec![], Some(blocked(&[("dep", Wait::Open)]))));
-    done_with(&mut r, "dep", None);
-    assert_eq!(unfinished(&r), (vec![], None));
-    set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
-    assert_eq!(unfinished(&r).1, Some(Readiness::Parked));
-    set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
+    // A done stored on the parent, as an older version wrote, is ignored: its leaves decide.
     done_with(&mut r, "goal", None);
+    assert_eq!(status(&r, "goal"), Readiness::Parent);
+    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    done_with(&mut r, "dep", None);
+    done_with(&mut r, "child", None);
     assert_eq!(status(&r, "after-goal"), Readiness::Ready);
+    // A parent parked by hand meets nothing.
+    set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
+    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
 }
 
 #[test]
@@ -196,7 +179,7 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     assert_eq!(status(&r, "waiting"), blocked(&[("dep", Wait::Open)]));
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
-    assert_eq!(readiness.ready(false, "session/s").unwrap(), []);
+    assert_eq!(readiness.ready("session/s").unwrap(), []);
     assert_eq!(readiness.thread("ghost").unwrap(), ThreadReadiness::Missing);
 }
 
@@ -216,7 +199,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     };
     let ready = |r: &Replica, actor: &str| {
         let model = Model::read(&r.state).unwrap();
-        flat(&ReadinessEvaluator::new(&r.state, &model, NOW).ready(false, actor).unwrap())
+        flat(&ReadinessEvaluator::new(&r.state, &model, NOW).ready(actor).unwrap())
     };
     let workable = vec!["dep".to_owned(), "x".to_owned()];
     assert_eq!(at(&a, "main"), ThreadReadiness::Ready { items: workable.clone() });
@@ -248,21 +231,17 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
 #[test]
 fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     let mut r = replica("a");
-    items(&mut r, &["dep", "x", "y", "z", "unrelated", "goal", "archived-leaf"]);
+    items(&mut r, &["dep", "x", "y", "z", "unrelated"]);
     for id in ["x", "y"] {
         link(&mut r, id, "dep", by(2)).unwrap();
     }
     done_with(&mut r, "dep", Some("c1"));
     thread(&mut r, "dep", "deps");
     done_with(&mut r, "unrelated", Some("c2"));
-    set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
-    model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
-    let ready = flat(&readiness.ready(false, "session/s").unwrap());
+    let ready = flat(&readiness.ready("session/s").unwrap());
     assert_eq!(ready, ["x", "y", "z"]);
-    let with_archived = flat(&readiness.ready(true, "session/s").unwrap());
-    assert!(with_archived.contains(&"archived-leaf".to_owned()));
 }
 
 #[test]
@@ -284,7 +263,7 @@ fn two_threads_whose_items_once_named_one_resource_are_both_ready() {
         readiness.thread("other").unwrap(),
         ThreadReadiness::Ready { items: vec!["y".into()] }
     );
-    assert_eq!(flat(&readiness.ready(false, "session/two").unwrap()), ["y"]);
+    assert_eq!(flat(&readiness.ready("session/two").unwrap()), ["y"]);
 }
 
 #[test]
@@ -312,7 +291,7 @@ fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves
     claim::claim(&mut r, "d", "session/me", 900, (500, 1_000), false).unwrap();
     claim::claim(&mut r, "e", "session/other", 900, (500, 1_000), false).unwrap();
     let model = Model::read(&r.state).unwrap();
-    let ready = ReadinessEvaluator::new(&r.state, &model, NOW).ready(false, "session/me").unwrap();
+    let ready = ReadinessEvaluator::new(&r.state, &model, NOW).ready("session/me").unwrap();
     let order: Vec<(&str, Vec<&str>)> = ready
         .iter()
         .map(|t| (t.thread.as_str(), t.items.iter().map(String::as_str).collect()))
@@ -343,19 +322,18 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     for id in ["same", "other"] {
         link(&mut r, id, "goal", by(2)).unwrap();
     }
-    // An archived leaf is met already; an open one, however deep, holds the dependency.
-    model::put(&mut r, &item_key("old").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
+    // A done leaf is met already; an open one, however deep, holds the dependency.
+    done_with(&mut r, "old", None);
     done_with(&mut r, "b", Some("c1"));
     assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
     // Done is enough, in the leaves' thread or another.
     done_with(&mut r, "a", Some("c2"));
     assert_eq!(status(&r, "same"), Readiness::Ready);
     assert_eq!(status(&r, "other"), Readiness::Ready);
-    // A part closed by hand counts as closed, whatever is open under it.
+    // A done stored on a part, as older versions wrote, counts for nothing: its open leaf holds the dependency.
     set_state(&mut r, "a", ItemState::Backlog, by(3)).unwrap();
-    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
     set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
-    assert_eq!(status(&r, "same"), Readiness::Ready);
+    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
     // A parked parent meets nothing, whatever its leaves.
     set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
     assert_eq!(status(&r, "other"), blocked(&[("goal", Wait::Open)]));
@@ -423,12 +401,9 @@ fn a_leaf_in_a_claimed_thread_reads_in_progress_unless_it_waits() {
 }
 
 #[test]
-fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() {
+fn a_parent_counts_its_leaves_by_stage_a_parked_part_counting_whole() {
     let mut r = replica("a");
-    items(
-        &mut r,
-        &["goal", "closed", "c1", "c2", "parked", "p1", "p2", "p3", "gone", "g1", "ready"],
-    );
+    items(&mut r, &["goal", "closed", "c1", "c2", "parked", "p1", "p2", "p3", "ready"]);
     for (kid, parent) in [
         ("closed", "goal"),
         ("c1", "closed"),
@@ -437,24 +412,17 @@ fn a_parent_counts_its_leaves_by_stage_closed_and_parked_parts_counting_whole() 
         ("p1", "parked"),
         ("p2", "parked"),
         ("p3", "parked"),
-        ("gone", "goal"),
-        ("g1", "gone"),
         ("ready", "goal"),
     ] {
         set_parent(&mut r, kid, Some(parent), by(2)).unwrap();
     }
-    // A part closed by hand counts every leaf as done; under a part parked by hand only the open ones park, so a done
-    // leaf stays done.
-    set_state(&mut r, "closed", ItemState::Done, by(3)).unwrap();
+    // Under a part parked by hand only the open leaves park, so a done leaf stays done.
+    done_with(&mut r, "c1", None);
+    done_with(&mut r, "c2", None);
     set_state(&mut r, "parked", ItemState::Parked, by(3)).unwrap();
     done_with(&mut r, "p1", None);
-    model::put(&mut r, &item_key("gone").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
     let rolled = rollup(&r, "goal");
-    assert_eq!(
-        rolled.stages,
-        Stages { done: 3, parked: 2, ready: 1, ..Stages::default() },
-        "the archived part counts for nothing"
-    );
+    assert_eq!(rolled.stages, Stages { done: 3, parked: 2, ready: 1, ..Stages::default() });
     assert_eq!((rolled.progress.done, rolled.progress.total), (3, 6));
     assert_eq!(rolled.progress.state, ProgressState::InProgress, "done work under it moves it");
     assert_eq!(rolled.stage, Some(Stage::InProgress));
@@ -500,7 +468,7 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves(
     assert_eq!(rolled.stages, Stages { blocked: 2, ..Stages::default() }, "the counts stay honest");
 }
 
-/// A random plan of up to eight items: parents, states, threads, blocks links, a claim, archives and commits.
+/// A random plan of up to eight items: parents, states, threads, blocks links, a claim and commits.
 fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
     let below = |n: usize| tc.draw(gs::integers::<usize>().max_value(n - 1));
     let mut r = replica("a");
@@ -525,10 +493,6 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
         // A link the model refuses, such as one closing a cycle, is just left out.
         if below(5) == 0 {
             link(&mut r, id, &ids[below(n)], by(3)).ok();
-        }
-        if below(8) == 0 {
-            model::put(&mut r, &item_key(id).unwrap(), field::ARCHIVED, Some(&true), by(3))
-                .unwrap();
         }
     }
     if claims && below(2) == 0 && Model::read(&r.state).unwrap().threads.contains_key("t0") {
@@ -659,7 +623,7 @@ fn parked_work_holds_its_waiters_back_but_waits_on_nothing() {
 }
 
 #[test]
-fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back() {
+fn a_link_on_a_group_counts_its_open_work_and_done_work_holds_nothing_back() {
     let mut r = replica("a");
     items(&mut r, &["box", "in1", "in2"]);
     thread(&mut r, "in1", "t1");
@@ -670,10 +634,10 @@ fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back()
     waits(&mut r, ("w", "t3"), ("box", "main"));
     let found = waves(&r);
     assert_eq!(found.waits_for["t3"], ["t1", "t2"]);
-    model::put(&mut r, &item_key("in2").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
+    done_with(&mut r, "in2", None);
     let found = waves(&r);
     assert_eq!(found.waits_for["t3"], ["t1"]);
-    assert!(!found.waits_for.contains_key("t2"), "archived work leaves its thread nothing to do");
+    assert!(!found.waits_for.contains_key("t2"), "done work leaves its thread nothing to do");
 }
 
 /// Every thread with a leaf left is in one wave or apart, and no other; each thread waited on comes in an earlier

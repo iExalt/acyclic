@@ -39,7 +39,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
   "items": [
     // Required: id and title. "state" is backlog, parked or done, backlog for a new item.
     // Optional: parent, thread, notes, size (xs, s, m, l, xl), repositories, waits_for (the items it can't start
-    // before they are done), archived, and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"},
+    // before they are done), and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"},
     // either part or both. A list given replaces the record's: [] clears it.
     {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds", "size": "m",
      "thread": "01900000-0000-7000-8000-000000000002", "repositories": ["01900000-0000-7000-8000-000000000001"]},
@@ -150,9 +150,6 @@ pub struct Item {
     /// A rough size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Whether this done subtree's root is archived.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub archived: bool,
     /// Evidence of completion, for done items only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,
@@ -262,10 +259,10 @@ pub enum ValidationError {
         /// The item it names twice.
         waits_for: String,
     },
-    /// An archived item that isn't a wholly done subtree.
-    ArchivedNotDone(String),
     /// Evidence on an item that isn't done.
     EvidenceNotDone(String),
+    /// Done on an item with children, which reads done once they are.
+    DoneParent(String),
     /// A repository's name that isn't `owner/name`.
     InvalidRepositoryName {
         /// The repository.
@@ -320,13 +317,16 @@ impl fmt::Display for ValidationError {
                 write!(f, "{at} names unknown {kind} {id}")
             },
             Self::SelfLink(item) => write!(f, "item {item} waits for itself"),
-            Self::ArchivedNotDone(item) => {
-                write!(f, "item {item} is archived but it or a descendant isn't done")
-            },
             Self::DuplicateLink { item, waits_for } => {
                 write!(f, "item {item} names {waits_for} twice in waits_for")
             },
             Self::EvidenceNotDone(item) => write!(f, "item {item} has evidence but isn't done"),
+            Self::DoneParent(item) => {
+                write!(
+                    f,
+                    "item {item} has children, so it reads done once they are: leave its state out"
+                )
+            },
             Self::InvalidRepositoryName { repository, name } => {
                 write!(f, "repository {repository}: {name:?} isn't owner/name")
             },
@@ -433,7 +433,7 @@ impl Import {
 
     /// Checks the rules the document can break on its own and returns each broken one, sorted. When any id isn't a
     /// `UUIDv7`, those are all it returns, since nothing else can be judged. Whether references name records, and
-    /// whether evidence and archiving sit on done work, depend on the tracker too: [`apply`] checks them.
+    /// whether evidence sits on done work, depend on the tracker too: [`apply`] checks them.
     #[must_use]
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = self.invalid_ids();

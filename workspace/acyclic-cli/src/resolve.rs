@@ -4,7 +4,7 @@
 //! A reference is, in order:
 //!
 //! 1. a full UUID, in any case: that record;
-//! 2. an item's or thread's exact title, open, done or archived alike, or a repository's `owner/name` in any case:
+//! 2. an item's or thread's exact title, open or done alike, or a repository's `owner/name` in any case:
 //!    the one record that has it, refused as `ambiguous` when several do;
 //! 3. the end of exactly one record's id, at least [`MIN_ENDING`] characters, in any case.
 //!

@@ -36,8 +36,6 @@ export interface SceneNode {
   lit: boolean;
   dim: boolean;
   selected: boolean;
-  /** In an archived subtree, which only shows when asked for. */
-  archived: boolean;
 }
 
 /** How wide labels are drawn: a tile's in the face's regular weight, a box's in bold. */
@@ -145,7 +143,6 @@ export function scene(
       // the selection, outside the thread or not.
       dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
       selected: node.id === selection.item,
-      archived: node.archived,
     });
   }
   const within = withinOneBox(view);

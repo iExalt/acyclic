@@ -12,7 +12,7 @@ const plan = [
   item("c", null, ["a"], { thread: "t" }),
 ];
 const model = buildModel(plan);
-const view = visible(model, { collapsed: new Set(), showArchived: false });
+const view = visible(model, { collapsed: new Set() });
 /** Every node 10 wide and tall, placed by its index, so centres are easy to check. */
 const placed: Placed = {
   width: 100,
@@ -44,7 +44,7 @@ describe("scene", () => {
       item("b", "top", ["a"]),
       item("d", "top", ["a", "b"], { thread: "t" }),
     ]);
-    const open = visible(chain, { collapsed: new Set(), showArchived: false });
+    const open = visible(chain, { collapsed: new Set() });
     const at = new Map(open.nodes.map((node, i) => [node.id, { x: 0, y: i * 100, width: 10, height: 10 }]));
     const routed: Placed = {
       ...placed,
@@ -82,7 +82,7 @@ describe("scene", () => {
       item("a", "top", [], { thread: "t" }),
       item("b", "top", ["a"], { thread: "t" }),
     ]);
-    const open = visible(both, { collapsed: new Set(), showArchived: false });
+    const open = visible(both, { collapsed: new Set() });
     const inside = scene(open, placed, { item: null, thread: "t" }, (id) => both.items.get(id)?.thread ?? null);
     expect(inside.edges).toMatchObject([{ id: "a->b", crossing: false, lit: true, dim: false }]);
     const picked = scene(view, placed, { item: null, thread: "t" }, threadOf);
@@ -114,7 +114,7 @@ describe("scene", () => {
   });
 
   it("routes a thread through the collapsed box that hides a member", () => {
-    const closed = visible(model, { collapsed: new Set(["top"]), showArchived: false });
+    const closed = visible(model, { collapsed: new Set(["top"]) });
     const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);
     // Both now sit at the top level, so the link no longer crosses boxes.
     expect(drawn.edges).toMatchObject([{ id: "top->c", crossing: false, lit: true, dim: false }]);
@@ -136,7 +136,7 @@ describe("scene", () => {
   });
 
   it("places nodes by their centres, a box under what it holds, and labels a collapsed box with what it hides", () => {
-    const closed = visible(model, { collapsed: new Set(["top"]), showArchived: false });
+    const closed = visible(model, { collapsed: new Set(["top"]) });
     const drawn = scene(closed, placed, { item: null, thread: null }, threadOf);
     expect(drawn.nodes.find((node) => node.id === "top")?.label).toBe("TOP (+2)");
     const open = scene(view, placed, { item: null, thread: null }, threadOf).nodes;
@@ -150,7 +150,7 @@ describe("scene", () => {
 });
 
 describe("buildModel", () => {
-  it("takes a parent's progress from its item, and none when every leaf under it is archived", () => {
+  it("takes a parent's progress from its item, and none when it has no leaves", () => {
     const none = { in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
     const progress = (done: number, leaves: number) => ({ state: "done", counts: { ...none, done, leaves } });
     const model = buildModel([
@@ -171,11 +171,9 @@ describe("a box's stage", () => {
       item("q", null, [], { stage: "blocked" }),
       item("q1", "q", [], { stage: "blocked" }),
       item("r"),
-      item("r1", "r", [], { archived: true }),
-      item("r2", "r", [], { archived: true }),
     ];
     const built = buildModel(rows);
-    const shown = visible(built, { collapsed: new Set(["q"]), showArchived: true });
+    const shown = visible(built, { collapsed: new Set(["q"]) });
     const at = new Map(shown.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }]));
     const drawn = scene(shown, { ...placed, nodes: at }, { item: null, thread: null }, () => null);
     const stageOf = (id: string) => drawn.nodes.find((node) => node.id === id)?.stage;

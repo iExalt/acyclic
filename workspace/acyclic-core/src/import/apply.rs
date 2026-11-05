@@ -2,7 +2,7 @@
 //! document sets is written when it differs, so importing the same document twice writes nothing. A single value the
 //! document leaves out is kept; a list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`)
 //! is the whole of it, so what the list leaves out is removed. The judge refuses references to nothing, repository
-//! names another record holds, cycles the import would close, and evidence and archiving on work that isn't done, and
+//! names another record holds, cycles the import would close, and evidence on work that isn't done, and
 //! brings what any write brings: done work set back is reopened, and new or moved work with no thread joins the one
 //! passed down to it.
 
@@ -13,8 +13,7 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::archive::{self, ArchiveError};
-use crate::model::{By, Evidence, Model, Size, Value, WriteError};
+use crate::model::{By, Evidence, Model, Size, WriteError};
 use crate::place::Inherited;
 use crate::schema::kind;
 use crate::state::{Error, Replica};
@@ -106,8 +105,6 @@ pub enum ApplyError {
     Invalid(Vec<ValidationError>),
     /// On its own or with what is already there, the document closes these cycles of parents or waits-for.
     Cycles(Vec<Vec<String>>),
-    /// Archiving an imported item was refused.
-    Archive(ArchiveError),
     /// The judge refused a change the import mapper does not understand.
     Internal(Vec<Violation>),
     /// A write was refused.
@@ -128,7 +125,6 @@ impl fmt::Display for ApplyError {
                     crate::say::few(&cycles, "cycle", "cycles", "; ")
                 )
             },
-            Self::Archive(err) => err.fmt(f),
             Self::Internal(violations) => {
                 let violations: Vec<String> = violations.iter().map(ToString::to_string).collect();
                 write!(f, "internal error: import was refused for {}", violations.join("; "))
@@ -139,12 +135,6 @@ impl fmt::Display for ApplyError {
 }
 
 impl std::error::Error for ApplyError {}
-
-impl From<ArchiveError> for ApplyError {
-    fn from(err: ArchiveError) -> Self {
-        Self::Archive(err)
-    }
-}
 
 impl From<WriteError> for ApplyError {
     fn from(err: WriteError) -> Self {
@@ -162,7 +152,7 @@ impl From<Error> for ApplyError {
 ///
 /// # Errors
 ///
-/// Fails when the document is invalid, would close a cycle, archives an ineligible subtree, or a write is refused.
+/// Fails when the document is invalid, would close a cycle, or a write is refused.
 pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
@@ -171,7 +161,6 @@ pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, 
     let before = Model::read(replica.state())?;
     let doc = &named_commits(doc, &before)?;
     let outcome = judged(doc, &before, by)?;
-    archive_eligibility(&before, &outcome.after, by)?;
     write::write(replica, &outcome, by)?;
     Ok(report(&before, &outcome))
 }
@@ -189,7 +178,6 @@ pub fn preview(doc: &Import, replica: &Replica, by: By<'_>) -> Result<Report, Ap
     let before = Model::read(replica.state())?;
     let doc = &named_commits(doc, &before)?;
     let outcome = judged(doc, &before, by)?;
-    archive_eligibility(&before, &outcome.after, by)?;
     Ok(report(&before, &outcome))
 }
 
@@ -234,33 +222,6 @@ fn doc_repository(
         let (o, n) = owner_name(&record.name)?;
         same(o, n).then(|| record.id.clone())
     })
-}
-
-fn archive_eligibility(before: &Model, after: &Model, by: By<'_>) -> Result<(), ApplyError> {
-    let roots: Vec<&str> = after
-        .items
-        .iter()
-        .filter(|(id, item)| {
-            item.is_archived_root()
-                && !before.items.get(*id).is_some_and(crate::model::Item::is_archived_root)
-        })
-        .map(|(id, _)| id.as_str())
-        .collect();
-    if roots.is_empty() {
-        return Ok(());
-    }
-    // Clear them together so one candidate cannot hide another's dependent checks.
-    let mut candidate = after.clone();
-    for root in &roots {
-        candidate.items.get_mut(*root).expect("candidate root exists").archived = Value::None;
-    }
-    for root in roots {
-        let reasons = archive::eligibility(&candidate, root, by.at);
-        if !reasons.is_empty() {
-            return Err(ArchiveError::Ineligible { item: root.to_owned(), reasons }.into());
-        }
-    }
-    Ok(())
 }
 
 fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {
@@ -381,9 +342,6 @@ fn item_fields(item: &super::Item) -> Vec<Assign> {
             text: evidence.text.clone(),
         }))));
     }
-    if item.archived {
-        with.push(field(ItemAssign::Archive));
-    }
     with
 }
 
@@ -399,7 +357,7 @@ fn list_changes(held: &BTreeSet<&String>, wanted: &[String], adding: bool) -> Ve
 }
 
 /// The judge's refusal in the import's own terms, one kind at a time as the import has always told them: a deleted
-/// record, then references to nothing and names taken, then evidence and archiving on open work, then cycles.
+/// record, then references to nothing and names taken, then evidence on open work, then cycles.
 fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
     let mut deleted = None;
     let mut internal = false;
@@ -435,6 +393,9 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
             (Rule::EvidenceNotDone, Some(at)) => {
                 unfinished.push(ValidationError::EvidenceNotDone(at.record.id().to_owned()));
             },
+            (Rule::ParentDone, Some(at)) => {
+                unfinished.push(ValidationError::DoneParent(at.record.id().to_owned()));
+            },
             (Rule::InvalidCommit, Some(at)) => {
                 let item = at.record.id();
                 let commit = doc
@@ -451,9 +412,6 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                     repository: repository.clone(),
                     missing: missing.iter().map(|&field| field.to_owned()).collect(),
                 });
-            },
-            (Rule::ArchivedOpen(root), _) => {
-                unfinished.push(ValidationError::ArchivedNotDone(root.clone()));
             },
             (Rule::SelfLink, Some(at)) => {
                 unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
@@ -565,20 +523,6 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
                     },
                 }
             },
-            Written::Reopened(id, value) => {
-                let n = row(&mut report, kind::ITEM, id);
-                let from = before.items.get(id).map_or(Json::Null, |item| json!(item.reopened));
-                report.changes[n]
-                    .fields
-                    .insert("reopened".to_owned(), Edit { from, to: json!(value) });
-            },
-            Written::Unarchive(id) => {
-                let n = row(&mut report, kind::ITEM, id);
-                let from = before.items.get(id).map_or(Json::Null, |item| json!(item.archived));
-                report.changes[n]
-                    .fields
-                    .insert("archived".to_owned(), Edit { from, to: Json::Null });
-            },
             Written::Place(_) => {},
         }
     }
@@ -612,10 +556,8 @@ fn held(before: &Model, at: &FieldAddr) -> Json {
             FieldName::State => json!(item.state),
             FieldName::Parent => json!(item.parent),
             FieldName::Size => json!(item.size),
-            FieldName::Archived => json!(item.archived),
             FieldName::Evidence => json!(item.evidence),
             FieldName::Thread => json!(item.thread),
-            FieldName::Reopened => json!(item.reopened),
             _ => Json::Null,
         }),
         Record::Thread(id) => before.threads.get(id).map(|thread| match at.field {

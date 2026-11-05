@@ -26,11 +26,11 @@ fn list(r: &Replica) -> Vec<Entry> {
 
 #[test]
 fn need_identity_includes_the_core_payload_even_when_its_stable_key_does_not() {
-    let first = Entry::Reopened { item: "a".into(), dependents: vec!["b".into()] };
-    let changed = Entry::Reopened { item: "a".into(), dependents: vec!["c".into()] };
+    let first = Entry::Contest { thread: "t".into(), holders: vec!["a".into(), "b".into()] };
+    let changed = Entry::Contest { thread: "t".into(), holders: vec!["a".into(), "c".into()] };
     assert_eq!(first.key(), changed.key());
     assert_ne!(first.identity(), changed.identity());
-    assert_eq!(first.identity(), r#"{"entry":"reopened","item":"a","dependents":["b"]}"#);
+    assert_eq!(first.identity(), r#"{"entry":"contest","thread":"t","holders":["a","b"]}"#);
 }
 
 #[test]
@@ -70,6 +70,7 @@ fn the_state_puts_its_problems_on_the_list() {
     };
     model::set(&mut a, &item_key("dep").unwrap(), field::EVIDENCE, Some(&evidence), by).unwrap();
     link(&mut a, "z", "dep", by).unwrap();
+    link(&mut a, "dep", "kid", by).unwrap();
     b.join(&a.state).unwrap();
 
     // Concurrent: a title conflict, a link cycle, a contest, a clock ahead.
@@ -91,7 +92,12 @@ fn the_state_puts_its_problems_on_the_list() {
         thread: "tx".into(),
         holders: vec!["session/a".into(), "session/b".into()],
     });
-    has(&Entry::DoneEarly { item: "p".into(), open: vec!["kid".into()] });
+    // Done work waiting on an open leaf; a parent stored done over open work is no longer flagged, since it reads open.
+    has(&Entry::DoneWaiting { item: "dep".into(), waits_for: "kid".into() });
+    assert!(
+        !entries.iter().any(|e| matches!(e, Entry::DoneWaiting { item, .. } if item == "p")),
+        "{entries:#?}"
+    );
     has(&Entry::ClockAhead { thread: "tk".into(), holder: "session/b".into() });
     has(&Entry::Dangling {
         kind: "item".into(),
@@ -207,12 +213,8 @@ fn kinds_and_fields_no_reader_knows_are_skipped() {
 
 #[test]
 fn a_need_is_known_by_what_it_is_about_not_by_what_changes_while_it_stands() {
-    let reopened = |dependents: &[&str]| Entry::Reopened {
-        item: "a".into(),
-        dependents: dependents.iter().map(|&d| d.to_owned()).collect(),
-    };
-    assert_eq!(reopened(&[]).key(), "reopened:a");
-    assert_eq!(reopened(&["b"]).key(), reopened(&["b", "c"]).key());
+    let waiting = Entry::DoneWaiting { item: "a".into(), waits_for: "b".into() };
+    assert_eq!(waiting.key(), "done-waiting:a:b");
     let contest = |holders: &[&str]| Entry::Contest {
         thread: "t".into(),
         holders: holders.iter().map(|&h| h.to_owned()).collect(),
@@ -303,13 +305,6 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
         "{found:?}"
     );
     assert_eq!(found[1], set(ItemAssign::Parent(Some("p".into()))));
-
-    // Reopened holds which archive it left; only done work is reopened.
-    apart(&mut r, &x, field::REOPENED, &json!({"archived": false}), &json!(null));
-    assert_eq!(
-        keeps_in(&r, field::REOPENED),
-        [Keep::Not(Unkept::NoCommand), Keep::Not(Unkept::NotDone)]
-    );
 
     // A repository's owner is kept with its name as it stands, and not while the name is in conflict too.
     let repo = Key::new(kind::REPOSITORY, "r").unwrap();

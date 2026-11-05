@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, impliedWithin, inArchived, sourceKey, topOf, visible } from "./model";
+import { buildModel, collapsedWith, defaultView, impliedWithin, sourceKey, topOf, visible } from "./model";
 
 // garden
 //   beds: dig, edge
 //   plant: sow (waits for dig), water (waits for sow)
-// shed (archived): paint (waits for sow)
-// tools (waits for paint)
+// tools
 const plan = [
   item("garden"),
   item("beds", "garden"),
@@ -15,9 +14,7 @@ const plan = [
   item("plant", "garden"),
   item("sow", "plant", ["dig"], { thread: "spring" }),
   item("water", "plant", ["sow"], { thread: "spring" }),
-  item("shed", null, [], { archived: true }),
-  item("paint", "shed", ["sow"], { thread: "spring" }),
-  item("tools", null, ["paint"]),
+  item("tools"),
 ];
 
 describe("layout source identity", () => {
@@ -25,7 +22,7 @@ describe("layout source identity", () => {
     const original = buildModel([item("box"), item("one", "box", [], { title: "Short" })]);
     const renamed = buildModel([item("box"), item("one", "box", [], { title: "A much longer title" })]);
     expect(sourceKey(original)).not.toBe(sourceKey(renamed));
-    const toggled = visible(original, { collapsed: new Set(["box"]), showArchived: true });
+    const toggled = visible(original, { collapsed: new Set(["box"]) });
     expect(sourceKey(original)).toBe(sourceKey(buildModel([item("box"), item("one", "box", [], { title: "Short" })])));
     expect(toggled.nodes.find((node) => node.id === "box")?.kind).toBe("collapsed");
     const counts = { done: 0, leaves: 1, in_progress: 0, ready: 1, blocked: 0, parked: 0, unthreaded: 0 };
@@ -40,7 +37,7 @@ const model = buildModel(plan);
 const ids = (view: ReturnType<typeof visible>) => view.nodes.map((node) => `${node.id}:${node.kind}`);
 
 describe("visible", () => {
-  it("opens on the roots, with every box below them collapsed and archived subtrees hidden", () => {
+  it("opens on the roots, with every box below them collapsed", () => {
     const view = visible(model, defaultView(model));
     expect(ids(view)).toEqual(["garden:box", "beds:collapsed", "plant:collapsed", "tools:leaf"]);
     expect(view.nodes.find((node) => node.id === "beds")?.hidden).toBe(2);
@@ -48,46 +45,38 @@ describe("visible", () => {
     expect(view.edges).toEqual([{ source: "beds", target: "plant" }]);
   });
 
-  it("drops an edge inside one collapsed box, and one into a hidden archived subtree", () => {
-    const view = visible(model, { collapsed: new Set(["garden"]), showArchived: false });
+  it("drops an edge inside one collapsed box", () => {
+    const view = visible(model, { collapsed: new Set(["garden"]) });
     expect(ids(view)).toEqual(["garden:collapsed", "tools:leaf"]);
-    // tools waits for paint, which is archived and hidden; dig, sow and water all stand in as garden.
+    // dig, sow and water all stand in as garden, so the links among them vanish.
     expect(view.edges).toEqual([]);
   });
 
-  it("shows archived subtrees when asked, with their edges", () => {
-    const view = visible(model, { collapsed: new Set(), showArchived: true });
-    expect(ids(view)).toContain("shed:box");
+  it("draws every item with its edges when nothing is collapsed", () => {
+    const view = visible(model, { collapsed: new Set() });
     expect(view.edges).toEqual([
       { source: "dig", target: "sow" },
-      { source: "paint", target: "tools" },
-      { source: "sow", target: "paint" },
       { source: "sow", target: "water" },
     ]);
-    // Only the subtree's root is marked archived; what it holds is archived with it, closed or open.
-    const archived = (one: ReturnType<typeof visible>) =>
-      one.nodes.filter((node) => node.archived).map((node) => node.id);
-    expect(archived(view)).toEqual(["shed", "paint"]);
-    expect(archived(visible(model, { collapsed: new Set(["shed"]), showArchived: true }))).toEqual(["shed"]);
   });
 
   it("drops an edge between a box and an item inside it", () => {
     const nested = buildModel([item("a"), item("b", "a", ["a"])]);
-    expect(visible(nested, { collapsed: new Set(), showArchived: false }).edges).toEqual([]);
+    expect(visible(nested, { collapsed: new Set() }).edges).toEqual([]);
   });
 
   it("highlights a thread's hidden members as the box that hides them, once", () => {
     const view = visible(model, defaultView(model));
-    // sow and water are both inside collapsed plant; paint is archived and hidden.
+    // sow and water are both inside collapsed plant.
     expect(view.threads.get("spring")).toEqual(["plant"]);
-    const open = visible(model, { collapsed: new Set(), showArchived: true });
-    expect(open.threads.get("spring")).toEqual(["paint", "sow", "water"]);
+    const open = visible(model, { collapsed: new Set() });
+    expect(open.threads.get("spring")).toEqual(["sow", "water"]);
   });
 
   it("draws items whose parents form a cycle, from the first of them in id order", () => {
     const tangled = buildModel([item("a", "b"), item("b", "a"), item("c", "a")]);
     expect(tangled.roots).toEqual(["a"]);
-    expect(ids(visible(tangled, { collapsed: new Set(), showArchived: false }))).toEqual(["a:box", "b:leaf", "c:leaf"]);
+    expect(ids(visible(tangled, { collapsed: new Set() }))).toEqual(["a:box", "b:leaf", "c:leaf"]);
     expect([...tangled.depth.values()]).toEqual([0, 1, 1]);
     // An item hanging off a cycle stays under its parent, though it sorts before the cycle's items.
     const hanging = buildModel([item("x", "y"), item("y", "x"), item("a", "x")]);
@@ -98,17 +87,6 @@ describe("visible", () => {
   it("treats an item whose parent is missing as a root", () => {
     const orphan = buildModel([item("a", "gone")]);
     expect(orphan.roots).toEqual(["a"]);
-  });
-});
-
-describe("inArchived", () => {
-  it("holds for an archived item and what is under it, and ends on parents that loop", () => {
-    expect([inArchived(model, "shed"), inArchived(model, "paint"), inArchived(model, "sow")]).toEqual([
-      true,
-      true,
-      false,
-    ]);
-    expect(inArchived(buildModel([item("a", "b"), item("b", "a")]), "a")).toBe(false);
   });
 });
 
@@ -151,7 +129,7 @@ describe("implied links", () => {
       item("c1", "C", ["b2"]),
       item("c2", "C", ["a2"]),
     ];
-    const open = { collapsed: new Set(["A", "B", "C"]), showArchived: false };
+    const open = { collapsed: new Set(["A", "B", "C"]) };
     expect(visible(buildModel(boxes), open).edges).toEqual([
       { source: "A", target: "B" },
       { source: "A", target: "C" },
@@ -166,7 +144,7 @@ describe("implied links", () => {
 
 describe("topOf", () => {
   it("finds the top-level node a node is drawn in", () => {
-    const view = visible(model, { collapsed: new Set(), showArchived: false });
+    const view = visible(model, { collapsed: new Set() });
     expect([topOf(view, "sow"), topOf(view, "plant"), topOf(view, "tools")]).toEqual(["garden", "garden", "tools"]);
   });
 });

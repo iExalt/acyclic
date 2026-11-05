@@ -7,12 +7,10 @@ import { buildModel, defaultView, visible } from "./map/model";
 import { currentRows, outlineOf, uniqueProjectThread } from "./outline";
 
 // Two projects and a lone item at the top level: t works in both projects, u only in the second, v only in the lone
-// item, and w nowhere; the first project's archived part holds x.
+// item, and w and x nowhere.
 const model = buildModel([
   item("p1"),
   item("a", "p1", [], { thread: "t" }),
-  item("old", "p1", [], { archived: true }),
-  item("gone", "old", [], { thread: "x" }),
   item("p2", null, [], { thread: "u" }),
   item("b", "p2"),
   item("c", "b", [], { thread: "t" }),
@@ -22,7 +20,7 @@ const threads = ["t", "u", "v", "w", "x"];
 
 describe("outlineOf", () => {
   it("lists each project with its threads, a thread in two under both, and threads in no project apart", () => {
-    expect(outlineOf(model, threads, false)).toEqual({
+    expect(outlineOf(model, threads)).toEqual({
       projects: [
         { id: "p1", title: "P1", threads: [{ id: "t", also: ["p2"] }] },
         {
@@ -45,7 +43,7 @@ describe("outlineOf", () => {
       item("project-2"),
       item("b", "project-2"),
     ]);
-    expect(outlineOf(numbered, [], false).projects.map((project) => project.id)).toEqual(["project-2", "project-10"]);
+    expect(outlineOf(numbered, []).projects.map((project) => project.id)).toEqual(["project-2", "project-10"]);
     // Inside project-1, c waits on d, in side-1: side-1 comes first, as the Map draws it.
     const waiting = buildModel([
       item("project-1"),
@@ -55,11 +53,7 @@ describe("outlineOf", () => {
       item("side-1"),
       item("d", "side-1"),
     ]);
-    expect(outlineOf(waiting, [], false).projects.map((project) => project.id)).toEqual([
-      "project-2",
-      "side-1",
-      "project-1",
-    ]);
+    expect(outlineOf(waiting, []).projects.map((project) => project.id)).toEqual(["project-2", "side-1", "project-1"]);
   });
 
   it("lists projects in the dependency order the Map packs its top level by, with its boxes collapsed", async () => {
@@ -93,18 +87,12 @@ describe("outlineOf", () => {
     };
     await place(visible(plan, defaultView(plan)), new LayoutCache(), noted, 1);
     expect(packed).toEqual(["project-2", "lone", "side-1", "project-1"]);
-    expect(outlineOf(plan, [], false).projects.map((project) => project.id)).toEqual(
-      packed.filter((id) => id !== "lone"),
-    );
-  });
-
-  it("counts what is archived only while it shows", () => {
-    expect(outlineOf(model, threads, true).projects[0]?.threads.map((one) => one.id)).toEqual(["t", "x"]);
+    expect(outlineOf(plan, []).projects.map((project) => project.id)).toEqual(packed.filter((id) => id !== "lone"));
   });
 });
 
 describe("currentRows", () => {
-  const outline = outlineOf(model, threads, false);
+  const outline = outlineOf(model, threads);
   it("marks a selected item's project and thread, a project selected itself, and no project for a lone item at the top", () => {
     expect(currentRows(model, outline, "c")).toEqual({ project: "p2", thread: "t" });
     expect(currentRows(model, outline, "p2")).toEqual({ project: "p2", thread: "u" });
@@ -114,12 +102,11 @@ describe("currentRows", () => {
 });
 
 describe("uniqueProjectThread", () => {
-  const outline = outlineOf(model, threads, false);
+  const outline = outlineOf(model, threads);
   it("infers only a project's sole visible thread", () => {
     expect(uniqueProjectThread("p1", outline.projects)).toBe("t");
     expect(uniqueProjectThread("p2", outline.projects)).toBeNull();
     expect(uniqueProjectThread("empty", [{ id: "empty", threads: [] }])).toBeNull();
-    expect(uniqueProjectThread("p1", outlineOf(model, threads, true).projects)).toBeNull();
     expect(uniqueProjectThread("missing", outline.projects)).toBeNull();
     expect(uniqueProjectThread(null, outline.projects)).toBeNull();
   });

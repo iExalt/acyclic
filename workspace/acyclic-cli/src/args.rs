@@ -181,7 +181,7 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
-    /// Adds, edits, shows, lists, finishes, reopens, archives and deletes items.
+    /// Adds, edits, shows, lists, finishes, reopens and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
     /// Adds, edits, shows and lists threads, and finds, claims and releases ready work.
@@ -303,7 +303,7 @@ impl Command {
             Self::Needs
             | Self::Item(ItemCommand::List | ItemCommand::Show { .. })
             | Self::Thread(
-                ThreadCommand::List | ThreadCommand::Show { .. } | ThreadCommand::Ready { .. },
+                ThreadCommand::List | ThreadCommand::Show { .. } | ThreadCommand::Ready,
             )
             | Self::Repository(RepositoryCommand::List | RepositoryCommand::Show { .. }) => {
                 Class::Read
@@ -313,7 +313,6 @@ impl Command {
                 | ItemCommand::Edit(_)
                 | ItemCommand::Done { .. }
                 | ItemCommand::Reopen { .. }
-                | ItemCommand::Archive { .. }
                 | ItemCommand::Delete { .. },
             )
             | Self::Thread(
@@ -493,11 +492,6 @@ pub enum ItemCommand {
         /// The item.
         item: String,
     },
-    /// Archives a done subtree.
-    Archive {
-        /// The subtree's root.
-        item: String,
-    },
     /// Deletes an item nothing refers to: no children, nothing waiting for it or that it waits for, no evidence, not
     /// done, and no one else's live claim.
     Delete {
@@ -609,12 +603,7 @@ pub enum ThreadCommand {
     /// Lists every thread, by id, with its members and its heads: the open leaves nothing in it orders.
     List,
     /// Lists threads with ready work, the actor's own first, each with its ready items.
-    Ready {
-        /// Judge archived work as if it weren't archived.
-        #[arg(long)]
-        #[serde(default)]
-        include_archived: bool,
-    },
+    Ready,
     /// Claims a thread with ready work, or renews the actor's claim on it.
     Claim {
         /// The thread.

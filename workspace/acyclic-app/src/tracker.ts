@@ -43,7 +43,7 @@ export interface After {
 /** What the app tells the user, which `notices.ts` says how long to keep and where to show. */
 export interface Notice extends Raised {
   text: string;
-  offer: "retry" | "refresh" | "hide-archived" | "undo" | null;
+  offer: "retry" | "refresh" | "undo" | null;
   /** The write again, offered when the server was only busy. */
   retry: { body: Command; after: After; expected?: readonly Expected[]; observed?: readonly string[] } | null;
   /** Said of a link waiting for a form to close: dismissing it drops the link. */

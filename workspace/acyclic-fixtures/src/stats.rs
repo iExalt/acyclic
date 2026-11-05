@@ -21,8 +21,6 @@ pub struct Stats {
     pub multi_repository_threads: usize,
     /// Items per state.
     pub states: BTreeMap<String, usize>,
-    /// Archived items.
-    pub archived: usize,
     /// Waits-for links.
     pub links: usize,
 }
@@ -82,7 +80,6 @@ impl Stats {
             cross_root_threads,
             multi_repository_threads,
             states,
-            archived: import.items.iter().filter(|i| i.archived).count(),
             links: import.items.iter().map(|i| i.waits_for.as_ref().map_or(0, Vec::len)).sum(),
         }
     }

@@ -485,7 +485,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
 {
   "data": [
     {
-      "archived": false,
       "children": [],
       "claims": [],
       "done_at": null,
@@ -502,7 +501,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "readiness": {
         "status": "ready"
       },
-      "reopened": false,
       "repositories": [],
       "role": "item",
       "size": null,
@@ -694,12 +692,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First -o pretty
 # exit 0
 id         0000a1
 title      First
-archived   no
 done_at    2026-10-15T00:00:00Z
 evidence   text shipped
 links      waited_on_by 0000a2
 readiness  done
-reopened   no
 role       item
 stage      done
 state      done
@@ -797,7 +793,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
 {
   "data": [
     {
-      "archived": false,
       "children": [],
       "claims": [],
       "done_at": "2026-10-15T00:00:00Z",
@@ -817,7 +812,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "readiness": {
         "status": "done"
       },
-      "reopened": false,
       "repositories": [],
       "role": "item",
       "size": null,
@@ -827,7 +821,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "title": "First"
     },
     {
-      "archived": false,
       "children": [],
       "claims": [],
       "done_at": null,
@@ -844,7 +837,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "readiness": {
         "status": "ready"
       },
-      "reopened": false,
       "repositories": [],
       "role": "item",
       "size": null,
@@ -1135,7 +1127,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
 {
   "data": [
     {
-      "archived": false,
       "children": [],
       "claims": [],
       "done_at": "2026-10-15T00:00:00Z",
@@ -1155,7 +1146,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
       "readiness": {
         "status": "done"
       },
-      "reopened": false,
       "repositories": [],
       "role": "item",
       "size": null,
@@ -1184,7 +1174,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
 {
   "data": [
     {
-      "archived": false,
       "children": [],
       "claims": [],
       "done_at": null,
@@ -1199,7 +1188,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "readiness": {
         "status": "unthreaded"
       },
-      "reopened": false,
       "repositories": [],
       "role": "item",
       "size": null,
@@ -1328,17 +1316,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done Goal
 # exit 1
 {
   "error": {
-    "code": "not-ready",
+    "code": "parent",
     "details": {
-      "held": null,
-      "open": [
-        "01900000-0000-7000-8000-0000000000c2"
-      ],
-      "readiness": {
-        "status": "parent"
-      }
+      "item": "01900000-0000-7000-8000-0000000000c1"
     },
-    "message": "item 01900000-0000-7000-8000-0000000000c1 can't be finished yet: it has open children or is held back; `acyclic item show 01900000-0000-7000-8000-0000000000c1` says which"
+    "message": "item 01900000-0000-7000-8000-0000000000c1 has children, so it reads done once they are: finish its leaves instead (forcing doesn't change this)"
   },
   "ok": false
 }
@@ -1382,15 +1364,48 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done Part
   "ok": true
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item done Goal
+$ ACYCLIC_ACTOR=session/mac acyclic item show Goal
 # exit 0
 {
-  "data": {
-    "changed": true,
-    "evidence": null,
-    "item": "01900000-0000-7000-8000-0000000000c1",
-    "state": "done"
-  },
+  "data": [
+    {
+      "children": [
+        "01900000-0000-7000-8000-0000000000c2"
+      ],
+      "claims": [],
+      "done_at": null,
+      "evidence": null,
+      "id": "01900000-0000-7000-8000-0000000000c1",
+      "links": {
+        "waited_on_by": [],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": null,
+      "progress": {
+        "counts": {
+          "blocked": 0,
+          "done": 1,
+          "in_progress": 0,
+          "leaves": 1,
+          "parked": 0,
+          "ready": 0,
+          "unthreaded": 0
+        },
+        "state": "done"
+      },
+      "readiness": {
+        "status": "parent"
+      },
+      "repositories": [],
+      "role": "project",
+      "size": null,
+      "stage": "done",
+      "state": "backlog",
+      "thread": null,
+      "title": "Goal"
+    }
+  ],
   "ok": true
 }
 
@@ -1441,15 +1456,16 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-000000
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item done 0000c3 --force
-# exit 0
+# exit 1
 {
-  "data": {
-    "changed": true,
-    "evidence": null,
-    "item": "01900000-0000-7000-8000-0000000000c3",
-    "state": "done"
+  "error": {
+    "code": "parent",
+    "details": {
+      "item": "01900000-0000-7000-8000-0000000000c3"
+    },
+    "message": "item 01900000-0000-7000-8000-0000000000c3 has children, so it reads done once they are: finish its leaves instead (forcing doesn't change this)"
   },
-  "ok": true
+  "ok": false
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000d1 --title Doomed

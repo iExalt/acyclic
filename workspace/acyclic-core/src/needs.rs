@@ -1,5 +1,5 @@
 //! The needs-you list, computed on read: everything waiting on the user, as the state shows it (conflicts, cycles,
-//! contests, reopened work, dangling references).
+//! contests, done work waiting on open work, dangling references).
 
 use std::collections::BTreeSet;
 
@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, Model, Value};
-use crate::ready::ReadinessEvaluator;
+use crate::ready::{ReadinessEvaluator, Stage};
 use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
@@ -69,19 +69,12 @@ pub enum Entry {
         /// The command that puts it in a thread.
         fix: String,
     },
-    /// A reopened item, with the items that depend on it.
-    Reopened {
-        /// The item.
+    /// Done work that waits for a leaf that isn't done, as when what it waits for was reopened or added later.
+    DoneWaiting {
+        /// The done item.
         item: String,
-        /// Its dependents, by waits-for link.
-        dependents: Vec<String>,
-    },
-    /// A parent marked done while children are open.
-    DoneEarly {
-        /// The parent.
-        item: String,
-        /// Its open children.
-        open: Vec<String>,
+        /// The leaf it waits for.
+        waits_for: String,
     },
     /// A reference to something that doesn't exist.
     Dangling {
@@ -101,8 +94,7 @@ pub enum Entry {
 
 impl Entry {
     /// A stable, readable key: its kind and what it is about, joined by `:`, so the same need on the next look is
-    /// known as the same. Lists that change while the need stands, such as a contest's holders or a reopened item's
-    /// dependents, stay out of it. Ids and field names hold no `:`.
+    /// known as the same. Lists that change while the need stands, such as a contest's holders, stay out of it. Ids and field names hold no `:`.
     #[must_use]
     pub fn key(&self) -> String {
         let parts: Vec<&str> = match self {
@@ -120,8 +112,7 @@ impl Entry {
             Self::Contest { thread, holders: _ } => vec!["contest", thread],
             Self::ClockAhead { thread, holder } => vec!["clock-ahead", thread, holder],
             Self::Unthreaded { item, fix: _ } => vec!["unthreaded", item],
-            Self::Reopened { item, dependents: _ } => vec!["reopened", item],
-            Self::DoneEarly { item, open: _ } => vec!["done-early", item],
+            Self::DoneWaiting { item, waits_for } => vec!["done-waiting", item, waits_for],
             Self::Dangling { kind, id, field, target, fix: _ } => {
                 vec!["dangling", kind, id, field, target]
             },
@@ -151,8 +142,7 @@ impl Entry {
             | Self::ParentCycle { .. }
             | Self::ThreadCycle { .. }
             | Self::Contest { .. }
-            | Self::Reopened { .. }
-            | Self::DoneEarly { .. } => true,
+            | Self::DoneWaiting { .. } => true,
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
@@ -190,7 +180,7 @@ pub fn needs_you(
         entries.insert(Entry::ThreadCycle { threads: threads.into_iter().collect() });
     }
     claims(state, model, now, &mut entries)?;
-    reopened_and_early(model, &mut entries);
+    done_waiting(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
     for (id, item) in &model.items {
         if item.is_done() || !model.children(id).is_empty() {
@@ -201,14 +191,13 @@ pub fn needs_you(
     Ok(entries.into_iter().collect())
 }
 
-/// Whether an item is an open, unarchived, unparked leaf whose thread isn't in conflict: one `ready` lists only
+/// Whether an item is an open, unparked leaf whose thread isn't in conflict: one `ready` lists only
 /// while a thread with a record holds it. A conflicted thread is left to its conflict entry.
 fn wants_thread(model: &Model, item: &model::Item) -> bool {
     !item.is_done()
         && model.children(&item.id).is_empty()
         && item.state != Value::One(model::ItemState::Parked)
         && !item.thread.is_conflict()
-        && !model.is_archived(&item.id)
 }
 
 /// A leaf that wants a thread and names none, whatever else holds it back: `ready` never lists it. One that names a
@@ -245,29 +234,29 @@ fn claims(
     Ok(())
 }
 
-fn reopened_and_early(model: &Model, entries: &mut BTreeSet<Entry>) {
-    for (id, item) in &model.items {
-        if item.reopened != Value::None {
-            let dependents: Vec<String> = model
-                .links
-                .iter()
-                .filter(|l| l.to == *id && !model.is_archived(&l.from))
-                .map(|l| l.from.clone())
-                .collect();
-            entries.insert(Entry::Reopened { item: id.clone(), dependents });
+/// Each done item, leaf or parent, that waits directly for a leaf that isn't done: work finished before what it
+/// assumed. Waits for a parent don't count, so new work under an ongoing part flags nothing that waited on it.
+fn done_waiting(
+    model: &Model,
+    readiness: &ReadinessEvaluator<'_>,
+    entries: &mut BTreeSet<Entry>,
+) -> Result<(), Error> {
+    for link in &model.links {
+        let Some(target) = model.items.get(&link.to) else { continue };
+        if target.is_done() || !model.children(&link.to).is_empty() {
+            continue;
         }
-        if item.is_done() {
-            let open: Vec<String> = model
-                .children(id)
-                .into_iter()
-                .filter(|child| !model.items[*child].is_done() && !model.is_archived(child))
-                .map(str::to_owned)
-                .collect();
-            if !open.is_empty() {
-                entries.insert(Entry::DoneEarly { item: id.clone(), open });
-            }
+        let stage = if model.children(&link.from).is_empty() {
+            readiness.stage(&link.from)?
+        } else {
+            readiness.progress(&link.from)?.and_then(|rollup| rollup.stage)
+        };
+        if stage == Some(Stage::Done) {
+            entries
+                .insert(Entry::DoneWaiting { item: link.from.clone(), waits_for: link.to.clone() });
         }
     }
+    Ok(())
 }
 
 fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {

@@ -60,7 +60,7 @@ describe("markSvg", () => {
 });
 
 describe("a tile's stage", () => {
-  it("is core's, or for an archived tile or a parent drawn as one, what its own state says", () => {
+  it("is core's, or for a parent drawn as a tile, what its own state says", () => {
     expect(["done", "parked", "in-progress", "backlog"].map(fallbackStage)).toEqual([
       "done",
       "parked",
@@ -69,20 +69,11 @@ describe("a tile's stage", () => {
     ]);
     const model = buildModel([
       item("live", null, [], { stage: "blocked" }),
-      item("old", null, [], { archived: true, state: "done" }),
       item("box", null, [], { state: "parked" }),
-      item("gone", "box", [], { archived: true }),
     ]);
     const stages = Object.fromEntries(
-      visible(model, { collapsed: new Set(), showArchived: false }).nodes.map((node) => [node.id, node.stage]),
+      visible(model, { collapsed: new Set() }).nodes.map((node) => [node.id, node.stage]),
     );
     expect(stages).toEqual({ live: "blocked", box: "parked" });
-    const shown = visible(model, { collapsed: new Set(), showArchived: true }).nodes;
-    expect(Object.fromEntries(shown.map((node) => [node.id, node.stage]))).toEqual({
-      live: "blocked",
-      old: "done",
-      box: null,
-      gone: null,
-    });
   });
 });

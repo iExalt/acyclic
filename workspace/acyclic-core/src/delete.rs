@@ -2,7 +2,7 @@
 //!
 //! Deleting writes `deleted: true` on the item. Every reader leaves a deleted item out, and every checked write
 //! treats it as missing (`model::existing`), so a replica that has seen the tombstone refuses to link, move, claim,
-//! finish, reopen, archive or place it. Adding the id again is refused too: a deleted id is retired, since another
+//! finish, reopen or place it. Adding the id again is refused too: a deleted id is retired, since another
 //! replica may still be naming it.
 //!
 //! **Join rule: delete wins.** The tombstone is a field no write clears, so any join that holds it holds a deleted

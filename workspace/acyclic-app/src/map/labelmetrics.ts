@@ -30,7 +30,7 @@ export function textWidth(kind: Kind, width: number): number {
 }
 
 export function metricsOf(
-  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "archived" | "stage" | "progress" | "note" | "doneBox">,
+  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress" | "note" | "doneBox">,
   fonts: LabelFonts,
   width = TILE_WIDTH,
 ): LabelMetrics {

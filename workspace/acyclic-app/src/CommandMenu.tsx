@@ -10,7 +10,6 @@ import type { Stage } from "./api";
 import { Badge, lineStyle } from "./Badge";
 import { type Entry, onMac, type Run, rank } from "./commands";
 import {
-  Archive,
   ArrowUpLeft,
   FolderInput,
   Icon,
@@ -40,7 +39,7 @@ interface Props {
   /** The threads at work, listed before anything is typed. */
   working: ReadonlySet<string>;
   lines: ReadonlyMap<string, Line>;
-  /** An item's stage, "box" for a parent, or nothing for an archived item. */
+  /** An item's stage, or "box" for a parent. */
   kindOf: (id: string) => Stage | "box" | undefined;
   onRun: (run: Run) => void;
   /** Closes the menu, as Escape does. */
@@ -275,6 +274,5 @@ function icon(entry: Entry, lines: ReadonlyMap<string, Line>, kindOf: (id: strin
     return <Icon of={of[run.action]} size={16} />;
   }
   if (run.kind === "add") return <Icon of={Plus} size={16} />;
-  if (run.kind === "archived") return <Icon of={Archive} size={16} />;
   return <Icon of={RotateCw} size={16} />;
 }

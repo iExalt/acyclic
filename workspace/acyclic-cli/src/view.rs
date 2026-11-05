@@ -75,7 +75,7 @@ pub(crate) struct View<'a> {
 }
 
 impl View<'_> {
-    /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` unless it is archived (a
+    /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` (a
     /// parent's rolled up from its leaves, none with no leaf to count), and a parent's `progress`, `{state, counts}`,
     /// from the leaves under it and the claims on their threads. `counts`
     /// has its leaves, and each leaf under its stage, so the stages add up to `leaves`. An id the model lacks has only its
@@ -146,8 +146,6 @@ impl View<'_> {
                 "claims": claims,
                 "evidence": evidence(model, &item.evidence),
                 "done_at": item.done_at.map(rfc3339),
-                "archived": model.is_archived(id),
-                "reopened": item.reopened != Value::None,
             }),
         ))
     }
@@ -223,12 +221,9 @@ impl View<'_> {
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
                 },
-                Entry::Reopened { item, dependents } => json!({
-                    "kind": "reopened", "item": self.item_row(item)?, "dependents": items(dependents)?,
+                Entry::DoneWaiting { item, waits_for } => json!({
+                    "kind": "done-waiting", "item": self.item_row(item)?, "waits_for": self.item_row(waits_for)?,
                 }),
-                Entry::DoneEarly { item, open } => {
-                    json!({"kind": "done-early", "item": self.item_row(item)?, "open": items(open)?})
-                },
                 Entry::Dangling { kind, id, field, target, fix } => {
                     let mut shown = json!({
                         "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
@@ -267,7 +262,7 @@ impl View<'_> {
         let kept = acyclic_core::needs::keeps(self.state, self.model, (entity, id, field), by)?;
         let values: Vec<&Json> = kept.iter().map(|kept| &kept.value).collect();
         let keeps: Vec<Json> =
-            kept.iter().map(|kept| crate::keep::kept_json(self.model, field, kept)).collect();
+            kept.iter().map(|kept| crate::keep::kept_json(self.model, kept)).collect();
         let identity = crate::keep::conflict_identity(self.model, entry, &kept);
         let mut shown = json!({
             "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values,
@@ -392,7 +387,7 @@ mod tests {
     }
 
     /// Items `goal` > `a` and `b` in thread `t`, `late` an agent's add to it, `c` waiting for `a`, `d` done with
-    /// evidence and archived, and a repository `r` on `a`; `a` is claimed.
+    /// evidence, and a repository `r` on `a`; `a` is claimed.
     fn tracker() -> Replica {
         let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
         let user = by(USER);
@@ -423,7 +418,6 @@ mod tests {
         };
         model::set(&mut r, &key(kind::ITEM, "d"), "evidence", Some(&evidence), user).unwrap();
         set_state(&mut r, "d", ItemState::Done, user).unwrap();
-        r.write(&key(kind::ITEM, "d"), "archived", USER, NOW, Some(json!(true))).unwrap();
         claim::claim(&mut r, "t", "session/pi", NOW, (60_000, 480 * 60_000), false).unwrap();
         r
     }
@@ -460,9 +454,7 @@ mod tests {
                         assert!(inner.is_u64(), "{here}");
                         continue;
                     }
-                    if ["archived", "reopened", "conflicted"].contains(&name.as_str())
-                        && !inner.is_object()
-                    {
+                    if name == "conflicted" && !inner.is_object() {
                         assert!(inner.is_boolean(), "{here}: {inner}");
                     }
                     if name.ends_with("_at") && !inner.is_null() {
@@ -518,14 +510,10 @@ mod tests {
             let links = &view.item("c", &view.model.items["c"]).unwrap()["links"];
             assert_eq!(links, &json!({"waits_for": ["a"], "waited_on_by": []}));
             assert_eq!(shown["claims"][0]["holder"], "session/pi");
-            assert_eq!(
-                (&shown["archived"], &shown["reopened"], &shown["done_at"]),
-                (&json!(false), &json!(false), &Json::Null)
-            );
+            assert_eq!(shown["done_at"], Json::Null);
             let done = view.item("d", &view.model.items["d"]).unwrap();
             // The commit by its repository's owner/name, which a rename changes.
             assert_eq!(done["evidence"], json!({"commit": "me/code@abc1234", "text": "shipped"}));
-            assert_eq!(done["archived"], true);
             assert!(done["done_at"].is_string());
             for shape in [&row, &shown, &done] {
                 follows_the_conventions(shape, "item");

@@ -12,8 +12,8 @@ describe("Layouts", () => {
       new Promise((resolve) => answers.push(() => resolve({ width: 10, height: 10, at: {} })));
     const layouts = new Layouts(layBox);
     const model = buildModel([item("a")]);
-    const old = layouts.layout(visible(model, { collapsed: new Set(), showArchived: false }), PORTRAIT);
-    const fresh = layouts.layout(visible(model, { collapsed: new Set(), showArchived: true }), PORTRAIT);
+    const old = layouts.layout(visible(model, { collapsed: new Set() }), PORTRAIT);
+    const fresh = layouts.layout(visible(model, { collapsed: new Set() }), PORTRAIT);
     await new Promise((resolve) => setTimeout(resolve, 0));
     for (const answer of answers.splice(0)) answer();
     expect(await old).toBeNull();
@@ -49,14 +49,13 @@ describe("Layouts", () => {
     };
     const layouts = new Layouts(layBox);
     const model = buildModel([item("a"), item("a1", "a"), item("b")]);
-    const collapsed = visible(model, { collapsed: new Set(["a"]), showArchived: false });
+    const collapsed = visible(model, { collapsed: new Set(["a"]) });
     const packed = await layouts.layout(collapsed, PORTRAIT);
     expect(packed).not.toBeNull();
 
     const stale = layouts.layout(
       visible(buildModel([item("a"), item("a1", "a"), item("b"), item("c")]), {
         collapsed: new Set(),
-        showArchived: false,
       }),
       PORTRAIT,
     );
@@ -65,7 +64,6 @@ describe("Layouts", () => {
     const newer = layouts.layout(
       visible(buildModel([item("a"), item("a1", "a"), item("b"), item("d")]), {
         collapsed: new Set(["a"]),
-        showArchived: false,
       }),
       PORTRAIT,
     );
@@ -82,7 +80,6 @@ describe("Layouts", () => {
     const third = await layouts.layout(
       visible(buildModel([item("a"), item("a1", "a"), item("b"), item("c")]), {
         collapsed: new Set(["a"]),
-        showArchived: false,
       }),
       PORTRAIT,
     );
@@ -103,7 +100,7 @@ describe("Layouts", () => {
       return Promise.resolve({ width: 300, height: 100, at: { a: { x: 12, y: 12 } } });
     };
     const layouts = new Layouts(layBox);
-    const view = visible(buildModel([item("a")]), { collapsed: new Set(), showArchived: false });
+    const view = visible(buildModel([item("a")]), { collapsed: new Set() });
     const old = layouts.layout(
       view,
       PORTRAIT,

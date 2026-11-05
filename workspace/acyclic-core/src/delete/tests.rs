@@ -1,4 +1,3 @@
-use crate::archive;
 use crate::claim;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_state};
 use crate::needs::{Entry, needs_you};
@@ -111,14 +110,6 @@ fn a_deleted_item_is_missing_to_every_checked_write_and_its_id_is_retired() {
     assert!(missing(set_state(&mut r, "gone", ItemState::Parked, user(3))));
     let member = ScopeEdit::Member { item: "gone".into(), thread: Some("t".into()) };
     assert!(matches!(edit(&mut r, &member, user(3)), Err(WriteError::NoItem(_))));
-    assert!(matches!(
-        archive::reopen(&mut r, "gone", user(3)),
-        Err(archive::ArchiveError::Write(WriteError::NoItem(_)))
-    ));
-    assert!(matches!(
-        archive::archive(&mut r, "gone", user(3)),
-        Err(archive::ArchiveError::Write(WriteError::NoItem(_)))
-    ));
     assert!(matches!(add_item(&mut r, "gone", "Again", user(3)), Err(WriteError::Deleted(_))));
 }
 
@@ -126,7 +117,7 @@ fn a_deleted_item_is_missing_to_every_checked_write_and_its_id_is_retired() {
 fn needs_of(r: &Replica) -> Vec<Entry> {
     let model = Model::read(r.state()).unwrap();
     let readiness = ReadinessEvaluator::new(r.state(), &model, NOW);
-    let _ = readiness.ready(false, "session/mac").unwrap();
+    let _ = readiness.ready("session/mac").unwrap();
     for id in model.items.keys() {
         let _ = readiness.of(id).unwrap();
         let _ = (model.role(id), model.ancestors(id));

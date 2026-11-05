@@ -56,11 +56,15 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
             acyclic_cli::call(serde_json::from_value(command).unwrap(), tracker.clone(), &env);
         assert_eq!(code, 0, "{answer}");
     };
-    // An agent reopening finished work: news for the user.
+    // An agent reopening finished work that done work waits for: news for the user.
     let reopen = |n: u32| {
         let id = format!("01900000-0000-7000-8000-{n:012x}");
+        let waiter = format!("01900000-0000-7000-8000-{:012x}", 0x100 + n);
         run(json!({"item": {"add": {"id": id, "title": format!("P{n}")}}}));
-        run(json!({"item": {"done": {"item": id, "evidence": "n", "force": true}}}));
+        run(json!({"item": {"add": {"id": waiter, "title": format!("W{n}"), "waits-for": [id]}}}));
+        for item in [&id, &waiter] {
+            run(json!({"item": {"done": {"item": item, "evidence": "n", "force": true}}}));
+        }
         let edit = json!({"item": {"reopen": {"item": id}}});
         let (code, answer) = acyclic_cli::call_as(
             serde_json::from_value(edit).unwrap(),
@@ -134,7 +138,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
 
     // Subscribing tells the device what already needs the user, signed for the service by the server's key.
     let (authorization, message) = received(1).await;
-    assert_eq!(message["body"], "P1 was reopened", "{message}");
+    assert_eq!(message["body"], "W1 is done but waits for P1", "{message}");
     assert_eq!(message["url"], "/?needs");
     let claimed = claims(&authorization, &public);
     assert_eq!(
@@ -147,7 +151,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     server.push.look();
     reopen(2);
     server.push.look();
-    assert_eq!(received(2).await.1["body"], "P2 was reopened");
+    assert_eq!(received(2).await.1["body"], "W2 is done but waits for P2");
 
     // The client sends exact identities from the Needs response it last showed.
     let observed = {
@@ -173,23 +177,25 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     };
     for (index, command) in [
         json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000c1", "title": "M"}}}),
+        json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000c2", "title": "N", "waits-for": ["01900000-0000-7000-8000-0000000000c1"]}}}),
         json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000c1", "evidence": "n", "force": true}}}),
+        json!({"item": {"done": {"item": "01900000-0000-7000-8000-0000000000c2", "evidence": "n", "force": true}}}),
         json!({"item": {"reopen": {"item": "01900000-0000-7000-8000-0000000000c1"}}}),
     ]
     .into_iter()
     .enumerate()
     {
         // The final write still commits and acknowledges its new need when optional client metadata is malformed.
-        let observed = if index == 2 { json!("not a list") } else { json!(observed.clone()) };
+        let observed = if index == 4 { json!("not a list") } else { json!(observed.clone()) };
         assert_eq!(user(command, observed).await.0, StatusCode::OK);
     }
-    assert_eq!(received(3).await.1["body"], "P3 was reopened");
+    assert_eq!(received(3).await.1["body"], "W3 is done but waits for P3");
     let sent = home.join(".config/acyclic/push/sent.json");
     let read = |file: &std::path::Path| std::fs::read_to_string(file).unwrap();
     let identities = || serde_json::from_str::<BTreeSet<String>>(&read(&sent)).unwrap();
-    let own_reopen = acyclic_core::needs::Entry::Reopened {
-        item: "01900000-0000-7000-8000-0000000000c1".into(),
-        dependents: Vec::new(),
+    let own_reopen = acyclic_core::needs::Entry::DoneWaiting {
+        item: "01900000-0000-7000-8000-0000000000c2".into(),
+        waits_for: "01900000-0000-7000-8000-0000000000c1".into(),
     }
     .identity();
     eventually("persisting the app's exact own-need acknowledgment", || {
@@ -215,12 +221,12 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     })
     .await;
     let message: Value = serde_json::from_slice(&decrypt(&delivered, &device, &auth)).unwrap();
-    assert_eq!(message["body"], "P4 was reopened");
+    assert_eq!(message["body"], "W4 is done but waits for P4");
     // The service has it, but the server records it as told only once it hears back: a restart before then would
     // tell it again.
-    let p4 = acyclic_core::needs::Entry::Reopened {
-        item: "01900000-0000-7000-8000-000000000004".into(),
-        dependents: Vec::new(),
+    let p4 = acyclic_core::needs::Entry::DoneWaiting {
+        item: "01900000-0000-7000-8000-000000000104".into(),
+        waits_for: "01900000-0000-7000-8000-000000000004".into(),
     }
     .identity();
     eventually("recording P4 as told", || identities().contains(&p4).then_some(())).await;
@@ -234,7 +240,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     server.push.look();
     reopen(5);
     server.push.look();
-    assert_eq!(received(told + 1).await.1["body"], "P5 was reopened");
+    assert_eq!(received(told + 1).await.1["body"], "W5 is done but waits for P5");
     eventually("dropping the gone device", || (read(&devices) == "[]").then_some(())).await;
     for file in ["vapid.key", "subscriptions.json", "sent.json"] {
         let mode = std::fs::metadata(home.join(".config/acyclic/push").join(file))

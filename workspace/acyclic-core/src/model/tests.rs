@@ -76,9 +76,6 @@ fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
     assert_eq!(m.ancestors("x"), vec!["y"]);
     assert_eq!(m.subtree("x").len(), 2);
     assert_eq!(m.role("x"), Role::Group);
-    assert!(!m.is_archived("x"));
-    put(&mut a, &item_key("y").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
-    assert!(model(&a).is_archived("x"), "inherited through the cycle, and the walk ends");
 }
 
 #[test]
@@ -277,21 +274,16 @@ fn a_threads_heads_are_its_open_leaves_that_no_link_orders_after_another_member(
     assert_eq!(heads(&r), ["a"]);
     set_state(&mut r, "a", ItemState::Done, by(4)).unwrap();
     assert_eq!(heads(&r), ["b", "c", "d"], "a done member orders nothing");
-    put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(5)).unwrap();
     // A parent in the thread is never a head, and following it follows what is under it.
     put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by(5)).unwrap();
     link(&mut r, "b", "p", by(5)).unwrap();
-    assert_eq!(heads(&r), ["d"]);
+    assert_eq!(heads(&r), ["c", "d"]);
 }
 
 /// Heads as their definition reads, walking every link from each leaf with nothing gathered ahead. A member parent is
 /// open until it reads as done, by hand or by its leaves.
 fn heads_by_definition<'a>(m: &'a Model, thread: &str) -> Vec<&'a str> {
-    let open: Vec<&str> = m
-        .members(thread)
-        .into_iter()
-        .filter(|id| !m.reads_done(id) && !m.is_archived(id))
-        .collect();
+    let open: Vec<&str> = m.members(thread).into_iter().filter(|id| !m.reads_done(id)).collect();
     let lift = |id: &'a str| std::iter::once(id).chain(m.ancestors(id));
     let follows_another = |leaf: &'a str| {
         let others: BTreeSet<&str> =
@@ -421,18 +413,15 @@ fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
 }
 
 #[test]
-fn a_parent_reads_as_its_leaves_make_it_unless_parked_or_done_by_hand() {
+fn a_parent_reads_as_its_leaves_make_it_unless_parked_by_hand() {
     let mut r = replica("a");
-    items(&mut r, &["top", "mid", "a", "b", "c", "gone"]);
-    for (child, parent) in
-        [("mid", "top"), ("a", "mid"), ("b", "mid"), ("c", "top"), ("gone", "top")]
-    {
+    items(&mut r, &["top", "mid", "a", "b", "c"]);
+    for (child, parent) in [("mid", "top"), ("a", "mid"), ("b", "mid"), ("c", "top")] {
         set_parent(&mut r, child, Some(parent), by(2)).unwrap();
     }
-    put(&mut r, &item_key("gone").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
     let progress = |r: &Replica, id: &str| model(r).progress(id).unwrap();
     let reads = |state, done, total| Progress { state, done, total };
-    // Leaves count at every depth, archived ones aside, and a leaf has no progress.
+    // Leaves count at every depth, and a leaf has no progress.
     assert_eq!(progress(&r, "top"), reads(ProgressState::Backlog, 0, 3));
     assert_eq!(model(&r).progress("a"), None);
     set_state(&mut r, "a", ItemState::Done, by(3)).unwrap();
@@ -447,20 +436,14 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_or_done_by_hand() {
     set_state(&mut r, "b", ItemState::Backlog, by(5)).unwrap();
     set_state(&mut r, "mid", ItemState::Backlog, by(5)).unwrap();
     assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 2, 3));
-    // Parked or done by hand, a parent's own state holds.
+    // Parked by hand, a parent's own state holds.
     set_state(&mut r, "top", ItemState::Parked, by(6)).unwrap();
     assert_eq!(progress(&r, "top"), reads(ProgressState::Parked, 2, 3));
+    // A done stored on a parent, as older versions wrote, counts for nothing at any depth.
     set_state(&mut r, "top", ItemState::Done, by(7)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 2, 3));
-    // A part closed by hand reads closed from above, whatever is open under it.
-    set_state(&mut r, "top", ItemState::Backlog, by(7)).unwrap();
     set_state(&mut r, "mid", ItemState::Done, by(7)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 3, 3));
-    // A parent whose leaves are all archived is done.
-    put(&mut r, &item_key("mid").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
-    put(&mut r, &item_key("c").unwrap(), field::ARCHIVED, Some(&true), by(8)).unwrap();
-    set_state(&mut r, "top", ItemState::Backlog, by(9)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 0, 0));
+    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 2, 3));
+    assert!(!model(&r).reads_done("mid"));
 }
 
 #[test]

@@ -73,7 +73,7 @@ fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
 
 #[test]
 fn records_are_blocks_and_writes_are_one_line() {
-    let shown = json!([{"id": "plant", "title": "Plant", "notes": null, "repositories": [], "archived": false,
+    let shown = json!([{"id": "plant", "title": "Plant", "notes": null, "repositories": [],
         "links": {"waits_for": ["beds"], "waited_on_by": []},
         "claims": [{"holder": "session/s", "replica": "mac", "lease_started_at": "2026-10-15T00:00:00Z",
                     "lease_expires_at": "2026-10-15T01:00:00Z"}]}]);
@@ -270,7 +270,6 @@ fn every_readiness_reads_as_a_phrase() {
         (json!(Readiness::Parent), "parent"),
         (json!(Readiness::Parked), "parked"),
         (json!(Readiness::Done), "done"),
-        (json!(Readiness::Archived), "archived"),
         (json!(ThreadReadiness::Missing), "missing"),
         (json!(ThreadReadiness::Ready { items: vec![s("a"), s("b")] }), "ready: a, b"),
         (json!(ThreadReadiness::NothingReady), "nothing ready"),

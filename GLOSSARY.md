@@ -61,18 +61,14 @@ _Avoid_: round, tier
 An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member.
 _Avoid_: lock, assignment
 
-**Archived**:
-A finished subtree hidden from `thread ready` and the app by default; archiving hides, never deletes.
-_Avoid_: closed, deleted
-
 **Deleted**:
 An item or thread removed for good: gone from every view and every reader, and its id never used again.
-_Avoid_: archived (that only hides), closed
+_Avoid_: closed
 
 **Needs-you list**:
-Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, reopened work,
-claims two holders clash over, references to what doesn't exist, and items in no thread. The app calls it Needs you,
-and shows it as a view of its own.
+Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, done work waiting on
+work that isn't, claims two holders clash over, references to what doesn't exist, and items in no thread. The app calls
+it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
 ## The app
@@ -108,7 +104,7 @@ _Avoid_: group (for this), container, lane
 **Done box**:
 A box the Map makes of finished work, which holds no item of its own: a finished thread's items in a box, named after
 the thread, or the box's other finished work that no link ties to anything left there, named Done, last in its
-columns. A thread is finished when every leaf it has, archived ones aside, is done.
+columns. A thread is finished when every leaf it has is done.
 _Avoid_: pile, group, archive
 
 **State**:

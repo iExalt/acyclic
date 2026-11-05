@@ -187,7 +187,6 @@ impl Generator {
             repositories: (depth > 1).then(|| vec![self.repository_ids[repository].clone()]),
             waits_for: None,
             size: Some(size),
-            archived: false,
             evidence: None,
         });
         self.depth.push(depth);
@@ -237,8 +236,8 @@ impl Generator {
         apportion(total, &weights, 1, total)
     }
 
-    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; umbrellas are
-    /// done only when their whole subtree is. Some done umbrellas are archived.
+    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; umbrellas,
+    /// being parents, read done from their leaves.
     fn states(&mut self) {
         let done_target = self.scaled(35.0);
         let mut done = 0;
@@ -249,22 +248,6 @@ impl Generator {
                 done += 1;
             }
             index += 1;
-        }
-        let prefix_end = index;
-        // An umbrella in the prefix is done when its whole subtree lies inside the prefix.
-        for umbrella in (0..prefix_end).filter(|&i| self.depth[i] == 2) {
-            let subtree_end =
-                (umbrella + 1..self.total).find(|&i| self.depth[i] <= 2).unwrap_or(self.total);
-            if subtree_end <= prefix_end {
-                self.import.items[umbrella].state = Some(State::Done);
-            }
-        }
-        let done_umbrellas: Vec<usize> = (0..prefix_end)
-            .filter(|&i| self.depth[i] == 2 && self.import.items[i].state == Some(State::Done))
-            .collect();
-        let archive = self.scaled(1.0).min(done_umbrellas.len());
-        for &umbrella in &done_umbrellas[..archive] {
-            self.import.items[umbrella].archived = true;
         }
         for index in 0..self.total {
             let item = &mut self.import.items[index];
@@ -498,7 +481,6 @@ mod tests {
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
         assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
-        assert!(stats.archived > 0, "{at}");
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;
@@ -536,7 +518,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_249, 6_123_376_084_847_002_964));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_321, 16_542_305_078_767_677_133));
     }
 
     #[test]

@@ -84,8 +84,8 @@ export function dependencyOrder(
  * The top-level items shown, in the order the top level is packed in, which is the Map's reading order: the same
  * links, lifted to the top level as any view lifts them, whatever is collapsed.
  */
-export function topOrder(model: Model, showArchived: boolean): string[] {
-  const top = scopes(visible(model, { collapsed: new Set(), showArchived }));
+export function topOrder(model: Model): string[] {
+  const top = scopes(visible(model, { collapsed: new Set() }));
   return dependencyOrder(top.kids.get(ROOT) ?? [], top.edges.get(ROOT) ?? []);
 }
 

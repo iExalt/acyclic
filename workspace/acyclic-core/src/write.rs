@@ -1,6 +1,5 @@
 //! The one judge of writes to records. A caller states what it means to change as a [`ChangeSet`]; [`judge`] adds what
-//! every such change brings with it, whoever asks (done work set back is flagged as reopened and leaves its archive,
-//! and new or moved work joins the thread passed down to it), projects the result onto the model in memory, and
+//! every such change brings with it, whoever asks (new or moved work joins the thread passed down to it), projects the result onto the model in memory, and
 //! refuses it only for what it would break that wasn't broken before, naming every such violation. [`commit`] reads
 //! the model once, judges, and writes only an accepted change.
 
@@ -12,8 +11,7 @@ use serde_json::Value as Json;
 
 use crate::import::is_object_id;
 use crate::model::{
-    self, By, Evidence, Item, ItemState, Model, Reopened, Repository, Size, Thread, Value,
-    WriteError,
+    self, By, Evidence, Item, ItemState, Model, Repository, Size, Thread, Value, WriteError,
 };
 use crate::place::{Inherited, passed_down};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
@@ -379,14 +377,10 @@ pub enum FieldName {
     Parent,
     /// An item's size.
     Size,
-    /// Whether an item is an archived subtree's root.
-    Archived,
     /// An item's evidence.
     Evidence,
     /// An item's thread.
     Thread,
-    /// What reopening an item recorded.
-    Reopened,
     /// A thread's brief.
     Brief,
     /// A repository's owner.
@@ -411,10 +405,8 @@ impl FieldName {
             Self::State => field::STATE,
             Self::Parent => field::PARENT,
             Self::Size => field::SIZE,
-            Self::Archived => field::ARCHIVED,
             Self::Evidence => field::EVIDENCE,
             Self::Thread => field::THREAD,
-            Self::Reopened => field::REOPENED,
             Self::Brief => thread::BRIEF,
             Self::Owner => repository::OWNER,
             Self::Name => repository::NAME,
@@ -447,8 +439,6 @@ pub enum ItemAssign {
     Parent(Option<String>),
     /// Its size, or none.
     Size(Option<Size>),
-    /// Makes it an archived subtree's root. Only reopening work under it takes that back.
-    Archive,
     /// Its evidence, or none.
     Evidence(Option<Evidence>),
     /// Its thread, or none.
@@ -505,7 +495,6 @@ impl Assign {
                     ItemAssign::State(_) => FieldName::State,
                     ItemAssign::Parent(_) => FieldName::Parent,
                     ItemAssign::Size(_) => FieldName::Size,
-                    ItemAssign::Archive => FieldName::Archived,
                     ItemAssign::Evidence(_) => FieldName::Evidence,
                     ItemAssign::Thread(_) => FieldName::Thread,
                     ItemAssign::Repository(r, _) => FieldName::Repository(r.clone()),
@@ -544,7 +533,6 @@ impl Assign {
                 ItemAssign::State(v) => to_json(v),
                 ItemAssign::Parent(v) => to_json(v),
                 ItemAssign::Size(v) => to_json(v),
-                ItemAssign::Archive => Json::Bool(true),
                 ItemAssign::Evidence(v) => to_json(v),
                 ItemAssign::Thread(v) => to_json(v),
                 ItemAssign::Repository(_, present) | ItemAssign::WaitsFor(_, present) => {
@@ -621,10 +609,6 @@ pub enum Written {
     Create(Record),
     /// A field the change set sets, or one a consequence sets.
     Assign(Assign),
-    /// Done work set back records that it was reopened, and whether it was archived; work finished again clears it.
-    Reopened(String, Option<Reopened>),
-    /// Reopening work leaves the archive: each archived root on its line is unarchived.
-    Unarchive(String),
     /// New or moved work joins the thread passed down to it.
     Place(Inherited),
 }
@@ -693,8 +677,6 @@ pub enum Rule {
         /// The other repository record.
         other: String,
     },
-    /// Work would be open under this archived root, or an archived root would have open work under it.
-    ArchivedOpen(String),
     /// Evidence on an item that isn't done.
     EvidenceNotDone,
     /// An add of a record that exists gives this field another value.
@@ -706,13 +688,8 @@ pub enum Rule {
     /// The item isn't the finisher's to finish: not ready, or held by someone else. With no readiness to judge it by,
     /// no status.
     NotReady(Option<Readiness>),
-    /// A parent with these open children, or held back as a leaf would be, can't be finished yet.
-    OpenWork {
-        /// Its children neither done nor archived.
-        open: Vec<String>,
-        /// What would hold it back as a leaf.
-        held: Option<Readiness>,
-    },
+    /// An item with children would be stored done: a parent reads done once its leaves are, so finish those.
+    ParentDone,
     /// Done work would get other evidence than it was finished with.
     EvidenceDiffers,
     /// Evidence names a commit that isn't an object id.
@@ -766,9 +743,6 @@ impl fmt::Display for Violation {
                 write!(f, "{at}{} {} already has that title", other.kind(), other.id())
             },
             Rule::NameTaken { name, other } => write!(f, "{at}repository {other} is {name} too"),
-            Rule::ArchivedOpen(root) => {
-                write!(f, "{at}archived {root} would have work under it that isn't done")
-            },
             Rule::EvidenceNotDone => write!(f, "{at}evidence on an item that isn't done"),
             Rule::RepeatDiffers => write!(f, "{at}it exists with another value"),
             Rule::Contradicts => write!(f, "{at}two changes give it different values"),
@@ -781,7 +755,7 @@ impl fmt::Display for Violation {
                 )
             },
             Rule::NotReady(_) => write!(f, "{at}it isn't ready, or someone else holds it"),
-            Rule::OpenWork { .. } => write!(f, "{at}it has open children or is held back"),
+            Rule::ParentDone => write!(f, "{at}it has children, so it reads done once they are"),
             Rule::EvidenceDiffers => write!(f, "{at}it is done with other evidence"),
             Rule::InvalidCommit => {
                 write!(f, "{at}a commit is 7 to 64 hexadecimal characters, as git prints it")
@@ -972,16 +946,13 @@ impl Judging<'_, '_> {
     fn finishable(&mut self, n: usize, id: &str, evidence: Option<&Evidence>) {
         let at =
             || Some(FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::State });
-        match self.readiness.map(|readiness| (readiness, readiness.of(id))) {
+        match self.readiness.map(|readiness| readiness.of(id)) {
             // An unreadable claim leaves readiness unknown, which only forcing passes.
-            None | Some((_, Err(_))) => self.refuse(Some(n), at(), Rule::NotReady(None)),
-            Some((readiness, Ok(status))) => {
-                if status == Some(Readiness::Parent) {
-                    let (open, held) = readiness.unfinished(id);
-                    if !open.is_empty() || held.is_some() {
-                        self.refuse(Some(n), at(), Rule::OpenWork { open, held });
-                    }
-                } else if !status.as_ref().is_some_and(|status| status.finishable_by(self.actor)) {
+            None | Some(Err(_)) => self.refuse(Some(n), at(), Rule::NotReady(None)),
+            // A parent is refused by what it would store, forced or not.
+            Some(Ok(Some(Readiness::Parent))) => {},
+            Some(Ok(status)) => {
+                if !status.as_ref().is_some_and(|status| status.finishable_by(self.actor)) {
                     self.refuse(Some(n), at(), Rule::NotReady(status));
                 }
             },
@@ -1048,7 +1019,6 @@ impl Judging<'_, '_> {
             })
             .collect();
         self.start_in_backlog(&asked);
-        self.reopen(&asked);
         self.place(&asked);
     }
 
@@ -1077,56 +1047,6 @@ impl Judging<'_, '_> {
                 false,
                 Written::Assign(Assign::Item(id, ItemAssign::State(ItemState::Backlog))),
             );
-        }
-    }
-
-    fn reopen(&mut self, asked: &[(usize, Assign)]) {
-        let archived_by_change: BTreeSet<String> = asked
-            .iter()
-            .filter_map(|(_, assign)| match assign {
-                Assign::Item(id, ItemAssign::Archive) => Some(id.clone()),
-                _ => None,
-            })
-            .collect();
-        // Done work set back is reopened: flagged, and out of every archive on its line, unless the change set itself
-        // archives that root, which the archive rule then judges. Each is judged on the model the asked-for writes
-        // leave, before any archive is left, so the order of the changes doesn't matter.
-        let mut reopens: Vec<(usize, String, bool, Vec<String>)> = Vec::new();
-        let mut finished: Vec<(usize, String)> = Vec::new();
-        for (n, assign) in asked {
-            let Assign::Item(id, ItemAssign::State(state)) = assign else { continue };
-            let was_done = self
-                .before
-                .items
-                .get(id)
-                .is_some_and(|item| item.state == Value::One(ItemState::Done));
-            if was_done && *state != ItemState::Done {
-                let line = std::iter::once(id.as_str())
-                    .chain(self.after.ancestors(id))
-                    .filter(|root| {
-                        self.after.items.get(*root).is_some_and(|item| item.archived != Value::None)
-                            && !archived_by_change.contains(*root)
-                    })
-                    .map(str::to_owned)
-                    .collect();
-                reopens.push((*n, id.clone(), self.after.is_archived(id), line));
-            } else if *state == ItemState::Done
-                && self.after.items.get(id).is_some_and(|item| item.reopened != Value::None)
-            {
-                finished.push((*n, id.clone()));
-            }
-        }
-        let mut left: BTreeSet<String> = BTreeSet::new();
-        for (n, id, archived, line) in reopens {
-            for root in line {
-                if left.insert(root.clone()) {
-                    self.apply(n, false, Written::Unarchive(root));
-                }
-            }
-            self.apply(n, false, Written::Reopened(id, Some(Reopened { archived })));
-        }
-        for (n, id) in finished {
-            self.apply(n, false, Written::Reopened(id, None));
         }
     }
 
@@ -1175,7 +1095,6 @@ impl Judging<'_, '_> {
         let (after, steps) = (&self.after, &self.steps);
         let mut found = assign_rules(after, steps);
         found.extend(empty_creates(steps));
-        found.extend(open_under_archive(after, steps));
         found.extend(new_cycles(self.before, after, steps));
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
@@ -1189,7 +1108,6 @@ fn empty_creates(steps: &[Step]) -> Vec<Violation> {
         .iter()
         .filter_map(|step| match &step.write {
             Written::Assign(assign) => Some(assign.at().record),
-            Written::Reopened(id, _) | Written::Unarchive(id) => Some(Record::Item(id.clone())),
             Written::Place(placed) => Some(Record::Item(placed.item.clone())),
             Written::Create(_) => None,
         })
@@ -1208,7 +1126,7 @@ fn empty_creates(steps: &[Step]) -> Vec<Violation> {
 }
 
 /// The rules each asked-for field brings: what it names exists, an item never waits for itself, evidence is only on done
-/// work, and an archived root has no open work under it.
+/// work, and only a leaf is stored done.
 fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
     let mut found = Vec::new();
     for step in steps.iter().filter(|step| step.asked) {
@@ -1263,13 +1181,8 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                         refuse(Rule::EvidenceNotDone);
                     }
                 },
-                ItemAssign::Archive
-                    if !after
-                        .subtree(id)
-                        .into_iter()
-                        .all(|one| after.items.get(one).is_some_and(Item::is_done)) =>
-                {
-                    refuse(Rule::ArchivedOpen(id.clone()));
+                ItemAssign::State(ItemState::Done) if !after.children(id).is_empty() => {
+                    refuse(Rule::ParentDone);
                 },
                 _ => {},
             },
@@ -1279,40 +1192,6 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                 refuse(Rule::NoRecord(Record::Repository(repository.clone())));
             },
             _ => {},
-        }
-    }
-    found
-}
-
-/// Work added, moved or set back open under an archived root, which would be hidden.
-fn open_under_archive(after: &Model, steps: &[Step]) -> Vec<Violation> {
-    let mut found = Vec::new();
-    // Work added, moved or set back open under an archived root would be hidden.
-    let mut opened: BTreeMap<&str, usize> = BTreeMap::new();
-    for step in steps.iter().filter(|step| step.asked) {
-        match &step.write {
-            Written::Create(Record::Item(id))
-            | Written::Assign(Assign::Item(id, ItemAssign::Parent(_) | ItemAssign::State(_))) => {
-                opened.entry(id).or_insert(step.change);
-            },
-            _ => {},
-        }
-    }
-    for (id, n) in opened {
-        if after.items.get(id).is_some_and(Item::is_done) {
-            continue;
-        }
-        for root in after.ancestors(id) {
-            if after.items.get(root).is_some_and(Item::is_archived_root) {
-                found.push(Violation {
-                    change: Some(n),
-                    at: Some(FieldAddr {
-                        record: Record::Item(id.to_owned()),
-                        field: FieldName::Archived,
-                    }),
-                    rule: Rule::ArchivedOpen(root.to_owned()),
-                });
-            }
         }
     }
     found
@@ -1449,10 +1328,7 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
                     .items
                     .values()
                     .find(|other| {
-                        other.id != *id
-                            && other.title.all().contains(&title)
-                            && !other.is_done()
-                            && !after.is_archived(&other.id)
+                        other.id != *id && other.title.all().contains(&title) && !other.is_done()
                     })
                     .map(|other| Record::Item(other.id.clone()))
             },
@@ -1510,7 +1386,6 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ItemAssign::State(v) => item.state.holds(Some(v)),
                 ItemAssign::Parent(v) => item.parent.holds(v.as_ref()),
                 ItemAssign::Size(v) => item.size.holds(v.as_ref()),
-                ItemAssign::Archive => item.archived.holds(Some(&true)),
                 ItemAssign::Evidence(v) => item.evidence.holds(v.as_ref()),
                 ItemAssign::Thread(v) => item.thread.holds(v.as_ref()),
                 ItemAssign::Repository(r, present) => item.repositories.contains(r) == *present,
@@ -1552,7 +1427,6 @@ const fn assign_name(assign: &ItemAssign) -> &'static str {
         ItemAssign::State(_) => field::STATE,
         ItemAssign::Parent(_) => field::PARENT,
         ItemAssign::Size(_) => field::SIZE,
-        ItemAssign::Archive => field::ARCHIVED,
         ItemAssign::Evidence(_) => field::EVIDENCE,
         ItemAssign::Thread(_) => field::THREAD,
         ItemAssign::Repository(..) => set::REPOSITORY,
@@ -1569,11 +1443,9 @@ fn empty_item(id: &str) -> Item {
         done_at: None,
         parent: Value::None,
         size: Value::None,
-        archived: Value::None,
         evidence: Value::None,
         thread: Value::None,
         repositories: BTreeSet::new(),
-        reopened: Value::None,
     }
 }
 
@@ -1629,18 +1501,6 @@ fn project(model: &mut Model, write: &Written, at: Millis) {
             };
             settled(model, kind::REPOSITORY, id, name);
         },
-        Written::Reopened(id, value) => {
-            if let Some(item) = model.items.get_mut(id) {
-                item.reopened = one(*value);
-            }
-            settled(model, kind::ITEM, id, field::REOPENED);
-        },
-        Written::Unarchive(id) => {
-            if let Some(item) = model.items.get_mut(id) {
-                item.archived = Value::None;
-            }
-            settled(model, kind::ITEM, id, field::ARCHIVED);
-        },
         Written::Place(placed) => {
             if let Some(item) = model.items.get_mut(&placed.item) {
                 item.thread = Value::One(placed.thread.clone());
@@ -1695,7 +1555,6 @@ fn project_item(model: &mut Model, id: &str, assign: &ItemAssign, at: Millis) {
         },
         ItemAssign::Parent(v) => item.parent = one(v.clone()),
         ItemAssign::Size(v) => item.size = one(*v),
-        ItemAssign::Archive => item.archived = Value::One(true),
         ItemAssign::Evidence(v) => item.evidence = one(v.clone()),
         ItemAssign::Thread(v) => item.thread = one(v.clone()),
         ItemAssign::Repository(r, present) => {
@@ -1734,12 +1593,6 @@ pub fn write(replica: &mut Replica, outcome: &Outcome, by: By<'_>) -> Result<(),
         match &step.write {
             Written::Create(_) => {},
             Written::Assign(assign) => emit(replica, assign, by)?,
-            Written::Reopened(id, value) => {
-                model::put(replica, &model::item_key(id)?, field::REOPENED, value.as_ref(), by)?;
-            },
-            Written::Unarchive(id) => {
-                model::put::<bool>(replica, &model::item_key(id)?, field::ARCHIVED, None, by)?;
-            },
             Written::Place(placed) => {
                 model::put(
                     replica,

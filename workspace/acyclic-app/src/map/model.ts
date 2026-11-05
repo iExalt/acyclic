@@ -11,10 +11,9 @@ export interface MapItem {
   state: string;
   parent: string | null;
   thread: string | null;
-  archived: boolean;
-  /** Its stage as core gives it, a parent's from its leaves; null for an archived item or a parent with none to count. */
+  /** Its stage as core gives it, a parent's from its leaves; null for a parent with none to count. */
   stage: Stage | null;
-  /** A parent's leaves by stage, or null for a leaf or a parent whose leaves are all archived. */
+  /** A parent's leaves by stage, or null for a leaf or a parent with no leaves. */
   progress: Counts | null;
   /** The items this one waits for. */
   waitsFor: string[];
@@ -32,12 +31,11 @@ export interface Model {
 export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): string {
   return JSON.stringify(
     [...model.items.values()]
-      .map(({ id, title, parent, thread, archived, state, stage, progress, waitsFor }) => ({
+      .map(({ id, title, parent, thread, state, stage, progress, waitsFor }) => ({
         id,
         title,
         parent,
         thread,
-        archived,
         state,
         stage,
         progress,
@@ -58,7 +56,6 @@ export function buildModel(items: Item[]): Model {
         state: item.state,
         parent: item.parent,
         thread: item.thread,
-        archived: item.archived,
         stage: item.stage ?? null,
         progress: item.progress === undefined || item.progress.counts.leaves === 0 ? null : item.progress.counts,
         waitsFor: [...item.links.waits_for],
@@ -109,32 +106,16 @@ export function buildModel(items: Item[]): Model {
   return { items: byId, children, roots, depth };
 }
 
-/** Whether an item is archived or under one that is, so hidden while archived items are. */
-export function inArchived(model: Model, id: string): boolean {
-  // Parents that loop, as a plan written apart by two replicas can hold, end the walk where it began again.
-  const seen = new Set<string>();
-  for (
-    let item = model.items.get(id);
-    item !== undefined && !seen.has(item.id);
-    item = model.items.get(item.parent ?? "")
-  ) {
-    if (item.archived) return true;
-    seen.add(item.id);
-  }
-  return false;
-}
-
-/** What the user has chosen to see: which boxes are collapsed, and whether archived subtrees show. */
+/** What the user has chosen to see: which boxes are collapsed. */
 export interface ViewState {
   collapsed: ReadonlySet<string>;
-  showArchived: boolean;
 }
 
 /** The view the Map opens on: the roots open, every box below them collapsed. */
 export function defaultView(model: Model): ViewState {
   const collapsed = new Set<string>();
   for (const [id, d] of model.depth) if (d >= 1 && model.children.has(id)) collapsed.add(id);
-  return { collapsed, showArchived: false };
+  return { collapsed };
 }
 
 /**
@@ -161,8 +142,6 @@ export interface VisibleNode {
   kind: Kind;
   /** How many items a collapsed box hides. */
   hidden: number;
-  /** In an archived subtree: archived itself, or under an item that is. */
-  archived: boolean;
   /** Its stage, as its item has it; a tile core gives none takes one from its state. */
   stage: Stage | null;
   /** A leaf's thread, which its stripe and badge show. */
@@ -234,29 +213,25 @@ export function impliedWithin(model: Model, shown: (id: string) => boolean) {
 
 /**
  * The nodes and edges a view shows. Anything inside a collapsed box is drawn as that box, so edges and thread members
- * lift to their nearest visible ancestor. An archived item and everything under it vanish unless archived subtrees
- * show. Edges that end up inside one node, or between a box and something it contains, are dropped: the box already
+ * lift to their nearest visible ancestor. Edges that end up inside one node, or between a box and something it contains, are dropped: the box already
  * says the one holds the other.
  */
 export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): View {
-  // The visible item standing in for each item, absent when it is hidden in an archived subtree.
+  // The visible item standing in for each item.
   const stand = new Map<string, string>();
   const nodes: VisibleNode[] = [];
-  const shown = (id: string) => state.showArchived || !model.items.get(id)?.archived;
   const count = (id: string): number =>
-    (model.children.get(id) ?? []).reduce((sum, child) => (shown(child) ? sum + 1 + count(child) : sum), 0);
-  const walk = (id: string, parent: string | null, standIn: string | null, under: boolean) => {
-    if (!shown(id)) return;
+    (model.children.get(id) ?? []).reduce((sum, child) => sum + 1 + count(child), 0);
+  const walk = (id: string, parent: string | null, standIn: string | null) => {
     if (standIn !== null) {
       stand.set(id, standIn);
-      for (const child of model.children.get(id) ?? []) walk(child, parent, standIn, under);
+      for (const child of model.children.get(id) ?? []) walk(child, parent, standIn);
       return;
     }
     const item = model.items.get(id);
     if (item === undefined) return;
     stand.set(id, id);
-    const archived = under || item.archived;
-    const kids = (model.children.get(id) ?? []).filter(shown);
+    const kids = model.children.get(id) ?? [];
     const collapsed = kids.length > 0 && state.collapsed.has(id);
     nodes.push({
       id,
@@ -265,15 +240,14 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
       parent,
       kind: kids.length === 0 ? "leaf" : collapsed ? "collapsed" : "box",
       hidden: collapsed ? count(id) : 0,
-      archived,
       stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : item.stage,
       thread: item.thread,
       progress: item.progress,
       ...doneBoxOf(doneBoxes.get(id), item.progress),
     });
-    for (const child of kids) walk(child, id, collapsed ? id : null, archived);
+    for (const child of kids) walk(child, id, collapsed ? id : null);
   };
-  for (const root of model.roots) walk(root, null, null, false);
+  for (const root of model.roots) walk(root, null, null);
 
   const parentOf = new Map(nodes.map((node) => [node.id, node.parent]));
   const contains = (outer: string, inner: string) => {
@@ -316,8 +290,7 @@ function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { don
 }
 
 /**
- * A stage for a tile core gives none: one archived, or a parent drawn as a tile because everything under it is
- * archived. Its own state says what it can: done, parked or started, and nothing otherwise.
+ * A stage for a tile core gives none: a parent with no leaves to count, drawn as a tile. Its own state says what it can: done, parked or started, and nothing otherwise.
  */
 export function fallbackStage(state: string): Stage | null {
   return state === "done" || state === "parked" || state === "in-progress" ? state : null;

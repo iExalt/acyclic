@@ -116,7 +116,9 @@ export function NeedsList({
         Needs you
       </h1>
       {views.length === 0 ? (
-        <p className="empty">Nothing needs you. Conflicts, cycles and reopened work show here.</p>
+        <p className="empty">
+          Nothing needs you. Conflicts, cycles and done work still waiting on open work show here.
+        </p>
       ) : null}
       <ul className="needs">
         {views.map((view, index) => {

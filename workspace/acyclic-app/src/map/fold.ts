@@ -32,14 +32,14 @@ export interface Folded {
 }
 
 /**
- * Folds the finished work in each box of `model`. A thread is finished when every leaf it has, archived ones aside, is
+ * Folds the finished work in each box of `model`. A thread is finished when every leaf it has is
  * done. Each finished thread with two or more of a box's leaves becomes a box in that box. Those boxes and the box's
  * other done leaves that are finished (a finished thread's last one there, or one in no thread) go into the box's
  * Done box, unless a link inside the box joins them, directly or through each other, to anything else; it
  * forms only when it would hold two or more and leave something beside it. `titleOf` names a thread.
  */
 export function foldDone(model: Model, titleOf: (thread: string) => string | null): Folded {
-  const live = (item: MapItem) => !item.archived && !model.children.has(item.id);
+  const live = (item: MapItem) => !model.children.has(item.id);
   // A thread the plan doesn't name, as one deleted elsewhere, counts as none.
   const threadOf = (item: MapItem) => (item.thread !== null && titleOf(item.thread) !== null ? item.thread : null);
   const finished = new Map<string, boolean>();
@@ -65,7 +65,6 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       state: "done",
       parent,
       thread,
-      archived: false,
       stage: "done",
       progress: counts,
       waitsFor: [],
@@ -112,8 +111,7 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
     for (const [id, at] of owner)
       for (const first of model.items.get(id)?.waitsFor ?? []) {
         const from = owner.get(first);
-        const firstItem = model.items.get(first);
-        if (from === undefined || from === at || firstItem?.archived || model.items.get(id)?.archived) continue;
+        if (from === undefined || from === at) continue;
         touching.get(at)?.add(from);
         touching.get(from)?.add(at);
       }
@@ -137,8 +135,8 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       if (anchored) for (const id of component) tied.add(id);
     }
     const loose = standing.filter((id) => finishedNodes.has(id) && !tied.has(id));
-    // Something must stand beside it that shows whatever is hidden: an archived child may be hidden.
-    const beside = standing.filter((id) => !loose.includes(id) && !model.items.get(id)?.archived);
+    // Something must stand beside it.
+    const beside = standing.filter((id) => !loose.includes(id));
     if (loose.length < 2 || beside.length === 0) {
       if (made.length > 0) children.set(box, standing);
       continue;
@@ -180,7 +178,7 @@ function subtree(model: Model, id: string): string[] {
 /** The leaves an item stands for: itself, or those under it. */
 function leavesOf(items: Map<string, MapItem>, children: Map<string, string[]>, id: string): number {
   const kids = children.get(id);
-  if (kids === undefined) return items.get(id)?.archived ? 0 : 1;
+  if (kids === undefined) return 1;
   return kids.reduce((sum, kid) => sum + leavesOf(items, children, kid), 0);
 }
 

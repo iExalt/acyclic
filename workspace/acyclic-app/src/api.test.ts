@@ -16,7 +16,6 @@ function raw(id: string) {
     state: "backlog",
     notes: null,
     size: null,
-    archived: false,
     links: { waits_for: [], waited_on_by: [] },
   };
 }

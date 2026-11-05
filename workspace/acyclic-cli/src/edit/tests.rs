@@ -1,5 +1,5 @@
 use acyclic_core::model;
-use acyclic_core::schema::{item as field, kind};
+use acyclic_core::schema::kind;
 use acyclic_core::scope::{ScopeEdit, USER};
 use acyclic_core::state::{ReplicaId, State};
 
@@ -32,7 +32,11 @@ fn an_unreadable_readiness_on_item_done_is_exit_six_not_a_not_ready_refusal() {
     assert_eq!(unreadable.details["hint"], DOCTOR_HINT);
 
     let not_ready = violation_error(
-        &Violation { change: None, at: None, rule: Rule::NotReady(Some(Readiness::Unthreaded)) },
+        &Violation {
+            change: None,
+            at: None,
+            rule: Rule::NotReady(Some(acyclic_core::ready::Readiness::Unthreaded)),
+        },
         None,
         &before,
     );
@@ -460,16 +464,13 @@ fn a_minted_add_whose_title_open_work_has_is_refused_naming_it() {
 }
 
 #[test]
-fn a_retry_ignores_done_archived_and_deleted_items() {
+fn a_retry_ignores_done_and_deleted_items() {
     let mut r = replica();
     add_item(&mut r, "c", &titled("Weed"), USER_BY).unwrap();
     model::set_state(&mut r, "c", ItemState::Done, USER_BY).unwrap();
-    add_item(&mut r, "a", &titled("Sow"), USER_BY).unwrap();
-    let key = model::item_key("a").unwrap();
-    r.write(&key, field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
     add_item(&mut r, "b", &titled("Rows"), USER_BY).unwrap();
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
-    for (n, title) in ["Weed", "Sow", "Rows"].into_iter().enumerate() {
+    for (n, title) in ["Weed", "Rows"].into_iter().enumerate() {
         let changes = item_changes(&format!("n{n}"), &titled(title), Adding::Minted);
         assert!(commit(&mut r, USER_BY, None, false, |_| Ok(changes)).is_ok(), "{title}");
     }
@@ -500,33 +501,6 @@ fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
     let thread =
         ThreadFields { repositories: both(&id(3), "me/garden"), ..ThreadFields::default() };
     assert_eq!(code(thread.resolve(&model, &records, None)), "usage");
-}
-
-#[test]
-fn setting_done_work_back_reopens_it_out_of_its_archived_subtree() {
-    let mut r = replica();
-    add_item(&mut r, "p", &titled("Beds"), USER_BY).unwrap();
-    add_item(
-        &mut r,
-        "c",
-        &ItemFields { parent: Change::Set("p".into()), ..titled("Dig") },
-        USER_BY,
-    )
-    .unwrap();
-    for id in ["c", "p"] {
-        model::set_state(&mut r, id, ItemState::Done, USER_BY).unwrap();
-    }
-    r.write(&model::item_key("p").unwrap(), field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
-    assert!(Model::read(r.state()).unwrap().is_archived("c"));
-    let parked = ItemFields { state: Some(ItemState::Parked), ..ItemFields::default() };
-    edit_item(&mut r, "c", &parked, AGENT).unwrap();
-    let model = Model::read(r.state()).unwrap();
-    assert_eq!(model.items["c"].state.one(), Some(&ItemState::Parked));
-    assert!(
-        model.items["c"].reopened != model::Value::None,
-        "flagged, so its dependents are listed"
-    );
-    assert!(!model.is_archived("c"), "out of the archived subtree");
 }
 
 #[test]
@@ -595,20 +569,6 @@ fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
     let err = edit_item(&mut r, "c", &both, USER_BY).unwrap_err();
     assert_eq!(err.code, "not-found");
     assert_eq!(err.details["violations"].as_array().map(Vec::len), Some(2));
-}
-
-#[test]
-fn work_moved_or_added_under_an_archived_root_is_refused() {
-    let mut r = replica();
-    add_item(&mut r, "p", &titled("Beds"), USER_BY).unwrap();
-    model::set_state(&mut r, "p", ItemState::Done, USER_BY).unwrap();
-    r.write(&model::item_key("p").unwrap(), field::ARCHIVED, USER, 1, Some(json!(true))).unwrap();
-    add_item(&mut r, "o", &titled("Open"), USER_BY).unwrap();
-    let under = ItemFields { parent: Change::Set("p".into()), ..ItemFields::default() };
-    let err = edit_item(&mut r, "o", &under, USER_BY).unwrap_err();
-    assert_eq!((err.code, err.details.clone()), ("archived", json!({"root": "p"})));
-    let new = ItemFields { parent: Change::Set("p".into()), ..titled("New") };
-    assert_eq!(code(add_item(&mut r, "n", &new, USER_BY)), "archived");
 }
 
 #[test]

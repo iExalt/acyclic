@@ -1,9 +1,7 @@
-//! Readiness, computed on read from the state alone: a dependency is met once it is done, and an archived dependency
-//! always is. Reads never run git: commit evidence is checked when it is written.
+//! Readiness, computed on read from the state alone: a dependency is met once it is done. Reads never run git: commit evidence is checked when it is written.
 //!
-//! Only leaves are claimed or ready. A dependency on a parent is met when the parent was marked done by hand, and
-//! otherwise once everything under it meets it, each child judged as a dependency of its own, so a part closed by hand
-//! counts as closed: a parked parent meets none.
+//! Only leaves are claimed or ready. A dependency on a parent is met once everything under it meets it, each child
+//! judged as a dependency of its own: a parent's stored done is ignored, and a parked parent meets none.
 //! A parent's dependencies hold back every item under it.
 
 use std::cell::{OnceCell, RefCell};
@@ -67,8 +65,6 @@ pub enum Readiness {
     Parked,
     /// Done.
     Done,
-    /// It or an ancestor is archived.
-    Archived,
 }
 
 impl Readiness {
@@ -167,7 +163,7 @@ pub enum Stage {
     Unthreaded,
 }
 
-/// A parent's leaves counted by stage, archived ones aside.
+/// A parent's leaves counted by stage.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct Stages {
@@ -219,7 +215,7 @@ impl Stages {
         .find_map(|(count, stage)| (count > 0).then_some(stage))
     }
 
-    /// Leaves counted by the stage each has; parents and archived items have none, so none count.
+    /// Leaves counted by the stage each has; parents have none, so none count.
     ///
     /// # Errors
     ///
@@ -263,7 +259,6 @@ pub struct ReadinessEvaluator<'a> {
     cyclic: BTreeSet<String>,
     /// Waits-for links' targets by the item they start from.
     links_from: BTreeMap<String, Vec<String>>,
-    archived: RefCell<BTreeMap<String, bool>>,
     /// Each thread's members, built on first use.
     members: OnceCell<BTreeMap<&'a str, Vec<&'a str>>>,
     /// Each thread's winning claim, memoized.
@@ -288,7 +283,6 @@ impl<'a> ReadinessEvaluator<'a> {
             now,
             cyclic,
             links_from,
-            archived: RefCell::default(),
             members: OnceCell::new(),
             winners: RefCell::default(),
             stages: RefCell::default(),
@@ -315,9 +309,6 @@ impl<'a> ReadinessEvaluator<'a> {
 
     /// An item's readiness as though no thread were claimed, or `None` when it would be ready.
     fn unclaimed(&self, id: &str, item: &Item) -> Option<Readiness> {
-        if self.is_archived(id) {
-            return Some(Readiness::Archived);
-        }
         let fields: Vec<String> =
             [("state", item.state.is_conflict()), ("thread", item.thread.is_conflict())]
                 .into_iter()
@@ -327,11 +318,12 @@ impl<'a> ReadinessEvaluator<'a> {
         if !fields.is_empty() {
             return Some(Readiness::Conflicted { fields });
         }
-        if item.is_done() {
-            return Some(Readiness::Done);
-        }
+        // A parent's done is its leaves', so a stored one is ignored.
         if !self.model.children(id).is_empty() {
             return Some(Readiness::Parent);
+        }
+        if item.is_done() {
+            return Some(Readiness::Done);
         }
         if self.cyclic.contains(id) {
             return Some(Readiness::InCycle);
@@ -392,21 +384,12 @@ impl<'a> ReadinessEvaluator<'a> {
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
-    /// unclaimed ones by title in natural order and id. Threads others hold are left out, and so are archived subtrees
-    /// unless `include_archived` is set, which judges every item as if nothing were archived.
+    /// unclaimed ones by title in natural order and id. Threads others hold are left out.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
-    pub fn ready(&self, include_archived: bool, actor: &str) -> Result<Vec<ReadyThread>, Error> {
-        if include_archived {
-            let mut model = self.model.clone();
-            for item in model.items.values_mut() {
-                item.archived = Value::None;
-            }
-            let unarchived = ReadinessEvaluator::new(self.state, &model, self.now);
-            return unarchived.ready(false, actor);
-        }
+    pub fn ready(&self, actor: &str) -> Result<Vec<ReadyThread>, Error> {
         let title =
             |id: &str, title: &Value<String>| title.one().cloned().unwrap_or_else(|| id.to_owned());
         let mut ready = Vec::new();
@@ -434,7 +417,7 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
     }
 
-    /// A leaf's stage, or `None` for a parent, an archived item or an unknown one: its readiness decides, and a claim
+    /// A leaf's stage, or `None` for a parent or an unknown one: its readiness decides, and a claim
     /// on its thread reads as in progress.
     ///
     /// # Errors
@@ -446,13 +429,12 @@ impl<'a> ReadinessEvaluator<'a> {
         }
         let Some(item) = self.model.items.get(id) else { return Ok(None) };
         // Done work is done whatever else holds it, such as threads two clones wrote apart: the model counts it so.
-        let finished =
-            item.is_done() && self.model.children(id).is_empty() && !self.is_archived(id);
+        let finished = item.is_done() && self.model.children(id).is_empty();
         let stage = if finished {
             Some(Stage::Done)
         } else {
             self.of(id)?.and_then(|status| match status {
-                Readiness::Archived | Readiness::Parent => None,
+                Readiness::Parent => None,
                 Readiness::Done => Some(Stage::Done),
                 Readiness::Parked => Some(Stage::Parked),
                 Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
@@ -490,8 +472,7 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(Some(Rollup { progress, stages, stage: stages.rolled_up(claimed) }))
     }
 
-    /// Counts the leaves under `id` by stage, walking as the model's own tally does: archived ones aside, each item
-    /// once, every leaf of a part done by hand as done, and the open leaves of a part parked by hand as parked.
+    /// Counts the leaves under `id` by stage, walking as the model's own tally does: each item once, and the open leaves of a part parked by hand as parked.
     fn tally<'b>(
         &self,
         id: &'b str,
@@ -503,7 +484,7 @@ impl<'a> ReadinessEvaluator<'a> {
         'a: 'b,
     {
         for child in self.model.children(id) {
-            if !seen.insert(child) || self.is_archived(child) {
+            if !seen.insert(child) {
                 continue;
             }
             let Some(item) = self.model.items.get(child) else { continue };
@@ -511,10 +492,6 @@ impl<'a> ReadinessEvaluator<'a> {
                 let stage = self.stage(child)?.unwrap_or(Stage::Blocked);
                 let open = stage != Stage::Done;
                 stages.add(if parked && open { Stage::Parked } else { stage }, 1);
-            } else if item.is_done() {
-                let mut closed = Stages::default();
-                self.tally(child, false, seen, &mut closed)?;
-                stages.add(Stage::Done, closed.total());
             } else {
                 let parks = parked || item.state == Value::One(ItemState::Parked);
                 self.tally(child, parks, seen, stages)?;
@@ -531,10 +508,7 @@ impl<'a> ReadinessEvaluator<'a> {
     {
         for child in self.model.children(id) {
             let Some(item) = self.model.items.get(child) else { continue };
-            if !seen.insert(child)
-                || item.is_done()
-                || item.state == Value::One(ItemState::Parked)
-                || self.is_archived(child)
+            if !seen.insert(child) || item.is_done() || item.state == Value::One(ItemState::Parked)
             {
                 continue;
             }
@@ -549,32 +523,6 @@ impl<'a> ReadinessEvaluator<'a> {
             }
         }
         Ok(false)
-    }
-
-    /// The unmet waits-for targets of an item and its ancestors.
-    /// What keeps a parent from being finished: its children that are neither done nor archived, and what would hold
-    /// it back as a leaf (a cycle, being parked, or unmet dependencies).
-    #[must_use]
-    pub fn unfinished(&self, id: &str) -> (Vec<String>, Option<Readiness>) {
-        let open = self
-            .model
-            .children(id)
-            .into_iter()
-            .filter(|child| {
-                self.model.items.get(*child).is_some_and(|c| !c.is_done() && !c.is_archived_root())
-            })
-            .map(str::to_owned)
-            .collect();
-        let held = if self.cyclic.contains(id) {
-            Some(Readiness::InCycle)
-        } else if self.model.items.get(id).is_some_and(|i| i.state == Value::One(ItemState::Parked))
-        {
-            Some(Readiness::Parked)
-        } else {
-            let waiting = self.waiting(id);
-            (!waiting.is_empty()).then_some(Readiness::Blocked { waiting })
-        };
-        (open, held)
     }
 
     #[allow(
@@ -610,41 +558,21 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(winner)
     }
 
-    /// Whether an item is archived, memoized.
-    fn is_archived(&self, id: &str) -> bool {
-        if let Some(&archived) = self.archived.borrow().get(id) {
-            return archived;
-        }
-        let archived = self.model.is_archived(id);
-        self.archived.borrow_mut().insert(id.to_owned(), archived);
-        archived
-    }
-
     /// Why `dependency` doesn't yet satisfy `dependent`, or `None` when it does.
     fn dependency_wait(&self, dependent: &str, dependency: &str) -> Option<Wait> {
         let Some(item) = self.model.items.get(dependency) else { return Some(Wait::Open) };
-        if self.is_archived(dependency) {
-            return None;
+        if self.model.children(dependency).is_empty() {
+            return (!item.is_done()).then_some(Wait::Open);
         }
-        // Reopening archived work flags its dependents but never blocks them again.
-        if item.reopened.all().iter().any(|r| r.archived) {
-            return None;
+        if item.state == Value::One(ItemState::Parked) {
+            return Some(Wait::Open);
         }
-        if !item.is_done() {
-            if item.state == Value::One(ItemState::Parked)
-                || self.model.children(dependency).is_empty()
-            {
-                return Some(Wait::Open);
-            }
-            return self.leaves_wait(dependent, dependency);
-        }
-        None
+        self.leaves_wait(dependent, dependency)
     }
 
     /// Why the work under a parent doesn't yet satisfy `dependent`, or `None` when all of it does: each child judged
-    /// as a dependency of its own, so a leaf by its state, a parent under it done or parked by hand by that, and any
-    /// other by what is under it in turn. A leaf waiting on
-    /// its own ancestor is among what it waits on, so only closing the ancestor by hand meets it.
+    /// as a dependency of its own, so a leaf by its state, a parent under it parked by hand by that, and any other by
+    /// what is under it in turn.
     fn leaves_wait(&self, dependent: &str, parent: &str) -> Option<Wait> {
         // A parent in a cycle meets nothing until the cycle is fixed: a cycle of parents has no bottom to reach.
         if self.cyclic.contains(parent) {

@@ -3,7 +3,7 @@
 `acyclic up` runs on a fixture with a home of its own; the browser opens the address it prints, and every request
 that leaves the server is aborted. In Chromium, at both sizes, the page must list every item, be installable (which
 needs the manifest and its icons), and draw the Map as the plan says it should: the
-default view, a box expanded and collapsed again without moving on screen, archived subtrees shown, and a thread's
+default view, a box expanded and collapsed again without moving on screen, and a thread's
 members lit. On the phone, an item is added, moved, linked and unlinked on the Map, an agent's note is shown as text,
 the item's fields are edited, a conflict a second clone wrote is settled, and the item is reopened; a thread's panel
 lists its items; from Needs you's view, a conflict is settled and threads that wait on each other are named. Chromium's
@@ -198,29 +198,18 @@ class Plan:
     def depth(self, id):
         return len(self.chain(id)) - 1
 
-    def shown(self, id, archived):
-        return archived or not any(
-            self.items[one]["archived"] for one in self.chain(id)
-        )
-
-    def default(self, archived=False):
+    def default(self):
         """The default view's nodes: every item shown down to depth 1, below which every box is collapsed."""
-        return [
-            id for id in self.items if self.shown(id, archived) and self.depth(id) <= 1
-        ]
+        return [id for id in self.items if self.depth(id) <= 1]
 
-    def children(self, id, archived=False):
-        return [
-            one
-            for one in self.items
-            if self.parent[one] == id and self.shown(one, archived)
-        ]
+    def children(self, id):
+        return [one for one in self.items if self.parent[one] == id]
 
     def lit(self, thread):
         """In the default view, a thread's members as drawn: themselves, or the depth-1 box hiding them, once."""
         drawn = set()
         for id, row in self.items.items():
-            if row["thread"] == thread and self.shown(id, False):
+            if row["thread"] == thread:
                 drawn.add(self.chain(id)[-2] if self.depth(id) > 1 else id)
         return len(drawn)
 
@@ -239,85 +228,16 @@ def tracker(directory, env, items, remote=None):
                 check=True,
             ).stdout
         )
-    archive_roots = [item["id"] for item in data["items"] if item.get("archived")]
-    assert archive_roots, f"the {items}-item fixture has no archived subtree"
-    bootstrap = json.loads(json.dumps(data))
-    for item in bootstrap["items"]:
-        item["archived"] = False
-    bootstrap_path = directory / f"plan-{items}-bootstrap.json"
-    bootstrap_path.write_text(json.dumps(bootstrap))
+    plan.write_text(json.dumps(data))
 
     remote_args = [] if remote is None else ["--remote", str(remote)]
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
-    archive_at = time.time_ns() // 1_000_000
-    done_at = archive_at - 31 * 24 * 60 * 60 * 1000
-    env["ACYCLIC_NOW"] = str(done_at)
-    with detail(f"tracker {items}: bootstrap import"):
-        run(env, "import", str(bootstrap_path))
-    with detail(f"tracker {items}: bootstrap read"):
-        seeded = Plan(env)
-
-    archive_items = set()
-    for root in archive_roots:
-        pending = [root]
-        while pending:
-            item = pending.pop()
-            if item in archive_items:
-                continue
-            archive_items.add(item)
-            pending.extend(seeded.children(item))
-    rows = seeded.items
-
-    def reads_done(row):
-        return row["state"] == "done" or row.get("progress", {}).get("state") == "done"
-    data_by_id = {item["id"]: item for item in data["items"]}
-    for item in data["items"]:
-        id = item["id"]
-        if id in archive_items:
-            assert reads_done(rows[id]), f"archived subtree item {id} isn't done"
-            evidence = item.get("evidence") or {}
-            evidence.pop("commit", None)
-            evidence["text"] = evidence.get("text") or "synthetic completion"
-            item["evidence"] = evidence
-        elif not reads_done(rows[id]) and item.get("waits_for"):
-            item["waits_for"] = [target for target in item["waits_for"] if target not in archive_items]
-    assert not any(
-        item.get("evidence", {}).get("commit")
-        for item in data["items"]
-        if item["id"] in archive_items
-    ), "archived subtree evidence must not need a code clone"
-    assert all(data_by_id[id]["evidence"]["text"] for id in archive_items)
-    assert not any(
-        not reads_done(rows[item["id"]]) and target in archive_items
-        for item in data["items"]
-        if item["id"] not in archive_items
-        for target in item.get("waits_for", [])
-    ), "open external work must not wait on an archived subtree"
-    expected_done_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(done_at / 1000))
-    assert all(rows[id]["done_at"] == expected_done_at for id in archive_items)
-
-    plan.write_text(json.dumps(data))
-    base = json.loads(json.dumps(data))
-    for item in base["items"]:
-        item["archived"] = False
-    base_path = directory / f"plan-{items}-base.json"
-    base_path.write_text(json.dumps(base))
-    with detail(f"tracker {items}: base import"):
-        run(env, "import", str(base_path))
-
-    env["ACYCLIC_NOW"] = str(archive_at)
-    with detail(f"tracker {items}: archive import"):
+    with detail(f"tracker {items}: import"):
         run(env, "import", str(plan))
-    env.pop("ACYCLIC_NOW", None)
     if remote is not None:
         run(env, "sync")
     with detail(f"tracker {items}: final read"):
-        result = Plan(env)
-    assert all(result.items[id]["done_at"] == rows[id]["done_at"] for id in archive_items), (
-        "archiving must preserve the done time beyond the 30-day grace"
-    )
-    assert all(result.items[root]["archived"] for root in archive_roots)
-    return result
+        return Plan(env)
 
 
 def wait_drawn(page, nodes, timeout=20_000):
@@ -905,7 +825,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
     # A parent's status is its stage, not its stored progress state: finished work reads done, and unstarted work
     # says whether it is ready or blocked. Reuse the fixture and the page already open for links.
-    parents = [row for row in plan.items.values() if row.get("progress") and not row["archived"]]
+    parents = [row for row in plan.items.values() if row.get("progress")]
     cases = {
         "done": next((row for row in parents if row.get("stage") == "done"), None),
         "unstarted": next((row for row in parents if row["progress"]["state"] == "backlog" and row.get("stage")), None),
@@ -943,7 +863,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
 def history_journey(context, origin, view, plan, name, failures):
     """Back retraces linked items; a queued follow keeps the entry it lands on, and Search preserves a dirty form."""
     parents = set(plan.parent.values())
-    leaves = {id for id in plan.items if id not in parents and plan.shown(id, False)}
+    leaves = {id for id in plan.items if id not in parents}
     chain = next(
         (
             (a, b, c)
@@ -1112,13 +1032,13 @@ def command_journey(page, view, origin, plan, name, failures):
     dismissed; on a phone, from the Map, Back then closes the item and comes home. Wide, it goes to Needs you, whose
     entries take the page's width in columns, and a thread one names goes to the Map and closes back."""
     search_selection_journey(page.context, origin, plan, name, failures)
-    id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
+    id = min(one for one in plan.items if plan.depth(one) == 2)
     title_counts = Counter(item["title"] for item in plan.items.values())
     unique_titles = [
         one
         for one, item in plan.items.items()
         if plan.depth(one) == 2
-        and plan.shown(one, False)
+       
         and title_counts[item["title"]] == 1
     ]
     if unique_titles:
@@ -1272,8 +1192,7 @@ def search_selection_journey(context, origin, plan, name, failures):
     leaves = sorted(
         id
         for id, row in plan.items.items()
-        if plan.shown(id, False)
-        and id not in parents
+        if id not in parents
         and plan.depth(id) > 1
         and titles[row["title"]] == 1
     )
@@ -1670,7 +1589,7 @@ def stages_drawn(page, plan, name, failures):
         "m => Object.fromEntries(m.cy.nodes('.leaf').map(n => [n.id(),"
         " (n.classes().find(c => c.startsWith('stage-')) ?? '').slice(6) || null]))"
     )
-    # A parent drawn as a tile, everything under it archived, has no stage of its own: its state says what it can.
+    # A parent drawn as a tile with no leaves to count has no stage of its own: its state says what it can.
     told = {
         id: plan.items[id].get("stage")
         or (state if (state := plan.items[id]["state"]) in ("done", "parked") else None)
@@ -1804,24 +1723,6 @@ def map_journey(page, view, plan, name, failures, hint=None):
     else:
         failures.append(f"{name}: no box moved in the layout when expanded")
         box = None
-    # Archived subtrees show when asked, and hide again.
-    from_menu(page, lambda: page.get_by_test_id("show-archived").click())
-    wait_drawn(page, len(plan.default(archived=True)))
-    archived = next(
-        (id for id in plan.default(archived=True) if plan.items[id]["archived"]), None
-    )
-    if archived is not None:
-        # For the eye only, so a fixed wait will do: the renderer loads its images after drawing, and draws them later.
-        centre(page, archived)
-        page.wait_for_timeout(200)
-        page.screenshot(path=SHOTS / f"app-{name}-archived.png")
-        # Selected, then hidden with the rest: what's selected is drawn, so its panel and its address go with it.
-        tap_middle(page, view, archived)
-        page.get_by_test_id("inspector").wait_for(timeout=5_000)
-    from_menu(page, lambda: page.get_by_test_id("show-archived").click())
-    wait_drawn(page, expected)
-    if archived is not None and (page.get_by_test_id("inspector").count() or "item=" in page.url):
-        failures.append(f"{name}: hiding archived items left {archived} open, at {page.url}")
     # A thread lights up its members as drawn.
     thread, _ = Counter(
         row["thread"] for row in plan.items.values() if row["thread"]
@@ -2586,7 +2487,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
 def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     """Unlinks the last edge of a tall box: its size shrinks, the next root repacks, and Undo restores both."""
     plan = Plan(env)
-    roots = {id for id in plan.items if plan.depth(id) == 0 and plan.shown(id, False)}
+    roots = {id for id in plan.items if plan.depth(id) == 0}
 
     def root_edges(plan):
         return sorted(
@@ -2695,7 +2596,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     after = geometry([project, other, chain[-2]])
     updated = Plan(env)
 
-    if roots != {id for id in updated.items if updated.depth(id) == 0 and updated.shown(id, False)}:
+    if roots != {id for id in updated.items if updated.depth(id) == 0}:
         failures.append(f"{name}: the unlink changed the top-level item set")
     if edges != root_edges(updated):
         failures.append(f"{name}: the unlink changed the top-level wait edges")
@@ -3154,7 +3055,7 @@ def thread_journey(page, env, plan, thread, name, failures):
 def fold_journey(page, view, env, plan, name, failures):
     """A finished thread's items in a box fold into one box, named after it, on the Map; the command menu still finds
     one of them, opening every box above it."""
-    box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id) and plan.shown(id, False))
+    box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id))
     thread = json.loads(run(env, "thread", "add", "--title", "Folded away"))["data"]["thread"]
     items = []
     for title in ("Fold the first", "Fold the second"):

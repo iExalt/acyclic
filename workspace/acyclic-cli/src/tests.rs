@@ -1,6 +1,5 @@
 use std::fmt::Write as _;
 
-use acyclic_core::archive::ArchiveError;
 use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
@@ -120,8 +119,6 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::LinkCycle(vec!["a1".into()]).into(),
         WriteError::SelfLink("a1".into()).into(),
         DeleteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
-        ArchiveError::Ineligible { item: "a1".into(), reasons: vec![] }.into(),
-        ArchiveError::NotDone("a1".into()).into(),
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
         StoreError::Duplicate(id()).into(),
@@ -151,6 +148,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("changed-since", ""),
         CliError::refused("already-exists", ""),
         CliError::refused("already-done", ""),
+        CliError::refused("not-done", ""),
+        CliError::refused("parent", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("nested-repository", ""),
         CliError::new("not-found", exit::NOT_FOUND, ""),

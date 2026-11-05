@@ -10,7 +10,7 @@ the plan on a desktop when they reshape it. Most visits are short: see what need
 
 ## Primary tasks
 
-1. Settle what needs them: resolve a conflict, untangle a cycle, look at reopened work.
+1. Settle what needs them: resolve a conflict, untangle a cycle, look at done work still waiting on open work.
 2. See where work stands: which threads are at work, which to start next, how each project is doing.
 3. Reshape the plan: add, move, link and edit items on the Map.
 
@@ -161,7 +161,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   need with no thread to badge it takes the inbox icon in its place. (An amber "!" read as a warning sign, out of
   place in the quiet look.)
 - **Notices stay with what they are about** (`src/notices.ts`). News of what just happened (saved, undone, a link
-  opened, with any offer it makes, such as Hide archived, which the menu's switch also does) goes once the user moves; a
+  opened, with any offer it makes, such as Undo) goes once the user moves; a
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
   Dismiss; the Undo stays on offer over a reload of the tab, shown once the plan read then says it can still be undone,
@@ -247,13 +247,12 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   opened over the views, `?needs` as notifications send it, opens its view. A link opens over home, one history entry
   per layer, so Back closes what it opened, then leaves.
   Older or malformed entry metadata falls back to the URL; when its ancestry is unknown, closure stays local rather
-  than guessing browser history. A link to something gone says so; one to an archived item shows
-  archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's
-  panel carries it beside the title, ticking in place.
+  than guessing browser history. A link to something gone says so. An item's panel has Copy link in its ⋯ menu,
+  which says "Link copied"; a thread's panel carries it beside the title, ticking in place.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's visible Search… with accessible name
   Search or jump to…; its optional keyboard hint does not change the row height; the phone bar's Search) opens the
   command menu over everything: views, Needs you among them,
-  New item, the archived switch, Refresh,
+  New item, Refresh,
   threads by title, and projects and items by title or id, grouped, the best first: exact titles, then prefixes, then
   contiguous title phrases, then the remaining matches. While a move or link waits for its target, it finds the target
   instead. Choosing a result replaces Search with its destination in history; the same destination just closes Search,
@@ -290,7 +289,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   fit together. Otherwise keep the boxes and chevrons but hide their text until the user moves the Map or changes the
   selection. A project's title may remain off-screen when its items are far from it; showing both would require a zoom
   below readable. The picked thread's sidebar row unpicks it. A thread opened from an item's panel keeps that item
-  underneath; closing the thread or pressing Back reopens the item unless it is gone or archived.
+  underneath; closing the thread or pressing Back reopens the item unless it is gone.
 - **The selection stays in view.** An unpinned item from Search, Needs you or a direct link, and a top-level add, comes
   to the middle of the open Map. Below readable zoom, its title comes in at a readable size. An explicit pin—the parent
   of an add or move, or the current item when following a link in the Inspector—holds that drawn box in place and
@@ -402,8 +401,7 @@ before what went wrong.
   boxes do; unfolded, a finished thread's is a frame around its items with its name and chevron, the user's pick over a
   Fold button in the thread's panel or a Fold tile. A tap on a finished thread's box anywhere but its chevron picks the
   thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
-  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. With archived items
-  shown, an archived item stays outside them, beside them.
+  as its target. Finding a folded item, or opening a link to it, unfolds every box above it.
 - **The wheel zooms 12 % a notch** of a Mac's mouse, which scrolls 80 px, and in step with the pixels where a notch
   scrolls more (15 % for 100 px), with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past

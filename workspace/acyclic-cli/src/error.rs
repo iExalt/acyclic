@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use acyclic_core::archive::ArchiveError;
 use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
@@ -168,19 +167,6 @@ impl From<DeleteError> for CliError {
     }
 }
 
-impl From<ArchiveError> for CliError {
-    fn from(err: ArchiveError) -> Self {
-        let message = err.to_string();
-        match err {
-            ArchiveError::Write(err) => err.into(),
-            ArchiveError::Ineligible { item, reasons } => {
-                Self::refused("ineligible", message).with(json!({"item": item, "reasons": reasons}))
-            },
-            ArchiveError::NotDone(_) => Self::refused("not-done", message),
-        }
-    }
-}
-
 impl From<ParseError> for CliError {
     fn from(err: ParseError) -> Self {
         Self::refused("invalid-import", err.to_string())
@@ -191,7 +177,6 @@ impl From<ApplyError> for CliError {
     fn from(err: ApplyError) -> Self {
         let message = err.to_string();
         match err {
-            ApplyError::Archive(err) => err.into(),
             ApplyError::Internal(violations) => Self::refused("internal", message).with(json!({
                 "violations": violations.iter().map(ToString::to_string).collect::<Vec<_>>(),
             })),

@@ -87,7 +87,6 @@ function measuring(family: string): Fonts {
 
 export interface PlanMapProps {
   items: Item[];
-  showArchived: boolean;
   /** The thread picked in the sidebar, if any. */
   thread: string | null;
   /** Each thread's line, whose colour lights its items. */
@@ -126,7 +125,6 @@ export interface Focus {
 
 export default function PlanMap({
   items,
-  showArchived,
   thread,
   lines,
   palette,
@@ -192,10 +190,7 @@ export default function PlanMap({
     drawn: Scene;
   } | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
-  const view = useMemo(
-    () => visible(model, { collapsed, showArchived }, doneBoxes),
-    [model, collapsed, showArchived, doneBoxes],
-  );
+  const view = useMemo(() => visible(model, { collapsed }, doneBoxes), [model, collapsed, doneBoxes]);
   const fonts = useMemo(() => (fontFamily === null ? UNMEASURED : measuring(fontFamily)), [fontFamily]);
   const labelMetrics = useMemo(
     () => new Map(view.nodes.map((node) => [node.id, metricsOf(node, fonts, TILE_WIDTH)] as const)),
@@ -361,7 +356,7 @@ export default function PlanMap({
     // A pinch past the floor is held at it, about the fingers. Cytoscape's own limit drops the whole step of a pinch
     // that would cross it, its pan with it, so near the limit the plan stuck, then leapt as the fingers moved on: its
     // limit sits below the floor instead, and the floor is kept here, where the fingers are known.
-    // Only while two fingers are down: a zoom left past a floor that rose, as after hiding archived items, stays until
+    // Only while two fingers are down: a zoom left past a floor that rose, as after a box folds, stays until
     // the user zooms, rather than leaping on a pan.
     let fingers: { x: number; y: number } | null = null;
     const touch = (event: TouchEvent) => {
