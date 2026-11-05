@@ -88,4 +88,37 @@ describe("Layouts", () => {
     );
     expect(third?.nodes.get("b")).toMatchObject({ y: packed?.nodes.get("b")?.y });
   });
+
+  it("does not promote a submitted root packing after its effect becomes stale", async () => {
+    let release: ((layout: BoxLayout) => void) | undefined;
+    let live = true;
+    let rootCalls = 0;
+    const layBox: LayBox = (input) => {
+      if (input.id !== ROOT) return Promise.resolve({ width: 200, height: 64, at: {} });
+      rootCalls += 1;
+      if (rootCalls === 1)
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return Promise.resolve({ width: 300, height: 100, at: { a: { x: 12, y: 12 } } });
+    };
+    const layouts = new Layouts(layBox);
+    const view = visible(buildModel([item("a")]), { collapsed: new Set(), showArchived: false });
+    const old = layouts.layout(
+      view,
+      PORTRAIT,
+      "same-source",
+      new Map([["a", { width: 200, height: 80 }]]),
+      new Map(),
+      () => live,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    live = false;
+    release?.({ width: 300, height: 100, at: { a: { x: 12, y: 12 } } });
+    expect(await old).toBeNull();
+
+    const retry = await layouts.layout(view, PORTRAIT, "same-source", new Map([["a", { width: 200, height: 64 }]]));
+    expect(retry).not.toBeNull();
+    expect(rootCalls).toBe(2);
+  });
 });

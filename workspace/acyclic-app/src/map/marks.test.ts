@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Stage } from "../api";
 import { PALETTES } from "../palette";
+import { onChevron } from "./chevron";
 import { item } from "./fixture";
 import { boxMarkSvg, markOf, markSvg } from "./marks";
 import { buildModel, fallbackStage, visible } from "./model";
@@ -29,6 +30,13 @@ describe("markSvg", () => {
     const closed = boxMarkSvg("collapsed", null, 300, 64, DARK);
     expect(closed).toContain('d="M4 2l4 4-4 4"');
     expect(closed).not.toContain("<g ");
+  });
+
+  it("keeps the chevron inside its hit area when a full box header grows", () => {
+    const svg = boxMarkSvg("box", "blocked", 300, 400, DARK, null, 100);
+    expect(svg).toContain('height="100"');
+    expect(svg).toContain("translate(12 20)");
+    expect(onChevron("box", { x1: 0, y1: 0, x2: 300, y2: 400, header: 100 }, { x: 18, y: 24 }, 1)).toBe(true);
   });
 
   it("draws a ring where a tile with no thread would have its dot", () => {

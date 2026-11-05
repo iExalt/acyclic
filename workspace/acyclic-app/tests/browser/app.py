@@ -21,18 +21,20 @@ import inspect
 import json
 import os
 import re
+import select
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 from collections import Counter
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import pairwise
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from playwright.sync_api import Locator, sync_playwright
+from playwright.sync_api import Locator, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -81,6 +83,29 @@ LARGE_LIMIT_MS = 60_000
 BUDGET_S, LIMIT_S = 60, 120
 # Each timed step's name and seconds, for the run's summary.
 TIMES = []
+# Details are included in the whole run and may overlap the named steps; never add them to TIMES.
+DETAILS = []
+
+
+@contextmanager
+def detail(label):
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        DETAILS.append((label, time.monotonic() - start))
+
+
+_screenshot = Page.screenshot
+
+
+def _capture_time(self, *args, **kwargs):
+    # Capture wall time includes rendering, transport and writing the original image, not just encoding it.
+    with detail(f"capture {Path(kwargs.get('path') or 'unnamed').name}"):
+        return _screenshot(self, *args, **kwargs)
+
+
+Page.screenshot = _capture_time
 
 
 def timed(step):
@@ -205,14 +230,15 @@ def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
     # A seed whose threads come in many waves with only small cycles among them, so arrows skip waves.
-    data = json.loads(
-        subprocess.run(
-            [FIXTURES, "--items", str(items), "--seed", "3"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    )
+    with detail(f"tracker {items}: generate"):
+        data = json.loads(
+            subprocess.run(
+                [FIXTURES, "--items", str(items), "--seed", "3"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
     archive_roots = [item["id"] for item in data["items"] if item.get("archived")]
     assert archive_roots, f"the {items}-item fixture has no archived subtree"
     bootstrap = json.loads(json.dumps(data))
@@ -226,8 +252,10 @@ def tracker(directory, env, items, remote=None):
     archive_at = time.time_ns() // 1_000_000
     done_at = archive_at - 31 * 24 * 60 * 60 * 1000
     env["ACYCLIC_NOW"] = str(done_at)
-    run(env, "import", str(bootstrap_path))
-    seeded = Plan(env)
+    with detail(f"tracker {items}: bootstrap import"):
+        run(env, "import", str(bootstrap_path))
+    with detail(f"tracker {items}: bootstrap read"):
+        seeded = Plan(env)
 
     archive_items = set()
     for root in archive_roots:
@@ -274,14 +302,17 @@ def tracker(directory, env, items, remote=None):
         item["archived"] = False
     base_path = directory / f"plan-{items}-base.json"
     base_path.write_text(json.dumps(base))
-    run(env, "import", str(base_path))
+    with detail(f"tracker {items}: base import"):
+        run(env, "import", str(base_path))
 
     env["ACYCLIC_NOW"] = str(archive_at)
-    run(env, "import", str(plan))
+    with detail(f"tracker {items}: archive import"):
+        run(env, "import", str(plan))
     env.pop("ACYCLIC_NOW", None)
     if remote is not None:
         run(env, "sync")
-    result = Plan(env)
+    with detail(f"tracker {items}: final read"):
+        result = Plan(env)
     assert all(result.items[id]["done_at"] == rows[id]["done_at"] for id in archive_items), (
         "archiving must preserve the done time beyond the 30-day grace"
     )
@@ -2793,7 +2824,7 @@ def guarded_undo_race(page, view, env, plan, name, failures, errors):
 @timed
 def failed_add_journey(page, errors, name, failures):
     """A form holding typing survives Escape and Back; a refused edit opens the editor again with what was typed, the
-    session's smoke test in the browser. What else a write, a read and an Undo come to is session.test.ts's."""
+    tracker's smoke test in the browser. What else a write, a read and an Undo come to is tracker.test.ts's."""
     refusal = json.dumps(
         {
             "ok": False,
@@ -2954,29 +2985,33 @@ def form_journey(page, view, env, remote, id, name, failures):
                 page.evaluate("() => { window.noticeSubmitProof.cleanup(); delete window.noticeSubmitProof; }")
                 if form.count():
                     form.locator("input[name=title]").focus()
-        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
-        # must stay in it.
         size = page.viewport_size
         drawn = page.get_by_test_id("map")
-        widest = drawn.evaluate("m => m.cy.minZoom()")
-        page.set_viewport_size({"width": size["width"], "height": 360})
-        # The Map shrinks with the page, and lets a pinch zoom out as far as fits it now; a plan that fits at full
-        # zoom can't show it, since zooming out stops there.
-        if widest >= 1:
-            failures.append(
-                f"{name}: the plan fits the Map at full zoom, so a resize can't show its furthest zoom out following"
+        before = drawn.evaluate("m => ({width: m.clientWidth, height: m.clientHeight, min: m.cy.minZoom()})")
+        # Shrink both Map dimensions in the same portrait layout: its fit floor must follow whichever axis limits it.
+        # A height-only shrink need not change the floor when width already limits how far out the plan can zoom.
+        smaller = {axis: round(before[axis] * 0.75) for axis in ("width", "height")}
+        page.set_viewport_size({axis: size[axis] - before[axis] + smaller[axis] for axis in smaller})
+        try:
+            page.wait_for_function(
+                """([before, smaller]) => {
+                    const m = document.querySelector('[data-testid=map]');
+                    const sx = m.clientWidth / before.width, sy = m.clientHeight / before.height;
+                    const min = m.cy.minZoom();
+                    return Math.abs(m.clientWidth - smaller.width) <= 1 && Math.abs(m.clientHeight - smaller.height) <= 1
+                        && before.min > 0 && before.min < 0.5 && sx > 0 && sx < 1 && sy > 0 && sy < 1
+                        && min >= before.min * Math.min(sx, sy) - 1e-7
+                        && min <= before.min * Math.max(sx, sy) + 1e-7;
+                }""",
+                arg=[before, smaller],
+                timeout=5_000,
             )
-        else:
-            try:
-                page.wait_for_function(
-                    "z => document.querySelector('[data-testid=map]').cy.minZoom() !== z",
-                    arg=widest,
-                    timeout=5_000,
-                )
-            except PlaywrightTimeout:
-                failures.append(
-                    f"{name}: the Map's furthest zoom out stayed {widest} when it shrank"
-                )
+        except PlaywrightTimeout:
+            after = drawn.evaluate("m => ({width: m.clientWidth, height: m.clientHeight, min: m.cy.minZoom()})")
+            failures.append(f"{name}: the Map's fit floor did not follow a proportional resize: {before} -> {after}")
+        # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
+        # must stay in it.
+        page.set_viewport_size({"width": size["width"], "height": 360})
         reachable = form.evaluate(
             "f => { f.querySelector('input[name=title]').focus();"
             " return [...f.querySelectorAll(':scope > .actions button')].every(b => {"
@@ -3423,6 +3458,18 @@ def report(took, failures):
         steps[label] += seconds
     rows = steps.most_common()
     print(f"took {took:.1f} s; slowest: " + ", ".join(f"{label} {s:.1f} s" for label, s in rows[:5]))
+    print("All step durations:")
+    for label, seconds in rows:
+        print(f"  {label}: {seconds:.3f} s")
+    details, counts = Counter(), Counter()
+    for label, seconds in DETAILS:
+        details[label] += seconds
+        counts[label] += 1
+    captures = [entry for entry in DETAILS if entry[0].startswith("capture ")]
+    print(f"Capture subset: {len(captures)} calls, {sum(seconds for _, seconds in captures):.3f} s")
+    print("Detail durations (included in the whole run; overlap steps, so are not additive):")
+    for label, seconds in details.most_common():
+        print(f"  {label}: {seconds:.3f} s ({counts[label]} calls)")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a") as out:
             out.write(f"### The app's journeys: {took:.1f} s (budget {BUDGET_S} s, limit {LIMIT_S} s)\n\n")
@@ -3435,10 +3482,217 @@ def report(took, failures):
         print(f"::warning title=The app's journeys::took {took:.1f} s, over their {BUDGET_S} s budget")
 
 
+def server_origin(server):
+    """Reads the server's own listening receipt within a bounded startup deadline."""
+    deadline = time.monotonic() + 10
+    line = b""
+    while b"\n" not in line:
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([server.stdout], [], [], left)[0]:
+            raise TimeoutError(
+                "the fixture server did not report its listening address"
+            )
+        chunk = os.read(server.stdout.fileno(), 4096)
+        if not chunk:
+            raise AssertionError(
+                f"the fixture server exited before listening: {server.poll()}"
+            )
+        line += chunk
+    return f"http://{json.loads(line.splitlines()[0])['data']['listening']}/"
+
+
+@timed
+def labels_journey(browser, link, ids, titles):
+    """Measured labels fit their nodes; a failed font settles on the face that was measured."""
+    origin = link.rstrip("/")
+
+    def fresh(view, mode=None):
+        context = browser.new_context(**view)
+        blocked = []
+
+        def local_only(route):
+            if route.request.url.startswith(origin + "/"):
+                route.continue_()
+            else:
+                blocked.append(route.request.url)
+                route.abort()
+
+        context.route(
+            "**/*",
+            local_only,
+        )
+        page = context.new_page()
+        page.set_default_timeout(10_000)
+        errors, messages, fonts = [], [], []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on(
+            "console",
+            lambda message: (
+                messages.append({"text": message.text, "url": message.location.get("url", "")})
+                if message.type in ("error", "warning")
+                else None
+            ),
+        )
+        if mode is not None:
+
+            def font_route(route):
+                fonts.append(route)
+                if mode == "abort":
+                    route.abort()
+
+            context.route(re.compile(r"^" + re.escape(origin) + r"/[^?#]*\.woff2(?:\?[^#]*)?$"), font_route)
+        return context, page, errors, messages, fonts, blocked
+
+    def check_errors(errors, messages, fonts, blocked):
+        assert not errors, errors
+        assert not blocked, blocked
+        font_urls = {route.request.url for route in fonts}
+        unexpected = [
+            message
+            for message in messages
+            if not (message["url"] in font_urls and message["text"].startswith("Failed to load resource:"))
+        ]
+        assert not unexpected, unexpected
+
+    def read(page):
+        return page.get_by_test_id("map").evaluate(
+            r"""(m, ids) => {
+                const core=m.cy, canvas=document.createElement('canvas'), measure=canvas.getContext('2d');
+                return {zoom:core.zoom(),viewport:{width:m.clientWidth,height:m.clientHeight}, nodes:ids.map(id=>{
+                    const n=core.getElementById(id), body=n.boundingBox({includeLabels:false}), ink=n.boundingBox({includeLabels:true});
+                    const family=n.style('font-family');
+                    measure.font=`${n.style('font-weight')} ${n.style('font-size')} ${family}`;
+                    return {id,rendered:n.renderedBoundingBox({includeLabels:true}),label:n.data('label'),family,header:n.data('header'),body,ink,
+                        textWidth:n.data('textWidth'), widths:n.data('label').split('\n').map(line=>measure.measureText(line.trimEnd()).width)};
+                })};
+            }""",
+            ids,
+        )
+
+    def check_labels(found):
+        for node, title in zip(found["nodes"], titles):
+            assert re.sub(r"\s", "", title) in re.sub(r"\s", "", node["label"]), node
+            assert all(width <= node["textWidth"] + 1 for width in node["widths"]), node
+            body, ink = node["body"], node["ink"]
+            assert ink["x1"] >= body["x1"] - 1 and ink["x2"] <= body["x2"] + 1, node
+            assert ink["y1"] >= body["y1"] - 1 and ink["y2"] <= body["y2"] + 1, node
+        root, long, ready = found["nodes"]
+        assert "Needs a thread" in long["label"] and "Ready" in ready["label"], found
+        assert root["header"] > 72, root
+        assert all(
+            child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1
+            for child in (long, ready)
+        ), found
+
+    for name, view in VIEWS.items():
+        context, page, errors, messages, fonts, blocked = fresh(view)
+        point = None
+        try:
+            page.goto(link + "?view=map")
+            wait_drawn(page, 3)
+            page.screenshot(path=SHOTS / f"app-{name}-full-labels.png")
+            found = read(page)
+            assert FIRST_ZOOM <= found["zoom"] <= 2, found
+            ink = found["nodes"][1]["rendered"]
+            assert ink["x1"] >= 0 and ink["y1"] >= 0, found
+            assert ink["x2"] <= found["viewport"]["width"] and ink["y2"] <= found["viewport"]["height"], found
+            assert all("Overpass" in node["family"] for node in found["nodes"]), found
+            check_labels(found)
+            point = page.get_by_test_id("map").evaluate(
+                r"""(m,id)=>{
+                    const n=m.cy.getElementById(id), box=n.renderedBoundingBox({includeLabels:false}), rect=m.getBoundingClientRect();
+                    const svg=decodeURIComponent(n.data('mark').split(',').slice(1).join(','));
+                    const transform=new DOMParser().parseFromString(svg,'image/svg+xml').querySelector('path').getAttribute('transform');
+                    const [,x,y]=transform.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
+                    return {x:rect.x+box.x1+(Number(x)+6)*m.cy.zoom(),y:rect.y+box.y1+(Number(y)+6)*m.cy.zoom()};
+                }""",
+                ids[0],
+            )
+            assert page.get_by_test_id("map").evaluate(
+                """(m,p)=>{const r=m.getBoundingClientRect(), hit=document.elementFromPoint(p.x,p.y);
+                return p.x>=r.left && p.x<r.right && p.y>=r.top && p.y<r.bottom
+                    && hit && m.contains(hit) && !hit.closest('button');}""", point
+            ), point
+            if view.get("has_touch"):
+                page.touchscreen.tap(point["x"], point["y"])
+            else:
+                page.mouse.click(point["x"], point["y"])
+            wait_drawn(page, 1)
+            assert page.get_by_test_id("map").evaluate(
+                "(m,id)=>m.cy.getElementById(id).hasClass('collapsed')", ids[0]
+            )
+            assert page.get_by_test_id("inspector").count() == 0
+            check_errors(errors, messages, fonts, blocked)
+        except (AssertionError, PlaywrightTimeout):
+            page.screenshot(path=SHOTS / f"app-{name}-labels-failure.png")
+            state = page.evaluate(
+                """id=>{const m=document.querySelector('[data-testid=map]'),core=m?.cy;
+                return {dataset:m?{...m.dataset}:null,root:core?.getElementById(id).data(),
+                nodes:core?.nodes().map(n=>({id:n.id(),kind:n.data('kind')})),font:document.fonts.status,
+                inspector:document.querySelector('[data-testid=inspector] code.id')?.textContent};}""", ids[0]
+            )
+            (SHOTS / f"app-{name}-labels-failure.json").write_text(json.dumps({"point":point,"state":state}, indent=2))
+            raise
+        finally:
+            context.close()
+
+    context, page, errors, messages, fonts, blocked = fresh(VIEWS["desktop"], "abort")
+    try:
+        page.goto(link + "?view=map")
+        wait_drawn(page, 3)
+        page.screenshot(path=SHOTS / "app-font-fallback.png")
+        assert fonts, "the font-failure case did not intercept a font"
+        check_labels(read(page))
+        assert all("Overpass" not in node["family"] for node in read(page)["nodes"])
+        from_menu(page, lambda: page.get_by_test_id("theme").select_option("light"))
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'light'")
+        colour = page.evaluate(r"""() => {
+            const probe=document.body.appendChild(document.createElement('i'));probe.style.color='var(--box)';
+            const colour=getComputedStyle(probe).color.replace(/\s/g,'');probe.remove();return colour;
+        }""")
+        page.wait_for_function(
+            r"""([id,colour]) => {
+            const n=document.querySelector('[data-testid=map]')?.cy?.getElementById(id);
+            return n?.nonempty() && n.style('background-color').replace(/\s/g,'')===colour;
+        }""",
+            arg=[ids[0], colour],
+        )
+        assert all("Overpass" not in node["family"] for node in read(page)["nodes"])
+        check_errors(errors, messages, fonts, blocked)
+    finally:
+        context.close()
+
+    context, page, errors, messages, fonts, blocked = fresh(VIEWS["desktop"], "hold")
+    try:
+        with page.expect_request(
+            lambda request: urlsplit(request.url).path.endswith(".woff2"),
+            timeout=10_000,
+        ):
+            page.goto(link + "?view=map", wait_until="domcontentloaded", timeout=15_000)
+        page.get_by_test_id("map").wait_for(state="attached")
+        page.wait_for_function("() => document.fonts.status === 'loading'")
+        assert fonts, "the font-wait case did not hold a font"
+        assert page.get_by_test_id("map").evaluate(
+            "m=>Number(m.dataset.layouts ?? 0)===0"
+        )
+        page.goto("about:blank", timeout=10_000)
+        check_errors(errors, messages, fonts, blocked)
+    finally:
+        # The old document is gone; resolve the deliberately held routes before draining their handlers.
+        # This proves lifetime cleanup, without inspecting the old document's cache.
+        try:
+            for route in fonts:
+                route.abort()
+            context.unroute_all(behavior="wait")
+        finally:
+            context.close()
+
+
 def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
     began = time.monotonic()
+    print(f"Journeys optimization override: {os.environ.get('CARGO_PROFILE_JOURNEYS_OPT_LEVEL', 'unset (Cargo config)')}")
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as playwright:
         directory = Path(temp)
         servers = []
@@ -3465,9 +3719,9 @@ def main():
                 text=True,
             )
             servers.append(server)
-            listening = json.loads(server.stdout.readline())["data"]["listening"]
-            return plan, f"http://{listening}/", env, remote
+            return plan, server_origin(server), env, remote
 
+        @timed
         def serve_shrink():
             home = directory / "home-shrink"
             home.mkdir()
@@ -3497,12 +3751,62 @@ def main():
                 text=True,
             )
             servers.append(server)
-            listening = json.loads(server.stdout.readline())["data"]["listening"]
-            return f"http://{listening}/", env, project, other, chain
+            return server_origin(server), env, project, other, chain
+
+        @timed
+        def serve_labels():
+            home = directory / "home-labels"
+            home.mkdir()
+            env = {
+                **os.environ,
+                "HOME": str(home),
+                "ACYCLIC_TRACKER": str(directory / "tracker-labels"),
+                "ACYCLIC_ACTOR": "session/browser",
+            }
+            run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            thread = json.loads(run(env, "thread", "add", "--title", "Label proof"))[
+                "data"
+            ]["thread"]
+            titles = [
+                "Keep the whole project title readable while its header grows",
+                "Read every word including 🧑🏽‍🚀 and "
+                + "supercalifragilisticexpialidocious" * 2,
+                "Ordinary item",
+            ]
+            root = json.loads(run(env, "item", "add", "--title", titles[0]))["data"][
+                "item"
+            ]
+            long = json.loads(
+                run(env, "item", "add", "--title", titles[1], "--parent", root)
+            )["data"]["item"]
+            ready = json.loads(
+                run(
+                    env,
+                    "item",
+                    "add",
+                    "--title",
+                    titles[2],
+                    "--parent",
+                    root,
+                    "--thread",
+                    thread,
+                )
+            )["data"]["item"]
+            server = subprocess.Popen(
+                [ACYCLIC, "up", "--port", "0"],
+                env=env,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            servers.append(server)
+            return server_origin(server), [root, long, ready], titles
 
         try:
             plan, link, env, remote = serve(350)
             chromium = playwright.chromium.launch()
+            print(f"Chromium default headless: {chromium.version}")
+            label_link, label_ids, label_titles = serve_labels()
+            labels_journey(chromium, label_link, label_ids, label_titles)
             hint = None
             for name, view in VIEWS.items():
                 context, page, origin, errors = open_app(
@@ -3553,6 +3857,7 @@ def main():
                 context.close()
             # The full build supports push delivery; the journey records display calls before sending a push.
             notifying = playwright.chromium.launch(channel="chromium")
+            print(f"Chromium full headless: {notifying.version}")
             context, page, origin, errors = open_app(
                 notifying, VIEWS["phone"], link, failures, "notifying phone"
             )
@@ -3564,6 +3869,7 @@ def main():
             context.close()
             notifying.close()
             webkit = playwright.webkit.launch()
+            print(f"WebKit headless: {webkit.version}")
             context, page, origin, errors = open_app(
                 webkit, VIEWS["phone"], link, failures, "webkit phone"
             )

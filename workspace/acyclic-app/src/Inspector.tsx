@@ -21,6 +21,7 @@ import { stateWords } from "./stages";
 
 export interface InspectorProps {
   item: Item;
+  isProject: boolean;
   titleOf: (id: string) => string;
   /** A linked item's stage, to show beside it. */
   stageOf: (id: string) => Stage | undefined;
@@ -58,6 +59,7 @@ export interface InspectorProps {
 
 export function Inspector({
   item,
+  isProject,
   titleOf,
   stageOf,
   onSelect,
@@ -230,23 +232,27 @@ export function Inspector({
             <dd data-testid="state" className="status-value" data-main>
               <ItemStatus item={item} />
             </dd>
-            <dt>Thread</dt>
-            <dd>
-              {item.thread === null ? (
-                <span className="muted">None</span>
-              ) : (
-                <button
-                  type="button"
-                  className="chip line"
-                  style={lineStyle(lines.get(item.thread))}
-                  data-pick-thread={item.thread}
-                  onClick={() => item.thread !== null && onPickThread(item.thread)}
-                >
-                  <Badge line={lines.get(item.thread)} />
-                  <Prose text={lines.get(item.thread)?.name ?? item.thread} />
-                </button>
-              )}
-            </dd>
+            {isProject && item.thread === null ? null : (
+              <>
+                <dt>Thread</dt>
+                <dd>
+                  {item.thread === null ? (
+                    <span className="muted">None</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="chip line"
+                      style={lineStyle(lines.get(item.thread))}
+                      data-pick-thread={item.thread}
+                      onClick={() => item.thread !== null && onPickThread(item.thread)}
+                    >
+                      <Badge line={lines.get(item.thread)} />
+                      <Prose text={lines.get(item.thread)?.name ?? item.thread} />
+                    </button>
+                  )}
+                </dd>
+              </>
+            )}
           </>
         )}
         <dt>Parent</dt>

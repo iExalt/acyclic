@@ -4,7 +4,7 @@
 import ElkApi from "elkjs/lib/elk-api.js";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
 import { elkLayBox } from "./elk";
-import { type LayBox, LayoutCache, type Placed, place } from "./layout";
+import { type LayBox, LayoutCache, type Placed, place, type Size } from "./layout";
 import type { View } from "./model";
 
 /** Lays out views one after another, answering each request with its layout, or null once a newer one was made. */
@@ -14,10 +14,26 @@ export class Layouts {
 
   constructor(private readonly layBox: LayBox) {}
 
-  async layout(view: View, aspect: number, source = ""): Promise<Placed | null> {
+  async layout(
+    view: View,
+    aspect: number,
+    source = "",
+    sizes: ReadonlyMap<string, Size> = new Map(),
+    headers: ReadonlyMap<string, number> = new Map(),
+    isLive: () => boolean = () => true,
+  ): Promise<Placed | null> {
     const request = ++this.latest;
-    const placed = await place(view, this.cache, this.layBox, aspect, () => request === this.latest, source);
-    return request === this.latest ? placed : null;
+    const placed = await place(
+      view,
+      this.cache,
+      this.layBox,
+      aspect,
+      () => request === this.latest && isLive(),
+      source,
+      sizes,
+      headers,
+    );
+    return request === this.latest && isLive() ? placed : null;
   }
 }
 

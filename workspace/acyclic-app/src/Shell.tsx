@@ -174,10 +174,11 @@ function SidebarChrome(props: ShellProps & { folded: boolean; fold: () => void }
           onClick={props.onSearch}
           data-action="search"
           title="Search or jump to…"
+          aria-label="Search or jump to…"
           aria-keyshortcuts={`${MAC ? "Meta+K" : "Control+K"}${props.shortcuts ? " /" : ""}`}
         >
           <Icon of={Search} />
-          <span className="grow text">Search or jump to…</span>
+          <span className="grow text">Search…</span>
           {/* The shortcut, for the eye; assistive technology has it from aria-keyshortcuts. */}
           <span className="kbd" aria-hidden="true">
             {MAC ? "⌘K" : "Ctrl K"}

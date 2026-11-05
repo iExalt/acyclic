@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 import { STRIP } from "./chevron";
 import { beside, dependencyOrder, elkLayBox, PORTRAIT, shapeAfter, shapeOf } from "./elk";
 import { item } from "./fixture";
+import { metricsOf } from "./labelmetrics";
 import { type LayBox, LayoutCache, LEAF, place, ROOT, scopes, withinOneBox } from "./layout";
-import { buildModel, type ViewState, visible } from "./model";
+import { buildModel, sourceKey, type ViewState, visible } from "./model";
 
 /**
  * A layout engine whose box sizes depend on content: children in rows of two, as far apart as packing puts them, each row as tall as its tallest child,
@@ -46,6 +47,20 @@ async function relaid(before: ReturnType<typeof item>[], after: ReturnType<typeo
 }
 
 describe("place", () => {
+  it("invalidates a box's cached layout when its measured header changes", async () => {
+    const cache = new LayoutCache();
+    const view = visible(buildModel([item("box"), item("tile", "box")]), open);
+    const layBox: LayBox = async (input) => ({
+      width: 224,
+      height: (input.header ?? STRIP) + 76,
+      at: Object.fromEntries(input.children.map((child) => [child.id, { x: 12, y: input.header ?? STRIP }])),
+    });
+    const sizes = new Map([["tile", { width: 200, height: 64 }]]);
+    await place(view, cache, layBox, PORTRAIT, () => true, "same-source", sizes, new Map([["box", STRIP]]));
+    const grown = await place(view, cache, layBox, PORTRAIT, () => true, "same-source", sizes, new Map([["box", 84]]));
+    expect(grown.laidOut).toContain("box");
+  });
+
   it("lays out again exactly the boxes whose content changed", async () => {
     // A fourth child fills the second row of two: right's size holds, so only right is laid out again.
     const three = [...plan, item("r2", "right"), item("r3", "right")];
@@ -108,6 +123,111 @@ describe("place", () => {
       PORTRAIT,
     );
     expect(fresh.laidOut).toContain(ROOT);
+
+    // A measured two-root plan must repack a novel shrink, then restore the grown hold exactly on Undo.
+    const metricsCache = new LayoutCache();
+    const fonts = { regular: (text: string) => text.length * 8, bold: (text: string) => text.length * 8 };
+    let rootCalls = 0;
+    const measured: LayBox = async (input) => {
+      const header = input.header ?? STRIP;
+      if (input.id !== ROOT) {
+        const child = input.children[0];
+        if (child === undefined) return { width: input.minWidth ?? 200, height: header + 24, at: {} };
+        return {
+          width: Math.max(input.minWidth ?? 200, child.width + 24),
+          height: header + child.height + 24,
+          at: { [child.id]: { x: 12, y: header + 12 } },
+        };
+      }
+      rootCalls += 1;
+      const children = dependencyOrder(
+        input.children.map(({ id }) => id),
+        input.edges,
+      ).flatMap((id) => {
+        const child = input.children.find((one) => one.id === id);
+        return child === undefined ? [] : [child];
+      });
+      const at: Record<string, { x: number; y: number }> = {};
+      let y = 12;
+      for (const child of children) {
+        at[child.id] = { x: 12, y };
+        y += child.height + 24;
+      }
+      return {
+        width: Math.max(0, ...children.map((child) => child.width)) + 24,
+        height: children.length === 0 ? 24 : y - 12,
+        at,
+      };
+    };
+    const makeModel = (title: string) =>
+      buildModel([
+        item("a", null, [], { title }),
+        item("a1", "a"),
+        item("b", null, ["a"], { title: "B" }),
+        item("b1", "b"),
+      ]);
+    const prepare = (snapshot: ReturnType<typeof makeModel>, state = open) => {
+      const view = visible(snapshot, state);
+      const labels = new Map(view.nodes.map((node) => [node.id, metricsOf(node, fonts)] as const));
+      return {
+        view,
+        source: sourceKey(snapshot),
+        sizes: new Map([...labels].map(([id, label]) => [id, { width: label.width, height: label.height }] as const)),
+        headers: new Map([...labels].map(([id, label]) => [id, label.header || label.height] as const)),
+      };
+    };
+    const medium = prepare(makeModel("W".repeat(36)));
+    const long = prepare(makeModel("W".repeat(90)));
+    const novelShort = prepare(makeModel("New short"));
+    expect(long.source).not.toBe(medium.source);
+    expect(novelShort.source).not.toBe(medium.source);
+    expect(novelShort.source).not.toBe(long.source);
+    expect(medium.headers.get("a")).toBe(65);
+    expect(long.headers.get("a")).toBe(114);
+    expect(novelShort.headers.get("a")).toBe(52);
+    const run = (input: ReturnType<typeof prepare>) =>
+      place(input.view, metricsCache, measured, PORTRAIT, () => true, input.source, input.sizes, input.headers);
+    const beforeTitle = await run(medium);
+    const afterGrow = await run(long);
+    expect(afterGrow.laidOut).not.toContain(ROOT);
+    expect(afterGrow.nodes.get("a")).toMatchObject({
+      x: beforeTitle.nodes.get("a")?.x,
+      y: beforeTitle.nodes.get("a")?.y,
+    });
+    expect(afterGrow.nodes.get("b")?.y).toBeGreaterThan(beforeTitle.nodes.get("b")?.y ?? 0);
+    const headerClearsTile = (placed: Awaited<ReturnType<typeof place>>, input: ReturnType<typeof prepare>) =>
+      (placed.nodes.get("a1")?.y ?? 0) - (placed.nodes.get("a")?.y ?? 0) >= (input.headers.get("a") ?? 0);
+    expect(headerClearsTile(beforeTitle, medium)).toBe(true);
+    expect(headerClearsTile(afterGrow, long)).toBe(true);
+
+    const callsBeforeNovelShort = rootCalls;
+    const shrunk = await run(novelShort);
+    expect(rootCalls).toBe(callsBeforeNovelShort + 1);
+    expect(shrunk.nodes.get("b")?.y).toBeLessThan(beforeTitle.nodes.get("b")?.y ?? 0);
+    expect(headerClearsTile(shrunk, novelShort)).toBe(true);
+    const callsBeforeFresh = rootCalls;
+    const freshShort = await place(
+      novelShort.view,
+      new LayoutCache(),
+      measured,
+      PORTRAIT,
+      () => true,
+      novelShort.source,
+      novelShort.sizes,
+      novelShort.headers,
+    );
+    expect(rootCalls).toBe(callsBeforeFresh + 1);
+    expect(shrunk.nodes).toEqual(freshShort.nodes);
+
+    const afterUndo = await run(long);
+    expect(afterUndo.laidOut).not.toContain(ROOT);
+    expect(headerClearsTile(afterUndo, long)).toBe(true);
+    expect(afterUndo.nodes).toEqual(afterGrow.nodes);
+
+    const foldedLong = prepare(makeModel("W".repeat(90)), { collapsed: new Set(["a"]), showArchived: false });
+    expect(foldedLong.source).toBe(long.source);
+    await run(foldedLong);
+    expect((await run(long)).nodes).toEqual(afterUndo.nodes);
   });
 
   it("restores a topology's held packing across an add and undo, and later folds", async () => {

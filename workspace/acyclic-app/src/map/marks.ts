@@ -73,9 +73,11 @@ export function boxMarkSvg(
   height: number,
   palette: Palette,
   thread: Thread | null = null,
+  header = STRIP,
 ): string {
-  const tall = kind === "box" ? STRIP : height;
-  const middle = tall / 2;
+  const tall = kind === "box" ? header : height;
+  // Keep the open-box controls inside the fixed hit area at the top of a taller header.
+  const middle = kind === "box" ? STRIP / 2 : tall / 2;
   const left = (TITLE - CHEVRON) / 2;
   const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
@@ -119,6 +121,7 @@ export function boxMarkOf(
   height: number,
   palette: Palette,
   thread: Thread | null = null,
+  header = STRIP,
 ): string {
   let mine = made.get(palette);
   if (mine === undefined) {
@@ -126,8 +129,8 @@ export function boxMarkOf(
     made.set(palette, mine);
   }
   // A box's strip is as tall whatever it holds, so its height doesn't key it.
-  const key = JSON.stringify([kind, stage, width, kind === "box" ? 0 : height, thread]);
-  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, thread));
+  const key = JSON.stringify([kind, stage, width, kind === "box" ? 0 : height, thread, kind === "box" ? header : 0]);
+  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, thread, header));
 }
 
 function once(mine: Map<string, string>, key: string, svg: () => string): string {

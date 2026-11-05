@@ -1,4 +1,4 @@
-// The app's session with the server: the plan as last read, the write out and the one notice slot, with the Undo on
+// The app's tracker: the plan as last read, the write out and the one notice slot, with the Undo on
 // offer kept in the tab over a reload. Writes go one at a time; reads are numbered, so one overtaken is never shown;
 // what a write does to where the user is goes through `nav`. Plain TypeScript with its ports passed in, so every
 // outcome of a write, a read and an undo is tested without a browser.
@@ -91,7 +91,7 @@ export interface Snapshot {
   version: number;
 }
 
-export interface Session {
+export interface Tracker {
   /** The same object until something in it changes. */
   snapshot(): Snapshot;
   subscribe(listener: () => void): () => void;
@@ -119,7 +119,7 @@ export interface Session {
 
 const planOf = (found: Item[]): Plan => ({ items: new Map(found.map((one) => [one.id, one])) });
 
-export function createSession({ fetcher, storage, nav }: Ports): Session {
+export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
   const listeners = new Set<() => void>();
   let reads: Reads = NO_READS;
   /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */

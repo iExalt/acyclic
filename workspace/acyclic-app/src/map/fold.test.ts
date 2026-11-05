@@ -24,7 +24,7 @@ const chained = (xWaitsForR: boolean) => [
 ];
 
 describe("foldDone", () => {
-  it("keys the folded source structure without display text", () => {
+  it("keys folded structure and label text independently of record order", () => {
     const finished = chained(false);
     const folded = fold(finished);
     const renamed = fold(finished.map((one) => ({ ...one, title: `Changed ${one.title}`, notes: "Changed notes" })));
@@ -35,7 +35,7 @@ describe("foldDone", () => {
       })),
     );
     const inReview = fold(finished.map((one) => (one.id === "a2" ? { ...one, stage: "in-review" as const } : one)));
-    expect(sourceKey(renamed.model)).toBe(sourceKey(folded.model));
+    expect(sourceKey(renamed.model)).not.toBe(sourceKey(folded.model));
     expect(sourceKey(reordered.model)).toBe(sourceKey(folded.model));
     // The raw item state/thread/parent are the same, but the merged stage means the finished thread no longer folds.
     expect(sourceKey(inReview.model)).not.toBe(sourceKey(folded.model));

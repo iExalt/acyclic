@@ -88,6 +88,38 @@ describe("the command menu", () => {
     expect(dig?.detail).toBe("in Garden");
   });
 
+  it("shows the direct parent and root for entries and move or link targets", () => {
+    const nested = buildModel([
+      item("root", null, [], { title: "Root" }),
+      item("parent-a", "root", [], { title: "Parent A" }),
+      item("parent-b", "root", [], { title: "Parent B" }),
+      item("child-a", "parent-a", [], { title: "Same title" }),
+      item("child-b", "parent-b", [], { title: "Same title" }),
+    ]);
+    const contextual = { ...plan, model: nested };
+    const expected = [
+      { id: "child-a", detail: "in Parent A · Root" },
+      { id: "child-b", detail: "in Parent B · Root" },
+    ];
+    const children = (all: Entry[]) =>
+      all
+        .filter(
+          (one) =>
+            one.key === "item:child-a" ||
+            one.key === "item:child-b" ||
+            one.key === "target:child-a" ||
+            one.key === "target:child-b",
+        )
+        .map((one) => ({
+          id: one.run.kind === "item" || one.run.kind === "target" ? one.run.id : null,
+          detail: one.detail,
+        }));
+
+    expect(children(entries(contextual))).toEqual(expected);
+    expect(children(targets(contextual, "link"))).toEqual(expected);
+    expect(children(targets(contextual, "move"))).toEqual(expected);
+  });
+
   it("finds archived items only while they're shown, and says which way the switch goes", () => {
     expect(titles("paint")).toEqual([]);
     const shown = { ...plan, showArchived: true };
