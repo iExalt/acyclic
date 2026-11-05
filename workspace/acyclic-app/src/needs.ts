@@ -45,6 +45,8 @@ export interface Action {
 export interface NeedView {
   /** The entry's stable key, as the needs-you list gives it: its kind and what it is about. */
   key: string;
+  /** The source kind, kept as data so views can adapt without parsing text or keys. */
+  kind: string;
   text: string;
   /** What it names besides its text, for a list that shows the entry without its rows, such as an item's title. */
   detail: string | null;
@@ -64,6 +66,13 @@ export interface NeedView {
   merged?: string[];
   /** An unconfirmed merge's repository as people name it: its `owner/name`, or its id when it has no record. */
   repository?: string;
+}
+
+/** Whether the phone can collapse this terminal-only entry without hiding a decision or a single record. */
+export function isCollapsible(view: NeedView): boolean {
+  if (view.actions.length !== 0) return false;
+  if (view.kind === "thread-cycle") return view.threads.length > 1;
+  return view.kind === "unverified" && (view.merged?.length ?? 0) > 0 && view.items.length + view.more > 1;
 }
 
 interface Row {
@@ -136,6 +145,7 @@ function viewOf(
   const base = {
     // The list's own key, which the server's pushes use too.
     key: str(need.key),
+    kind: need.kind,
     line,
     more: 0,
     items: item === null ? [] : [item.id],

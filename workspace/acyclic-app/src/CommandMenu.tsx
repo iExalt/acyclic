@@ -59,7 +59,11 @@ export function CommandMenu({
   onDismiss,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  const keyboardSelection = useRef(
+    window.matchMedia("(pointer: fine) and (hover: hover)").matches ||
+      document.documentElement.dataset.keyboard === "true",
+  );
+  const [active, setActive] = useState(keyboardSelection.current ? 0 : -1);
   const pool = useMemo(
     () => (shortcutsOnly ? entries.filter((entry) => keys?.[entry.key] !== undefined) : entries),
     [entries, keys, shortcutsOnly],
@@ -100,7 +104,18 @@ export function CommandMenu({
     if (shown >= 0) document.getElementById(`${list}-${shown}`)?.scrollIntoView({ block: "nearest" });
   }, [list, shown]);
 
-  const move = (by: number) => setActive((was) => (found.length === 0 ? 0 : (was + by + found.length) % found.length));
+  const chooseByKeyboard = (next: number) => {
+    keyboardSelection.current = true;
+    setActive(next);
+  };
+  const move = (by: number) => {
+    if (found.length === 0) return;
+    setActive((was) => {
+      const next = was < 0 ? (by > 0 ? 0 : found.length - 1) : (was + by + found.length) % found.length;
+      return next;
+    });
+    keyboardSelection.current = true;
+  };
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
     const to = { ArrowDown: 1, ArrowUp: -1 }[event.key];
@@ -109,13 +124,14 @@ export function CommandMenu({
       move(to);
     } else if (event.key === "Home" && found.length > 0) {
       event.preventDefault();
-      setActive(0);
+      chooseByKeyboard(0);
     } else if (event.key === "End" && found.length > 0) {
       event.preventDefault();
-      setActive(found.length - 1);
+      chooseByKeyboard(found.length - 1);
     } else if (event.key === "Enter") {
       event.preventDefault();
-      run(found[shown]);
+      if (shown >= 0) run(found[shown]);
+      else if (query.trim() !== "") run(found[0]);
     }
   };
 
@@ -134,7 +150,12 @@ export function CommandMenu({
         aria-selected={n === shown}
         className="command-row"
         data-command={entry.key}
-        onPointerMove={() => setActive(n)}
+        onPointerMove={(event) => {
+          if (event.pointerType === "mouse") {
+            keyboardSelection.current = true;
+            setActive(n);
+          }
+        }}
         onClick={() => run(entry)}
       >
         <span className="command-icon">{icon(entry, lines, kindOf)}</span>
@@ -180,7 +201,7 @@ export function CommandMenu({
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setActive(0);
+              setActive(keyboardSelection.current ? 0 : -1);
             }}
             onKeyDown={onKeyDown}
           />

@@ -1,7 +1,7 @@
-// How long a notice lasts. Every notice shows in one place, the slot at the stage's foot, which takes its height from
-// the view rather than covering it; how long it stays there follows what it is about: news goes once the user moves
-// on, a refusal once the surface that raised it closes, a form's warning with the form, and what is offered (Undo, a
-// refresh that failed) whatever the user does next. Pure, so the rules are tested without a browser.
+// One App notice owns its lifetime, actions and announcement; placement is chosen by App. Its lifetime follows what it
+// is about: news goes once the user moves on, a refusal once the surface that raised it closes, a form's warning with
+// the form, and what is offered (Undo, a refresh that failed) whatever the user does next. Pure, so the rules are
+// tested without a browser.
 
 import type { Layer, Place } from "./nav";
 

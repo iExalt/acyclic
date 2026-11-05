@@ -379,6 +379,35 @@ button.view[aria-current="page"] {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.brand:where(:has(.notice-trigger)) h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+button.notice-trigger {
+  position: relative;
+  z-index: 11;
+  width: 92px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--tile);
+  font-size: 14px;
+  font-weight: 650;
+}
+.notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: transparent;
+}
 button.icon {
   display: inline-grid;
   place-items: center;
@@ -996,6 +1025,36 @@ button.project-title {
 .thread-tile .looped {
   color: var(--signal);
 }
+@media (max-width: 899px) {
+  .waves .columns {
+    gap: 16px;
+  }
+  .wave h2 {
+    margin-bottom: 6px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .wave ul {
+    gap: 8px;
+  }
+  .thread-tile {
+    gap: 3px;
+    padding: 6px 10px 8px;
+  }
+  .thread-tile .head {
+    gap: 6px;
+  }
+  .thread-tile .name {
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .thread-tile .projects,
+  .thread-tile .counts,
+  .thread-tile .after,
+  .thread-tile .looped {
+    font-size: 13px;
+  }
+}
 .arrows {
   position: absolute;
   top: 0;
@@ -1167,6 +1226,15 @@ button.project-title {
      a form's: on a panel, it took the foot of a short sheet for hidden, and scrolled its main action, focused or
      clicked there, up under the header. */
   scroll-padding-bottom: calc(var(--hit) + 48px);
+}
+@media (max-width: 699px) {
+  .sheet.add {
+    display: flex;
+    flex-direction: column;
+  }
+  .sheet.add > .actions {
+    margin-top: auto;
+  }
 }
 .inspector.tall::before,
 .sheet.add::before,
@@ -1395,7 +1463,7 @@ code {
   display: none;
 }
 
-/* A notice: under a panel's heading, or in the slot at the stage's foot, in the flow, so it covers nothing. */
+/* One notice: in the stage slot, over clear Map space, or behind the phone Notice disclosure. */
 .notice {
   display: flex;
   gap: 8px;
@@ -1482,7 +1550,7 @@ code {
 /* On a phone, entries ruled apart with less air. */
 @media (max-width: 899px) {
   .needs > li {
-    padding: 8px 0 10px;
+    padding: 6px 0 8px;
   }
 }
 /* The entry the Overview opened the view at, marked until the view is left. */
@@ -1542,7 +1610,8 @@ button.row {
 /* On touch, a fingertip's height as room around its text, as an entry's rows have it, rather than a floor under it,
    which left a gap between a one-line head and what it names. */
 @media (pointer: coarse) {
-  button.need-head {
+  :is(p, button).need-head {
+    min-height: 0;
     padding-block: calc((var(--hit) - 1lh) / 2);
   }
 }
@@ -1577,6 +1646,18 @@ button.row {
 }
 /* A phone's at 13 px, the text's weight, set close; how many more alike. */
 @media (max-width: 899px) {
+  :is(p, button).need-head {
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .need-why {
+    margin-top: 2px;
+    font-size: 12px;
+  }
+  .need-items {
+    margin-top: 2px;
+  }
   .need-items button.row,
   .need-items .more {
     font-size: 13px;
@@ -1631,6 +1712,34 @@ button.row {
   .need-items button.row {
     min-height: 32px;
     padding-block: calc((32px - 1lh) / 2);
+  }
+}
+
+/* Long terminal-only entries collapse on phones, while their original heading remains visible and linked to details. */
+@media (max-width: 899px) {
+  .need-head[data-collapsed="true"] .prose {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .need-head:not([data-collapsed="true"]) .prose {
+    display: block;
+  }
+  .need-disclosure-toggle {
+    display: block;
+    min-height: var(--hit);
+    margin: 2px 0 0 32px;
+    padding: 0 8px;
+    border: 0;
+    color: var(--muted);
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+  }
+  .need-details[hidden] {
+    display: none;
   }
 }
 
@@ -2298,4 +2407,41 @@ dl.facts .chip.line {
 .key-reference dl > div > dd {
   margin: 0;
   text-align: end;
+}
+
+/* A notice's stable origin does not enter the panel's natural layout. */
+.notice-origin {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.notice-portal {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: auto;
+  pointer-events: auto;
+}
+.notice-portal[data-mode="disclosure"] {
+  z-index: 10;
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.12),
+    0 10px 28px rgb(0 0 0 / 0.18);
+}
+.notice-portal[data-mode="disclosure"] .notice {
+  flex-wrap: wrap;
+}
+.notice-portal[data-mode="disclosure"] .notice .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+button.notice-backdrop {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: default;
+}
+button.notice-backdrop:hover {
+  background: transparent;
 }

@@ -2,14 +2,15 @@
 // allows. Each entry is a line, with what it names to select under it, then the actions the app can take on it, so
 // the button comes after what it acts on.
 
-import { useLayoutEffect, useRef } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
 import type { Line } from "./lines";
 import type { NeedsLeft } from "./nav";
-import { type Need, needView, threadLabel, together } from "./needs";
+import { isCollapsible, type Need, needView, threadLabel, together } from "./needs";
 import { Prose } from "./Prose";
+import { useWide } from "./wide";
 
 export interface NeedsListProps {
   needs: Need[];
@@ -45,6 +46,33 @@ export function NeedsList({
   const views = together(needs.map((need) => needView(need, lines, titleOf)));
   // The entry asked for, or the one it was shown as part of.
   const target = at === null ? null : (views.find((view) => view.merged?.includes(at))?.key ?? at);
+  const wide = useWide();
+  const [disclosures, setDisclosures] = useState<{
+    target: string | null;
+    restore: NeedsLeft | undefined;
+    expanded: Set<string>;
+  }>({ target: null, restore: undefined, expanded: new Set() });
+  // Apply a new target or restoration during render, before the focus/scroll layout effect below sees the DOM.
+  if (disclosures.target !== target || disclosures.restore !== restore) {
+    const expanded = new Set(disclosures.expanded);
+    const include = (key: string | null | undefined) => {
+      const view = views.find((one) => one.key === key || one.merged?.includes(key ?? ""));
+      if (view !== undefined && isCollapsible(view)) expanded.add(view.key);
+    };
+    include(target);
+    include(restore?.entry);
+    setDisclosures({ target, restore, expanded });
+  }
+  const disclosureId = useId();
+  const expanded = disclosures.expanded;
+  const toggle = (key: string) => {
+    setDisclosures((was) => {
+      const next = new Set(was.expanded);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return { ...was, expanded: next };
+    });
+  };
   const page = useRef<HTMLElement>(null);
   // Once an entry is settled, the keyboard goes to the one that took its place, so settling the list is pressing Enter
   // down it; with nothing left to settle, to the page.
@@ -93,93 +121,121 @@ export function NeedsList({
         <p className="empty">Nothing needs you. Conflicts, cycles and reopened work show here.</p>
       ) : null}
       <ul className="needs">
-        {views.map((view, index) => (
-          <li
-            key={view.key}
-            data-need={view.key}
-            data-at={view.key === target || undefined}
-            // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
-            // nothing; Tab reaches its actions.
-            data-row
-            tabIndex={-1}
-          >
-            {view.thread === null ? (
-              <p className="facts line need-head" style={lineStyle(view.line)}>
-                <NeedBadge line={view.line} />
-                <Prose text={view.text} />
-              </p>
-            ) : (
-              <button
-                type="button"
-                className="row line need-head"
-                style={lineStyle(view.line)}
-                data-pick-thread={view.thread}
-                onClick={leave(view.key, ":scope > [data-pick-thread]", () => view.thread && onPickThread(view.thread))}
-              >
-                <Badge line={view.line} />
-                <Prose text={view.text} />
-              </button>
-            )}
-            {view.note === null ? null : <p className="why need-why">{view.note}</p>}
-            <ul className="rows need-items">
-              {view.threads.map((thread) => {
-                const label = threadLabel(thread, lines);
-                return (
-                  <li key={`t-${thread.id}`}>
-                    <button
-                      type="button"
-                      className="row line"
-                      style={lineStyle(label.line)}
-                      data-pick-thread={thread.id}
-                      onClick={leave(view.key, `.need-items [data-pick-thread="${CSS.escape(thread.id)}"]`, () =>
-                        onPickThread(thread.id),
-                      )}
-                    >
-                      <Badge line={label.line} />
-                      <Prose text={label.text} />
-                    </button>
-                  </li>
-                );
-              })}
-              {view.items.map((id) => (
-                <li key={`i-${id}`}>
-                  <button
-                    type="button"
-                    className="row"
-                    data-select={id}
-                    onClick={leave(view.key, `[data-select="${CSS.escape(id)}"]`, () => onSelect(id))}
-                  >
-                    <Prose text={titleOf(id)} />
-                  </button>
-                </li>
-              ))}
-              {view.more === 0 ? null : (
-                <li>
-                  <span className="row more">and {view.more} more</span>
-                </li>
+        {views.map((view, index) => {
+          const eligible = isCollapsible(view);
+          const isExpanded = wide || expanded.has(view.key);
+          const collapsed = eligible && !isExpanded;
+          const detailsId = `${disclosureId}-${index}`;
+          return (
+            <li
+              key={view.key}
+              data-need={view.key}
+              data-at={view.key === target || undefined}
+              // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
+              // nothing; Tab reaches its actions.
+              data-row
+              tabIndex={-1}
+            >
+              {view.thread === null ? (
+                <p
+                  className="facts line need-head"
+                  style={lineStyle(view.line)}
+                  data-collapsed={collapsed || undefined}
+                >
+                  <NeedBadge line={view.line} />
+                  <Prose text={view.text} />
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  className="row line need-head"
+                  style={lineStyle(view.line)}
+                  data-pick-thread={view.thread}
+                  data-collapsed={collapsed || undefined}
+                  onClick={leave(
+                    view.key,
+                    ":scope > [data-pick-thread]",
+                    () => view.thread && onPickThread(view.thread),
+                  )}
+                >
+                  <Badge line={view.line} />
+                  <Prose text={view.text} />
+                </button>
               )}
-            </ul>
-            {view.actions.length === 0 ? null : (
-              <div className="actions need-actions">
-                {view.actions.map((action) => (
-                  <button
-                    type="button"
-                    key={action.label}
-                    className="quiet"
-                    data-action={action.action}
-                    {...held(
-                      `${view.key} ${action.action}`,
-                      () => onCommand(action.command, action.done),
-                      after(index),
-                    )}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+              {eligible && !wide ? (
+                <button
+                  type="button"
+                  className="need-disclosure-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={detailsId}
+                  onClick={() => toggle(view.key)}
+                >
+                  {isExpanded ? "Hide details" : "Show details"}
+                </button>
+              ) : null}
+              <div id={detailsId} className="need-details" hidden={collapsed}>
+                {view.note === null ? null : <p className="why need-why">{view.note}</p>}
+                <ul className="rows need-items">
+                  {view.threads.map((thread) => {
+                    const label = threadLabel(thread, lines);
+                    return (
+                      <li key={`t-${thread.id}`}>
+                        <button
+                          type="button"
+                          className="row line"
+                          style={lineStyle(label.line)}
+                          data-pick-thread={thread.id}
+                          onClick={leave(view.key, `.need-items [data-pick-thread="${CSS.escape(thread.id)}"]`, () =>
+                            onPickThread(thread.id),
+                          )}
+                        >
+                          <Badge line={label.line} />
+                          <Prose text={label.text} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                  {view.items.map((id) => (
+                    <li key={`i-${id}`}>
+                      <button
+                        type="button"
+                        className="row"
+                        data-select={id}
+                        onClick={leave(view.key, `[data-select="${CSS.escape(id)}"]`, () => onSelect(id))}
+                      >
+                        <Prose text={titleOf(id)} />
+                      </button>
+                    </li>
+                  ))}
+                  {view.more === 0 ? null : (
+                    <li>
+                      <span className="row more">and {view.more} more</span>
+                    </li>
+                  )}
+                </ul>
+                {view.actions.length === 0 ? null : (
+                  <div className="actions need-actions">
+                    {view.actions.map((action) => (
+                      <button
+                        type="button"
+                        key={action.label}
+                        className="quiet"
+                        data-action={action.action}
+                        {...held(
+                          `${view.key} ${action.action}`,
+                          () => onCommand(action.command, action.done),
+                          after(index),
+                        )}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

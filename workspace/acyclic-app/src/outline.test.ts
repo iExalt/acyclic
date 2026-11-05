@@ -4,7 +4,7 @@ import { dependencyOrder, elkLayBox } from "./map/elk";
 import { item } from "./map/fixture";
 import { type LayBox, LayoutCache, place, ROOT } from "./map/layout";
 import { buildModel, defaultView, visible } from "./map/model";
-import { currentRows, outlineOf } from "./outline";
+import { currentRows, outlineOf, uniqueProjectThread } from "./outline";
 
 // Two projects and a lone item at the top level: t works in both projects, u only in the second, v only in the lone
 // item, and w nowhere; the first project's archived part holds x.
@@ -110,5 +110,17 @@ describe("currentRows", () => {
     expect(currentRows(model, outline, "p2")).toEqual({ project: "p2", thread: "u" });
     expect(currentRows(model, outline, "lone")).toEqual({ project: null, thread: "v" });
     expect(currentRows(model, outline, null)).toEqual({ project: null, thread: null });
+  });
+});
+
+describe("uniqueProjectThread", () => {
+  const outline = outlineOf(model, threads, false);
+  it("infers only a project's sole visible thread", () => {
+    expect(uniqueProjectThread("p1", outline.projects)).toBe("t");
+    expect(uniqueProjectThread("p2", outline.projects)).toBeNull();
+    expect(uniqueProjectThread("empty", [{ id: "empty", threads: [] }])).toBeNull();
+    expect(uniqueProjectThread("p1", outlineOf(model, threads, true).projects)).toBeNull();
+    expect(uniqueProjectThread("missing", outline.projects)).toBeNull();
+    expect(uniqueProjectThread(null, outline.projects)).toBeNull();
   });
 });

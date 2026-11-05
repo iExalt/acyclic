@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Line, linesOf } from "./lines";
-import { countText, keepsIn, type Need, needView, structuralKey, threadLabel, together } from "./needs";
+import { countText, isCollapsible, keepsIn, type Need, needView, structuralKey, threadLabel, together } from "./needs";
 import examples from "./needs.examples.json";
 import { PALETTES } from "./palette";
 
@@ -65,6 +65,8 @@ describe("needView", () => {
       ["unverified:i2:cli", "Can't confirm its merge into me/cli", 1, 0],
       ["unverified:i9:app", "Can't confirm its merge into me/app", 1, 0],
     ]);
+    expect(shown[0] && isCollapsible(shown[0])).toBe(true);
+    expect(shown[2] && isCollapsible(shown[2])).toBe(false);
   });
 
   it("names a thread as the thread list does, with its badge, and as the entry gives it where the list lacks it", () => {
@@ -132,6 +134,7 @@ describe("needView", () => {
     const state = needView(field("state"), none);
     expect(state.actions.map((one) => one.label)).toEqual(["Use parked"]);
     expect(state.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
+    expect(isCollapsible(state)).toBe(false);
     // Named, and its values too where they are ids, while the command keeps the id.
     const parent = field("parent");
     const titles = (id: string) => (id === parent.id ? "First" : "Parent");
@@ -194,6 +197,7 @@ describe("needView", () => {
     );
     expect(cycle).toMatchObject({
       key: "thread-cycle:t:u",
+      kind: "thread-cycle",
       text: "Threads wait on each other in a cycle: T, U",
       threads: [
         { id: "t", title: "T" },
@@ -202,6 +206,8 @@ describe("needView", () => {
       thread: null,
       actions: [],
     });
+    expect(isCollapsible(cycle)).toBe(true);
+    expect(isCollapsible(needView({ kind: "thread-cycle", threads: [thread("t")] }, none))).toBe(false);
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
     expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");

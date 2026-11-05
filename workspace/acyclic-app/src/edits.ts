@@ -6,7 +6,9 @@ import { changes, draftOf, type ItemDraft } from "./forms";
 import type { Model } from "./map/model";
 import { uuidv7 } from "./uuid";
 
-/** A new item, under the id the app made for it. A thread or parent left out is none. */
+/**
+ * A new item, under the id the app made for it. A null parent is top level; a null thread asks the tracker to inherit.
+ */
 export interface NewItem {
   id: string;
   title: string;
