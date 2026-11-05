@@ -37,15 +37,22 @@ fn parse_id(text: &str) -> Result<gix::ObjectId, StoreError> {
 /// Finds the repository from the path alone, as `git -C <path>` does, taking no repository or settings from the
 /// environment, and without reflogs for the tracker's refs.
 fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
-    let options = || {
-        gix::open::Options::default().ignore_repository_environment(true).cli_overrides([
-            "core.logAllRefUpdates=false",
-            "gitoxide.core.nativeLocalTransport=true",
+    let overrides = || {
+        let mut overrides: Vec<String> = vec![
+            "core.logAllRefUpdates=false".into(),
+            "gitoxide.core.nativeLocalTransport=true".into(),
             // A transfer slower than 1,000 bytes a second for 30 seconds fails over HTTP rather than hanging the sync,
             // and the server's writes queued behind it.
-            "http.lowSpeedLimit=1000",
-            "http.lowSpeedTime=30",
-        ])
+            "http.lowSpeedLimit=1000".into(),
+            "http.lowSpeedTime=30".into(),
+        ];
+        if let Some(dir) = credential_exec_path() {
+            overrides.push(format!("gitoxide.credentials.execPath={}", dir.display()));
+        }
+        overrides
+    };
+    let options = || {
+        gix::open::Options::default().ignore_repository_environment(true).cli_overrides(overrides())
     };
     let mapping = gix::sec::trust::Mapping { full: options(), reduced: options() };
     gix::ThreadSafeRepository::discover_opts(
@@ -54,6 +61,32 @@ fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
         mapping,
     )
     .map_err(|e| format!("can't open {}: {}", path.display(), describe(&e)))
+}
+
+/// Where Git keeps its helpers on a Mac, which `gix` can't ask `git` for: the first of these that holds the keychain
+/// helper, so a configured `osxkeychain` credential helper is found without a `git` on the `PATH`.
+const MACOS_EXEC_PATHS: [&str; 4] = [
+    "/Library/Developer/CommandLineTools/usr/libexec/git-core",
+    "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core",
+    "/opt/homebrew/opt/git/libexec/git-core",
+    "/usr/local/opt/git/libexec/git-core",
+];
+
+/// The first of `candidates` that holds a `git-credential-osxkeychain`.
+fn first_holding_keychain_helper<'a>(candidates: &[&'a str]) -> Option<&'a str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|dir| Path::new(dir).join("git-credential-osxkeychain").is_file())
+}
+
+/// The directory of Git's own helpers to search for credential helpers: only on a Mac, and only when the user hasn't
+/// pointed `GIT_EXEC_PATH` somewhere. Elsewhere Git's helpers are found on the `PATH`, as Git finds them.
+fn credential_exec_path() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") && std::env::var_os("GIT_EXEC_PATH").is_none() {
+        return first_holding_keychain_helper(&MACOS_EXEC_PATHS).map(PathBuf::from);
+    }
+    None
 }
 
 /// A repository addressed by its path.

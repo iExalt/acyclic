@@ -426,3 +426,18 @@ fn a_slow_http_transfer_fails_rather_than_hangs() {
     assert_eq!(values.get("http.lowSpeedLimit").map(String::as_str), Some("1000"));
     assert_eq!(values.get("http.lowSpeedTime").map(String::as_str), Some("30"));
 }
+
+#[test]
+fn the_keychain_helper_is_found_in_the_first_directory_that_holds_it() {
+    let dir = TempDir::new().expect("a temporary directory");
+    let (empty, holding) = (dir.path().join("empty"), dir.path().join("holding"));
+    std::fs::create_dir(&empty).expect("a directory");
+    std::fs::create_dir(&holding).expect("a directory");
+    std::fs::write(holding.join("git-credential-osxkeychain"), "").expect("a helper");
+    let (empty, holding) = (empty.to_str().expect("UTF-8"), holding.to_str().expect("UTF-8"));
+    assert_eq!(
+        super::first_holding_keychain_helper(&[empty, "/nonexistent", holding]),
+        Some(holding)
+    );
+    assert_eq!(super::first_holding_keychain_helper(&[empty]), None);
+}
