@@ -3777,17 +3777,22 @@ def main():
                 + "supercalifragilisticexpialidocious" * 2,
                 "Ordinary item",
             ]
-            root = json.loads(run(env, "item", "add", "--title", titles[0]))["data"][
+            # The Map orders boxes that nothing links by id, in natural order, which for random ids differs from run to run: the
+            # phone's first view holds only the left of the two children, so these ids put the one with the long title there.
+            ids = [f"00000000-0000-7000-8000-00000000000{number}" for number in (1, 2, 3)]
+            root = json.loads(run(env, "item", "add", "--id", ids[0], "--title", titles[0]))["data"][
                 "item"
             ]
             long = json.loads(
-                run(env, "item", "add", "--title", titles[1], "--parent", root)
+                run(env, "item", "add", "--id", ids[1], "--title", titles[1], "--parent", root)
             )["data"]["item"]
             ready = json.loads(
                 run(
                     env,
                     "item",
                     "add",
+                    "--id",
+                    ids[2],
                     "--title",
                     titles[2],
                     "--parent",
