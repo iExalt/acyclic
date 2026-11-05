@@ -651,22 +651,46 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         if page.get_by_test_id("threads-view").count() != 1:
             failures.append(f"{name}: an item open over Threads reopened on {page.url}, not over Threads")
         # A link to the tile drawn furthest right, where the panel will open, brings it out from under the panel.
-        drawn = "() => document.querySelector('[data-testid=map]')?.dataset.state === 'drawn'"
         page.goto(f"{origin}/?view=map")
-        page.wait_for_function(drawn, timeout=20_000)
-        far = page.get_by_test_id("map").evaluate(
-            "m => m.cy.nodes('.leaf').max(n => n.renderedBoundingBox().x2).ele.id()"
-        )
+        far = page.wait_for_function(
+            """() => {
+                const map = document.querySelector('[data-testid=map]');
+                if (!map?.cy) return false;
+                let id = null, right = -Infinity;
+                map.cy.nodes('node.leaf, node.collapsed').forEach(node => {
+                    const box = node.renderedBoundingBox({ includeLabels: false });
+                    if ([box.x1, box.x2, box.y1, box.y2].every(Number.isFinite)
+                        && box.x2 > box.x1 && box.y2 > box.y1 && box.x2 > right) {
+                        id = node.id();
+                        right = box.x2;
+                    }
+                });
+                return id;
+            }""",
+            timeout=20_000,
+        ).json_value()
         page.goto(f"{origin}/?item={quote(far)}")
         title.wait_for(timeout=10_000)
-        page.wait_for_function(drawn, timeout=20_000)
-        clear = page.evaluate(
-            """id => { const m = document.querySelector('[data-testid=map]'); const r = m.getBoundingClientRect();
-                const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
-                const panel = document.querySelector('[data-testid=inspector]').getBoundingClientRect();
-                return [Math.round(r.left + b.x1), Math.round(r.left + b.x2), Math.round(panel.left)]; }""",
-            far,
+        clear = page.wait_for_function(
+            """id => {
+                const m = document.querySelector('[data-testid=map]');
+                const node = m?.cy?.getElementById(id);
+                const panel = document.querySelector('[data-testid=inspector]');
+                if (!node?.nonempty() || !node.hasClass('selected') || !panel) return false;
+                const r = m.getBoundingClientRect();
+                const b = node.renderedBoundingBox({ includeLabels: false });
+                const p = panel.getBoundingClientRect();
+                if (![b.x1, b.x2, b.y1, b.y2, r.left, p.left].every(Number.isFinite)
+                    || b.x2 <= b.x1 || b.y2 <= b.y1) return false;
+                const x1 = Math.round(r.left + b.x1);
+                const x2 = Math.round(r.left + b.x2);
+                const panelLeft = Math.round(p.left);
+                return x1 >= 0 && x2 <= panelLeft ? [x1, x2, panelLeft] : false;
+            }""",
+            arg=far,
+            timeout=20_000,
         )
+        clear = clear.json_value()
         if not (clear[0] >= 0 and clear[1] <= clear[2]):
             failures.append(f"{name}: a link to {far} drew it at {clear[:2]}, under the panel from {clear[2]}")
     # A link to an item gone says so, and opens the rest it names: Needs you's view, from an address of when it opened
