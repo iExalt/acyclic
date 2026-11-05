@@ -252,6 +252,13 @@ pub enum ValidationError {
     },
     /// An item waits for itself.
     SelfLink(String),
+    /// An item waits for one above or below it.
+    LineageLink {
+        /// The waiting item.
+        item: String,
+        /// The item it waits for.
+        waits_for: String,
+    },
     /// An item names the same item twice in its waits-for.
     DuplicateLink {
         /// The waiting item.
@@ -317,6 +324,10 @@ impl fmt::Display for ValidationError {
                 write!(f, "{at} names unknown {kind} {id}")
             },
             Self::SelfLink(item) => write!(f, "item {item} waits for itself"),
+            Self::LineageLink { item, waits_for } => write!(
+                f,
+                "item {item} waits for {waits_for}, which is above or below it, so neither could ever be done"
+            ),
             Self::DuplicateLink { item, waits_for } => {
                 write!(f, "item {item} names {waits_for} twice in waits_for")
             },

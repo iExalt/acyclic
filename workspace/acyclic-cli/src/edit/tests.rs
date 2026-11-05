@@ -526,7 +526,7 @@ fn one_repository_named_twice_is_written_once() {
 #[test]
 fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
     let mut r = replica();
-    for id in ["p", "c"] {
+    for id in ["p", "c", "o"] {
         add_item(&mut r, id, &titled(id), USER_BY).unwrap();
     }
     edit_item(
@@ -548,25 +548,22 @@ fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
         (err.code, err.message.as_str()),
         ("parent-cycle", "c can't go under itself or its own descendant")
     );
-    edit_item(
-        &mut r,
-        "p",
-        &ItemFields {
-            waits_for: Delta { add: vec!["c".into()], remove: vec![] },
-            ..ItemFields::default()
-        },
-        USER_BY,
-    )
-    .unwrap();
-    let back = ItemFields {
-        waits_for: Delta { add: vec!["p".into()], remove: vec![] },
+    let waits = |on: &str| ItemFields {
+        waits_for: Delta { add: vec![on.into()], remove: vec![] },
         ..ItemFields::default()
     };
-    let err = edit_item(&mut r, "c", &back, USER_BY).unwrap_err();
-    assert_eq!((err.code, err.details.clone()), ("link-cycle", json!({"items": ["c", "p"]})));
+    let err = edit_item(&mut r, "p", &waits("c"), USER_BY).unwrap_err();
+    assert_eq!(
+        (err.code, err.details.clone()),
+        ("lineage-link", json!({"item": "p", "waits_for": "c"}))
+    );
+    edit_item(&mut r, "p", &waits("o"), USER_BY).unwrap();
+    let back = waits("p");
+    let err = edit_item(&mut r, "o", &back, USER_BY).unwrap_err();
+    assert_eq!((err.code, err.details.clone()), ("link-cycle", json!({"items": ["o", "p"]})));
     // Several at once: the one naming nothing speaks first, and every one is listed.
     let both = ItemFields { thread: Change::Set("nowhere".into()), ..back };
-    let err = edit_item(&mut r, "c", &both, USER_BY).unwrap_err();
+    let err = edit_item(&mut r, "o", &both, USER_BY).unwrap_err();
     assert_eq!(err.code, "not-found");
     assert_eq!(err.details["violations"].as_array().map(Vec::len), Some(2));
 }

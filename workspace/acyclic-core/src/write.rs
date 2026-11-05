@@ -668,6 +668,14 @@ pub enum Rule {
     ParentCycle(Vec<String>),
     /// Items would wait for each other in a cycle, through these.
     LinkCycle(Vec<String>),
+    /// An item would wait for one above or below it, which could then never be done: a parent is done only once its
+    /// leaves are.
+    LineageLink {
+        /// The waiting item.
+        from: String,
+        /// The item it waits for.
+        to: String,
+    },
     /// A minted record would take the title of this open one.
     TitleTaken(Record),
     /// A repository would take `owner/name` that this other record has, or could have once its conflict is settled.
@@ -739,6 +747,10 @@ impl fmt::Display for Violation {
             Rule::LinkCycle(path) => {
                 write!(f, "items would wait for each other in a cycle: {}", path.join(", "))
             },
+            Rule::LineageLink { from, to } => write!(
+                f,
+                "{at}{from} would wait for {to}, which is above or below it, so neither could ever be done"
+            ),
             Rule::TitleTaken(other) => {
                 write!(f, "{at}{} {} already has that title", other.kind(), other.id())
             },
@@ -1096,6 +1108,7 @@ impl Judging<'_, '_> {
         let mut found = assign_rules(after, steps);
         found.extend(empty_creates(steps));
         found.extend(new_cycles(self.before, after, steps));
+        found.extend(new_lineage_links(self.before, after, steps));
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
         self.violations.extend(found);
@@ -1246,6 +1259,56 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
             change: change.map(|step| step.change),
             at,
             rule: if parents { Rule::ParentCycle(cycle) } else { Rule::LinkCycle(cycle) },
+        });
+    }
+    found
+}
+
+/// Waits-for links between an item and one above or below it that the change set makes, by a link or by a move:
+/// neither could ever be done, since a parent reads done only once its leaves are. One a sync brought is left be.
+fn new_lineage_links(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
+    let lineage = |model: &Model, from: &str, to: &str| {
+        model.ancestors(from).contains(&to) || model.ancestors(to).contains(&from)
+    };
+    // Items in a parent cycle sit above and below each other, and the cycle is refused on its own.
+    let cyclic: BTreeSet<String> = after.parent_cycles().into_iter().flatten().collect();
+    let mut found = Vec::new();
+    for link in &after.links {
+        let (from, to) = (link.from.as_str(), link.to.as_str());
+        let held = before.links.iter().any(|l| l.from == from && l.to == to);
+        if cyclic.contains(from)
+            || cyclic.contains(to)
+            || !lineage(after, from, to)
+            || (held && lineage(before, from, to))
+        {
+            continue;
+        }
+        let involved: BTreeSet<&str> = [from, to]
+            .into_iter()
+            .chain(after.ancestors(from))
+            .chain(after.ancestors(to))
+            .collect();
+        // Named at the link made, else at the move that brought the two into one line.
+        let step = steps
+            .iter()
+            .find(|step| {
+                matches!(&step.write, Written::Assign(Assign::Item(id, ItemAssign::WaitsFor(t, true)))
+                    if id == from && t == to)
+            })
+            .or_else(|| {
+                steps.iter().find(|step| {
+                    matches!(&step.write, Written::Assign(Assign::Item(id, ItemAssign::Parent(_)))
+                        if involved.contains(id.as_str()))
+                })
+            });
+        let at = step.and_then(|step| match &step.write {
+            Written::Assign(assign) => Some(assign.at()),
+            _ => None,
+        });
+        found.push(Violation {
+            change: step.map(|step| step.change),
+            at,
+            rule: Rule::LineageLink { from: from.to_owned(), to: to.to_owned() },
         });
     }
     found

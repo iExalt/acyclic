@@ -377,6 +377,30 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
 }
 
 #[test]
+fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes() {
+    let mut r = done_tree();
+    commit_ok(&mut r, 3, vec![add("other", vec![])]);
+    let lineage = |from: &str, to: &str| Rule::LineageLink { from: from.into(), to: to.into() };
+    let waits = |from: &str, to: &str| item(from, ItemAssign::WaitsFor(to.into(), true));
+    assert!(refused(&r, vec![waits("leaf", "root")]).contains(&lineage("leaf", "root")));
+    assert!(refused(&r, vec![waits("root", "leaf")]).contains(&lineage("root", "leaf")));
+    // A move that puts two linked items in one line is refused too.
+    commit_ok(&mut r, 4, vec![waits("other", "mid")]);
+    let moved = refused(&r, vec![item("mid", ItemAssign::Parent(Some("other".into())))]);
+    assert!(moved.contains(&lineage("other", "mid")), "{moved:?}");
+    // One a sync brought holds no other write back.
+    let mut synced = done_tree();
+    commit_ok(&mut synced, 3, vec![add("x", vec![])]);
+    let mut apart = replica("b");
+    apart.join(&synced.state).unwrap();
+    commit_ok(&mut synced, 4, vec![waits("x", "leaf")]);
+    commit_ok(&mut apart, 4, vec![item("leaf", ItemAssign::Parent(Some("x".into())))]);
+    synced.join(&apart.state).unwrap();
+    assert!(read(&synced).ancestors("leaf").contains(&"x"));
+    commit_ok(&mut synced, 5, vec![item("mid", ItemAssign::Title("Mid".into()))]);
+}
+
+#[test]
 fn new_or_moved_work_joins_the_thread_passed_down_unless_given_one() {
     let mut r = done_tree();
     // The leaf open again, its thread is the one `mid`'s open children share.

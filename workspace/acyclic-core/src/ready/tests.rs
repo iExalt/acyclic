@@ -369,6 +369,24 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
     assert_eq!(state(&r, NOW), ProgressState::Parked);
 }
 
+#[test]
+fn a_done_stored_on_a_part_hides_none_of_its_claimed_work_from_above() {
+    let mut r = replica("a");
+    items(&mut r, &["first", "goal", "part", "x"]);
+    set_parent(&mut r, "part", Some("goal"), by(2)).unwrap();
+    set_parent(&mut r, "x", Some("part"), by(2)).unwrap();
+    // Blocked, so only the claim on its thread says it is under way.
+    link(&mut r, "x", "first", by(2)).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
+    // As an older version could write it.
+    set_state(&mut r, "part", ItemState::Done, by(3)).unwrap();
+    let rolled = rollup(&r, "goal");
+    assert_eq!(
+        (rolled.progress.state, rolled.stage),
+        (ProgressState::InProgress, Some(Stage::InProgress))
+    );
+}
+
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
     let model = Model::read(&r.state).unwrap();
     ReadinessEvaluator::new(&r.state, &model, NOW).stage(id).unwrap()

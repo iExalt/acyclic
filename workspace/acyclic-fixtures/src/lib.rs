@@ -236,14 +236,16 @@ impl Generator {
         apportion(total, &weights, 1, total)
     }
 
-    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; umbrellas,
-    /// being parents, read done from their leaves.
+    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; only leaves are
+    /// marked done, since a parent reads done from its leaves.
     fn states(&mut self) {
         let done_target = self.scaled(35.0);
+        let parents: std::collections::BTreeSet<usize> =
+            self.parent.iter().flatten().copied().collect();
         let mut done = 0;
         let mut index = 0;
         while done < done_target && index < self.total {
-            if self.depth[index] >= 3 {
+            if self.depth[index] >= 3 && !parents.contains(&index) {
                 self.import.items[index].state = Some(State::Done);
                 done += 1;
             }
@@ -518,7 +520,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_321, 16_542_305_078_767_677_133));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (155_261, 16_250_611_626_592_946_955));
     }
 
     #[test]

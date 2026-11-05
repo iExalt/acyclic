@@ -413,6 +413,12 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                     missing: missing.iter().map(|&field| field.to_owned()).collect(),
                 });
             },
+            (Rule::LineageLink { from, to }, _) => {
+                unknown.push(ValidationError::LineageLink {
+                    item: from.clone(),
+                    waits_for: to.clone(),
+                });
+            },
             (Rule::SelfLink, Some(at)) => {
                 unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
             },

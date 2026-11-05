@@ -508,8 +508,9 @@ impl<'a> ReadinessEvaluator<'a> {
     {
         for child in self.model.children(id) {
             let Some(item) = self.model.items.get(child) else { continue };
-            if !seen.insert(child) || item.is_done() || item.state == Value::One(ItemState::Parked)
-            {
+            // A done stored on a parent, as older versions wrote, is ignored: its leaves decide.
+            let finished = item.is_done() && self.model.children(child).is_empty();
+            if !seen.insert(child) || finished || item.state == Value::One(ItemState::Parked) {
                 continue;
             }
             if !self.model.children(child).is_empty() {

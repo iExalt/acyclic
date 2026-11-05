@@ -407,6 +407,8 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         Rule::SelfLink => WriteError::SelfLink(record.map_or("", Record::id).to_owned()).into(),
         Rule::ParentCycle(_) => WriteError::ParentCycle(record.map_or("", Record::id).to_owned()).into(),
         Rule::LinkCycle(cycle) => WriteError::LinkCycle(cycle.clone()).into(),
+        Rule::LineageLink { from, to } => CliError::refused("lineage-link", violation.to_string())
+            .with(json!({"item": from, "waits_for": to})),
         Rule::TitleTaken(other) => {
             let (of, id) = (other.kind(), other.id());
             CliError::refused(
