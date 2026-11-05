@@ -661,7 +661,8 @@ const BOUND: std::time::Duration = std::time::Duration::from_secs(120);
 pub(crate) const MAINTAIN_ARG: &str = "--maintain-store-in-background";
 
 /// Repacks the clone at `path` when git's thresholds are crossed, here and now. Best effort. Whether the attempt is
-/// settled: it ran, or nothing was due. A run that failed or found another one busy isn't.
+/// settled: it ran, or nothing was due. A run that failed, found another one busy, was declined by the `pre-auto-gc` hook
+/// or met a recent `gc.log` isn't, and is tried again by the first command 30 seconds on, for as long as the cause lasts.
 fn run_gc(path: &Path) -> bool {
     let git = Git::new(path);
     let Ok(repo) = git.fresh_handle() else { return false };

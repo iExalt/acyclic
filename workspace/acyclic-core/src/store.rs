@@ -804,8 +804,11 @@ impl Tracker {
             "packed-refs.lock".to_owned(),
         ];
         for entry in own {
-            remove_stale_locks(&common.join(entry));
+            remove_stale_locks(&common.join(entry), STALE_LOCK);
         }
+        // A repack that was killed keeps the lock that stops two repacks at once, which has no age limit of its own; a
+        // live one is bounded at two minutes, so this old is dead.
+        remove_stale_locks(&common.join("objects/maintenance.lock"), STALE_MAINTENANCE_LOCK);
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -1284,19 +1287,18 @@ fn push_failure(state: &str, refused: Vec<Refused>) -> StoreError {
 /// How old a lock file on this replica's own refs is before the next writer removes it.
 const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Removes the lock files at `path` or below it that are older than [`STALE_LOCK`]. Best effort.
-fn remove_stale_locks(path: &Path) {
+/// How old the lock of a repack is before it is taken for a dead one's: well past the longest a repack is let to run.
+const STALE_MAINTENANCE_LOCK: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Removes the lock files at `path` or below it that are at least `stale` old. Best effort.
+fn remove_stale_locks(path: &Path, stale: std::time::Duration) {
     let Ok(meta) = std::fs::symlink_metadata(path) else { return };
     if meta.is_dir() {
         for entry in std::fs::read_dir(path).into_iter().flatten().filter_map(Result::ok) {
-            remove_stale_locks(&entry.path());
+            remove_stale_locks(&entry.path(), stale);
         }
     } else if path.extension().is_some_and(|ext| ext == "lock")
-        && meta
-            .modified()
-            .ok()
-            .and_then(|at| at.elapsed().ok())
-            .is_some_and(|age| age >= STALE_LOCK)
+        && meta.modified().ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age >= stale)
     {
         let _ = std::fs::remove_file(path);
     }
