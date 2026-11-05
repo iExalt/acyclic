@@ -109,6 +109,13 @@ fn refresh_fetches_a_merge_made_since_the_clones_last_fetch() {
     ancestry.refresh(&record).unwrap();
     assert_eq!(ancestry.check(&record, &squashed), Check::Merged);
     assert_eq!(git(&clone, &["branch", "--show-current"]), "work", "the checkout is untouched");
+    // A clone with no default branch to look in fetches it too, as before its first fetch.
+    git(&clone, &["update-ref", "-d", "refs/remotes/origin/main"]);
+    git(&clone, &["branch", "-q", "-D", "main"]);
+    let fresh = GitAncestry::new(|_: &Repository| Some(clone.clone()));
+    assert!(matches!(fresh.check(&record, &squashed), Check::NoBranch(_)));
+    fresh.refresh(&record).unwrap();
+    assert_eq!(fresh.check(&record, &squashed), Check::Merged);
     std::fs::remove_dir_all(&origin).unwrap();
     assert!(ancestry.refresh(&record).is_err(), "a fetch that fails says so");
 }

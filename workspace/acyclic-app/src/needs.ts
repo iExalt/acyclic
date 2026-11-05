@@ -51,8 +51,6 @@ export interface NeedView {
   line: Line | undefined;
   /** What it names, to select: items by id, and threads with the title the entry gives, for one the list lacks. */
   items: string[];
-  /** How many more items it covers than it lists. */
-  more: number;
   threads: { id: string; title: string }[];
   /** The thread the badge-led text names, which the text picks: its row would only repeat it. */
   thread: string | null;
@@ -139,7 +137,6 @@ function viewOf(
     key: str(need.key),
     kind: need.kind,
     line,
-    more: 0,
     items: item === null ? [] : [item.id],
     threads: threads.map((one) => ({ id: one.id, title: titled(one) })),
     actions: [] as Action[],

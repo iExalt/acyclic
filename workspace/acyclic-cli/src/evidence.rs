@@ -64,7 +64,7 @@ pub(crate) fn check(
             continue;
         };
         let mut checked = ancestry.check(record, commit);
-        if matches!(checked, Check::NotMerged | Check::UnknownCommit) {
+        if matches!(checked, Check::NotMerged | Check::UnknownCommit | Check::NoBranch(_)) {
             // A squash commit merged a moment ago isn't in the clone until it fetches.
             let fetched = refreshed.entry(repository).or_insert_with(|| ancestry.refresh(record));
             if let Err(reason) = fetched {
@@ -82,7 +82,9 @@ pub(crate) fn check(
             Check::UnknownCommit => {
                 return Err(refusal(after, (item, repository, commit), "unknown-commit"));
             },
-            Check::Unchecked(reason) => found.push(unchecked(item, repository, commit, &reason)),
+            Check::NoBranch(reason) | Check::Unchecked(reason) => {
+                found.push(unchecked(item, repository, commit, &reason));
+            },
         }
     }
     Ok(found)
@@ -141,7 +143,7 @@ pub(crate) fn audit(env: &Env, model: &Model) -> Json {
             Check::Merged => None,
             Check::NotMerged => Some("not-merged"),
             Check::UnknownCommit => Some("unknown-commit"),
-            Check::Unchecked(_) => {
+            Check::NoBranch(_) | Check::Unchecked(_) => {
                 unchecked += 1;
                 continue;
             },

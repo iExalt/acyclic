@@ -153,6 +153,8 @@ pub enum Check {
     NotMerged,
     /// No commit the clone knows: a typo, or one it hasn't fetched.
     UnknownCommit,
+    /// The clone has no default branch to look in, as before its first fetch of it; the reason says so.
+    NoBranch(String),
     /// Can't be checked on this machine, and why: no clone mapped, no single default branch, or git failing.
     Unchecked(String),
 }
@@ -176,7 +178,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
             .or_insert_with(|| Branch::of(&clone, branch))
         {
             Ok(found) => found,
-            Err(reason) => return Check::Unchecked(reason.clone()),
+            Err(reason) => return Check::NoBranch(reason.clone()),
         };
         if found.has(&clone, commit) {
             return Check::Merged;
@@ -263,7 +265,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
             Check::Merged => Ok(true),
             Check::NotMerged => Ok(false),
             Check::UnknownCommit => Err("no commit the clone knows".to_owned()),
-            Check::Unchecked(reason) => Err(reason),
+            Check::NoBranch(reason) | Check::Unchecked(reason) => Err(reason),
         }
     }
 }

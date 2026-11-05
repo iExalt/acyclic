@@ -205,11 +205,6 @@ export function NeedsList({
                       </button>
                     </li>
                   ))}
-                  {view.more === 0 ? null : (
-                    <li>
-                      <span className="row more">and {view.more} more</span>
-                    </li>
-                  )}
                 </ul>
                 {view.actions.length === 0 ? null : (
                   <div className="actions need-actions">
