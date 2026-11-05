@@ -161,8 +161,15 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   refusal or failure stays on the surface that raised it until that surface closes; a form's warning stays with the
   form. An offered Undo, and a plan that couldn't be read again, wait wherever the user goes, until the next write or
   Dismiss; the Undo stays on offer over a reload of the tab, shown once the plan read then says it can still be undone,
-  and its guard checked again when pressed. Every notice shows in the slot, a bar at the stage's foot in the page's
-  flow, so it covers nothing and a sheet rises above it: one place to look, which doesn't move as panels open and close.
+  and its guard checked again when pressed. App owns one notice, its lifetime, actions and announcement; it chooses
+  where that notice appears. On desktop, and on a phone outside the Map when no panel is open, it uses the slot at the
+  stage's foot in the page's flow. On the Map, a
+  notice floats only when at least 44 px of clear space is available, within a bounded area. In other phone contexts,
+  including a Map without that space or a non-Map panel, it stays closed behind a labeled Notice disclosure in the top
+  bar, in place of the visible view name; the existing semantic h1 remains. A newly arrived notice does not open the
+  disclosure, so one extra tap reveals it. Its bounded scroll area keeps the full text and actions available. The
+  disclosure has explicit open, close and focus behavior. These placements leave forms, the header, Save and Cancel, the
+  Map and its scrolling alone.
   Dismiss is the panels' quiet ✕. A notice of news or an Undo is edged with a rule; the signal's dash is for a refusal,
   a failure or a form's warning, as news needs nothing of the user. One shows at a time: the next replaces it, including
   one a link from a notification brings. (Notices that followed the user to unrelated panels, and floated over the Map's
@@ -179,14 +186,21 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **The ⋯ menu, on a phone,** is a list of plain rows, as Slack's is, 260 px wide: each switch a row, its name at the
   start and the switch, a checkbox drawn as one, at the end, the whole row its target; Theme ruled
   off, a muted caption over the value as a quiet row whose caret ends where the switches do; Refresh a row last.
-- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px, then what
+- **Needs you's entries:** the badge in a column of its own; beside it what the entry asks, bold at 16 px (14 px at
+  650 on a phone), then what
   it names as rows, muted, at 14 px (13 px on a phone), regular and 32 px apart on touch, so the head leads and they
   read as its parts (the user asked for "the thread title … more prominent" and the "line spacing between each item …
   smaller"); each underlines under the pointer, in ink, saying it opens (a stage's icon beside each read as a mark
   without a word), then its action, compact, after what it acts on. An entry the app can only show says what
   failed and what fixes it, in words, never a command to type, and names its item once, as its row. Merges unconfirmed
   for one cause in one repository are one entry, saying how many, its rows the first five, as the same why eight times
-  read as noise; the count still counts each. A hairline between entries.
+  read as noise; the count still counts each. A hairline between entries. Touch headings have equal padding above
+  and below their text, whether they open a thread or are plain text. On a phone, terminal-only multi-thread cycles
+  and grouped unconfirmed merges start with a two-line heading and Show details; one tap reveals their unchanged
+  explanation and records. Entries with decisions and single-record entries stay open. Opening an entry from the
+  Overview or returning to one of its records expands it before restoring focus and scroll.
+- **Phone Threads tiles** use 14 px titles at 500 and 13 px details, with less padding and space between tiles. Their
+  project names, stage counts and dependency information stay available, and each tile keeps its own 44 px target.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
   the pointer.
@@ -235,7 +249,9 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   contiguous title phrases, then the remaining matches. While a move or link waits for its target, it finds the target
   instead. Choosing a result replaces Search with its destination in history; the same destination just closes Search,
   without adding a duplicate visit. It leaves what's under it as it is, never closes a form holding typing, and gives
-  the focus back where it was.
+  the focus back where it was. A touch-only menu starts without a selected result; typing keeps it that way until
+  arrow keys or a mouse choose a row. Enter on a nonempty query opens the first result when none is selected; Enter
+  on an empty, unselected menu does nothing.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
   ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys
   while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M
@@ -249,8 +265,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   back nothing changed since, nor a removed wait or a state once the work it released has started, saying so. It says
   "Undoing…" until done, then what it did (not "Undone": agents' work meanwhile stands), a link said as it reads ("Sow
   now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set
-  X back". Undo sits in the slot, its text two lines at most there, so it says what was done, as its button says what it
-  offers; anything else in the slot wraps, as it is the only place its reason shows.
+  X back". Undo uses the same placement as other notices. Its actions remain available with its full text in the bounded
+  disclosure or floating area; elsewhere its text wraps in the slot.
 - **Settling keeps the keyboard in place.** An action in Needs you is held, not disabled, while its
   write is out, so focus stays on it; only the pressed one looks held, as greying every one said they were all at work.
   Once what it settled goes, focus goes to the next entry's action, else to the view. What a one-press
@@ -275,10 +291,14 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
   the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
   waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.
-- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is a
-  UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
-  item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state first;
-  its editor opens on Title.
+- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is
+  a UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
+  item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state
+  first; its editor opens on Title. A picked thread, then the parent or selected item's thread, takes precedence;
+  otherwise a project's sole visible thread supplies the default. Changing Project updates that default until the
+  user chooses a thread, including Automatic; a reopened draft keeps its choice. Automatic follows the tracker's
+  parent, sibling or ancestor placement policy, leaving no thread when none applies. On a narrow phone the existing
+  actions use the form's spare height at its foot; the tablet keeps its content-height form.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page

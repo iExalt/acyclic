@@ -5,6 +5,7 @@ import { type FormEvent, useRef, useState } from "react";
 import type { NewItem } from "./edits";
 import { useFieldInView, useFocusIn } from "./focus";
 import { Icon, X } from "./icons";
+import { uniqueProjectThread } from "./outline";
 import { uuidv7 } from "./uuid";
 
 export interface AddFormProps {
@@ -15,6 +16,8 @@ export interface AddFormProps {
   /** With no parent, the projects to put it in, and the one it starts in. */
   projects: readonly { id: string; title: string }[];
   project: string | null;
+  /** Visible threads in each project, used only while the thread choice remains automatic. */
+  projectThreads: readonly { id: string; threads: readonly { id: string }[] }[];
   /** Each thread, named as everywhere a badge doesn't stand beside it. */
   threads: readonly { id: string; label: string }[];
   /** What the user wrote before, when a failed add opens the form again. */
@@ -30,6 +33,7 @@ export function AddForm({
   thread: initialThread,
   projects,
   project: initialProject,
+  projectThreads,
   threads,
   draft,
   busy,
@@ -39,8 +43,12 @@ export function AddForm({
   const [title, setTitle] = useState(draft?.title ?? "");
   // A reopened draft keeps its id: the add that failed may have been saved, and sending it again is the same add.
   const [id] = useState(() => draft?.id ?? uuidv7());
-  const [thread, setThread] = useState(draft === null ? initialThread : draft.thread);
+  const [thread, setThread] = useState(
+    draft === null ? (initialThread ?? uniqueProjectThread(initialProject, projectThreads)) : draft.thread,
+  );
   const [project, setProject] = useState(draft === null ? initialProject : draft.parent);
+  const [threadChosen, setThreadChosen] = useState(draft !== null);
+  const inferredThread = (projectId: string | null) => initialThread ?? uniqueProjectThread(projectId, projectThreads);
   const form = useRef<HTMLFormElement>(null);
   useFocusIn(form);
   useFieldInView(form);
@@ -77,7 +85,11 @@ export function AddForm({
           <select
             name="project"
             value={project ?? ""}
-            onChange={(event) => setProject(event.target.value === "" ? null : event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value === "" ? null : event.target.value;
+              setProject(next);
+              if (!threadChosen) setThread(inferredThread(next));
+            }}
           >
             <option value="">None, at the top level</option>
             {projects.map((one) => (
@@ -93,15 +105,21 @@ export function AddForm({
         <select
           name="thread"
           value={thread ?? ""}
-          onChange={(event) => setThread(event.target.value === "" ? null : event.target.value)}
+          onChange={(event) => {
+            setThreadChosen(true);
+            setThread(event.target.value === "" ? null : event.target.value);
+          }}
         >
-          <option value="">None</option>
+          <option value="">Automatic</option>
           {threads.map((one) => (
             <option key={one.id} value={one.id}>
               {one.label}
             </option>
           ))}
         </select>
+        <span className="hint">
+          Uses the parent's, siblings' or ancestor's thread when available; otherwise no thread.
+        </span>
       </label>
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || title.trim() === ""}>

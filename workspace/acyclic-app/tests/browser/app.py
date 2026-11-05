@@ -112,6 +112,44 @@ def run(env, *args):
     return out.stdout
 
 
+def show_notice(page, expected_text=None):
+    """Wait for the expected notice, then explicitly open its pressure disclosure."""
+    notice = page.get_by_test_id("notice")
+    notice.wait_for(state="attached")
+    if expected_text is not None:
+        notice.get_by_text(expected_text).wait_for(state="attached")
+    trigger = page.get_by_test_id("notice-trigger")
+    if trigger.count() and trigger.get_attribute("aria-expanded") == "false":
+        trigger.click()
+    notice.wait_for(state="visible")
+    return notice
+
+
+def close_notice_details(page):
+    """Close only the disclosure before continuing with the underlying task."""
+    trigger = page.get_by_test_id("notice-trigger")
+    if trigger.count() and trigger.get_attribute("aria-expanded") == "true":
+        page.keyboard.press("Escape")
+        page.wait_for_function(
+            "() => document.querySelector('[data-testid=notice-trigger]')?.getAttribute('aria-expanded') === 'false'"
+        )
+
+
+def reveal_need_target(target):
+    """Open only a chosen member's own collapsed details before an explicit pick."""
+    if target.is_visible():
+        return
+    identity = target.evaluate("e => [e.closest('[data-need]')?.dataset.need, e.dataset.pickThread, e.dataset.select]")
+    details = target.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' need-details ')][1]")
+    assert details.count() == 1 and details.evaluate("e => e.hidden"), "target is hidden outside collapsed details"
+    entry = target.locator("xpath=ancestor::*[@data-need][1]")
+    toggle = entry.locator(":scope > .need-disclosure-toggle")
+    assert toggle.count() == 1 and toggle.get_attribute("aria-expanded") == "false"
+    toggle.click()
+    target.wait_for(state="visible")
+    assert target.evaluate("e => [e.closest('[data-need]')?.dataset.need, e.dataset.pickThread, e.dataset.select]") == identity
+
+
 class Plan:
     """The tracker's items, and what the Map's views of them must show."""
 
@@ -697,11 +735,11 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     # over the others, and a thread over it. Two layers, a phone's view away from home one of them, closed quicker than
     # the history moves, leave the address saying what's open.
     page.goto(f"{origin}/?item=no-such-item&thread={plan.first_thread}&needs")
-    notice = page.get_by_test_id("notice")
-    notice.wait_for(timeout=10_000)
+    notice = show_notice(page)
     if "isn't in the plan" not in notice.inner_text():
         failures.append(f"{name}: a link to a missing item said {notice.inner_text()!r}")
     page.get_by_test_id("needs").wait_for(timeout=5_000)
+    close_notice_details(page)
     page.keyboard.press("Escape")
     page.keyboard.press("Escape")
     page.locator("[data-testid=thread-panel]").wait_for(state="detached", timeout=5_000)
@@ -729,7 +767,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         draft.fill("Typed, not saved")
         page.go_back()
         try:
-            page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
+            show_notice(page, "Unsaved changes").get_by_text("Unsaved changes").wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back over an editor holding typing didn't say so")
         landed = nav_entry(page)
@@ -742,6 +780,7 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             failures.append(
                 f"{name}: Back over the dirty editor lost its draft or overwrote the landed Overview: {landed}"
             )
+        close_notice_details(page)
         inspector.get_by_role("button", name="Cancel", exact=True).click()
     else:
         page.go_back()
@@ -1006,11 +1045,12 @@ def history_journey(context, origin, view, plan, name, failures):
         draft = inspector.locator("input[name=title]")
         draft.fill("History draft, not saved")
         search("view:needs", "Needs you")
-        page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
+        show_notice(page, "Unsaved changes").get_by_text("Unsaved changes").wait_for(timeout=5_000)
         at_entry(item_entry)
         assert draft.input_value() == "History draft, not saved", (
             "Search refusal lost the draft"
         )
+        close_notice_details(page)
         before = int(page.locator("main.stage").get_attribute("data-reads"))
         search("refresh", "Refresh")
         page.wait_for_function(
@@ -1043,8 +1083,85 @@ def command_journey(page, view, origin, plan, name, failures):
     entries take the page's width in columns, and a thread one names goes to the Map and closes back."""
     search_selection_journey(page.context, origin, plan, name, failures)
     id = min(one for one in plan.items if plan.depth(one) == 2 and plan.shown(one, False))
+    title_counts = Counter(item["title"] for item in plan.items.values())
+    unique_titles = [
+        one
+        for one, item in plan.items.items()
+        if plan.depth(one) == 2
+        and plan.shown(one, False)
+        and title_counts[item["title"]] == 1
+    ]
+    if unique_titles:
+        id = min(unique_titles)
+    else:
+        failures.append(f"{name}: the plan has no unique visible title for touch Enter coverage")
     title = plan.items[id]["title"]
     to_map(page)
+    if view.get("has_touch"):
+        # Earlier journeys send hardware keys on this page. A new document leaves the phone's keyboard hint unset,
+        # so this proves the command menu's cold touch behavior rather than a menu opened after a keyboard was used.
+        cold = page.context.new_page()
+        cold.route(
+            "**/*",
+            lambda route: route.continue_()
+            if route.request.url.startswith(origin)
+            else route.abort(),
+        )
+        cold.goto(origin)
+        cold.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
+        cold.locator("[data-action=search]").tap()
+        menu = cold.get_by_test_id("command-menu")
+        menu.wait_for(timeout=5_000)
+        query = menu.locator("input")
+        rows = menu.locator(".command-row")
+        if (
+            query.get_attribute("aria-activedescendant") is not None
+            or rows.evaluate_all(
+                "rows => rows.some(row => row.getAttribute('aria-selected') === 'true')"
+            )
+        ):
+            failures.append(f"{name}: a cold touch command menu started with a selected result")
+        before = cold.url
+        cold.keyboard.press("Enter")
+        if menu.count() != 1 or cold.url != before:
+            failures.append(f"{name}: Enter on a blank cold touch command menu ran a command")
+        query.fill(title)
+        row = cold.locator(f".command-row[data-command='item:{id}']")
+        row.wait_for(timeout=5_000)
+        if (
+            query.get_attribute("aria-activedescendant") is not None
+            or rows.evaluate_all(
+                "rows => rows.some(row => row.getAttribute('aria-selected') === 'true')"
+            )
+        ):
+            failures.append(f"{name}: typing in a touch command menu selected a result")
+        query.press("Enter")
+        cold.locator("[data-testid=inspector] h2").wait_for(timeout=5_000)
+        if parse_qs(urlsplit(cold.url).query).get("item") != [id]:
+            failures.append(f"{name}: Enter on an unset touch exact title didn't open {id}: {cold.url}")
+
+        # Reload gives the second arrow check a fresh menu and an unset selection after the first key.
+        cold.goto(origin)
+        cold.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
+        cold.locator("[data-action=search]").tap()
+        menu = cold.get_by_test_id("command-menu")
+        menu.wait_for(timeout=5_000)
+        rows = menu.locator(".command-row")
+        cold.keyboard.press("ArrowDown")
+        if rows.first.get_attribute("aria-selected") != "true":
+            failures.append(f"{name}: ArrowDown from unset touch selection didn't choose the first command")
+        menu.get_by_role("button", name="Close").tap()
+        menu.wait_for(state="detached", timeout=5_000)
+        cold.locator("[data-action=search]").tap()
+        menu.wait_for(timeout=5_000)
+        rows = menu.locator(".command-row")
+        query = menu.locator("input")
+        if query.get_attribute("aria-activedescendant") is not None:
+            failures.append(f"{name}: a fresh touch command menu didn't start with unset selection")
+        cold.keyboard.press("ArrowUp")
+        if rows.last.get_attribute("aria-selected") != "true":
+            failures.append(f"{name}: ArrowUp from unset touch selection didn't choose the last command")
+        cold.close()
     menu = page.get_by_test_id("command-menu")
     if view.get("has_touch"):
         page.locator("[data-action=search]").tap()
@@ -1315,7 +1432,8 @@ def keys_journey(page, plan, name, failures):
     was = title.input_value()
     title.fill(f"{was} for undo")
     form.locator("button[type=submit]").click()
-    page.get_by_test_id("notice").get_by_role("button", name="Undo").wait_for(timeout=10_000)
+    notice = show_notice(page)
+    notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
     page.evaluate("() => document.activeElement?.blur()")
     writes = []
 
@@ -1330,7 +1448,7 @@ def keys_journey(page, plan, name, failures):
     page.on("request", wrote_edit)
     page.keyboard.press("ControlOrMeta+z")
     page.keyboard.press("ControlOrMeta+z")
-    page.get_by_text(f"Set {was} back").wait_for(timeout=10_000)
+    show_notice(page, f"Set {was} back").get_by_text(f"Set {was} back").wait_for(timeout=10_000)
     page.wait_for_timeout(300)
     if heading.inner_text() != was or len(writes) != 1:
         failures.append(f"{name}: ⌘Z twice left the title {heading.inner_text()!r}, in {len(writes)} writes")
@@ -2299,18 +2417,18 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
     edge = f"{first}->{added}"
     item_action(page, "waits-for")
-    # A target refused, the box holding it, says why in the slot, whole however narrow the screen: the link waits on.
+    # A target refused, the box holding it, shows its whole reason however narrow the screen: the link waits on.
     tap_middle(page, view, second)
-    refused = page.locator(".slot [data-testid=notice]")
+    refused = show_notice(page)
     try:
         refused.wait_for(timeout=5_000)
         whole = refused.locator("span").first.evaluate("s => s.scrollWidth <= s.clientWidth + 1")
         if not whole or not page.get_by_test_id("prompt").is_visible():
             failures.append(f"{name}: a refused target's reason was cut, or the link stopped waiting")
     except PlaywrightTimeout:
-        failures.append(f"{name}: a refused target said nothing in the slot")
-    page.locator(".slot [aria-label=Dismiss]").click()
-    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+        failures.append(f"{name}: a refused target showed no notice")
+    refused.get_by_role("button", name="Dismiss").click()
+    page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
     tap_middle(page, view, first)
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
     page.wait_for_function(
@@ -2330,7 +2448,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # Undoing the link addition is also a write: it restores the same root frame while removing the edge.
     frame = settled_corner(page, root)
     zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
-    page.get_by_test_id("notice").get_by_role("button", name="Undo").click()
+    show_notice(page).get_by_role("button", name="Undo").click()
     page.wait_for_function(
         "edge => document.querySelector('[data-testid=map]').cy.getElementById(edge).empty()",
         arg=edge,
@@ -2356,15 +2474,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
         arg=[edge, first],
         timeout=10_000,
     )
-    # Unlinked from the inspector: gone from the Map and the tracker. Its Undo waits in the slot at the stage's foot,
-    # which takes its height from the Map without moving what the Map shows.
-    page.locator(".slot [aria-label=Dismiss]").click()
-    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+    # Unlinked from the inspector: gone from the Map and tracker, with Undo offered without moving the sheet or Map.
+    show_notice(page).get_by_role("button", name="Dismiss").click()
+    page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
     frame = settled_corner(page, root)
     zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
-    page.locator(".slot [data-testid=notice]").wait_for(timeout=5_000)
+    notice = show_notice(page)
     wait_drawn(page, base + 1)
     held(page, root, frame, "unlinking a wait", name, failures)
     after_unlink_zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
@@ -2384,7 +2501,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
         name,
     )
     # Undone, the link is back; unlinked again and linked meanwhile from elsewhere, the undo refuses, sending nothing.
-    notice = page.get_by_test_id("notice")
+    notice = show_notice(page)
     frame = settled_corner(page, root)
     notice.get_by_role("button", name="Undo").click()
     wait_inspector(page, f"[data-testid=waits-for] [data-select='{first}']")
@@ -2405,6 +2522,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     )
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
+    notice = show_notice(page)
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
     run(env, "item", "edit", added, "--waits-for", first)
     # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
@@ -2415,12 +2533,13 @@ def edit_journey(page, view, env, plan, box, name, failures):
         and sent.append(request.post_data)
     )
     page.on("request", listen)
-    notice.get_by_role("button", name="Undo").click()
-    page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
+    show_notice(page).get_by_role("button", name="Undo").click()
+    show_notice(page, "Changed since, so it can't be undone").get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
     page.remove_listener("request", listen)
     if sent:
         failures.append(f"{name}: a refused undo sent {sent}")
     # Unlinked once more, as the journeys after expect.
+    close_notice_details(page)
     unlink(page, "waits-for")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
@@ -2484,7 +2603,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     editor = page.get_by_test_id("item-form")
     editor.locator("textarea[name=notes]").fill("Frame proof notes")
     editor.get_by_role("button", name="Save").click()
-    notice = page.get_by_test_id("notice")
+    notice = show_notice(page)
     notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, count)
@@ -2497,7 +2616,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         for axis in ("sx", "sy")
     ):
         failures.append(f"{name}: a Notes-only save changed the selected frame: {before} -> {written_notes}")
-    notice.get_by_role("button", name="Undo").click()
+    show_notice(page).get_by_role("button", name="Undo").click()
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, count)
     undone_notes = geometry([project, other, chain[-2]])
@@ -2509,8 +2628,8 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         for axis in ("sx", "sy")
     ):
         failures.append(f"{name}: Undoing Notes changed the selected frame: {before} -> {undone_notes}")
-    page.locator(".slot [aria-label=Dismiss]").click()
-    page.locator(".slot").wait_for(state="detached", timeout=5_000)
+    show_notice(page).get_by_role("button", name="Dismiss").click()
+    page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
     dismissed_notes = geometry([project, other, chain[-2]])
     if dismissed_notes["zoom"] != before["zoom"] or any(
         abs(dismissed_notes["pan"][axis] - before["pan"][axis]) > 0.5 for axis in ("x", "y")
@@ -2523,6 +2642,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     layouts_before = int(page.get_by_test_id("map").get_attribute("data-layouts") or 0)
     unlink(page, "waited-on-by")
     wait_inspector(page, "[data-testid=waited-on-by]", state="detached")
+    show_notice(page)
     page.get_by_role("button", name="Undo").wait_for(timeout=10_000)
     page.wait_for_function(
         "([n, layouts, project, other, oldHeight, oldY]) => {"
@@ -2557,6 +2677,7 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         failures.append(f"{name}: the selected item moved on screen during the shrink")
 
     frame = settled_corner(page, project)
+    show_notice(page)
     page.get_by_role("button", name="Undo").click()
     wait_inspector(page, f"[data-testid=waited-on-by] [data-select='{chain[-1]}']")
     wait_drawn(page, count)
@@ -2619,7 +2740,7 @@ def guarded_undo_race(page, view, env, plan, name, failures, errors):
     elsewhere = f"Concurrent edit {id[-6:]}"
     title.fill(changed)
     form.locator("button[type=submit]").click()
-    notice = page.get_by_test_id("notice")
+    notice = show_notice(page)
     notice.get_by_role("button", name="Undo").wait_for(timeout=10_000)
 
     requests = []
@@ -2646,8 +2767,8 @@ def guarded_undo_race(page, view, env, plan, name, failures, errors):
 
     page.route("**/api/command", interleave)
     try:
-        notice.get_by_role("button", name="Undo").click()
-        page.get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
+        show_notice(page).get_by_role("button", name="Undo").click()
+        show_notice(page, "Changed since, so it can't be undone").get_by_text("Changed since, so it can't be undone").wait_for(timeout=10_000)
     finally:
         page.unroute("**/api/command", interleave)
         page.remove_listener("response", guarded_response)
@@ -2694,7 +2815,7 @@ def failed_add_journey(page, errors, name, failures):
     page.keyboard.press("Escape")
     if (
         not form.count()
-        or not page.locator(".slot [data-testid=notice]").get_by_text("Unsaved changes").count()
+        or not page.get_by_test_id("notice").get_by_text("Unsaved changes").count()
     ):
         failures.append(f"{name}: Escape threw away an add form's typed title")
     # Nor does Back.
@@ -2745,7 +2866,7 @@ def failed_add_journey(page, errors, name, failures):
     editor.locator("input[name=title]").fill("Refused edit")
     editor.locator("textarea[name=notes]").fill("Notes typed on the phone")
     editor.locator("button[type=submit]").click()
-    page.get_by_test_id("notice").wait_for(timeout=10_000)
+    show_notice(page)
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     page.unroute("**/api/command")
     if (
@@ -2759,6 +2880,7 @@ def failed_add_journey(page, errors, name, failures):
             f"{name}: a refused edit didn't give back what was typed over the item as it was"
         )
     if editor.count():
+        close_notice_details(page)
         editor.get_by_role("button", name="Cancel").click()
     print(f"{name}: a form kept its typing through Escape and Back, and a refused edit gave back what was typed")
 
@@ -2796,6 +2918,42 @@ def form_journey(page, view, env, remote, id, name, failures):
     form.locator("select[name=size]").select_option("m")
     form.locator("textarea[name=notes]").fill("Plain notes")
     if view == VIEWS["phone"]:
+        # A link offered while typing belongs to the notice, so Enter cannot submit the dirty editor.
+        before = form.evaluate(
+            "f => { const clipboard = navigator.clipboard;"
+            " const descriptor = clipboard && Object.getOwnPropertyDescriptor(clipboard, 'writeText');"
+            " if (clipboard) Object.defineProperty(clipboard, 'writeText', {configurable:true,"
+            " value:() => Promise.reject(new Error('Clipboard unavailable'))});"
+            " let submits = 0; const count = () => submits++;"
+            " f.addEventListener('submit', count, {capture:true, passive:true});"
+            " window.noticeSubmitProof = {form:f, count:() => submits, cleanup:() => {"
+            " f.removeEventListener('submit', count, true);"
+            " if (clipboard) { if (descriptor) Object.defineProperty(clipboard, 'writeText', descriptor);"
+            " else delete clipboard.writeText; } }};"
+            " return [f.elements.title.value, f.elements.notes.value]; }"
+        )
+        try:
+            item_action(page, "copy-link")
+            notice = show_notice(page)
+            link = page.get_by_test_id("link-to-copy")
+            link.wait_for(timeout=5_000)
+            outside = link.evaluate("input => input.form === null")
+            link.press("Enter")
+            kept = page.evaluate(
+                "() => { const p = window.noticeSubmitProof, f = p.form;"
+                " return [p.count(), f.isConnected, f.elements.title.value, f.elements.notes.value]; }"
+            )
+            if not outside or kept != [0, True, *before]:
+                failures.append(f"{name}: notice Link Enter reached the dirty editor: outside={outside}, kept={kept}")
+        finally:
+            try:
+                notice = page.get_by_test_id("notice")
+                if notice.count():
+                    notice.get_by_role("button", name="Dismiss", exact=True).click()
+            finally:
+                page.evaluate("() => { window.noticeSubmitProof.cleanup(); delete window.noticeSubmitProof; }")
+                if form.count():
+                    form.locator("input[name=title]").focus()
         # A keyboard shrinks the page to a sliver over the title being typed: Save and Cancel, at the form's foot,
         # must stay in it.
         size = page.viewport_size
@@ -3021,9 +3179,18 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: the Needs you tab showed no list")
         return
+    # A grouped terminal-only entry opens its details with one tap; its member then returns to the same control.
+    disclosure = needs.locator(".need-disclosure-toggle").first
+    disclosure.wait_for(timeout=5_000)
+    disclosure.click()
+    disclosure.locator("..").locator(".need-details").wait_for(timeout=5_000)
+    if disclosure.get_attribute("aria-expanded") != "true":
+        failures.append(f"{name}: Needs you's grouped entry didn't reveal its details")
     # A thread picked from the list goes to the Map, as any thread does; closing it comes back to the view.
     viewed = "() => new URLSearchParams(location.search).get('view')"
-    needs.locator("[data-pick-thread]").first.click()
+    first_picker = needs.locator("[data-pick-thread]").first
+    reveal_need_target(first_picker)
+    first_picker.click()
     try:
         page.get_by_test_id("thread-panel").wait_for(timeout=5_000)
         if page.evaluate(viewed) != "map":
@@ -3031,6 +3198,9 @@ def needs_journey(page, env, plan, thread, name, failures):
         page.keyboard.press("Escape")
         page.get_by_test_id("thread-panel").wait_for(state="detached", timeout=5_000)
         needs.wait_for(timeout=5_000)
+        first_picker.wait_for(state="visible", timeout=5_000)
+        if not first_picker.evaluate("e => e === document.activeElement"):
+            failures.append(f"{name}: Back did not restore the chosen needs-you member without another expansion")
         if page.evaluate(viewed) != "needs":
             failures.append(f"{name}: closing a thread from Needs you left the view at {page.url}")
     except PlaywrightTimeout:
@@ -3038,6 +3208,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     # An item likewise, selected on the Map; its panel's ✕ comes back.
     row = needs.locator("button.row[data-select]").first
     if row.count():
+        reveal_need_target(row)
         row.click()
         inspector = page.get_by_test_id("inspector")
         try:
@@ -3106,6 +3277,8 @@ def needs_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: no entry picks a thread")
     else:
         picked = picker.get_attribute("data-pick-thread")
+        reveal_need_target(picker)
+        assert picker.get_attribute("data-pick-thread") == picked
         picker.click()
         panel = page.get_by_test_id("thread-panel")
         panel.wait_for(timeout=10_000)

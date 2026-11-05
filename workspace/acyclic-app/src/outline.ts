@@ -68,3 +68,13 @@ export function currentRows(
   const project = outline.projects.some((one) => one.id === root) ? root : null;
   return { project, thread: model.items.get(selected)?.thread ?? null };
 }
+
+/** A project's default thread only when its visible work belongs to exactly one thread. */
+export function uniqueProjectThread(
+  project: string | null,
+  projects: readonly { id: string; threads: readonly { id: string }[] }[],
+): string | null {
+  if (project === null) return null;
+  const threads = projects.find((one) => one.id === project)?.threads ?? [];
+  return threads.length === 1 ? (threads[0]?.id ?? null) : null;
+}

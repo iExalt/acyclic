@@ -28,6 +28,7 @@ import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from
 import { byTitle, linesOf } from "./lines";
 import { buildModel, inArchived } from "./map/model";
 import { NeedsList } from "./NeedsList";
+import { NoticePlacement } from "./NoticePlacement";
 import { Notify } from "./Notify";
 import {
   addressOf,
@@ -128,6 +129,12 @@ function rowsInView(): HTMLElement[] {
 }
 
 export function App() {
+  const noticeStage = useRef<HTMLElement>(null);
+  const noticeChrome = useRef<HTMLDivElement>(null);
+  const selectNoticeLink = useCallback(
+    (field: HTMLInputElement | null) => field?.setSelectionRange(0, field.value.length),
+    [],
+  );
   const [showArchived, setShowArchived] = useState(false);
   /**
    * Where the user is, and what the moves since the last render asked of what is drawn. `placeNow` is the place as of
@@ -729,8 +736,7 @@ export function App() {
   const noticeView =
     // One a reload brought back shows once the plan read since says it can still be undone.
     notice === null || notice.restored ? null : (
-      // News is told by the status line below, always there, as a live region must be to be heard.
-      <div className="notice" role={notice.polite ? undefined : "alert"} data-testid="notice" data-lasts={notice.lasts}>
+      <div className="notice" data-testid="notice" data-lasts={notice.lasts}>
         <span className={notice.link === undefined ? "grow" : undefined} title={notice.text}>
           {notice.text}
         </span>
@@ -741,14 +747,15 @@ export function App() {
         )}
         {notice.link === undefined ? null : (
           <input
+            key={notice.link}
             className="grow"
             readOnly
             value={notice.link}
             aria-label="Link"
             data-testid="link-to-copy"
             // Selected, so a long press or ⌘C copies it.
-            ref={(field) => field?.select()}
-            onFocus={(event) => event.target.select()}
+            ref={selectNoticeLink}
+            onClick={(event) => event.currentTarget.select()}
           />
         )}
         {notice.offer === "undo" && notice.undo !== undefined ? (
@@ -851,6 +858,7 @@ export function App() {
   const goTo = (to: View, at: string | null = null) => go({ kind: "goTo", view: to, at });
   return (
     <Shell
+      noticeHost={noticeChrome}
       wide={wide}
       count={shown.length}
       view={view}
@@ -882,8 +890,11 @@ export function App() {
       <p className="visually-hidden" role="status">
         {notice?.polite ? notice.text : ""}
       </p>
+      <p className="visually-hidden" role="alert">
+        {notice !== null && !notice.polite ? notice.text : ""}
+      </p>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
-      <main className="stage" data-busy={busy} aria-busy={busy} data-reads={reads}>
+      <main ref={noticeStage} className="stage" data-busy={busy} aria-busy={busy} data-reads={reads}>
         <Suspense
           fallback={
             <p className="status" role="status">
@@ -980,6 +991,7 @@ export function App() {
             thread={thread ?? model?.items.get(adding.parent ?? selected ?? "")?.thread ?? null}
             projects={outline?.projects ?? []}
             project={current.project}
+            projectThreads={outline?.projects ?? []}
             threads={sorted.map((one) => ({ id: one.id, label: one.title }))}
             draft={adding.draft}
             busy={busy}
@@ -1059,9 +1071,15 @@ export function App() {
           />
         ) : null}
       </main>
-      {/* The slot, where every notice shows: at the stage's foot, in its flow, so it covers nothing and a sheet rises
-          above it. */}
-      {noticeView === null ? null : <div className="slot">{noticeView}</div>}
+      <NoticePlacement
+        notice={noticeView}
+        phone={!wide}
+        mapActive={view === "map"}
+        stage={noticeStage}
+        chrome={noticeChrome}
+        context={`${view}/${panel}/${selected}/${thread}`}
+        suspended={showCommand}
+      />
     </Shell>
   );
 }
