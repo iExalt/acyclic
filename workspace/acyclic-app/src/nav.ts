@@ -1,8 +1,8 @@
 // Where the user is in the app, and how each thing they do moves them: the view, the item and the thread open, what
 // those were opened from, and what is open over them. Each way of moving is one intent, which `navigate` turns into
 // the next place and the requests it makes of what is drawn (an item to bring into view, a thread to frame, an editor
-// to open). Then the layers the place stacks, which Escape and Back close one by one, the history entries that follow
-// them, and the address that names what is open. Pure, so the rules are tested without a browser.
+// to open). Then the layers the place stacks, which Escape and Back close one by one, what a history entry remembers
+// of the place, and the address that names what is open. Pure, so the rules are tested without a browser.
 
 import type { Edited, Mode, NewItem } from "./edits";
 import { HOME, type View } from "./Shell";
@@ -117,6 +117,8 @@ export interface Step {
 export type Intent =
   /** An item chosen anywhere but on the Map, which goes to the Map for it, brought into view. */
   | { kind: "select"; id: string; pin: string | null }
+  /** A linked item followed from the Inspector, keeping the existing origin so Back retraces the visit. */
+  | { kind: "follow"; id: string; pin: string | null }
   /** A tap on the Map: an item, or the background (null), which makes the Map where the user is. */
   | { kind: "tap"; id: string | null }
   /** The item selected went away, deleted or hidden with archived items. */
@@ -191,18 +193,11 @@ function move(place: Place, intent: Intent, world: World): Step {
   const only = (next: Place): Step => ({ place: next, requests: {} });
   switch (intent.kind) {
     case "select": {
-      const { id, pin } = intent;
-      // An item chosen from a thread's panel keeps where the thread came from, for the thread's close.
-      const cameFrom =
-        place.view !== "map"
-          ? { view: place.view, by: "item" as const }
-          : place.thread !== null && place.cameFrom?.by === "thread"
-            ? place.cameFrom
-            : null;
-      return {
-        place: { ...place, item: id, thread: pickedAfter(place.thread, id, world), cameFrom, view: "map" },
-        requests: { focus: { id, pin } },
-      };
+      return selectItem(place, intent.id, intent.pin, world);
+    }
+    case "follow": {
+      if (world.dirty) return { place, requests: { unsaved: true } };
+      return selectItem(place, intent.id, intent.pin, world);
     }
     case "tap":
       return only({
@@ -246,7 +241,7 @@ function move(place: Place, intent: Intent, world: World): Step {
       // An item is shown on the Map, so going to another view leaves it. The Overview and Needs you are lists, over
       // which a thread's panel would only cover what the user went to see; the Threads view shows it picked.
       const to = intent.view;
-      let next: Place = { ...place, view: to };
+      let next: Place = { ...place, view: to, cameFrom: null };
       if (to !== "map") next = { ...next, item: null };
       if (to === "overview" || to === "needs") next = { ...next, thread: null };
       // Needs you from its top, or at the entry asked for: only closing what an entry opened comes back where it was.
@@ -331,6 +326,19 @@ function move(place: Place, intent: Intent, world: World): Step {
   }
 }
 
+/** A non-canvas item choice: preserve its origin, except when leaving a picked thread. */
+function selectItem(place: Place, id: string, pin: string | null, world: World): Step {
+  const thread = pickedAfter(place.thread, id, world);
+  const cameFrom =
+    place.cameFrom?.by === "thread" && thread === null
+      ? { view: place.cameFrom.view, by: "item" as const }
+      : (place.cameFrom ?? (place.view === "map" ? null : { view: place.view, by: "item" as const }));
+  return {
+    place: { ...place, item: id, thread, cameFrom, view: "map" },
+    requests: { focus: { id, pin } },
+  };
+}
+
 /**
  * Closes one layer: an item chosen from a thread's panel goes back to the thread, whose own close goes back further, to
  * the item it was opened from if that is still shown, brought into view.
@@ -376,8 +384,6 @@ function itemUnder(place: Place, world: Pick<World, "has" | "archived">): string
 // never closes a panel hidden under the one in view; and one history entry per layer open, so Back on a phone closes
 // them one by one before it leaves the app.
 
-export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
-
 export interface Open {
   /** The command menu: over everything, as it can be opened from anywhere. */
   command: boolean;
@@ -398,6 +404,8 @@ export interface Open {
   away: boolean;
 }
 
+export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
+
 /** What of `place` is open as a layer: an item only once drawn; the projects' sheet and a view away only on a phone. */
 export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wide">): Open {
   return {
@@ -408,7 +416,7 @@ export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wi
     projects: place.overlays.projects && !world.wide,
     thread: place.thread !== null,
     under: itemUnder(place, world) !== null,
-    away: !world.wide && place.view !== HOME,
+    away: !world.wide && place.view !== HOME && !(place.view === "map" && place.cameFrom?.view === HOME),
   };
 }
 
@@ -425,65 +433,6 @@ export const topLayer = (open: Open): Layer | null => openLayers(open)[0] ?? nul
 
 /** How many layers are open, each with its own history entry. */
 export const depth = (open: Open): number => openLayers(open).length;
-
-/**
- * The app's entries in the history: one per layer open, each holding how many layers it stands for, so Back lands on
- * one saying how many should stay open. `waiting` while a move back the app made itself hasn't landed yet: pushing
- * then would put the new entry where that move is about to leave.
- */
-export interface Entries {
-  pushed: number;
-  waiting: boolean;
-  /**
-   * Forward landed on an entry whose layers open again from its address. Once they have, the entry is relabelled with
-   * how many did, as one may stand for layers no address names, such as the command menu: going back from there would
-   * only meet Forward again.
-   */
-  restoring?: boolean;
-}
-
-export type HistoryAction =
-  | { kind: "push"; from: number; to: number }
-  | { kind: "back"; by: number }
-  /** Back, over `by` entries, closes as many layers from the top. */
-  | { kind: "close"; by: number }
-  /** Forward: open what the entry's address names. */
-  | { kind: "restore" }
-  /** The entry shown stands for `layers` layers. */
-  | { kind: "relabel"; layers: number }
-  | null;
-
-/** Brings the entries to `open` layers: pushing more as they open, going back over the extra as the app closes them. */
-export function follow(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
-  if (entries.restoring) return restored(entries, open);
-  if (entries.waiting || open === entries.pushed) return { entries, action: null };
-  if (open > entries.pushed)
-    return { entries: { pushed: open, waiting: false }, action: { kind: "push", from: entries.pushed, to: open } };
-  return { entries: { pushed: open, waiting: true }, action: { kind: "back", by: entries.pushed - open } };
-}
-
-/**
- * Where a move through the history landed, on an entry standing for `at` layers, with `open` layers open: the app's
- * own move back done, which may let a push it held wait go ahead; Back, which closes the layer on top; or Forward,
- * which opens again what the entry's address names.
- */
-export function arrived(entries: Entries, at: number, open: number): { entries: Entries; action: HistoryAction } {
-  if (entries.waiting) return follow({ ...entries, waiting: false }, open);
-  if (at > entries.pushed)
-    return { entries: { pushed: at, waiting: false, restoring: true }, action: { kind: "restore" } };
-  if (at === entries.pushed) return { entries, action: null };
-  return { entries: { pushed: at, waiting: false }, action: { kind: "close", by: entries.pushed - at } };
-}
-
-/**
- * The entries once what Forward restored is open, or once its address waits behind a form: the entry shown says how
- * many layers are open, never moving through the history, and a layer more than it counted takes an entry of its own.
- */
-export function restored(entries: Entries, open: number): { entries: Entries; action: HistoryAction } {
-  const settled = { pushed: open, waiting: false };
-  if (open > entries.pushed) return { entries: settled, action: { kind: "push", from: entries.pushed, to: open } };
-  return { entries: settled, action: open < entries.pushed ? { kind: "relabel", layers: open } : null };
-}
 
 // The app's address: what is open, in the query, so the address bar always says it and a link opens it again. Only
 // what a link should bring back is in it: the view (Needs you at an entry), an item and a thread. The add form, the
@@ -539,28 +488,97 @@ export function parse(search: string): Wanted {
 /** What a history entry holds of the place it was written at: never what passes, the overlays, nor any request. */
 export const stored = (place: Place): Place => ({ ...place, overlays: CLOSED });
 
-/** Whether two places are the same, as an entry holds them. */
-export const samePlace = (a: Place | null, b: Place | null): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** A history entry's place at each open-layer depth, with each state projected independently from the current one. */
+export function placesByDepth(place: Place, world: World): Place[] {
+  let current = place;
+  const projected = [stored(current)];
+  for (const layer of openLayers(openOf(place, world))) {
+    current = shut(current, layer, world).place;
+    projected.push(stored(current));
+  }
+  return projected.reverse();
+}
 
-const idOrNull = (value: unknown): value is string | null => value === null || typeof value === "string";
+/** Whether two stored places match by the fields history persists. `stored` closes transient overlays first. */
+export const samePlace = (a: Place | null, b: Place | null): boolean =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.view === b.view &&
+    a.item === b.item &&
+    a.thread === b.thread &&
+    a.needsAt === b.needsAt &&
+    sameCameFrom(a.cameFrom, b.cameFrom) &&
+    sameNeedsLeft(a.needsLeft, b.needsLeft));
+
+const sameCameFrom = (a: CameFrom | null, b: CameFrom | null) =>
+  a === b || (a !== null && b !== null && a.view === b.view && a.by === b.by && a.item === b.item);
+const sameNeedsLeft = (a: NeedsLeft | null, b: NeedsLeft | null) =>
+  a === b || (a !== null && b !== null && a.top === b.top && a.entry === b.entry && a.control === b.control);
+
+const idOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && value.length > 0);
+const plainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const needsControl = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+
+function cameFromIn(value: unknown): CameFrom | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!plainObject(value) || !VIEWS.some((one) => one === value.view)) return undefined;
+  if (value.by !== "item" && value.by !== "thread") return undefined;
+  if (Object.hasOwn(value, "item") && (value.by !== "thread" || typeof value.item !== "string" || value.item === ""))
+    return undefined;
+  return value.by === "thread" && typeof value.item === "string"
+    ? { view: value.view as View, by: value.by, item: value.item }
+    : { view: value.view as View, by: value.by };
+}
+
+function needsLeftIn(value: unknown): NeedsLeft | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (
+    !plainObject(value) ||
+    typeof value.top !== "number" ||
+    !Number.isFinite(value.top) ||
+    value.top < 0 ||
+    typeof value.entry !== "string" ||
+    value.entry === "" ||
+    !needsControl(value.control)
+  )
+    return undefined;
+  return { top: value.top, entry: value.entry, control: value.control };
+}
 
 /**
  * The place a history entry holds, or null for one that holds none, as entries written before places were do, or one
  * not this app's: those open what their address names, as a link does.
  */
 export function placeIn(state: unknown): Place | null {
-  const place = (state as { place?: Partial<Place> } | null)?.place;
-  if (typeof place !== "object" || place === null) return null;
+  if (!plainObject(state) || !plainObject(state.place)) return null;
+  const place = state.place;
   const { view, item, thread, needsAt, cameFrom, needsLeft } = place;
-  if (!VIEWS.some((one) => one === view) || !idOrNull(item) || !idOrNull(thread)) return null;
+  const origin = cameFromIn(cameFrom);
+  const left = needsLeftIn(needsLeft);
+  if (
+    !VIEWS.some((one) => one === view) ||
+    !idOrNull(item) ||
+    !idOrNull(thread) ||
+    (needsAt !== undefined && !idOrNull(needsAt)) ||
+    origin === undefined ||
+    left === undefined
+  )
+    return null;
   return {
     ...START,
     view: view as View,
     item,
     thread,
-    needsAt: idOrNull(needsAt) ? needsAt : null,
-    cameFrom: typeof cameFrom === "object" && cameFrom !== null ? cameFrom : null,
-    needsLeft: typeof needsLeft === "object" && needsLeft !== null ? needsLeft : null,
+    needsAt: needsAt ?? null,
+    cameFrom: origin,
+    needsLeft: left,
   };
 }
 

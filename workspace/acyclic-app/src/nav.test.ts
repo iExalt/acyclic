@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addressOf,
-  arrived,
   depth,
   type Found,
-  follow,
   type Intent,
   landing,
   landingPlace,
@@ -15,9 +13,10 @@ import {
   type Place,
   parse,
   placeIn,
-  restored,
+  placesByDepth,
   START,
   type Step,
+  samePlace,
   stored,
   topLayer,
   type Wanted,
@@ -54,6 +53,57 @@ describe("select", () => {
     });
     expect(go(fromThreads, { kind: "select", id: "c", pin: null }).place.thread).toBeNull();
     expect(go(onMap, { kind: "select", id: "a", pin: null }).place.thread).toBeNull();
+  });
+});
+
+describe("follow", () => {
+  const phone = { ...world, wide: false };
+  const layers = (place: Place) => depth(openOf(place, phone));
+
+  it("preserves a home item origin through Search selection and Inspector follow", () => {
+    const homeItem = go(overview, { kind: "select", id: "a", pin: null }).place;
+    const followed = go(homeItem, { kind: "follow", id: "b", pin: null });
+    const searched = go(homeItem, { kind: "select", id: "b", pin: null });
+    expect(followed.place.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect(searched.place.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect([layers(followed.place), layers(searched.place)]).toEqual([1, 1]);
+    expect(followed.requests).toEqual({ focus: { id: "b", pin: null } });
+    expect(go(homeItem, { kind: "follow", id: "b", pin: null }, { dirty: true })).toEqual({
+      place: homeItem,
+      requests: { unsaved: true },
+    });
+  });
+
+  it("keeps a picked thread's under-item origin until following outside the thread", () => {
+    const thread = go(overview, { kind: "thread", id: "t" }).place;
+    const selected = go(thread, { kind: "select", id: "a", pin: null }).place;
+    const sameThread = go(selected, { kind: "follow", id: "b", pin: null }).place;
+    expect(sameThread.cameFrom).toEqual({ view: "overview", by: "thread" });
+    expect(sameThread.thread).toBe("t");
+
+    const under = go(go(overview, { kind: "select", id: "a", pin: null }).place, {
+      kind: "itemThread",
+      id: "t",
+    }).place;
+    expect(go(under, { kind: "follow", id: "b", pin: null }).place.cameFrom).toEqual({
+      view: "overview",
+      by: "thread",
+      item: "a",
+    });
+    const outside = go(under, { kind: "follow", id: "c", pin: null }).place;
+    expect(outside.thread).toBeNull();
+    expect(outside.cameFrom).toEqual({ view: "overview", by: "item" });
+    expect(outside.cameFrom).not.toHaveProperty("item");
+    expect(go(outside, { kind: "close", count: 1 }).place).toEqual(overview);
+  });
+
+  it("keeps explicit Map navigation as its own layer while following items", () => {
+    const map = go(overview, { kind: "goTo", view: "map", at: null }).place;
+    const first = go(map, { kind: "follow", id: "a", pin: null }).place;
+    const second = go(first, { kind: "follow", id: "b", pin: null }).place;
+    expect(first.cameFrom).toBeNull();
+    expect(second.cameFrom).toBeNull();
+    expect([layers(first), layers(second)]).toEqual([2, 2]);
   });
 });
 
@@ -124,6 +174,14 @@ describe("goTo", () => {
       place: at({ view: "needs", needsAt: "e2" }),
       requests: {},
     });
+  });
+
+  it("clears an item origin when the user explicitly returns to the Map", () => {
+    const opened = go(overview, { kind: "select", id: "a", pin: null }).place;
+    expect(opened.cameFrom).toEqual({ view: "overview", by: "item" });
+    const map = go(opened, { kind: "goTo", view: "map", at: null }).place;
+    expect(map.cameFrom).toBeNull();
+    expect(go(map, { kind: "close", count: 1 }).place).toEqual(at({ view: "map" }));
   });
 });
 
@@ -294,52 +352,53 @@ describe("topLayer", () => {
   });
 });
 
-describe("the history of layers", () => {
-  const at = (pushed: number, waiting = false) => ({ pushed, waiting });
-
-  it("keeps one entry per layer open: pushing as they open, going back over the extra as the app closes them", () => {
-    expect(depth({ ...none, thread: true, item: true })).toBe(2);
-    expect(follow(at(0), 2)).toEqual({ entries: at(2), action: { kind: "push", from: 0, to: 2 } });
-    expect(follow(at(2), 1)).toEqual({ entries: at(1, true), action: { kind: "back", by: 1 } });
-    expect(follow(at(1), 1).action).toBeNull();
+describe("history places by depth", () => {
+  const phone = { ...world, wide: false };
+  const left = { top: 40, entry: "need:one", control: "#need\\:one" };
+  const wanted = (place: Place): Wanted => ({
+    view: place.view,
+    item: place.item,
+    thread: place.thread,
+    needsAt: place.needsAt,
   });
 
-  it("holds a push until its own move back has landed, then brings the entries to what's open then", () => {
-    // Closed in the app, then another opened before the move back lands.
-    const waiting = follow(at(2), 1).entries;
-    expect(follow(waiting, 2)).toEqual({ entries: waiting, action: null });
-    expect(arrived(waiting, 1, 2)).toEqual({ entries: at(2), action: { kind: "push", from: 1, to: 2 } });
-    expect(arrived(waiting, 1, 1)).toEqual({ entries: at(1), action: null });
+  it("keeps Needs you restoration data in each projected entry", () => {
+    const needs = at({ view: "needs", needsAt: "need:one", needsLeft: left });
+    const opened = navigate(needs, { kind: "select", id: "a", pin: null }, phone).place;
+    const places = placesByDepth(opened, phone);
+    expect(places).toHaveLength(3);
+    expect(places.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2]);
+    expect(places[0]).toMatchObject({ view: "overview", item: null, needsLeft: left });
+    expect(places[1]).toMatchObject({ view: "needs", item: null, needsAt: "need:one", needsLeft: left });
+    expect(places[2]).toEqual(stored(opened));
+    expect(places.map((place) => place.needsLeft)).toEqual([left, left, left]);
+    expect(places.map((place) => addressOf(wanted(place)))).toEqual(["/", "/?view=needs&needs=need%3Aone", "/?item=a"]);
   });
 
-  it("closes the layer on top on Back, and ignores a move that lands on as many layers", () => {
-    expect(arrived(at(2), 1, 2)).toEqual({ entries: at(1), action: { kind: "close", by: 1 } });
-    // A jump over several entries, as a long press on Back makes, or Chrome skipping one pushed without a tap.
-    expect(arrived(at(3), 1, 3)).toEqual({ entries: at(1), action: { kind: "close", by: 2 } });
-    expect(arrived(at(2), 2, 2).action).toBeNull();
-    // A form left open by Back stays: it takes its entry again.
-    expect(follow(arrived(at(2), 1, 2).entries, 2)).toEqual({
-      entries: at(2),
-      action: { kind: "push", from: 1, to: 2 },
+  it("projects each open depth to its own stored place and address", () => {
+    const open = at({
+      view: "map",
+      item: "a",
+      thread: "t",
+      cameFrom: { view: "overview", by: "thread", item: "a" },
+      needsLeft: left,
     });
-  });
+    const places = placesByDepth(open, phone);
+    expect(places).toHaveLength(4);
+    expect(places.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2, 3]);
+    expect(places.every((place) => !place.overlays.command && place.needsLeft === left)).toBe(true);
+    expect(new Set(places.map((place) => addressOf(wanted(place)))).size).toBe(places.length);
+    expect(places.map((place) => addressOf(wanted(place)))).toEqual([
+      "/",
+      "/?item=a",
+      "/?view=map&thread=t",
+      "/?item=a&thread=t",
+    ]);
 
-  it("opens again on Forward what the entry's address names, then says how many layers that was, never moving", () => {
-    const forward = arrived(at(1), 2, 1);
-    expect(forward).toEqual({ entries: { pushed: 2, waiting: false, restoring: true }, action: { kind: "restore" } });
-    // Over two entries at once, as a long press on Forward makes.
-    expect(arrived(at(0), 2, 0).entries).toEqual({ pushed: 2, waiting: false, restoring: true });
-    // All of it opened again: nothing to do.
-    expect(follow(forward.entries, 2)).toEqual({ entries: at(2), action: null });
-    // Fewer, as the command menu has no address, or a link's item is gone: the entry says so, and Back goes on from it.
-    expect(follow(forward.entries, 1)).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
-    expect(follow(forward.entries, 0)).toEqual({ entries: at(0), action: { kind: "relabel", layers: 0 } });
-    // More, as a thread named with an item opens a layer each: the one more takes its own entry.
-    expect(follow(forward.entries, 3)).toEqual({ entries: at(3), action: { kind: "push", from: 2, to: 3 } });
-    // Held behind a form holding typing: the entry stands for what is open meanwhile, so no later move goes back.
-    const held = restored(forward.entries, 1);
-    expect(held).toEqual({ entries: at(1), action: { kind: "relabel", layers: 1 } });
-    expect(follow(held.entries, 2)).toEqual({ entries: at(2), action: { kind: "push", from: 1, to: 2 } });
+    const withCommand = placesByDepth({ ...open, overlays: { ...START.overlays, command: true } }, phone);
+    expect(withCommand.map((place) => depth(openOf(place, phone)))).toEqual([0, 1, 2, 3, 3]);
+    expect(samePlace(withCommand[3] ?? null, withCommand[4] ?? null)).toBe(true);
+    expect(addressOf(wanted(withCommand[3] ?? START))).toBe(addressOf(wanted(withCommand[4] ?? START)));
   });
 });
 
@@ -388,6 +447,105 @@ describe("the address", () => {
   it("opens at home what it doesn't know or finds empty", () => {
     expect(parse("?view=elsewhere&item=&thread=&utm=1")).toEqual(NOTHING);
     expect(parse("")).toEqual(NOTHING);
+  });
+});
+
+describe("history places", () => {
+  const needsLeft = { top: 42.5, entry: "need:one", control: "#need\\:one" };
+  const cameFrom = { view: "map" as const, by: "thread" as const, item: "a" };
+  const persistent = at({
+    view: "needs",
+    item: "a",
+    thread: "t",
+    needsAt: "need:one",
+    cameFrom,
+    needsLeft,
+  });
+
+  it("compares persistent place fields independent of key order and ignores transient overlays", () => {
+    const reordered: Place = {
+      overlays: { ...START.overlays, command: true, projects: true },
+      needsLeft: { control: needsLeft.control, entry: needsLeft.entry, top: needsLeft.top },
+      cameFrom: { item: "a", by: "thread", view: "map" },
+      needsAt: "need:one",
+      thread: "t",
+      item: "a",
+      view: "needs",
+    };
+    expect(samePlace(persistent, reordered)).toBe(true);
+
+    const changed: Place[] = [
+      { ...persistent, view: "threads" },
+      { ...persistent, item: "b" },
+      { ...persistent, thread: "other" },
+      { ...persistent, needsAt: "other" },
+      { ...persistent, cameFrom: { ...cameFrom, view: "overview" } },
+      { ...persistent, cameFrom: { ...cameFrom, by: "item" } },
+      { ...persistent, cameFrom: { ...cameFrom, item: "b" } },
+      { ...persistent, needsLeft: { ...needsLeft, top: 43 } },
+      { ...persistent, needsLeft: { ...needsLeft, entry: "need:two" } },
+      { ...persistent, needsLeft: { ...needsLeft, control: "button.close" } },
+    ];
+    for (const place of changed) expect(samePlace(persistent, place)).toBe(false);
+  });
+
+  it("rejects malformed restored places and nested history fields", () => {
+    const base = stored(at({ view: "map" }));
+    const parsePlace = (place: unknown) => placeIn({ layers: 1, place });
+    for (const state of [null, 1, "place", [], { layers: 1 }, { layers: 1, place: [] }])
+      expect(placeIn(state)).toBeNull();
+    for (const place of [
+      { ...base, view: "elsewhere" },
+      { ...base, item: [] },
+      { ...base, needsAt: 17 },
+      { ...base, cameFrom: [] },
+      { ...base, cameFrom: { view: "elsewhere", by: "item" } },
+      { ...base, cameFrom: { view: "map", by: "unknown" } },
+      { ...base, cameFrom: { view: "map", by: "item", item: "a" } },
+      { ...base, cameFrom: { view: "map", by: "thread", item: 1 } },
+      { ...base, cameFrom: { view: "map", by: "thread", item: "" } },
+      { ...base, needsLeft: [] },
+      { ...base, needsLeft: { top: Number.NaN, entry: "e", control: "#e" } },
+      { ...base, needsLeft: { top: Number.POSITIVE_INFINITY, entry: "e", control: "#e" } },
+      { ...base, needsLeft: { top: -1, entry: "e", control: "#e" } },
+      { ...base, needsLeft: { top: 1, entry: 2, control: "#e" } },
+      { ...base, needsLeft: { top: 1, entry: "e", control: 2 } },
+      { ...base, needsLeft: { top: 1, entry: "e", control: "" } },
+    ])
+      expect(parsePlace(place)).toBeNull();
+  });
+
+  it("preserves a valid escaped Needs you selector from a restored entry", () => {
+    const needs = { ...needsLeft, control: "#need\\:one" };
+    const place = placeIn({ layers: 1, place: { ...stored(at({ view: "needs" })), needsLeft: needs } });
+    expect(place?.needsLeft).toEqual(needs);
+  });
+});
+
+describe("phone history depths", () => {
+  const phone = { ...world, wide: false };
+  const layers = (place: Place) => depth(openOf(place, phone));
+
+  it("uses one home-return entry for Overview selections, but keeps explicit Map and direct-link origins", () => {
+    const overview = at({ view: "overview" });
+    const itemOne = navigate(overview, { kind: "select", id: "a", pin: null }, phone).place;
+    const itemTwo = navigate(overview, { kind: "select", id: "b", pin: null }, phone).place;
+    expect([layers(itemOne), layers(itemTwo)]).toEqual([1, 1]);
+
+    const thread = navigate(overview, { kind: "thread", id: "t" }, phone).place;
+    const threadItemOne = navigate(thread, { kind: "select", id: "a", pin: null }, phone).place;
+    const threadItemTwo = navigate(threadItemOne, { kind: "select", id: "b", pin: null }, phone).place;
+    expect([layers(thread), layers(threadItemOne), layers(threadItemTwo)]).toEqual([1, 2, 2]);
+
+    const map = navigate(overview, { kind: "goTo", view: "map", at: null }, phone).place;
+    const mapItemOne = navigate(map, { kind: "select", id: "a", pin: null }, phone).place;
+    const mapItemTwo = navigate(mapItemOne, { kind: "select", id: "b", pin: null }, phone).place;
+    expect([layers(map), layers(mapItemOne), layers(mapItemTwo)]).toEqual([1, 2, 2]);
+
+    const direct = navigate(START, { kind: "link", wanted: { ...NOTHING, view: "map", item: "a" } }, phone).place;
+    expect(direct.cameFrom).toBeNull();
+    expect(openOf(direct, phone).away).toBe(true);
+    expect(layers(direct)).toBe(2);
   });
 });
 

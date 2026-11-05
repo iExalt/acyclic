@@ -41,7 +41,7 @@ export interface Entry {
 
 /** An entry, folded for matching. */
 export function entry(fields: Omit<Entry, "folded">): Entry {
-  return { ...fields, folded: { title: fold(fields.title), also: fold(fields.also) } };
+  return { ...fields, folded: { title: searchText(fields.title), also: searchText(fields.also) } };
 }
 
 /** At most this many found, which is more than a screen holds. */
@@ -225,13 +225,12 @@ function listed({ model, showArchived }: Plan) {
 export const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
 
 /**
- * The entries `query` finds, best first, at most `MOST`: every word of it must be in the title or the id. A title
- * starting with the whole query comes first, then one where every word starts a word, then any match in the title,
- * then one in the id alone; ties go by group, then title. Then grouped, the group of the best first. With nothing
- * typed, the actions and the threads at work, or for a waiting move or link, the projects it can go to.
+ * The entries `query` finds, best first, at most `MOST`: exact titles first, then title prefixes, embedded phrases,
+ * word starts, other title matches and ID matches. Every word must occur in the title or ID; ties go by group, then
+ * title. With nothing typed, the actions and the threads at work, or for a waiting move or link, the projects it can go to.
  */
 export function rank(query: string, all: readonly Entry[], working: ReadonlySet<string>): Entry[] {
-  const words = fold(query).split(/\s+/).filter(Boolean);
+  const words = searchText(query).split(" ").filter(Boolean);
   const byGroup = (a: Entry, b: Entry) =>
     GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || natural(a.title, b.title);
   if (words.length === 0)
@@ -250,25 +249,31 @@ export function rank(query: string, all: readonly Entry[], working: ReadonlySet<
   for (const entry of all) {
     const { title, also } = entry.folded;
     if (!words.every((word) => title.includes(word) || also.includes(word))) continue;
-    const score = title.startsWith(whole)
-      ? 0
-      : starts.every((start) => start.test(title))
-        ? 1
-        : words.every((word) => title.includes(word))
-          ? 2
-          : 3;
+    const score =
+      title === whole
+        ? 0
+        : title.startsWith(whole)
+          ? 1
+          : words.length > 1 && title.includes(whole)
+            ? 2
+            : starts.every((start) => start.test(title))
+              ? 3
+              : words.every((word) => title.includes(word))
+                ? 4
+                : 5;
     found.push({ entry, score });
   }
   const best = found
     .sort((a, b) => a.score - b.score || byGroup(a.entry, b.entry))
     .slice(0, MOST)
     .map(({ entry }) => entry);
-  // Listed by group, the group of the best first, each in its own order: what ↑ and ↓ move through is what shows.
-  const groups = [...new Set(best.map((one) => one.group))];
-  return groups.flatMap((group) => best.filter((one) => one.group === group));
+  return best;
 }
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Matching ignores case, accents and whitespace runs. */
+const searchText = (text: string) => fold(text).trim().replace(/\s+/g, " ");
 
 /** Whether the platform's command key is ⌘ rather than Ctrl. */
 export const isMac = (platform: string) => /mac|iphone|ipad|ipod/i.test(platform);

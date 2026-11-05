@@ -206,13 +206,13 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Views are places.** Overview, Map, Threads and Needs you are views; the one shown carries `aria-current="page"`
   and is filled, and a phone's bar names it.
 - **Home is the Overview.** On a phone, Back from another view returns there before it leaves the app.
-- **Layers stack in one order** (`src/nav.ts`), with one history entry each, so Escape and Back close the top one.
-  Each entry keeps where the user was, so Forward opens it again as it was left, closing back where it came from, and
-  without the command menu, a form or a sheet that was open over it; what has gone since is dropped, as a link's is.
+- **Layers stack in one order** (`src/nav.ts`), with each browser-history entry owning its snapshot and address.
+  Back and Forward retrace items followed from the Inspector. Escape or ✕ closes to the underlying context, skipping
+  intermediate item visits; Forward restores the stored place without transient menus, forms or sheets.
 - **An item or a thread opens on the Map and closes back.** An item opened from the Overview, Threads or Needs you, or
-  a thread from anywhere, shows on the Map (the user's call, so every thread opens the same way), and one Back,
-  Escape or ✕ returns to the view it came from; Needs you comes back scrolled as it was left, the focus on the row
-  picked. Selecting on the Map or going to another view makes that where the user is, and going to
+  a thread from anywhere, shows on the Map (the user's call, so every thread opens the same way). Back may first
+  retrace those item visits; Escape or ✕ closes to what was underneath. Needs you comes back scrolled as it was left,
+  with focus on the picked row. Selecting on the Map makes Map the return context; going to
   another view closes the item, which it doesn't show, and going to the Overview or Needs you closes the thread too, as
   its panel would only stand over the list (the Threads view keeps it, its tile picked); what a link opened closes onto
   the Map.
@@ -224,14 +224,18 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   `?view=needs&needs=<entry>` for Needs you at an entry), so a reload, a copied link or a notification opens it again;
   an item implies the Map, and one left open over another view names that view too. An address from when Needs you
   opened over the views, `?needs` as notifications send it, opens its view. A link opens over home, one history entry
-  per layer, so Back closes what it opened, then leaves. A link to something gone says so; one to an archived item shows
+  per layer, so Back closes what it opened, then leaves.
+  Older or malformed entry metadata falls back to the URL; when its ancestry is unknown, closure stays local rather
+  than guessing browser history. A link to something gone says so; one to an archived item shows
   archived items, with Hide archived. An item's panel has Copy link in its ⋯ menu, which says "Link copied"; a thread's
   panel carries it beside the title, ticking in place.
 - **One field reaches anything.** Search (⌘K, Ctrl+K elsewhere; the sidebar's Search or jump to…; the phone bar's
   Search) opens the command menu over everything: views, Needs you among them, New item, the archived switch, Refresh,
-  and every thread, project and item by title or id, grouped, the best first. While a move or link waits for its target,
-  it finds the target instead. It leaves what's under it as it is, never closes a form holding typing, and gives the
-  focus back where it was.
+  threads by title, and projects and items by title or id, grouped, the best first: exact titles, then prefixes, then
+  contiguous title phrases, then the remaining matches. While a move or link waits for its target, it finds the target
+  instead. Choosing a result replaces Search with its destination in history; the same destination just closes Search,
+  without adding a duplicate visit. It leaves what's under it as it is, never closes a form holding typing, and gives
+  the focus back where it was.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
   ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys
   while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M

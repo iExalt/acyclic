@@ -70,7 +70,8 @@ export function NeedsList({
     if (was !== null) {
       scroller.scrollTop = was.top;
       const entry = scroller.querySelector<HTMLElement>(`[data-need="${CSS.escape(was.entry)}"]`);
-      (entry?.querySelector<HTMLElement>(was.control) ?? entry)?.focus({ preventScroll: true });
+      const control = entry === null ? null : safeControl(entry, was.control);
+      (control ?? entry)?.focus({ preventScroll: true });
       return;
     }
     if (target === null) return;
@@ -182,4 +183,12 @@ export function NeedsList({
       </ul>
     </section>
   );
+}
+
+function safeControl(entry: HTMLElement, selector: string): HTMLElement | null {
+  try {
+    return entry.querySelector<HTMLElement>(selector);
+  } catch {
+    return null;
+  }
 }

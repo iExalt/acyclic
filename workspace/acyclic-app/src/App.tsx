@@ -13,6 +13,15 @@ import { AddForm } from "./AddForm";
 import { CommandMenu } from "./CommandMenu";
 import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
 import { addCommand, type NewItem, type Pick, pick, unlinkCommand } from "./edits";
+import {
+  boundary,
+  type Cursor,
+  type HistoryHint,
+  type HistoryPlan,
+  plan as planHistory,
+  readHistory,
+  replaceDepth,
+} from "./history";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
@@ -22,12 +31,7 @@ import { NeedsList } from "./NeedsList";
 import { Notify } from "./Notify";
 import {
   addressOf,
-  arrived,
-  depth,
-  type Entries,
   type Found,
-  follow,
-  type HistoryAction,
   type Intent,
   landing,
   landingPlace,
@@ -37,9 +41,8 @@ import {
   openOf,
   type Place,
   parse,
-  placeIn,
+  placesByDepth,
   type Requests,
-  restored,
   START,
   type Step,
   samePlace,
@@ -79,7 +82,33 @@ const UNSAVED: Notice = {
 };
 
 /** What opens as a link does: an address, or the place a history entry holds. */
-type Opening = Wanted & { place?: Place };
+type Opening = Wanted & {
+  place?: Place;
+  source: "initial" | "pop" | "message";
+  cursor: Cursor | null;
+  fresh: boolean;
+  wide: boolean | null;
+};
+
+function historyWide(raw: unknown): boolean | null {
+  if (typeof raw !== "object" || raw === null || !("wide" in raw)) return null;
+  return typeof raw.wide === "boolean" ? raw.wide : null;
+}
+
+function openingAt(source: Opening["source"], raw: unknown, search: string): Opening {
+  const address = parse(search);
+  const entry = readHistory(raw);
+  const place = entry?.place;
+  const matchingPlace = place !== undefined && place !== null && addressOf(place) === addressOf(address) ? place : null;
+  return {
+    ...address,
+    ...(matchingPlace === null ? {} : { place: matchingPlace }),
+    source,
+    cursor: matchingPlace === null ? null : (entry?.cursor ?? null),
+    fresh: source === "initial" && raw === null,
+    wide: historyWide(raw),
+  };
+}
 
 /** The tab's storage, where the Undo on offer is kept over a reload, or null where the browser blocks it. */
 function storageOrNull(): Storage | null {
@@ -119,12 +148,19 @@ export function App() {
     threadOf: () => null,
     wide: false,
   });
-  const go = useCallback((intent: Intent): Step => {
-    const step = navigate(placeNow.current, intent, { ...worldNow.current, dirty: dirtyForm() });
+  const historyMove = useRef<(place: Place, hint: HistoryHint, retainPurpose?: boolean) => void>(() => undefined);
+  const go = useCallback((intent: Intent, hint?: HistoryHint): Step => {
+    const before = placeNow.current;
+    const step = navigate(before, intent, { ...worldNow.current, dirty: dirtyForm() });
     const { unsaved: _, ...asked } = step.requests;
     placeNow.current = step.place;
     askedNow.current = { ...askedNow.current, ...asked };
     setNav({ place: step.place, requests: askedNow.current });
+    if (!step.requests.unsaved) {
+      const purpose =
+        hint ?? (intent.kind === "follow" && !samePlace(stored(before), stored(step.place)) ? "visit" : "ordinary");
+      historyMove.current(step.place, purpose, ["wrote", "leaveNeeds", "edit", "reopen"].includes(intent.kind));
+    }
     return step;
   }, []);
   const { place, requests } = nav;
@@ -155,10 +191,12 @@ export function App() {
    * history entry Forward landed on holds, with what it names. It waits for the plan to load, and for a form holding
    * what the user typed to close.
    */
-  const [wanted, setWanted] = useState<Opening | null>(() => {
-    const asked = parse(window.location.search);
-    return addressOf(asked) === "/" ? null : asked;
-  });
+  const [wanted, setWanted] = useState<Opening | null>(() =>
+    openingAt("initial", window.history.state, window.location.search),
+  );
+  const initialFresh = useRef(window.history.state === null);
+  const waitingLink = useRef(wanted !== null);
+  waitingLink.current = wanted !== null;
   /** Counts forms closed, so a link waiting on one opens once it has. */
   const [formsClosed, setFormsClosed] = useState(0);
 
@@ -267,7 +305,6 @@ export function App() {
     const plan = { model, threads, working, showArchived, item: item === undefined ? null : item };
     return mode.kind === "idle" ? commandEntries(plan) : targets(plan, mode.kind, mode.item);
   }, [showCommand, model, sorted, lines, working, showArchived, mode, panel, selected]);
-  const layers = depth(open);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
     session.event({ kind: "form-closed" });
@@ -342,57 +379,72 @@ export function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [go]);
-  // One history entry per layer open, so a phone's Back closes them one by one before it leaves the app.
-  const entries = useRef<Entries>({ pushed: 0, waiting: false });
-  const layersNow = useRef(layers);
-  layersNow.current = layers;
-  const act = useCallback((step: { entries: Entries; action: HistoryAction }) => {
-    entries.current = step.entries;
-    const { action } = step;
-    if (action === null) return;
-    if (action.kind === "push") {
-      // Each with the address and the place of what is open, so Forward onto any of them opens it again; while a link
-      // waits, the address it was opened at stays, and no place says otherwise. The entry under them, unless it is the
-      // app's first, takes them too: what it stood for may have closed as these opened, as the command menu does
-      // choosing an item, and its address with it.
-      const url = waitingLink.current ? undefined : addressOf(hereNow.current, window.location.search);
-      const place = url === undefined ? {} : { place: stored(placeShown.current) };
-      if (url !== undefined && action.from > 0)
-        window.history.replaceState({ ...window.history.state, ...place }, "", url);
-      for (let n = action.from + 1; n <= action.to; n++) window.history.pushState({ layers: n, ...place }, "", url);
-    } else if (action.kind === "back") window.history.go(-action.by);
-    else if (action.kind === "relabel")
-      window.history.replaceState({ ...window.history.state, layers: action.layers }, "");
-    else if (action.kind === "restore") {
-      // Read now, before the address is written over with what was open: Forward opens the place the entry holds,
-      // where it came from too, or, on an entry written before entries held places, its address, as a link does.
-      waitingLink.current = true;
-      const place = placeIn(window.history.state);
-      const address = parse(window.location.search);
-      setWanted(
-        place === null
-          ? address
-          : { view: place.view, item: place.item, thread: place.thread, needsAt: place.needsAt, place },
-      );
+  // Browser positions count visits; parent positions say which visit closing a layer returns to.
+  const cursor = useRef<Cursor | null>(null);
+  const ownBack = useRef<{ place: Place; hint: HistoryHint; expectedPosition: number } | null>(null);
+  const writeEntry = (kind: "replace" | "push", at: Cursor, place: Place) => {
+    const state = { ...at, place, wide: worldNow.current.wide };
+    const url = addressOf(place, window.location.search);
+    if (kind === "replace") window.history.replaceState({ ...window.history.state, ...state }, "", url);
+    else window.history.pushState(state, "", url);
+  };
+  const applyHistory = (planned: HistoryPlan, desired: Place, hint: HistoryHint) => {
+    cursor.current = planned.cursor;
+    for (const effect of planned.effects) {
+      if (effect.kind === "go") {
+        ownBack.current = { place: desired, hint, expectedPosition: planned.cursor.position + effect.offset };
+        window.history.go(effect.offset);
+      } else writeEntry(effect.kind, effect.cursor, effect.place);
     }
-    // A form left open by Back takes its entries again.
-    else if (closeTop.current(action.by) === 0) act(follow(entries.current, layersNow.current));
-  }, []);
-  // What Forward restores settles once it has opened: until then the layers open are the ones before it.
-  useEffect(() => {
-    if (!(entries.current.restoring && wanted !== null)) act(follow(entries.current, layers));
-  }, [act, layers, wanted]);
+  };
+  const driveHistory = (desired: Place, hint: HistoryHint, retainPurpose = false) => {
+    if (model === null || waitingLink.current || cursor.current === null) return;
+    if (ownBack.current !== null) {
+      ownBack.current = { ...ownBack.current, place: desired, hint: retainPurpose ? ownBack.current.hint : hint };
+      return;
+    }
+    // A write can name a new item before the refreshed model draws it.
+    const drawable =
+      desired.item !== null && (!worldNow.current.has(desired.item) || worldNow.current.archived(desired.item))
+        ? { ...desired, item: null }
+        : desired;
+    const projected = placesByDepth(drawable, { ...worldNow.current, dirty: false });
+    const source = readHistory(window.history.state)?.place;
+    const sourceWide = historyWide(window.history.state);
+    const sourceProjected =
+      source !== undefined && source !== null && sourceWide !== null
+        ? placesByDepth(source, { ...worldNow.current, wide: sourceWide, dirty: false })
+        : undefined;
+    const planned = planHistory(cursor.current, projected, hint, window.history.length, sourceProjected);
+    if (planned !== null) applyHistory(planned, desired, hint);
+  };
+  historyMove.current = driveHistory;
+  useLayoutEffect(() => {
+    historyMove.current(placeNow.current, "ordinary", true);
+  }, [model, wide, showArchived, place, wanted]);
   useEffect(() => {
     const onMove = (event: PopStateEvent) => {
-      const at = typeof event.state?.layers === "number" ? event.state.layers : 0;
-      act(arrived(entries.current, at, layersNow.current));
+      const pending = ownBack.current;
+      const landed = openingAt("pop", event.state, window.location.search);
+      ownBack.current = null;
+      if (
+        pending !== null &&
+        landed.cursor !== null &&
+        landed.wide !== null &&
+        landed.cursor.position === pending.expectedPosition
+      ) {
+        cursor.current = landed.cursor;
+        // A queued visit pushes from the landed entry; it must not overwrite that entry first.
+        historyMove.current(pending.place, pending.hint);
+      } else {
+        waitingLink.current = true;
+        setWanted(landed);
+      }
     };
     window.addEventListener("popstate", onMove);
     return () => window.removeEventListener("popstate", onMove);
-  }, [act]);
+  }, []);
 
-  // The address always says what's open, on the entry shown: written over it as what's open changes, never while the
-  // app's own move back is on its way (it would land on the entry being left), nor before a link asked for is open.
   const here: Wanted = {
     view,
     item: chosen?.id ?? null,
@@ -401,26 +453,6 @@ export function App() {
   };
   const hereNow = useRef(here);
   hereNow.current = here;
-  /** The place shown, as the address says it: what an entry holds, written with its address. */
-  const placeShown = useRef(place);
-  placeShown.current = place;
-  const waitingLink = useRef(wanted !== null);
-  waitingLink.current = wanted !== null;
-  const writeAddress = useCallback(() => {
-    if (entries.current.waiting || waitingLink.current) return;
-    const next = addressOf(hereNow.current, window.location.search);
-    const place = stored(placeShown.current);
-    const state = window.history.state;
-    if (next !== window.location.pathname + window.location.search || !samePlace(placeIn(state), place))
-      window.history.replaceState({ ...state, place }, "", next);
-  }, []);
-  const address = addressOf(here);
-  // Written again whenever what's open changes, and once a link has opened.
-  useEffect(writeAddress, [writeAddress, address, wanted, layers, place]);
-  useEffect(() => {
-    window.addEventListener("popstate", writeAddress);
-    return () => window.removeEventListener("popstate", writeAddress);
-  }, [writeAddress]);
 
   // A notification's link, sent to the app already open rather than reloading it: answered at once, so the service
   // worker knows not to, then opened as any link is.
@@ -435,7 +467,15 @@ export function App() {
       const asked = parse(event.data.search);
       const query = new URLSearchParams(event.data.search);
       const names = ["view", "item", "needs"].some((key) => query.has(key));
-      setWanted(names ? asked : { ...asked, view: hereNow.current.view });
+      waitingLink.current = true;
+      setWanted({
+        ...asked,
+        view: names ? asked.view : hereNow.current.view,
+        source: "message",
+        cursor: null,
+        fresh: false,
+        wide: null,
+      });
     };
     container.addEventListener("message", onMessage);
     container.startMessages();
@@ -461,8 +501,6 @@ export function App() {
                 ? "Threads"
                 : "the Overview";
     if (dirtyForm()) {
-      // An entry Forward landed on stands for what is open meanwhile, so no later move goes back over it unasked.
-      if (entries.current.restoring) act(restored(entries.current, layersNow.current));
       tell({
         text: `Unsaved changes: save or cancel, then ${name} opens`,
         offer: null,
@@ -479,10 +517,6 @@ export function App() {
     };
     // A place an entry held lands as a link does, gone or archived since.
     const found = link.place === undefined ? landing(link, has) : landingPlace(link.place, has);
-    setWanted(null);
-    // Landing from outside, nothing open has an entry yet: the one landed on becomes home.
-    if (entries.current.pushed === 0)
-      window.history.replaceState(window.history.state, "", addressOf(NOTHING, window.location.search));
     if ("place" in found) {
       if (found.place.item !== null && found.archived) setShowArchived(true);
       go({ kind: "restore", place: found.place });
@@ -490,6 +524,30 @@ export function App() {
       if (found.wanted.item !== null && found.archived) setShowArchived(true);
       go({ kind: "link", wanted: found.wanted });
     }
+    const projected = placesByDepth(placeNow.current, {
+      ...worldNow.current,
+      archived: found.archived ? () => false : worldNow.current.archived,
+      dirty: false,
+    });
+    const actualDepth = projected.length - 1;
+    const destination = projected[actualDepth];
+    if (destination !== undefined && (link.source !== "message" || cursor.current === null)) {
+      if (link.fresh || (link.source === "message" && cursor.current === null && initialFresh.current)) {
+        const base = boundary(0);
+        if (base !== null) {
+          const planned = planHistory(base, projected, "ordinary", window.history.length);
+          if (planned !== null) applyHistory(planned, placeNow.current, "ordinary");
+        }
+      } else {
+        cursor.current =
+          link.cursor !== null && link.wide === worldNow.current.wide && actualDepth <= link.cursor.layers
+            ? replaceDepth(link.cursor, actualDepth)
+            : boundary(actualDepth);
+        if (cursor.current !== null) writeEntry("replace", cursor.current, destination);
+      }
+    }
+    waitingLink.current = false;
+    setWanted(null);
     const gone = found.missing.join(" and ");
     // An offered Undo waits wherever the user goes, a link included, and one a reload kept is offered again.
     const was = session.snapshot().notice;
@@ -573,30 +631,50 @@ export function App() {
    * typed: that says how to leave it instead, as Escape does.
    */
   const runCommand = (run: Run) => {
-    go({ kind: "shut", layer: "command" });
-    if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
-    if (run.kind === "archived") return setShowArchived((was) => !was);
-    if (run.kind === "refresh") return refresh();
-    if (dirtyForm()) return tell(UNSAVED);
-    if (run.kind === "view") goTo(run.view);
-    else if (run.kind === "add") startAdd(null);
-    else if (run.kind === "on-item") onItem(run.action);
-    else if (run.kind === "thread") toThread(run.id);
-    else select(run.id, null);
+    if (run.kind === "target" || run.kind === "archived" || run.kind === "refresh" || dirtyForm()) {
+      go({ kind: "shut", layer: "command" });
+      if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
+      if (run.kind === "archived") return setShowArchived((was) => !was);
+      if (run.kind === "refresh") return refresh();
+      return tell(UNSAVED);
+    }
+    const under = {
+      ...placeNow.current,
+      overlays: { ...placeNow.current.overlays, command: false },
+    };
+    const move = (intent: Intent, newOverlay = false) => {
+      const next = navigate(under, intent, { ...worldNow.current, dirty: false }).place;
+      const different = newOverlay || !samePlace(stored(under), stored(next));
+      // An outstanding close has already given its transient entry back; its result branches after arrival.
+      const hint: HistoryHint = different ? (ownBack.current === null ? "replaceTransient" : "visit") : "ordinary";
+      placeNow.current = under;
+      go(intent, hint);
+    };
+    if (run.kind === "view") move({ kind: "goTo", view: run.view, at: null });
+    else if (run.kind === "add") move({ kind: "add", parent: null }, true);
+    else if (run.kind === "on-item") {
+      placeNow.current = under;
+      onItem(run.action, run.action === "edit" ? "ordinary" : ownBack.current === null ? "replaceTransient" : "visit");
+      if (chosen === undefined || busy) go({ kind: "shut", layer: "command" });
+    } else if (run.kind === "thread") move({ kind: "thread", id: run.id });
+    else move({ kind: "select", id: run.id, pin: null });
   };
   /**
    * Acts on the item whose panel shows, as its buttons do, while they would be enabled; a move or link, asked for
    * from the keyboard or the menu, finds its target in the menu, as the keyboard has no Map to tap.
    */
-  const onItem = (action: OnItem) => {
+  const onItem = (action: OnItem, hint?: HistoryHint) => {
     if (chosen === undefined || busy) return;
-    if (action === "edit") go({ kind: "edit" });
-    else if (action === "add-inside") startAdd(chosen.id);
+    if (action === "edit") go({ kind: "edit" }, hint);
+    else if (action === "add-inside") go({ kind: "add", parent: chosen.id }, hint);
     else {
-      go({
-        kind: "mode",
-        mode: action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id },
-      });
+      go(
+        {
+          kind: "mode",
+          mode: action === "move" ? { kind: "move", item: chosen.id } : { kind: "link", item: chosen.id },
+        },
+        hint,
+      );
       setShortcutsOnly(false);
       go({ kind: "command", open: true });
     }
@@ -710,7 +788,15 @@ export function App() {
           className="close"
           aria-label="Dismiss"
           onClick={() => {
-            if (notice.held) setWanted(null);
+            if (notice.held) {
+              waitingLink.current = false;
+              setWanted(null);
+              const projected = placesByDepth(placeNow.current, { ...worldNow.current, dirty: false });
+              const destination = projected.at(-1);
+              cursor.current = boundary(projected.length - 1);
+              if (destination !== undefined && cursor.current !== null)
+                writeEntry("replace", cursor.current, destination);
+            }
             session.dismiss();
           }}
         >
@@ -907,7 +993,9 @@ export function App() {
             reopen={requests.reopenEditor?.id === chosen.id ? requests.reopenEditor : undefined}
             titleOf={titleOf}
             stageOf={(id) => model?.items.get(id)?.stage ?? undefined}
-            onSelect={(id) => select(id, selected)}
+            onSelect={(id) => {
+              if (go({ kind: "follow", id, pin: selected }).requests.unsaved) tell(UNSAVED);
+            }}
             edit={requests.edit}
             shortcuts={shortcuts}
             // To the Map for the thread, framed, as a thread goes from anywhere; the item stays under its panel, so
