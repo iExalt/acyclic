@@ -2648,6 +2648,10 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     ):
         failures.append(f"{name}: a Notes-only save changed the selected frame: {before} -> {written_notes}")
     show_notice(page).get_by_role("button", name="Undo").click()
+    # An Undo reads the plan before it writes, and is not busy while it reads, so busy alone is not the end of it: its
+    # result is the notice that says so (news), where "Undoing…" and an offer are the notices that last until the next
+    # write. Dismissing before then dismisses "Undoing…", and the write that follows raises its result again.
+    page.locator("[data-testid=notice][data-lasts=news]").wait_for(timeout=10_000)
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, count)
     undone_notes = geometry([project, other, chain[-2]])
