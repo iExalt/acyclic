@@ -138,6 +138,7 @@ impl From<StoreError> for CliError {
             StoreError::RemoteMoved => Self::new("remote-moved", exit::STORE, message),
             StoreError::Duplicate(_) => Self::refused("duplicate-replica", message),
             StoreError::Rejected { .. } => Self::new("rejected", exit::STORE, message),
+            StoreError::ObjectsRefused(_) => Self::new("objects-refused", exit::STORE, message),
         }
     }
 }

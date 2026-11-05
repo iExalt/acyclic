@@ -10,9 +10,7 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use serde::Serialize;
 
@@ -20,6 +18,7 @@ use crate::claim;
 use crate::model::{Evidence, Item, ItemState, Model, Progress, ProgressState, Repository, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
+use crate::store::Git;
 
 mod waves;
 pub use waves::Waves;
@@ -48,7 +47,7 @@ pub struct GitAncestry<F> {
 struct Branch {
     target: String,
     commits: Vec<String>,
-    names: Option<Names>,
+    git: Git,
 }
 
 /// The most of a branch's commits looked up at once; an older commit takes a git process of its own.
@@ -61,101 +60,29 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
     }
 }
 
-/// Git in `clone`, in the C locale.
-fn git_in(clone: &Path) -> std::process::Command {
-    let mut git = crate::store::git_at(clone);
-    git.env("LC_ALL", "C");
-    git
-}
-
-/// Git's output in `clone`.
-fn git_output(clone: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    git_in(clone).args(args).output().map_err(|e| format!("git can't run: {e}"))
-}
-
 impl Branch {
     /// The ref `clone` reads `branch` from, and its latest commits.
     fn of(clone: &Path, branch: &str) -> Result<Self, String> {
+        let git = Git::new(clone);
         let target = [format!("refs/remotes/origin/{branch}"), format!("refs/heads/{branch}")]
             .into_iter()
-            .find(|candidate| {
-                git_output(
-                    clone,
-                    &["rev-parse", "--verify", "--quiet", &format!("{candidate}^{{commit}}")],
-                )
-                .is_ok_and(|out| out.status.success())
-            })
+            .find_map(|candidate| git.resolve(&candidate).ok().flatten())
             .ok_or_else(|| format!("the clone has no {branch} branch"))?;
         // Without them, every commit is checked on its own, which is slower but no less right.
-        let mut commits =
-            git_output(clone, &["rev-list", &format!("--max-count={LATEST}"), &target])
-                .ok()
-                .filter(|out| out.status.success())
-                .map(|out| {
-                    String::from_utf8_lossy(&out.stdout)
-                        .lines()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+        let mut commits = git.recent_commits(&target, LATEST).unwrap_or_default();
         commits.sort_unstable();
-        Ok(Self { target, commits, names: None })
+        Ok(Self { target, commits, git })
     }
 
     /// Whether `commit` is among the latest. An abbreviated id is named in full first, as git names it: one that
     /// names no commit, or several, isn't.
-    fn has(&mut self, clone: &Path, commit: &str) -> bool {
+    fn has(&self, commit: &str) -> bool {
         let full = if matches!(commit.len(), 40 | 64) {
             Some(commit.to_ascii_lowercase())
         } else {
-            self.names.get_or_insert_with(|| Names::start(clone)).full(commit)
+            self.git.full_commit(commit)
         };
         full.is_some_and(|full| self.commits.binary_search(&full).is_ok())
-    }
-}
-
-/// A `git cat-file` that names abbreviated commit ids in full, one a line, started on the first.
-struct Names(
-    Option<(std::process::Child, std::process::ChildStdin, BufReader<std::process::ChildStdout>)>,
-);
-
-impl Names {
-    fn start(clone: &Path) -> Self {
-        let started = git_in(clone)
-            .args(["cat-file", "--batch-check"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        Self(started.ok().and_then(|mut child| {
-            let (stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
-            Some((child, stdin, BufReader::new(stdout)))
-        }))
-    }
-
-    /// The commit `id` names, in full, or `None` when it names none, several objects, another kind of object, or git
-    /// failed.
-    fn full(&mut self, id: &str) -> Option<String> {
-        let (_, stdin, stdout) = self.0.as_mut()?;
-        // Bare, as merge-base takes it: an id that also starts another kind of object is ambiguous to both.
-        writeln!(stdin, "{id}").and_then(|()| stdin.flush()).ok()?;
-        let mut line = String::new();
-        stdout.read_line(&mut line).ok()?;
-        // `<id> commit <size>` when found, else the id asked for and why not, such as `missing` or `ambiguous`.
-        match line.split_whitespace().collect::<Vec<_>>()[..] {
-            [full, "commit", _] => Some(full.to_owned()),
-            _ => None,
-        }
-    }
-}
-
-impl Drop for Names {
-    fn drop(&mut self) {
-        if let Some((mut child, stdin, _)) = self.0.take() {
-            // Its input closed, it exits.
-            drop(stdin);
-            let _ = child.wait();
-        }
     }
 }
 
@@ -174,19 +101,16 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
             .or_insert_with(|| Branch::of(&clone, branch))
             .as_mut()
             .map_err(|reason| reason.clone())?;
-        if found.has(&clone, commit) {
+        if found.has(commit) {
             return Ok(true);
         }
         // Not among the latest: not merged, older than they go, or no commit git knows, which git tells apart.
-        let output = git_output(
-            &clone,
-            &["merge-base", "--is-ancestor", "--end-of-options", commit, &found.target],
-        )?;
-        match output.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
-        }
+        let full = found
+            .git
+            .full_commit(commit)
+            .or_else(|| (matches!(commit.len(), 40 | 64)).then(|| commit.to_ascii_lowercase()))
+            .ok_or_else(|| format!("Not a valid object name {commit}"))?;
+        found.git.is_ancestor_checked(&full, &found.target).map_err(|e| e.to_string())
     }
 }
 

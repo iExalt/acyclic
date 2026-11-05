@@ -26,6 +26,7 @@ expression: table
 5 no-replica
 4 remote-moved
 4 rejected
+4 objects-refused
 5 no-tracker
 5 no-tracker
 5 no-tracker
