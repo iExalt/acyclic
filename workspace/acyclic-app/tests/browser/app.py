@@ -591,6 +591,19 @@ def overview_journey(page, view, name, failures):
     print(f"{name}: the Overview listed {headings}, and its rows opened what they name")
 
 
+def nav_entry(page):
+    """The persisted navigation fields, separate from the visible panel and its draft."""
+    return page.evaluate(
+        """() => { const s=history.state,p=s?.place,c=p?.cameFrom;
+          const text=v=>typeof v==='string'?v:null;
+          return {url:location.href,position:Number.isSafeInteger(s?.position)?s.position:null,
+            layers:Number.isSafeInteger(s?.layers)?s.layers:null,
+            parents:Array.isArray(s?.parents)&&s.parents.length<=8&&s.parents.every(Number.isSafeInteger)?s.parents.slice():null,
+            wide:typeof s?.wide==='boolean'?s.wide:null,view:text(p?.view),item:text(p?.item),thread:text(p?.thread),
+            cameFrom:c?{view:text(c.view),by:text(c.by),item:text(c.item)}:null,needsAt:text(p?.needsAt)}; }"""
+    )
+
+
 @timed
 def deep_link_journey(context, origin, view, plan, name, failures):
     """A link opens what it names, as if the user had opened it: Back closes it, then leaves the app; a reload opens it
@@ -679,25 +692,50 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     overview.wait_for(timeout=5_000)
     inspector = page.get_by_test_id("inspector")
     phone = view.get("has_touch")
+    page.wait_for_function(
+        "() => location.search === '' && history.state?.layers === 0 && history.state?.place?.view === 'overview'",
+        timeout=5_000,
+    )
+    overview_entry = nav_entry(page)
     page.locator("[data-overview-project]").first.click()
     inspector.wait_for(timeout=5_000)
     if phone:
         inspector.locator("[data-action=edit]").click()
-        inspector.locator("input[name=title]").fill("Typed, not saved")
+        draft = inspector.locator("input[name=title]")
+        draft.fill("Typed, not saved")
         page.go_back()
         try:
             page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back over an editor holding typing didn't say so")
-        if not inspector.is_visible() or overview.count():
-            failures.append(f"{name}: Back over an editor holding typing left the item")
+        landed = nav_entry(page)
+        if (
+            not inspector.is_visible()
+            or overview.count()
+            or draft.input_value() != "Typed, not saved"
+            or landed != overview_entry
+        ):
+            failures.append(
+                f"{name}: Back over the dirty editor lost its draft or overwrote the landed Overview: {landed}"
+            )
         inspector.get_by_role("button", name="Cancel", exact=True).click()
-    page.go_back()
+    else:
+        page.go_back()
     try:
         overview.wait_for(timeout=5_000)
-        page.wait_for_function("() => location.search === ''", timeout=5_000)
+        page.wait_for_function(
+            "() => location.search === '' && history.state?.place?.view === 'overview' "
+            "&& history.state?.layers === 0",
+            timeout=5_000,
+        )
     except PlaywrightTimeout:
-        failures.append(f"{name}: Back from an item opened on the Overview landed on {page.url}")
+        failures.append(
+            f"{name}: Back from an item opened on the Overview landed on {page.url}"
+        )
+    if phone and page.url != f"{origin}/":
+        failures.append(
+            f"{name}: cancelling the dirty editor landed on {page.url}, not the Overview root"
+        )
     # Forward opens it again from the place its entry holds, where it came from too: closing it goes back to the
     # Overview, not to the Map an address alone would leave.
     page.go_forward()
@@ -807,6 +845,172 @@ def deep_link_journey(context, origin, view, plan, name, failures):
     page.close()
     kept = "Back kept to it" if view.get("has_touch") else "Back and a reload kept to it, one far right came clear of the panel"
     print(f"{name}: a link opened {id}, {kept}, a stale link said so, and Back went where things were opened")
+
+@timed
+def history_journey(context, origin, view, plan, name, failures):
+    """Back retraces linked items; a queued follow keeps the entry it lands on, and Search preserves a dirty form."""
+    parents = set(plan.parent.values())
+    leaves = {id for id in plan.items if id not in parents and plan.shown(id, False)}
+    chain = next(
+        (
+            (a, b, c)
+            for a in sorted(leaves)
+            for b in plan.items[a]["links"]["waits_for"]
+            if b in leaves
+            for c in plan.items[b]["links"]["waits_for"]
+            if c in leaves and len({a, b, c}) == 3
+        ),
+        None,
+    )
+    if chain is None:
+        failures.append(
+            f"{name}: history fixture has no three distinct visible linked leaves"
+        )
+        return
+    a, b, c = chain
+    page = context.new_page()
+    errors = []
+
+    def opened(id):
+        page.wait_for_function(
+            "id => new URLSearchParams(location.search).get('item') === id && !!document.querySelector('[data-testid=inspector] h2')",
+            arg=id,
+            timeout=5_000,
+        )
+        assert (
+            page.locator("[data-testid=inspector] h2").inner_text()
+            == plan.items[id]["title"]
+        ), f"wrong Inspector for {id}"
+
+    def at_entry(entry):
+        page.wait_for_function(
+            "([position,layers]) => history.state?.position === position && history.state?.layers === layers"
+            " && !document.querySelector('[data-testid=command-menu]')",
+            arg=[entry["position"], entry["layers"]],
+            timeout=5_000,
+        )
+        assert nav_entry(page) == entry, (
+            f"restored entry differs: {nav_entry(page)} != {entry}"
+        )
+
+    def search(key, query):
+        page.locator("[data-action=search]").click()
+        menu = page.get_by_test_id("command-menu")
+        menu.wait_for(timeout=5_000)
+        menu.get_by_role("combobox").fill(query)
+        menu.locator(f"[data-command='{key}']").click(timeout=5_000)
+        menu.wait_for(state="detached", timeout=5_000)
+
+    try:
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(f"{origin}/?item={quote(a)}")
+        opened(a)
+        first = nav_entry(page)
+        for id in (b, c):
+            page.locator(f"[data-testid=waits-for] [data-select='{id}']").click(
+                timeout=5_000
+            )
+            opened(id)
+        third = nav_entry(page)
+        page.go_back()
+        opened(b)
+        page.go_forward()
+        opened(c)
+        page.evaluate("history.go(-2)")
+        opened(a)
+        at_entry(first)
+        page.evaluate("history.go(2)")
+        opened(c)
+        at_entry(third)
+
+        page.locator("[data-action=search]").click()
+        menu = page.get_by_test_id("command-menu")
+        menu.wait_for(timeout=5_000)
+        page.evaluate("""() => {
+          const go=history.go.bind(history); window.__historyGo=go; window.__heldClose=null; window.__historyPops=0;
+          addEventListener('popstate',()=>window.__historyPops++);
+          history.go=delta=>{if(delta<0 && !window.__heldClose){window.__heldClose={delta,release:()=>go(delta)};return;}go(delta);};
+        }""")
+        menu.get_by_role("button", name="Close", exact=True).click()
+        page.wait_for_function("() => window.__heldClose?.delta === -1", timeout=5_000)
+        page.locator(f"[data-testid=waited-on-by] [data-select='{b}']").click(
+            timeout=5_000
+        )
+        page.wait_for_function(
+            "([id,title]) => document.querySelector('[data-testid=map]').cy.getElementById(id).hasClass('selected')"
+            " && document.querySelector('[data-testid=inspector] h2')?.textContent?.trim() === title",
+            arg=[b, plan.items[b]["title"]],
+            timeout=5_000,
+        )
+        assert page.evaluate("() => window.__historyPops === 0"), (
+            "held close navigated before release"
+        )
+        assert parse_qs(urlsplit(page.url).query).get("item") == [c], (
+            "queued follow rewrote the departing entry"
+        )
+        page.evaluate("() => window.__heldClose.release()")
+        opened(b)
+        page.wait_for_function("() => window.__historyPops === 1", timeout=5_000)
+        assert nav_entry(page)["position"] == third["position"] + 1, (
+            "queued follow did not append its visit"
+        )
+        page.evaluate("() => {history.go=window.__historyGo;}")
+        page.go_back()
+        opened(c)
+        at_entry(third)
+        page.get_by_test_id("inspector").get_by_role(
+            "button", name="Close", exact=True
+        ).click()
+        page.wait_for_function(
+            "depth => history.state?.layers === depth && !new URLSearchParams(location.search).has('item')"
+            " && !document.querySelector('[data-testid=inspector]')",
+            arg=1 if view.get("has_touch") else 0,
+            timeout=5_000,
+        )
+        assert page.url == f"{origin}/?view=map", (
+            f"X did not close the visit trail: {page.url}"
+        )
+
+        page.close()
+        page = context.new_page()
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(f"{origin}/?item={quote(a)}")
+        opened(a)
+        item_entry = nav_entry(page)
+        inspector = page.get_by_test_id("inspector")
+        inspector.locator("[data-action=edit]").click()
+        draft = inspector.locator("input[name=title]")
+        draft.fill("History draft, not saved")
+        search("view:needs", "Needs you")
+        page.get_by_text("Unsaved changes").first.wait_for(timeout=5_000)
+        at_entry(item_entry)
+        assert draft.input_value() == "History draft, not saved", (
+            "Search refusal lost the draft"
+        )
+        before = int(page.locator("main.stage").get_attribute("data-reads"))
+        search("refresh", "Refresh")
+        page.wait_for_function(
+            "before => Number(document.querySelector('main.stage').dataset.reads) > before",
+            arg=before,
+            timeout=5_000,
+        )
+        at_entry(item_entry)
+        assert draft.input_value() == "History draft, not saved", (
+            "Refresh lost the draft"
+        )
+        inspector.get_by_role("button", name="Cancel", exact=True).click()
+        page.screenshot(path=SHOTS / f"app-{name}-history.png")
+        assert not errors, errors
+    except (PlaywrightTimeout, AssertionError) as error:
+        state = nav_entry(page)
+        page.screenshot(path=SHOTS / f"app-{name}-history-failure.png")
+        failures.append(
+            f"{name}: linked-item history or Search-over-form failed: {error}; {state}"
+        )
+    finally:
+        if not page.is_closed():
+            page.close()
+
 
 @timed
 def command_journey(page, view, origin, plan, name, failures):
@@ -2970,6 +3174,7 @@ def main():
                 outline_journey(page, view, plan, name, failures)
                 threads_journey(page, view, env, name, failures)
                 deep_link_journey(context, origin, view, plan, name, failures)
+                history_journey(context, origin, view, plan, name, failures)
                 command_journey(page, view, origin, plan, name, failures)
                 if name == "desktop":
                     cross_origin_journey(context, origin, env, name, failures)
