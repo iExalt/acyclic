@@ -82,9 +82,24 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.0-${{ runner.os }}
-      # A stuck apt mirror fails the job here, rather than holding it for hours.
+      # The system libraries are 181 packages and 114 MB from an apt mirror that has taken minutes for a single one. Their .deb files
+      # are kept per Playwright version and runner image, so a hit installs them without the network and a miss downloads as before.
+      - id: image
+        run: echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      - id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/acyclic/browser-debs
+          key: browser-debs-playwright-1.64.0-${{ steps.image.outputs.image }}
+      # On a miss a stuck apt mirror fails the job here, rather than holding it for hours.
       - run: mise run deps:browser
         timeout-minutes: 5
+      # Saved here and not after the job, so that a failing journey doesn't lose the packages a miss just downloaded.
+      - if: steps.debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/acyclic/browser-debs
+          key: browser-debs-playwright-1.64.0-${{ steps.image.outputs.image }}
       - run: mise run check:browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

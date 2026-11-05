@@ -85,7 +85,7 @@ run = [
 
 [tasks."deps:browser"]
 description = "Install the browsers' system libraries with apt, for check:browser on Linux; CI runs it as its own step, so check:browser's time is the tests'"
-run = "uv run --no-project --with playwright==1.64.0 python -m playwright install-deps chromium webkit"
+run = "sh scripts/browser-deps.sh"
 
 [tasks.notices]
 description = "Write the release's third-party notices to the path given: THIRD_PARTY.md and the Rust crates' licences"
