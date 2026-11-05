@@ -16,7 +16,10 @@ if ls "$cache"/*.deb >/dev/null 2>&1; then
     took "installed $(ls "$cache"/*.deb | wc -l) cached packages"
     exit 0
   fi
-  echo "browser deps: the cached packages don't install here; downloading instead" >&2
+  echo "::warning::browser deps: the cached packages don't install here; repairing and downloading instead" >&2
+  # A failed dpkg leaves packages unpacked but unconfigured, which the install-deps below cannot repair on its own: it names
+  # only the top-level packages, so apt would call the unconfigured ones' dependencies unmet.
+  sudo apt-get install -y --fix-broken --no-install-recommends || true
 fi
 
 uv run --no-project --with playwright==1.64.0 python -m playwright install-deps chromium webkit

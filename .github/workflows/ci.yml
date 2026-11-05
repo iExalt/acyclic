@@ -86,11 +86,12 @@ jobs:
       # are kept per Playwright version and runner image, so a hit installs them without the network and a miss downloads as before.
       - id: image
         run: echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      # The v1 in the key is a salt: a cache that restores as a hit is never saved again, so bump it to discard one that is bad.
       - id: debs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/acyclic/browser-debs
-          key: browser-debs-playwright-1.64.0-${{ steps.image.outputs.image }}
+          key: browser-debs-v1-playwright-1.64.0-${{ steps.image.outputs.image }}
       # On a miss a stuck apt mirror fails the job here, rather than holding it for hours.
       - run: mise run deps:browser
         timeout-minutes: 5
@@ -99,7 +100,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/acyclic/browser-debs
-          key: browser-debs-playwright-1.64.0-${{ steps.image.outputs.image }}
+          key: browser-debs-v1-playwright-1.64.0-${{ steps.image.outputs.image }}
       - run: mise run check:browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
