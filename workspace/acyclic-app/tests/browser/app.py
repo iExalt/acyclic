@@ -234,6 +234,25 @@ def tracker(directory, env, items, remote=None):
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     with detail(f"tracker {items}: import"):
         run(env, "import", str(plan))
+    # Done work waiting on open work, so Needs you holds an entry that names items. The open leaf and everything above
+    # it wait for nothing, so the link closes no cycle.
+    parent = {item["id"]: item.get("parent") for item in data["items"]}
+    waits = {item["id"]: item.get("waits_for") for item in data["items"]}
+
+    def line(id):
+        while id is not None:
+            yield id
+            id = parent.get(id)
+
+    done = next(item["id"] for item in data["items"] if item.get("state") == "done")
+    unwaiting = next(
+        item["id"]
+        for item in data["items"]
+        if item.get("state") != "done"
+        and item["id"] not in parent.values()
+        and not any(waits[one] for one in line(item["id"]))
+    )
+    run(env, "item", "edit", done, "--waits-for", unwaiting)
     if remote is not None:
         run(env, "sync")
     with detail(f"tracker {items}: final read"):
@@ -551,7 +570,8 @@ def overview_journey(page, view, name, failures):
         panel.wait_for(state="detached", timeout=5_000)
     except PlaywrightTimeout:
         failures.append(f"{name}: going to the Overview left {thread}'s panel open over it")
-    entry = overview.locator(".overview-section").first.locator("button.overview-row").nth(1)
+    # The last row, so with several the view opens at one that isn't simply its first.
+    entry = overview.locator(".overview-section").first.locator("button.overview-row").last
     entry.click()
     needs = page.get_by_test_id("needs")
     needs.wait_for(timeout=5_000)
