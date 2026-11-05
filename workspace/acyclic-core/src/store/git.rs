@@ -41,6 +41,10 @@ fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
         gix::open::Options::default().ignore_repository_environment(true).cli_overrides([
             "core.logAllRefUpdates=false",
             "gitoxide.core.nativeLocalTransport=true",
+            // A transfer slower than 1,000 bytes a second for 30 seconds fails over HTTP rather than hanging the sync,
+            // and the server's writes queued behind it.
+            "http.lowSpeedLimit=1000",
+            "http.lowSpeedTime=30",
         ])
     };
     let mapping = gix::sec::trust::Mapping { full: options(), reduced: options() };
@@ -268,7 +272,9 @@ impl Git {
 
     /// Starts a transaction on refs, which applies all of its changes or none.
     pub(crate) fn transaction(&self) -> Result<Transaction, StoreError> {
-        Ok(Transaction { repo: self.handle()?, edits: Vec::new(), root: self.repo.clone() })
+        let repo = self.handle()?;
+        let common = repo.common_dir().to_owned();
+        Ok(Transaction { repo, edits: Vec::new(), common })
     }
 
     /// Points `reference` at `new`, whatever it held.
@@ -396,7 +402,7 @@ pub(crate) struct NewCommit<'a> {
 pub(crate) struct Transaction {
     repo: gix::Repository,
     edits: Vec<RefEdit>,
-    root: PathBuf,
+    common: PathBuf,
 }
 
 impl Transaction {
@@ -458,7 +464,8 @@ impl Transaction {
     /// `git update-ref` does. `between` runs after the refs are locked and checked, before anything changes; it
     /// is for tests that crash there, and skips the hook.
     pub(crate) fn commit(self, between: Option<&dyn Fn()>) -> Result<(), StoreError> {
-        let Self { repo, edits, root } = self;
+        let Self { repo, edits, common } = self;
+        let names: Vec<String> = edits.iter().map(|edit| edit.name.as_bstr().to_string()).collect();
         let fallback = gix::actor::SignatureRef {
             name: "acyclic".into(),
             email: "acyclic@acyclic.invalid".into(),
@@ -483,43 +490,38 @@ impl Transaction {
                 }
             },
         };
-        result.map_err(|e| classify(&e, &root))
+        result.map_err(|e| classify(&e, &common, &names))
     }
 }
 
-/// A failed ref transaction as the store reports it: a lost race, a held lock or another failure.
-fn classify(err: &gix::Error, root: &Path) -> StoreError {
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(err);
-    while let Some(current) = cause {
-        if current.is::<gix::refs::file::transaction::prepare::ReferenceOutOfDate>()
-            || current.is::<gix::refs::file::transaction::prepare::MustNotExist>()
-        {
-            return StoreError::Conflict;
+/// A failed ref transaction as the store reports it: a lost race, a held lock or another failure. The lock file is the
+/// one of the first ref that has one under `common`, the directory the refs live in.
+fn classify(err: &gix::Error, common: &Path, names: &[String]) -> StoreError {
+    use gix::refs::file::transaction::prepare::{MustNotExist, ReferenceOutOfDate};
+    if err.downcast_any_ref::<ReferenceOutOfDate>().is_some()
+        || err.downcast_any_ref::<MustNotExist>().is_some()
+    {
+        return StoreError::Conflict;
+    }
+    let held = err
+        .downcast_any_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists);
+    if held {
+        let path = names
+            .iter()
+            .map(|name| common.join(format!("{name}.lock")))
+            .find(|path| path.exists())
+            .or_else(|| names.first().map(|name| common.join(format!("{name}.lock"))));
+        if let Some(path) = path {
+            let age = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|d| d.as_secs());
+            return StoreError::Locked { path, age_seconds: age };
         }
-        if let Some(io) = current.downcast_ref::<std::io::Error>()
-            && io.kind() == std::io::ErrorKind::AlreadyExists
-        {
-            let text = describe(err);
-            if let Some(path) = lock_path_in(&text) {
-                let path = if path.is_absolute() { path } else { root.join(path) };
-                let age = std::fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .map(|d| d.as_secs());
-                return StoreError::Locked { path, age_seconds: age };
-            }
-        }
-        cause = current.source();
     }
     StoreError::Git(describe(err))
-}
-
-/// The lock file an error message names, as `The lockfile at "<path>" might need manual deletion`.
-fn lock_path_in(text: &str) -> Option<PathBuf> {
-    let start = text.find("lockfile at \"")? + "lockfile at \"".len();
-    let end = text[start..].find('"')?;
-    Some(PathBuf::from(&text[start..start + end]))
 }
 
 impl Git {
@@ -820,7 +822,16 @@ impl Git {
                 let name = entry.update.name().as_bstr().to_string();
                 match refusal {
                     Refusal::StaleLease { .. } => Refused::Stale(name),
-                    other => Refused::Rejected(name, format!("{other:?}")),
+                    Refusal::NotFastForward => {
+                        Refused::Rejected(name, "non-fast-forward".to_owned())
+                    },
+                    Refusal::LeaseObjectMissing => Refused::Rejected(
+                        name,
+                        "the remote's value isn't in this clone: fetch first".to_owned(),
+                    ),
+                    Refusal::TagUpdate => {
+                        Refused::Rejected(name, "a tag already exists".to_owned())
+                    },
                 }
             })
             .collect();
@@ -852,8 +863,9 @@ impl Git {
     /// The root of the work tree, which is an error for a bare repository.
     pub(crate) fn toplevel(&self) -> Result<PathBuf, StoreError> {
         let repo = self.handle()?;
+        // As `git rev-parse --show-toplevel` prints it: the real path, symbolic links resolved.
         repo.workdir()
-            .map(Path::to_owned)
+            .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_owned()))
             .ok_or_else(|| StoreError::Git("this operation must be run in a work tree".to_owned()))
     }
 

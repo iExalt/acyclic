@@ -9,9 +9,9 @@
 //!
 //! Reads come from a cache of the parsed state kept beside the repository for the state ref's current tip, and the
 //! store repacks itself once packs pile up, so the repository's share of a command stays small and steady; parsing and
-//! rewriting the state still grow with the tracker. The repack is `gc` with `--auto`'s conditions: it runs in the
-//! command that crossed them, and skips repacking for a day after a run that warned, as git records in `gc.log`;
-//! packs pile up meanwhile.
+//! rewriting the state still grow with the tracker. The repack is `gc` with `--auto`'s conditions, started by the
+//! command that crossed them and run beside it (see [`Maintenance`]); one that began in the last 30 seconds keeps the
+//! next from starting, so a repack that fails is retried at that pace.
 
 mod cache;
 mod git;
@@ -119,7 +119,8 @@ pub enum StoreError {
     Git(String),
     /// Something moved a ref between its read and its update, though writers hold the batch lock.
     Conflict,
-    /// A ref lock is held. Locks are never removed automatically: a stalled git process could still finish.
+    /// A ref lock is held. A lock on this replica's own refs that is a minute old is a dead writer's and is removed by
+    /// the next writer; any other is left alone, since the process holding it could still finish.
     Locked {
         /// The lock file.
         path: PathBuf,
@@ -154,7 +155,7 @@ impl fmt::Display for StoreError {
                 if let Some(age) = age_seconds {
                     write!(f, " ({age} s old)")?;
                 }
-                write!(f, "; if no git process holds it, delete that file")
+                write!(f, "; if nothing holds it, delete that file")
             },
             Self::State(err) => err.fmt(f),
             Self::Config(message) => write!(f, "tracker not set up: {message}"),
@@ -501,14 +502,17 @@ impl Tracker {
         let git = Git::new(path);
         // The replica's settings and git's repacking thresholds: the first value in git's order, as `git config
         // --get-regexp` lists them and the first match of each is taken.
-        let settings = git.config_values(&[
-            REPLICA_CONFIG,
-            UNUSED_CONFIG,
-            PUSH_AFTER_WRITE_CONFIG,
-            "gc.auto",
-            "gc.autopacklimit",
-            "remote.origin.url",
-        ])?;
+        let settings = git
+            .config_values(&[
+                REPLICA_CONFIG,
+                UNUSED_CONFIG,
+                PUSH_AFTER_WRITE_CONFIG,
+                "gc.auto",
+                "gc.autopacklimit",
+                "remote.origin.url",
+            ])
+            // A directory that isn't a repository has no replica id, which is what the error below says.
+            .unwrap_or_default();
         let setting = |name: &str| settings.get(name).map(String::as_str);
         let number = |name, default| setting(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         let upkeep =
@@ -782,6 +786,18 @@ impl Tracker {
             .open(&path)
             .map_err(|e| StoreError::Git(format!("can't open {}: {e}", path.display())))?;
         file.lock().map_err(|e| StoreError::Git(format!("can't lock {}: {e}", path.display())))?;
+        // Every writer of this replica's refs holds this lock, so a lock file on them that has been there for a minute
+        // is left by a writer that died between locking and committing; `git update-ref` released its locks when its
+        // parent died, a process of ours can't.
+        let common = self.git.common_dir()?;
+        let own = [
+            format!("refs/heads/state/{}.lock", self.replica),
+            format!("refs/heads/log/{}", self.replica),
+            format!("refs/acyclic/pruned/log/{}", self.replica),
+        ];
+        for entry in own {
+            remove_stale_locks(&common.join(entry));
+        }
         Ok(file)
     }
 
@@ -1253,6 +1269,27 @@ fn push_failure(state: &str, refused: Vec<Refused>) -> StoreError {
         },
         Some(Refused::Rejected(reference, reason)) => StoreError::Rejected { reference, reason },
         None => StoreError::Git("the push was refused".to_owned()),
+    }
+}
+
+/// How old a lock file on this replica's own refs is before the next writer removes it.
+const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Removes the lock files at `path` or below it that are older than [`STALE_LOCK`]. Best effort.
+fn remove_stale_locks(path: &Path) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return };
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(path).into_iter().flatten().filter_map(Result::ok) {
+            remove_stale_locks(&entry.path());
+        }
+    } else if path.extension().is_some_and(|ext| ext == "lock")
+        && meta
+            .modified()
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age >= STALE_LOCK)
+    {
+        let _ = std::fs::remove_file(path);
     }
 }
 

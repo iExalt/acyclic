@@ -232,8 +232,8 @@ fn crash_at(point: &str) {
         .unwrap();
     assert!(!status.success(), "the child aborted");
     assert_eq!(refs(), before, "neither the state ref nor the log ref moved");
-    // The transaction ran in the dead process, as one of git does when it is killed, so its locks stay until they are
-    // deleted. The next batch says so, and moves nothing.
+    // The transaction ran in the dead process, so its locks stay. Inside the first minute the next batch says so and
+    // moves nothing, since the holder could still be finishing.
     let key = item("a1");
     let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
         replica.write(&key, "f", "actor/user", at, Some(json!("after"))).map(|_| ())
@@ -242,8 +242,14 @@ fn crash_at(point: &str) {
         panic!("expected the dead process's lock to be reported, got {result:?}");
     };
     assert!(lock.starts_with(path.join(".git/refs/heads")), "{}", lock.display());
+    // A minute on, the next writer knows the process that held them is gone, and removes them.
     for lock in ["state/mac.lock", "log/mac/2026-10/0001.lock"] {
-        let _ = std::fs::remove_file(path.join(".git/refs/heads").join(lock));
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path.join(".git/refs/heads").join(lock))
+            .expect("the dead process left its lock");
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+            .unwrap();
     }
     write(&tracker, "a1", "f", json!("after"));
     let events = log_lines(&path, "refs/heads/log/mac/2026-10/0001", "_/15.jsonl");

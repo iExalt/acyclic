@@ -364,3 +364,65 @@ fn a_fetch_follows_the_tags_into_what_it_receives_as_git_does() {
     git(&theirs_dir, &["fetch", "-q", "--prune", remote.to_str().expect("UTF-8"), &spec[0]]);
     assert_eq!(refs(&ours_dir), refs(&theirs_dir), "the pruned tracking ref is gone from both");
 }
+
+#[test]
+fn a_transaction_tells_a_lost_race_from_a_held_lock_as_it_runs_in_production() {
+    use crate::store::StoreError;
+    let (dir, ours) = repository("sha1");
+    let tree = ours.write_tree(None, &files(&[("a", Some("x"))])).expect("a tree");
+    let first = ours.commit(&tree, None, "mac", 1, "first").expect("a commit");
+    let second = ours.commit(&tree, None, "mac", 2, "second").expect("another commit");
+    let create = |name: &str, id: &str| {
+        let mut transaction = ours.transaction().expect("a transaction");
+        transaction.update(name, id, None).expect("an update");
+        transaction.commit(None)
+    };
+    create("refs/heads/x", &first).expect("a new ref is created");
+
+    let result = create("refs/heads/x", &second);
+    assert!(
+        matches!(result, Err(StoreError::Conflict)),
+        "creating what exists is a lost race: {result:?}"
+    );
+    let mut transaction = ours.transaction().expect("a transaction");
+    transaction.update("refs/heads/x", &second, Some(&second)).expect("an update");
+    let result = transaction.commit(None);
+    assert!(
+        matches!(result, Err(StoreError::Conflict)),
+        "a wrong old value is a lost race: {result:?}"
+    );
+    let mut transaction = ours.transaction().expect("a transaction");
+    transaction.delete("refs/heads/x", &second).expect("a deletion");
+    let result = transaction.commit(None);
+    assert!(
+        matches!(result, Err(StoreError::Conflict)),
+        "so is deleting at a wrong value: {result:?}"
+    );
+    assert_eq!(git(dir.path(), &["rev-parse", "refs/heads/x"]), first, "nothing moved");
+
+    let lock = dir.path().join(".git/refs/heads/x.lock");
+    std::fs::write(&lock, "").expect("a lock file");
+    let mut transaction = ours.transaction().expect("a transaction");
+    transaction.update("refs/heads/x", &second, Some(&first)).expect("an update");
+    match transaction.commit(None) {
+        Err(StoreError::Locked { path, age_seconds }) => {
+            assert_eq!(path, dir.path().join(".git/refs/heads/x.lock"));
+            assert!(age_seconds.is_some());
+        },
+        other => panic!("a held lock is reported as one: {other:?}"),
+    }
+    std::fs::remove_file(&lock).expect("the lock goes");
+    let mut transaction = ours.transaction().expect("a transaction");
+    transaction.update("refs/heads/x", &second, Some(&first)).expect("an update");
+    transaction.commit(None).expect("with the right old value and no lock it commits");
+    assert_eq!(git(dir.path(), &["rev-parse", "refs/heads/x"]), second);
+}
+
+#[test]
+fn a_slow_http_transfer_fails_rather_than_hangs() {
+    let (_dir, ours) = repository("sha1");
+    let values =
+        ours.config_values(&["http.lowSpeedLimit", "http.lowSpeedTime"]).expect("config reads");
+    assert_eq!(values.get("http.lowSpeedLimit").map(String::as_str), Some("1000"));
+    assert_eq!(values.get("http.lowSpeedTime").map(String::as_str), Some("30"));
+}
