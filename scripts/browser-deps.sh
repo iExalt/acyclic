@@ -10,7 +10,9 @@ start=$(date +%s)
 took() { echo "browser deps: $1 in $(( $(date +%s) - start )) s"; }
 
 if ls "$cache"/*.deb >/dev/null 2>&1; then
-  if sudo apt-get install -y --no-install-recommends --no-download "$cache"/*.deb; then
+  # dpkg, not apt-get: with --no-download, apt-get install of these files failed in CI ("Unable to fetch some archives"):
+  # it resolves dependencies afresh against the image's package lists, and the cache is already the exact set to install.
+  if sudo dpkg --install "$cache"/*.deb; then
     took "installed $(ls "$cache"/*.deb | wc -l) cached packages"
     exit 0
   fi
