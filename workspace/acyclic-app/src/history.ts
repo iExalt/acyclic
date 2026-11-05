@@ -157,6 +157,47 @@ function placesIn(places: readonly Place[], depth: number): Place[] | null {
   return canonical;
 }
 
+function sourcePlacesIn(places: readonly Place[], layers: number): Place[] | null {
+  if (!Array.isArray(places) || places.length === 0) return null;
+  const sourceDepth = places.length - 1;
+  if (sourceDepth > layers || boundary(sourceDepth) === null) return null;
+  const canonical = placesIn(places, sourceDepth);
+  const last = canonical?.at(-1);
+  if (canonical === null || last === undefined) return null;
+  while (canonical.length <= layers) canonical.push(last);
+  return canonical;
+}
+
+function sameCameFrom(a: Place["cameFrom"], b: Place["cameFrom"]): boolean {
+  return a === b || (a !== null && b !== null && a.view === b.view && a.by === b.by && a.item === b.item);
+}
+
+/** The context that must remain reachable; the list's scroll/focus snapshot is intentionally excluded. */
+function sameContext(a: Place, b: Place): boolean {
+  return (
+    a.view === b.view &&
+    a.item === b.item &&
+    a.thread === b.thread &&
+    sameCameFrom(a.cameFrom, b.cameFrom) &&
+    (a.view !== "needs" || a.needsAt === b.needsAt)
+  );
+}
+
+function firstContextMismatch(
+  cursor: Cursor,
+  source: readonly Place[],
+  destination: readonly Place[],
+  toLayers: number,
+): number | null {
+  const end = Math.min(cursor.layers, toLayers);
+  for (let depth = cursor.layers - cursor.parents.length; depth < end; depth++) {
+    const from = source[depth];
+    const to = destination[depth];
+    if (from !== undefined && to !== undefined && !sameContext(from, to)) return depth;
+  }
+  return null;
+}
+
 function writes(cursor: Cursor, toLayers: number, places: readonly Place[]): HistoryPlan | null {
   const pushed = pushDepths(cursor, toLayers);
   if (pushed === null) return null;
@@ -177,6 +218,7 @@ export function plan(
   projectedPlaces: readonly Place[],
   hint: HistoryHint,
   historyLength: number,
+  sourceProjectedPlaces?: readonly Place[],
 ): HistoryPlan | null {
   const current = cursorIn(cursor);
   if (current === null || !Number.isSafeInteger(historyLength) || historyLength < 0) return null;
@@ -185,6 +227,18 @@ export function plan(
   if (boundary(toLayers) === null) return null;
   const places = placesIn(projectedPlaces, toLayers);
   if (places === null) return null;
+  const source =
+    sourceProjectedPlaces === undefined ? undefined : sourcePlacesIn(sourceProjectedPlaces, current.layers);
+  if (source === null) return null;
+
+  if (hint !== "visit" && source !== undefined) {
+    const mismatch = firstContextMismatch(current, source, places, toLayers);
+    if (mismatch !== null) {
+      const reset = close(current, Math.max(0, mismatch - 1), historyLength);
+      if (reset === null) return null;
+      return reset.kind === "go" ? { cursor: current, effects: [reset] } : writes(reset.cursor, toLayers, places);
+    }
+  }
 
   if (hint === "visit" && toLayers <= current.layers) {
     const replaced = replaceDepth(current, toLayers);

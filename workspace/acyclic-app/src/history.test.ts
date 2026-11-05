@@ -10,7 +10,7 @@ import {
   replaceDepth,
   visit,
 } from "./history";
-import { openLayers, openOf, type Place, START, stored } from "./nav";
+import { openLayers, openOf, type Place, placesByDepth, START, stored } from "./nav";
 
 const places: Place[] = [
   stored(START),
@@ -21,6 +21,15 @@ const places: Place[] = [
   stored({ ...START, view: "map", thread: "thread-a", item: "item-c" }),
   stored({ ...START, view: "map", thread: "thread-b" }),
 ];
+const phone = { has: () => true, archived: () => false, threadOf: () => null, dirty: false, wide: false };
+const desktop = { ...phone, wide: true };
+const directItemA = stored({ ...START, view: "map", item: "item-a", cameFrom: null });
+const portalItemA = stored({ ...directItemA, cameFrom: { view: "overview", by: "item" } });
+const needs = stored({ ...START, view: "needs", needsAt: "entry-a" });
+const needsThread = stored({ ...needs, thread: "thread-a" });
+const needsItem = stored({ ...needsThread, item: "item-a" });
+const threads = stored({ ...START, view: "threads" });
+const threadsThread = stored({ ...START, view: "threads", thread: "thread-a" });
 
 function placeAt(depth: number): Place {
   const place = places[depth];
@@ -221,22 +230,27 @@ describe("history cursor", () => {
     expect(entries[5]?.place).toEqual(placeAt(5));
 
     at = 4; // Forward to B, then follow a different thread at a shallower depth.
-    const branch = plan(b, [placeAt(0), placeAt(1), placeAt(6)], "visit", entries.length);
+    expect([needs, needsThread, needsItem].map((place) => openLayers(openOf(place, phone)).length)).toEqual([1, 2, 3]);
+    const branch = plan(b, [placeAt(0), threads, threadsThread], "visit", entries.length, [
+      placeAt(0),
+      needs,
+      needsThread,
+      needsItem,
+    ]);
     expect(branch).toEqual({
       cursor: { position: 5, layers: 2, parents: [0, 1] },
-      effects: [{ kind: "push", cursor: { position: 5, layers: 2, parents: [0, 1] }, place: placeAt(6) }],
+      effects: [{ kind: "push", cursor: { position: 5, layers: 2, parents: [0, 1] }, place: threadsThread }],
     });
     if (branch === null) return;
     at = apply(entries, at, branch);
     expect(at).toBe(5);
     expect(entries[4]?.place).toEqual(placeAt(4));
-    expect(entries[5]?.place).toEqual(placeAt(6));
+    expect(entries[5]?.place).toEqual(threadsThread);
   });
 
   it("grows C to Search at six, then replaces that entry with D while preserving C at five", () => {
     const c = { position: 5, layers: 3, parents: [0, 1, 2] };
     const d = stored({ ...START, view: "map", thread: "thread-a", item: "item-d" });
-    const phone = { has: () => true, archived: () => false, wide: false };
     expect(openLayers(openOf(d, phone))).toHaveLength(3);
     const entries = Array.from({ length: 6 }, (_, position) => ({
       cursor: { ...c, position },
@@ -257,6 +271,7 @@ describe("history cursor", () => {
       [placeAt(0), placeAt(1), placeAt(2), d],
       "replaceTransient",
       entries.length,
+      places.slice(0, 4),
     );
     expect(replaceSearch?.effects).toEqual([
       { kind: "replace", cursor: { position: 6, layers: 3, parents: [0, 1, 2] }, place: d },
@@ -285,7 +300,6 @@ describe("history cursor", () => {
       item: "item-a",
       cameFrom: { view: "overview", by: "item" },
     });
-    const phone = { has: () => true, archived: () => false, wide: false };
     expect(openLayers(openOf(portal, phone))).toHaveLength(1);
     const openedItem = plan(openedSearch.cursor, [placeAt(0), portal], "replaceTransient", entries.length);
     expect(openedItem?.effects).toEqual([{ kind: "replace", cursor: openedSearch.cursor, place: portal }]);
@@ -307,6 +321,94 @@ describe("history cursor", () => {
       effects: [{ kind: "replace", cursor: { position: 0, layers: 2, parents: [] }, place: places[2] }],
     });
     expect(plan(c, places.slice(0, 3), "ordinary", 6)?.effects).toEqual([{ kind: "go", offset: -3 }]);
+  });
+
+  it("rebases Needs-to-Threads navigation to Home at the first retained context change", () => {
+    const cursor = { position: 5, layers: 3, parents: [0, 1, 2] };
+    expect([needs, needsThread, needsItem].map((place) => openLayers(openOf(place, phone)).length)).toEqual([1, 2, 3]);
+    expect([threads, threadsThread].map((place) => openLayers(openOf(place, phone)).length)).toEqual([1, 2]);
+    expect(
+      plan(cursor, [placeAt(0), threads, threadsThread], "ordinary", 6, [placeAt(0), needs, needsThread, needsItem]),
+    ).toEqual({ cursor, effects: [{ kind: "go", offset: -5 }] });
+  });
+
+  it("rebases a Home portal item when an explicit Map context replaces Search", () => {
+    const cursor = { position: 2, layers: 2, parents: [0, 1] };
+    const source = placesByDepth(portalItemA, phone);
+    const destination = placesByDepth(directItemA, phone);
+    expect(source).toEqual([placeAt(0), portalItemA]);
+    expect(destination).toEqual([placeAt(0), placeAt(1), directItemA]);
+    expect(openLayers(openOf(portalItemA, phone))).toEqual(["item"]);
+    expect(openLayers(openOf(directItemA, phone))).toEqual(["item", "away"]);
+    expect(plan(cursor, destination, "replaceTransient", 3, source)).toEqual({
+      cursor,
+      effects: [{ kind: "go", offset: -2 }],
+    });
+    expect(plan(cursor, source, "ordinary", 3, destination)).toEqual({
+      cursor,
+      effects: [{ kind: "go", offset: -1 }],
+    });
+    const unchanged = { position: 1, layers: 1, parents: [0] };
+    expect(plan(unchanged, source, "replaceTransient", 2, source)).toEqual({
+      cursor: unchanged,
+      effects: [{ kind: "replace", cursor: unchanged, place: portalItemA }],
+    });
+  });
+
+  it("rebases an old desktop Map item when the new phone path starts at Home", () => {
+    const cursor = { position: 1, layers: 1, parents: [0] };
+    const source = placesByDepth(directItemA, desktop);
+    const destination = placesByDepth(directItemA, phone);
+    expect(source).toEqual([placeAt(1), directItemA]);
+    expect(destination).toEqual([placeAt(0), placeAt(1), directItemA]);
+    expect(openLayers(openOf(directItemA, desktop))).toEqual(["item"]);
+    expect(openLayers(openOf(directItemA, phone))).toEqual(["item", "away"]);
+    expect(plan(cursor, destination, "ordinary", 2, source)).toEqual({
+      cursor,
+      effects: [{ kind: "go", offset: -1 }],
+    });
+  });
+
+  it("ignores Needs you scroll snapshots but compares its selected entry", () => {
+    const cursor = { position: 5, layers: 3, parents: [0, 1, 4] };
+    const oldNeeds = stored({
+      ...START,
+      view: "needs",
+      needsAt: "entry-a",
+      needsLeft: { top: 12, entry: "entry-a", control: "next" },
+    });
+    const scrolledNeeds = stored({
+      ...START,
+      view: "needs",
+      needsAt: "entry-a",
+      needsLeft: { top: 40, entry: "entry-a", control: "next" },
+    });
+    expect(openLayers(openOf(oldNeeds, phone))).toEqual(["away"]);
+    expect(plan(cursor, [placeAt(0), scrolledNeeds, scrolledNeeds], "ordinary", 6, [placeAt(0), oldNeeds])).toEqual({
+      cursor,
+      effects: [{ kind: "go", offset: -1 }],
+    });
+
+    const otherEntry = stored({ ...scrolledNeeds, needsAt: "entry-b" });
+    expect(plan(cursor, [placeAt(0), otherEntry, otherEntry], "ordinary", 6, [placeAt(0), oldNeeds])).toEqual({
+      cursor,
+      effects: [{ kind: "go", offset: -5 }],
+    });
+  });
+
+  it("rewrites from Home when a mismatched retained parent is unknown or unreachable", () => {
+    const source = [placeAt(0), needs, needsThread, needsItem];
+    const destination = [placeAt(0), threads, threadsThread];
+    const expected = {
+      cursor: { position: 7, layers: 2, parents: [5, 6] },
+      effects: [
+        { kind: "replace", cursor: { position: 5, layers: 0, parents: [] }, place: placeAt(0) },
+        { kind: "push", cursor: { position: 6, layers: 1, parents: [5] }, place: threads },
+        { kind: "push", cursor: { position: 7, layers: 2, parents: [5, 6] }, place: threadsThread },
+      ],
+    };
+    expect(plan({ position: 5, layers: 3, parents: [1, 4] }, destination, "ordinary", 6, source)).toEqual(expected);
+    expect(plan({ position: 5, layers: 3, parents: [0, 1, 4] }, destination, "ordinary", 5, source)).toEqual(expected);
   });
 
   it("rejects planner inputs without canonical projections or valid history lengths", () => {
