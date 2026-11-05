@@ -144,6 +144,9 @@ pub enum StoreError {
         /// Why, as git reports it.
         reason: String,
     },
+    /// A fetch was refused because an object it received failed the check that `fetch.fsckObjects` or `transfer.fsckObjects` asks
+    /// for. Nothing it received was kept, and no ref moved.
+    ObjectsRefused(String),
 }
 
 impl fmt::Display for StoreError {
@@ -175,6 +178,12 @@ impl fmt::Display for StoreError {
             Self::Rejected { reference, reason } => {
                 write!(f, "the remote refused {reference}: {reason}")
             },
+            Self::ObjectsRefused(report) => write!(
+                f,
+                "the fetched objects failed the check that `fetch.fsckObjects` or `transfer.fsckObjects` asks for, and none were \
+                 kept: {}",
+                report.trim_end()
+            ),
         }
     }
 }

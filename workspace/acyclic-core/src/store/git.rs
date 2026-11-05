@@ -849,7 +849,10 @@ impl Git {
             .map_err(failed)?
             .with_prune(true)
             .receive(gix::progress::Discard, &std::sync::atomic::AtomicBool::new(false))
-            .map_err(failed)?;
+            .map_err(|err| match err.downcast_any_ref::<gix::remote::fetch::ObjectsRefused>() {
+                Some(refused) => StoreError::ObjectsRefused(refused.report.to_string()),
+                None => failed(err),
+            })?;
         Ok(())
     }
 

@@ -468,3 +468,107 @@ fn a_remote_with_relative_paths_keeps_its_name_and_its_push_url() {
     assert!(matches!(pushed, Ok(1)), "one ref was pushed to the push URL");
     assert_eq!(git(&dir.path().join("remote.git"), &["rev-parse", "refs/heads/state/mac"]), commit);
 }
+
+/// A remote whose state ref points at a commit with a tree that names a file twice, which `git fetch` refuses with `fetch.fsckObjects` and takes
+/// without it: with the setting the fetch fails as the class `ObjectsRefused` and keeps nothing, without it the fetch takes the
+/// commit, as Git does.
+#[test]
+fn a_flawed_object_is_refused_when_the_configuration_asks_for_the_check_as_git_does() {
+    let dir = TempDir::new().expect("a temporary directory");
+    let remote = dir.path().join("remote.git");
+    git(dir.path(), &["init", "-q", "--bare", "remote.git"]);
+    let blob_id = git_with(&remote, &["hash-object", "-w", "--stdin"], &[], b"x\n");
+    let blob_bytes: Vec<u8> = (0..40)
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&blob_id.trim()[i..i + 2], 16).expect("a hex object id"))
+        .collect();
+    let mut entries = Vec::new();
+    for _ in 0..2 {
+        entries.extend_from_slice(b"100644 a\0");
+        entries.extend_from_slice(&blob_bytes);
+    }
+    let tree_id = git_with(
+        &remote,
+        &["hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+        &[],
+        &entries,
+    );
+    let flawed = format!(
+        "tree {}\nauthor A <a@e.invalid> 1 +0000\ncommitter C <c@e.invalid> 1 +0000\n\nduplicate entries\n",
+        tree_id.trim()
+    );
+    let commit_id = git_with(
+        &remote,
+        &["hash-object", "-t", "commit", "-w", "--stdin"],
+        &[],
+        flawed.as_bytes(),
+    );
+    git(&remote, &["update-ref", "refs/heads/state/mac", commit_id.trim()]);
+    let url = remote.to_str().expect("UTF-8");
+    let spec = vec!["+refs/heads/state/*:refs/acyclic/remotes/x/state/*".to_owned()];
+    let refs = |path: &Path| git(path, &["for-each-ref", "--format=%(refname)"]);
+
+    // The oracle must not read the machine's configuration: a global `transfer.fsckObjects` would decide the control.
+    let isolated_git = |dir: &Path| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        command
+    };
+    let fetched_by_git = |dir: &Path| {
+        isolated_git(dir).args(["fetch", "-q", url, &spec[0]]).output().expect("git runs")
+    };
+
+    for key in ["fetch.fsckObjects", "transfer.fsckObjects"] {
+        let theirs = dir.path().join(format!("theirs-{key}"));
+        git(dir.path(), &["init", "-q", theirs.to_str().expect("UTF-8")]);
+        git(&theirs, &["config", key, "true"]);
+        let output = fetched_by_git(&theirs);
+        assert!(!output.status.success(), "{key}: Git refuses the commit");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("duplicateEntries"),
+            "{key}: Git names the check"
+        );
+
+        let ours = dir.path().join(format!("ours-{key}"));
+        git(dir.path(), &["init", "-q", ours.to_str().expect("UTF-8")]);
+        git(&ours, &["config", key, "true"]);
+        match Git::new(&ours).fetch(url, &spec) {
+            Err(super::StoreError::ObjectsRefused(report)) => {
+                assert!(
+                    report.contains("duplicateEntries"),
+                    "{key}: the report names the check: {report}"
+                );
+            },
+            other => panic!("{key}: expected the objects to be refused, got {other:?}"),
+        }
+        assert_eq!(refs(&ours), "", "{key}: a refused fetch moves no ref");
+        let kept =
+            std::fs::read_dir(ours.join(".git/objects/pack")).expect("the pack directory").count();
+        assert_eq!(
+            kept, 0,
+            "{key}: a refused fetch keeps no pack, nor the scratch directory of one"
+        );
+        assert!(
+            !isolated_git(&ours)
+                .args(["cat-file", "-e", commit_id.trim()])
+                .status()
+                .expect("git runs")
+                .success(),
+            "{key}: the flawed commit is not in the repository"
+        );
+    }
+
+    // The control: both settings false, which also wins over a machine's global `transfer.fsckObjects`.
+    let theirs = dir.path().join("theirs-unchecked");
+    git(dir.path(), &["init", "-q", theirs.to_str().expect("UTF-8")]);
+    git(&theirs, &["config", "fetch.fsckObjects", "false"]);
+    assert!(fetched_by_git(&theirs).status.success(), "Git takes the commit without the check");
+    let ours = dir.path().join("ours-unchecked");
+    git(dir.path(), &["init", "-q", ours.to_str().expect("UTF-8")]);
+    git(&ours, &["config", "fetch.fsckObjects", "false"]);
+    Git::new(&ours).fetch(url, &spec).expect("without the check the commit is taken, as Git does");
+    assert_eq!(refs(&ours).trim(), "refs/acyclic/remotes/x/state/mac");
+}
