@@ -441,3 +441,30 @@ fn the_keychain_helper_is_found_in_the_first_directory_that_holds_it() {
     );
     assert_eq!(super::first_holding_keychain_helper(&[empty]), None);
 }
+
+#[test]
+fn a_remote_with_relative_paths_keeps_its_name_and_its_push_url() {
+    let dir = TempDir::new().expect("a temporary directory");
+    git(dir.path(), &["init", "-q", "--bare", "remote.git"]);
+    git(dir.path(), &["init", "-q", "ours"]);
+    let ours_dir = dir.path().join("ours");
+    // Fetches would go to a place that doesn't exist; only the push URL leads anywhere, and both count from the clone.
+    git(&ours_dir, &["config", "remote.origin.url", "../nowhere.git"]);
+    git(&ours_dir, &["config", "remote.origin.pushurl", "../remote.git"]);
+    let ours = Git::new(&ours_dir);
+    let tree = ours.write_tree(None, &files(&[("a", Some("x"))])).expect("a tree");
+    let commit = ours.commit(&tree, None, "mac", 1, "first").expect("a commit");
+    let pushed = ours
+        .push(
+            "origin",
+            &[super::PushRef {
+                name: "refs/heads/state/mac".to_owned(),
+                lease: None,
+                new: Some(commit.clone()),
+                rewrite: false,
+            }],
+        )
+        .expect("the push runs");
+    assert!(matches!(pushed, Ok(1)), "one ref was pushed to the push URL");
+    assert_eq!(git(&dir.path().join("remote.git"), &["rev-parse", "refs/heads/state/mac"]), commit);
+}

@@ -119,8 +119,9 @@ pub enum StoreError {
     Git(String),
     /// Something moved a ref between its read and its update, though writers hold the batch lock.
     Conflict,
-    /// A ref lock is held. A lock on this replica's own refs that is a minute old is a dead writer's and is removed by
-    /// the next writer; any other is left alone, since the process holding it could still finish.
+    /// A ref lock is held. A lock on this replica's own state, log or join refs that is a minute old and found by a writer
+    /// with the batch lock is a dead writer's and is removed; any other is left alone, since the process holding it could
+    /// still finish.
     Locked {
         /// The lock file.
         path: PathBuf,
@@ -261,6 +262,8 @@ pub struct Tracker {
     push_after_write: bool,
     /// How the repack runs once it is due.
     maintenance: Maintenance,
+    /// How old a lock on this replica's refs is before a writer that holds the batch lock removes it.
+    stale_lock: std::time::Duration,
 }
 
 /// How the store repacks itself once git's thresholds are crossed. `git gc --auto` detached into the background and
@@ -538,6 +541,7 @@ impl Tracker {
             origin,
             push_after_write,
             maintenance: default_maintenance(),
+            stale_lock: STALE_LOCK,
         };
         if tip.is_some() {
             return Ok((tracker(git, id, false, tip), None));
@@ -557,6 +561,14 @@ impl Tracker {
         };
         init_replica(path, &fresh)?;
         Ok((tracker(git, fresh.clone(), true, None), Some(fresh)))
+    }
+
+    /// Sets how old a lock on this replica's own refs must be before a writer removes it, for tests that need a short one.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_stale_lock(mut self, age: std::time::Duration) -> Self {
+        self.stale_lock = age;
+        self
     }
 
     /// Chooses how this tracker repacks, instead of the process's choice.
@@ -790,25 +802,25 @@ impl Tracker {
         Ok(file)
     }
 
-    /// Removes the lock files a dead writer left on refs this replica writes, which `git update-ref` released when its
-    /// parent died and a process of ours can't: the own state and log refs, everything under `refs/acyclic/` (join
-    /// markers, tracking refs, pending prunes) and `packed-refs`. A lock a minute old is no live writer's, since a ref's
-    /// lock is held for milliseconds, or as long as a `reference-transaction` hook runs; a younger one is left, and reported
-    /// as [`StoreError::Locked`] when it blocks a write. Best effort.
+    /// Removes the lock files a dead writer left on the refs that only a holder of the batch lock changes: this replica's
+    /// state and log refs and its join markers. `git update-ref` released its locks when its parent died, and a process
+    /// of ours can't. Called with the batch lock held, which is what makes it safe: the operating system releases that lock
+    /// when its holder dies, and a live writer of these refs holds it from before it takes the ref locks until after it
+    /// has committed them, a `reference-transaction` hook that takes minutes included, so a ref lock found by a second
+    /// writer that has the batch lock was left by a writer that is dead. The age is a margin, not the proof, for
+    /// something outside acyclic changing these refs by hand. Locks on any other ref (fetched refs, pending prunes,
+    /// `packed-refs`, a repack's) are never removed: a writer without the batch lock may hold them, and as with Git the
+    /// next write reports [`StoreError::Locked`] with the file to delete.
     fn sweep_stale_locks(&self) {
         let Ok(common) = self.git.common_dir() else { return };
         let own = [
             format!("refs/heads/state/{}.lock", self.replica),
             format!("refs/heads/log/{}", self.replica),
-            "refs/acyclic".to_owned(),
-            "packed-refs.lock".to_owned(),
+            format!("refs/acyclic/joined/{}", self.replica),
         ];
         for entry in own {
-            remove_stale_locks(&common.join(entry), STALE_LOCK);
+            remove_stale_locks(&common.join(entry), self.stale_lock);
         }
-        // A repack that was killed keeps the lock that stops two repacks at once, which has no age limit of its own; a
-        // live one is bounded at two minutes, so this old is dead.
-        remove_stale_locks(&common.join("objects/maintenance.lock"), STALE_MAINTENANCE_LOCK);
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -904,7 +916,6 @@ impl Tracker {
     ///
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
-        self.sweep_stale_locks();
         let base = remote_base(remote);
         let mut specs = vec![format!("+refs/heads/state/*:{base}state/*")];
         for prefix in self.segment_prefixes() {
@@ -930,7 +941,6 @@ impl Tracker {
     /// [`StoreError::RemoteMoved`] when the remote's state ref moved since this clone last saw it, and
     /// [`StoreError::Rejected`] when the remote refuses another ref; nothing moves then. Fails too when git fails.
     pub fn push(&self, remote: &str) -> Result<usize, StoreError> {
-        self.sweep_stale_locks();
         let mine = state_ref(&self.replica);
         let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
         let segment_prefixes = self.segment_prefixes();
@@ -1286,9 +1296,6 @@ fn push_failure(state: &str, refused: Vec<Refused>) -> StoreError {
 
 /// How old a lock file on this replica's own refs is before the next writer removes it.
 const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// How old the lock of a repack is before it is taken for a dead one's: well past the longest a repack is let to run.
-const STALE_MAINTENANCE_LOCK: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Removes the lock files at `path` or below it that are at least `stale` old. Best effort.
 fn remove_stale_locks(path: &Path, stale: std::time::Duration) {

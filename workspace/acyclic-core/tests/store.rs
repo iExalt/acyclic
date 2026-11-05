@@ -326,37 +326,98 @@ fn a_detached_repack_leaves_the_command_alone_and_follows_soon() {
     git(&path, &["fsck", "--strict", "--full"]);
 }
 
-/// A dead writer can leave locks on any ref it was changing, not only the batch's: the markers of a join, the refs a fetch
-/// or a push keeps, and `packed-refs`. A lock a minute old goes at the next write, a younger one stays.
+/// A dead writer can leave locks on the refs of a batch or a join, and the next writer removes them once they are a minute
+/// old. It leaves the locks of refs that a writer without the batch lock may hold, and of `packed-refs` and a repack, to
+/// be reported as `Locked` until someone deletes them, as with Git.
 #[test]
-fn stale_locks_of_a_dead_writer_go_wherever_it_left_them() {
+fn stale_locks_are_removed_only_where_the_batch_lock_proves_the_holder_dead() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
     write(&tracker, "a1", "f", json!(1));
     let git_dir = path.join(".git");
-    let old = [
-        "refs/acyclic/joined/mac/origin/state/pi.lock",
+    let removed = ["refs/acyclic/joined/mac/origin/state/pi.lock"];
+    let kept = [
         "refs/acyclic/remotes/origin/state/pi.lock",
+        "refs/acyclic/pruned/log/mac/2026-09/0001.lock",
         "packed-refs.lock",
+        "objects/maintenance.lock",
     ];
-    let young = "refs/acyclic/remotes/origin/state/fresh.lock";
-    for name in old.iter().chain(&[young]) {
+    let young = "refs/acyclic/joined/mac/origin/state/fresh.lock";
+    for name in removed.iter().chain(&kept).chain(&[young]) {
         let file = git_dir.join(name);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "").unwrap();
         if *name != young {
             let handle = std::fs::File::options().write(true).open(&file).unwrap();
             handle
-                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(7_200))
                 .unwrap();
         }
     }
-    write(&tracker, "a1", "f", json!(2));
-    for name in old {
+    // The `packed-refs` lock of a repack, if it is one, is not ours to take: the write is refused and says which file.
+    let key = item("a1");
+    let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
+        replica.write(&key, "f", "actor/user", at, Some(json!(2))).map(|_| ())
+    });
+    match result {
+        Err(BatchError::Store(StoreError::Locked { path, .. })) => {
+            assert!(
+                path.ends_with("packed-refs.lock") || path.ends_with("pi.lock"),
+                "{}",
+                path.display()
+            );
+        },
+        Ok(_) => {},
+        other => panic!("expected a write or a lock report, got {other:?}"),
+    }
+    for name in removed {
         assert!(!git_dir.join(name).exists(), "{name} was a dead writer's and is gone");
     }
-    assert!(git_dir.join(young).exists(), "a lock younger than a minute may be a live writer's");
+    for name in kept {
+        assert!(git_dir.join(name).exists(), "{name} may be a live writer's, so it stays");
+    }
+    assert!(git_dir.join(young).exists(), "a lock younger than a minute stays");
+}
+
+/// A writer whose `reference-transaction` hook takes longer than the stale-lock age is alive, and a second writer must not
+/// take its locks away: it waits for the batch lock, and both writes are kept.
+#[test]
+fn a_hook_that_outlasts_the_stale_lock_age_keeps_its_locks_from_a_second_writer() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let age = std::time::Duration::from_millis(500);
+    let (first, _) = Tracker::open(&path).unwrap();
+    let first = first.with_stale_lock(age);
+    let (second, _) = Tracker::open(&path).unwrap();
+    let second = second.with_stale_lock(age);
+    write(&first, "a1", "f", json!(0));
+    // The hook holds the transaction in its prepared state, with every ref locked, for three times the age.
+    let hook = path.join(".git/hooks/reference-transaction");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\nif [ \"$1\" = prepared ]; then sleep 1.5; fi\nexit 0\n")
+        .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::thread::scope(|scope| {
+        let slow = scope.spawn(|| write(&first, "a1", "f", json!("slow")));
+        // The second writer starts after the lock is older than the stale age.
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        let key = item("a2");
+        let result = second.batch(&meta(), NOW, false, &no_project, |replica, at| {
+            replica.write(&key, "g", "actor/user", at, Some(json!("second"))).map(|_| ())
+        });
+        result.expect("the second writer waits for the first, and then writes");
+        slow.join().unwrap();
+    });
+    let (_, state) = first.load().unwrap();
+    let text = format!("{state:?}");
+    assert!(text.contains("slow") && text.contains("second"), "neither write was lost: {text}");
+    assert_eq!(
+        git(&path, &["rev-list", "--count", "refs/heads/state/mac"]),
+        "3",
+        "three commits, one after another"
+    );
 }
 
 #[test]

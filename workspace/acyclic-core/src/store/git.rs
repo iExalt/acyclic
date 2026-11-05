@@ -540,9 +540,11 @@ fn classify(err: &gix::Error, common: &Path, names: &[String]) -> StoreError {
         .downcast_any_ref::<std::io::Error>()
         .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists);
     if held {
+        // The lock file that exists: one of the refs being changed, or the one that guards `packed-refs`.
         let path = names
             .iter()
             .map(|name| common.join(format!("{name}.lock")))
+            .chain(std::iter::once(common.join("packed-refs.lock")))
             .find(|path| path.exists())
             .or_else(|| names.first().map(|name| common.join(format!("{name}.lock"))));
         if let Some(path) = path {
@@ -727,6 +729,40 @@ pub(crate) enum Refused {
 }
 
 impl Git {
+    /// Makes the relative paths that the remote `name` is configured with, `url` and `pushurl`, absolute in `repo`'s
+    /// configuration in memory, counting from the top of the work tree where git runs a fetch or a push. The remote keeps
+    /// its name and every other setting, so it is found as Git finds it.
+    fn absolutize_urls(repo: &mut gix::Repository, name: &str) -> Result<(), StoreError> {
+        if repo.try_find_remote(name).is_none() {
+            return Ok(());
+        }
+        let top = repo.workdir().unwrap_or_else(|| repo.git_dir()).to_owned();
+        let mut changes = Vec::new();
+        for key in ["url", "pushurl"] {
+            let full = format!("remote.{name}.{key}");
+            let Some(value) = repo.config_snapshot().string(full.as_str()).map(|v| v.to_string())
+            else {
+                continue;
+            };
+            let relative = gix::url::parse(gix::bstr::BStr::new(value.as_bytes()))
+                .ok()
+                .filter(|url| url.scheme == gix::url::Scheme::File)
+                .and_then(|url| gix::path::from_byte_slice(&url.path).ok().map(Path::to_owned))
+                .filter(|path| path.is_relative());
+            if let Some(path) = relative {
+                changes.push((full, top.join(path).to_string_lossy().into_owned()));
+            }
+        }
+        if !changes.is_empty() {
+            let mut snapshot = repo.config_snapshot_mut();
+            for (key, value) in &changes {
+                snapshot.set_raw_value(key.as_str(), value.as_str()).map_err(failed)?;
+            }
+            snapshot.commit().map_err(failed)?;
+        }
+        Ok(())
+    }
+
     /// The remote by name, or at a URL or path; a relative path counts from the repository.
     fn remote<'r>(
         &self,
@@ -734,19 +770,7 @@ impl Git {
         remote: &str,
     ) -> Result<gix::Remote<'r>, StoreError> {
         if let Some(found) = repo.try_find_remote(remote) {
-            let found = found.map_err(failed)?;
-            // A relative path counts from the top of the work tree, where git runs a fetch or a push.
-            let relative = found.url(gix::remote::Direction::Fetch).and_then(|url| {
-                let path = gix::path::from_byte_slice(&url.path).ok()?.to_owned();
-                (url.scheme == gix::url::Scheme::File && path.is_relative()).then_some(path)
-            });
-            return match relative {
-                Some(path) => {
-                    let top = repo.workdir().unwrap_or_else(|| repo.git_dir());
-                    repo.remote_at(top.join(path).to_string_lossy().into_owned()).map_err(failed)
-                },
-                None => Ok(found),
-            };
+            return found.map_err(failed);
         }
         let path = Path::new(remote);
         let at = if path.is_relative() && self.repo.join(path).exists() {
@@ -763,7 +787,8 @@ impl Git {
         remote: &str,
         patterns: &[String],
     ) -> Result<BTreeMap<String, String>, StoreError> {
-        let repo = self.handle()?;
+        let mut repo = self.handle()?;
+        Self::absolutize_urls(&mut repo, remote)?;
         self.list_remote_with(&repo, remote, patterns)
     }
 
@@ -812,7 +837,8 @@ impl Git {
     /// Fetches `refspecs` from `remote`, pruning the local refs that the specs map and the remote no longer has,
     /// and following the tags that point into what it receives, as `git fetch` does.
     pub(crate) fn fetch(&self, remote: &str, refspecs: &[String]) -> Result<(), StoreError> {
-        let repo = self.fresh_handle()?;
+        let mut repo = self.fresh_handle()?;
+        Self::absolutize_urls(&mut repo, remote)?;
         let mut remote = self.remote(&repo, remote)?;
         remote
             .replace_refspecs(refspecs.iter().map(String::as_str), gix::remote::Direction::Fetch)
@@ -835,7 +861,8 @@ impl Git {
         refs: &[PushRef],
     ) -> Result<Result<usize, Vec<Refused>>, StoreError> {
         use gix::remote::push::{Lease, Refusal, Status, Update};
-        let repo = self.fresh_handle()?;
+        let mut repo = self.fresh_handle()?;
+        Self::absolutize_urls(&mut repo, remote)?;
         let remote = self.remote(&repo, remote)?;
         let mut updates = Vec::with_capacity(refs.len());
         for r in refs {
