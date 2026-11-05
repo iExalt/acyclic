@@ -43,3 +43,10 @@ tower-http = { version = "0.7.1", default-features = false, features = ["fs", "c
 [profile.journeys]
 inherits = "dev"
 opt-level = 1
+
+# The shipped binary carries gix, with its network and TLS stack. Thin LTO with one codegen unit made it 9% smaller (stripped, 29.2 to
+# 26.5 MB) at the cost of nothing on a cold build and 2.3 times the time of a release build after an edit; fat LTO made it 17% smaller
+# but a cold build took 1.7 times and an edited one 5 times as long. Panics stay unwinding, as the server catches those of a task.
+[profile.release]
+lto = "thin"
+codegen-units = 1
