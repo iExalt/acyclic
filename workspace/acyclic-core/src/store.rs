@@ -786,19 +786,26 @@ impl Tracker {
             .open(&path)
             .map_err(|e| StoreError::Git(format!("can't open {}: {e}", path.display())))?;
         file.lock().map_err(|e| StoreError::Git(format!("can't lock {}: {e}", path.display())))?;
-        // Every writer of this replica's refs holds this lock, so a lock file on them that has been there for a minute
-        // is left by a writer that died between locking and committing; `git update-ref` released its locks when its
-        // parent died, a process of ours can't.
-        let common = self.git.common_dir()?;
+        self.sweep_stale_locks();
+        Ok(file)
+    }
+
+    /// Removes the lock files a dead writer left on refs this replica writes, which `git update-ref` released when its
+    /// parent died and a process of ours can't: the own state and log refs, everything under `refs/acyclic/` (join
+    /// markers, tracking refs, pending prunes) and `packed-refs`. A lock a minute old is no live writer's, since a ref's
+    /// lock is held for milliseconds, or as long as a `reference-transaction` hook runs; a younger one is left, and reported
+    /// as [`StoreError::Locked`] when it blocks a write. Best effort.
+    fn sweep_stale_locks(&self) {
+        let Ok(common) = self.git.common_dir() else { return };
         let own = [
             format!("refs/heads/state/{}.lock", self.replica),
             format!("refs/heads/log/{}", self.replica),
-            format!("refs/acyclic/pruned/log/{}", self.replica),
+            "refs/acyclic".to_owned(),
+            "packed-refs.lock".to_owned(),
         ];
         for entry in own {
             remove_stale_locks(&common.join(entry));
         }
-        Ok(file)
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -894,6 +901,7 @@ impl Tracker {
     ///
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
+        self.sweep_stale_locks();
         let base = remote_base(remote);
         let mut specs = vec![format!("+refs/heads/state/*:{base}state/*")];
         for prefix in self.segment_prefixes() {
@@ -919,6 +927,7 @@ impl Tracker {
     /// [`StoreError::RemoteMoved`] when the remote's state ref moved since this clone last saw it, and
     /// [`StoreError::Rejected`] when the remote refuses another ref; nothing moves then. Fails too when git fails.
     pub fn push(&self, remote: &str) -> Result<usize, StoreError> {
+        self.sweep_stale_locks();
         let mine = state_ref(&self.replica);
         let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
         let segment_prefixes = self.segment_prefixes();

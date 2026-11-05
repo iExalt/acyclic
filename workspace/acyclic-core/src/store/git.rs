@@ -600,7 +600,9 @@ impl Git {
     /// Repacks when the store's thresholds are crossed, as `git gc --auto` does, in the way `how` says. Best effort.
     pub(crate) fn auto_maintenance(&self, how: Maintenance) {
         match how {
-            Maintenance::Inline => run_gc(&self.repo),
+            Maintenance::Inline => {
+                run_gc(&self.repo);
+            },
             Maintenance::Thread => self.detached(|path| {
                 let path = path.to_owned();
                 std::thread::spawn(move || run_gc_and_clear_marker(&path));
@@ -609,7 +611,8 @@ impl Git {
                 let Ok(exe) = std::env::current_exe() else { return };
                 let mut child = std::process::Command::new(exe);
                 child
-                    .env(MAINTAIN_ENV, path)
+                    .arg(MAINTAIN_ARG)
+                    .arg(path)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
@@ -619,6 +622,7 @@ impl Git {
                     // Its own process group, so the terminal's signals for the command don't reach it.
                     child.process_group(0);
                 }
+                // Best effort: a binary replaced on disk since it started can't be run again from its old path.
                 let _ = child.spawn();
             }),
         }
@@ -652,13 +656,15 @@ const BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
 /// The longest a detached run goes on before it is told to stop.
 const BOUND: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// The variable that makes the binary run the repack for the clone it names instead of its command.
-pub(crate) const MAINTAIN_ENV: &str = "ACYCLIC_MAINTAIN_STORE";
+/// The argument that makes the binary run the repack for the clone that follows it instead of a command. It is not one of
+/// the commands' arguments, and it isn't in the environment, which a hook of the user's would inherit.
+pub(crate) const MAINTAIN_ARG: &str = "--maintain-store-in-background";
 
-/// Repacks the clone at `path` when git's thresholds are crossed, here and now. Best effort.
-fn run_gc(path: &Path) {
+/// Repacks the clone at `path` when git's thresholds are crossed, here and now. Best effort. Whether the attempt is
+/// settled: it ran, or nothing was due. A run that failed or found another one busy isn't.
+fn run_gc(path: &Path) -> bool {
     let git = Git::new(path);
-    let Ok(repo) = git.fresh_handle() else { return };
+    let Ok(repo) = git.fresh_handle() else { return false };
     let mut options = gix::maintenance::gc::Options::default();
     options.auto = true;
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -676,21 +682,28 @@ fn run_gc(path: &Path) {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     });
-    let _ = repo.gc(options, &stop);
+    let outcome = repo.gc(options, &stop);
     done.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = watchdog.join();
+    matches!(outcome, Ok(outcome) if matches!(outcome.skipped, None | Some(gix::maintenance::gc::Skipped::NotDue)))
 }
 
+/// Repacks, and then lets the next command start another repack; after a failure it keeps that from the marker's age.
 fn run_gc_and_clear_marker(path: &Path) {
-    run_gc(path);
-    if let Ok(common) = Git::new(path).common_dir() {
+    if run_gc(path)
+        && let Ok(common) = Git::new(path).common_dir()
+    {
         let _ = std::fs::remove_file(common.join("acyclic").join("maintenance"));
     }
 }
 
-/// Runs the repack a parent asked for with [`MAINTAIN_ENV`], and says whether this process was started for that.
+/// Runs the repack a parent asked for with [`MAINTAIN_ARG`], and says whether this process was started for that.
 pub(crate) fn maintenance_child() -> bool {
-    let Some(path) = std::env::var_os(MAINTAIN_ENV) else { return false };
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_none_or(|first| first != MAINTAIN_ARG) {
+        return false;
+    }
+    let Some(path) = args.next() else { return false };
     run_gc_and_clear_marker(Path::new(&path));
     true
 }

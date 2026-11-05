@@ -326,6 +326,39 @@ fn a_detached_repack_leaves_the_command_alone_and_follows_soon() {
     git(&path, &["fsck", "--strict", "--full"]);
 }
 
+/// A dead writer can leave locks on any ref it was changing, not only the batch's: the markers of a join, the refs a fetch
+/// or a push keeps, and `packed-refs`. A lock a minute old goes at the next write, a younger one stays.
+#[test]
+fn stale_locks_of_a_dead_writer_go_wherever_it_left_them() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    write(&tracker, "a1", "f", json!(1));
+    let git_dir = path.join(".git");
+    let old = [
+        "refs/acyclic/joined/mac/origin/state/pi.lock",
+        "refs/acyclic/remotes/origin/state/pi.lock",
+        "packed-refs.lock",
+    ];
+    let young = "refs/acyclic/remotes/origin/state/fresh.lock";
+    for name in old.iter().chain(&[young]) {
+        let file = git_dir.join(name);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "").unwrap();
+        if *name != young {
+            let handle = std::fs::File::options().write(true).open(&file).unwrap();
+            handle
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+                .unwrap();
+        }
+    }
+    write(&tracker, "a1", "f", json!(2));
+    for name in old {
+        assert!(!git_dir.join(name).exists(), "{name} was a dead writer's and is gone");
+    }
+    assert!(git_dir.join(young).exists(), "a lock younger than a minute may be a live writer's");
+}
+
 #[test]
 fn a_crash_after_prepare_moves_nothing() {
     crash_at("after-prepare");
