@@ -14,6 +14,74 @@ $ acyclic init tracker --replica mac
   "ok": true
 }
 
+$ ACYCLIC_ACTOR=session/mac acyclic item add --title Nowhere
+# exit 1
+{
+  "error": {
+    "code": "parent-required",
+    "details": {
+      "initiatives": []
+    },
+    "message": "an item needs a parent and the tracker has no initiative: `acyclic initiative add --title <TITLE>` adds one, or pass --parent <ITEM>"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative add --id 01900000-0000-7000-8000-0000000000b0 --title Garden
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "initiative": "01900000-0000-7000-8000-0000000000b0",
+    "title": "Garden"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative add --id 01900000-0000-7000-8000-0000000000b0 --title Garden
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "initiative": "01900000-0000-7000-8000-0000000000b0",
+    "title": "Garden"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative add --id 01900000-0000-7000-8000-0000000000b0 --title Other
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "fields": [
+        "title"
+      ]
+    },
+    "message": "initiative 01900000-0000-7000-8000-0000000000b0 exists with other --title; change it with `acyclic initiative edit 01900000-0000-7000-8000-0000000000b0 --title …`"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000b0 --title Clash --parent Garden
+# exit 1
+{
+  "error": {
+    "code": "id-taken",
+    "details": {
+      "id": "01900000-0000-7000-8000-0000000000b0",
+      "kind": "initiative",
+      "violations": [
+        "initiative 01900000-0000-7000-8000-0000000000b0 has that id, and an id names one kind of record, since an item's parent names an item or an initiative by its id alone: leave --id out for the tracker to make one",
+        "01900000-0000-7000-8000-0000000000b0 can't go under itself or its own descendant"
+      ]
+    },
+    "message": "initiative 01900000-0000-7000-8000-0000000000b0 has that id, and an id names one kind of record, since an item's parent names an item or an initiative by its id alone: leave --id out for the tracker to make one"
+  },
+  "ok": false
+}
+
 $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a1 --title First
 # exit 0
 {
@@ -86,7 +154,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
         "items": [
           {
             "id": "01900000-0000-7000-8000-0000000000a1",
-            "parent": null,
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
             "readiness": {
               "readiness": "ready"
             },
@@ -148,7 +217,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
         "items": [
           {
             "id": "01900000-0000-7000-8000-0000000000a1",
-            "parent": null,
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
             "readiness": {
               "readiness": "ready"
             },
@@ -310,7 +380,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
         {
           "conflicted": false,
           "id": "01900000-0000-7000-8000-0000000000a1",
-          "parent": null,
+          "initiative": "01900000-0000-7000-8000-0000000000b0",
+          "parent": "01900000-0000-7000-8000-0000000000b0",
           "readiness": {
             "readiness": "done"
           },
@@ -322,7 +393,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
         {
           "conflicted": false,
           "id": "01900000-0000-7000-8000-0000000000a2",
-          "parent": null,
+          "initiative": "01900000-0000-7000-8000-0000000000b0",
+          "parent": "01900000-0000-7000-8000-0000000000b0",
           "readiness": {
             "holder": "session/mac",
             "readiness": "claimed"
@@ -392,7 +464,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
         "items": [
           {
             "id": "01900000-0000-7000-8000-0000000000a2",
-            "parent": null,
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
             "readiness": {
               "readiness": "ready"
             },
@@ -478,7 +551,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit Second --title Renamed --parent no
   "error": {
     "code": "not-found",
     "details": null,
-    "message": "no item nope"
+    "message": "no item or initiative nope"
   },
   "ok": false
 }
@@ -493,6 +566,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "done_at": null,
       "evidence": null,
       "id": "01900000-0000-7000-8000-0000000000a2",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [],
         "waits_for": [
@@ -500,11 +574,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
         ]
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "readiness": {
         "readiness": "ready"
       },
-      "role": "item",
+      "role": "task",
       "stage": "ready",
       "state": "open",
       "thread": "01900000-0000-7000-8000-0000000000f0",
@@ -535,7 +609,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
         "items": [
           {
             "id": "01900000-0000-7000-8000-0000000000a2",
-            "parent": null,
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
             "readiness": {
               "readiness": "ready"
             },
@@ -595,7 +670,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
     "items": [
       {
         "id": "01900000-0000-7000-8000-0000000000a1",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000b0",
+        "parent": "01900000-0000-7000-8000-0000000000b0",
         "readiness": {
           "readiness": "done"
         },
@@ -606,7 +682,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
       },
       {
         "id": "01900000-0000-7000-8000-0000000000a2",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000b0",
+        "parent": "01900000-0000-7000-8000-0000000000b0",
         "readiness": {
           "readiness": "ready"
         },
@@ -689,16 +766,18 @@ ID      TITLE  DONE  LEAVES  WAVE
 
 $ ACYCLIC_ACTOR=session/mac acyclic item show First -o pretty
 # exit 0
-id         0000a1
-title      First
-done_at    2026-10-15T00:00:00Z
-evidence   text shipped
-links      waited_on_by 0000a2
-readiness  done
-role       item
-stage      done
-state      done
-thread     0000f1
+id          0000a1
+title       First
+done_at     2026-10-15T00:00:00Z
+evidence    text shipped
+initiative  0000b0
+links       waited_on_by 0000a2
+parent      0000b0
+readiness   done
+role        task
+stage       done
+state       done
+thread      0000f1
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000a1 --title First -o pretty
 # exit 0
@@ -721,7 +800,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
         {
           "conflicted": false,
           "id": "01900000-0000-7000-8000-0000000000a1",
-          "parent": null,
+          "initiative": "01900000-0000-7000-8000-0000000000b0",
+          "parent": "01900000-0000-7000-8000-0000000000b0",
           "readiness": {
             "readiness": "done"
           },
@@ -733,7 +813,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
         {
           "conflicted": false,
           "id": "01900000-0000-7000-8000-0000000000a2",
-          "parent": null,
+          "initiative": "01900000-0000-7000-8000-0000000000b0",
+          "parent": "01900000-0000-7000-8000-0000000000b0",
           "readiness": {
             "readiness": "ready"
           },
@@ -793,6 +874,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
         "text": "shipped"
       },
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [
           "01900000-0000-7000-8000-0000000000a2"
@@ -800,11 +882,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
         "waits_for": []
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "readiness": {
         "readiness": "done"
       },
-      "role": "item",
+      "role": "task",
       "stage": "done",
       "state": "done",
       "thread": "01900000-0000-7000-8000-0000000000f1",
@@ -816,6 +898,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "done_at": null,
       "evidence": null,
       "id": "01900000-0000-7000-8000-0000000000a2",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [],
         "waits_for": [
@@ -823,11 +906,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
         ]
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "readiness": {
         "readiness": "ready"
       },
-      "role": "item",
+      "role": "task",
       "stage": "ready",
       "state": "open",
       "thread": "01900000-0000-7000-8000-0000000000f1",
@@ -1079,6 +1162,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
         "text": "shipped"
       },
       "id": "01900000-0000-7000-8000-0000000000a1",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [
           "01900000-0000-7000-8000-0000000000a2"
@@ -1086,11 +1170,11 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
         "waits_for": []
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "readiness": {
         "readiness": "done"
       },
-      "role": "item",
+      "role": "task",
       "stage": "done",
       "state": "done",
       "thread": "01900000-0000-7000-8000-0000000000f1",
@@ -1121,16 +1205,17 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "done_at": null,
       "evidence": null,
       "id": "01900000-0000-7000-8000-0000000000a2",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [],
         "waits_for": []
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "readiness": {
         "readiness": "ready"
       },
-      "role": "item",
+      "role": "task",
       "stage": "ready",
       "state": "open",
       "thread": null,
@@ -1170,7 +1255,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit Second --parent Follow-ups
     "details": {
       "meant": "acyclic item edit Second --thread Follow-ups"
     },
-    "message": "no item Follow-ups: Follow-ups is a thread; did you mean `acyclic item edit Second --thread Follow-ups`?"
+    "message": "no item or initiative Follow-ups: Follow-ups is a thread; did you mean `acyclic item edit Second --thread Follow-ups`?"
   },
   "ok": false
 }
@@ -1330,12 +1415,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       "done_at": null,
       "evidence": null,
       "id": "01900000-0000-7000-8000-0000000000c1",
+      "initiative": "01900000-0000-7000-8000-0000000000b0",
       "links": {
         "waited_on_by": [],
         "waits_for": []
       },
       "notes": null,
-      "parent": null,
+      "parent": "01900000-0000-7000-8000-0000000000b0",
       "progress": {
         "counts": {
           "canceled": 0,
@@ -1351,7 +1437,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       "readiness": {
         "readiness": "parent"
       },
-      "role": "project",
+      "role": "epic",
       "stage": "done",
       "state": "open",
       "thread": null,
@@ -1542,6 +1628,433 @@ $ ACYCLIC_ACTOR=session/mac acyclic item delete nope
     "code": "not-found",
     "details": null,
     "message": "no item nope"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative add --id 01900000-0000-7000-8000-0000000000b1 --title Orchard --notes Trees
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "initiative": "01900000-0000-7000-8000-0000000000b1",
+    "title": "Orchard"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --title Floating
+# exit 1
+{
+  "error": {
+    "code": "parent-required",
+    "details": {
+      "initiatives": [
+        {
+          "id": "01900000-0000-7000-8000-0000000000b0",
+          "title": "Garden"
+        },
+        {
+          "id": "01900000-0000-7000-8000-0000000000b1",
+          "title": "Orchard"
+        }
+      ]
+    },
+    "message": "an item needs a parent and the tracker has several initiatives: pass --parent <INITIATIVE or ITEM>, one of 01900000-0000-7000-8000-0000000000b0 (Garden), 01900000-0000-7000-8000-0000000000b1 (Orchard)"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000b2 --title Pear --parent Orchard
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "01900000-0000-7000-8000-0000000000b2",
+    "placed": [],
+    "title": "Pear"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000b3 --title Orchard --parent Garden
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "01900000-0000-7000-8000-0000000000b3",
+    "placed": [],
+    "title": "Orchard"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --title Plum --parent Orchard
+# exit 2
+{
+  "error": {
+    "code": "ambiguous",
+    "details": {
+      "candidates": [
+        {
+          "id": "01900000-0000-7000-8000-0000000000b3",
+          "title": "Orchard"
+        },
+        {
+          "id": "01900000-0000-7000-8000-0000000000b1",
+          "title": "Orchard"
+        }
+      ]
+    },
+    "message": "\"Orchard\" is the title of 2 items or initiatives: 01900000-0000-7000-8000-0000000000b3 (Orchard), 01900000-0000-7000-8000-0000000000b1 (Orchard); name one by its full id or a longer ending"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item show Pear
+# exit 0
+{
+  "data": [
+    {
+      "children": [],
+      "claims": [],
+      "done_at": null,
+      "evidence": null,
+      "id": "01900000-0000-7000-8000-0000000000b2",
+      "initiative": "01900000-0000-7000-8000-0000000000b1",
+      "links": {
+        "waited_on_by": [],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": "01900000-0000-7000-8000-0000000000b1",
+      "readiness": {
+        "readiness": "ready"
+      },
+      "role": "task",
+      "stage": "ready",
+      "state": "open",
+      "thread": null,
+      "title": "Pear"
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready --initiative Orchard
+# exit 0
+{
+  "data": {
+    "ready": [
+      {
+        "id": "01900000-0000-7000-8000-0000000000b2.one",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000b2",
+            "initiative": "01900000-0000-7000-8000-0000000000b1",
+            "parent": "01900000-0000-7000-8000-0000000000b1",
+            "readiness": {
+              "readiness": "ready"
+            },
+            "stage": "ready",
+            "state": "open",
+            "thread": null,
+            "title": "Pear"
+          }
+        ],
+        "stalled": false,
+        "task": "01900000-0000-7000-8000-0000000000b2",
+        "title": "Pear"
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready --initiative Garden
+# exit 0
+{
+  "data": {
+    "ready": [
+      {
+        "id": "01900000-0000-7000-8000-0000000000f2",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000a4",
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000a2",
+            "readiness": {
+              "holder": "session/mac",
+              "readiness": "claimed"
+            },
+            "stage": "in-progress",
+            "state": "open",
+            "thread": "01900000-0000-7000-8000-0000000000f2",
+            "title": "Third-follow-up"
+          }
+        ],
+        "stalled": false,
+        "task": null,
+        "title": "Follow-ups"
+      },
+      {
+        "id": "01900000-0000-7000-8000-0000000000a3.one",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000a3",
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
+            "readiness": {
+              "readiness": "ready"
+            },
+            "stage": "ready",
+            "state": "open",
+            "thread": null,
+            "title": "Second-follow-up"
+          }
+        ],
+        "stalled": false,
+        "task": "01900000-0000-7000-8000-0000000000a3",
+        "title": "Second-follow-up"
+      },
+      {
+        "id": "01900000-0000-7000-8000-0000000000b3.one",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000b3",
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000b0",
+            "readiness": {
+              "readiness": "ready"
+            },
+            "stage": "ready",
+            "state": "open",
+            "thread": null,
+            "title": "Orchard"
+          }
+        ],
+        "stalled": false,
+        "task": "01900000-0000-7000-8000-0000000000b3",
+        "title": "Orchard"
+      },
+      {
+        "id": "01900000-0000-7000-8000-0000000000c4.one",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000c4",
+            "initiative": "01900000-0000-7000-8000-0000000000b0",
+            "parent": "01900000-0000-7000-8000-0000000000c3",
+            "readiness": {
+              "readiness": "ready"
+            },
+            "stage": "ready",
+            "state": "open",
+            "thread": null,
+            "title": "Part"
+          }
+        ],
+        "stalled": false,
+        "task": "01900000-0000-7000-8000-0000000000c4",
+        "title": "Part"
+      }
+    ]
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic thread ready --initiative nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no initiative nope; `acyclic initiative list` lists them, and `acyclic initiative add --title <TITLE>` adds one"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative edit Orchard --no-notes
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "initiative": "01900000-0000-7000-8000-0000000000b1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative edit Orchard --notes x --no-notes
+# exit 2
+{
+  "error": {
+    "code": "usage",
+    "details": null,
+    "message": "--notes and --no-notes contradict each other: pass one"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative list
+# exit 0
+{
+  "data": {
+    "initiatives": [
+      {
+        "counts": {
+          "items": 6
+        },
+        "id": "01900000-0000-7000-8000-0000000000b0",
+        "title": "Garden"
+      },
+      {
+        "counts": {
+          "items": 1
+        },
+        "id": "01900000-0000-7000-8000-0000000000b1",
+        "title": "Orchard"
+      }
+    ],
+    "no_initiative": {
+      "items": []
+    }
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative list -o pretty
+# exit 0
+ID      TITLE    ITEMS
+0000b0  Garden   6
+0000b1  Orchard  1
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative show Garden Orchard
+# exit 0
+{
+  "data": [
+    {
+      "children": [
+        "01900000-0000-7000-8000-0000000000a1",
+        "01900000-0000-7000-8000-0000000000a2",
+        "01900000-0000-7000-8000-0000000000a3",
+        "01900000-0000-7000-8000-0000000000b3",
+        "01900000-0000-7000-8000-0000000000c1",
+        "01900000-0000-7000-8000-0000000000c3"
+      ],
+      "counts": {
+        "items": 6
+      },
+      "id": "01900000-0000-7000-8000-0000000000b0",
+      "notes": null,
+      "title": "Garden"
+    },
+    {
+      "children": [
+        "01900000-0000-7000-8000-0000000000b2"
+      ],
+      "counts": {
+        "items": 1
+      },
+      "id": "01900000-0000-7000-8000-0000000000b1",
+      "notes": null,
+      "title": "Orchard"
+    }
+  ],
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative show nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no initiative nope; `acyclic initiative list` lists them, and `acyclic initiative add --title <TITLE>` adds one"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Pear --no-parent
+# exit 2
+
+# stderr
+error: unexpected argument '--no-parent' found
+
+  tip: a similar argument exists: '--parent'
+
+Usage: acyclic item edit --parent <PARENT> <ITEM>
+
+For more information, try '--help'.
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative delete Orchard
+# exit 1
+{
+  "error": {
+    "code": "in-use",
+    "details": {
+      "initiative": "01900000-0000-7000-8000-0000000000b1",
+      "reasons": [
+        {
+          "items": [
+            "01900000-0000-7000-8000-0000000000b2"
+          ],
+          "why": "holds-items"
+        }
+      ]
+    },
+    "message": "01900000-0000-7000-8000-0000000000b1 can't be deleted: items are under it (01900000-0000-7000-8000-0000000000b2)"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item edit Pear --parent 01900000-0000-7000-8000-0000000000b0
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "item": "01900000-0000-7000-8000-0000000000b2",
+    "placed": []
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative delete Orchard
+# exit 0
+{
+  "data": {
+    "changed": true,
+    "initiative": "01900000-0000-7000-8000-0000000000b1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative delete 01900000-0000-7000-8000-0000000000b1
+# exit 0
+{
+  "data": {
+    "changed": false,
+    "initiative": "01900000-0000-7000-8000-0000000000b1"
+  },
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative show Orchard
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no initiative Orchard; `acyclic initiative list` lists them, and `acyclic initiative add --title <TITLE>` adds one"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic initiative delete nope
+# exit 3
+{
+  "error": {
+    "code": "not-found",
+    "details": null,
+    "message": "no initiative nope; `acyclic initiative list` lists them, and `acyclic initiative add --title <TITLE>` adds one"
   },
   "ok": false
 }

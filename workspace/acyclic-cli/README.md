@@ -50,6 +50,13 @@ meets what waits for it: `needs` lists that work as `waits-on-canceled`. Replica
 `canceled`, so upgrade every replica before canceling. `--state backlog`, the older word for open, is still taken; the
 tracker stores open as `backlog`, so replicas of older versions keep reading it.
 
+An item's `--parent` names an initiative or an item, and an item always has one: `item add` requires it (defaulting to
+the tracker's only initiative), and no flag clears it. Initiatives are records of their own (`acyclic initiative`), with
+a title and notes. A replica of an older version ignores a record of a kind it doesn't know, so it reads each item
+under an initiative as having a missing parent, and nothing else breaks. To keep that quiet, upgrade every replica, the
+server's and each machine's, before the first `acyclic initiative add`, and cancel work only after that too. An import
+document is version 4: it lists `initiatives`, and every new item in it names a parent.
+
 ### Output
 
 Every command's output follows these rules, so you can guess a key from the inputs.
@@ -68,7 +75,9 @@ Every command's output follows these rules, so you can guess a key from the inpu
    case; enum values are kebab-case. A reference that can name several kinds of record is `{record, id}`, as in a
    conflict, a dangling reference or an unreadable record. An item's `links` read `waits_for`, what it waits for, and
    `waited_on_by`, what waits for it.
-3. **One summary per record**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`,
+3. **One summary per record**, defined once and shared. An item is `{id, title, state, parent, initiative, thread,
+   readiness}`, where `initiative` is the initiative above it, or `null` for an item in none, and an initiative is
+   `{id, title, counts}`,
    its `readiness` tagged by kind as `{readiness: "waiting", waiting}`;
    `thread ready` lists thread summaries, each with its ready `items`. A thread is `{id, title}` and a
    repository record `{id, owner, name, default_branch}`. `list` returns the summaries and `show` returns the same

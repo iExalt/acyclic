@@ -28,11 +28,14 @@ describe("undo", () => {
     expect(undo?.expect).toEqual([{ kind: "item-field", item: "dig", field: "parent", value: "beds" }]);
     expect(undo?.holds(after("dig", { parent: "beds" }))).toBe(true);
     expect(undo?.holds(after("dig", { parent: null }))).toBe(false);
-    const top = undoOf({ item: { edit: { item: "garden", parent: "beds" } } }, before);
-    expect(top?.command).toEqual({ item: { edit: { item: "garden", "no-parent": true } } });
-    expect(undoOf({ item: { edit: { item: "dig", "no-parent": true } } }, before)?.text).toBe(
-      "Moved Dig to the top level",
-    );
+    // An item whose parent was unset has none to go back to, so no undo is offered; `no-parent` is never undone.
+    expect(undoOf({ item: { edit: { item: "garden", parent: "beds" } } }, before)).toBeNull();
+    expect(undoOf({ item: { edit: { item: "dig", "no-parent": true } } }, before)).toBeNull();
+    // An epic's parent is an initiative, not among the items: it goes back there.
+    const epic = plan([item("epic", "init", [], { title: "Epic" }), item("beds", null, [], { title: "Beds" })]);
+    expect(undoOf({ item: { edit: { item: "epic", parent: "beds" } } }, epic)?.command).toEqual({
+      item: { edit: { item: "epic", parent: "init" } },
+    });
   });
 
   it("sets an item's fields back, clearing one that was empty, while each still holds what was set", () => {

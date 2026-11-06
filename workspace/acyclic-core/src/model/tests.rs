@@ -31,22 +31,36 @@ fn pair(ids: &[&str]) -> (Replica, Replica) {
 }
 
 #[test]
-fn roles_follow_children_and_the_top_level() {
+fn roles_follow_children_and_the_initiative_above() {
     let mut r = replica("a");
-    items(&mut r, &["top", "plain", "leaf"]);
-    set_parent(&mut r, "plain", Some("top"), by(2)).unwrap();
+    add_initiative(&mut r, "init", "Init", by(1)).unwrap();
+    items(&mut r, &["epic", "plain", "leaf", "loose"]);
+    set_parent(&mut r, "epic", Some("init"), by(2)).unwrap();
+    set_parent(&mut r, "plain", Some("epic"), by(2)).unwrap();
     set_parent(&mut r, "leaf", Some("plain"), by(2)).unwrap();
+    set_parent(&mut r, "loose", Some("init"), by(2)).unwrap();
     // A gate older versions stored is ignored, so it makes no other role.
     r.write(&item_key("plain").unwrap(), "gate", "actor/user", 3, Some(json!("ships"))).unwrap();
     let m = model(&r);
-    assert_eq!(m.role("top"), Role::Project);
-    assert_eq!(m.role("plain"), Role::Group);
-    assert_eq!(m.role("leaf"), Role::Leaf);
-    assert_eq!(json!(Role::Leaf), json!("item"));
-    // An unplaced leaf keeps its leaf role.
+    assert_eq!(m.role("epic"), Role::Epic);
+    // Deeper than an epic is a task, with or without children; a childless item under an initiative is one too.
+    assert_eq!(m.role("plain"), Role::Task);
+    assert_eq!(m.role("leaf"), Role::Task);
+    assert_eq!(m.role("loose"), Role::Task);
+    assert_eq!(json!(Role::Epic), json!("epic"));
+    assert_eq!(json!(Role::Task), json!("task"));
+    assert_eq!(m.initiative_of("leaf"), Some("init"));
+    assert_eq!(m.initiatives_of("init"), Vec::<&str>::new());
+    // With no initiative above, an item with children is where an initiative's work sits, and the rest are tasks.
     let mut r = replica("b");
-    items(&mut r, &["alone"]);
-    assert_eq!(model(&r).role("alone"), Role::Leaf);
+    items(&mut r, &["alone", "top", "kid"]);
+    set_parent(&mut r, "kid", Some("top"), by(2)).unwrap();
+    let m = model(&r);
+    assert_eq!(
+        (m.role("alone"), m.role("top"), m.role("kid")),
+        (Role::Task, Role::Epic, Role::Task)
+    );
+    assert_eq!(m.initiative_of("kid"), None);
 }
 
 #[test]
@@ -75,7 +89,7 @@ fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
     assert_eq!(m.parent_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
     assert_eq!(m.ancestors("x"), vec!["y"]);
     assert_eq!(m.subtree("x").len(), 2);
-    assert_eq!(m.role("x"), Role::Group);
+    assert_eq!(m.role("x"), Role::Task);
 }
 
 #[test]
@@ -442,4 +456,35 @@ fn only_the_explicit_paths_name_the_canceled_state() {
         );
     }
     assert!(named.len() > 1, "the guard looked at nothing: {named:?}");
+}
+
+#[test]
+fn an_initiative_is_stored_as_its_kind_title_notes_and_tombstone() {
+    let mut r = replica("a");
+    add_initiative(&mut r, "garden", "Garden", by(1)).unwrap();
+    let key = Key::new(kind::INITIATIVE, "garden").unwrap();
+    // Notes are stored as `notes`, with no older name, and read back from it.
+    put(&mut r, &key, initiative::NOTES, Some(&"Beds first"), by(2)).unwrap();
+    let stored = |r: &Replica| -> serde_json::Value {
+        let files = r.state.to_files();
+        // Pinned, with the fan-out: a change to the kind's name, its fields or its place moves every record.
+        assert_eq!(key.path(), "initiative/cc/garden.json");
+        serde_json::from_str(&files[&key.path()]).unwrap()
+    };
+    let value = |at: u64, value: serde_json::Value| json!([{"actor": "actor/user", "at": at, "dot": ["a", at], "value": value}]);
+    assert_eq!(
+        stored(&r),
+        json!({
+            "kind": "initiative", "id": "garden",
+            "fields": {"title": value(1, json!("Garden")), "notes": value(2, json!("Beds first"))},
+        })
+    );
+    let m = model(&r);
+    assert_eq!(m.initiatives["garden"].title, Value::One("Garden".into()));
+    assert_eq!(m.initiatives["garden"].notes, Value::One("Beds first".into()));
+    // Deleting sets the tombstone every kind shares, and the initiative is then gone from every reader.
+    put(&mut r, &key, initiative::DELETED, Some(&true), by(3)).unwrap();
+    assert_eq!(stored(&r)["fields"]["deleted"], value(3, json!(true)));
+    let m = model(&r);
+    assert!(m.initiatives.is_empty() && m.is_deleted(&key));
 }

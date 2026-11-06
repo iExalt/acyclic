@@ -9,7 +9,9 @@ import {
   type Expected,
   type Fetch,
   failure,
+  type Initiative,
   type Item,
+  initiatives,
   items,
   needs,
   type Threads,
@@ -24,7 +26,16 @@ import { type Kept, keep, type Plan, type Undo, undoOf, unkeep } from "./undo";
 
 export type Load =
   | { state: "loading" }
-  | { state: "loaded"; items: Item[]; threads: Threads; needs: Need[]; unread: Unread[] }
+  | {
+      state: "loaded";
+      items: Item[];
+      threads: Threads;
+      needs: Need[];
+      /** The initiatives, and the ids of the items in none. */
+      initiatives: Initiative[];
+      noInitiative: string[];
+      unread: Unread[];
+    }
   | { state: "failed"; code: string; message: string };
 
 /** What an edit selects afterwards, and which box holds still on screen while the Map redraws. */
@@ -182,11 +193,24 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
   async function fetchAll() {
     reads = start(reads);
     const n = reads.started;
-    const [found, listed, needed] = await Promise.all([items(fetcher), threads(fetcher), needs(fetcher)]);
+    const [found, listed, needed, tops] = await Promise.all([
+      items(fetcher),
+      threads(fetcher),
+      needs(fetcher),
+      initiatives(fetcher),
+    ]);
     const next = show(reads, n, found);
     if (next === null) return null;
     reads = next;
-    return { state: "loaded" as const, items: found, threads: listed, needs: needed, unread: next.unread };
+    return {
+      state: "loaded" as const,
+      items: found,
+      threads: listed,
+      needs: needed,
+      initiatives: tops.initiatives,
+      noInitiative: tops.noInitiative,
+      unread: next.unread,
+    };
   }
   /** Shows a read: the plan, and the latest read the server gave. */
   const shown = (next: Extract<Load, { state: "loaded" }>) =>

@@ -1,5 +1,5 @@
 {
-  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which the app always gives), in an order that succeeds on a tracker holding item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
+  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which the app always gives), in an order that succeeds on a tracker holding one initiative, item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
   "examples": [
     {
       "name": "list",
@@ -15,6 +15,12 @@
             "items": ["01900000-0000-7000-8000-0000000000a1", "01900000-0000-7000-8000-0000000000b1"]
           }
         }
+      }
+    },
+    {
+      "name": "initiatives",
+      "command": {
+        "initiative": "list"
       }
     },
     {
@@ -37,7 +43,7 @@
       }
     },
     {
-      "name": "add at the top level",
+      "name": "add with no parent, under the tracker's only initiative",
       "command": {
         "item": {
           "add": {
@@ -53,17 +59,6 @@
         "item": {
           "add": {
             "title": "F"
-          }
-        }
-      }
-    },
-    {
-      "name": "move to the top level",
-      "command": {
-        "item": {
-          "edit": {
-            "item": "01900000-0000-7000-8000-0000000000c1",
-            "no-parent": true
           }
         }
       }

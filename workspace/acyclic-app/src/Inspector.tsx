@@ -51,6 +51,8 @@ export interface InspectorProps {
   /** The editor's draft, asked open again after a save failed: each new ask opens the editor with it. */
   reopen?: { edited: Edited } | undefined;
   threads: Thread[];
+  /** The initiatives' titles by id: an epic's parent is one, which no item selects. */
+  initiativeTitles: ReadonlyMap<string, string>;
   /** Each thread's line, to show the item's. */
   lines: ReadonlyMap<string, Line>;
   /** The needs-you list, whose conflict entries say how each of the item's conflicted values is kept. */
@@ -79,6 +81,7 @@ export function Inspector({
   onSave,
   reopen,
   threads,
+  initiativeTitles,
   lines,
   needs,
   busy,
@@ -267,7 +270,15 @@ export function Inspector({
           </>
         )}
         <dt>Parent</dt>
-        <dd>{item.parent === null ? <span className="muted">Top level</span> : chip(item.parent)}</dd>
+        <dd>
+          {item.parent === null ? (
+            <span className="muted">No initiative</span>
+          ) : initiativeTitles.has(item.parent) ? (
+            <Prose text={initiativeTitles.get(item.parent) ?? item.parent} />
+          ) : (
+            chip(item.parent)
+          )}
+        </dd>
         <dt>Id</dt>
         <dd>
           <code className="id">{item.id}</code>

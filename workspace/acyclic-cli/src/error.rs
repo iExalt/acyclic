@@ -14,7 +14,7 @@ use serde_json::{Value as Json, json};
 pub(crate) const DOCTOR_HINT: &str = "run acyclic doctor";
 /// What a state an earlier format version wrote hints at, from every command.
 const MIGRATE_HINT: &str = "written by an earlier acyclic: read it with that version, or rebuild it with \
-                            `acyclic import` from a version-3 document";
+                            `acyclic import` from a version-4 document";
 /// What a state a later format version wrote hints at.
 const LATER_HINT: &str = "written by a later acyclic: run that version";
 const CLOCK_JUMP_HINT: &str = "Correct the system clock and wait until it is within five minutes of this replica's \
@@ -159,7 +159,13 @@ impl From<DeleteError> for CliError {
             DeleteError::InUse { item, reasons } => {
                 Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
             },
-            DeleteError::NoThread(_) => Self::new("not-found", exit::NOT_FOUND, message),
+            DeleteError::NoThread(_) | DeleteError::NoInitiative(_) => {
+                Self::new("not-found", exit::NOT_FOUND, message)
+            },
+            DeleteError::InitiativeInUse { initiative, reasons } => {
+                Self::refused("in-use", message)
+                    .with(json!({"initiative": initiative, "reasons": reasons}))
+            },
             DeleteError::ThreadInUse { thread, reasons } => {
                 Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
             },

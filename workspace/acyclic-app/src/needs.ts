@@ -158,7 +158,7 @@ function viewOf(
       const said = (value: unknown) =>
         typeof value !== "string"
           ? field === "parent" && value === null
-            ? "the top level"
+            ? "no parent"
             : field === "thread" && value === null
               ? "no thread"
               : shown(value)
@@ -185,6 +185,9 @@ function viewOf(
       };
     }
     case "thread-cycle":
+      return { ...base, text: summary, note: IN_A_TERMINAL };
+    // An item with no parent, or whose parent is gone: opened from its row; core's words say which.
+    case "parent-missing":
       return { ...base, text: summary, note: IN_A_TERMINAL };
     case "dangling": {
       // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.

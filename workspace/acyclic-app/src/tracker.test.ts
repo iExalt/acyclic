@@ -67,9 +67,15 @@ function server(titles: Record<string, string> = { a: "A" }) {
           thread: null,
           state: "open",
           notes: null,
+          initiative: null,
           links: { waits_for: [], waited_on_by: [] },
         })),
       );
+    if (name === "initiative list")
+      return answer({
+        initiatives: [{ id: "init", title: "Init", counts: { items: 0 } }],
+        no_initiative: { items: [...plan.keys()] },
+      });
     if (name === "thread list") return answer({ threads: [], waves: [], anytime: [] });
     if (name === "needs") return answer({ needs: needsRows });
     apply(body);
@@ -118,6 +124,15 @@ describe("a tracker's writes", () => {
     expect(await tracker.send(addCommand(added), { select: "n", pin: null }, { kind: "add", item: added })).toBe(false);
     expect(moves.at(-1)).toMatchObject({ kind: "redraft", adding: { parent: null, draft: { title: "New" } } });
     expect(tracker.snapshot()).toMatchObject({ pending: null, busy: false, notice: { lasts: "refusal" } });
+  });
+
+  it("reads the initiatives with the plan, and the ids of the items in none", async () => {
+    const { tracker } = open();
+    await tracker.refresh();
+    expect(tracker.snapshot().load).toMatchObject({
+      initiatives: [{ id: "init", title: "Init", items: 0 }],
+      noInitiative: ["a"],
+    });
   });
 
   it("keeps an add the server saved though its answer was lost, the form closed", async () => {

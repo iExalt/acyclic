@@ -28,7 +28,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// Measures a plan. Its references must resolve.
+    /// Measures a plan. Its references must resolve; a parent that names no item is an initiative, so its item is a root.
     ///
     /// # Panics
     ///
@@ -37,8 +37,11 @@ impl Stats {
     pub fn of(import: &Import) -> Self {
         let index: HashMap<&str, usize> =
             import.items.iter().enumerate().map(|(i, item)| (item.id.as_str(), i)).collect();
-        let parent: Vec<Option<usize>> =
-            import.items.iter().map(|item| item.parent.as_deref().map(|p| index[p])).collect();
+        let parent: Vec<Option<usize>> = import
+            .items
+            .iter()
+            .map(|item| item.parent.as_deref().and_then(|p| index.get(p).copied()))
+            .collect();
         let root = |mut i: usize| {
             let mut depth = 1;
             while let Some(p) = parent[i] {

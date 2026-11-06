@@ -1,5 +1,5 @@
 //! The needs-you list, computed on read: everything waiting on the user, as the state shows it (conflicts, cycles,
-//! contests, done work waiting on open work, dangling references).
+//! contests, done work waiting on open work, items with no parent, dangling references).
 
 use std::collections::BTreeSet;
 
@@ -100,6 +100,16 @@ pub enum Entry {
         #[serde(skip_serializing_if = "Option::is_none")]
         fix: Option<String>,
     },
+    /// An item with no parent, or whose parent is neither an initiative nor an item that exists: it belongs to no
+    /// initiative, which reads as an unplaced bucket until the user gives it one, as when a parent was deleted on
+    /// another replica, or the item was made before every item needed one.
+    ParentMissing {
+        /// The item.
+        item: String,
+        /// The missing parent it names, or none when it names no parent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+    },
     /// A thread stored on an item that has children, as a sync or `item edit --thread` on a parent can leave one:
     /// reads ignore it, so the user decides whether to clear it.
     ThreadOnParent {
@@ -149,6 +159,8 @@ impl Entry {
                 vec![kind, record, id, field, target]
             },
             Self::ThreadOnParent { item, thread, fix: _ } => vec![kind, item, thread],
+            Self::ParentMissing { item, parent: None } => vec![kind, item],
+            Self::ParentMissing { item, parent: Some(parent) } => vec![kind, item, parent],
         };
         parts.join(":")
     }
@@ -169,6 +181,7 @@ impl Entry {
             Self::DoneWaiting { .. } => "done-waiting",
             Self::WaitsOnCanceled { .. } => "waits-on-canceled",
             Self::Dangling { .. } => "dangling",
+            Self::ParentMissing { .. } => "parent-missing",
             Self::ThreadOnParent { .. } => "thread-on-parent",
             Self::EmptyThread { .. } => "empty-thread",
         }
@@ -217,6 +230,12 @@ impl Entry {
                     format!("{}: its {field} names {target}, which doesn't exist", name(id))
                 }
             },
+            Self::ParentMissing { item, parent: None } => {
+                format!("{} is in no initiative: it has no parent", name(item))
+            },
+            Self::ParentMissing { item, parent: Some(parent) } => {
+                format!("{}: its parent {parent} doesn't exist", name(item))
+            },
             Self::ThreadOnParent { item, thread, fix: _ } => {
                 format!("{} has children, so its thread {} is ignored", name(item), name(thread))
             },
@@ -236,7 +255,7 @@ impl Entry {
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
     /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to
-    /// nothing, a merge that can't be checked) and threads with no item, which agents leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
+    /// nothing, an item with no parent) and threads with no item, which agents leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
     pub const fn notifies(&self) -> bool {
         match self {
@@ -252,6 +271,7 @@ impl Entry {
             | Self::ClockAhead { .. }
             | Self::Stalled { .. }
             | Self::EmptyThread { .. }
+            | Self::ParentMissing { .. }
             | Self::Dangling { .. } => false,
         }
     }
@@ -289,6 +309,7 @@ pub fn needs_you(
     done_waiting(model, readiness, &mut entries)?;
     waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
+    parent_missing(model, &mut entries);
     thread_membership(state, model, now, &mut entries)?;
     Ok(entries.into_iter().collect())
 }
@@ -422,6 +443,23 @@ fn waits_on_canceled(
     Ok(())
 }
 
+/// Each item with no parent, or whose parent is neither an initiative nor an item that exists.
+fn parent_missing(model: &Model, entries: &mut BTreeSet<Entry>) {
+    for (id, item) in &model.items {
+        if item.parent == Value::None {
+            entries.insert(Entry::ParentMissing { item: id.clone(), parent: None });
+        }
+        for parent in item
+            .parent
+            .all()
+            .into_iter()
+            .filter(|p| !model.items.contains_key(*p) && !model.initiatives.contains_key(*p))
+        {
+            entries.insert(Entry::ParentMissing { item: id.clone(), parent: Some(parent.clone()) });
+        }
+    }
+}
+
 fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
     let mut add = |kind: &str, id: &str, field: &str, target: &str, fix: Option<String>| {
         entries.insert(Entry::Dangling {
@@ -433,9 +471,6 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
         });
     };
     for (id, item) in &model.items {
-        for parent in item.parent.all().into_iter().filter(|p| !model.items.contains_key(*p)) {
-            add(kind::ITEM, id, "parent", parent, None);
-        }
         for thread in
             model.thread_value(item).all().into_iter().filter(|t| !model.threads.contains_key(*t))
         {

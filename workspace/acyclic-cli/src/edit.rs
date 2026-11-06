@@ -11,8 +11,8 @@ use acyclic_core::import::owner_name;
 use acyclic_core::model::{By, ItemState, Model, WriteError};
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
-    self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
-    Record, Repeat, RepositoryAssign, Rule, ThreadAssign, Violation,
+    self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, InitiativeAssign,
+    ItemAssign, Outcome, Record, Repeat, RepositoryAssign, Rule, ThreadAssign, Violation,
 };
 use serde_json::json;
 
@@ -74,6 +74,13 @@ pub(crate) struct ItemFields {
     pub waits_for: Delta,
 }
 
+/// What an initiative's `add` or `edit` sets.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InitiativeFields {
+    pub title: Option<String>,
+    pub notes: Change<String>,
+}
+
 /// What a thread's `add` or `edit` sets.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ThreadFields {
@@ -106,7 +113,8 @@ impl Delta {
 
 impl ItemFields {
     /// The fields with every reference resolved to the id of the record it names. `item` is the item they are for,
-    /// when it exists: a removal looks among what it holds first, so it finds an element whose record is gone.
+    /// when it exists: a removal looks among what it holds first, so it finds an element whose record is gone. An add
+    /// (no `item`) that names no parent goes under the tracker's only initiative.
     pub fn resolve(
         self,
         model: &Model,
@@ -114,7 +122,8 @@ impl ItemFields {
         item: Option<&str>,
     ) -> Result<Self, CliError> {
         let parent = match self.parent {
-            Change::Set(parent) => Change::Set(records.item(&parent)?),
+            Change::Set(parent) => Change::Set(records.parent(&parent)?),
+            Change::Keep if item.is_none() => Change::Set(only_initiative(model)?),
             other => other,
         };
         let thread = match self.thread {
@@ -142,6 +151,39 @@ impl ItemFields {
         .disjoint("waits-for")?;
         Ok(Self { parent, thread, waits_for, ..self })
     }
+}
+
+/// The initiative an add with no `--parent` goes under: the only one there is. With none or several, the add is refused,
+/// naming the choices.
+fn only_initiative(model: &Model) -> Result<String, CliError> {
+    let mut found = model.initiatives.values();
+    if let (Some(only), None) = (found.next(), found.next()) {
+        return Ok(only.id.clone());
+    }
+    let listed: Vec<serde_json::Value> = model
+        .initiatives
+        .values()
+        .map(|initiative| json!({"id": initiative.id, "title": initiative.title}))
+        .collect();
+    let message = if model.initiatives.is_empty() {
+        "an item needs a parent and the tracker has no initiative: `acyclic initiative add --title <TITLE>` adds one, \
+         or pass --parent <ITEM>"
+            .to_owned()
+    } else {
+        let each: Vec<String> = model
+            .initiatives
+            .values()
+            .map(|initiative| match initiative.title.all().first() {
+                Some(title) => format!("{} ({title})", initiative.id),
+                None => initiative.id.clone(),
+            })
+            .collect();
+        format!(
+            "an item needs a parent and the tracker has several initiatives: pass --parent <INITIATIVE or ITEM>, one of {}",
+            each.join(", ")
+        )
+    };
+    Err(CliError::refused("parent-required", message).with(json!({"initiatives": listed})))
 }
 
 /// An add that names other values than the entity holds, which `edit` is for.
@@ -229,8 +271,9 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
     if let Some(notes) = fields.notes.given() {
         assigns.push(field(ItemAssign::Notes(notes.cloned())));
     }
-    if let Some(parent) = fields.parent.given() {
-        assigns.push(field(ItemAssign::Parent(parent.cloned())));
+    // No flag clears a parent, so a change to it is always a value.
+    if let Some(Some(parent)) = fields.parent.given() {
+        assigns.push(field(ItemAssign::Parent(parent.clone())));
     }
     let canceling = fields.state == Some(ItemState::Canceled) && adding == Adding::No;
     if let Some(state) = fields.state
@@ -249,6 +292,19 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
         set.0.push(WriteChange::Cancel { item: id.to_owned(), force: fields.force });
     }
     set
+}
+
+/// The change set an initiative's fields ask for.
+pub(crate) fn initiative_changes(id: &str, fields: &InitiativeFields, adding: Adding) -> ChangeSet {
+    let field = |assign| Assign::Initiative(id.to_owned(), assign);
+    let mut assigns = Vec::new();
+    if let Some(title) = &fields.title {
+        assigns.push(field(InitiativeAssign::Title(title.clone())));
+    }
+    if let Some(notes) = fields.notes.given() {
+        assigns.push(field(InitiativeAssign::Notes(notes.cloned())));
+    }
+    changes(Record::Initiative(id.to_owned()), assigns, adding)
 }
 
 /// The change set a thread's fields ask for.
@@ -357,10 +413,14 @@ fn unclear_refusal(id: &str, parent: &str) -> CliError {
 
 /// One violation as the CLI has always told it: its code, exit status, message and details. `name` is the
 /// `owner/name` a repository write gave, which a taken name repeats as given.
+#[expect(clippy::too_many_lines, reason = "one arm for each rule the judge can refuse")]
 fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) -> CliError {
     let record = violation.at.as_ref().map(|at| &at.record);
     match &violation.rule {
         Rule::NoRecord(Record::Item(id)) => WriteError::NoItem(id.clone()).into(),
+        Rule::NoRecord(Record::Initiative(id)) => not_found(format!(
+            "no initiative {id}; `acyclic initiative add --title <TITLE>` adds one"
+        )),
         Rule::NoRecord(Record::Thread(id)) => {
             not_found(format!("no thread {id}; `acyclic thread add --title <TITLE>` adds one"))
         },
@@ -373,6 +433,16 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         Rule::WaitsForCycle(cycle) => WriteError::WaitsForCycle(cycle.clone()).into(),
         Rule::LineageLink { from, to } => CliError::refused("lineage-link", violation.to_string())
             .with(json!({"item": from, "waits_for": to})),
+        Rule::IdTaken(other) => CliError::refused(
+            "id-taken",
+            format!(
+                "{} {} has that id, and an id names one kind of record, since an item's parent names an item or an \
+                 initiative by its id alone: leave --id out for the tracker to make one",
+                other.kind(),
+                other.id()
+            ),
+        )
+        .with(json!({"id": other.id(), "kind": other.kind()})),
         Rule::TitleTaken(other) => {
             let (of, id) = (other.kind(), other.id());
             CliError::refused(
@@ -472,6 +542,7 @@ pub(crate) fn refusal(violations: &[Violation], name: Option<&str>, before: &Mod
                 differs.sort_by_key(|flag| FLAGS.iter().position(|(_, f)| f == flag));
                 differs.dedup();
                 let (what, edit) = match at.record {
+                    Record::Initiative(_) => ("initiative", "initiative edit"),
                     Record::Item(_) => ("item", "item edit"),
                     Record::Thread(_) => ("thread", "thread edit"),
                     Record::Repository(_) => ("repository record", "repository edit"),

@@ -17,6 +17,7 @@ use crate::model::{By, Evidence, Model, WriteError, shown_state};
 use crate::place::Inherited;
 use crate::schema::kind;
 use crate::state::{Error, Replica};
+use crate::write::InitiativeAssign;
 use crate::write::{
     self, Assign, Change as Write, ChangeSet, FieldAddr, FieldName, ItemAssign, Outcome, Record,
     Repeat, RepositoryAssign, Rule, ThreadAssign, Violation, Written,
@@ -27,6 +28,8 @@ use crate::write::{
 pub struct Report {
     /// Repository records created.
     pub repositories: usize,
+    /// Initiatives created.
+    pub initiatives: usize,
     /// Items created.
     pub items: usize,
     /// Links created or restored.
@@ -45,7 +48,7 @@ pub struct Report {
 /// What an import did to one record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Change {
-    /// The record's kind: `repository`, `thread`, `item` or `link`.
+    /// The record's kind: `initiative`, `repository`, `thread`, `item` or `link`.
     pub record: &'static str,
     /// Which record.
     #[serde(flatten)]
@@ -60,7 +63,7 @@ pub struct Change {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Name {
-    /// A repository, thread or item.
+    /// An initiative, repository, thread or item.
     Id {
         /// Its id.
         id: String,
@@ -224,7 +227,20 @@ fn doc_repository(
     })
 }
 
+/// Every new item names a parent, since each belongs to an initiative or to an item under one. An item the tracker has
+/// keeps the parent it holds when the document leaves it out.
+fn parents_named(doc: &Import, before: &Model) -> Result<(), ApplyError> {
+    let missing: Vec<ValidationError> = doc
+        .items
+        .iter()
+        .filter(|item| item.parent.is_none() && !before.items.contains_key(&item.id))
+        .map(|item| ValidationError::ParentRequired(item.id.clone()))
+        .collect();
+    if missing.is_empty() { Ok(()) } else { Err(ApplyError::Invalid(missing)) }
+}
+
 fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {
+    parents_named(doc, before)?;
     write::judge(before, &changes(doc, before), by, None)
         .map_err(|violations| refused(doc, &violations))
 }
@@ -251,6 +267,15 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
                 field(RepositoryAssign::DefaultBranch(record.default_branch.clone())),
             ],
         ));
+    }
+    for record in &doc.initiatives {
+        let id = &record.id;
+        let mut with =
+            vec![Assign::Initiative(id.clone(), InitiativeAssign::Title(record.title.clone()))];
+        if let Some(notes) = &record.notes {
+            with.push(Assign::Initiative(id.clone(), InitiativeAssign::Notes(Some(notes.clone()))));
+        }
+        changes.push(add(Record::Initiative(id.clone()), with));
     }
     for record in &doc.threads {
         let id = &record.id;
@@ -303,7 +328,7 @@ fn item_fields(item: &super::Item) -> Vec<Assign> {
         with.push(field(ItemAssign::State(state)));
     }
     if let Some(parent) = &item.parent {
-        with.push(field(ItemAssign::Parent(Some(parent.clone()))));
+        with.push(field(ItemAssign::Parent(parent.clone())));
     }
     if let Some(evidence) = &item.evidence {
         let commit = evidence.commit.as_ref().and_then(|c| c.rsplit_once('@'));
@@ -343,6 +368,7 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
             (Rule::NoRecord(target), Some(at)) => unknown.push(ValidationError::UnknownReference {
                 at: where_in(at),
                 kind: match target {
+                    Record::Initiative(_) => KeyKind::Initiative,
                     Record::Item(_) => KeyKind::Item,
                     Record::Thread(_) => KeyKind::Thread,
                     Record::Repository(_) => KeyKind::Repository,
@@ -387,6 +413,9 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                     repository: repository.clone(),
                     missing: missing.iter().map(|&field| field.to_owned()).collect(),
                 });
+            },
+            (Rule::IdTaken(other), _) => {
+                unknown.push(ValidationError::SharedId(other.id().to_owned()));
             },
             (Rule::LineageLink { from, to }, _) => {
                 unknown.push(ValidationError::LineageLink {
@@ -467,6 +496,7 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
             Written::Create(record) => {
                 let entity = record.kind();
                 match record {
+                    Record::Initiative(_) => report.initiatives += 1,
                     Record::Item(_) => report.items += 1,
                     Record::Thread(_) => report.threads += 1,
                     Record::Repository(_) => report.repositories += 1,
@@ -506,6 +536,11 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
 /// A field's value before the import: `null` when unset or new, and a conflict as `{"conflict": [values]}`.
 fn held(before: &Model, at: &FieldAddr) -> Json {
     let value = match &at.record {
+        Record::Initiative(id) => before.initiatives.get(id).map(|record| match at.field {
+            FieldName::Title => json!(record.title),
+            FieldName::Notes => json!(record.notes),
+            _ => Json::Null,
+        }),
         Record::Item(id) => before.items.get(id).map(|item| match at.field {
             FieldName::Title => json!(item.title),
             FieldName::Notes => json!(item.notes),

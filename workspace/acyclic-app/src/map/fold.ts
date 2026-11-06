@@ -66,6 +66,7 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       title,
       state: "done",
       parent,
+      initiative: items.get(parent)?.initiative ?? null,
       thread,
       stage: "done",
       progress: counts,

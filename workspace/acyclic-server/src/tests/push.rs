@@ -75,6 +75,8 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         assert_eq!(code, 0, "{answer}");
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    // An item needs a parent, and goes under the tracker's only initiative.
+    run(json!({"initiative": {"add": {"title": "Default"}}}));
     reopen(1);
 
     let service =

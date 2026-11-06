@@ -18,8 +18,8 @@ pub(super) fn item(n: u8, state: Option<State>, parent: Option<u8>) -> Item {
     }
 }
 
-/// Repository 1; items 10, 11 under 10 and 12 done under 10 in repository 1, 11 waiting for 12; thread 20 holding
-/// 11 and 12.
+/// Repository 1; initiative 9; items 10 under it, 11 under 10 and 12 done under 10 in repository 1, 11 waiting for
+/// 12; thread 20 holding 11 and 12.
 pub(super) fn valid() -> Import {
     let mut import = Import::new();
     import.repositories.push(Repository {
@@ -27,8 +27,9 @@ pub(super) fn valid() -> Import {
         name: "example/code".to_owned(),
         default_branch: "main".to_owned(),
     });
+    import.initiatives = vec![Initiative { id: id(9), title: "Initiative".into(), notes: None }];
     import.items = vec![
-        item(10, None, None),
+        item(10, None, Some(9)),
         item(11, Some(State::Backlog), Some(10)),
         item(12, Some(State::Done), Some(10)),
     ];
@@ -54,13 +55,13 @@ fn a_valid_document_round_trips() {
 }
 
 #[test]
-fn only_version_3_is_read() {
+fn only_version_4_is_read() {
     assert!(matches!(Import::from_json("[]"), Err(ParseError::NotAnImport)));
     assert!(matches!(
-        Import::from_json("{\"format\":\"other\",\"version\":3}"),
+        Import::from_json("{\"format\":\"other\",\"version\":4}"),
         Err(ParseError::NotAnImport)
     ));
-    for version in [0, 1, 2, 4] {
+    for version in [0, 1, 2, 3, 5] {
         assert!(
             matches!(
                 Import::from_json(&document(version, "")),
@@ -69,14 +70,14 @@ fn only_version_3_is_read() {
             "{version}"
         );
     }
-    assert_eq!(Import::from_json(&document(3, "")).unwrap(), Import::new());
+    assert_eq!(Import::from_json(&document(4, "")).unwrap(), Import::new());
 }
 
 #[test]
 fn a_state_reads_open_or_the_stored_backlog() {
     for word in ["open", "backlog"] {
         let doc =
-            document(3, &format!("{{\"id\":\"{}\",\"title\":\"A\",\"state\":\"{word}\"}}", id(1)));
+            document(4, &format!("{{\"id\":\"{}\",\"title\":\"A\",\"state\":\"{word}\"}}", id(1)));
         assert_eq!(Import::from_json(&doc).unwrap().items[0].state, Some(State::Backlog), "{word}");
     }
 }
@@ -84,7 +85,7 @@ fn a_state_reads_open_or_the_stored_backlog() {
 #[test]
 fn removed_and_unknown_fields_are_refused() {
     let one =
-        |fields: &str| document(3, &format!("{{\"id\":\"{}\",\"title\":\"A\"{fields}}}", id(1)));
+        |fields: &str| document(4, &format!("{{\"id\":\"{}\",\"title\":\"A\"{fields}}}", id(1)));
     for removed in [
         r#","key":"a""#,
         r#","areas":["x"]"#,
@@ -109,14 +110,14 @@ fn removed_and_unknown_fields_are_refused() {
         ),
     ] {
         let doc = format!(
-            r#"{{"format":"{FORMAT}","version":3,"{list}":[{{"id":"{}",{record}}}]}}"#,
+            r#"{{"format":"{FORMAT}","version":4,"{list}":[{{"id":"{}",{record}}}]}}"#,
             id(1)
         );
         let err = Import::from_json(&doc).unwrap_err();
         assert!(err.to_string().contains(&format!("unknown field `{retired}`")), "{list}: {err}");
     }
     let threads = format!(
-        "{{\"format\":\"{FORMAT}\",\"version\":3,\"threads\":[{{\"id\":\"{}\",\"title\":\"T\",\"items\":[]}}]}}",
+        "{{\"format\":\"{FORMAT}\",\"version\":4,\"threads\":[{{\"id\":\"{}\",\"title\":\"T\",\"items\":[]}}]}}",
         id(2)
     );
     assert!(matches!(Import::from_json(&threads), Err(ParseError::Json(_))), "a thread's items");
@@ -147,7 +148,7 @@ fn the_schema_example_is_a_valid_document() {
 #[test]
 fn ids_are_unique_within_a_kind() {
     let mut import = valid();
-    import.items.push(item(10, None, None));
+    import.items.push(item(10, None, Some(9)));
     // A thread may share an item's id: they are different kinds.
     import.threads[0].id = id(10);
     for member in &mut import.items {
@@ -185,4 +186,30 @@ fn a_repository_is_owner_and_name_and_a_commit_names_its_repository() {
     for not in ["me/", "/code", "me/a/b", "me /code", "code"] {
         assert_eq!(owner_name(not), None, "{not}");
     }
+}
+
+#[test]
+fn an_initiative_is_a_record_of_its_own_whose_id_no_item_shares() {
+    let mut import = valid();
+    import.initiatives.push(Initiative {
+        id: id(9),
+        title: "Again".into(),
+        notes: Some("n".into()),
+    });
+    import.items[0].id = id(9);
+    import.items[1].parent = None;
+    import.items[2].parent = None;
+    assert_eq!(
+        import.validate(),
+        vec![
+            ValidationError::DuplicateId(KeyKind::Initiative, id(9)),
+            ValidationError::SharedId(id(9)),
+        ]
+    );
+    // An initiative's id is a UUIDv7 in any case, like every other.
+    let mut bad = valid();
+    bad.initiatives[0].id = "garden".into();
+    assert!(bad.validate().iter().all(ValidationError::is_invalid_id));
+    let upper = valid().to_json().replace(&id(9), &id(9).to_uppercase());
+    assert_eq!(Import::from_json(&upper).unwrap(), valid());
 }

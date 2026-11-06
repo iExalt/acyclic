@@ -18,7 +18,16 @@ fn replica(name: &str) -> Replica {
     Replica::open(ReplicaId::new(name).unwrap(), State::new())
 }
 
+/// The needs-you list but for the items made with no parent, which most of these tests make bare: those are
+/// `every_entry`'s to show.
 fn list(r: &Replica) -> Vec<Entry> {
+    every_entry(r)
+        .into_iter()
+        .filter(|entry| !matches!(entry, Entry::ParentMissing { parent: None, .. }))
+        .collect()
+}
+
+fn every_entry(r: &Replica) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     needs_you(&r.state, &model, &readiness, NOW).unwrap()
@@ -89,13 +98,45 @@ fn the_state_puts_its_problems_on_the_list() {
         "{entries:#?}"
     );
     has(&Entry::ClockAhead { thread: "tk".into(), holder: "session/b".into() });
-    has(&Entry::Dangling {
-        kind: "item".into(),
-        id: "orphan".into(),
-        field: "parent".into(),
-        target: "gone".into(),
-        fix: None,
-    });
+    has(&Entry::ParentMissing { item: "orphan".into(), parent: Some("gone".into()) });
+}
+
+#[test]
+fn an_item_with_no_parent_or_a_parent_that_names_nothing_is_in_no_initiative_and_never_notifies() {
+    let mut r = replica("a");
+    let by = user(1);
+    crate::model::add_initiative(&mut r, "init", "Init", by).unwrap();
+    for id in ["bare", "placed", "gone", "deleted", "under"] {
+        add_item(&mut r, id, id, by).unwrap();
+    }
+    set_parent(&mut r, "placed", Some("init"), by).unwrap();
+    set_parent(&mut r, "under", Some("bare"), by).unwrap();
+    r.write(&item_key("gone").unwrap(), field::PARENT, USER, 1, Some(json!("nowhere"))).unwrap();
+    let ended = Key::new(kind::INITIATIVE, "ended").unwrap();
+    model::set(&mut r, &ended, "title", Some(&"Ended"), by).unwrap();
+    model::set(&mut r, &ended, "deleted", Some(&true), by).unwrap();
+    r.write(&item_key("deleted").unwrap(), field::PARENT, USER, 1, Some(json!("ended"))).unwrap();
+
+    let entries: Vec<Entry> = every_entry(&r)
+        .into_iter()
+        .filter(|entry| matches!(entry, Entry::ParentMissing { .. } | Entry::Dangling { .. }))
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            Entry::ParentMissing { item: "bare".into(), parent: None },
+            Entry::ParentMissing { item: "deleted".into(), parent: Some("ended".into()) },
+            Entry::ParentMissing { item: "gone".into(), parent: Some("nowhere".into()) },
+        ]
+    );
+    assert!(entries.iter().all(|entry| !entry.notifies()));
+    assert_eq!(entries[0].key(), "parent-missing:bare");
+    assert_eq!(entries[2].key(), "parent-missing:gone:nowhere");
+    assert_eq!(
+        entries[0].identity(),
+        r#"{"entry":"parent-missing","item":"bare"}"#,
+        "a missing parent is left out, not null"
+    );
 }
 
 #[test]
@@ -272,7 +313,9 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
     set_parent(&mut r, "kid", Some("x"), user(1)).unwrap();
     let x = item_key("x").unwrap();
     let set = |assign: ItemAssign| {
-        Keep::Write(ChangeSet(vec![Change::Set(Assign::Item("x".into(), assign))]))
+        Keep::Write(crate::write::ChangeSet(vec![crate::write::Change::Set(
+            crate::write::Assign::Item("x".into(), assign),
+        )]))
     };
     let values = |found: &[(Json, Keep)]| found.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
     let keeps_in = |r: &Replica, field: &str| {
@@ -309,7 +352,7 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
         matches!(&found[0], Keep::Not(Unkept::Refused(v)) if matches!(v[0].rule, Rule::ParentCycle(_))),
         "{found:?}"
     );
-    assert_eq!(found[1], set(ItemAssign::Parent(Some("p".into()))));
+    assert_eq!(found[1], set(ItemAssign::Parent("p".into())));
 
     // A repository's owner is kept with its name as it stands, and not while the name is in conflict too.
     let repo = Key::new(kind::REPOSITORY, "r").unwrap();
@@ -675,4 +718,75 @@ fn an_emptied_thread_of_one_is_on_the_list_only_while_someone_holds_it() {
     // Entering the list never costs the unclaimed task its own row in the ready threads.
     let model = Model::read(&r.state).unwrap();
     assert!(model.thread_exists(&one));
+}
+
+#[test]
+fn replicas_moving_an_item_under_an_item_and_an_initiative_apart_conflict_and_each_value_is_kept_by_a_move()
+ {
+    let mut a = replica("a");
+    let by = user(1);
+    crate::model::add_initiative(&mut a, "init", "Init", by).unwrap();
+    for id in ["epic", "x"] {
+        add_item(&mut a, id, id, by).unwrap();
+    }
+    set_parent(&mut a, "epic", Some("init"), by).unwrap();
+    set_parent(&mut a, "x", Some("init"), by).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    // Apart: one replica files x under the epic, the other leaves it directly under the initiative and says so again.
+    set_parent(&mut a, "x", Some("epic"), user(2)).unwrap();
+    set_parent(&mut b, "x", Some("init"), user(3)).unwrap();
+    let (mut one, mut other) = (a.clone(), b.clone());
+    one.join(&b.state).unwrap();
+    other.join(&a.state).unwrap();
+    for joined in [&one, &other] {
+        let model = Model::read(&joined.state).unwrap();
+        // Both values stand until chosen, and the item counts under each: the epic's tree and the initiative alike.
+        assert_eq!(
+            model.items["x"].parent,
+            Value::Conflict(vec![Some("epic".to_owned()), Some("init".to_owned())])
+        );
+        assert_eq!(model.initiatives_of("x"), ["init"]);
+        assert_eq!(model.role("x"), crate::model::Role::Task);
+        let entries = list(joined);
+        assert!(entries.contains(&Entry::Conflict {
+            kind: "item".into(),
+            id: "x".into(),
+            field: "parent".into(),
+        }));
+        // Each value is kept by moving the item there, and no value keeps it parentless.
+        let kept = keeps(&joined.state, &model, ("item", "x", "parent"), user(4)).unwrap();
+        let moves: Vec<&Keep> = kept.iter().map(|k| &k.keep).collect();
+        let set = |parent: &str| {
+            Keep::Write(crate::write::ChangeSet(vec![crate::write::Change::Set(
+                crate::write::Assign::Item(
+                    "x".into(),
+                    crate::write::ItemAssign::Parent(parent.into()),
+                ),
+            )]))
+        };
+        assert_eq!(moves, [&set("epic"), &set("init")]);
+    }
+    assert_eq!(one.state.to_files(), other.state.to_files());
+}
+
+#[test]
+fn a_clear_raced_against_a_move_is_no_value_to_keep() {
+    let mut a = replica("a");
+    let by = user(1);
+    crate::model::add_initiative(&mut a, "init", "Init", by).unwrap();
+    add_item(&mut a, "x", "x", by).unwrap();
+    set_parent(&mut a, "x", Some("init"), by).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    // An older replica could still clear a parent.
+    set_parent(&mut b, "x", None, user(2)).unwrap();
+    set_parent(&mut a, "x", Some("init"), user(3)).unwrap();
+    a.join(&b.state).unwrap();
+    let model = Model::read(&a.state).unwrap();
+    let kept = keeps(&a.state, &model, ("item", "x", "parent"), user(4)).unwrap();
+    assert!(
+        kept.iter().any(|k| k.value.is_null() && k.keep == Keep::Not(Unkept::NoParent)),
+        "{kept:?}"
+    );
 }

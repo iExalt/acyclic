@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, command, countsText, failure, items, NO_COUNTS, settle, thread, threads } from "./api";
+import {
+  CommandError,
+  command,
+  countsText,
+  failure,
+  initiatives,
+  items,
+  NO_COUNTS,
+  settle,
+  thread,
+  threads,
+} from "./api";
 import { examples } from "./commands.examples.json";
 import { ID } from "./map/fixture";
 
@@ -15,6 +26,7 @@ function raw(id: string) {
     thread: null,
     state: "open",
     notes: null,
+    initiative: null,
     links: { waits_for: [], waited_on_by: [] },
   };
 }
@@ -92,6 +104,33 @@ describe("items", () => {
       "item show": { ok: true, data: [parent] },
     });
     await expect(items(fetcher)).resolves.toMatchObject([{ stage: "in-progress", progress: { counts } }]);
+  });
+});
+
+describe("initiatives", () => {
+  it("lists initiatives with their item counts, and the items in none, as the server's tests send it", async () => {
+    const { fetcher, sent } = server({
+      "initiative list": {
+        ok: true,
+        data: {
+          initiatives: [
+            { id: "i1", title: "One", counts: { items: 2 } },
+            { id: "i2", title: { conflict: [null, "Two"] }, counts: { items: 0 } },
+            { id: "i3", title: null },
+          ],
+          no_initiative: { items: ["x", "y"] },
+        },
+      },
+    });
+    await expect(initiatives(fetcher)).resolves.toEqual({
+      initiatives: [
+        { id: "i1", title: "One", items: 2 },
+        { id: "i2", title: "Two", items: 0 },
+        { id: "i3", title: "i3", items: 0 },
+      ],
+      noInitiative: ["x", "y"],
+    });
+    expect(sent).toEqual([example("initiatives")]);
   });
 });
 

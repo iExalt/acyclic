@@ -46,7 +46,9 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
             .find(|c| c["record"] == entity && c["id"] == id(n))
             .unwrap()
     };
-    assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 3 + 1);
+    assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 1 + 3 + 1);
+    assert_eq!(report.initiatives, 1);
+    assert_eq!(find("initiative", 9)["action"], "create");
     assert_eq!(find("repository", 1)["action"], "create");
     assert_eq!(find("repository", 1)["fields"]["owner"], json!({"from": null, "to": "example"}));
     assert_eq!(find("item", 11)["fields"]["parent"], json!({"from": null, "to": id(10)}));
@@ -106,7 +108,7 @@ fn what_a_document_leaves_out_is_kept() {
 fn a_list_given_replaces_the_records_own() {
     let mut r = imported();
     let mut doc = valid();
-    doc.items.push(item(13, None, None));
+    doc.items.push(item(13, None, Some(10)));
     doc.items[1].waits_for = Some(vec![id(13)]);
     let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
     let m = model(&r);
@@ -191,7 +193,7 @@ fn an_invalid_document_is_refused() {
 fn a_document_closing_cycles_of_its_own_is_refused_naming_each_once() {
     let mut doc = valid();
     for n in [13, 14] {
-        doc.items.push(item(n, None, None));
+        doc.items.push(item(n, None, Some(9)));
     }
     // 10 and 11 under each other; 11 and 12 waiting for each other; 13 and 14 likewise.
     doc.items[0].parent = Some(id(11));
@@ -321,7 +323,7 @@ fn a_deleted_thread_items_still_name_is_unknown_to_an_import() {
     let key = model::item_key(&id(11)).unwrap();
     r.write(&key, field::THREAD, USER, 4, Some(json!(id(20)))).unwrap();
     let mut doc = Import::new();
-    let mut next = item(30, None, None);
+    let mut next = item(30, None, Some(10));
     next.thread = Some(id(20));
     doc.items.push(next);
     let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 5)) else {
@@ -420,9 +422,10 @@ fn new_children_join_their_siblings_thread_and_moved_work_never_changes_a_thread
     let mut r = imported();
     let mut doc = valid();
     doc.items.push(item(13, None, Some(10)));
-    doc.items.push(item(14, None, None));
+    doc.items.push(item(14, None, Some(9)));
     let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
-    // 11 and 12 share thread 20, so the new child 13 follows them; 14 has no parent to follow.
+    // 11 and 12 share thread 20, so the new child 13 follows them; 14 sits under the initiative, whose other
+    // children are no siblings to follow.
     assert_eq!(report.placed, [Inherited { item: id(13), thread: id(20) }]);
     assert_eq!(model(&r).thread_of(&id(14)), None);
     // Moving 14 under 10 puts it in no thread, though the siblings share one.
@@ -445,4 +448,45 @@ fn new_children_join_their_siblings_thread_and_moved_work_never_changes_a_thread
     doc.items[5].thread = Some(id(21));
     apply(&doc, &mut r, by(USER, 6)).unwrap();
     assert_eq!(model(&r).thread_of(&id(15)), Some(id(21).as_str()));
+}
+
+#[test]
+fn every_new_item_needs_a_parent_and_an_existing_one_keeps_its_own() {
+    let mut r = imported();
+    let mut doc = Import::new();
+    doc.items = vec![item(40, None, None), item(11, None, None)];
+    let before = r.state.clone();
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 2)) else {
+        panic!("a new item with no parent accepted")
+    };
+    // Only the new item 40 is refused: 11 is in the tracker, and keeps the parent it holds.
+    assert_eq!(errors, [ValidationError::ParentRequired(id(40))]);
+    assert_eq!(r.state, before);
+    doc.items[0].parent = Some(id(9));
+    apply(&doc, &mut r, by(USER, 3)).unwrap();
+    let m = model(&r);
+    assert_eq!(
+        (m.initiative_of(&id(40)), m.initiative_of(&id(11))),
+        (Some(id(9).as_str()), Some(id(9).as_str()))
+    );
+}
+
+#[test]
+fn an_import_that_gives_an_item_and_an_initiative_one_id_is_refused_against_the_tracker_too() {
+    let mut r = imported();
+    // The tracker's initiative 9 can't be made an item by a document that names it so.
+    let mut doc = Import::new();
+    doc.items = vec![item(9, None, Some(10))];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 2)) else {
+        panic!("an item taking an initiative's id accepted")
+    };
+    assert_eq!(errors, [ValidationError::SharedId(id(9))]);
+    // And the other way round: initiative 10 over the tracker's item.
+    let mut doc = Import::new();
+    doc.initiatives =
+        vec![crate::import::Initiative { id: id(10), title: "I".into(), notes: None }];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("an initiative taking an item's id accepted")
+    };
+    assert_eq!(errors, [ValidationError::SharedId(id(10))]);
 }

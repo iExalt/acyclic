@@ -161,7 +161,7 @@ fn waiter_guard_covers_new_direct_and_ancestor_waiters_and_keeps_original_waiter
         vec![
             thread("t"),
             add("parent", vec![]),
-            add("done", vec![ItemAssign::Parent(Some("parent".into()))]),
+            add("done", vec![ItemAssign::Parent("parent".into())]),
             add("direct", vec![ItemAssign::Thread(Some("t".into()))]),
             add("ancestor", vec![ItemAssign::Thread(Some("t".into()))]),
         ],
@@ -216,7 +216,7 @@ fn started_at_most_includes_live_claims_on_leaf_and_parent() {
             add("root", vec![]),
             add(
                 "leaf",
-                vec![ItemAssign::Parent(Some("root".into())), ItemAssign::Thread(Some("t".into()))],
+                vec![ItemAssign::Parent("root".into()), ItemAssign::Thread(Some("t".into()))],
             ),
         ],
     );
@@ -283,10 +283,10 @@ fn done_tree() -> Replica {
         vec![
             thread("t"),
             add("root", vec![]),
-            add("mid", vec![ItemAssign::Parent(Some("root".into()))]),
+            add("mid", vec![ItemAssign::Parent("root".into())]),
             add(
                 "leaf",
-                vec![ItemAssign::Parent(Some("mid".into())), ItemAssign::Thread(Some("t".into()))],
+                vec![ItemAssign::Parent("mid".into()), ItemAssign::Thread(Some("t".into()))],
             ),
         ],
     );
@@ -386,7 +386,7 @@ fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes
     assert!(refused(&r, vec![waits("root", "leaf")]).contains(&lineage("root", "leaf")));
     // A move that puts two linked items in one line is refused too.
     commit_ok(&mut r, 4, vec![waits("other", "mid")]);
-    let moved = refused(&r, vec![item("mid", ItemAssign::Parent(Some("other".into())))]);
+    let moved = refused(&r, vec![item("mid", ItemAssign::Parent("other".into()))]);
     assert!(moved.contains(&lineage("other", "mid")), "{moved:?}");
     // One a sync brought holds no other write back.
     let mut synced = done_tree();
@@ -394,7 +394,7 @@ fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes
     let mut apart = replica("b");
     apart.join(&synced.state).unwrap();
     commit_ok(&mut synced, 4, vec![waits("x", "leaf")]);
-    commit_ok(&mut apart, 4, vec![item("leaf", ItemAssign::Parent(Some("x".into())))]);
+    commit_ok(&mut apart, 4, vec![item("leaf", ItemAssign::Parent("x".into()))]);
     synced.join(&apart.state).unwrap();
     assert!(read(&synced).ancestors("leaf").contains(&"x"));
     commit_ok(&mut synced, 5, vec![item("mid", ItemAssign::Title("Mid".into()))]);
@@ -405,7 +405,7 @@ fn thread_of(r: &Replica, id: &str) -> Option<String> {
 }
 
 fn under(parent: &str) -> ItemAssign {
-    ItemAssign::Parent(Some(parent.into()))
+    ItemAssign::Parent(parent.into())
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn every_violation_is_named_at_once() {
     let rules = refused(
         &r,
         vec![
-            item("leaf", ItemAssign::Parent(Some("nowhere".into()))),
+            item("leaf", ItemAssign::Parent("nowhere".into())),
             item("leaf", ItemAssign::WaitsFor("leaf".into(), true)),
             item("mid", ItemAssign::Title("A".into())),
             item("mid", ItemAssign::Title("B".into())),
@@ -657,7 +657,7 @@ fn change(tc: &TestCase) -> Change {
             [ItemState::Backlog, ItemState::Parked, ItemState::Done]
                 [tc.draw(gs::integers::<usize>().max_value(2))],
         ),
-        3 => ItemAssign::Parent(maybe(tc)),
+        3 => ItemAssign::Parent(pick(tc)),
         4 => ItemAssign::Thread(tc.draw(gs::booleans()).then(|| "t".to_owned())),
         5 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
         _ => return add(&id, vec![]),
@@ -669,18 +669,18 @@ fn change(tc: &TestCase) -> Change {
 #[test]
 fn settling_a_conflicted_parent_on_the_value_that_closes_a_cycle_is_refused() {
     let mut a = replica("a");
-    let kid = add("kid", vec![ItemAssign::Parent(Some("x".into()))]);
+    let kid = add("kid", vec![ItemAssign::Parent("x".into())]);
     commit_ok(&mut a, 1, vec![add("x", vec![]), add("p", vec![]), kid]);
     let mut b = replica("b");
     b.join(&a.state).unwrap();
     // One replica, as an older version might, wrote x under its own child while another moved it under p.
     let x = crate::model::item_key("x").unwrap();
     a.write(&x, field::PARENT, "actor/user", 2, Some(Json::from("kid"))).unwrap();
-    commit_ok(&mut b, 2, vec![item("x", ItemAssign::Parent(Some("p".into())))]);
+    commit_ok(&mut b, 2, vec![item("x", ItemAssign::Parent("p".into()))]);
     a.join(&b.state).unwrap();
-    let rules = refused(&a, vec![item("x", ItemAssign::Parent(Some("kid".into())))]);
+    let rules = refused(&a, vec![item("x", ItemAssign::Parent("kid".into()))]);
     assert!(matches!(rules.as_slice(), [Rule::ParentCycle(_)]), "{rules:?}");
-    assert_eq!(refused_or_none(&a, item("x", ItemAssign::Parent(Some("p".into())))), []);
+    assert_eq!(refused_or_none(&a, item("x", ItemAssign::Parent("p".into()))), []);
 }
 
 /// The rules one change breaks, or none when it is accepted.
@@ -722,7 +722,7 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
             thread("t"),
             add("free", vec![ItemAssign::Thread(Some("t".into()))]),
             add("parent", vec![ItemAssign::Thread(Some("t".into()))]),
-            add("child", vec![ItemAssign::Parent(Some("parent".into()))]),
+            add("child", vec![ItemAssign::Parent("parent".into())]),
             add("lone", vec![]),
         ],
     );
@@ -770,7 +770,7 @@ fn canceling_refuses_done_work_and_another_holders_claim_unless_forced_and_frees
             add("free", vec![ItemAssign::Thread(Some("t".into()))]),
             add("done", vec![]),
             add("parent", vec![]),
-            add("child", vec![ItemAssign::Parent(Some("parent".into()))]),
+            add("child", vec![ItemAssign::Parent("parent".into())]),
         ],
     );
     assert_eq!(canceling(&r, "free", false), []);
@@ -948,7 +948,7 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
                 "state" => ItemAssign::State(ItemState::Done),
                 "notes" => ItemAssign::Notes(None),
                 "thread" => ItemAssign::Thread(None),
-                _ => ItemAssign::Parent(None),
+                _ => ItemAssign::Parent("a".into()),
             };
             changes.0.push(item(id, settle));
         }
@@ -971,7 +971,7 @@ fn a_tasks_thread_of_one_takes_its_title_when_a_second_item_joins_and_frees_it_o
         "a lone task's thread has no title of its own"
     );
     // Breaking the task down: the first child takes the thread, and the thread takes the task's title with it.
-    commit_ok(&mut r, 3, vec![add("kid", vec![ItemAssign::Parent(Some("x".into()))])]);
+    commit_ok(&mut r, 3, vec![add("kid", vec![ItemAssign::Parent("x".into())])]);
     let model = read(&r);
     assert_eq!(model.items["kid"].thread, Value::One(one.clone()));
     assert_eq!(model.items["x"].thread, Value::None);
@@ -990,4 +990,118 @@ fn a_tasks_thread_of_one_takes_its_title_when_a_second_item_joins_and_frees_it_o
     assert!(model.is_emptied_one(&one));
     assert_eq!(model.threads[&one].title, Value::One("X".into()));
     assert!(judge(&model, &ChangeSet(vec![minted("X")]), by(5), None).is_ok());
+}
+
+fn initiative_add(id: &str) -> Change {
+    Change::Add {
+        record: Record::Initiative(id.to_owned()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with: vec![Assign::Initiative(id.to_owned(), InitiativeAssign::Title(id.to_uppercase()))],
+    }
+}
+
+#[test]
+fn an_initiative_is_added_and_edited_like_a_record_and_an_item_may_be_put_under_it() {
+    let mut r = replica("a");
+    let outcome = commit_ok(
+        &mut r,
+        1,
+        vec![
+            initiative_add("init"),
+            Change::Set(Assign::Initiative(
+                "init".into(),
+                InitiativeAssign::Notes(Some("n".into())),
+            )),
+            add("epic", vec![under("init")]),
+        ],
+    );
+    // What the judge projects is what reading the written state gives.
+    assert_eq!(read(&r), outcome.after);
+    let m = read(&r);
+    assert_eq!(m.initiatives["init"].title, Value::One("INIT".into()));
+    assert_eq!(m.initiatives["init"].notes, Value::One("n".into()));
+    assert_eq!(m.children("init"), ["epic"]);
+    // Saying it again, or settling its notes to the same value, writes nothing; clearing them writes.
+    let again = commit_ok(&mut r, 2, vec![initiative_add("init")]);
+    assert!(!again.changes());
+    commit_ok(
+        &mut r,
+        3,
+        vec![Change::Set(Assign::Initiative("init".into(), InitiativeAssign::Notes(None)))],
+    );
+    assert_eq!(read(&r).initiatives["init"].notes, Value::None);
+    // A parent that is neither an item nor an initiative is refused.
+    assert_eq!(
+        refused(&r, vec![add("lost", vec![under("nowhere")])]),
+        [Rule::NoRecord(Record::Item("nowhere".into()))]
+    );
+    // Editing an initiative that doesn't exist is refused as any record is.
+    assert_eq!(
+        refused(
+            &r,
+            vec![Change::Set(Assign::Initiative(
+                "nowhere".into(),
+                InitiativeAssign::Title("T".into())
+            ))]
+        ),
+        [Rule::NoRecord(Record::Initiative("nowhere".into()))]
+    );
+}
+
+#[test]
+fn no_id_names_both_an_initiative_and_an_item_live_or_deleted() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![initiative_add("init"), add("work", vec![under("init")])]);
+    // An item can't take an initiative's id, nor an initiative an item's.
+    assert_eq!(
+        refused(&r, vec![add("init", vec![])]),
+        [Rule::IdTaken(Record::Initiative("init".into()))]
+    );
+    assert_eq!(
+        refused(&r, vec![initiative_add("work")]),
+        [Rule::IdTaken(Record::Item("work".into()))]
+    );
+    // Nor one that was deleted, since another replica may still name it.
+    let at = By { actor: "actor/user", at: 2 };
+    r.write(
+        &Key::new(kind::INITIATIVE, "ended").unwrap(),
+        "deleted",
+        "actor/user",
+        at.at,
+        Some(json!(true)),
+    )
+    .unwrap();
+    assert_eq!(
+        refused(&r, vec![add("ended", vec![under("init")])]),
+        [Rule::IdTaken(Record::Initiative("ended".into()))]
+    );
+    // A kind's own id is no clash: saying an existing record again is an update.
+    assert!(
+        !commit_ok(&mut r, 3, vec![initiative_add("init"), add("work", vec![under("init")])])
+            .changes()
+    );
+}
+
+#[test]
+fn work_directly_under_an_initiative_takes_no_thread_from_its_neighbours() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![initiative_add("init"), thread("t")]);
+    commit_ok(
+        &mut r,
+        2,
+        vec![add("one", vec![under("init"), ItemAssign::Thread(Some("t".into()))])],
+    );
+    // A sibling in thread `t` places no new child of an epic or task directly under the initiative.
+    let outcome = commit_ok(
+        &mut r,
+        3,
+        vec![add("two", vec![under("init")]), add("three", vec![under("init")])],
+    );
+    assert_eq!(outcome.placed(), Vec::new());
+    assert_eq!((thread_of(&r, "two"), thread_of(&r, "three")), (None, None));
+    // Under an item the rule stands: siblings place.
+    commit_ok(&mut r, 4, vec![add("kid", vec![under("one")])]);
+    commit_ok(&mut r, 5, vec![add("kid2", vec![under("one")])]);
+    assert_eq!(thread_of(&r, "kid2"), thread_of(&r, "kid"));
 }

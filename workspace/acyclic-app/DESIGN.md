@@ -307,14 +307,14 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
   the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
   waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.
-- **New item asks for little:** a title, a project (the one in context, else the top level) and a thread. Its id is
-  a UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same add. Added, the
-  item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than its state
-  first; its editor opens on Title. A picked thread, then the parent or selected item's thread, takes precedence;
-  otherwise a project's sole visible thread supplies the default. Changing Project updates that default until the
-  user chooses a thread, including Automatic; a reopened draft keeps its choice. Automatic follows the tracker's
-  parent, sibling or ancestor placement policy, leaving no thread when none applies. On a narrow phone the existing
-  actions use the form's spare height at its foot; the tablet keeps its content-height form.
+- **New item asks for little:** a title, a project (the one in context, else the only initiative, else it asks) and a
+  thread. Its id is a UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same
+  add. Added, the item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than
+  its state first; its editor opens on Title. A picked thread, then the parent or selected item's thread, takes
+  precedence; otherwise a project's sole visible thread supplies the default. Changing Project updates that default
+  until the user chooses a thread, including Automatic; a reopened draft keeps its choice. Automatic follows the
+  tracker's parent, sibling or ancestor placement policy, leaving no thread when none applies. On a narrow phone the
+  existing actions use the form's spare height at its foot; the tablet keeps its content-height form.
 - **One thing in focus.** Selecting an item outside the picked thread unpicks the thread, so the sidebar never marks
   a project and a thread the selection isn't in at once; an item in the thread keeps it, its panel over the thread's.
 - **States:** loading, a failed load (what to check, then the error, then Try again), and an empty plan are each a page

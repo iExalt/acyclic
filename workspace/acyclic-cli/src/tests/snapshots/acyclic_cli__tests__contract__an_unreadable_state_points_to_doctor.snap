@@ -61,6 +61,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
       "unmerged": []
     },
     "counts": {
+      "initiatives": 1,
       "items": 1,
       "links": 0,
       "threads": 0

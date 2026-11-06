@@ -283,7 +283,13 @@ fn claiming_a_loose_task_makes_its_thread_and_names_it_on_the_task_in_one_go() {
     let model = Model::read(&r.state).unwrap();
     assert!(model.threads.contains_key("x.one"));
     let readiness = ReadinessEvaluator::new(&r.state, &model, 30);
-    assert_eq!(crate::needs::needs_you(&r.state, &model, &readiness, 30).unwrap().len(), 0);
+    let listed = crate::needs::needs_you(&r.state, &model, &readiness, 30).unwrap();
+    assert_eq!(listed.iter().filter(|entry| !is_unplaced(entry)).count(), 0);
+}
+
+/// An entry that these tests' bare items bring and no test here is about: an item with no parent.
+fn is_unplaced(entry: &crate::needs::Entry) -> bool {
+    matches!(entry, crate::needs::Entry::ParentMissing { parent: None, .. })
 }
 
 #[test]
@@ -309,7 +315,8 @@ fn two_replicas_claiming_one_loose_task_apart_make_one_thread_and_a_contest_in_e
         assert_eq!(model.conflicts().count(), 0);
         let readiness = ReadinessEvaluator::new(&joined.state, &model, 30);
         let needs = needs_you(&joined.state, &model, &readiness, 30).unwrap();
-        let keys: Vec<String> = needs.iter().map(Entry::key).collect();
+        let keys: Vec<String> =
+            needs.iter().filter(|entry| !is_unplaced(entry)).map(Entry::key).collect();
         assert_eq!(keys, [format!("contest:{one}")]);
         // The earlier lease wins on every replica.
         seen.push(holder(&joined, &one, 30));

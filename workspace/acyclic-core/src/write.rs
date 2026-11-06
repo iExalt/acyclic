@@ -11,11 +11,11 @@ use serde_json::Value as Json;
 
 use crate::import::is_object_id;
 use crate::model::{
-    self, By, Evidence, Item, ItemState, Model, Repository, Thread, Value, WriteError,
+    self, By, Evidence, Initiative, Item, ItemState, Model, Repository, Thread, Value, WriteError,
 };
 use crate::place::{Inherited, Placement, placement};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
-use crate::schema::{item as field, kind, link, repository, thread};
+use crate::schema::{initiative, item as field, kind, link, repository, thread};
 use crate::state::{Error as StateError, Key, Millis, Replica, State};
 
 /// A condition an app write requires to still hold in the tracker's current state.
@@ -329,6 +329,8 @@ fn current_waiters(model: &Model, item: &str) -> BTreeSet<String> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(tag = "kind", content = "id", rename_all = "kebab-case")]
 pub enum Record {
+    /// An initiative.
+    Initiative(String),
     /// An item.
     Item(String),
     /// A thread.
@@ -342,7 +344,7 @@ impl Record {
     #[must_use]
     pub fn id(&self) -> &str {
         match self {
-            Self::Item(id) | Self::Thread(id) | Self::Repository(id) => id,
+            Self::Initiative(id) | Self::Item(id) | Self::Thread(id) | Self::Repository(id) => id,
         }
     }
 
@@ -350,6 +352,7 @@ impl Record {
     #[must_use]
     pub const fn kind(&self) -> &'static str {
         match self {
+            Self::Initiative(_) => kind::INITIATIVE,
             Self::Item(_) => kind::ITEM,
             Self::Thread(_) => kind::THREAD,
             Self::Repository(_) => kind::REPOSITORY,
@@ -365,6 +368,7 @@ impl Record {
 
     fn exists(&self, model: &Model) -> bool {
         match self {
+            Self::Initiative(id) => model.initiatives.contains_key(id),
             Self::Item(id) => model.items.contains_key(id),
             Self::Thread(id) => model.threads.contains_key(id),
             Self::Repository(id) => model.repositories.contains_key(id),
@@ -376,9 +380,9 @@ impl Record {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FieldName {
-    /// An item's or thread's title.
+    /// An initiative's, item's or thread's title.
     Title,
-    /// An item's or thread's notes.
+    /// An initiative's, item's or thread's notes.
     Notes,
     /// An item's state.
     State,
@@ -436,14 +440,23 @@ pub enum ItemAssign {
     Notes(Option<String>),
     /// Its state.
     State(ItemState),
-    /// Its parent, or the top level.
-    Parent(Option<String>),
+    /// Its parent, an item or an initiative. No write clears it: an item always belongs to one.
+    Parent(String),
     /// Its evidence, or none.
     Evidence(Option<Evidence>),
     /// Its thread, or none.
     Thread(Option<String>),
     /// Makes it wait for an item, or stop.
     WaitsFor(String, bool),
+}
+
+/// A value for one of an initiative's fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InitiativeAssign {
+    /// Its title.
+    Title(String),
+    /// Its notes, or none.
+    Notes(Option<String>),
 }
 
 /// A value for one of a thread's fields.
@@ -469,6 +482,8 @@ pub enum RepositoryAssign {
 /// One field of one record given one value: a field and its value always agree in type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Assign {
+    /// An initiative's field.
+    Initiative(String, InitiativeAssign),
     /// An item's field.
     Item(String, ItemAssign),
     /// A thread's field.
@@ -482,6 +497,13 @@ impl Assign {
     #[must_use]
     pub fn at(&self) -> FieldAddr {
         let (record, field) = match self {
+            Self::Initiative(id, assign) => (
+                Record::Initiative(id.clone()),
+                match assign {
+                    InitiativeAssign::Title(_) => FieldName::Title,
+                    InitiativeAssign::Notes(_) => FieldName::Notes,
+                },
+            ),
             Self::Item(id, assign) => (
                 Record::Item(id.clone()),
                 match assign {
@@ -519,6 +541,10 @@ impl Assign {
     #[must_use]
     pub fn value(&self) -> Json {
         match self {
+            Self::Initiative(_, assign) => match assign {
+                InitiativeAssign::Title(v) => to_json(v),
+                InitiativeAssign::Notes(v) => to_json(v),
+            },
             Self::Item(_, assign) => match assign {
                 ItemAssign::Title(v) => to_json(v),
                 ItemAssign::Notes(v) => to_json(v),
@@ -673,6 +699,9 @@ pub enum Rule {
         /// The item it waits for.
         to: String,
     },
+    /// A new initiative or item would take the id of this record of the other kind, or of one deleted: an item's
+    /// `parent` names either by its id alone.
+    IdTaken(Record),
     /// A minted record would take the title of this open one.
     TitleTaken(Record),
     /// A repository would take `owner/name` that this other record has, or could have once its conflict is settled.
@@ -760,6 +789,14 @@ impl fmt::Display for Violation {
                 f,
                 "{at}{from} would wait for {to}, which is above or below it, so neither could ever be done"
             ),
+            Rule::IdTaken(record) => {
+                write!(
+                    f,
+                    "{at}{} {} has that id, and an id names one kind of record",
+                    record.kind(),
+                    record.id()
+                )
+            },
             Rule::TitleTaken(other) => {
                 write!(f, "{at}{} {} already has that title", other.kind(), other.id())
             },
@@ -1027,6 +1064,11 @@ impl Judging<'_, '_> {
         // a field given.
         let id = record.id().to_owned();
         match record {
+            Record::Initiative(_) => {
+                self.after
+                    .initiatives
+                    .insert(id.clone(), Initiative { id, title: Value::None, notes: Value::None });
+            },
             Record::Item(_) => {
                 self.after.items.insert(id.clone(), empty_item(&id));
             },
@@ -1172,7 +1214,9 @@ impl Judging<'_, '_> {
         for (n, id) in created {
             let Some(item) = after.items.get(id) else { continue };
             let Some(parent) = item.parent.one() else { continue };
-            if threaded.contains(id) || item.is_finished() {
+            // An initiative's children are its epics and loose tasks, which share no thread by being siblings.
+            if threaded.contains(id) || item.is_finished() || after.initiatives.contains_key(parent)
+            {
                 continue;
             }
             let siblings: Vec<&str> =
@@ -1208,6 +1252,7 @@ impl Judging<'_, '_> {
         let (after, steps) = (&self.after, &self.steps);
         let mut found = assign_rules(after, steps);
         found.extend(empty_creates(steps));
+        found.extend(shared_ids(self.before, steps));
         found.extend(new_cycles(self.before, after, steps));
         found.extend(new_lineage_links(self.before, after, steps));
         found.extend(taken_names(after, steps));
@@ -1252,7 +1297,10 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
         };
         match assign {
             Assign::Item(id, assign) => match assign {
-                ItemAssign::Parent(Some(parent)) if !after.items.contains_key(parent) => {
+                ItemAssign::Parent(parent)
+                    if !after.items.contains_key(parent)
+                        && !after.initiatives.contains_key(parent) =>
+                {
                     refuse(Rule::NoRecord(Record::Item(parent.clone())));
                 },
                 ItemAssign::Thread(Some(thread)) if !after.threads.contains_key(thread) => {
@@ -1296,10 +1344,33 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                 },
                 _ => {},
             },
-            Assign::Thread(..) | Assign::Repository(..) => {},
+            Assign::Initiative(..) | Assign::Thread(..) | Assign::Repository(..) => {},
         }
     }
     found
+}
+
+/// A new initiative or item whose id another kind has, live or deleted: an item's `parent` names an item or an
+/// initiative by its id alone, so one id may not name both. Judged on the model before, as the id was free to take.
+fn shared_ids(before: &Model, steps: &[Step]) -> Vec<Violation> {
+    steps
+        .iter()
+        .filter_map(|step| {
+            let Written::Create(record) = &step.write else { return None };
+            let own = record.kind();
+            if !matches!(record, Record::Initiative(_) | Record::Item(_))
+                || !before.id_held_beyond(own, record.id())
+            {
+                return None;
+            }
+            let other = if own == kind::ITEM {
+                Record::Initiative(record.id().to_owned())
+            } else {
+                Record::Item(record.id().to_owned())
+            };
+            Some(Violation { change: Some(step.change), at: None, rule: Rule::IdTaken(other) })
+        })
+        .collect()
 }
 
 /// Canceling done work, or a parent that reads done, is refused: reopen it first. Judged on the model before.
@@ -1330,9 +1401,7 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
     let closes = |parents: bool, cycle: &[String]| {
         steps.iter().any(|step| {
             let (id, to) = match &step.write {
-                Written::Assign(Assign::Item(id, ItemAssign::Parent(Some(to)))) if parents => {
-                    (id, to)
-                },
+                Written::Assign(Assign::Item(id, ItemAssign::Parent(to))) if parents => (id, to),
                 Written::Assign(Assign::Item(id, ItemAssign::WaitsFor(to, true))) if !parents => {
                     (id, to)
                 },
@@ -1524,7 +1593,7 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
                     })
                     .map(|other| Record::Thread(other.id.clone()))
             },
-            Record::Repository(_) => None,
+            Record::Initiative(_) | Record::Repository(_) => None,
         };
         if let Some(other) = other {
             found.push(Violation {
@@ -1553,6 +1622,19 @@ fn holds(model: &Model, assign: &Assign) -> bool {
         model.conflicts.contains(&(record.to_owned(), id.to_owned(), name.to_owned()))
     };
     match assign {
+        Assign::Initiative(id, assign) => {
+            let Some(record) = model.initiatives.get(id) else { return false };
+            match assign {
+                InitiativeAssign::Title(v) => {
+                    !conflicted(kind::INITIATIVE, id, initiative::TITLE)
+                        && record.title.holds(Some(v))
+                },
+                InitiativeAssign::Notes(v) => {
+                    !conflicted(kind::INITIATIVE, id, initiative::NOTES)
+                        && record.notes.holds(v.as_ref())
+                },
+            }
+        },
         Assign::Item(id, assign) => {
             let Some(item) = model.items.get(id) else { return false };
             let name = assign_name(assign);
@@ -1563,7 +1645,7 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ItemAssign::Title(v) => item.title.holds(Some(v)),
                 ItemAssign::Notes(v) => item.notes.holds(v.as_ref()),
                 ItemAssign::State(v) => item.state.holds(Some(v)),
-                ItemAssign::Parent(v) => item.parent.holds(v.as_ref()),
+                ItemAssign::Parent(v) => item.parent.holds(Some(v)),
                 ItemAssign::Evidence(v) => item.evidence.holds(v.as_ref()),
                 ItemAssign::Thread(v) => item.thread.holds(v.as_ref()),
                 ItemAssign::WaitsFor(to, present) => {
@@ -1632,6 +1714,20 @@ fn project(model: &mut Model, write: &Written, at: Millis) {
     };
     match write {
         Written::Create(_) => {},
+        Written::Assign(Assign::Initiative(id, assign)) => {
+            let Some(record) = model.initiatives.get_mut(id) else { return };
+            let name = match assign {
+                InitiativeAssign::Title(v) => {
+                    record.title = Value::One(v.clone());
+                    initiative::TITLE
+                },
+                InitiativeAssign::Notes(v) => {
+                    record.notes = one(v.clone());
+                    initiative::NOTES
+                },
+            };
+            settled(model, kind::INITIATIVE, id, name);
+        },
         Written::Assign(Assign::Item(id, assign)) => project_item(model, id, assign, at),
         Written::Assign(Assign::Thread(id, assign)) => {
             let Some(record) = model.threads.get_mut(id) else { return };
@@ -1690,9 +1786,7 @@ fn project_item(model: &mut Model, id: &str, assign: &ItemAssign, at: Millis) {
                 }
             }
         }
-        if let Some(parent) = parent {
-            model.children.entry(parent.clone()).or_default().insert(id.to_owned());
-        }
+        model.children.entry(parent.clone()).or_default().insert(id.to_owned());
     }
     if let ItemAssign::WaitsFor(to, present) = assign {
         let link = model::Link { from: id.to_owned(), to: to.clone() };
@@ -1717,7 +1811,7 @@ fn project_item(model: &mut Model, id: &str, assign: &ItemAssign, at: Millis) {
             item.state = Value::One(*v);
             item.done_at = (*v == ItemState::Done).then_some(at);
         },
-        ItemAssign::Parent(v) => item.parent = one(v.clone()),
+        ItemAssign::Parent(v) => item.parent = Value::One(v.clone()),
         ItemAssign::Evidence(v) => item.evidence = one(v.clone()),
         ItemAssign::Thread(v) => item.thread = one(v.clone()),
         ItemAssign::WaitsFor(..) => unreachable!("handled above"),
@@ -1784,6 +1878,12 @@ fn emit(replica: &mut Replica, assign: &Assign, by: By<'_>) -> Result<(), WriteE
             let value = assign.value();
             replica.write(&key, assign_name(item), by.actor, by.at, Some(value))?;
             Ok(())
+        },
+        Assign::Initiative(_, InitiativeAssign::Title(_)) => {
+            put_json(replica, &key, initiative::TITLE, assign, by)
+        },
+        Assign::Initiative(_, InitiativeAssign::Notes(_)) => {
+            put_json(replica, &key, initiative::NOTES, assign, by)
         },
         Assign::Thread(_, ThreadAssign::Title(_)) => {
             put_json(replica, &key, thread::TITLE, assign, by)

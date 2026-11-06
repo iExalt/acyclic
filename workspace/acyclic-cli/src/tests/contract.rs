@@ -59,12 +59,28 @@ impl Shell {
         (code, parsed)
     }
 
+    /// Sets up the tracker with the one initiative every test's items go under, since an item needs a parent and
+    /// `item add` puts one in the tracker's only initiative. The initiative is made off the transcript.
+    fn init(&mut self) -> u8 {
+        let code = self.run("init tracker --replica mac", &[]);
+        let line = format!("initiative add --id {} --title Default", id(DEFAULT_INITIATIVE));
+        let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
+        // Two hours before NOW, so a test may still write at an earlier time than NOW's, as one of them does.
+        let earlier = [("ACYCLIC_ACTOR", "session/mac"), ("ACYCLIC_NOW", "1792015200000")];
+        let made = execute(args, &self.env(&earlier));
+        assert_eq!(made.code, 0, "{made:?}");
+        code
+    }
+
     fn path(&self) -> &Path {
         self.dir.path()
     }
 }
 
 const AGENT: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac")];
+
+/// The default initiative made by [`Shell::init`].
+const DEFAULT_INITIATIVE: &str = "ff";
 
 /// A fixed `UUIDv7` ending in `tail`, a hex string, so a transcript is the same each run.
 fn id(tail: &str) -> String {
@@ -78,6 +94,23 @@ fn a_journey_through_the_contract() {
     let [a1, a2, a3, a4] = ["a1", "a2", "a3", "a4"].map(id);
     let [t0, t1, t2, t3] = ["f0", "f1", "f2", "f3"].map(id);
     assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    // An item needs a parent, and the tracker has no initiative to default to yet.
+    let i0 = id("b0");
+    let (code, out) = sh.output("item add --title Nowhere", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("parent-required")), "{out}");
+    assert_eq!(sh.run(&format!("initiative add --id {i0} --title Garden"), AGENT), 0);
+    assert_eq!(sh.run(&format!("initiative add --id {i0} --title Garden"), AGENT), 0, "a repeat");
+    assert_eq!(
+        sh.run(&format!("initiative add --id {i0} --title Other"), AGENT),
+        1,
+        "another title"
+    );
+    assert_eq!(
+        sh.run(&format!("item add --id {i0} --title Clash --parent Garden"), AGENT),
+        1,
+        "its id"
+    );
+    // With one initiative, an add that names no parent goes under it.
     assert_eq!(sh.run(&format!("item add --id {a1} --title First"), AGENT), 0);
     assert_eq!(sh.run(&format!("item add --id {a2} --title Second"), AGENT), 0);
     assert_eq!(sh.run(&format!("item add --id {a2} --title Second"), AGENT), 0, "a repeat");
@@ -276,13 +309,61 @@ fn a_journey_through_the_contract() {
         "its id is retired"
     );
     assert_eq!(sh.run("item delete nope", AGENT), 3);
+    // A second initiative: an add naming no parent is refused, naming the choices, and `--parent` takes either kind.
+    let (orchard, pear, grove) = (id("b1"), id("b2"), id("b3"));
+    let line = format!("initiative add --id {orchard} --title Orchard --notes Trees");
+    assert_eq!(sh.run(&line, AGENT), 0);
+    let (code, out) = sh.output("item add --title Floating", AGENT);
+    let choices = out["error"]["details"]["initiatives"].as_array().map(Vec::len);
+    assert_eq!(
+        (code, out["error"]["code"].as_str(), choices),
+        (1, Some("parent-required"), Some(2))
+    );
+    let line = format!("item add --id {pear} --title Pear --parent Orchard");
+    assert_eq!(sh.run(&line, AGENT), 0);
+    let line = format!("item add --id {grove} --title Orchard --parent Garden");
+    assert_eq!(sh.run(&line, AGENT), 0);
+    let (code, out) = sh.output("item add --title Plum --parent Orchard", AGENT);
+    assert_eq!(
+        (code, out["error"]["code"].as_str()),
+        (2, Some("ambiguous")),
+        "an item's and an initiative's title"
+    );
+    assert_eq!(out["error"]["details"]["candidates"].as_array().map(Vec::len), Some(2));
+    // Reads: the item says which initiative it is under, and `thread ready --initiative` keeps its threads.
+    assert_eq!(sh.output("item show Pear", AGENT).1["data"][0]["initiative"], json!(orchard));
+    let (code, scoped) = sh.output("thread ready --initiative Orchard", AGENT);
+    let tasks: Vec<&serde_json::Value> =
+        scoped["data"]["ready"].as_array().unwrap().iter().map(|row| &row["task"]).collect();
+    assert_eq!((code, tasks), (0, vec![&json!(pear)]), "{scoped}");
+    let (_, wide) = sh.output("thread ready --initiative Garden", AGENT);
+    let kept =
+        wide["data"]["ready"].as_array().unwrap().iter().any(|row| row["task"] == json!(pear));
+    assert!(!kept, "{wide}");
+    assert_eq!(sh.run("thread ready --initiative nope", AGENT), 3);
+    assert_eq!(sh.run("initiative edit Orchard --no-notes", AGENT), 0);
+    assert_eq!(sh.run("initiative edit Orchard --notes x --no-notes", AGENT), 2);
+    assert_eq!(sh.run("initiative list", AGENT), 0);
+    assert_eq!(sh.run("initiative list -o pretty", AGENT), 0);
+    assert_eq!(sh.run("initiative show Garden Orchard", AGENT), 0);
+    assert_eq!(sh.run("initiative show nope", AGENT), 3);
+    // No flag clears an item's parent; it moves to another, and an initiative is deleted once it holds no item.
+    assert_eq!(sh.run("item edit Pear --no-parent", AGENT), 2);
+    let (code, out) = sh.output("initiative delete Orchard", AGENT);
+    assert_eq!((code, &out["error"]["details"]["reasons"][0]["why"]), (1, &json!("holds-items")));
+    assert_eq!(sh.run(&format!("item edit Pear --parent {i0}"), AGENT), 0);
+    assert_eq!(sh.run("initiative delete Orchard", AGENT), 0);
+    let (code, out) = sh.output(&format!("initiative delete {orchard}"), AGENT);
+    assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(false)), "a repeat");
+    assert_eq!(sh.run("initiative show Orchard", AGENT), 3);
+    assert_eq!(sh.run("initiative delete nope", AGENT), 3);
     insta::assert_snapshot!(sh.transcript);
 }
 
 #[test]
 fn an_add_takes_only_a_uuidv7_in_any_case_and_references_match_as_the_rules_say() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let sow = id("5eed01");
     let add = format!("item add --id {sow} --title Sow");
     let (code, out) = sh.output(&add, AGENT);
@@ -313,7 +394,7 @@ fn an_add_takes_only_a_uuidv7_in_any_case_and_references_match_as_the_rules_say(
 #[test]
 fn done_names_its_commit_by_repository_and_sha() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     sh.run(
         &format!("repository add --id {} --name iExalt/acyclic --default-branch main", id("e1")),
         AGENT,
@@ -334,7 +415,7 @@ fn done_names_its_commit_by_repository_and_sha() {
 #[test]
 fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     sh.run(&format!("item add --id {} --title First", id("a1")), AGENT);
     // The replica's state as an earlier build wrote it: the same files under the previous format version.
     let tracker = sh.path().join("tracker");
@@ -386,7 +467,7 @@ fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
         assert_eq!(
             error["details"]["hint"],
             "written by an earlier acyclic: read it with that version, or rebuild it with `acyclic import` from a \
-             version-3 document"
+             version-4 document"
         );
     }
     // Any other unreadable state points to doctor, except from doctor itself.
@@ -399,7 +480,7 @@ fn a_state_this_build_cant_read_hints_at_the_fix_and_doctor_never_at_itself() {
 fn doctor_names_the_first_noncanonical_entity_file() {
     let mut sh = Shell::new();
     let items = [id("a1"), id("a2")];
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     for (index, item) in items.iter().enumerate() {
         sh.run(&format!("item add --id {item} --title Item-{index}"), AGENT);
     }
@@ -451,7 +532,7 @@ fn doctor_names_the_first_noncanonical_entity_file() {
 #[test]
 fn an_unreadable_state_points_to_doctor() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let (a1, a2) = (id("a1"), id("a2"));
     sh.run(&format!("item add --id {a1} --title First"), AGENT);
     sh.run(&format!("item add --id {a2} --title Second"), AGENT);
@@ -485,7 +566,7 @@ fn an_unreadable_state_points_to_doctor() {
 fn a_new_child_joins_its_siblings_thread_and_the_flags_say_otherwise() {
     let mut sh = Shell::new();
     let [epic, t1, t2] = [id("e1"), id("f1"), id("f2")];
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     for line in [
         format!("item add --id {epic} --title Epic"),
         format!("thread add --id {t1} --title One"),
@@ -541,7 +622,7 @@ fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_ne
     let mut sh = Shell::new();
     let [x, y] = [id("a1"), id("a2")];
     let [one_x, one_y] = [format!("{x}.one"), format!("{y}.one")];
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     for line in [
         format!("item add --id {x} --title Alpha"),
         format!("item add --id {y} --title Beta"),
@@ -638,7 +719,7 @@ fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_ne
 fn finishing_with_an_unreadable_claim_exits_six() {
     let mut sh = Shell::new();
     let (thread, item) = (id("f1"), id("a1"));
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     sh.run(&format!("thread add --id {thread} --title Work"), AGENT);
     sh.run(&format!("item add --id {item} --title First --thread {thread}"), AGENT);
 
@@ -660,7 +741,7 @@ fn finishing_with_an_unreadable_claim_exits_six() {
 #[test]
 fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let mut plan = acyclic_fixtures::generate(50, 7);
     let file = sh.path().join("plan.json");
     std::fs::write(&file, plan.to_json()).unwrap();
@@ -677,7 +758,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     // Each record is listed as created, with its fields, and nothing has been written.
     let creates =
         dry["changes"].as_array().unwrap().iter().filter(|c| c["action"] == "create").count();
-    let counted: u64 = ["links", "threads", "repositories"]
+    let counted: u64 = ["links", "threads", "repositories", "initiatives"]
         .iter()
         .map(|k| dry["counts"][k].as_u64().unwrap())
         .sum();
@@ -738,7 +819,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
 #[test]
 fn a_parent_that_is_a_thread_suggests_a_command_that_pastes_as_it_is() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     assert_eq!(sh.run("thread add --title Q&A", AGENT), 0);
     assert_eq!(sh.run("item add --title It's", AGENT), 0);
     let meant = |sh: &mut Shell, line: &str| {
@@ -758,7 +839,7 @@ fn a_parent_that_is_a_thread_suggests_a_command_that_pastes_as_it_is() {
 #[test]
 fn pretty_output_names_a_record_the_command_just_added_among_the_rest() {
     let mut sh = Shell::new();
-    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    assert_eq!(sh.init(), 0);
     // Two ids sharing their last six characters, so each is named by seven once both exist.
     let [old, new] = ["0abc12", "10abc12"].map(id);
     assert_eq!(sh.run(&format!("item add --id {old} --title Old"), AGENT), 0);
@@ -777,7 +858,7 @@ fn pretty_output_names_a_record_the_command_just_added_among_the_rest() {
 #[test]
 fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let ids = ["a1", "a2", "a3", "a4", "a5"].map(id);
     let [added, open, alias, edited, app] = ids.each_ref().map(String::as_str);
     for line in [
@@ -824,7 +905,7 @@ fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
 #[test]
 fn canceling_parses_reads_back_and_refuses_in_the_clis_words() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let [cut, done, held, work] = ["a1", "a2", "a3", "f1"].map(id);
     for line in [
         format!("thread add --id {work} --title Work"),
@@ -854,7 +935,7 @@ fn canceling_parses_reads_back_and_refuses_in_the_clis_words() {
 #[test]
 fn notes_are_how_a_stored_brief_reads_and_brief_is_what_is_written() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let ids = ["f1", "f2", "f3", "f4", "f5", "f6"].map(id);
     let [added, alias, edited, app, imported, older] = ids.each_ref().map(String::as_str);
     for line in [
@@ -880,7 +961,7 @@ fn notes_are_how_a_stored_brief_reads_and_brief_is_what_is_written() {
     assert_eq!((code, &out["error"]["code"]), (1, &json!("changed-since")), "{out}");
     assert_eq!(app_edit("notes", "Two", "notes", json!(null)).0, 0);
     assert_eq!(app_edit("brief", "One", "brief", json!("Two")).0, 0);
-    let plan = json!({"format": "acyclic-import", "version": 3, "threads": [
+    let plan = json!({"format": "acyclic-import", "version": 4, "threads": [
         {"id": imported, "title": "Imported", "notes": "One"},
         {"id": older, "title": "Older", "brief": "One"},
     ]});
@@ -988,7 +1069,7 @@ fn a_finish_renews_the_lease_a_refused_command_does_not_and_a_lapsed_lease_stall
         shown["data"][0]["claims"][0]["lease_expires_at"].as_str().map(str::to_owned)
     };
     let minute = |minutes: i64| acyclic_core::time::rfc3339(start + minutes * MINUTE);
-    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    assert_eq!(sh.init(), 0);
     for line in [
         "thread add --title Work",
         "item add --title First --thread Work",
@@ -1051,9 +1132,10 @@ fn add_stalled_thread(sh: &mut Shell) {
 /// The needs list the app's tests read, made here so they read what this build sends, with a conflict for each way a
 /// value is kept. `UPDATE_EXAMPLES=1` writes it; otherwise it must match.
 #[test]
+#[expect(clippy::too_many_lines, reason = "one list of every need the app reads")]
 fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_conflict() {
     let mut sh = Shell::new();
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     add_stalled_thread(&mut sh);
     let (a1, p1, e1, t1, r1, r2) = (id("a1"), id("b1"), id("e1"), id("f1"), id("c1"), id("c2"));
     for line in [
@@ -1092,17 +1174,35 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         (key("item", &id("a7")), "state", json!("done"), json!("canceled")),
         // Stored as `backlog`, shown and kept as `open`.
         (key("item", &p1), "state", json!("backlog"), json!("parked")),
-        (key("item", &a1), "parent", json!(p1), json!(null)),
+        // An item moved under another, and under an initiative.
+        (key("item", &a1), "parent", json!(p1), json!(id(DEFAULT_INITIATIVE))),
         (key("thread", &t1), "brief", json!("Why"), json!(null)),
         (key("repository", &r2), "owner", json!("me"), json!("you")),
         (key("item", &e1), "evidence", evidence("abc1234"), evidence("def5678")),
     ];
+    let lost = [(id("a9"), None), (id("aa"), Some("gone"))];
     let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
     let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
     tracker
         .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
             let id = acyclic_core::state::ReplicaId::new("pi").unwrap();
             let mut other = acyclic_core::state::Replica::open(id, replica.state().clone());
+            // Two items no command makes, as an older replica or a sync could leave them: one with no parent, one
+            // whose parent is gone. Each is on Needs you as a missing parent.
+            for (made, parent) in &lost {
+                let key = acyclic_core::state::Key::new("item", made).unwrap();
+                replica.write(
+                    &key,
+                    "title",
+                    "actor/user",
+                    at,
+                    Some(json!(format!("Lost {made}"))),
+                )?;
+                replica.write(&key, "state", "actor/user", at, Some(json!("backlog")))?;
+                if let Some(parent) = parent {
+                    replica.write(&key, "parent", "actor/user", at, Some(json!(parent)))?;
+                }
+            }
             for (key, name, mine, theirs) in &apart {
                 replica.write(key, name, "actor/user", at, Some(mine.clone()))?;
                 other.write(key, name, "actor/user", at, Some(theirs.clone()))?;
@@ -1201,7 +1301,7 @@ fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
     let mut sh = Shell::new();
     let (home, work) = code(&sh);
     let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     sh.run("repository add --name me/code --default-branch main", mapped);
     sh.run("repository add --name me/other --default-branch main", mapped);
     for (n, title) in [("a1", "Ship"), ("a2", "Elsewhere"), ("a3", "Later")] {
@@ -1259,12 +1359,13 @@ fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
     let mut sh = Shell::new();
     let (home, work) = code(&sh);
     let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
-    sh.run("init tracker --replica mac", &[]);
+    sh.init();
     let plan = |commit: &str| {
         json!({
-            "format": "acyclic-import", "version": 3,
+            "format": "acyclic-import", "version": 4,
             "repositories": [{"id": id("c1"), "name": "me/code", "default_branch": "main"}],
             "items": [{"id": id("a1"), "title": "Ship", "state": "done",
+                       "parent": id(DEFAULT_INITIATIVE),
                        "evidence": {"commit": format!("me/code@{commit}")}}],
         })
         .to_string()

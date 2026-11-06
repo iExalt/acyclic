@@ -266,7 +266,9 @@ def tracker(directory, env, items, remote=None, cycles=False):
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     with detail(f"tracker {items}: import"):
         run(env, "import", str(plan))
-    parent = {item["id"]: item.get("parent") for item in data["items"]}
+    # A root's parent is the plan's initiative, which is no item: the roots are the items with no parent here.
+    ids = {item["id"] for item in data["items"]}
+    parent = {item["id"]: item.get("parent") if item.get("parent") in ids else None for item in data["items"]}
     waits = {item["id"]: item.get("waits_for") for item in data["items"]}
 
     def line(id):
@@ -3874,6 +3876,7 @@ def shard_run(shard):
                 "ACYCLIC_ACTOR": "session/browser",
             }
             run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            run(env, "initiative", "add", "--title", "Home")
             run(env, "thread", "add", "--title", "Shrink proof")
             project = json.loads(run(env, "item", "add", "--title", "Tall chain"))["data"]["item"]
             other = json.loads(run(env, "item", "add", "--title", "Other root"))["data"]["item"]
@@ -3906,6 +3909,7 @@ def shard_run(shard):
                 "ACYCLIC_ACTOR": "session/browser",
             }
             run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
+            run(env, "initiative", "add", "--title", "Home")
             thread = json.loads(run(env, "thread", "add", "--title", "Label proof"))[
                 "data"
             ]["thread"]

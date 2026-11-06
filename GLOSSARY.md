@@ -6,22 +6,34 @@ coherent pieces of it, plus the app and the agent runs that carry that work out.
 ## Work
 
 **Item**:
-One unit of tracked work, from a single task to a whole project; items nest to any depth.
-_Avoid_: issue, task, ticket, battle
+One unit of tracked work, from a single task to a whole epic; items nest to any depth under an initiative.
+_Avoid_: issue, ticket, battle
+
+**Initiative**:
+The top level: a long-lived body of work, such as a product, kept as a record of its own rather than an item. It has a
+title and notes, no state, thread or links, and is never work. An item's `parent` may name one by its id, so no id names
+both an item and an initiative. One is deleted only when no item is under it, and its id is never used again.
+_Avoid_: project (for this), area, space
+
+**Epic**:
+An item with children that sits directly under an initiative, or under none at all. Read from the tree, so it is an epic
+once it has something under it. JSON says it as the item's `role`.
+_Avoid_: group, category, goal
+
+**Task**:
+Any other item: one with no children, or one deeper than an epic, which may have children of its own. A childless item
+directly under an initiative is a task. JSON says it as the item's `role`.
+_Avoid_: leaf (for the role)
+
+**No initiative**:
+Where an item with no parent, or one whose parent doesn't exist, reads until it is given one. Each such item is on the
+needs-you list as `parent-missing`, which doesn't notify.
 
 **Leaf**:
-An item with no children. The Rust role is `Leaf`; JSON keeps the older role name `item`.
+An item with no children, whatever its role.
 
 **Member**:
 An item belonging to a thread, including an item with children.
-
-**Group**:
-An item with children under another item.
-_Avoid_: epic, category, goal
-
-**Project**:
-A top-level item with children.
-_Avoid_: theatre, repository, phase, milestone, campaign
 
 **Evidence**:
 What `item done` records to show an item was finished: the commit that completed it, or a line of text.
@@ -168,8 +180,9 @@ Stored data keeps the older kind name `blocks` for a waits-for link. Links that 
 cycle, `waits-for-cycle` in JSON.
 
 **Dangling reference**:
-A parent, thread or waits-for target that names a record that doesn't exist or was deleted. It lands on
-the needs-you list, and an item whose thread dangles counts as in no thread, so as a thread of one.
+A thread or waits-for target that names a record that doesn't exist or was deleted. It lands on
+the needs-you list, and an item whose thread dangles counts as in no thread, so as a thread of one. A parent that names
+nothing is listed as `parent-missing` instead.
 _Avoid_: broken link, orphan
 
 ## Where the data lives
@@ -178,10 +191,8 @@ _Avoid_: broken link, orphan
 The repository that holds one trust domain's items and their changes; it is not where project knowledge is kept.
 _Avoid_: board, project (for the repository)
 
-**Record**:
-A stored entry in the tracker, such as an item, thread or repository, named by its id. JSON names its kind under
-`record`, as in a conflict or a dangling reference.
-_Avoid_: entity
+**Record**: A stored entry in the tracker, such as an initiative, item, thread or repository, named by its id. JSON
+names its kind under `record`, as in a conflict or a dangling reference. _Avoid_: entity
 
 **Session**:
 The server token issued by `acyclic up` for access to the app and API. The stored actor kind `session/<id>` keeps
@@ -193,8 +204,8 @@ _Avoid_: instance, node
 
 **Conflict**:
 A field holding two values that replicas wrote without seeing each other's, kept side by side until someone writes
-the field again. Clearing a field counts as a value, so a clear and a set made apart conflict too: moving an item to
-the top level while an agent moves it elsewhere asks which move stands. Waits-for links don't conflict: an add the
+the field again. Clearing a field counts as a value, so a clear and a set made apart conflict too: moving an item
+under one epic while an agent moves it under another asks which move stands. Waits-for links don't conflict: an add the
 remover never saw survives.
 _Avoid_: merge conflict (nothing blocks a sync)
 
@@ -253,9 +264,9 @@ _Avoid_: record (that is a stored tracker entry), log, ADR (for the general idea
 ## Flagged ambiguities
 
 - "campaign": the planning skills use it for a whole planned effort ending at a final gate. Resolved: in acyclic that
-  is a **Project**; "campaign" stays the skills' word.
-- "project": a top-level **Item** in acyclic, but a registered checkout in Paseo. Resolved: "project" means the
-  acyclic sense here; say "Paseo project" for the other.
+  is an **Initiative** or an **Epic**; "campaign" stays the skills' word.
+- "project": once a top-level item in acyclic, and a registered checkout in Paseo. Resolved: an **Initiative** is the
+  top level now, and "project" means a Paseo project, or the larger sense of the Trust domain entry.
 - "thread" and "workstream": earlier drafts said workstream. Resolved: **Thread**, the planning skills' word too.
 - "brief": a thread's notes were once called its brief, and stored data still names the field so. Resolved: say
   notes for that field; **Brief** names only what an agent receives when a thread is deployed.

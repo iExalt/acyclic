@@ -9,14 +9,14 @@ use std::fmt::Write as _;
 use comfy_table::{ContentArrangement, LineStyle, Table, TableStyle, presets};
 use serde_json::Value as Json;
 
-use crate::args::{Command, ItemCommand, ThreadCommand};
+use crate::args::{Command, InitiativeCommand, ItemCommand, ThreadCommand};
 
 /// A terminal's table: a rule under the header and nothing else, so a wrapped cell still reads as one row.
 const RULED: TableStyle =
     TableStyle::new().header_separator(LineStyle::none().fill('─').junction('─'));
 
 /// The entities a write names, in the order a summary looks for them.
-const ENTITIES: [&str; 3] = ["item", "thread", "repository"];
+const ENTITIES: [&str; 4] = ["initiative", "item", "thread", "repository"];
 
 /// A command's data for people, each id that `names` holds printed as its name there. `width` is the terminal's, or
 /// `None` when not printing to one.
@@ -34,7 +34,8 @@ pub(crate) fn render(
             &columns(&["id", "title", "state", "thread", "readiness"]),
             width,
         ),
-        Command::Thread(ThreadCommand::Ready) => ready(data, width),
+        Command::Initiative(InitiativeCommand::List) => initiatives(data, width),
+        Command::Thread(ThreadCommand::Ready { .. }) => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
         Command::Init { .. } => format!(
@@ -112,6 +113,7 @@ pub(crate) fn error(envelope: &Json) -> String {
 fn import(data: &Json) -> String {
     let dry = data["dry_run"] == true;
     let kinds = [
+        ("initiative", "initiative", "initiatives"),
         ("item", "item", "items"),
         ("thread", "thread", "threads"),
         ("link", "waits-for", "waits-for"),
@@ -203,6 +205,26 @@ fn table(rows: Vec<&Json>, columns: &[String], width: Option<u16>) -> String {
             .join("\n");
     }
     text.push('\n');
+    text
+}
+
+/// `initiative list`: each initiative with how many items sit directly under it, then the bucket of items in none, so
+/// nothing is left out of sight.
+fn initiatives(data: &Json, width: Option<u16>) -> String {
+    let lines: Vec<Json> = rows(&data["initiatives"])
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({"id": row["id"], "title": row["title"], "items": row["counts"]["items"]})
+        })
+        .collect();
+    let columns: Vec<String> =
+        ["id", "title", "items"].iter().map(|key| (*key).to_owned()).collect();
+    let mut text = table(lines.iter().collect(), &columns, width);
+    let loose = rows(&data["no_initiative"]["items"]);
+    if !loose.is_empty() {
+        let ids: Vec<String> = loose.into_iter().map(compact).collect();
+        let _ = writeln!(text, "\nno initiative: {} ({})", ids.len(), ids.join(", "));
+    }
     text
 }
 

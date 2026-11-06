@@ -3,7 +3,9 @@
 
 use acyclic_core::model::Model;
 use acyclic_core::needs::{Entry, Keep, Kept, Unkept};
-use acyclic_core::write::{Assign, Change, ItemAssign, RepositoryAssign, ThreadAssign};
+use acyclic_core::write::{
+    Assign, Change, InitiativeAssign, ItemAssign, RepositoryAssign, ThreadAssign,
+};
 use serde_json::{Map, Value as Json, json};
 
 use crate::commands::shell_word;
@@ -95,6 +97,7 @@ impl Command {
 fn command(model: &Model, keep: &Keep) -> Result<Command, Unkept> {
     match keep {
         Keep::Write(changes) => match changes.0.as_slice() {
+            [Change::Set(Assign::Initiative(id, assign))] => Ok(initiative_edit(id, assign)),
             [Change::Set(Assign::Item(id, assign))] => Ok(item_edit(id, assign)),
             [Change::Set(Assign::Thread(id, assign))] => Ok(thread_edit(id, assign)),
             [Change::Set(Assign::Repository(id, RepositoryAssign::DefaultBranch(branch)))] => {
@@ -149,7 +152,7 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
         ItemAssign::Title(title) => ("title", Flag::Text(title.clone())),
         ItemAssign::State(state) => ("state", Flag::Text(state.word().to_owned())),
         ItemAssign::Notes(notes) => set("notes", notes),
-        ItemAssign::Parent(parent) => set("parent", parent),
+        ItemAssign::Parent(parent) => ("parent", Flag::Text(parent.clone())),
         ItemAssign::Thread(thread) => set("thread", thread),
         ItemAssign::WaitsFor(to, true) => ("waits-for", Flag::Each(to.clone())),
         ItemAssign::WaitsFor(to, false) => ("no-waits-for", Flag::Each(to.clone())),
@@ -159,6 +162,19 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
         },
     };
     Command { words: ["item", "edit"], subject: ("item", id.to_owned()), flags: vec![flag] }
+}
+
+fn initiative_edit(id: &str, assign: &InitiativeAssign) -> Command {
+    let flag = match assign {
+        InitiativeAssign::Title(title) => ("title", Flag::Text(title.clone())),
+        InitiativeAssign::Notes(Some(notes)) => ("notes", Flag::Text(notes.clone())),
+        InitiativeAssign::Notes(None) => ("no-notes", Flag::On),
+    };
+    Command {
+        words: ["initiative", "edit"],
+        subject: ("initiative", id.to_owned()),
+        flags: vec![flag],
+    }
 }
 
 fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
@@ -173,7 +189,6 @@ fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
 const fn clear(flag: &str) -> &'static str {
     match flag.as_bytes() {
         b"notes" => "no-notes",
-        b"parent" => "no-parent",
         _ => "no-thread",
     }
 }
@@ -183,6 +198,9 @@ fn why_not(why: Unkept) -> String {
     match why {
         Unkept::NeedsEvidence => "Keep done in a terminal: run acyclic item done with its evidence".to_owned(),
         Unkept::NoClear => "This field can't be cleared".to_owned(),
+        Unkept::NoParent => {
+            "An item always belongs to a parent, so clearing it isn't offered: keep one of the others".to_owned()
+        },
         Unkept::NotDone => "Settle its state first, then keep this evidence".to_owned(),
         Unkept::NameAlsoConflicted => {
             "Its owner and name are both written apart: settle them together with acyclic repository edit, giving \
@@ -244,6 +262,14 @@ mod identity_tests {
                 assert_eq!(shown["command"]["item"]["done"]["commit"], "me/code@abc1234");
             }
         }
+    }
+
+    #[test]
+    fn a_cleared_parent_is_never_offered_and_says_why() {
+        let kept = Kept { value: Json::Null, keep: Keep::Not(Unkept::NoParent) };
+        let shown = super::kept_json(&Model::default(), &kept);
+        assert_eq!((&shown["command"], &shown["run"]), (&Json::Null, &Json::Null));
+        assert!(shown["why"].as_str().unwrap().contains("always belongs to a parent"), "{shown}");
     }
 
     fn identity(values: Vec<Json>) -> String {

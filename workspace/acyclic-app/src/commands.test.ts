@@ -150,26 +150,24 @@ describe("the command menu", () => {
     expect(Math.min(...each) / Math.min(...pass)).toBeLessThan(12);
   });
 
-  it("offers a waiting move any item shown or the top level, and a link any item shown", () => {
+  it("offers a waiting move any item shown, never a top level, and a link any item shown", () => {
     const move = targets(plan, "move");
-    expect(move[0]?.run).toEqual({ kind: "target", id: null });
+    expect(move.some((one) => one.title === "Top level" || one.key === "target:top")).toBe(false);
     expect(rank("garden", move, new Set()).map((one) => one.run)).toEqual([{ kind: "target", id: "garden" }]);
     // Projects in their own group, offered before anything is typed.
     expect(move.find((one) => one.title === "Garden")?.group).toBe("Projects");
-    expect(rank("", move, new Set()).map((one) => one.title)).toEqual(["Top level", "Garden"]);
-    expect(targets(plan, "link").some((one) => one.run.kind === "target" && one.run.id === null)).toBe(false);
+    expect(rank("", move, new Set()).map((one) => one.title)).toEqual(["Garden"]);
     expect(rank("paint", targets(plan, "link"), new Set())).toEqual([]);
   });
 
   it("never offers what wouldn't move it: the item, anything inside it, or where it already is", () => {
     const ids = (pick: "move" | "link", from: string) =>
       targets(plan, pick, from).map((one) => (one.run.kind === "target" ? one.run.id : "?"));
-    // Garden's own item is inside it, and it is at the top level already.
-    expect(ids("move", "garden")).not.toContain(null);
+    // Garden's own item is inside it.
     expect(ids("move", "garden")).not.toEqual(expect.arrayContaining(["garden", "dig"]));
     expect(ids("move", "garden")).toContain("tools");
-    // Dig is in Garden: Garden isn't offered, the top level is.
-    expect(ids("move", "dig")).toEqual(expect.arrayContaining([null, "tools"]));
+    // Dig is in Garden: Garden isn't offered.
+    expect(ids("move", "dig")).toContain("tools");
     expect(ids("move", "dig")).not.toContain("garden");
     expect(ids("link", "dig")).not.toContain("dig");
     expect(ids("link", "dig")).toContain("garden");

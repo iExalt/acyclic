@@ -20,18 +20,24 @@ pub use apply::{ApplyError, Report, apply, preview};
 pub const FORMAT: &str = "acyclic-import";
 
 /// The one version this build reads.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
-/// An annotated version 3 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
+/// An annotated version 4 document, as `acyclic import --schema` prints it: lines starting with `//` are notes to
 /// remove, since JSON has no comments.
 pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every record named by its own UUIDv7 id.
 // `acyclic id 20` prints twenty new ids to name records with. Importing the document again updates the same records.
 // A reference (parent, thread, waits_for, evidence) is an id, of a record in the document or already
-// in the tracker. A field left out keeps what the record holds; a new record takes the default.
+// in the tracker. A field left out keeps what the record holds; a new record takes the default, except that a new
+// item must name its parent.
 // JSON has no comments: remove the lines that start with //.
 {
   "format": "acyclic-import",
-  "version": 3,
+  "version": 4,
+  // An initiative is the top level: a long-lived body of work that items sit under. Required: id and title; optional:
+  // notes. An item's parent names an initiative or another item, and no id names both.
+  "initiatives": [
+    {"id": "01900000-0000-7000-8000-000000000005", "title": "Garden"}
+  ],
   // A code repository that evidence can name, as "owner/name"; all three fields are required.
   "repositories": [
     {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
@@ -39,13 +45,14 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
   "items": [
     // Required: id and title. "state" is open, parked, done or canceled, open for a new item. Canceled skips the check
     // for another holder's claim that `item edit --state canceled` makes, as done work skips the one finishing makes.
-    // Optional: parent, thread, notes, waits_for (the items it can't start before they are done),
+    // Required for a new item: parent, an initiative or an item. Optional: thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
     // given replaces the record's: [] clears it.
     {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds",
-     "thread": "01900000-0000-7000-8000-000000000002"},
+     "parent": "01900000-0000-7000-8000-000000000005", "thread": "01900000-0000-7000-8000-000000000002"},
     {"id": "01900000-0000-7000-8000-000000000004", "title": "Plant the seeds",
-     "thread": "01900000-0000-7000-8000-000000000002", "waits_for": ["01900000-0000-7000-8000-000000000003"]}
+     "parent": "01900000-0000-7000-8000-000000000005", "thread": "01900000-0000-7000-8000-000000000002",
+     "waits_for": ["01900000-0000-7000-8000-000000000003"]}
   ],
   // A thread groups items for one continuing agent conversation; an item joins one with its "thread". Optional:
   // notes ("brief", as older documents say, reads as notes).
@@ -68,6 +75,9 @@ pub struct Import {
     /// Code repositories that evidence names.
     #[serde(default)]
     pub repositories: Vec<Repository>,
+    /// Initiatives that items sit under.
+    #[serde(default)]
+    pub initiatives: Vec<Initiative>,
     /// Items, in any order.
     #[serde(default)]
     pub items: Vec<Item>,
@@ -86,6 +96,19 @@ pub struct Repository {
     pub name: String,
     /// The default branch.
     pub default_branch: String,
+}
+
+/// An initiative: a long-lived body of work, a record of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Initiative {
+    /// Its id.
+    pub id: String,
+    /// A short title.
+    pub title: String,
+    /// Its notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 /// The item's state. Stage and readiness are derived on read, never imported.
@@ -121,7 +144,8 @@ pub struct Item {
     /// one is open. `backlog`, as older documents say, reads as open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<State>,
-    /// The parent item.
+    /// The parent: an initiative or an item. A new item must name one; an existing item with none left out keeps the one
+    /// it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     /// The thread it is in.
@@ -188,6 +212,8 @@ impl std::error::Error for ParseError {}
 /// The kind of record an id names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyKind {
+    /// An initiative.
+    Initiative,
     /// A repository.
     Repository,
     /// An item.
@@ -199,6 +225,7 @@ pub enum KeyKind {
 impl fmt::Display for KeyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::Initiative => "initiative",
             Self::Repository => "repository",
             Self::Item => "item",
             Self::Thread => "thread",
@@ -227,6 +254,10 @@ pub enum ValidationError {
         /// The missing id.
         id: String,
     },
+    /// An initiative and an item share an id: an item's parent names either by its id alone.
+    SharedId(String),
+    /// A new item names no parent: every item belongs to an initiative or to an item under one.
+    ParentRequired(String),
     /// An item waits for itself.
     SelfLink(String),
     /// An item waits for one above or below it.
@@ -309,6 +340,16 @@ impl fmt::Display for ValidationError {
             Self::UnknownReference { at, kind, id } => {
                 write!(f, "{at} names unknown {kind} {id}")
             },
+            Self::SharedId(id) => {
+                write!(
+                    f,
+                    "{id} names both an initiative and an item, and an id names one kind of record"
+                )
+            },
+            Self::ParentRequired(item) => write!(
+                f,
+                "item {item} is new, so it needs a parent: an initiative or an item under one"
+            ),
             Self::SelfLink(item) => write!(f, "item {item} waits for itself"),
             Self::LineageLink { item, waits_for } => write!(
                 f,
@@ -374,6 +415,7 @@ impl Import {
             format: FORMAT.to_owned(),
             version: VERSION,
             repositories: Vec::new(),
+            initiatives: Vec::new(),
             items: Vec::new(),
             threads: Vec::new(),
         }
@@ -409,6 +451,9 @@ impl Import {
             low(&mut record.id);
         }
         for record in &mut self.threads {
+            low(&mut record.id);
+        }
+        for record in &mut self.initiatives {
             low(&mut record.id);
         }
         for item in &mut self.items {
@@ -464,6 +509,9 @@ impl Import {
         for record in &self.threads {
             check("thread id".to_owned(), &record.id);
         }
+        for record in &self.initiatives {
+            check("initiative id".to_owned(), &record.id);
+        }
         for item in &self.items {
             check("item id".to_owned(), &item.id);
             let at = |field: &str| format!("item {}, {field}", item.id);
@@ -497,6 +545,11 @@ impl Import {
         once(KeyKind::Repository, self.repositories.iter().map(|r| &r.id).collect());
         once(KeyKind::Item, self.items.iter().map(|i| &i.id).collect());
         once(KeyKind::Thread, self.threads.iter().map(|t| &t.id).collect());
+        once(KeyKind::Initiative, self.initiatives.iter().map(|i| &i.id).collect());
+        let items: HashSet<&String> = self.items.iter().map(|i| &i.id).collect();
+        for record in self.initiatives.iter().filter(|i| items.contains(&i.id)) {
+            errors.push(ValidationError::SharedId(record.id.clone()));
+        }
     }
 
     /// Cycles, among parents or waits-for, are left to the import, which judges them with what the tracker holds.

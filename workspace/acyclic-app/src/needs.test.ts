@@ -90,14 +90,29 @@ describe("needView", () => {
     const parent = field("parent");
     const titles = (id: string) => (id === parent.id ? "First" : "Parent");
     const moved = needView(parent, none, titles);
-    expect(moved.actions.map((one) => one.label)).toEqual(["Use Parent", "Use the top level"]);
-    const said = "Parent: its parent names q, which doesn't exist";
-    const gone = needView(
-      { kind: "dangling", record: "item", id: "a", field: "parent", target: "q", summary: said },
-      none,
-      titles,
-    );
-    expect(gone.text).toBe(said);
+    expect(moved.actions.map((one) => one.label)).toEqual(["Use Parent", "Use Parent"]);
+    // An old replica may still list a cleared parent: unavailable, with the server's why, never an action.
+    const old: Need = {
+      ...parent,
+      keeps: [
+        ...keepsIn(parent),
+        { value: null, command: null, run: null, why: "A parent can't be cleared: every item has one" },
+      ],
+    };
+    const cleared = needView(old, none, titles);
+    expect(cleared.actions).toHaveLength(2);
+    expect(cleared.note).toBe("no parent: A parent can't be cleared: every item has one");
+  });
+
+  it("opens an item with no parent, or whose parent is gone, with core's words and no write action", () => {
+    const missing = (examples.needs as Need[]).filter((need) => need.kind === "parent-missing");
+    expect(missing.map((need) => need.parent)).toEqual([null, "gone"]);
+    for (const need of missing) {
+      const view = needView(need, none);
+      expect(view).toMatchObject({ kind: "parent-missing", text: need.summary, key: need.key, actions: [] });
+      expect(view.items).toEqual([(need.item as { id: string }).id]);
+      expect(view.note).not.toBeNull();
+    }
   });
 
   it("says a dangling waits-for as the plan reads, with the CLI's fix, and any other dangling field as before", () => {
