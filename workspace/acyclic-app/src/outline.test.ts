@@ -111,3 +111,39 @@ describe("uniqueProjectThread", () => {
     expect(uniqueProjectThread(null, outline.projects)).toBeNull();
   });
 });
+
+describe("a task in no thread, a thread of one", () => {
+  const one = buildModel([
+    item("p"),
+    item("claimed", "p", [], { thread: "claimed.one" }),
+    item("idle", "p"),
+    item("alone"),
+    item("a", "p", [], { thread: "t" }),
+  ]);
+  const listed = ["t", "claimed.one", "idle.one", "alone.one"];
+
+  it("is in the projects its task is in, claimed or not, and else among the others", () => {
+    expect(outlineOf(one, listed)).toEqual({
+      projects: [
+        {
+          id: "p",
+          title: "P",
+          threads: [
+            { id: "t", also: [] },
+            { id: "claimed.one", also: [] },
+            { id: "idle.one", also: [] },
+          ],
+        },
+      ],
+      others: ["alone.one"],
+    });
+  });
+
+  it("marks its row for the task selected", () => {
+    const outline = outlineOf(one, listed);
+    expect(currentRows(one, outline, "idle")).toEqual({ project: "p", thread: "idle.one" });
+    expect(currentRows(one, outline, "alone")).toEqual({ project: null, thread: "alone.one" });
+    // One the plan doesn't list as a thread marks none.
+    expect(currentRows(one, outlineOf(one, ["t"]), "idle")).toEqual({ project: "p", thread: null });
+  });
+});

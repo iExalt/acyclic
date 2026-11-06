@@ -252,6 +252,13 @@ label:has(> input[type="checkbox"]) {
   padding: 0;
   margin: 0 0.42em;
 }
+/* A thread of one is a task alone: a thread's dot and stripe, left grey: the quiet ink, not a line's colour. */
+.badge.dot.task {
+  background: var(--muted);
+}
+.thread-tile[data-task] {
+  border-left-color: var(--muted);
+}
 .count {
   font-variant-numeric: tabular-nums;
 }

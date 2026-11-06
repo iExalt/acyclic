@@ -3350,7 +3350,8 @@ def needs_journey(page, env, plan, thread, name, failures):
         failures.append(f"{name}: Needs you's grouped entry didn't reveal its details")
     # A thread picked from the list goes to the Map, as any thread does; closing it comes back to the view.
     viewed = "() => new URLSearchParams(location.search).get('view')"
-    first_picker = needs.locator("[data-pick-thread]").first
+    # One of a thread's own: a thread of one, a task alone, opens the task, as an item's row does.
+    first_picker = needs.locator("[data-pick-thread]:not([data-pick-thread$='.one'])").first
     reveal_need_target(first_picker)
     first_picker.click()
     try:
@@ -3434,7 +3435,7 @@ def needs_journey(page, env, plan, thread, name, failures):
     if json.loads(run(env, "item", "show", outside))["data"][0]["title"] != "Needs you's title from the other clone":
         failures.append(f"{name}: settling the conflict from the list didn't keep the other clone's title")
     page.screenshot(path=SHOTS / f"app-{name}-needs.png")
-    picker = needs.locator("[data-need] [data-pick-thread]").first
+    picker = needs.locator("[data-need] [data-pick-thread]:not([data-pick-thread$='.one'])").first
     if picker.count() == 0:
         failures.append(f"{name}: no entry picks a thread")
     else:

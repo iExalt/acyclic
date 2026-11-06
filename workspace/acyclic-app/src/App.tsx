@@ -47,6 +47,7 @@ import {
   type Step,
   samePlace,
   stored,
+  threadIntent,
   topLayer,
   type Wanted,
   type World,
@@ -268,8 +269,18 @@ export function App() {
 
   /** An item chosen anywhere but on the Map: to the Map for it, brought into view with `pin` held still. */
   const select = useCallback((id: string, pin: string | null = null) => go({ kind: "select", id, pin }), [go]);
+  // A thread of one is a task alone: its row opens the task, as any item's does, not a thread's panel.
+  const taskOf = useMemo(
+    () => new Map((loaded?.threads.threads ?? []).flatMap((one) => (one.task === null ? [] : [[one.id, one.task]]))),
+    [loaded],
+  );
+  /** What a thread's row asks for: the Map for the thread, or for the task a thread of one stands for. */
+  const forThread = useCallback(
+    (id: string, kind: "thread" | "outline" = "thread") => threadIntent(taskOf, id, kind),
+    [taskOf],
+  );
   /** To the Map for a thread, as its row or tile anywhere does: picked, its panel open, and its items framed. */
-  const toThread = useCallback((id: string) => go({ kind: "thread", id }), [go]);
+  const toThread = useCallback((id: string) => go(forThread(id)), [go, forThread]);
 
   const choose = useCallback(
     (target: Pick) => {
@@ -649,7 +660,7 @@ export function App() {
       placeNow.current = under;
       onItem(run.action, run.action === "edit" ? "ordinary" : ownBack.current === null ? "replaceTransient" : "visit");
       if (chosen === undefined || busy) go({ kind: "shut", layer: "command" });
-    } else if (run.kind === "thread") move({ kind: "thread", id: run.id });
+    } else if (run.kind === "thread") move(forThread(run.id));
     else move({ kind: "select", id: run.id, pin: null });
   };
   /**
@@ -841,7 +852,7 @@ export function App() {
             lines={lines}
             picked={thread}
             current={current}
-            onPickThread={(id) => go({ kind: "outline", id })}
+            onPickThread={(id) => go(forThread(id, "outline"))}
             onSelectProject={(id) => select(id, null)}
           />
         )
@@ -1012,7 +1023,7 @@ export function App() {
               current={current}
               onPickThread={(id) => {
                 go({ kind: "shut", layer: "projects" });
-                go({ kind: "outline", id });
+                go(forThread(id, "outline"));
               }}
               onSelectProject={(id) => {
                 go({ kind: "shut", layer: "projects" });

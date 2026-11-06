@@ -38,16 +38,10 @@ export function markSvg(
 ): string {
   const middle = height / 2;
   const parts: string[] = [];
-  if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${height}" fill="${thread.colour}"/>`);
-  const left = BADGE_AT;
-  if (thread === null) {
-    // No thread: an empty ring where its badge would be.
-    parts.push(
-      `<circle cx="${left + BADGE / 2}" cy="${middle}" r="${BADGE / 2 - 1}" fill="none" stroke="${palette.muted}" stroke-width="1.5" stroke-dasharray="3 2.4"/>`,
-    );
-  } else {
-    parts.push(`<circle cx="${left + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
-  }
+  // A task in no thread has a thread's stripe and dot, left grey: the muted ink in place of a line's colour.
+  const colour = thread === null ? palette.muted : thread.colour;
+  parts.push(`<rect width="${STRIPE}" height="${height}" fill="${colour}"/>`);
+  parts.push(`<circle cx="${BADGE_AT + BADGE / 2}" cy="${middle}" r="5" fill="${colour}"/>`);
   if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }

@@ -17,6 +17,7 @@ import {
   type Step,
   samePlace,
   stored,
+  threadIntent,
   topLayer,
   type Wanted,
   type World,
@@ -695,5 +696,18 @@ describe("Back and Forward", () => {
       missing: ["item", "thread"],
     });
     expect(landingPlace({ ...held, item: "c", thread: null }, has)).toMatchObject({ missing: [] });
+  });
+});
+
+describe("threadIntent", () => {
+  const tasks = new Map([["a.one", "a"]]);
+  it("opens the task a thread of one stands for, from any row that names the thread", () => {
+    expect(threadIntent(tasks, "a.one")).toEqual({ kind: "select", id: "a", pin: null });
+    expect(threadIntent(tasks, "a.one", "outline")).toEqual({ kind: "select", id: "a", pin: null });
+  });
+
+  it("picks any other thread as the row asks", () => {
+    expect(threadIntent(tasks, "t")).toEqual({ kind: "thread", id: "t" });
+    expect(threadIntent(tasks, "t", "outline")).toEqual({ kind: "outline", id: "t" });
   });
 });

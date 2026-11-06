@@ -48,6 +48,7 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
           type="button"
           className="thread-tile"
           data-thread-tile={one.id}
+          data-task={line?.task ?? undefined}
           data-thread={one.id}
           aria-current={one.id === picked || undefined}
           style={lineStyle(line)}

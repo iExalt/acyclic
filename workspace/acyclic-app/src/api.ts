@@ -220,6 +220,8 @@ export async function items(fetcher: Fetch = fetch): Promise<Item[]> {
 export interface Thread {
   id: string;
   title: string;
+  /** The task this thread of one stands for while it has no title of its own: then its title is the task's. */
+  task: string | null;
   /** The threads whose work its own waits on. */
   waitsFor: string[];
   /** Its member leaves by stage, as core counts them: as core counts them. */
@@ -255,6 +257,7 @@ export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
     threads: raw.threads.map((row) => ({
       id: row.id,
       title: titleOr(row.title, row.id),
+      task: row.task ?? null,
       waitsFor: row.waits_for,
       counts: row.progress?.counts ?? NO_COUNTS,
     })),
@@ -267,6 +270,8 @@ export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
 export interface ThreadDetail {
   id: string;
   title: string;
+  /** The task a thread of one stands for, as in `Thread`. */
+  task: string | null;
   notes: string | null;
   members: { id: string; title: string }[];
 }
@@ -274,7 +279,8 @@ export interface ThreadDetail {
 const text = (raw: Raw<string>, fallback: string) => (typeof raw === "string" ? raw : fallback);
 
 export async function thread(id: string, fetcher: Fetch = fetch): Promise<ThreadDetail> {
-  type Row = Omit<ThreadDetail, "title" | "notes" | "members"> & {
+  type Row = Omit<ThreadDetail, "title" | "task" | "notes" | "members"> & {
+    task?: string | null;
     title: Raw<string>;
     notes: Raw<string>;
     members: { id: string; title: Raw<string> }[];
@@ -284,6 +290,7 @@ export async function thread(id: string, fetcher: Fetch = fetch): Promise<Thread
   return {
     ...row,
     title: text(row.title, row.id),
+    task: row.task ?? null,
     notes: typeof row.notes === "string" ? row.notes : null,
     members: row.members.map((member) => ({ id: member.id, title: text(member.title, member.id) })),
   };

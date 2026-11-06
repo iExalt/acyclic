@@ -42,8 +42,9 @@ unless the menu's Theme picks one on the device (System, Light or Dark; System b
 two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
-  Map's items and boxes). A tile in progress takes a cooler tint, one stalled a warm one, one done, waiting, parked or
-  canceled a greyer one; one in review keeps the tile's, its icon saying so, after a tint read as a selection.
+  Map's items and boxes). A tile in progress takes a cooler tint, one done, waiting, parked or canceled a greyer one;
+  one stalled keeps ready's, its exclamation-mark icon alone saying so, since a warm tint drew more attention than ready
+  work; one in review keeps the tile's, its icon saying so, after a tint read as a selection.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
@@ -140,13 +141,18 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons, each count
   set apart by its icon rather than a comma, which only a screen reader reads; a Map box's line of counts, drawn as text
   on the canvas, which sets no icon inside a line, takes the commas. An item in no thread is a thread of one, so its
-  stage reads like any other's (ready, or in progress once claimed); on the Map the dashed ring an item with no thread
-  carries in its badge's place stays, and its stage's icon ends the line. The editor says a state in words ("Open", "In
-  progress"), Open with how it shows (ready or waiting, by its waits), and a finished item's state as the panel's stage,
-  as text: finishing sets it, not the form.
+  stage reads like any other's (ready, or in progress once claimed); on the Map it carries a thread's stripe and dot,
+  same size and place, in the muted ink instead of a line's colour, with no ring, and its stage's icon ends the line.
+  The editor says a state in words ("Open", "In progress"), Open with how it shows (ready or waiting, by its waits), and
+  a finished item's state as the panel's stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
   what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
   more; "Starts with", its first items alone, meant nothing to the user. Then its notes.
+- **A thread of one is a task alone.** Its row or tile, in Up next, In progress, the Threads view, the outline and the
+  command menu, reads as a thread's does but takes no line's colour: its badge is the thread's dot in the muted ink, as
+  the Map's grey dot and stripe, and a tile's left edge is that grey; both clear 3:1 on every tint but stay quieter than
+  a line's colour. Opening it opens the task, as an item's row does, not a thread's panel, and the item's panel names no
+  thread for it. A thread holding a title of its own, once a second item joined, is a thread like any other.
 - **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the

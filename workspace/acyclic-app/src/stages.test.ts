@@ -41,13 +41,13 @@ describe("canceled", () => {
 });
 
 describe("stalled", () => {
-  it("has its word, icon and a tint of its own in both schemes, and is not drawn quiet", () => {
+  it("has its word and icon, takes ready's tint so it draws no more attention, and is not drawn quiet", () => {
     expect(STAGE_WORDS.stalled).toBe("Stalled");
     expect(STAGE_ICONS.stalled).toContain("<circle");
     expect(QUIET.has("stalled")).toBe(false);
     expect(stageCountWords("stalled")).toBe("stalled");
     for (const palette of Object.values(PALETTES)) {
-      expect(palette.tints.stalled).not.toBe(palette.tints.ready);
+      expect(palette.tints.stalled).toBe(palette.tints.ready);
       expect(palette.tints.stalled).not.toBe(palette.tints["in-progress"]);
     }
   });
