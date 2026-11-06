@@ -1909,6 +1909,25 @@ def outline_journey(page, view, plan, name, failures):
     phone = view.get("has_touch")
     sheet = page.get_by_test_id("projects")
     if phone:
+        # The item's sheet opens at a height that ends on a row, its Thread row whole or not at all, not cut through
+        # its text under the tab bar. Measured once it has come to rest.
+        page.wait_for_function(
+            "() => { const p = document.querySelector('[data-testid=inspector]'); return p.getAnimations().length === 0; }"
+        )
+        rows = inspector.evaluate(
+            """p => {
+              const bottom = Math.min(innerHeight, p.getBoundingClientRect().bottom,
+                document.querySelector('.tabbar')?.getBoundingClientRect().top ?? innerHeight);
+              return [...p.querySelectorAll('dl.facts dt, dl.facts dd')].map((e) => {
+                const r = e.getBoundingClientRect();
+                return { text: e.innerText.slice(0, 24), top: r.top, bottom: r.bottom, cut: r.top < bottom && r.bottom > bottom + 0.5 };
+              }).concat([{ edge: bottom }]);
+            }"""
+        )
+        cut = [row["text"] for row in rows if row.get("cut")]
+        shown = [row for row in rows if row.get("text") == "Thread"]
+        if cut or not shown:
+            failures.append(f"{name}: {picked}'s first height cut through {cut}, Thread row drawn: {bool(shown)}")
         page.get_by_test_id("projects-button").click()
         try:
             sheet.wait_for(timeout=5_000)
@@ -1926,6 +1945,18 @@ def outline_journey(page, view, plan, name, failures):
     if missed:
         failures.append(f"{name}: selecting {picked} didn't mark project {project} and {thread}'s row there")
     if phone:
+        # A tap leaves no pressed look behind: the pointer stays where it came down on a touch screen, so a tint
+        # shown on hover would stay on the handle and the chevron until the next tap.
+        for what, control in (
+            ("the sheet's handle", sheet.locator(".sheet-handle")),
+            ("a project's chevron", sheet.locator("[data-toggle-project]").first),
+        ):
+            control.tap()
+            tint = control.evaluate(
+                "e => ({ hover: matchMedia('(hover: hover)').matches, bg: getComputedStyle(e).backgroundColor })"
+            )
+            if tint["hover"] or tint["bg"] != "rgba(0, 0, 0, 0)":
+                failures.append(f"{name}: after a tap, {what} shows {tint['bg']} (hover capable: {tint['hover']})")
         url = page.url
         page.go_back()
         try:
@@ -2204,12 +2235,43 @@ def item_action(page, action):
     page.locator(f"[data-testid=inspector] [data-action={action}]").click()
 
 
-def unlink(page, testid):
-    """Removes a panel's first link of a kind, its button shown as a pointer comes over its row."""
+def unlink(page, testid, held_alone=None):
+    """Removes a panel's first link of a kind, its button shown as a pointer comes over its row. With `held_alone` a
+    list, adds to it what was wrong while the write was out: only the pressed button may look held, no other control
+    greyed or disabled (an observer sees the write's first draw, however soon it lands)."""
     open_full(page, "inspector")
     row = page.locator(f"[data-testid={testid}] .link").first
     row.hover()
+    if held_alone is not None:
+        page.evaluate(
+            """() => {
+              window.heldSeen = null;
+              const panel = document.querySelector('[data-testid=inspector]');
+              new MutationObserver((records, observer) => {
+                const pressed = panel.querySelector('.unlink[aria-busy=true]');
+                if (!pressed) return;
+                observer.disconnect();
+                const others = [...panel.querySelectorAll('.unlink, [data-action=edit]')].filter((b) => b !== pressed);
+                window.heldSeen = {
+                  others: others.length,
+                  disabled: others.filter((b) => b.disabled).length,
+                  dim: others.filter((b) => Number(getComputedStyle(b).opacity) < 0.9).length,
+                  pressedDim: Number(getComputedStyle(pressed).opacity) < 0.9,
+                };
+              }).observe(panel, { attributes: true, subtree: true, attributeFilter: ['aria-busy'] });
+            }"""
+        )
     row.locator(".unlink").click()
+    if held_alone is not None:
+        try:
+            page.wait_for_function("() => window.heldSeen !== null", timeout=10_000)
+        except PlaywrightTimeout:
+            held_alone.append(f"{testid}'s write held no button, the pressed one included")
+            return
+        seen = page.evaluate("() => window.heldSeen")
+        # The Edit pencil is always one of the others, so none seen means the panel was not looked at.
+        if seen["others"] < 1 or seen["disabled"] or seen["dim"] or not seen["pressedDim"]:
+            held_alone.append(f"{testid}'s write held {seen}")
     open_full(page, "inspector", full=False)
 
 
@@ -2465,7 +2527,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     page.get_by_test_id("notice").wait_for(state="detached", timeout=5_000)
     frame = settled_corner(page, root)
     zoom = page.get_by_test_id("map").evaluate("m => m.cy.zoom()")
-    unlink(page, "waits-for")
+    wrong = []
+    unlink(page, "waits-for", wrong)
+    failures.extend(f"{name}: {one}" for one in wrong)
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice = show_notice(page)
     wait_drawn(page, base + 1)

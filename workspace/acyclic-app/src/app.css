@@ -129,9 +129,12 @@ button {
   font-weight: 650;
   cursor: pointer;
 }
-/* A view's row has hover of its own, below, which leaves the view shown as it is. */
-button:hover:not(:disabled, [aria-disabled="true"], .view) {
-  background: var(--hover);
+/* A view's row has hover of its own, below, which leaves the view shown as it is. Only where there is hover: a tap
+   leaves a touch screen's pointer where it was, which would keep the tint on the button until the next tap. */
+@media (hover: hover) {
+  button:hover:not(:disabled, [aria-disabled="true"], .view) {
+    background: var(--hover);
+  }
 }
 /* Held while a write is out, a pressed button keeps its focus: so it is dimmed as a disabled one, not disabled. The
    others held with it stay as they were, but inert, as a dimmed column of them said they were all at work. */

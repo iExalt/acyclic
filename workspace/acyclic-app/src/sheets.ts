@@ -16,6 +16,20 @@ export function firstHeight(room: number, half: boolean, needs = 0): number {
   return Math.min(room, half ? Math.max(320, room / 2) : Math.max(PEEK, needs));
 }
 
+/** The most a row's end may be beyond the first height for the sheet to rise to it: a row of the panel, not a block. */
+export const ROW = 48;
+
+/**
+ * The first height that ends on a row: the first row end at or below `needs` and `PEEK`, the least the sheet shows,
+ * when it is within `ROW` of them, so the sheet shows its next row whole rather than cutting through its text.
+ * `ends` are the rows' ends, in pixels from the sheet's top, in any order.
+ */
+export function endOnRow(needs: number, ends: readonly number[]): number {
+  const least = Math.max(PEEK, needs);
+  const end = Math.min(...ends.filter((one) => one >= least - 0.5));
+  return end - least <= ROW ? Math.max(needs, Math.ceil(end)) : needs;
+}
+
 /** A pointer's position down the screen at a time, in milliseconds. */
 export interface Sample {
   t: number;
