@@ -117,9 +117,9 @@ describe("threads", () => {
     });
     await expect(threads(fetcher)).resolves.toEqual({
       threads: [
-        { id: "t", title: "T", waitsFor: [], counts: { ...NO_COUNTS, leaves: 3, done: 2, ready: 1 } },
+        { id: "t", title: "T", task: null, waitsFor: [], counts: { ...NO_COUNTS, leaves: 3, done: 2, ready: 1 } },
         // Counts from a server that sends none: no leaves.
-        { id: "u", title: "V", waitsFor: ["t"], counts: NO_COUNTS },
+        { id: "u", title: "V", task: null, waitsFor: ["t"], counts: NO_COUNTS },
       ],
       waves: [["t"], ["u"]],
       anytime: [],
@@ -206,6 +206,54 @@ describe("failure", () => {
     expect(failure(new CommandError("claimed", "thread t is claimed by session/1")).message).toBe(
       "Thread t is claimed by session/1",
     );
+  });
+});
+
+describe("a thread of one", () => {
+  const ONE = `${ID.a}.one`;
+  const rows = {
+    threads: [
+      { id: ONE, title: "Water the beds", task: ID.a, waits_for: [] },
+      { id: ID.t, title: "Garden", task: null, waits_for: [] },
+      { id: "old", title: "From an older server", waits_for: [] },
+    ],
+    waves: [[ONE]],
+    anytime: [],
+  };
+
+  it("lists with the task it stands for, and none for a thread of its own or an older server's row", async () => {
+    const { fetcher } = server({ "thread list": { ok: true, data: rows } });
+    const listed = await threads(fetcher);
+    expect(listed.threads.map((one) => [one.id, one.title, one.task])).toEqual([
+      [ONE, "Water the beds", ID.a],
+      [ID.t, "Garden", null],
+      ["old", "From an older server", null],
+    ]);
+  });
+
+  it("shows with its task, its title the task's, for the panel", async () => {
+    const { fetcher } = server({
+      "thread show": {
+        ok: true,
+        data: [
+          {
+            id: ONE,
+            title: "Water the beds",
+            task: ID.a,
+            notes: null,
+            members: [{ id: ID.a, title: "Water the beds" }],
+          },
+        ],
+      },
+    });
+    await expect(thread(ONE, fetcher)).resolves.toMatchObject({ id: ONE, title: "Water the beds", task: ID.a });
+  });
+
+  it("is claimed through the same command as any thread, by its derived id", async () => {
+    // The app sends the CLI's own command: `thread claim <id>` takes a loose task's derived id as it takes a thread's.
+    const { fetcher, sent } = server({ "thread claim": { ok: true, data: { thread: ONE } } });
+    await command({ thread: { claim: { thread: ONE } } }, fetcher);
+    expect(sent).toEqual([{ thread: { claim: { thread: ONE } } }]);
   });
 });
 

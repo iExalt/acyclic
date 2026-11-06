@@ -27,11 +27,17 @@ const none = {
 };
 const listed = {
   threads: [
-    { id: "a", title: "A", waitsFor: [], counts: { ...none, leaves: 2, done: 2 } },
-    { id: "b", title: "B", waitsFor: ["d"], counts: { ...none, leaves: 3, ready: 1, in_progress: 1, parked: 1 } },
-    { id: "c", title: "C", waitsFor: ["b", "d"], counts: { ...none, leaves: 1, waiting: 1 } },
-    { id: "d", title: "D", waitsFor: ["b"], counts: { ...none, leaves: 1, parked: 1 } },
-    { id: "e", title: "E", waitsFor: [], counts: none },
+    { id: "a", title: "A", task: null, waitsFor: [], counts: { ...none, leaves: 2, done: 2 } },
+    {
+      id: "b",
+      title: "B",
+      task: null,
+      waitsFor: ["d"],
+      counts: { ...none, leaves: 3, ready: 1, in_progress: 1, parked: 1 },
+    },
+    { id: "c", title: "C", task: null, waitsFor: ["b", "d"], counts: { ...none, leaves: 1, waiting: 1 } },
+    { id: "d", title: "D", task: null, waitsFor: ["b"], counts: { ...none, leaves: 1, parked: 1 } },
+    { id: "e", title: "E", task: null, waitsFor: [], counts: none },
   ],
   waves: [["b", "d"], ["c"]],
   anytime: ["a", "e"],

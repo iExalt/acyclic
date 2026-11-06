@@ -246,7 +246,8 @@ export function Inspector({
               <>
                 <dt>Thread</dt>
                 <dd>
-                  {item.thread === null ? (
+                  {/* A thread of one is the task alone, which names no thread. */}
+                  {item.thread === null || lines.get(item.thread)?.task ? (
                     <span className="muted">None</span>
                   ) : (
                     <button

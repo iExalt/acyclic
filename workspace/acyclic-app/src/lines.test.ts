@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { lineStyle } from "./Badge";
 import { byTitle, lineColour, lineOf, linesOf } from "./lines";
 import { PALETTES } from "./palette";
 
@@ -12,6 +13,30 @@ describe("lineOf", () => {
     expect(alone).toMatchObject({ name: "Errands" });
     expect(among).toEqual(alone);
     expect(lineOf({ id: "x", title: "Errands" }, DARK).colour).not.toBe(alone?.colour);
+  });
+});
+
+describe("a thread of one", () => {
+  it("carries its task, and a thread of its own none", () => {
+    const lines = linesOf(
+      [
+        { id: "a.one", title: "Water the beds", task: "a" },
+        { id: "t", title: "Garden", task: null },
+        { id: "u", title: "Old shape" },
+      ],
+      DARK,
+    );
+    expect(lines.get("a.one")?.task).toBe("a");
+    expect(lines.get("t")?.task).toBeNull();
+    expect(lines.get("u")?.task).toBeNull();
+  });
+
+  it("is no thread's line, so it takes none of a line's colour into its row or tile", () => {
+    const [task, real] = ["a.one", "t"].map((id) =>
+      lineOf({ id, title: "X", task: id === "a.one" ? "a" : null }, DARK),
+    );
+    expect(lineStyle(task)).toBeUndefined();
+    expect(lineStyle(real)).toEqual({ "--line": real?.colour, "--line-ink": real?.ink });
   });
 });
 

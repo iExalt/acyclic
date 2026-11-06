@@ -112,6 +112,19 @@ export interface Step {
   requests: Requests;
 }
 
+/**
+ * What a thread's row or tile asks for: the thread picked on the Map, or, for a thread of one (`tasks` names its task by
+ * the thread's id), the task opened, as any item's row does.
+ */
+export function threadIntent(
+  tasks: ReadonlyMap<string, string>,
+  id: string,
+  kind: "thread" | "outline" = "thread",
+): Intent {
+  const task = tasks.get(id);
+  return task === undefined ? { kind, id } : { kind: "select", id: task, pin: null };
+}
+
 export type Intent =
   /** An item chosen anywhere but on the Map, which goes to the Map for it, brought into view. */
   | { kind: "select"; id: string; pin: string | null }

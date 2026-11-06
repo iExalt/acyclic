@@ -4,6 +4,9 @@
 import { topOrder } from "./map/elk";
 import type { Model } from "./map/model";
 
+/** The thread of one a task in no thread stands for: a pure function of its id, as core derives it. */
+export const oneOf = (item: string) => `${item}.one`;
+
 export interface ProjectRow {
   id: string;
   title: string;
@@ -21,7 +24,7 @@ export interface Outline {
  * The outline of `model` as the Map shows it, for `threads` in their
  * order, and its projects in the order the Map packs its top level in: each after those it waits on. A project is a
  * top-level item with something under it shown; a thread is in a project when any item shown in it, the project itself
- * included, is in the thread.
+ * included, is in the thread. A task in no thread is in the thread of one it stands for, if `threads` lists it.
  */
 export function outlineOf(model: Model, threads: readonly string[]): Outline {
   const projects: { id: string; title: string; threads: Set<string> }[] = [];
@@ -30,7 +33,7 @@ export function outlineOf(model: Model, threads: readonly string[]): Outline {
     const touched = new Set<string>();
     const walk = (id: string) => {
       const thread = model.items.get(id)?.thread;
-      if (thread !== null && thread !== undefined) touched.add(thread);
+      if (thread !== undefined) touched.add(thread ?? oneOf(id));
       for (const child of model.children.get(id) ?? []) walk(child);
     };
     walk(root);
@@ -64,7 +67,10 @@ export function currentRows(
     parent = model.items.get(root)?.parent;
   }
   const project = outline.projects.some((one) => one.id === root) ? root : null;
-  return { project, thread: model.items.get(selected)?.thread ?? null };
+  const thread = model.items.get(selected)?.thread ?? oneOf(selected);
+  const listed =
+    outline.others.includes(thread) || outline.projects.some((one) => one.threads.some((t) => t.id === thread));
+  return { project, thread: listed ? thread : null };
 }
 
 /** A project's default thread only when its visible work belongs to exactly one thread. */

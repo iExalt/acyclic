@@ -39,15 +39,9 @@ export function markSvg(
   const middle = height / 2;
   const parts: string[] = [];
   if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${height}" fill="${thread.colour}"/>`);
-  const left = BADGE_AT;
-  if (thread === null) {
-    // No thread: an empty ring where its badge would be.
-    parts.push(
-      `<circle cx="${left + BADGE / 2}" cy="${middle}" r="${BADGE / 2 - 1}" fill="none" stroke="${palette.muted}" stroke-width="1.5" stroke-dasharray="3 2.4"/>`,
-    );
-  } else {
-    parts.push(`<circle cx="${left + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
-  }
+  // An item in no thread, a task alone, has no stripe or badge: the thread's colour is what they would say.
+  if (thread !== null)
+    parts.push(`<circle cx="${BADGE_AT + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
   if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }

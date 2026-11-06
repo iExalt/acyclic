@@ -252,6 +252,11 @@ label:has(> input[type="checkbox"]) {
   padding: 0;
   margin: 0 0.42em;
 }
+/* A thread of one is a task alone: the dot's size, left open, in the quiet ink rather than a line's colour. */
+.badge.dot.task {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
 .count {
   font-variant-numeric: tabular-nums;
 }

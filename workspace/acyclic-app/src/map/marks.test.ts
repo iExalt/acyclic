@@ -39,9 +39,11 @@ describe("markSvg", () => {
     expect(onChevron("box", { x1: 0, y1: 0, x2: 300, y2: 400, header: 100 }, { x: 18, y: 24 }, 1)).toBe(true);
   });
 
-  it("draws a ring where a tile with no thread would have its dot", () => {
+  it("draws no stripe, dot or ring for a tile in no thread, a task alone", () => {
     const none = markSvg("ready", null, 200, 48, DARK);
-    expect(none).toContain("stroke-dasharray");
+    // The only circle is its stage's icon, drawn unfilled.
+    expect(none).not.toMatch(/<circle[^>]*fill="#/);
+    expect(none).not.toContain("stroke-dasharray");
     expect(none).not.toContain("<rect");
     // The stage's icon still ends the tile: a task in no thread is a thread of one, ready like any other.
     expect(none).toContain("<g ");

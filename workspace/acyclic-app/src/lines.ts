@@ -8,7 +8,7 @@ import { okhsl } from "./okhsl";
 import type { Palette } from "./palette";
 
 /** What a line is drawn from: a thread's id and title. */
-type Named = Pick<Thread, "id" | "title">;
+type Named = Pick<Thread, "id" | "title"> & Partial<Pick<Thread, "task">>;
 
 /** Threads to a lap of the hue wheel. */
 const LAP = 27;
@@ -39,12 +39,14 @@ export interface Line {
   colour: string;
   /** The badge's text colour, whichever of the two reads better on `colour`. */
   ink: string;
+  /** The task a thread of one stands for: such a line is no thread's, so it has no badge colour of its own to show. */
+  task: string | null;
 }
 
 /** The line for a thread, coloured by its id, so colours hold still as threads come and go. */
 export function lineOf(thread: Named, palette: Palette): Line {
   const colour = lineColour(hash(thread.id), palette);
-  return { name: thread.title, colour, ink: inkOn(colour, palette) };
+  return { name: thread.title, colour, ink: inkOn(colour, palette), task: thread.task ?? null };
 }
 
 /** Each thread's line, by id. */

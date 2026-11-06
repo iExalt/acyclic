@@ -81,6 +81,49 @@ const fresh = (next: Drawn[]) => {
   return core;
 };
 
+describe("a task in no thread of its own", () => {
+  const marks = (thread: string | null) => {
+    const items = [item("solo", null, [], { thread }), item("other", null, [], { thread: "t" })];
+    const lines = linesOf(
+      [
+        { id: "s.one", title: "Solo", task: "solo" },
+        { id: "t", title: "Tools" },
+      ],
+      PALETTES.dark,
+    );
+    const model = buildModel(items);
+    const view = visible(model, { collapsed: new Set() });
+    const placed: Placed = {
+      width: 500,
+      height: 500,
+      laidOut: [],
+      routes: new Map(),
+      junctions: new Map(),
+      dividers: new Map(),
+      redundant: new Set(),
+      nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 30, y: 0, width: 200, height: 48 }])),
+    };
+    const drawn = elementsOf(
+      scene(view, placed, { item: null, thread: null }, (id) => model.items.get(id)?.thread ?? null),
+      undefined,
+      lines,
+      PALETTES.dark,
+    );
+    const mark = (id: string) => decodeURIComponent(String(drawn.find((one) => one.data.id === id)?.data.mark));
+    return { solo: mark("solo"), other: mark("other") };
+  };
+
+  it("draws like an item in no thread, with no stripe, dot or ring, once claimed too", () => {
+    for (const thread of [null, "s.one"]) {
+      const { solo, other } = marks(thread);
+      expect(solo).not.toMatch(/<rect|<circle[^>]*fill="#|stroke-dasharray/);
+      // A real thread's item keeps its stripe and dot.
+      expect(other).toMatch(/<rect/);
+      expect(other).toMatch(/<circle[^>]*fill="#/);
+    }
+  });
+});
+
 describe("draw", () => {
   const start: Shot = { items: base };
   const shots: [string, Shot][] = [

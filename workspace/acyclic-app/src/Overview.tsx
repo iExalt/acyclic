@@ -68,6 +68,7 @@ export function Overview({
           data-row
           style={lineStyle(line)}
           data-overview-thread={id}
+          data-task={line?.task ?? undefined}
           onClick={() => onPickThread(id)}
         >
           <Badge line={line} />
