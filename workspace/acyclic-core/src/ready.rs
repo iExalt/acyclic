@@ -356,7 +356,7 @@ impl<'a> ReadinessEvaluator<'a> {
             // Under a part canceled by hand, unless every leaf that is left is done.
             !self.model.reads_done(id)
         } else {
-            kids.into_iter().all(|child| self.reads_canceled(child))
+            !self.model.reads_done(id) && kids.into_iter().all(|child| self.reads_canceled(child))
         };
         self.canceled.borrow_mut().insert(id.to_owned(), reads);
         reads

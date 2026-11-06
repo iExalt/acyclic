@@ -206,7 +206,10 @@ fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
     let mut r = replica("a");
     items(
         &mut r,
-        &["top", "cut", "c1", "c2", "mix", "m1", "m2", "all", "a1", "a2", "dn", "d1", "d2"],
+        &[
+            "top", "cut", "c1", "c2", "mix", "m1", "m2", "all", "a1", "a2", "dn", "d1", "d2", "g",
+            "gc", "gd", "go",
+        ],
     );
     for (kid, parent) in [
         ("cut", "top"),
@@ -221,6 +224,10 @@ fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
         ("dn", "cut"),
         ("d1", "dn"),
         ("d2", "dn"),
+        // A grandparent whose only child is canceled by hand, over a done leaf and an open one, reads done.
+        ("gc", "g"),
+        ("gd", "gc"),
+        ("go", "gc"),
     ] {
         set_parent(&mut r, kid, Some(parent), by(2)).unwrap();
     }
@@ -232,6 +239,8 @@ fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
         ("a2", ItemState::Canceled),
         ("d1", ItemState::Done),
         ("d2", ItemState::Done),
+        ("gc", ItemState::Canceled),
+        ("gd", ItemState::Done),
     ] {
         set_state(&mut r, id, state, by(3)).unwrap();
     }
@@ -244,7 +253,7 @@ fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
     }
     // Pinned: a part under one canceled by hand reads canceled unless it reads done; an all-canceled part reads so.
     let canceled: Vec<&str> = reading.iter().filter(|(_, c)| *c).map(|(id, _)| *id).collect();
-    assert_eq!(canceled, ["a1", "a2", "all", "c1", "c2", "cut", "m1"]);
+    assert_eq!(canceled, ["a1", "a2", "all", "c1", "c2", "cut", "gc", "go", "m1"]);
 }
 
 #[test]

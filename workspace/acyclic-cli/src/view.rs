@@ -431,6 +431,20 @@ mod tests {
     }
 
     #[test]
+    fn a_canceled_leaf_reads_canceled_for_its_waiter_and_counts_apart_under_its_parent() {
+        let mut r = tracker();
+        set_state(&mut r, "a", ItemState::Canceled, by(USER)).unwrap();
+        viewing(&r, |view| {
+            assert_eq!(
+                view.item_row("c").unwrap()["readiness"]["waiting"]["a"],
+                json!({"why": "canceled"})
+            );
+            let counts = &view.item_row("goal").unwrap()["progress"]["counts"];
+            assert_eq!((&counts["canceled"], &counts["leaves"]), (&json!(1), &json!(1)));
+        });
+    }
+
+    #[test]
     fn an_item_is_one_row_that_show_extends() {
         let mut r = tracker();
         // A size an older version stored is retired: it stays in the state but no item shows it.
