@@ -428,6 +428,17 @@ fn a_slow_http_transfer_fails_rather_than_hangs() {
 }
 
 #[test]
+fn a_fetch_never_prompts_on_a_terminal_for_credentials() {
+    let (_dir, ours) = repository("sha1");
+    let values =
+        ours.config_values(&["gitoxide.credentials.terminalPrompt"]).expect("config reads");
+    assert_eq!(
+        values.get("gitoxide.credentials.terminalPrompt").map(String::as_str),
+        Some("false")
+    );
+}
+
+#[test]
 fn the_keychain_helper_is_found_in_the_first_directory_that_holds_it() {
     let dir = TempDir::new().expect("a temporary directory");
     let (empty, holding) = (dir.path().join("empty"), dir.path().join("holding"));

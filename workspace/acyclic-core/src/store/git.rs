@@ -45,6 +45,8 @@ fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
             // and the server's writes queued behind it.
             "http.lowSpeedLimit=1000".into(),
             "http.lowSpeedTime=30".into(),
+            // A sync or check never waits on a terminal: without this, a fetch that needs credentials prompts for them.
+            "gitoxide.credentials.terminalPrompt=false".into(),
         ];
         if let Some(dir) = credential_exec_path() {
             overrides.push(format!("gitoxide.credentials.execPath={}", dir.display()));
