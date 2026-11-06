@@ -60,6 +60,9 @@ const QUALIFIERS: [&str; 10] = [
     "from the CLI",
 ];
 
+/// The lowest and highest thread rank under an item.
+type Span = ((usize, usize), (usize, usize));
+
 /// Generates a plan of exactly `items` items (at least 50) from `seed`.
 ///
 /// # Panics
@@ -205,20 +208,29 @@ impl Generator {
         // Umbrellas per root, then leaves per umbrella, as near-even shares with jitter.
         let per_root = self.shares(umbrellas, roots);
         let mut umbrella_leaves = self.shares(leaves, umbrellas).into_iter();
-        for umbrella_count in per_root {
+        let last_root = per_root.len() - 1;
+        for (at_root, umbrella_count) in per_root.into_iter().enumerate() {
             let root = self.push_item(None);
-            for _ in 0..umbrella_count {
+            for at_umbrella in 0..umbrella_count {
+                let last = at_root == last_root && at_umbrella + 1 == umbrella_count;
                 // The areas' draws, kept so each seed keeps its structure.
                 let _ = self.rng.below(AREAS.len());
                 let umbrella = self.push_item(Some(root));
                 let mut last_leaf = None;
-                for _ in 0..umbrella_leaves.next().unwrap_or(0) {
+                let leaves_here = umbrella_leaves.next().unwrap_or(0);
+                for at in 0..leaves_here {
                     if !self.rng.chance(0.005) && !self.rng.chance(0.85) {
                         let _ = self.rng.below(AREAS.len());
                     }
-                    // About one leaf in twenty is a sub-item of the previous leaf.
+                    // About one leaf in twenty is a sub-item of the previous leaf; the last leaf of a plan that has had
+                    // none is one, so a small plan has every depth.
+                    let forced = last && at + 1 == leaves_here && !self.depth.contains(&4);
                     let parent = match last_leaf {
-                        Some(leaf) if self.depth[leaf] == 3 && self.rng.chance(0.05) => leaf,
+                        Some(leaf)
+                            if self.depth[leaf] == 3 && (self.rng.chance(0.05) || forced) =>
+                        {
+                            leaf
+                        },
                         _ => umbrella,
                     };
                     let index = self.push_item(Some(parent));
@@ -262,6 +274,7 @@ impl Generator {
             prefix[umbrella] = subtree_end <= prefix_end;
         }
         let parents: HashSet<usize> = self.parent.iter().flatten().copied().collect();
+        let mut parked = 0;
         for (index, &in_prefix) in prefix.iter().enumerate() {
             let leaf = !parents.contains(&index);
             let item = &mut self.import.items[index];
@@ -284,8 +297,17 @@ impl Generator {
                 // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays open.
                 if self.rng.unit() < 0.04 {
                     item.state = Some(State::Parked);
+                    parked += 1;
                 }
             }
+        }
+        // A small plan can draw none; every plan has some parked work, as the large ones do.
+        if parked == 0 {
+            let open: Vec<usize> = (0..self.total)
+                .filter(|&i| !prefix[i] && self.depth[i] >= 3 && !parents.contains(&i))
+                .collect();
+            let at = open[self.rng.below(open.len())];
+            self.import.items[at].state = Some(State::Parked);
         }
     }
 
@@ -398,10 +420,47 @@ impl Generator {
         ancestor_of(a, b) || ancestor_of(b, a)
     }
 
+    /// Each item's lowest and highest thread rank among the leaves at or under it. Threads are ranked in the depth-first
+    /// order of their runs; a leaf in no thread reads as a thread of one, ranked after the thread of the item before
+    /// it and apart from every other.
+    fn thread_span(&self, owner: &[Option<usize>]) -> Vec<Option<Span>> {
+        let parents: HashSet<usize> = self.parent.iter().flatten().copied().collect();
+        let mut last = 0;
+        let mut span: Vec<Option<Span>> = (0..self.total)
+            .map(|index| {
+                if let Some(thread) = owner[index] {
+                    last = last.max(thread);
+                    Some(((2 * thread, 0), (2 * thread, 0)))
+                } else if self.depth[index] >= 2 && !parents.contains(&index) {
+                    Some(((2 * last + 1, index), (2 * last + 1, index)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for index in (0..self.total).rev() {
+            if let (Some(parent), Some((lo, hi))) = (self.parent[index], span[index]) {
+                span[parent] = Some(match span[parent] {
+                    Some((a, b)) => (a.min(lo), b.max(hi)),
+                    None => (lo, hi),
+                });
+            }
+        }
+        span
+    }
+
     /// Waits-for links average about 1.2 per item, always from a later item to an earlier one, so they never form a
-    /// cycle. No link joins an item to its ancestor or descendant. The related links once drawn at 0.05 per item are
-    /// still drawn, so each seed keeps its structure, and written nowhere.
+    /// cycle of items. No link joins an item to its ancestor or descendant. A thread waits on the threads holding the
+    /// leaves its leaves wait for, so a link is kept only when none of the leaves under its target is in a later
+    /// thread than any leaf under its source: threads then never wait on each other in a cycle, as a real tracker's
+    /// seldom do. The related links once drawn at 0.05 per item are still drawn, so each seed keeps its structure,
+    /// and written nowhere.
     fn links(&mut self, owner: &[Option<usize>]) {
+        let span = self.thread_span(owner);
+        let in_order = |from: usize, to: usize| match (span[from], span[to]) {
+            (Some((lowest, _)), Some((_, highest))) => highest <= lowest,
+            _ => true,
+        };
         let mut by_thread: HashMap<usize, Vec<usize>> = HashMap::new();
         for (item, thread) in owner.iter().enumerate() {
             if let Some(thread) = thread {
@@ -422,7 +481,11 @@ impl Generator {
                     let earlier: Vec<usize> = pool
                         .iter()
                         .copied()
-                        .filter(|&to| to < from && !self.is_related_by_ancestry(from, to))
+                        .filter(|&to| {
+                            to < from
+                                && !self.is_related_by_ancestry(from, to)
+                                && in_order(from, to)
+                        })
                         .collect();
                     if earlier.is_empty() {
                         continue;
@@ -496,25 +559,39 @@ mod tests {
 
         assert_eq!(stats.thread_sizes.len(), scaled(21.0), "{at}");
         let big = stats.thread_sizes.iter().filter(|&&s| s >= 4).count();
-        assert_eq!(big, scaled(15.0), "{at}");
+        assert_eq!(big, scaled(21.0) - scaled(6.0).min(scaled(21.0) - 1), "{at}");
         assert!(
             stats.thread_sizes.iter().all(|&s| (1..=2).contains(&s) || (4..=46).contains(&s)),
             "{at}"
         );
-        assert!(stats.thread_sizes.iter().any(|&s| s >= 40), "a thread of 40 or more: {at}");
+        // The largest thread is near the top of the range, in proportion below the base size.
+        let largest = scaled(40.0).min(40);
+        assert!(stats.thread_sizes.iter().any(|&s| s >= largest), "a thread of {largest}+: {at}");
         let unthreaded = stats.unthreaded as f64 / items as f64;
-        assert!((0.085..=0.165).contains(&unthreaded), "unthreaded share {unthreaded}: {at}");
+        // Every parent is unthreaded, and a small plan has at least two roots and a few umbrellas, so its share runs higher.
+        let most = if items >= BASE_ITEMS { 0.165 } else { 0.25 };
+        assert!((0.085..=most).contains(&unthreaded), "unthreaded share {unthreaded}: {at}");
 
         assert!(stats.cross_root_threads > 0, "{at}");
 
-        assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
-        assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
+        let done = stats.state_share(State::Done);
+        let parked = stats.state_share(State::Parked);
+        if items >= BASE_ITEMS {
+            assert!((0.07..=0.14).contains(&done), "{at}");
+            assert!((0.02..=0.06).contains(&parked), "{at}");
+        } else {
+            // Too few items for the rates to hold: some done and some parked work, and no more than an eighth.
+            assert!((1.0 / items as f64..=0.14).contains(&done), "{at}");
+            assert!((1.0 / items as f64..=0.125).contains(&parked), "{at}");
+        }
         // Canceled is written only by a person's explicit edit, so no fixture carries it.
         assert_eq!(stats.state_share(State::Canceled), 0.0, "{at}");
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;
-        assert!(near(stats.link_rate(), 1.2, 0.3), "{at}");
+        // Early items have few earlier ones to wait for, which weighs more in a small plan.
+        let spread = if items >= BASE_ITEMS { 0.3 } else { 0.4 };
+        assert!(near(stats.link_rate(), 1.2, spread), "{at}");
         stats
     }
 
@@ -526,6 +603,27 @@ mod tests {
     fn small_plans_match_the_shape() {
         for seed in 1..=3 {
             check_shape(BASE_ITEMS, seed);
+        }
+    }
+
+    #[test]
+    fn small_plans_are_shaped_like_large_ones() {
+        for items in [50, 75, 120] {
+            for seed in 1..=20 {
+                check_shape(items, seed);
+            }
+        }
+    }
+
+    /// Thread cycles are what a real tracker's threads don't make, and what journeys and benchmarks mustn't depend on a
+    /// seed to be free of.
+    #[test]
+    fn no_seed_makes_threads_wait_on_each_other_in_a_cycle() {
+        for (items, seeds) in [(50, 1..=20), (BASE_ITEMS, 1..=20), (10 * BASE_ITEMS, 1..=1)] {
+            for seed in seeds {
+                let cycles = crate::stats::thread_cycles(&generate(items, seed));
+                assert_eq!(cycles, Vec::<usize>::new(), "{items} items, seed {seed}");
+            }
         }
     }
 
@@ -548,7 +646,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_347, 14_666_096_642_313_301_582));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_299, 11_358_292_599_230_118_913));
     }
 
     #[test]

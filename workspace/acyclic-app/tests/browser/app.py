@@ -217,11 +217,40 @@ class Plan:
 LONG_CODE = "workspace/acyclic-app/src/a/very/long/path/that/has/no/spaces/to/break/at/" + "x" * 60 + "/file.tsx"
 
 
+def add_thread_cycles(env):
+    """Two cycles of two threads waiting on each other, in a project of their own, so Needs you names two. In each
+    thread, a leaf waits on a leaf the other holds, which waits for nothing, so no cycle of items closes. Made apart
+    from the fixture's items, which journeys add to and link, and which a seed's threads never form a cycle among."""
+
+    def add(*args):
+        return json.loads(run(env, *args))["data"]
+
+    project = add("item", "add", "--title", "Cycles")["item"]
+    for cycle in ("A", "B"):
+        threads = [add("thread", "add", "--title", f"Cycle {cycle}{n}")["thread"] for n in (1, 2)]
+        held = [
+            add("item", "add", "--title", f"Cycle {cycle}{n} holds", "--parent", project, "--thread", thread)["item"]
+            for n, thread in enumerate(threads, 1)
+        ]
+        for n, thread in enumerate(threads, 1):
+            add(
+                "item", "add", "--title", f"Cycle {cycle}{n} waits", "--parent", project, "--thread", thread,
+                "--waits-for", held[n % 2],
+            )
+
+
+# Trackers below this many items are the small ones: they sync with an origin, so a second clone can write a conflict,
+# and hold the cycles of threads Needs you names. The large one needs neither.
+SMALL_TRACKER = 1000
+
+
 @timed
-def tracker(directory, env, items, remote=None):
-    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
+def tracker(directory, env, items, remote=None, cycles=False):
+    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it, and
+    two cycles of threads if `cycles`."""
     plan = directory / f"plan-{items}.json"
-    # A seed whose threads come in many waves with only small cycles among them, so arrows skip waves.
+    # Any seed's threads come in many waves, so arrows skip waves, and none makes threads wait on each other in a
+    # cycle; the cycles Needs you names are made below.
     with detail(f"tracker {items}: generate"):
         data = json.loads(
             subprocess.run(
@@ -237,8 +266,6 @@ def tracker(directory, env, items, remote=None):
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     with detail(f"tracker {items}: import"):
         run(env, "import", str(plan))
-    # Done work waiting on open work, so Needs you holds an entry that names items. The open leaf and everything above
-    # it wait for nothing, so the link closes no cycle.
     parent = {item["id"]: item.get("parent") for item in data["items"]}
     waits = {item["id"]: item.get("waits_for") for item in data["items"]}
 
@@ -247,6 +274,10 @@ def tracker(directory, env, items, remote=None):
             yield id
             id = parent.get(id)
 
+    if cycles:
+        add_thread_cycles(env)
+    # Done work waiting on open work, so Needs you holds an entry that names items. The open leaf and everything above
+    # it wait for nothing, so the link closes no cycle.
     done = next(item["id"] for item in data["items"] if item.get("state") == "done")
     unwaiting = next(
         item["id"]
@@ -806,10 +837,10 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         needs = page.get_by_test_id("needs")
         needs.wait_for(timeout=5_000)
         # Scrolled down the list, so coming back shows whether it kept its place. A shorter page, so the fixture's few
-        # entries scroll.
+        # entries, with the ring of threads among them, scroll.
         size = page.viewport_size
         page.set_viewport_size({"width": size["width"], "height": 480})
-        # On to the next item's row when none shows there, as when a long thread cycle's threads fill the view.
+        # On to the next item's row when none shows there, as when a tall entry fills the view.
         top = needs.evaluate(
             """n => { n.scrollTop = Math.min(400, n.scrollHeight - n.clientHeight);
                 const box = n.getBoundingClientRect();
@@ -3816,10 +3847,10 @@ def shard_run(shard):
             }
             # The small tracker syncs with an origin, so the journeys can write a conflict from a second clone.
             remote = None
-            if items < 1000:
+            if items < SMALL_TRACKER:
                 remote = directory / f"origin-{items}.git"
                 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-            plan = tracker(directory, env, items, remote)
+            plan = tracker(directory, env, items, remote, cycles=items < SMALL_TRACKER)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,

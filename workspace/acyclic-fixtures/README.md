@@ -8,6 +8,10 @@ any of its content.
 At about 350 items a plan has 21 threads: 15 of 4 to 46 items and 6 of 1 or 2, with about an eighth of the items in
 no thread. Larger plans scale the number of threads and keep every per-item rate.
 
+Threads never wait on each other in a cycle, whatever the seed: a link is kept only when it runs from a later thread to
+an earlier one or within one, as a real tracker's seldom do. A test that needs a cycle makes one with two edits. Plans
+of 50 items and more keep the shape in proportion: a share of threads, some done work, some parked work and every depth.
+
 The same seed always gives the same plan:
 
 ```sh

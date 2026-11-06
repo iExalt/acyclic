@@ -3,6 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use acyclic_core::import::{Import, State};
+use acyclic_core::model::{By, Model};
+use acyclic_core::ready::ReadinessEvaluator;
+use acyclic_core::scope::USER;
+use acyclic_core::state::{Replica, ReplicaId, State as Doc};
 
 /// A plan's shape.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,4 +90,22 @@ impl Stats {
     pub fn link_rate(&self) -> f64 {
         self.links as f64 / self.items as f64
     }
+}
+
+/// The sizes of the plan's thread cycles, as the tracker reads them: groups of threads that wait on each other, through
+/// their items' links and their ancestors', with work left.
+///
+/// # Panics
+///
+/// Panics when the plan doesn't apply to an empty tracker.
+#[must_use]
+pub fn thread_cycles(import: &Import) -> Vec<usize> {
+    let mut replica = Replica::open(ReplicaId::new("fixtures").unwrap(), Doc::new());
+    acyclic_core::import::apply(import, &mut replica, By { actor: USER, at: 1 }).unwrap();
+    let model = Model::read(replica.state()).unwrap();
+    let readiness = ReadinessEvaluator::new(replica.state(), &model, 2);
+    let mut sizes: Vec<usize> =
+        readiness.thread_cycles().unwrap().iter().map(std::collections::BTreeSet::len).collect();
+    sizes.sort_unstable();
+    sizes
 }
