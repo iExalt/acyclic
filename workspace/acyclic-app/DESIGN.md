@@ -79,7 +79,7 @@ beside Linear's although its contrast was 14:1; at 500 it is as dark as Inter at
 cold; Overpass, heavier, keeps the app's voice.
 
 Panels set what they say in one size, 14 px, labels and values alike, and wide their fields too (a phone's stay at 16
-px, so it doesn't zoom in on them); notes and briefs, the reading, at 15 px wide; the title 19 px at 650, not bold, 17
+px, so it doesn't zoom in on them); notes, the reading, at 15 px wide; the title 19 px at 650, not bold, 17
 px on a phone; section headings 13 px at 600, muted, so the content leads. (Mixed sizes and weights read as awkward;
 then 13 px read a smidge small beside Linear at the same window size, as Overpass sets smaller than Inter at a size.)
 
@@ -147,7 +147,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
   what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
-  more; "Starts with", its first items alone, meant nothing to the user. Then its brief.
+  more; "Starts with", its first items alone, meant nothing to the user. Then its notes.
 - **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
   capitals beside them, a tenth of an em over the line's, since Overpass sits high (the user saw them sit low).
 - **Settings change at once.** A setting in the ⋯ menu shows its new value as it is picked. A setting leaves the
@@ -211,8 +211,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
   the pointer.
-- **Notes and briefs:** a small, safe part of Markdown, built as elements: code, strong (which may hold code) and
-  emphasis. Nothing else is read, and never as markup.
+- **Notes,** an item's and a thread's: a small, safe part of Markdown, built as elements: code, strong (which may hold
+  code) and emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
   at the field's end. A thread's row is its badge and name. An item's or target's context names its parent and root
   project when they differ, and wraps in full; the title may still truncate. Context does not change result ranking or
@@ -348,7 +348,8 @@ before what went wrong.
   title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
   fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (done once all of it
   is; else in progress once work under it has started and some of what is left isn't parked; else ready, else waiting,
-  else parked, else needs a thread), and its title is muted once done or held up, as an item's title is.
+  else parked, else needs a thread); one with no leaf to count, as on a cycle of parents, says its own state. Its title
+  is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and

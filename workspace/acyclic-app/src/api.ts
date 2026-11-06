@@ -12,7 +12,7 @@ export type Raw<T> = T | null | { conflict: (T | null)[] };
 /** A condition the server checks with an app write under the tracker lock. */
 export type Expected =
   | { kind: "item-field"; item: string; field: "title" | "parent" | "state" | "notes"; value: Raw<string> }
-  | { kind: "thread-field"; thread: string; field: "title" | "brief"; value: Raw<string> }
+  | { kind: "thread-field"; thread: string; field: "title" | "notes"; value: Raw<string> }
   | { kind: "waits-for"; item: string; target: string; present: boolean }
   | { kind: "started-at-most"; item: string; count: number }
   | { kind: "waiters-started-at-most"; item: string; baselines: { item: string; count: number }[] };
@@ -31,7 +31,7 @@ interface RawItem {
    * count has none.
    */
   stage?: Stage;
-  /** A parent's state as the work under it makes it, and its leaves counted by stage; a leaf has none. */
+  /** A parent's leaves counted by stage; a leaf has none. */
   progress?: Progress;
 }
 
@@ -66,7 +66,6 @@ export const NO_COUNTS: Counts = {
 };
 
 export interface Progress {
-  state: string;
   counts: Counts;
 }
 
@@ -152,7 +151,7 @@ export function failure(err: unknown): { code: string; message: string } {
  */
 const REFUSALS: Record<string, string> = {
   "parent-cycle": "An item can't go inside itself, or inside anything under it",
-  "link-cycle": "That link would close a loop: the items would wait on each other",
+  "waits-for-cycle": "That link would close a loop: the items would wait on each other",
   "self-link": "An item can't link to itself",
   deleted: "That item was deleted after it was added: send it again to add it anew",
   "not-found": "It isn't in the plan",
@@ -256,7 +255,7 @@ export async function threads(fetcher: Fetch = fetch): Promise<Threads> {
 export interface ThreadDetail {
   id: string;
   title: string;
-  brief: string | null;
+  notes: string | null;
   heads: string[];
   members: { id: string; title: string }[];
 }
@@ -264,9 +263,9 @@ export interface ThreadDetail {
 const text = (raw: Raw<string>, fallback: string) => (typeof raw === "string" ? raw : fallback);
 
 export async function thread(id: string, fetcher: Fetch = fetch): Promise<ThreadDetail> {
-  type Row = Omit<ThreadDetail, "title" | "brief" | "members"> & {
+  type Row = Omit<ThreadDetail, "title" | "notes" | "members"> & {
     title: Raw<string>;
-    brief: Raw<string>;
+    notes: Raw<string>;
     members: { id: string; title: Raw<string> }[];
   };
   const [row] = await command<Row[]>({ thread: { show: { threads: [id] } } }, fetcher);
@@ -274,7 +273,7 @@ export async function thread(id: string, fetcher: Fetch = fetch): Promise<Thread
   return {
     ...row,
     title: text(row.title, row.id),
-    brief: typeof row.brief === "string" ? row.brief : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
     members: row.members.map((member) => ({ id: member.id, title: text(member.title, member.id) })),
   };
 }

@@ -234,7 +234,7 @@ fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() 
 #[test]
 fn adding_a_thread_or_repository_again_needs_the_same_fields() {
     let mut r = replica();
-    let thread = ThreadFields { title: Some("T".into()), brief: Change::Set("B".into()) };
+    let thread = ThreadFields { title: Some("T".into()), notes: Change::Set("B".into()) };
     add_thread(&mut r, "t", &thread, AGENT).unwrap();
     let before = r.changes();
     add_thread(&mut r, "t", &thread, AGENT).unwrap();
@@ -388,7 +388,7 @@ fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
     edit_item(&mut r, "p", &waits("o"), USER_BY).unwrap();
     let back = waits("p");
     let err = edit_item(&mut r, "o", &back, USER_BY).unwrap_err();
-    assert_eq!((err.code, err.details.clone()), ("link-cycle", json!({"items": ["o", "p"]})));
+    assert_eq!((err.code, err.details.clone()), ("waits-for-cycle", json!({"items": ["o", "p"]})));
     // Several at once: the one naming nothing speaks first, and every one is listed.
     let both = ItemFields { thread: Change::Set("nowhere".into()), ..back };
     let err = edit_item(&mut r, "o", &both, USER_BY).unwrap_err();

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{Item, ItemState, Model, Progress, ProgressState, Value};
+use crate::model::{Item, ItemState, Model, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
 
@@ -27,7 +27,7 @@ pub enum Wait {
 
 /// An item's readiness.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "kebab-case", tag = "status")]
+#[serde(rename_all = "kebab-case", tag = "readiness")]
 pub enum Readiness {
     /// Ready to work on.
     Ready,
@@ -84,7 +84,7 @@ impl Readiness {
 
 /// A thread's readiness: whether it can be claimed, and its members that would be ready while it is held.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case", tag = "status")]
+#[serde(rename_all = "kebab-case", tag = "readiness")]
 pub enum ThreadReadiness {
     /// No thread has this id.
     Missing,
@@ -240,12 +240,10 @@ impl Stages {
     }
 }
 
-/// A parent's progress as it reads now, with its leaves counted by stage.
+/// A parent's progress as it reads now: its leaves counted by stage, and the stage they make it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rollup {
-    /// Its state, and its leaves done and in all, as the model counts them.
-    pub progress: Progress,
-    /// The same leaves by stage: the done ones are the model's done.
+    /// Its leaves by stage: in all and done, the model's own counts.
     pub stages: Stages,
     /// Its stage, from its leaves; `None` with no leaf to count.
     pub stage: Option<Stage>,
@@ -272,7 +270,7 @@ impl<'a> ReadinessEvaluator<'a> {
     #[must_use]
     pub fn new(state: &'a State, model: &'a Model, now: Millis) -> Self {
         let cyclic =
-            model.link_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
+            model.waits_for_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
         let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for link in &model.links {
             links_from.entry(link.from.clone()).or_default().push(link.to.clone());
@@ -449,27 +447,24 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(stage)
     }
 
-    /// A parent's progress as it reads now, with its leaves by stage. It reads in progress, rather than open, once
-    /// a leaf under it is, or while a live claim holds the thread of any open leaf under it, even one still waiting.
-    /// A claim names a thread, not an item, and expires, so this is how the parent reads now; nothing is waiting on
-    /// it. Under a part parked by hand, this one included, open leaves count as parked and don't make it read in
-    /// progress.
+    /// A parent's progress as it reads now, with its leaves by stage. Its stage is in progress once a leaf under it
+    /// is, or while a live claim holds the thread of any open leaf under it, even one still waiting. A claim names a
+    /// thread, not an item, and expires, so this is how the parent reads now; nothing is waiting on it. Under a part
+    /// parked by hand, this one included, open leaves count as parked and don't make it read in progress.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
     pub fn progress(&self, id: &str) -> Result<Option<Rollup>, Error> {
-        let Some(mut progress) = self.model.progress(id) else { return Ok(None) };
+        let Some(item) = self.model.items.get(id) else { return Ok(None) };
+        if self.model.children(id).is_empty() {
+            return Ok(None);
+        }
         let mut stages = Stages::default();
-        let parked = progress.state == ProgressState::Parked;
+        let parked = item.state == Value::One(ItemState::Parked);
         self.tally(id, parked, &mut BTreeSet::from([id]), &mut stages)?;
         let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
-        if progress.state == ProgressState::InProgress || progress.state == ProgressState::Backlog {
-            let moving = stages.in_progress > 0 || progress.done > 0 || claimed;
-            progress.state =
-                if moving { ProgressState::InProgress } else { ProgressState::Backlog };
-        }
-        Ok(Some(Rollup { progress, stages, stage: stages.rolled_up(claimed) }))
+        Ok(Some(Rollup { stages, stage: stages.rolled_up(claimed) }))
     }
 
     /// Counts the leaves under `id` by stage, walking as the model's own tally does: each item once, and the open leaves of a part parked by hand as parked.

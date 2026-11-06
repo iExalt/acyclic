@@ -38,7 +38,7 @@ pub(super) fn valid() -> Import {
     for member in &mut import.items[1..] {
         member.thread = Some(id(20));
     }
-    import.threads = vec![Thread { id: id(20), title: "Thread".into(), brief: None }];
+    import.threads = vec![Thread { id: id(20), title: "Thread".into(), notes: None }];
     import
 }
 

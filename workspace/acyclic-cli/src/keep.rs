@@ -164,8 +164,8 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
 fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
     let flag = match assign {
         ThreadAssign::Title(title) => ("title", Flag::Text(title.clone())),
-        ThreadAssign::Brief(Some(brief)) => ("brief", Flag::Text(brief.clone())),
-        ThreadAssign::Brief(None) => ("no-brief", Flag::On),
+        ThreadAssign::Notes(Some(notes)) => ("notes", Flag::Text(notes.clone())),
+        ThreadAssign::Notes(None) => ("no-notes", Flag::On),
     };
     Command { words: ["thread", "edit"], subject: ("thread", id.to_owned()), flags: vec![flag] }
 }

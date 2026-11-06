@@ -352,10 +352,10 @@ impl<'a> CommandContext<'a> {
             },
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
-            Command::Thread(ThreadCommand::Add { id: given, title, brief }) => {
+            Command::Thread(ThreadCommand::Add { id: given, title, notes }) => {
                 let fields = ThreadFields {
                     title: Some(title.clone()),
-                    brief: Change::of(brief.clone(), false),
+                    notes: Change::of(notes.clone(), false),
                 };
                 self.write(|replica, by| {
                     let (id, adding) = match given {
@@ -372,7 +372,7 @@ impl<'a> CommandContext<'a> {
             Command::Thread(ThreadCommand::Edit(edit)) => {
                 let fields = ThreadFields {
                     title: edit.title.clone(),
-                    brief: Change::of(edit.brief.clone(), edit.no_brief),
+                    notes: Change::of(edit.notes.clone(), edit.no_notes),
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
@@ -700,7 +700,7 @@ impl<'a> CommandContext<'a> {
         let (model, unreadable) = Model::read_lenient(&state);
         let unreadable: Vec<Json> = unreadable
             .into_iter()
-            .map(|(key, err)| json!({"entity": key.kind, "id": key.id, "error": err.to_string()}))
+            .map(|(key, err)| json!({"record": key.kind, "id": key.id, "error": err.to_string()}))
             .collect();
         Ok(json!({
             "replica": self.tracker.replica().as_str(),

@@ -1,5 +1,5 @@
-// Text as a person or agent wrote it, with `backticked` runs set as code, as Markdown sets them: in titles, notes and
-// briefs, ids and commands are written that way.
+// Text as a person or agent wrote it, with `backticked` runs set as code, as Markdown sets them: in titles and notes,
+// ids and commands are written that way.
 
 import { Fragment, type ReactNode } from "react";
 

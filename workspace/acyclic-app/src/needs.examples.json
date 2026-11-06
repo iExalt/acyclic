@@ -2,7 +2,6 @@
   "about": "A needs-you list as this build sends it, with a conflict for each way a value is kept. Written by the CLI's contract tests with UPDATE_EXAMPLES=1; the app's tests read it.",
   "needs": [
     {
-      "entity": "item",
       "field": "parent",
       "id": "01900000-0000-7000-8000-0000000000a1",
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"parent\":\"01900000-0000-7000-8000-0000000000b1\"}}},\"value\":\"01900000-0000-7000-8000-0000000000b1\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"no-parent\":true}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"parent\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
@@ -18,7 +17,7 @@
           "fields": [
             "state"
           ],
-          "status": "conflicted"
+          "readiness": "conflicted"
         },
         "stage": "waiting",
         "state": {
@@ -66,13 +65,13 @@
       "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:parent",
       "kind": "conflict",
       "notify": true,
+      "record": "item",
       "values": [
         "01900000-0000-7000-8000-0000000000b1",
         null
       ]
     },
     {
-      "entity": "item",
       "field": "state",
       "id": "01900000-0000-7000-8000-0000000000a1",
       "identity": "{\"choices\":[{\"command\":null,\"value\":\"done\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
@@ -88,7 +87,7 @@
           "fields": [
             "state"
           ],
-          "status": "conflicted"
+          "readiness": "conflicted"
         },
         "stage": "waiting",
         "state": {
@@ -129,13 +128,13 @@
       "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:state",
       "kind": "conflict",
       "notify": true,
+      "record": "item",
       "values": [
         "done",
         "parked"
       ]
     },
     {
-      "entity": "item",
       "field": "title",
       "id": "01900000-0000-7000-8000-0000000000a1",
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"One\"}}},\"value\":\"One\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"Two\"}}},\"value\":\"Two\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"title\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
@@ -151,7 +150,7 @@
           "fields": [
             "state"
           ],
-          "status": "conflicted"
+          "readiness": "conflicted"
         },
         "stage": "waiting",
         "state": {
@@ -199,13 +198,13 @@
       "key": "conflict:item:01900000-0000-7000-8000-0000000000a1:title",
       "kind": "conflict",
       "notify": true,
+      "record": "item",
       "values": [
         "One",
         "Two"
       ]
     },
     {
-      "entity": "item",
       "field": "state",
       "id": "01900000-0000-7000-8000-0000000000b1",
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"open\"}}},\"value\":\"open\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000b1\",\"kind\":\"item\"}}",
@@ -221,14 +220,13 @@
             "ready": 0,
             "unthreaded": 0,
             "waiting": 1
-          },
-          "state": "open"
+          }
         },
         "readiness": {
           "fields": [
             "state"
           ],
-          "status": "conflicted"
+          "readiness": "conflicted"
         },
         "stage": "waiting",
         "state": {
@@ -271,13 +269,13 @@
       "key": "conflict:item:01900000-0000-7000-8000-0000000000b1:state",
       "kind": "conflict",
       "notify": true,
+      "record": "item",
       "values": [
         "open",
         "parked"
       ]
     },
     {
-      "entity": "item",
       "field": "evidence",
       "id": "01900000-0000-7000-8000-0000000000e1",
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@abc1234\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"abc1234\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}},{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@def5678\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"def5678\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}}],\"entry\":{\"entry\":\"conflict\",\"field\":\"evidence\",\"id\":\"01900000-0000-7000-8000-0000000000e1\",\"kind\":\"item\"}}",
@@ -285,7 +283,7 @@
         "id": "01900000-0000-7000-8000-0000000000e1",
         "parent": null,
         "readiness": {
-          "status": "done"
+          "readiness": "done"
         },
         "stage": "done",
         "state": "done",
@@ -331,6 +329,7 @@
       "key": "conflict:item:01900000-0000-7000-8000-0000000000e1:evidence",
       "kind": "conflict",
       "notify": true,
+      "record": "item",
       "values": [
         {
           "commit": "abc1234",
@@ -343,7 +342,6 @@
       ]
     },
     {
-      "entity": "repository",
       "field": "owner",
       "id": "01900000-0000-7000-8000-0000000000c2",
       "identity": "{\"choices\":[{\"command\":{\"repository\":{\"edit\":{\"name\":\"me/app\",\"repository\":\"01900000-0000-7000-8000-0000000000c2\"}}},\"value\":\"me\"},{\"command\":{\"repository\":{\"edit\":{\"name\":\"you/app\",\"repository\":\"01900000-0000-7000-8000-0000000000c2\"}}},\"value\":\"you\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"owner\",\"id\":\"01900000-0000-7000-8000-0000000000c2\",\"kind\":\"repository\"}}",
@@ -378,27 +376,27 @@
       "key": "conflict:repository:01900000-0000-7000-8000-0000000000c2:owner",
       "kind": "conflict",
       "notify": true,
+      "record": "repository",
       "values": [
         "me",
         "you"
       ]
     },
     {
-      "entity": "thread",
-      "field": "brief",
+      "field": "notes",
       "id": "01900000-0000-7000-8000-0000000000f1",
-      "identity": "{\"choices\":[{\"command\":{\"thread\":{\"edit\":{\"brief\":\"Why\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":\"Why\"},{\"command\":{\"thread\":{\"edit\":{\"no-brief\":true,\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"brief\",\"id\":\"01900000-0000-7000-8000-0000000000f1\",\"kind\":\"thread\"}}",
+      "identity": "{\"choices\":[{\"command\":{\"thread\":{\"edit\":{\"notes\":\"Why\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":\"Why\"},{\"command\":{\"thread\":{\"edit\":{\"no-notes\":true,\"thread\":\"01900000-0000-7000-8000-0000000000f1\"}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"brief\",\"id\":\"01900000-0000-7000-8000-0000000000f1\",\"kind\":\"thread\"}}",
       "keeps": [
         {
           "command": {
             "thread": {
               "edit": {
-                "brief": "Why",
+                "notes": "Why",
                 "thread": "01900000-0000-7000-8000-0000000000f1"
               }
             }
           },
-          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --brief Why",
+          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --notes Why",
           "value": "Why",
           "why": null
         },
@@ -406,12 +404,12 @@
           "command": {
             "thread": {
               "edit": {
-                "no-brief": true,
+                "no-notes": true,
                 "thread": "01900000-0000-7000-8000-0000000000f1"
               }
             }
           },
-          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --no-brief",
+          "run": "acyclic thread edit 01900000-0000-7000-8000-0000000000f1 --no-notes",
           "value": null,
           "why": null
         }
@@ -419,6 +417,7 @@
       "key": "conflict:thread:01900000-0000-7000-8000-0000000000f1:brief",
       "kind": "conflict",
       "notify": true,
+      "record": "thread",
       "thread": {
         "counts": {
           "conflicted": 0,

@@ -363,7 +363,7 @@ impl Generator {
             self.import.threads.push(Thread {
                 id,
                 title,
-                brief: Some("A synthetic thread.".to_owned()),
+                notes: Some("A synthetic thread.".to_owned()),
             });
         }
         owner
@@ -543,7 +543,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_368, 8_288_387_897_255_007_585));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_368, 5_021_021_054_589_452_822));
     }
 
     #[test]

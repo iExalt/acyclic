@@ -46,7 +46,7 @@ pub struct Report {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Change {
     /// The record's kind: `repository`, `thread`, `item` or `link`.
-    pub entity: &'static str,
+    pub record: &'static str,
     /// Which record.
     #[serde(flatten)]
     pub name: Name,
@@ -255,8 +255,8 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
     for record in &doc.threads {
         let id = &record.id;
         let mut with = vec![Assign::Thread(id.clone(), ThreadAssign::Title(record.title.clone()))];
-        if let Some(brief) = &record.brief {
-            with.push(Assign::Thread(id.clone(), ThreadAssign::Brief(Some(brief.clone()))));
+        if let Some(notes) = &record.notes {
+            with.push(Assign::Thread(id.clone(), ThreadAssign::Notes(Some(notes.clone()))));
         }
         changes.push(add(Record::Thread(id.clone()), with));
     }
@@ -393,7 +393,9 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
             (Rule::SelfLink, Some(at)) => {
                 unknown.push(ValidationError::SelfLink(at.record.id().to_owned()));
             },
-            (Rule::ParentCycle(cycle) | Rule::LinkCycle(cycle), _) => cycles.push(cycle.clone()),
+            (Rule::ParentCycle(cycle) | Rule::WaitsForCycle(cycle), _) => {
+                cycles.push(cycle.clone());
+            },
             (Rule::Deleted(record), _) => {
                 deleted.get_or_insert(record);
             },
@@ -439,7 +441,7 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
     let mut row = |report: &mut Report, entity: &'static str, id: &str| -> usize {
         *rows.entry((entity, id.to_owned())).or_insert_with(|| {
             report.changes.push(Change {
-                entity,
+                record: entity,
                 name: Name::Id { id: id.to_owned() },
                 action: Action::Update,
                 fields: BTreeMap::new(),
@@ -467,7 +469,7 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
                     report.links += 1;
                 }
                 report.changes.push(Change {
-                    entity: kind::LINK,
+                    record: kind::LINK,
                     name: Name::Link { from: from.clone(), kind: "waits-for", to: to.clone() },
                     action: if *present { Action::Create } else { Action::Remove },
                     fields: BTreeMap::new(),
@@ -505,7 +507,7 @@ fn held(before: &Model, at: &FieldAddr) -> Json {
         }),
         Record::Thread(id) => before.threads.get(id).map(|thread| match at.field {
             FieldName::Title => json!(thread.title),
-            FieldName::Brief => json!(thread.brief),
+            FieldName::Notes => json!(thread.notes),
             _ => Json::Null,
         }),
         Record::Repository(id) => before.repositories.get(id).map(|record| match at.field {

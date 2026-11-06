@@ -68,14 +68,14 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "replica": "mac",
     "unreadable": [
       {
-        "entity": "item",
         "error": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `open`, `parked`, `done`",
-        "id": "01900000-0000-7000-8000-0000000000a1"
+        "id": "01900000-0000-7000-8000-0000000000a1",
+        "record": "item"
       },
       {
-        "entity": "link",
         "error": "unreadable state: invalid kind on link relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1: unknown variant `relates`, expected `blocks`",
-        "id": "relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1"
+        "id": "relates-36-01900000-0000-7000-8000-0000000000a2-01900000-0000-7000-8000-0000000000a1",
+        "record": "link"
       }
     ]
   },

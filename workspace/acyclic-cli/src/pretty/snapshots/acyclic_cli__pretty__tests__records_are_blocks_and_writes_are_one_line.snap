@@ -1,6 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/pretty/tests.rs
-expression: "format!(\"{}\\n{}{}{}{}\",\nrender(&command(\"item show plant\"), &shown, None, &BTreeMap::new()),\nrender(&command(\"item edit plant --thread t1\"), &edited, None,\n&BTreeMap::new()),\nrender(&command(\"thread add --title T\"), &unchanged, None, &BTreeMap::new()),\nrender(&command(\"thread add --title T\"), &titled, None, &BTreeMap::new()),\nrender(&command(\"thread edit t2 --brief B\"), &untitled, None,\n&BTreeMap::new()))"
+expression: "format!(\"{}\\n{}{}{}{}\",\nrender(&command(\"item show plant\"), &shown, None, &BTreeMap::new()),\nrender(&command(\"item edit plant --thread t1\"), &edited, None,\n&BTreeMap::new()),\nrender(&command(\"thread add --title T\"), &unchanged, None, &BTreeMap::new()),\nrender(&command(\"thread add --title T\"), &titled, None, &BTreeMap::new()),\nrender(&command(\"thread edit t2 --notes B\"), &untitled, None,\n&BTreeMap::new()))"
 ---
 id     plant
 title  Plant

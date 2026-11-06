@@ -15,7 +15,7 @@ fn ids_print_as_the_names_people_use() {
             .map(|(id, name)| (id.to_owned(), name.to_owned())),
     );
     let shown = json!([{"id": plant, "title": "Plant",
-        "readiness": {"status": "waiting", "waiting": {beds: {"why": "open"}}},
+        "readiness": {"readiness": "waiting", "waiting": {beds: {"why": "open"}}},
         "evidence": {"commit": "me/garden@abc1234", "text": null}}]);
     let text = render(&command("item show Plant"), &shown, None, &names);
     for name in ["0000a1", "me/garden", "waiting for 0000b1 (not done)", "me/garden@abc1234"] {
@@ -31,7 +31,7 @@ fn command(line: &str) -> Command {
 
 fn item(id: &str, title: &str, status: &str) -> Json {
     json!({"id": id, "title": title, "state": "open", "parent": null, "thread": "t1",
-           "readiness": {"status": status}})
+           "readiness": {"readiness": status}})
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn lists_are_tables_fitted_to_a_terminal_and_bare_in_a_pipe() {
     let list = json!({"items": [
         item("beds", "Build the raised beds along the south fence", "ready"),
         json!({"id": "plant", "title": "Plant tomatoes", "state": "open", "parent": "beds", "thread": "t1",
-               "readiness": {"status": "waiting", "waiting": {"beds": {"why": "open"}}}}),
+               "readiness": {"readiness": "waiting", "waiting": {"beds": {"why": "open"}}}}),
     ]});
     let piped = render(&command("item list"), &list, None, &BTreeMap::new());
     let narrow = render(&command("item list"), &list, Some(60), &BTreeMap::new());
@@ -89,7 +89,7 @@ fn records_are_blocks_and_writes_are_one_line() {
         render(&command("item edit plant --thread t1"), &edited, None, &BTreeMap::new()),
         render(&command("thread add --title T"), &unchanged, None, &BTreeMap::new()),
         render(&command("thread add --title T"), &titled, None, &BTreeMap::new()),
-        render(&command("thread edit t2 --brief B"), &untitled, None, &BTreeMap::new())
+        render(&command("thread edit t2 --notes B"), &untitled, None, &BTreeMap::new())
     ));
 }
 
@@ -106,7 +106,7 @@ fn cleared_conflict_sides_are_visible_but_unset_fields_stay_omitted() {
     assert!(text.contains("conflict none, ideas"), "{text}");
     assert!(!text.contains("notes"), "{text}");
 
-    let needs = json!({"needs": [{"kind": "conflict", "entity": "item", "id": "a1",
+    let needs = json!({"needs": [{"kind": "conflict", "record": "item", "id": "a1",
     "field": "parent", "values": [null, "ideas"], "keeps": [
         {"value": null, "command": {}, "run": "acyclic item edit a1 --no-parent", "why": null},
     ]}]});
@@ -126,9 +126,9 @@ fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
             .flat_map(|(key, entity)| {
                 (0..counts[key].as_u64().unwrap()).map(move |id| {
                     if entity == "link" {
-                        json!({"entity": entity, "from": "a1", "kind": "waits-for", "to": format!("b{id}"), "action": "create"})
+                        json!({"record": entity, "from": "a1", "kind": "waits-for", "to": format!("b{id}"), "action": "create"})
                     } else {
-                        json!({"entity": entity, "id": format!("{entity}{id}"), "action": "create"})
+                        json!({"record": entity, "id": format!("{entity}{id}"), "action": "create"})
                     }
                 })
             })
@@ -163,9 +163,9 @@ fn an_import_and_a_waits_for_edit_say_what_they_wrote() {
 
 #[test]
 fn import_summaries_count_updates_removals_and_placement_without_claiming_dry_run_writes() {
-    let update = json!({"entity": "item", "id": "a1", "action": "update",
+    let update = json!({"record": "item", "id": "a1", "action": "update",
         "fields": {"title": {"from": "Old", "to": "New"}, "notes": {"from": null, "to": "Checked"}}});
-    let removal = json!({"entity": "link", "from": "a1", "kind": "waits-for", "to": "b1", "action": "remove"});
+    let removal = json!({"record": "link", "from": "a1", "kind": "waits-for", "to": "b1", "action": "remove"});
     for (changes, fields, actual, dry) in [
         (
             json!([update]),
@@ -180,7 +180,7 @@ fn import_summaries_count_updates_removals_and_placement_without_claiming_dry_ru
             "would import: remove 1 waits-for (1 field)",
         ),
         (
-            json!([{"entity": "item", "id": "a2", "action": "create"}, update, removal]),
+            json!([{"record": "item", "id": "a2", "action": "create"}, update, removal]),
             5,
             "imported: created 1 item; updated 1 item; removed 1 waits-for (5 fields)",
             "would import: create 1 item; update 1 item; remove 1 waits-for (5 fields)",
@@ -226,7 +226,7 @@ fn a_lone_list_is_its_table_and_notes_keep_their_column() {
     let needs = json!({"needs": [
         {"kind": "thread-cycle", "threads": [{"id": "t1", "title": "T"}, {"id": "t2", "title": "U"}]},
         {"kind": "unthreaded", "item": {"id": "a1"}, "fix": "acyclic item edit a1 --thread <THREAD>"},
-        {"kind": "conflict", "entity": "item", "id": "a1", "field": "state", "keeps": [
+        {"kind": "conflict", "record": "item", "id": "a1", "field": "state", "keeps": [
             {"value": "done", "command": null, "run": null, "why": "Keep done in a terminal"},
             {"value": "parked", "command": {}, "run": "acyclic item edit a1 --state parked", "why": null},
         ]},
@@ -292,7 +292,7 @@ fn every_readiness_reads_as_a_phrase() {
     for (status, expected) in items {
         assert_eq!(phrase(status.clone()).as_deref(), Some(expected), "{status}");
     }
-    // A status a later build adds, with fields, still prints field by field rather than as its name alone.
-    assert_eq!(phrase(json!({"status": "new-kind", "detail": "x"})), None);
-    assert_eq!(compact(&json!({"status": "new-kind", "detail": "x"})), "new-kind (detail x)");
+    // A readiness a later build adds, with fields, still prints field by field rather than as its name alone.
+    assert_eq!(phrase(json!({"readiness": "new-kind", "detail": "x"})), None);
+    assert_eq!(compact(&json!({"readiness": "new-kind", "detail": "x"})), "new-kind (detail x)");
 }

@@ -1,4 +1,4 @@
-// The picked thread: its progress, its items in the order their work runs, and its brief.
+// The picked thread: its progress, its items in the order their work runs, and its notes.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type Counts, failure, type Stage, type ThreadDetail, thread } from "./api";
@@ -134,11 +134,11 @@ export function ThreadPanel({
           )}
         </div>
       )}
-      {detail.brief === null ? null : (
+      {detail.notes === null ? null : (
         <div className="notes-block">
-          <h3>Brief</h3>
+          <h3>Notes</h3>
           <p className="notes">
-            <Prose text={detail.brief} notes />
+            <Prose text={detail.notes} notes />
           </p>
         </div>
       )}

@@ -127,19 +127,15 @@ pub fn shown_state(value: &Json) -> Json {
     }
 }
 
-/// What a parent reads as, from the leaves under it: an item's states, and in progress once work under it has started.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProgressState {
-    /// Nothing under it has started: open, as an item's state reads.
-    #[serde(rename = "open")]
-    Backlog,
-    /// Set aside on purpose.
-    Parked,
-    /// Work under it has started.
-    InProgress,
-    /// Every leaf under it is finished.
-    Done,
+/// A stored field's name as reads show it: a thread's `brief` is its notes. Older replicas read the stored name, so it
+/// stays, as does a need's key, which names the field as stored.
+#[must_use]
+pub fn shown_field<'a>(kind: &str, field: &'a str) -> &'a str {
+    if (kind, field) == (crate::schema::kind::THREAD, crate::schema::thread::BRIEF) {
+        "notes"
+    } else {
+        field
+    }
 }
 
 /// What shows a done item was done.
@@ -210,12 +206,9 @@ impl Item {
     }
 }
 
-/// A parent's progress, from the leaves under it.
+/// A parent's leaves, counted: where its work stands is its stage, from [`crate::ready`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
-    /// The state it reads as: its own when parked by hand, else done when every leaf under it is finished, in
-    /// progress once any leaf is done, and open until then; [`crate::ready`] also counts claimed work as started.
-    pub state: ProgressState,
     /// Its leaves that are done.
     pub done: usize,
     /// Its leaves.
@@ -245,8 +238,8 @@ pub struct Thread {
     pub id: String,
     /// A short title.
     pub title: Value<String>,
-    /// The brief.
-    pub brief: Value<String>,
+    /// Its notes: what the work is and how to go about it, stored under the older field name `brief`.
+    pub notes: Value<String>,
 }
 
 /// A repository record as read.
@@ -392,7 +385,7 @@ impl Model {
                 let thread = Thread {
                     id: key.id.clone(),
                     title: value(state, key, thread::TITLE)?,
-                    brief: value(state, key, thread::BRIEF)?,
+                    notes: value(state, key, thread::BRIEF)?,
                 };
                 self.threads.insert(key.id.clone(), thread);
             },
@@ -470,26 +463,17 @@ impl Model {
         }
     }
 
-    /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked by hand; its
-    /// leaves decide the rest, and a done stored on it, as older versions wrote, is ignored.
+    /// A parent's leaves done and in all, or `None` for a leaf. A done stored on a parent, as older versions wrote,
+    /// is ignored: its leaves count.
     #[must_use]
     pub fn progress(&self, id: &str) -> Option<Progress> {
-        let item = self.items.get(id)?;
+        self.items.get(id)?;
         if self.children(id).is_empty() {
             return None;
         }
         let mut tally = Tally::default();
         self.tally(id, &mut BTreeSet::from([id]), &mut tally);
-        let state = if item.state == Value::One(ItemState::Parked) {
-            ProgressState::Parked
-        } else if tally.done == tally.total {
-            ProgressState::Done
-        } else if tally.done > 0 {
-            ProgressState::InProgress
-        } else {
-            ProgressState::Backlog
-        };
-        Some(Progress { state, done: tally.done, total: tally.total })
+        Some(Progress { done: tally.done, total: tally.total })
     }
 
     /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk.
@@ -509,12 +493,16 @@ impl Model {
         }
     }
 
-    /// Whether an item reads as done: a leaf by its own state, a parent by its progress.
+    /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it is, unless it is
+    /// parked by hand.
     #[must_use]
     pub fn reads_done(&self, id: &str) -> bool {
+        let Some(item) = self.items.get(id) else { return false };
         match self.progress(id) {
-            Some(progress) => progress.state == ProgressState::Done,
-            None => self.items.get(id).is_some_and(Item::is_done),
+            Some(progress) => {
+                progress.done == progress.total && item.state != Value::One(ItemState::Parked)
+            },
+            None => item.is_done(),
         }
     }
 
@@ -535,9 +523,9 @@ impl Model {
         self.items.get(id).and_then(|item| item.thread.one()).map(String::as_str)
     }
 
-    /// The cycles among blocks links, each sorted.
+    /// The cycles among waits-for links, each sorted.
     #[must_use]
-    pub fn link_cycles(&self) -> Vec<Vec<String>> {
+    pub fn waits_for_cycles(&self) -> Vec<Vec<String>> {
         let edges: Vec<(String, String)> =
             self.links.iter().map(|link| (link.from.clone(), link.to.clone())).collect();
         graph::cycles(&edges)
@@ -620,8 +608,8 @@ pub enum WriteError {
     Deleted(String),
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
-    /// The link would close a cycle of blocks links, through these items.
-    LinkCycle(Vec<String>),
+    /// The link would close a cycle of waits-for links, through these items.
+    WaitsForCycle(Vec<String>),
     /// An item can't link to itself.
     SelfLink(String),
 }
@@ -637,7 +625,7 @@ impl fmt::Display for WriteError {
             Self::NoItem(id) => write!(f, "no item {id}"),
             Self::Deleted(id) => write!(f, "{id} was deleted, and its id isn't used again"),
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
-            Self::LinkCycle(path) => {
+            Self::WaitsForCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
             },
             Self::SelfLink(id) => write!(f, "{id} can't link to itself"),
@@ -806,7 +794,7 @@ fixture! {
         }
         let key = link_key(from, to)?;
         if let Some(path) = Model::read(&replica.state)?.ordering_path(to, from) {
-            return Err(WriteError::LinkCycle(path));
+            return Err(WriteError::WaitsForCycle(path));
         }
         if replica.state.field(&key, link::FROM).is_none() {
             put(replica, &key, link::FROM, Some(&from), by)?;

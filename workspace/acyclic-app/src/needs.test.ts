@@ -43,9 +43,9 @@ describe("needView", () => {
     const torn = needView(
       {
         kind: "conflict",
-        entity: "thread",
+        record: "thread",
         id: "t7",
-        field: "brief",
+        field: "notes",
         values: ["x", "y"],
         thread: { id: "t7", title: "Build it" },
       },
@@ -87,7 +87,7 @@ describe("needView", () => {
     const moved = needView(parent, none, titles);
     expect(moved.text).toBe("First: its parent was written differently on two machines");
     expect(moved.actions.map((one) => one.label)).toEqual(["Use Parent", "Use the top level"]);
-    const gone = needView({ kind: "dangling", entity: "item", id: "a", field: "parent", target: "q" }, none, titles);
+    const gone = needView({ kind: "dangling", record: "item", id: "a", field: "parent", target: "q" }, none, titles);
     expect(gone.text).toBe("Parent: its parent names q, which doesn't exist");
   });
 
@@ -96,7 +96,7 @@ describe("needView", () => {
     const waits = needView(
       {
         kind: "dangling",
-        entity: "item",
+        record: "item",
         id: "a",
         field: "waits-for",
         target: "q",
@@ -108,11 +108,11 @@ describe("needView", () => {
     expect(waits.text).toBe("A waits for q, which doesn't exist");
     expect(waits.note).toBe("acyclic item edit a --no-waits-for q");
     // The waiting item itself gone leaves the older shape, kept as it was.
-    const orphan = needView({ kind: "dangling", entity: "link", id: "x", field: "end", target: "q" }, none, titles);
+    const orphan = needView({ kind: "dangling", record: "link", id: "x", field: "end", target: "q" }, none, titles);
     expect(orphan.text).toBe("x: its end names q, which doesn't exist");
     // An item in a thread that is gone is opened from its row to choose another, as an item in none is.
     const ghost = needView(
-      { kind: "dangling", entity: "item", id: "a", field: "thread", target: "t", item: item("a") },
+      { kind: "dangling", record: "item", id: "a", field: "thread", target: "t", item: item("a") },
       none,
       titles,
     );
@@ -156,7 +156,9 @@ describe("needView", () => {
     expect(isCollapsible(needView({ kind: "thread-cycle", threads: [thread("t")] }, none))).toBe(false);
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
-    expect(needView({ kind: "link-cycle", items: [item("a"), torn] }, none).text).toBe("Links form a cycle: A, Bee");
+    expect(needView({ kind: "waits-for-cycle", items: [item("a"), torn] }, none).text).toBe(
+      "Links form a cycle: A, Bee",
+    );
   });
 });
 

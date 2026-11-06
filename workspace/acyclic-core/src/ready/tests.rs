@@ -2,9 +2,7 @@ use hegel::TestCase;
 use hegel::generators as gs;
 
 use super::*;
-use crate::model::{
-    self, By, Evidence, ProgressState, add_item, item_key, link, set, set_parent, set_state,
-};
+use crate::model::{self, By, Evidence, add_item, item_key, link, set, set_parent, set_state};
 use crate::schema::{item as field, kind, repository, thread as thread_field};
 use crate::state::{Key, Replica, ReplicaId};
 
@@ -349,24 +347,20 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
     thread(&mut r, "y", "other");
     let state = |r: &Replica, now: Millis| {
         let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, now)
-            .progress("goal")
-            .unwrap()
-            .unwrap()
-            .progress
-            .state
+        ReadinessEvaluator::new(&r.state, &model, now).progress("goal").unwrap().unwrap().stage
     };
-    assert_eq!(state(&r, NOW), ProgressState::Backlog);
-    // A claim lasts its lease: the parent reads in progress while it lives, and open once it lapses.
+    assert_eq!(state(&r, NOW), Some(Stage::Ready));
+    // A claim lasts its lease: the parent reads in progress while it lives, and ready again once it lapses.
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
-    assert_eq!(state(&r, NOW), ProgressState::InProgress);
-    assert_eq!(state(&r, 2_000), ProgressState::Backlog);
+    assert_eq!(state(&r, NOW), Some(Stage::InProgress));
+    assert_eq!(state(&r, 2_000), Some(Stage::Ready));
     // Parked work isn't being worked, though its thread is claimed.
     set_state(&mut r, "x", ItemState::Parked, by(3)).unwrap();
-    assert_eq!(state(&r, NOW), ProgressState::Backlog);
+    assert_eq!(state(&r, NOW), Some(Stage::Ready));
     // A state set by hand holds.
+    set_state(&mut r, "x", ItemState::Backlog, by(3)).unwrap();
     set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
-    assert_eq!(state(&r, NOW), ProgressState::Parked);
+    assert_eq!(state(&r, NOW), Some(Stage::Parked));
 }
 
 #[test]
@@ -381,10 +375,7 @@ fn a_done_stored_on_a_part_hides_none_of_its_claimed_work_from_above() {
     // As an older version could write it.
     set_state(&mut r, "part", ItemState::Done, by(3)).unwrap();
     let rolled = rollup(&r, "goal");
-    assert_eq!(
-        (rolled.progress.state, rolled.stage),
-        (ProgressState::InProgress, Some(Stage::InProgress))
-    );
+    assert_eq!(rolled.stage, Some(Stage::InProgress));
 }
 
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
@@ -441,12 +432,10 @@ fn a_parent_counts_its_leaves_by_stage_a_parked_part_counting_whole() {
     done_with(&mut r, "p1", None);
     let rolled = rollup(&r, "goal");
     assert_eq!(rolled.stages, Stages { done: 3, parked: 2, ready: 1, ..Stages::default() });
-    assert_eq!((rolled.progress.done, rolled.progress.total), (3, 6));
-    assert_eq!(rolled.progress.state, ProgressState::InProgress, "done work under it moves it");
-    assert_eq!(rolled.stage, Some(Stage::InProgress));
+    assert_eq!((rolled.stages.done, rolled.stages.total()), (3, 6));
+    assert_eq!(rolled.stage, Some(Stage::InProgress), "done work under it moves it");
     let rolled = rollup(&r, "parked");
     assert_eq!(rolled.stages, Stages { done: 1, parked: 2, ..Stages::default() });
-    assert_eq!(rolled.progress.state, ProgressState::Parked);
     assert_eq!(
         rolled.stage,
         Some(Stage::Parked),
@@ -479,10 +468,10 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_waiting_leaves(
         set_parent(&mut r, leaf, Some("box"), by(2)).unwrap();
         link(&mut r, leaf, "first", by(2)).unwrap();
     }
-    assert_eq!(rollup(&r, "box").progress.state, ProgressState::Backlog);
+    assert_eq!(rollup(&r, "box").stage, Some(Stage::Waiting));
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     let rolled = rollup(&r, "box");
-    assert_eq!(rolled.progress.state, ProgressState::InProgress);
+    assert_eq!(rolled.stage, Some(Stage::InProgress));
     assert_eq!(rolled.stages, Stages { waiting: 2, ..Stages::default() }, "the counts stay honest");
 }
 
@@ -519,8 +508,7 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
     r
 }
 
-/// A parent's leaves by stage add up to its leaves, the done ones to its done, and its done and leaves
-/// are the model's own; with no claims and no parked parts, its state is the model's too.
+/// A parent's leaves by stage add up to its leaves, and the done ones to its done, as the model counts them.
 #[hegel::test]
 fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
     let (claims, parks) = (tc.draw(gs::booleans()), tc.draw(gs::booleans()));
@@ -536,10 +524,6 @@ fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
         let stages = rolled.stages;
         assert_eq!(stages.total(), counted.total, "{id}: {stages:?}");
         assert_eq!(stages.done, counted.done, "{id}: {stages:?}");
-        assert_eq!((rolled.progress.done, rolled.progress.total), (counted.done, counted.total));
-        if !claims && !parks {
-            assert_eq!(rolled.progress.state, counted.state, "{id}: {stages:?}");
-        }
     }
 }
 

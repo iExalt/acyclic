@@ -145,7 +145,7 @@ function viewOf(
   };
   switch (need.kind) {
     case "conflict": {
-      const entity = str(need.entity);
+      const entity = str(need.record);
       const id = str(need.id);
       const field = str(need.field);
       const actions: Action[] = [];
@@ -187,9 +187,9 @@ function viewOf(
         note: IN_A_TERMINAL,
       };
     case "dangling": {
-      const name = nameOf(str(need.entity), str(need.id));
+      const name = nameOf(str(need.record), str(need.id));
       // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.
-      if (str(need.entity) === "item" && str(need.field) === "waits-for")
+      if (str(need.record) === "item" && str(need.field) === "waits-for")
         return {
           ...base,
           text: `${name} waits for ${shown(need.target)}, which doesn't exist`,
@@ -199,7 +199,7 @@ function viewOf(
         ...base,
         text: `${name}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
         // An item in a thread that is gone is in none, which its editor puts right.
-        note: str(need.entity) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
+        note: str(need.record) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
       };
     }
     case "unthreaded": {
@@ -249,7 +249,7 @@ function describe(
   const subject = item !== null ? titled(item) : thread !== null ? name(thread) : named.map(titled).join(", ");
   const words: Record<string, string> = {
     unpushed: "This clone holds writes the remote lacks",
-    "link-cycle": "Links form a cycle",
+    "waits-for-cycle": "Links form a cycle",
     "parent-cycle": "Parents form a cycle",
     contest: "Two holders claim one thread",
     "clock-ahead": "A claim's clock runs ahead",

@@ -31,7 +31,7 @@ pub enum Expectation {
         /// Its expected value, including the ordered values of a conflict.
         value: ExpectedValue,
     },
-    /// A thread's title or brief as read by the model; null means unset.
+    /// A thread's title or notes as read by the model; null means unset.
     ThreadField {
         /// The thread.
         thread: String,
@@ -85,8 +85,9 @@ pub enum ExpectedItemField {
 pub enum ExpectedThreadField {
     /// The title.
     Title,
-    /// The brief.
-    Brief,
+    /// The notes; `brief`, as older clients say, reads as notes.
+    #[serde(alias = "brief")]
+    Notes,
 }
 
 /// A model value, serialized as null, one scalar, or a conflict with ordered sides.
@@ -243,7 +244,7 @@ pub fn check_expected(
                 };
                 match field {
                     ExpectedThreadField::Title => serde_json::to_value(&thread.title),
-                    ExpectedThreadField::Brief => serde_json::to_value(&thread.brief),
+                    ExpectedThreadField::Notes => serde_json::to_value(&thread.notes),
                 }
                 .expect("model values serialize")
             },
@@ -377,7 +378,7 @@ impl Record {
 pub enum FieldName {
     /// An item's or thread's title.
     Title,
-    /// An item's notes.
+    /// An item's or thread's notes.
     Notes,
     /// An item's state.
     State,
@@ -387,8 +388,6 @@ pub enum FieldName {
     Evidence,
     /// An item's thread.
     Thread,
-    /// A thread's brief.
-    Brief,
     /// A repository's owner.
     Owner,
     /// A repository's name.
@@ -400,7 +399,8 @@ pub enum FieldName {
 }
 
 impl FieldName {
-    /// The field's name as stored and reported; a set's element names the set.
+    /// The field's name as reported, which is also how it is stored except for a thread's notes (stored as `brief`);
+    /// a set's element names the set.
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
@@ -410,7 +410,6 @@ impl FieldName {
             Self::Parent => field::PARENT,
             Self::Evidence => field::EVIDENCE,
             Self::Thread => field::THREAD,
-            Self::Brief => thread::BRIEF,
             Self::Owner => repository::OWNER,
             Self::Name => repository::NAME,
             Self::DefaultBranch => repository::DEFAULT_BRANCH,
@@ -452,8 +451,8 @@ pub enum ItemAssign {
 pub enum ThreadAssign {
     /// Its title.
     Title(String),
-    /// Its brief, or none.
-    Brief(Option<String>),
+    /// Its notes, or none.
+    Notes(Option<String>),
 }
 
 /// A value for one of a repository record's fields.
@@ -499,7 +498,7 @@ impl Assign {
                 Record::Thread(id.clone()),
                 match assign {
                     ThreadAssign::Title(_) => FieldName::Title,
-                    ThreadAssign::Brief(_) => FieldName::Brief,
+                    ThreadAssign::Notes(_) => FieldName::Notes,
                 },
             ),
             Self::Repository(id, assign) => (
@@ -531,7 +530,7 @@ impl Assign {
             },
             Self::Thread(_, assign) => match assign {
                 ThreadAssign::Title(v) => to_json(v),
-                ThreadAssign::Brief(v) => to_json(v),
+                ThreadAssign::Notes(v) => to_json(v),
             },
             Self::Repository(_, assign) => match assign {
                 RepositoryAssign::Owner(v)
@@ -656,7 +655,7 @@ pub enum Rule {
     /// Items would sit under each other in a cycle, through these.
     ParentCycle(Vec<String>),
     /// Items would wait for each other in a cycle, through these.
-    LinkCycle(Vec<String>),
+    WaitsForCycle(Vec<String>),
     /// An item would wait for one above or below it, which could then never be done: a parent is done only once its
     /// leaves are.
     LineageLink {
@@ -733,7 +732,7 @@ impl fmt::Display for Violation {
             Rule::ParentCycle(path) => {
                 write!(f, "items would sit under each other in a cycle: {}", path.join(", "))
             },
-            Rule::LinkCycle(path) => {
+            Rule::WaitsForCycle(path) => {
                 write!(f, "items would wait for each other in a cycle: {}", path.join(", "))
             },
             Rule::LineageLink { from, to } => write!(
@@ -973,7 +972,7 @@ impl Judging<'_, '_> {
             Record::Thread(_) => {
                 self.after
                     .threads
-                    .insert(id.clone(), Thread { id, title: Value::None, brief: Value::None });
+                    .insert(id.clone(), Thread { id, title: Value::None, notes: Value::None });
             },
             Record::Repository(_) => {
                 self.after.repositories.insert(
@@ -1199,7 +1198,7 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
             .parent_cycles()
             .into_iter()
             .map(|cycle| (true, cycle))
-            .chain(model.link_cycles().into_iter().map(|cycle| (false, cycle)))
+            .chain(model.waits_for_cycles().into_iter().map(|cycle| (false, cycle)))
             .collect()
     };
     let old = cycles(before);
@@ -1223,7 +1222,7 @@ fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
         found.push(Violation {
             change: change.map(|step| step.change),
             at,
-            rule: if parents { Rule::ParentCycle(cycle) } else { Rule::LinkCycle(cycle) },
+            rule: if parents { Rule::ParentCycle(cycle) } else { Rule::WaitsForCycle(cycle) },
         });
     }
     found
@@ -1424,8 +1423,8 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ThreadAssign::Title(v) => {
                     !conflicted(kind::THREAD, id, thread::TITLE) && record.title.holds(Some(v))
                 },
-                ThreadAssign::Brief(v) => {
-                    !conflicted(kind::THREAD, id, thread::BRIEF) && record.brief.holds(v.as_ref())
+                ThreadAssign::Notes(v) => {
+                    !conflicted(kind::THREAD, id, thread::BRIEF) && record.notes.holds(v.as_ref())
                 },
             }
         },
@@ -1487,8 +1486,8 @@ fn project(model: &mut Model, write: &Written, at: Millis) {
                     record.title = Value::One(v.clone());
                     thread::TITLE
                 },
-                ThreadAssign::Brief(v) => {
-                    record.brief = one(v.clone());
+                ThreadAssign::Notes(v) => {
+                    record.notes = one(v.clone());
                     thread::BRIEF
                 },
             };
@@ -1635,7 +1634,7 @@ fn emit(replica: &mut Replica, assign: &Assign, by: By<'_>) -> Result<(), WriteE
         Assign::Thread(_, ThreadAssign::Title(_)) => {
             put_json(replica, &key, thread::TITLE, assign, by)
         },
-        Assign::Thread(_, ThreadAssign::Brief(_)) => {
+        Assign::Thread(_, ThreadAssign::Notes(_)) => {
             put_json(replica, &key, thread::BRIEF, assign, by)
         },
         Assign::Repository(_, RepositoryAssign::Owner(_)) => {

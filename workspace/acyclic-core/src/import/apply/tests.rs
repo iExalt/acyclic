@@ -43,7 +43,7 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|c| c["entity"] == entity && c["id"] == id(n))
+            .find(|c| c["record"] == entity && c["id"] == id(n))
             .unwrap()
     };
     assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 3 + 1);
@@ -51,7 +51,7 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     assert_eq!(find("repository", 1)["fields"]["owner"], json!({"from": null, "to": "example"}));
     assert_eq!(find("item", 11)["fields"]["parent"], json!({"from": null, "to": id(10)}));
     assert_eq!(find("item", 12)["fields"]["thread"], json!({"from": null, "to": id(20)}));
-    let link = changes.as_array().unwrap().iter().find(|c| c["entity"] == "link").unwrap();
+    let link = changes.as_array().unwrap().iter().find(|c| c["record"] == "link").unwrap();
     assert_eq!(
         (&link["from"], &link["kind"], &link["action"]),
         (&json!(id(11)), &json!("waits-for"), &json!("create"))
@@ -90,7 +90,7 @@ fn what_a_document_leaves_out_is_kept() {
     let report = apply(&doc, &mut r, by(USER, 3)).unwrap();
     assert_eq!(
         serde_json::to_value(&report.changes).unwrap(),
-        json!([{"entity": "item", "id": id(11), "action": "update",
+        json!([{"record": "item", "id": id(11), "action": "update",
                 "fields": {"title": {"from": "Item 11", "to": "Renamed"}}}])
     );
     let m = model(&r);
@@ -117,7 +117,7 @@ fn a_list_given_replaces_the_records_own() {
     assert_eq!(
         removed,
         [
-            &json!({"entity": "link", "from": id(11), "kind": "waits-for", "to": id(12), "action": "remove", "fields": {}})
+            &json!({"record": "link", "from": id(11), "kind": "waits-for", "to": id(12), "action": "remove", "fields": {}})
         ]
     );
     assert_eq!(report.links, 1, "counts.links counts only created links");
@@ -228,7 +228,7 @@ fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
 fn a_deleted_thread_is_refused_as_a_deleted_item_is() {
     let mut r = replica();
     let mut doc = Import::new();
-    doc.threads = vec![crate::import::Thread { id: id(21), title: "Gone".into(), brief: None }];
+    doc.threads = vec![crate::import::Thread { id: id(21), title: "Gone".into(), notes: None }];
     apply(&doc, &mut r, by(USER, 1)).unwrap();
     assert!(crate::delete::delete_thread(&mut r, &id(21), by(USER, 2)).unwrap());
     let err = apply(&doc, &mut r, by(USER, 3)).unwrap_err();
@@ -347,7 +347,11 @@ fn evidence_naming_a_tracker_repository_that_cant_be_verified_is_refused_naming_
 fn an_unmapped_refusal_is_internal_even_with_mapped_violations() {
     let violations = vec![
         Violation { change: None, at: None, rule: Rule::Deleted(Record::Item("gone".into())) },
-        Violation { change: None, at: None, rule: Rule::LinkCycle(vec!["a".into(), "b".into()]) },
+        Violation {
+            change: None,
+            at: None,
+            rule: Rule::WaitsForCycle(vec!["a".into(), "b".into()]),
+        },
         Violation {
             change: None,
             at: None,

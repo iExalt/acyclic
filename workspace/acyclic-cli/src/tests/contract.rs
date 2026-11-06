@@ -207,7 +207,7 @@ fn a_journey_through_the_contract() {
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(false)), "a repeat");
     assert_eq!(sh.run("thread show Spare", AGENT), 3);
     let (code, out) = sh.output("item edit First --title Renamed --waits-for Second", AGENT);
-    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("link-cycle")), "{out}");
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("waits-for-cycle")), "{out}");
     assert_eq!(
         sh.output("item show First", AGENT).1["data"][0]["title"],
         "First",
@@ -663,25 +663,93 @@ fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
     }
 }
 
-/// The retired words never come out: no key or value in the contract's transcripts, the pretty tables or the
-/// examples the app's tests share says `backlog` or `blocked`. Text may still name `backlog` as what is stored.
+/// A thread's notes read as `notes` and are written under the older field `brief`, which replicas of older versions
+/// read: from `--notes`, the older `--brief` and `--no-brief`, the app's edit expecting the notes it read (or, as
+/// older clients say, its brief), and an import naming them `notes` or `brief`.
 #[test]
-fn no_output_says_backlog_or_blocked() {
-    const RETIRED: [&str; 2] = ["backlog", "blocked"];
-    fn walk(value: &serde_json::Value, at: &str) {
-        let check = |text: &str| assert!(!RETIRED.contains(&text), "{at} says {text}");
+fn notes_are_how_a_stored_brief_reads_and_brief_is_what_is_written() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let ids = ["f1", "f2", "f3", "f4", "f5", "f6"].map(id);
+    let [added, alias, edited, app, imported, older] = ids.each_ref().map(String::as_str);
+    for line in [
+        format!("thread add --id {added} --title Added --notes One"),
+        format!("thread add --id {alias} --title Alias --brief One"),
+        format!("thread add --id {edited} --title Edited --notes Gone"),
+        format!("thread edit {edited} --no-brief"),
+        format!("thread edit {edited} -b One"),
+        format!("thread add --id {app} --title App"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    let tracker = sh.path().join("tracker");
+    let app_edit = |sent: &str, notes: &str, field: &str, expected: serde_json::Value| {
+        let command =
+            serde_json::from_value(json!({"thread": {"edit": {"thread": app, sent: notes}}}));
+        let expect = serde_json::from_value(
+            json!([{"kind": "thread-field", "thread": app, "field": field, "value": expected}]),
+        );
+        crate::call_expected(command.unwrap(), tracker.clone(), &sh.env(&[]), expect.unwrap())
+    };
+    let (code, out) = app_edit("notes", "Two", "notes", json!("Else"));
+    assert_eq!((code, &out["error"]["code"]), (1, &json!("changed-since")), "{out}");
+    assert_eq!(app_edit("notes", "Two", "notes", json!(null)).0, 0);
+    assert_eq!(app_edit("brief", "One", "brief", json!("Two")).0, 0);
+    let plan = json!({"format": "acyclic-import", "version": 3, "threads": [
+        {"id": imported, "title": "Imported", "notes": "One"},
+        {"id": older, "title": "Older", "brief": "One"},
+    ]});
+    std::fs::write(sh.path().join("plan.json"), plan.to_string()).unwrap();
+    let (code, out) = sh.output("import plan.json", &[]);
+    assert_eq!(code, 0, "{out}");
+    let fields: Vec<&serde_json::Value> =
+        out["data"]["changes"].as_array().unwrap().iter().map(|change| &change["fields"]).collect();
+    assert!(fields.iter().all(|f| f["notes"]["to"] == "One" && f.get("brief").is_none()), "{out}");
+
+    let (_, shown) = sh.output(&format!("thread show {}", ids.join(" ")), AGENT);
+    let notes: Vec<&serde_json::Value> =
+        shown["data"].as_array().unwrap().iter().map(|row| &row["notes"]).collect();
+    assert_eq!(notes, [&json!("One"); 6], "{shown}");
+    let (tracker, _) = acyclic_core::store::Tracker::open(&tracker).unwrap();
+    let (_, state) = tracker.load().unwrap();
+    for id in &ids {
+        let key = acyclic_core::state::Key::new("thread", id).unwrap();
+        let stored: Vec<&serde_json::Value> =
+            state.field(&key, "brief").unwrap().values().map(|stamped| &stamped.value).collect();
+        assert_eq!(stored, [&json!("One")], "{id}");
+        assert!(state.field(&key, "notes").is_none(), "{id}");
+    }
+}
+
+/// The retired words never come out: no key or value in the contract's transcripts, the pretty tables or the
+/// examples the app's tests share says `backlog`, `blocked`, `brief` or `link-cycle`; no key is `entity` or `status`;
+/// and no `progress` has a `state`. Text may still name `backlog` as what is stored, and a need's identity, an opaque
+/// token kept stable across versions, names a thread's notes by their stored field, `brief`.
+#[test]
+fn no_output_says_a_retired_word() {
+    const RETIRED: [&str; 4] = ["backlog", "blocked", "brief", "link-cycle"];
+    const RETIRED_KEYS: [&str; 2] = ["entity", "status"];
+    fn walk(value: &serde_json::Value, at: &str, identity: bool) {
+        let check = |text: &str| {
+            let stored = identity && text == "brief";
+            assert!(!RETIRED.contains(&text) || stored, "{at} says {text}");
+        };
         match value {
             serde_json::Value::String(text) => {
                 check(text);
                 // A need's identity is JSON in a string.
                 if let Ok(inner @ serde_json::Value::Object(_)) = serde_json::from_str(text) {
-                    walk(&inner, at);
+                    walk(&inner, at, true);
                 }
             },
-            serde_json::Value::Array(values) => values.iter().for_each(|v| walk(v, at)),
+            serde_json::Value::Array(values) => values.iter().for_each(|v| walk(v, at, identity)),
             serde_json::Value::Object(fields) => fields.iter().for_each(|(key, v)| {
                 check(key);
-                walk(v, at);
+                assert!(!RETIRED_KEYS.contains(&key.as_str()), "{at} has the key {key}");
+                if key == "progress" {
+                    assert!(v.get("state").is_none(), "{at} has a progress state");
+                }
+                walk(v, at, identity);
             }),
             _ => {},
         }
@@ -689,17 +757,24 @@ fn no_output_says_backlog_or_blocked() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for name in ["commands.examples.json", "needs.examples.json"] {
         let path = root.join("../acyclic-app/src").join(name);
-        walk(&serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap(), name);
+        let json = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        walk(&json, name, false);
     }
     let mut read = 0;
-    for dir in ["src/tests/snapshots", "src/pretty/snapshots"] {
+    for dir in ["src/tests/snapshots", "src/pretty/snapshots", "src/snapshots"] {
         for entry in std::fs::read_dir(root.join(dir)).unwrap() {
             let path = entry.unwrap().path();
             let text = std::fs::read_to_string(&path).unwrap();
-            for word in RETIRED {
-                // A JSON key or value is the word in quotes; a table cell is the word alone.
-                let cell = dir.ends_with("pretty/snapshots")
-                    && text.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| w == word);
+            // A JSON key or value is the word in quotes (a need's identity escapes its own); a table cell or a
+            // listed error code is the word alone.
+            let words = RETIRED.iter().chain(&RETIRED_KEYS);
+            let cells: Vec<&str> = text
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .filter(|word| !word.is_empty())
+                .collect();
+            for word in words {
+                let cell = !dir.ends_with("tests/snapshots")
+                    && cells.iter().any(|w| w.eq_ignore_ascii_case(word));
                 assert!(
                     !text.contains(&format!("\"{word}\"")) && !cell,
                     "{} says {word}",

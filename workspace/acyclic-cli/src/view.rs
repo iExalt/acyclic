@@ -76,8 +76,8 @@ pub(crate) struct View<'a> {
 
 impl View<'_> {
     /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` (a
-    /// parent's rolled up from its leaves, none with no leaf to count), and a parent's `progress`, `{state, counts}`,
-    /// from the leaves under it and the claims on their threads. `counts`
+    /// parent's rolled up from its leaves and the claims on their threads, none with no leaf to count), and a parent's
+    /// `progress`, `{counts}`, from the leaves under it. `counts`
     /// has its leaves, and each leaf under its stage, so the stages add up to `leaves`. An id the model lacks has only its
     /// id.
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
@@ -99,8 +99,7 @@ impl View<'_> {
             row["stage"] = json!(stage);
         }
         if let Some(rollup) = self.readiness.progress(id)? {
-            row["progress"] =
-                json!({"state": rollup.progress.state, "counts": stage_counts(&rollup.stages)});
+            row["progress"] = json!({"counts": stage_counts(&rollup.stages)});
             if let Some(stage) = rollup.stage {
                 row["stage"] = json!(stage);
             }
@@ -164,7 +163,7 @@ impl View<'_> {
                 "readiness": self.readiness.thread(id)?,
                 "progress": self.thread_progress(listed)?,
                 "claims": claims,
-                "brief": thread.map(|t| &t.brief),
+                "notes": thread.map(|t| &t.notes),
                 "members": members,
             }),
         ))
@@ -199,8 +198,8 @@ impl View<'_> {
                     self.conflict(entry, kind, id, field, &thread)?
                 },
                 Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
-                Entry::LinkCycle { items: ids } => {
-                    json!({"kind": "link-cycle", "items": items(ids)?})
+                Entry::WaitsForCycle { items: ids } => {
+                    json!({"kind": "waits-for-cycle", "items": items(ids)?})
                 },
                 Entry::ParentCycle { items: ids } => {
                     json!({"kind": "parent-cycle", "items": items(ids)?})
@@ -223,7 +222,7 @@ impl View<'_> {
                 }),
                 Entry::Dangling { kind, id, field, target, fix } => {
                     let mut shown = json!({
-                        "kind": "dangling", "entity": kind, "id": id, "field": field, "target": target,
+                        "kind": "dangling", "record": kind, "id": id, "field": field, "target": target,
                     });
                     if let Some(fix) = fix {
                         shown["fix"] = json!(fix);
@@ -262,7 +261,8 @@ impl View<'_> {
             kept.iter().map(|kept| crate::keep::kept_json(self.model, kept)).collect();
         let identity = crate::keep::conflict_identity(self.model, entry, &kept);
         let mut shown = json!({
-            "kind": "conflict", "entity": entity, "id": id, "field": field, "values": values,
+            "kind": "conflict", "record": entity, "id": id,
+            "field": acyclic_core::model::shown_field(entity, field), "values": values,
             "keeps": keeps, "identity": identity,
         });
         match entity {
@@ -462,16 +462,16 @@ mod tests {
             assert_eq!(
                 row,
                 json!({"id": "c", "title": "C", "state": "open", "parent": null, "thread": null,
-                       "readiness": {"status": "waiting", "waiting": {"a": {"why": "open"}}}, "stage": "waiting"})
+                       "readiness": {"readiness": "waiting", "waiting": {"a": {"why": "open"}}}, "stage": "waiting"})
             );
-            // A parent's summary adds its progress from its leaves, in progress while their thread is claimed though
-            // none is started; a leaf's has none.
+            // A parent's summary adds its leaves counted by stage; a leaf's has none.
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
-                json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_progress": 2,
+                json!({"counts": {"done": 0, "leaves": 2, "in_progress": 2,
                        "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0}})
             );
-            // And its stage, rolled up from them under the key a leaf's has.
+            // And its stage, rolled up from them under the key a leaf's has: in progress while their thread is
+            // claimed though none is started.
             assert_eq!(view.item_row("goal").unwrap()["stage"], "in-progress");
             let shown = view.item("a", &view.model.items["a"]).unwrap();
             assert_eq!((shown.get("progress"), shown.get("size")), (None, None));
@@ -579,7 +579,7 @@ mod tests {
                 |kind: &str| -> Vec<&Json> { needs.iter().filter(|n| n["kind"] == kind).collect() };
             let conflicts = of("conflict");
             let parent = conflicts.iter().find(|c| c["field"] == "parent").unwrap();
-            assert_eq!(parent["entity"], "item");
+            assert_eq!(parent["record"], "item");
             assert_eq!(parent["item"]["id"], "b");
             assert_eq!(parent["values"], json!([null, "a"]));
             // Each value with the command that keeps it.

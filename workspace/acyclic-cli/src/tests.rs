@@ -81,7 +81,7 @@ fn an_internal_import_error_keeps_each_violation_in_its_details() {
         acyclic_core::write::Violation {
             change: None,
             at: None,
-            rule: acyclic_core::write::Rule::LinkCycle(vec!["a".into(), "b".into()]),
+            rule: acyclic_core::write::Rule::WaitsForCycle(vec!["a".into(), "b".into()]),
         },
         acyclic_core::write::Violation {
             change: None,
@@ -116,7 +116,7 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::NoItem("a1".into()).into(),
         WriteError::Deleted("a1".into()).into(),
         WriteError::ParentCycle("a1".into()).into(),
-        WriteError::LinkCycle(vec!["a1".into()]).into(),
+        WriteError::WaitsForCycle(vec!["a1".into()]).into(),
         WriteError::SelfLink("a1".into()).into(),
         DeleteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
         StoreError::Git("failed".into()).into(),
@@ -635,7 +635,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --parent b --no-parent",
         "acyclic item edit a --thread t --no-thread",
         "acyclic item edit a --waits-for b --no-waits-for b",
-        "acyclic thread edit t --brief b --no-brief",
+        "acyclic thread edit t --notes b --no-notes",
     ] {
         assert_eq!(check(line), Err("usage"), "{line}");
     }

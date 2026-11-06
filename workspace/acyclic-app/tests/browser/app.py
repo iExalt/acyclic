@@ -843,12 +843,12 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             page.wait_for_function("() => location.search === ''", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
-    # A parent's status is its stage, not its stored progress state: finished work reads done, and unstarted work
+    # A parent's status is its stage, from its leaves: finished work reads done, and unstarted work
     # says whether it is ready or waiting. Reuse the fixture and the page already open for links.
     parents = [row for row in plan.items.values() if row.get("progress")]
     cases = {
         "done": next((row for row in parents if row.get("stage") == "done"), None),
-        "unstarted": next((row for row in parents if row["progress"]["state"] == "open" and row.get("stage")), None),
+        "unstarted": next((row for row in parents if row.get("stage") in ("ready", "waiting")), None),
     }
     for case, parent in cases.items():
         if parent is None:

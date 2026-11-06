@@ -26,9 +26,9 @@ describe("layout source identity", () => {
     expect(sourceKey(original)).toBe(sourceKey(buildModel([item("box"), item("one", "box", [], { title: "Short" })])));
     expect(toggled.nodes.find((node) => node.id === "box")?.kind).toBe("collapsed");
     const counts = { done: 0, leaves: 1, in_progress: 0, ready: 1, waiting: 0, parked: 0, unthreaded: 0 };
-    const progressed = buildModel([item("box", null, [], { progress: { state: "ready", counts } })]);
+    const progressed = buildModel([item("box", null, [], { progress: { counts } })]);
     const advanced = buildModel([
-      item("box", null, [], { progress: { state: "in-progress", counts: { ...counts, ready: 0, in_progress: 1 } } }),
+      item("box", null, [], { progress: { counts: { ...counts, ready: 0, in_progress: 1 } } }),
     ]);
     expect(sourceKey(progressed)).not.toBe(sourceKey(advanced));
   });

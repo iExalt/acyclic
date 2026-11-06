@@ -291,7 +291,7 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
             {"kind": "item-field", "item": item, "field": "title", "value": "A"},
             {"kind": "item-field", "item": item, "field": "notes", "value": null},
             {"kind": "thread-field", "thread": thread, "field": "title", "value": "T"},
-            {"kind": "thread-field", "thread": thread, "field": "brief", "value": null},
+            {"kind": "thread-field", "thread": thread, "field": "notes", "value": null},
             {"kind": "waits-for", "item": item, "target": target, "present": true}
         ]
     });
@@ -448,7 +448,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"item": {"edit": {"item": "a", "no-waits-for": ["b"]}}}),
         json!({"thread": {"add": {"title": "T"}}}),
         json!({"thread": {"delete": {"thread": "t"}}}),
-        json!({"thread": {"edit": {"thread": "t", "no-brief": true}}}),
+        json!({"thread": {"edit": {"thread": "t", "no-notes": true}}}),
         json!({"repository": {"add": {"name": "o/n", "default-branch": "main"}}}),
         json!({"repository": {"edit": {"repository": "r", "default-branch": "trunk"}}}),
     ] {
