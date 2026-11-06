@@ -135,7 +135,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   and each heading 44, and rows stop where they would end past 770 px. Each populated initiative first gets one row, in
   order, and the rest of the eight rows go to them in order, so eight rows under up to three headings show, and fewer
   under more (one under each of six); an initiative beyond that is counted in "more in Threads". A phone has no
-  headings, so only the eight rows apply.
+  headings, so only the eight rows apply. Needs you and In progress share the rule without the fold: each populated
+  initiative gets a row before any takes a second, so the one in context need not fill the list first.
 - **The Overview, wide:** Needs you beside In progress, with Up next under it, once the Overview is 680 px wide, a 976
   px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
   stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px
