@@ -80,3 +80,14 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
     }
   });
 });
+
+describe("a thread of one in lists and tiles", () => {
+  const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = (selector: string) =>
+    css.match(new RegExp(`${selector.replace(/[.[\]]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+
+  it("takes the quiet ink, not a line's colour, for its grey dot badge and its tile's left edge", () => {
+    expect(rule(".badge.dot.task")).toContain("background: var(--muted)");
+    expect(rule(".thread-tile[data-task]")).toContain("border-left-color: var(--muted)");
+  });
+});

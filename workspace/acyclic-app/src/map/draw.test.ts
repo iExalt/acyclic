@@ -113,13 +113,16 @@ describe("a task in no thread of its own", () => {
     return { solo: mark("solo"), other: mark("other") };
   };
 
-  it("draws like an item in no thread, with no stripe, dot or ring, once claimed too", () => {
+  it("draws a stripe and dot like a threaded item's, in grey, once claimed too", () => {
+    const grey = PALETTES.dark.muted;
     for (const thread of [null, "s.one"]) {
       const { solo, other } = marks(thread);
-      expect(solo).not.toMatch(/<rect|<circle[^>]*fill="#|stroke-dasharray/);
-      // A real thread's item keeps its stripe and dot.
-      expect(other).toMatch(/<rect/);
-      expect(other).toMatch(/<circle[^>]*fill="#/);
+      expect(solo).toContain(`<rect width="6" height="48" fill="${grey}"/>`);
+      expect(solo).toContain(`<circle cx="24" cy="24" r="5" fill="${grey}"/>`);
+      expect(solo).not.toContain("stroke-dasharray");
+      // A real thread's item has the same shapes, in its line's colour.
+      expect(other).toMatch(new RegExp(`<rect width="6" height="48" fill="#(?!${grey.slice(1)})`));
+      expect(other).toMatch(new RegExp(`<circle cx="24" cy="24" r="5" fill="#(?!${grey.slice(1)})`));
     }
   });
 });
