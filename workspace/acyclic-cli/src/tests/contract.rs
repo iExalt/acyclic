@@ -241,21 +241,21 @@ fn a_journey_through_the_contract() {
     let (_, under) =
         sh.output(&format!("item add --id {a4} --title Third-follow-up --parent Second"), AGENT);
     assert_eq!(under["data"]["placed"][0]["thread"], json!(t2), "a parent passes its thread down");
-    // A parent is finished once its children are.
+    // A parent reads done once its children are, and is never finished by hand, even forced.
     let [g1, g1a, g2, g2a] = ["c1", "c2", "c3", "c4"].map(id);
     sh.run(&format!("item add --id {g1} --title Goal"), AGENT);
     sh.run(&format!("item add --id {g1a} --title Part --parent Goal"), AGENT);
     let (code, out) = sh.output("item done Goal", AGENT);
-    assert_eq!((code, &out["error"]["details"]["open"]), (1, &json!([g1a])));
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("parent")));
     sh.run("item edit Part --thread Follow-ups", AGENT);
     sh.run("thread claim Follow-ups", AGENT);
     sh.run("item done Part", AGENT);
-    assert_eq!(sh.run("item done Goal", AGENT), 0, "a parent is finished once its children are");
+    assert_eq!(sh.output("item show Goal", AGENT).1["data"][0]["stage"], "done");
     // A done item's title is free again, though the title then names both.
     sh.run(&format!("item add --id {g2} --title Goal"), AGENT);
     assert_eq!(sh.output("item show Goal", AGENT).1["error"]["code"], "ambiguous");
     sh.run(&format!("item add --id {g2a} --title Part --parent 0000c3"), AGENT);
-    assert_eq!(sh.run("item done 0000c3 --force", AGENT), 0, "or when forced");
+    assert_eq!(sh.run("item done 0000c3 --force", AGENT), 1, "forcing doesn't finish a parent");
     // Only an item nothing refers to is deleted, and it is gone for good.
     let [d1, d1a] = ["d1", "d2"].map(id);
     assert_eq!(sh.run(&format!("item add --id {d1} --title Doomed"), AGENT), 0);

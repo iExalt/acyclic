@@ -26,16 +26,12 @@ pub mod item {
     pub const PARENT: &str = "parent";
     /// A rough size.
     pub const SIZE: &str = "size";
-    /// Whether this done subtree's root is archived.
-    pub const ARCHIVED: &str = "archived";
     /// Evidence of completion.
     pub const EVIDENCE: &str = "evidence";
     /// The thread the item belongs to; at most one, since it is a single field.
     pub const THREAD: &str = "thread";
     /// Set when the item is deleted: a tombstone no write clears. See `crate::delete`.
     pub const DELETED: &str = "deleted";
-    /// Set when the item is reopened, until it is done again; flags its dependents.
-    pub const REOPENED: &str = "reopened";
 }
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.

@@ -26,7 +26,6 @@ export function item(id: string, parent: string | null = null, waitsFor: string[
     state: "backlog",
     notes: null,
     size: null,
-    archived: false,
     links: { waits_for: waitsFor, waited_on_by: [] },
     conflicts: {},
     ...extra,

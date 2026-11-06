@@ -76,18 +76,6 @@ describe("foldDone", () => {
     expect(kidsOf(folded, "p")).toEqual(["a1", "a2", "b1", "b2", "x"]);
   });
 
-  it("counts an archived leaf as no work left, and folds no archived leaf", () => {
-    const folded = fold([
-      item("p"),
-      done("a1", "p", "a"),
-      done("a2", "p", "a"),
-      ready("a3", "p", "a"),
-      item("a3", "p", [], { stage: "ready", thread: "a", archived: true }),
-      ready("x", "p", null),
-    ]);
-    expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);
-  });
-
   it("makes no done box of one: a finished thread's only leaf in a box stays a tile, and the Done box needs two", () => {
     const one = fold([item("p"), done("a1", "p", "a"), ready("x", "p", null)]);
     expect(one.doneBoxes.size).toBe(0);
@@ -98,16 +86,6 @@ describe("foldDone", () => {
   it("makes no Done box of a box's whole contents, whose own fold already does that", () => {
     const folded = fold([item("p"), done("a1", "p", "a"), done("a2", "p", "a"), done("r", "p", null)]);
     expect(kidsOf(folded, "p")).toEqual(["r", "~thread p a"]);
-  });
-
-  it("makes no Done box beside only archived work, which may be hidden", () => {
-    const folded = fold([
-      item("p"),
-      done("a1", "p", "a"),
-      done("r", "p", null),
-      item("old", "p", [], { stage: "ready", archived: true }),
-    ]);
-    expect(folded.model.children.has("~done p")).toBe(false);
   });
 
   it("counts a thread the plan doesn't name as none", () => {
@@ -136,11 +114,7 @@ describe("foldDone", () => {
 describe("a folded model on the Map", () => {
   it("opens with the doneBoxes folded, their links lifted to them and those inside dropped", () => {
     const folded = fold([...chained(true), item("far"), ready("y", "far", null, ["a2"])]);
-    const view = visible(
-      folded.model,
-      { collapsed: collapsedWith(folded.model, new Map()), showArchived: false },
-      folded.doneBoxes,
-    );
+    const view = visible(folded.model, { collapsed: collapsedWith(folded.model, new Map()) }, folded.doneBoxes);
     const node = view.nodes.find((one) => one.id === "~thread p a");
     // Done, as everything it holds is: drawn as finished work, as core would tell a parent of it.
     expect(node).toMatchObject({
@@ -167,11 +141,7 @@ describe("a folded model on the Map", () => {
       ["~done p", false],
       ["p", false],
     ]);
-    const view = visible(
-      folded.model,
-      { collapsed: collapsedWith(folded.model, toggles), showArchived: false },
-      folded.doneBoxes,
-    );
+    const view = visible(folded.model, { collapsed: collapsedWith(folded.model, toggles) }, folded.doneBoxes);
     expect(view.nodes.find((one) => one.id === "a1")?.parent).toBe("~thread p a");
     expect(view.nodes.find((one) => one.id === "~done p")).toMatchObject({ kind: "box", note: "5 done in 2 threads" });
   });

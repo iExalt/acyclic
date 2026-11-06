@@ -3,8 +3,7 @@
 
 use serde_json::Value as Json;
 
-use crate::archive::{self, Reason};
-use crate::model::{By, Evidence, Item, ItemState, Model, Reopened, Size, Value};
+use crate::model::{By, Evidence, Item, ItemState, Model, Size, Value};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
@@ -25,10 +24,6 @@ pub struct Kept {
 pub enum Keep {
     /// This change set, which the judge accepts and which settles the conflict.
     Write(ChangeSet),
-    /// Reopening the item, which is done.
-    Reopen(String),
-    /// Archiving the item, which is eligible.
-    Archive(String),
     /// Nothing can.
     Not(Unkept),
 }
@@ -46,10 +41,8 @@ pub enum Unkept {
     NoCommand,
     /// A repository's owner and name are written together, and the other one is in conflict too.
     NameAlsoConflicted,
-    /// Only done work is reopened or keeps evidence, and the item isn't done.
+    /// Only done work keeps evidence, and the item isn't done.
     NotDone,
-    /// The item can't be archived, for these reasons.
-    Ineligible(Vec<Reason>),
     /// The judge refuses the change that would keep it.
     Refused(Vec<Violation>),
     /// The change would leave the field in conflict.
@@ -80,18 +73,7 @@ pub fn keeps(
         .map(|value| {
             let keep = match keep(state, model, (entity, id, name), value) {
                 Keep::Write(changes) => verify(model, (entity, id, name), changes, by),
-                Keep::Archive(item) => {
-                    let reasons = archive::eligibility(model, &item, by.at);
-                    if reasons.is_empty() {
-                        Keep::Archive(item)
-                    } else {
-                        Keep::Not(Unkept::Ineligible(reasons))
-                    }
-                },
-                Keep::Reopen(item) if !model.items.get(&item).is_some_and(Item::is_done) => {
-                    Keep::Not(Unkept::NotDone)
-                },
-                other => other,
+                Keep::Not(why) => Keep::Not(why),
             };
             Ok(Kept { value: value.clone(), keep })
         })
@@ -167,16 +149,6 @@ fn keep(
                     Change::Finish { item: id.to_owned(), evidence: Some(evidence), force: true };
                 Keep::Write(ChangeSet(vec![finish]))
             }),
-        },
-        (kind::ITEM, field::ARCHIVED) => match value {
-            Json::Bool(true) => Keep::Archive(id.to_owned()),
-            Json::Null | Json::Bool(false) => Keep::Not(Unkept::NoCommand),
-            _ => Keep::Not(Unkept::Unreadable),
-        },
-        (kind::ITEM, field::REOPENED) => match value {
-            Json::Null => Keep::Not(Unkept::NoCommand),
-            _ => typed::<Reopened>(value)
-                .map_or(Keep::Not(Unkept::Unreadable), |_| Keep::Reopen(id.to_owned())),
         },
         (kind::THREAD, thread::TITLE) => {
             required(parsed(value), &|t| set(Assign::Thread(id.to_owned(), ThreadAssign::Title(t))))

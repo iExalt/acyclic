@@ -61,7 +61,8 @@ Only waits-for orders work: ids, titles and thread membership never do, so say e
 For example, `acyclic item edit 'Beds' --thread 'Garden' --no-notes --waits-for 'Soil' --no-waits-for 'Clay'` moves
 Beds into the Garden thread, clears its notes, makes it wait for Soil and no longer for Clay. Thread membership is
 `acyclic item edit --thread` (`--no-thread` takes the item out of its thread). `--state` sets `backlog` or `parked`;
-`item done` sets `done`, and `item reopen` puts a done item back in the backlog. What is under way shows in an item's
+`item done` sets `done` on a leaf, and `item reopen` puts a done leaf back in the backlog; a parent is done once
+its leaves are, and is never finished or reopened by hand. What is under way shows in an item's
 `stage`, from its thread's claim, not in its state.
 
 Leave out `--id` in `acyclic item add`, `acyclic thread add` and `acyclic repository add`: the tracker makes a UUIDv7
@@ -71,7 +72,7 @@ prints N of them and needs no tracker, and pass each as `--id`; any other id is 
 earlier try; the error's details give its id. Titles are how people find work, so two open items never share one.
 Never put counters in titles.
 
-`acyclic item` also has `reopen`, `archive` and `delete`; `delete` refuses an item with children, anything it waits
+`acyclic item` also has `reopen` and `delete`; `delete` refuses an item with children, anything it waits
 for or that waits for it, evidence, a done state or someone else's live claim on its thread. `acyclic import <file>`
 applies a whole plan document, its records named by ids from `acyclic id`, and `--dry-run` reports what it would
 change. `acyclic import --schema` prints the plan format. `acyclic thread delete` deletes a thread no item is in and
@@ -101,7 +102,7 @@ waits-for and thread it belongs with.
 - A `clock-jump` refusal means this replica's saved time is more than five minutes ahead of the system clock. Correct
   the clock and wait until it is within five minutes of the saved time. Writes remain stamped at the saved time until
   the clock catches up fully. If this clone has a shared remote, sync it and continue from a new clone with an unused
-  replica id. That migration keeps old timestamps: future-dated done work keeps its archive wait, and live claims keep
+  replica id. That migration keeps old timestamps: live claims keep
   their expiry until they expire or their holder releases them.
 
 ## Finding and doing work

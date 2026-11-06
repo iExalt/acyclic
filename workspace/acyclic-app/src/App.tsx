@@ -26,13 +26,12 @@ import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
 import { byTitle, linesOf } from "./lines";
-import { buildModel, inArchived } from "./map/model";
+import { buildModel } from "./map/model";
 import { NeedsList } from "./NeedsList";
 import { NoticePlacement } from "./NoticePlacement";
 import { Notify } from "./Notify";
 import {
   addressOf,
-  type Found,
   type Intent,
   landing,
   landingPlace,
@@ -135,7 +134,6 @@ export function App() {
     (field: HTMLInputElement | null) => field?.setSelectionRange(0, field.value.length),
     [],
   );
-  const [showArchived, setShowArchived] = useState(false);
   /**
    * Where the user is, and what the moves since the last render asked of what is drawn. `placeNow` is the place as of
    * the latest move, read by the next one before a render, so moves made one after another, in a handler or across a
@@ -151,7 +149,6 @@ export function App() {
   /** What the moves read of the plan and the screen: kept current at each render. */
   const worldNow = useRef<Omit<World, "dirty">>({
     has: () => false,
-    archived: () => false,
     threadOf: () => null,
     wide: false,
   });
@@ -235,11 +232,10 @@ export function App() {
         : outlineOf(
             model,
             sorted.map((one) => one.id),
-            showArchived,
           ),
-    [model, sorted, showArchived],
+    [model, sorted],
   );
-  /** Each thread's leaves by stage, as core counts them: every one but those archived, read with the plan. */
+  /** Each thread's leaves by stage, as core counts them: read with the plan. */
   const counts = useMemo(
     () => new Map(loaded === null ? [] : loaded.threads.threads.map((one) => [one.id, one.counts])),
     [loaded],
@@ -252,7 +248,6 @@ export function App() {
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   worldNow.current = {
     has: (id) => model?.items.has(id) ?? false,
-    archived: (id) => model !== null && !showArchived && inArchived(model, id),
     threadOf: (id) => model?.items.get(id)?.thread ?? null,
     wide,
   };
@@ -261,12 +256,12 @@ export function App() {
       model === null || outline === null ? { project: null, thread: null } : currentRows(model, outline, selected),
     [model, outline, selected],
   );
-  // An item that went away, deleted or moved out of reach elsewhere, or hidden with archived items, is no longer
+  // An item that went away, deleted or moved out of reach elsewhere, is no longer
   // selected: what's selected is drawn, so the panel and the address never name an item the Map doesn't show.
   useEffect(() => {
     if (model === null || selected === null) return;
-    if (!model.items.has(selected) || (!showArchived && inArchived(model, selected))) go({ kind: "gone" });
-  }, [model, selected, showArchived, go]);
+    if (!model.items.has(selected)) go({ kind: "gone" });
+  }, [model, selected, go]);
 
   /** An item chosen anywhere but on the Map: to the Map for it, brought into view with `pin` held still. */
   const select = useCallback((id: string, pin: string | null = null) => go({ kind: "select", id, pin }), [go]);
@@ -309,9 +304,9 @@ export function App() {
       name: lines.get(one.id)?.name ?? one.id,
     }));
     const item = panel === "item" && selected !== null ? model.items.get(selected) : undefined;
-    const plan = { model, threads, working, showArchived, item: item === undefined ? null : item };
+    const plan = { model, threads, working, item: item === undefined ? null : item };
     return mode.kind === "idle" ? commandEntries(plan) : targets(plan, mode.kind, mode.item);
-  }, [showCommand, model, sorted, lines, working, showArchived, mode, panel, selected]);
+  }, [showCommand, model, sorted, lines, working, mode, panel, selected]);
   /** Drops what was said of an unsaved form, once the form has gone. */
   const formClosed = useCallback(() => {
     tracker.event({ kind: "form-closed" });
@@ -412,9 +407,7 @@ export function App() {
     }
     // A write can name a new item before the refreshed model draws it.
     const drawable =
-      desired.item !== null && (!worldNow.current.has(desired.item) || worldNow.current.archived(desired.item))
-        ? { ...desired, item: null }
-        : desired;
+      desired.item !== null && !worldNow.current.has(desired.item) ? { ...desired, item: null } : desired;
     const projected = placesByDepth(drawable, { ...worldNow.current, dirty: false });
     const source = readHistory(window.history.state)?.place;
     const sourceWide = historyWide(window.history.state);
@@ -428,7 +421,7 @@ export function App() {
   historyMove.current = driveHistory;
   useLayoutEffect(() => {
     historyMove.current(placeNow.current, "ordinary", true);
-  }, [model, wide, showArchived, place, wanted]);
+  }, [model, wide, place, wanted]);
   useEffect(() => {
     const onMove = (event: PopStateEvent) => {
       const pending = ownBack.current;
@@ -519,23 +512,17 @@ export function App() {
       return;
     }
     const has = {
-      item: (id: string) => (!model.items.has(id) ? null : inArchived(model, id) ? "archived" : "shown") as Found,
+      item: (id: string) => model.items.has(id),
       thread: (id: string) => sorted.some((one) => one.id === id),
     };
-    // A place an entry held lands as a link does, gone or archived since.
+    // A place an entry held lands as a link does, gone since.
     const found = link.place === undefined ? landing(link, has) : landingPlace(link.place, has);
     if ("place" in found) {
-      if (found.place.item !== null && found.archived) setShowArchived(true);
       go({ kind: "restore", place: found.place });
     } else {
-      if (found.wanted.item !== null && found.archived) setShowArchived(true);
       go({ kind: "link", wanted: found.wanted });
     }
-    const projected = placesByDepth(placeNow.current, {
-      ...worldNow.current,
-      archived: found.archived ? () => false : worldNow.current.archived,
-      dirty: false,
-    });
+    const projected = placesByDepth(placeNow.current, { ...worldNow.current, dirty: false });
     const actualDepth = projected.length - 1;
     const destination = projected[actualDepth];
     if (destination !== undefined && (link.source !== "message" || cursor.current === null)) {
@@ -567,17 +554,9 @@ export function App() {
             lasts: "news",
             at: null,
           }
-        : found.archived
-          ? {
-              text: "That item is archived, so archived items are showing",
-              offer: "hide-archived",
-              retry: null,
-              lasts: "news",
-              at: null,
-            }
-          : was?.lasts === "offer"
-            ? was
-            : null,
+        : was?.lasts === "offer"
+          ? was
+          : null,
     );
   };
   // Tried again as the plan loads and as each form closes.
@@ -638,10 +617,9 @@ export function App() {
    * typed: that says how to leave it instead, as Escape does.
    */
   const runCommand = (run: Run) => {
-    if (run.kind === "target" || run.kind === "archived" || run.kind === "refresh" || dirtyForm()) {
+    if (run.kind === "target" || run.kind === "refresh" || dirtyForm()) {
       go({ kind: "shut", layer: "command" });
       if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
-      if (run.kind === "archived") return setShowArchived((was) => !was);
       if (run.kind === "refresh") return refresh();
       return tell(UNSAVED);
     }
@@ -768,17 +746,6 @@ export function App() {
             Undo
           </button>
         ) : null}
-        {notice.offer === "hide-archived" ? (
-          <button
-            type="button"
-            onClick={() => {
-              tracker.dismiss();
-              setShowArchived(false);
-            }}
-          >
-            Hide archived
-          </button>
-        ) : null}
         {notice.offer === "refresh" ? (
           <button
             type="button"
@@ -819,15 +786,6 @@ export function App() {
         : null;
   const menu = (
     <>
-      <label>
-        <input
-          type="checkbox"
-          checked={showArchived}
-          onChange={(event) => setShowArchived(event.target.checked)}
-          data-testid="show-archived"
-        />
-        Show archived items
-      </label>
       <Notify />
       <label>
         <input
@@ -904,7 +862,6 @@ export function App() {
         >
           <PlanMap
             items={shown}
-            showArchived={showArchived}
             thread={thread}
             lines={lines}
             palette={palette}

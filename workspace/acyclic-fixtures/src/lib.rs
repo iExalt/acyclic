@@ -187,7 +187,6 @@ impl Generator {
             repositories: (depth > 1).then(|| vec![self.repository_ids[repository].clone()]),
             waits_for: None,
             size: Some(size),
-            archived: false,
             evidence: None,
         });
         self.depth.push(depth);
@@ -237,47 +236,48 @@ impl Generator {
         apportion(total, &weights, 1, total)
     }
 
-    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; umbrellas are
-    /// done only when their whole subtree is. Some done umbrellas are archived.
+    /// Done work is a prefix of the depth-first order, so every dependency of a done item is done too; only leaves are
+    /// marked done, since a parent reads done from its leaves.
+    ///
+    /// The prefix and the random draws over it are as they were when umbrellas were stored done too, so the rest of
+    /// the fixture, which the seed's threads and links come from, stays as it was.
     fn states(&mut self) {
         let done_target = self.scaled(35.0);
+        let mut prefix = vec![false; self.total];
         let mut done = 0;
         let mut index = 0;
         while done < done_target && index < self.total {
             if self.depth[index] >= 3 {
-                self.import.items[index].state = Some(State::Done);
+                prefix[index] = true;
                 done += 1;
             }
             index += 1;
         }
         let prefix_end = index;
-        // An umbrella in the prefix is done when its whole subtree lies inside the prefix.
+        // An umbrella in the prefix once read done when its whole subtree lay inside the prefix.
         for umbrella in (0..prefix_end).filter(|&i| self.depth[i] == 2) {
             let subtree_end =
                 (umbrella + 1..self.total).find(|&i| self.depth[i] <= 2).unwrap_or(self.total);
-            if subtree_end <= prefix_end {
-                self.import.items[umbrella].state = Some(State::Done);
-            }
+            prefix[umbrella] = subtree_end <= prefix_end;
         }
-        let done_umbrellas: Vec<usize> = (0..prefix_end)
-            .filter(|&i| self.depth[i] == 2 && self.import.items[i].state == Some(State::Done))
-            .collect();
-        let archive = self.scaled(1.0).min(done_umbrellas.len());
-        for &umbrella in &done_umbrellas[..archive] {
-            self.import.items[umbrella].archived = true;
-        }
-        for index in 0..self.total {
+        let parents: HashSet<usize> = self.parent.iter().flatten().copied().collect();
+        for (index, &in_prefix) in prefix.iter().enumerate() {
+            let leaf = !parents.contains(&index);
             let item = &mut self.import.items[index];
-            if item.state == Some(State::Done) {
+            if in_prefix {
+                // Drawn for parents too, which keeps the draws after them where they were.
                 if self.rng.chance(0.5) {
                     let (a, b, c) = (self.rng.next_u64(), self.rng.next_u64(), self.rng.next_u64());
                     let sha = format!("{a:016x}{b:016x}{:08x}", c >> 32);
                     // Only items under a root are done, and each touches a repository.
                     let repository = item.repositories.iter().flatten().next();
-                    item.evidence = Some(Evidence {
+                    item.evidence = leaf.then(|| Evidence {
                         commit: repository.map(|repository| format!("{repository}@{sha}")),
                         text: None,
                     });
+                }
+                if leaf {
+                    item.state = Some(State::Done);
                 }
             } else if self.depth[index] >= 3 {
                 // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays in the backlog.
@@ -371,6 +371,19 @@ impl Generator {
         owner
     }
 
+    /// Whether an item reads done: a leaf stored done, or a parent whose leaves all are. A subtree follows its root
+    /// in the depth-first order, deeper than it.
+    fn reads_done(&self, index: usize) -> bool {
+        let subtree = (index + 1..self.total).take_while(|&i| self.depth[i] > self.depth[index]);
+        let mut leaves =
+            subtree.filter(|&i| self.depth.get(i + 1).is_none_or(|&next| next <= self.depth[i]));
+        if self.depth.get(index + 1).is_some_and(|&next| next > self.depth[index]) {
+            leaves.all(|i| self.import.items[i].state == Some(State::Done))
+        } else {
+            self.import.items[index].state == Some(State::Done)
+        }
+    }
+
     fn is_related_by_ancestry(&self, a: usize, b: usize) -> bool {
         let ancestor_of = |upper: usize, mut lower: usize| {
             while let Some(p) = self.parent[lower] {
@@ -415,9 +428,7 @@ impl Generator {
                     }
                     let to = earlier[self.rng.below(earlier.len())];
                     // Done items depend only on done items; skip links that would break that.
-                    if self.import.items[from].state == Some(State::Done)
-                        && self.import.items[to].state != Some(State::Done)
-                    {
+                    if self.import.items[from].state == Some(State::Done) && !self.reads_done(to) {
                         continue;
                     }
                     if !seen.insert((from, to, waits)) || !waits {
@@ -498,7 +509,6 @@ mod tests {
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
         assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
-        assert!(stats.archived > 0, "{at}");
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;
@@ -536,7 +546,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_249, 6_123_376_084_847_002_964));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_110, 5_764_513_502_845_841_242));
     }
 
     #[test]

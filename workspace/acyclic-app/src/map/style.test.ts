@@ -4,17 +4,16 @@ import type { Stage } from "../api";
 import { linesOf } from "../lines";
 import { PALETTES, type Palette } from "../palette";
 import { boxMarkOf, markOf } from "./marks";
-import { faded, hatchOf, styleFor } from "./style";
+import { faded, styleFor } from "./style";
 
 /** A hex colour as Cytoscape gives a parsed one back. */
 const rgb = (hex: string) => `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(",")})`;
-const HATCH = hatchOf(PALETTES.dark);
 
 /** A tile's marks, as an image its data carries. */
 const MARK = "data:image/svg+xml;utf8,%3Csvg%2F%3E";
 
 describe("style", () => {
-  it("draws each kind of box with its chevron, a tile with its marks, crosses out what is archived, and dashes an open archived box", () => {
+  it("draws each kind of box with its chevron, a tile with its marks", () => {
     const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
     const node = (id: string, classes: string) =>
       core.add({
@@ -38,13 +37,8 @@ describe("style", () => {
     };
     const plain = { border: "solid", align: "left-inside", opacity: 1, fill: 1, colour: expect.any(String) };
     expect(drawn("leaf")).toEqual({ ...plain, images: [MARK] });
-    expect(drawn("leaf archived")).toEqual({ ...plain, images: [HATCH, MARK] });
     expect(drawn("box")).toEqual({ ...plain, images: [MARK] });
-    expect(drawn("box archived")).toEqual({ ...plain, images: [MARK], border: "dashed" });
     expect(drawn("collapsed")).toEqual({ ...plain, images: [MARK] });
-    expect(drawn("collapsed archived")).toEqual({ ...plain, images: [HATCH, MARK] });
-    // Lit or selected, an open archived box keeps its dash.
-    expect(drawn("box archived lit selected").border).toBe("dashed");
     // Outside the thread lit, a tile fades, but its title stays at full strength, muted.
     expect(drawn("leaf dim")).toMatchObject({ opacity: 1, fill: 0.35, colour: rgb(PALETTES.dark.muted) });
   });
@@ -86,8 +80,7 @@ describe("a scheme's drawing", () => {
         text:
           JSON.stringify(styleFor(p), (_, value) => (typeof value === "function" ? String(value) : value)) +
           marks.join("") +
-          boxes.join("") +
-          decodeURIComponent(hatchOf(p)),
+          boxes.join(""),
         lines,
       };
     };

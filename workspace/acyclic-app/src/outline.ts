@@ -18,22 +18,20 @@ export interface Outline {
 }
 
 /**
- * The outline of `model` as the Map shows it, archived subtrees only when `showArchived`, for `threads` in their
+ * The outline of `model` as the Map shows it, for `threads` in their
  * order, and its projects in the order the Map packs its top level in: each after those it waits on. A project is a
  * top-level item with something under it shown; a thread is in a project when any item shown in it, the project itself
  * included, is in the thread.
  */
-export function outlineOf(model: Model, threads: readonly string[], showArchived: boolean): Outline {
-  const shown = (id: string) => showArchived || !model.items.get(id)?.archived;
+export function outlineOf(model: Model, threads: readonly string[]): Outline {
   const projects: { id: string; title: string; threads: Set<string> }[] = [];
-  for (const root of topOrder(model, showArchived)) {
-    const kids = (model.children.get(root) ?? []).filter(shown);
-    if (!shown(root) || kids.length === 0) continue;
+  for (const root of topOrder(model)) {
+    if ((model.children.get(root) ?? []).length === 0) continue;
     const touched = new Set<string>();
     const walk = (id: string) => {
       const thread = model.items.get(id)?.thread;
       if (thread !== null && thread !== undefined) touched.add(thread);
-      for (const child of model.children.get(id) ?? []) if (shown(child)) walk(child);
+      for (const child of model.children.get(id) ?? []) walk(child);
     };
     walk(root);
     projects.push({ id: root, title: model.items.get(root)?.title ?? root, threads: touched });

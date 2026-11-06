@@ -19,7 +19,6 @@ macro_rules! fixture {
     };
 }
 
-pub mod archive;
 pub mod claim;
 pub mod delete;
 pub mod graph;

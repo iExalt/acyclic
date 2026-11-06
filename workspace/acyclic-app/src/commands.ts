@@ -2,14 +2,12 @@
 // ranking is tested without a browser.
 
 import type { Model } from "./map/model";
-import { inArchived } from "./map/model";
 import { natural } from "./natural";
 import type { View } from "./Shell";
 
 export type Run =
   | { kind: "view"; view: View }
   | { kind: "add" }
-  | { kind: "archived" }
   | { kind: "refresh" }
   | { kind: "item"; id: string }
   | { kind: "thread"; id: string }
@@ -53,14 +51,13 @@ export interface Plan {
   threads: readonly { id: string; name: string }[];
   /** The threads at work, listed before a query is typed. */
   working: ReadonlySet<string>;
-  showArchived: boolean;
   /** The item whose panel shows, which the menu offers to act on. */
   item?: { id: string; title: string } | null;
 }
 
 const VIEW_NAMES: Record<View, string> = { overview: "Overview", map: "Map", threads: "Threads", needs: "Needs you" };
 
-/** Every entry the menu can find in `plan`: actions, threads, projects, then items, archived ones only while shown. */
+/** Every entry the menu can find in `plan`: actions, threads, projects, then items. */
 export function entries(plan: Plan): Entry[] {
   const actions: Entry[] = [
     ...(["overview", "map", "threads", "needs"] as const).map((view) =>
@@ -74,14 +71,6 @@ export function entries(plan: Plan): Entry[] {
       }),
     ),
     entry({ key: "add", group: "Actions", title: "New item", detail: null, also: "add", run: { kind: "add" } }),
-    entry({
-      key: "archived",
-      group: "Actions",
-      title: plan.showArchived ? "Hide archived items" : "Show archived items",
-      detail: null,
-      also: "",
-      run: { kind: "archived" },
-    }),
     entry({
       key: "refresh",
       group: "Actions",
@@ -201,8 +190,7 @@ const where = (project: { id: string; title: string } | null, parent: { id: stri
 /**
  * Every item shown, with its parent, root project and whether it is a project: a top-level item with children.
  */
-function listed({ model, showArchived }: Plan) {
-  const shown = (id: string) => showArchived || !inArchived(model, id);
+function listed({ model }: Plan) {
   /** The root project an item is in, from its top-level ancestor; parents that loop end the walk. */
   const projectOf = (id: string) => {
     const seen = new Set([id]);
@@ -216,18 +204,16 @@ function listed({ model, showArchived }: Plan) {
     return top === id || project === undefined ? null : { id: top, title: project.title };
   };
   const roots = new Set(model.roots);
-  return [...model.items.values()]
-    .filter((item) => shown(item.id))
-    .map((item) => {
-      const parent = item.parent === null ? null : (model.items.get(item.parent) ?? null);
-      return {
-        id: item.id,
-        title: item.title,
-        parent: parent === null ? null : { id: parent.id, title: parent.title },
-        project: projectOf(item.id),
-        isProject: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
-      };
-    });
+  return [...model.items.values()].map((item) => {
+    const parent = item.parent === null ? null : (model.items.get(item.parent) ?? null);
+    return {
+      id: item.id,
+      title: item.title,
+      parent: parent === null ? null : { id: parent.id, title: parent.title },
+      project: projectOf(item.id),
+      isProject: roots.has(item.id) && (model.children.get(item.id)?.length ?? 0) > 0,
+    };
+  });
 }
 
 /** Folded for matching: case and accents set aside, so "resume" finds "Résumé". */

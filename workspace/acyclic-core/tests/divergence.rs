@@ -262,7 +262,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
         readiness.thread_cycles().unwrap(),
         Vec::<std::collections::BTreeSet<String>>::new()
     );
-    readiness.ready(false, "session/mac").unwrap();
+    readiness.ready("session/mac").unwrap();
     Pair::edit(&pair.mac, "session/mac", NOW, &|r, by| {
         let added = add(r, by, "d", Some("c"))?;
         assert_eq!(added.placed(), Vec::new(), "nothing to inherit");

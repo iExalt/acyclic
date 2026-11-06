@@ -5,7 +5,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-use acyclic_core::archive;
 use acyclic_core::claim;
 use acyclic_core::delete;
 use acyclic_core::ids;
@@ -206,9 +205,7 @@ impl<'a> CommandContext<'a> {
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
-            Command::Thread(ThreadCommand::Ready { include_archived }) => {
-                self.ready(*include_archived)
-            },
+            Command::Thread(ThreadCommand::Ready) => self.ready(),
             Command::Item(ItemCommand::List) => self.list(),
             Command::Item(ItemCommand::Show { items }) => self.show(items),
             Command::Needs => self.needs(),
@@ -333,8 +330,30 @@ impl<'a> CommandContext<'a> {
                 Ok(json!({"thread": id, "released": claim::release(replica, &key, by.actor)}))
             }),
             Command::Item(ItemCommand::Reopen { item }) => self.write(|replica, by| {
-                let id = Records::of(&Model::read(replica.state())?).item(item)?;
-                archive::reopen(replica, &id, by)?;
+                let mut id = String::new();
+                let outcome = edit::commit(replica, by, None, false, |model| {
+                    id = Records::of(model).item(item)?;
+                    if !model.children(&id).is_empty() {
+                        return Err(CliError::refused(
+                            "parent",
+                            format!(
+                                "{id} has children, so it reads done once they are: reopen one of them instead"
+                            ),
+                        )
+                        .with(json!({"item": id})));
+                    }
+                    if !model.items[&id].is_done() {
+                        return Err(CliError::refused(
+                            "not-done",
+                            format!("{id} isn't done, so there is nothing to reopen"),
+                        ));
+                    }
+                    Ok(ChangeSet(vec![write::Change::Set(write::Assign::Item(
+                        id.clone(),
+                        write::ItemAssign::State(ItemState::Backlog),
+                    ))]))
+                })?;
+                self.remember(&outcome.after);
                 Ok(json!({"item": id}))
             }),
             Command::Thread(ThreadCommand::Claim { thread, lease, force }) => {
@@ -426,14 +445,6 @@ impl<'a> CommandContext<'a> {
                 let found = Records::of(&Model::read(replica.state())?).item(item);
                 let id = deletable(found, item, replica.state(), kind::ITEM)?;
                 delete::delete_item(replica, &id, by)?;
-                Ok(json!({"item": id}))
-            }),
-            Command::Item(ItemCommand::Archive { item }) => self.write(|replica, by| {
-                let model = Model::read(replica.state())?;
-                let id = Records::of(&model).item(item)?;
-                if !model.items[&id].is_archived_root() {
-                    archive::archive(replica, &id, by)?;
-                }
                 Ok(json!({"item": id}))
             }),
         }
@@ -581,9 +592,9 @@ impl<'a> CommandContext<'a> {
         read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
     }
 
-    fn ready(&self, include_archived: bool) -> Result<Json, CliError> {
+    fn ready(&self) -> Result<Json, CliError> {
         self.with_view(|view| {
-            let ready = view.readiness.ready(include_archived, &self.actor)?;
+            let ready = view.readiness.ready(&self.actor)?;
             acyclic_core::probe::mark("readiness");
             Ok(json!({"ready": view.ready_rows(&ready)?}))
         })
@@ -890,9 +901,9 @@ mod acknowledged_entries_tests {
 
     #[test]
     fn a_new_need_with_a_large_core_identity_is_still_acknowledged() {
-        let entry = Entry::Reopened {
-            item: "item".into(),
-            dependents: (0..1_000).map(|n| format!("dependent-{n:04}")).collect(),
+        let entry = Entry::Contest {
+            thread: "thread".into(),
+            holders: (0..1_000).map(|n| format!("session/holder-{n:04}")).collect(),
         };
         let identity = entry.identity();
         assert!(identity.len() > 16 * 1024);

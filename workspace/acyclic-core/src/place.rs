@@ -33,13 +33,13 @@ pub fn passed_down<'m>(model: &'m Model, parent: &str) -> Option<&'m str> {
         .map(String::as_str)
 }
 
-/// The one thread that `parent`'s open, unarchived children with a thread all hold; `None` when any of them is in
+/// The one thread that `parent`'s open children with a thread all hold; `None` when any of them is in
 /// conflict or they differ. Finished work doesn't pull new work into its thread.
 fn shared_by_children<'m>(model: &'m Model, parent: &str) -> Option<&'m str> {
     let mut shared = None;
     for child in model.children(parent) {
         let item = &model.items[child];
-        if item.is_done() || model.is_archived(child) {
+        if item.is_done() {
             continue;
         }
         match &item.thread {

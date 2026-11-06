@@ -17,8 +17,6 @@ expression: table
 1 link-cycle
 1 self-link
 1 in-use
-1 ineligible
-1 not-done
 4 git
 4 conflict
 1 duplicate-replica
@@ -43,6 +41,9 @@ expression: table
 1 changed-since
 1 already-exists
 1 already-done
+1 not-done
+1 parent
+1 lineage-link
 1 incomplete-repository
 1 nested-repository
 3 not-found

@@ -168,7 +168,6 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
       state: "backlog",
       notes: null,
       size: null,
-      archived: false,
       links,
       conflicts: {},
     };

@@ -8,7 +8,7 @@ export interface ThreadTile {
   id: string;
   /** The titles of the projects it has work in. */
   projects: string[];
-  /** Its leaves by stage, as core counts them: archived ones aside, whatever the Map shows. */
+  /** Its leaves by stage, as core counts them, whatever the Map shows. */
   counts: Counts;
   /** The threads in earlier waves it waits on. */
   after: string[];

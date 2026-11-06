@@ -1,5 +1,5 @@
 //! The model: items, links, threads and repositories, read as a typed snapshot of the state. Records are written
-//! through the write module's judge; the per-field writes here serve it, the archive, deletes and, with the
+//! through the write module's judge; the per-field writes here serve it, deletes and, with the
 //! `fixtures` feature, tests. Nothing derived is stored: roles, membership, repository sets and cycles are computed on read.
 //!
 //! Every field reads as a [`Value`], so a reader sees concurrent writes as a conflict and never silently picks one.
@@ -159,14 +159,6 @@ enum LinkKind {
     Blocks,
 }
 
-/// What reopening recorded on an item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Reopened {
-    /// Whether it was archived, so its dependents stay unblocked and are only flagged.
-    pub archived: bool,
-}
-
 /// An item's role, derived from its place in the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -197,16 +189,12 @@ pub struct Item {
     pub parent: Value<String>,
     /// A rough size.
     pub size: Value<Size>,
-    /// Whether this item is the root of an archived subtree.
-    pub archived: Value<bool>,
     /// Evidence of completion.
     pub evidence: Value<Evidence>,
     /// The thread the item belongs to.
     pub thread: Value<String>,
     /// Ids of the repositories the item touches.
     pub repositories: BTreeSet<String>,
-    /// Set while a reopened item is open again.
-    pub reopened: Value<Reopened>,
 }
 
 impl Item {
@@ -216,24 +204,17 @@ impl Item {
         let states = self.state.all();
         !states.is_empty() && states.iter().all(|state| **state == ItemState::Done)
     }
-
-    /// Whether the item is marked as an archived subtree's root; a conflict counts only if every value says so.
-    #[must_use]
-    pub fn is_archived_root(&self) -> bool {
-        let values = self.archived.all();
-        !values.is_empty() && values.iter().all(|archived| **archived)
-    }
 }
 
 /// A parent's progress, from the leaves under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
-    /// The state it reads as: its own when parked or done by hand, else done when every leaf under it is finished, in
+    /// The state it reads as: its own when parked by hand, else done when every leaf under it is finished, in
     /// progress once any leaf is done, and backlog until then; [`crate::ready`] also counts claimed work as started.
     pub state: ProgressState,
-    /// Its leaves that are done, archived ones aside.
+    /// Its leaves that are done.
     pub done: usize,
-    /// Its leaves, archived ones aside: none when every one is archived, and it then reads as done.
+    /// Its leaves.
     pub total: usize,
 }
 
@@ -487,9 +468,8 @@ impl Model {
         }
     }
 
-    /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked or done, set by
-    /// hand; any other is what reopening a child left, and its leaves decide. A parent under it done by hand counts
-    /// every leaf under it as done, so a closed part reads closed from above too.
+    /// A parent's progress, or `None` for a leaf. A parent's own state counts only when it is parked by hand; its
+    /// leaves decide the rest, and a done stored on it, as older versions wrote, is ignored.
     #[must_use]
     pub fn progress(&self, id: &str) -> Option<Progress> {
         let item = self.items.get(id)?;
@@ -500,7 +480,7 @@ impl Model {
         self.tally(id, &mut BTreeSet::from([id]), &mut tally);
         let state = if item.state == Value::One(ItemState::Parked) {
             ProgressState::Parked
-        } else if item.is_done() || tally.done == tally.total {
+        } else if tally.done == tally.total {
             ProgressState::Done
         } else if tally.done > 0 {
             ProgressState::InProgress
@@ -510,22 +490,18 @@ impl Model {
         Some(Progress { state, done: tally.done, total: tally.total })
     }
 
-    /// Counts the leaves under `id`, archived ones aside, each item once, so a parent cycle ends the walk.
+    /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk.
     fn tally<'a>(&'a self, id: &'a str, seen: &mut BTreeSet<&'a str>, tally: &mut Tally) {
         for child in self.children(id) {
-            if !seen.insert(child) || self.is_archived(child) {
+            if !seen.insert(child) {
                 continue;
             }
             let Some(item) = self.items.get(child) else { continue };
             if self.children(child).is_empty() {
                 tally.total += 1;
                 tally.done += usize::from(item.is_done());
-            } else if item.is_done() {
-                let mut closed = Tally::default();
-                self.tally(child, seen, &mut closed);
-                tally.total += closed.total;
-                tally.done += closed.total;
             } else {
+                // A parent's stored done is ignored: its leaves say whether it is done.
                 self.tally(child, seen, tally);
             }
         }
@@ -538,14 +514,6 @@ impl Model {
             Some(progress) => progress.state == ProgressState::Done,
             None => self.items.get(id).is_some_and(Item::is_done),
         }
-    }
-
-    /// Whether an item or any ancestor is an archived subtree's root.
-    #[must_use]
-    pub fn is_archived(&self, id: &str) -> bool {
-        std::iter::once(id)
-            .chain(self.ancestors(id))
-            .any(|id| self.items.get(id).is_some_and(Item::is_archived_root))
     }
 
     /// The items of a thread: those whose thread field is that thread alone. An item with a conflicted thread is in
@@ -621,7 +589,6 @@ impl Model {
         for item in self.items.values() {
             if let Some(thread) = item.thread.one()
                 && !self.reads_done(&item.id)
-                && !self.is_archived(&item.id)
             {
                 open.entry(thread.as_str()).or_default().push(item.id.as_str());
             }
@@ -820,9 +787,6 @@ fixture! {
         if value::<ItemState>(&replica.state, &key, field::STATE)? == Value::One(state) {
             return Ok(());
         }
-        if state == ItemState::Done && replica.state.field(&key, field::REOPENED).is_some() {
-            put::<Reopened>(replica, &key, field::REOPENED, None, by)?;
-        }
         put(replica, &key, field::STATE, Some(&state), by)
     }
 }
@@ -932,11 +896,9 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         done_at,
         parent: value(state, key, field::PARENT)?,
         size: value(state, key, field::SIZE)?,
-        archived: value(state, key, field::ARCHIVED)?,
         evidence: value(state, key, field::EVIDENCE)?,
         thread: value(state, key, field::THREAD)?,
         repositories: elements(state, key, set::REPOSITORY),
-        reopened: value(state, key, field::REOPENED)?,
     })
 }
 

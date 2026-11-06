@@ -29,7 +29,7 @@ const listed = {
 };
 
 describe("wavesView", () => {
-  const view = wavesView(listed, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"], false));
+  const view = wavesView(listed, outlineOf(buildModel(items), ["a", "b", "c", "d", "e"]));
 
   it("lays out each wave's threads as tiles, with the projects they work in and what they wait on, earlier or in a cycle", () => {
     expect(view.waves.map((wave) => wave.map((tile) => tile.id))).toEqual([["b", "d"], ["c"]]);

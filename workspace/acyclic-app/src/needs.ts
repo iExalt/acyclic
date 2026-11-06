@@ -254,8 +254,7 @@ function describe(
     contest: "Two holders claim one thread",
     "clock-ahead": "A claim's clock runs ahead",
     unthreaded: "Needs a thread",
-    reopened: "Reopened, with work waiting on it",
-    "done-early": "Done while work in it is open",
+    "done-waiting": "Done, but waits for work that isn't",
   };
   const said = words[kind] ?? kind;
   return subject === "" ? said : `${said}: ${subject}`;

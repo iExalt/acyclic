@@ -35,7 +35,7 @@ function grid() {
 // top: left (box: l1, l2, l3), right (box: r1); far
 const base = [item("top"), item("left", "top"), item("l1", "left"), item("l2", "left"), item("l3", "left")];
 const plan = [...base, item("right", "top"), item("r1", "right"), item("far")];
-const open: ViewState = { collapsed: new Set(), showArchived: false };
+const open: ViewState = { collapsed: new Set() };
 
 /** The boxes laid out again after an edit, with the cache warm from the plan before it. */
 async function relaid(before: ReturnType<typeof item>[], after: ReturnType<typeof item>[], state = open, next = open) {
@@ -81,7 +81,7 @@ describe("place", () => {
     const across = plan.map((one) => (one.id === "r1" ? item("r1", "right", ["l1"]) : one));
     expect(await relaid(plan, across)).toEqual(["top"]);
     // Collapsing a box changes its parent and everything above, but the top level, which only shrank.
-    expect(await relaid(plan, plan, open, { collapsed: new Set(["left"]), showArchived: false })).toEqual(["top"]);
+    expect(await relaid(plan, plan, open, { collapsed: new Set(["left"]) })).toEqual(["top"]);
   });
 
   it("keeps the top level where it was when a box in it shrank or grew, and packs it again for anything else", async () => {
@@ -90,12 +90,7 @@ describe("place", () => {
     const model = buildModel(plan);
     const first = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
     // Collapsing the top-level box leaves its sibling where it was, and the box at its own corner.
-    const folded = await place(
-      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
-      cache,
-      engine.layBox,
-      PORTRAIT,
-    );
+    const folded = await place(visible(model, { collapsed: new Set(["top"]) }), cache, engine.layBox, PORTRAIT);
     expect(folded.laidOut).toEqual([]);
     for (const id of ["top", "far"])
       expect([folded.nodes.get(id)?.x, folded.nodes.get(id)?.y]).toEqual([
@@ -106,7 +101,7 @@ describe("place", () => {
     // Folded again elsewhere, it still holds; expanding again finds the layout from before.
     expect((await place(visible(model, open), cache, engine.layBox, PORTRAIT)).nodes).toEqual(first.nodes);
     // Expanded from collapsed in a fresh cache, top grows to the right, where nothing stands: far, on its left, stays.
-    const shut = { collapsed: new Set(["top"]), showArchived: false };
+    const shut = { collapsed: new Set(["top"]) };
     const fromShut = new LayoutCache();
     const was = await place(visible(model, shut), fromShut, engine.layBox, PORTRAIT);
     const grew = await place(visible(model, open), fromShut, engine.layBox, PORTRAIT);
@@ -117,7 +112,7 @@ describe("place", () => {
     const added = await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
     expect(added.laidOut).toContain(ROOT);
     const fresh = await place(
-      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
+      visible(model, { collapsed: new Set(["top"]) }),
       new LayoutCache(),
       engine.layBox,
       PORTRAIT,
@@ -224,7 +219,7 @@ describe("place", () => {
     expect(headerClearsTile(afterUndo, long)).toBe(true);
     expect(afterUndo.nodes).toEqual(afterGrow.nodes);
 
-    const foldedLong = prepare(makeModel("W".repeat(90)), { collapsed: new Set(["a"]), showArchived: false });
+    const foldedLong = prepare(makeModel("W".repeat(90)), { collapsed: new Set(["a"]) });
     expect(foldedLong.source).toBe(long.source);
     await run(foldedLong);
     expect((await run(long)).nodes).toEqual(afterUndo.nodes);
@@ -234,12 +229,7 @@ describe("place", () => {
     const engine = grid();
     const cache = new LayoutCache();
     const model = buildModel(plan);
-    const folded = await place(
-      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
-      cache,
-      engine.layBox,
-      PORTRAIT,
-    );
+    const folded = await place(visible(model, { collapsed: new Set(["top"]) }), cache, engine.layBox, PORTRAIT);
     await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
 
     // Undoing the top-level add restores the original topology, but the top box is now expanded from its folded
@@ -249,12 +239,7 @@ describe("place", () => {
     for (const id of ["top", "far"]) expect(corner(undone, id)).toEqual(corner(folded, id));
 
     // The held expanded result must not become the baseline: a subsequent fold and reopen retain the original packing.
-    const foldedAgain = await place(
-      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
-      cache,
-      engine.layBox,
-      PORTRAIT,
-    );
+    const foldedAgain = await place(visible(model, { collapsed: new Set(["top"]) }), cache, engine.layBox, PORTRAIT);
     const reopened = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
     for (const id of ["top", "far"]) {
       expect(corner(foldedAgain, id)).toEqual(corner(folded, id));
@@ -265,7 +250,7 @@ describe("place", () => {
   it("repacks an actual shrink and restores the held view and packing on Undo", async () => {
     const engine = grid();
     const cache = new LayoutCache();
-    const foldedView = visible(buildModel(plan), { collapsed: new Set(["top"]), showArchived: false });
+    const foldedView = visible(buildModel(plan), { collapsed: new Set(["top"]) });
     const openView = visible(buildModel(plan), open);
     const reduced = plan.filter((one) => one.id !== "l3");
     const shrinkView = visible(buildModel(reduced), open);
@@ -291,7 +276,7 @@ describe("place", () => {
     const next = await place(visible(grown, open), cache, engine.layBox, PORTRAIT, undefined, "source-b");
     expect(next.laidOut).not.toContain(ROOT);
     const folded = await place(
-      visible(grown, { collapsed: new Set(["top"]), showArchived: false }),
+      visible(grown, { collapsed: new Set(["top"]) }),
       cache,
       engine.layBox,
       PORTRAIT,
@@ -366,12 +351,7 @@ describe("place", () => {
     const engine = grid();
     const cache = new LayoutCache();
     const model = buildModel(plan);
-    const folded = await place(
-      visible(model, { collapsed: new Set(["top"]), showArchived: false }),
-      cache,
-      engine.layBox,
-      PORTRAIT,
-    );
+    const folded = await place(visible(model, { collapsed: new Set(["top"]) }), cache, engine.layBox, PORTRAIT);
     await place(visible(model, open), cache, engine.layBox, 1.4);
     const turnedBack = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
     const corner = (placed: typeof folded, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
@@ -381,7 +361,7 @@ describe("place", () => {
   it("keeps a box's position after the other box opens and closes", async () => {
     // Two top-level boxes, both collapsed at first, each opened and closed in turn.
     const two = buildModel([item("x"), item("x1", "x"), item("x2", "x"), item("x3", "x"), item("y"), item("y1", "y")]);
-    const at = (collapsed: string[]) => visible(two, { collapsed: new Set(collapsed), showArchived: false });
+    const at = (collapsed: string[]) => visible(two, { collapsed: new Set(collapsed) });
     const engine = grid();
     const direct = new LayoutCache();
     await place(at(["x", "y"]), direct, engine.layBox, PORTRAIT);
@@ -399,7 +379,7 @@ describe("place", () => {
     const cache = new LayoutCache();
     const model = buildModel(plan);
     const first = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
-    await place(visible(model, { collapsed: new Set(["left"]), showArchived: false }), cache, engine.layBox, PORTRAIT);
+    await place(visible(model, { collapsed: new Set(["left"]) }), cache, engine.layBox, PORTRAIT);
     const back = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
     expect(back.laidOut).toEqual([]);
     expect(back.nodes).toEqual(first.nodes);
@@ -615,7 +595,7 @@ describe("beside", () => {
 describe("withinOneBox", () => {
   it("draws an edge always only when both drawn ends are in the same box", () => {
     const linked = [...plan, item("r2", "right", ["r1"]), item("far2", null, ["l1"])];
-    const view = visible(buildModel(linked), { collapsed: new Set(["left"]), showArchived: false });
+    const view = visible(buildModel(linked), { collapsed: new Set(["left"]) });
     const within = withinOneBox(view);
     const edges = view.edges.map((edge) => [`${edge.source}->${edge.target}`, within(edge)]);
     // r1 to r2 is inside right; left (standing in for l1) to far2 crosses from top to the top level.

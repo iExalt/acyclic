@@ -21,8 +21,6 @@ const model = buildModel([
   item("dig", "garden", [], { title: "Dig the beds" }),
   item("resume", "garden", [], { title: "Résumé of the bed plan" }),
   item("bedding", "garden", [], { title: "Order bedding plants" }),
-  item("shed", null, [], { title: "Shed", archived: true }),
-  item("paint", "shed", [], { title: "Paint the shed" }),
   item("tools", null, [], { title: "Sharpen tools" }),
 ]);
 const plan: Plan = {
@@ -32,7 +30,6 @@ const plan: Plan = {
     { id: "autumn", name: "Autumn" },
   ],
   working: new Set(["spring"]),
-  showArchived: false,
 };
 const titles = (query: string, over: Plan = plan) => rank(query, entries(over), over.working).map((one) => one.title);
 
@@ -44,7 +41,6 @@ describe("the command menu", () => {
       "Go to Threads",
       "Go to Needs you",
       "New item",
-      "Show archived items",
       "Refresh",
       "Spring beds",
     ]);
@@ -118,13 +114,6 @@ describe("the command menu", () => {
     expect(children(entries(contextual))).toEqual(expected);
     expect(children(targets(contextual, "link"))).toEqual(expected);
     expect(children(targets(contextual, "move"))).toEqual(expected);
-  });
-
-  it("finds archived items only while they're shown, and says which way the switch goes", () => {
-    expect(titles("paint")).toEqual([]);
-    const shown = { ...plan, showArchived: true };
-    expect(titles("paint", shown)).toEqual(["Paint the shed"]);
-    expect(titles("archived", shown)).toEqual(["Hide archived items"]);
   });
 
   it("stops at the most a list should hold, quickly in a large plan", () => {

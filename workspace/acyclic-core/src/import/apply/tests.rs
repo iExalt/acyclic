@@ -1,7 +1,6 @@
 use serde_json::json;
 
 use super::*;
-use crate::archive::{ArchiveError, Reason};
 use crate::import::State as Planned;
 use crate::import::tests::{id, item, valid};
 use crate::model::{self, ItemState, Value};
@@ -164,13 +163,12 @@ fn references_may_name_the_trackers_records_but_not_unknown_ones() {
 }
 
 #[test]
-fn evidence_and_archiving_are_judged_by_the_state_each_item_ends_with() {
+fn evidence_is_judged_by_the_state_each_item_ends_with() {
     let mut r = imported();
-    // 12 is done in the tracker, so evidence and archiving on it, its state left out, are fine.
+    // 12 is done in the tracker, so evidence on it, its state left out, is fine.
     let mut doc = crate::import::Import::new();
     let mut done = item(12, None, None);
     done.evidence = Some(crate::import::Evidence { commit: None, text: Some("again".into()) });
-    done.archived = true;
     doc.items.push(done);
     let mut release = item(11, None, None);
     release.waits_for = Some(vec![]);
@@ -283,38 +281,22 @@ fn a_repository_name_another_record_would_share_is_refused_in_any_case() {
 }
 
 #[test]
-fn new_work_under_an_archived_root_is_refused_and_done_work_set_back_is_reopened() {
+fn done_on_a_parent_is_refused_and_done_work_set_back_is_reopened() {
     let mut r = imported();
-    // 10 and its subtree done, then archived.
-    for n in [10, 11] {
-        model::set_state(&mut r, &id(n), ItemState::Done, by(USER, 2)).unwrap();
-    }
-    model::put(
-        &mut r,
-        &model::item_key(&id(10)).unwrap(),
-        field::ARCHIVED,
-        Some(&true),
-        by(USER, 3),
-    )
-    .unwrap();
-    // New work under the archived root would be hidden.
+    model::set_state(&mut r, &id(11), ItemState::Done, by(USER, 2)).unwrap();
+    // A parent reads done from its leaves, so done on one is refused.
     let mut doc = Import::new();
-    doc.items = vec![item(30, None, Some(10)), item(31, None, Some(11))];
-    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
-        panic!("open work under an archived root accepted")
+    doc.items = vec![item(10, Some(Planned::Done), None)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("done on a parent accepted")
     };
-    assert_eq!(errors, [ValidationError::ArchivedNotDone(id(10))]);
-    // Done work set back is reopened, as `item reopen` does: flagged, and out of the archive above it.
+    assert_eq!(errors, [ValidationError::DoneParent(id(10))]);
+    // Done work set back is reopened, as `item reopen` does: back in the backlog, and nothing else.
     doc.items = vec![item(11, Some(Planned::Backlog), Some(10))];
     let report = apply(&doc, &mut r, by(USER, 5)).unwrap();
-    let m = model(&r);
-    assert_eq!(m.items[&id(11)].reopened, Value::One(model::Reopened { archived: true }));
-    assert_eq!(m.items[&id(10)].archived, Value::None);
-    let fields = |n: u8| -> Vec<&str> {
-        let row = report.changes.iter().find(|c| c.name == Name::Id { id: id(n) }).unwrap();
-        row.fields.keys().map(String::as_str).collect()
-    };
-    assert_eq!((fields(10), fields(11)), (vec!["archived"], vec!["reopened", "state"]));
+    assert_eq!(model(&r).items[&id(11)].state, Value::One(ItemState::Backlog));
+    let row = report.changes.iter().find(|c| c.name == Name::Id { id: id(11) }).unwrap();
+    assert_eq!(row.fields.keys().map(String::as_str).collect::<Vec<_>>(), ["state"]);
 }
 
 #[test]
@@ -364,78 +346,6 @@ fn evidence_naming_a_tracker_repository_that_cant_be_verified_is_refused_naming_
         matches!(&refused, ApplyError::Invalid(errors) if errors == &[incomplete]),
         "{refused:?}"
     );
-}
-
-fn archive_import(clear_dependent: bool) -> Import {
-    let mut doc = Import::new();
-    let mut root = item(12, None, None);
-    root.archived = true;
-    doc.items.push(root);
-    if clear_dependent {
-        let mut dependent = item(11, None, None);
-        dependent.waits_for = Some(vec![]);
-        doc.items.push(dependent);
-    }
-    doc
-}
-
-#[test]
-fn import_archive_uses_the_shared_grace_and_external_dependent_rules() {
-    let mut r = imported();
-    let doc = archive_import(true);
-    let preview = super::preview(&doc, &r, by(USER, 2)).unwrap_err();
-    let before = r.state.clone();
-    let grace = apply(&doc, &mut r, by(USER, 2)).unwrap_err();
-    assert_eq!(preview, grace);
-    assert_eq!(r.state, before, "a refused archive writes nothing");
-    assert!(matches!(grace, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
-        if reasons.iter().any(|reason| matches!(reason, Reason::Waiting { .. }))));
-
-    let mut r = imported();
-    let dependent =
-        apply(&archive_import(false), &mut r, by(USER, 31 * 24 * 60 * 60 * 1000)).unwrap_err();
-    assert!(matches!(dependent, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
-        if reasons.iter().any(|reason| matches!(reason, Reason::LiveDependent { .. }))));
-}
-
-#[test]
-fn imported_archive_candidates_are_order_independent_and_preview_matches_apply() {
-    let make_replica = || {
-        let mut r = replica();
-        let mut doc = valid();
-        let mut parent = item(13, Some(Planned::Done), None);
-        parent.evidence =
-            Some(crate::import::Evidence { commit: None, text: Some("finished".into()) });
-        let mut child = item(14, Some(Planned::Done), Some(13));
-        child.evidence =
-            Some(crate::import::Evidence { commit: None, text: Some("finished".into()) });
-        doc.items.extend([parent, child]);
-        apply(&doc, &mut r, by(USER, 1)).unwrap();
-        r
-    };
-    let archived = |order: [u8; 2]| {
-        let mut doc = Import::new();
-        for n in order {
-            let mut item = item(n, None, None);
-            item.archived = true;
-            doc.items.push(item);
-        }
-        doc
-    };
-    let now = 31 * 24 * 60 * 60 * 1000;
-    let mut forward = make_replica();
-    let forward_doc = archived([13, 14]);
-    let preview = super::preview(&forward_doc, &forward, by(USER, now)).unwrap();
-    let applied = super::apply(&forward_doc, &mut forward, by(USER, now)).unwrap();
-    assert_eq!(preview, applied);
-
-    let mut reverse = make_replica();
-    super::preview(&archived([14, 13]), &reverse, by(USER, now)).unwrap();
-    super::apply(&archived([14, 13]), &mut reverse, by(USER, now)).unwrap();
-    for id in [id(13), id(14)] {
-        assert!(model(&forward).items[&id].is_archived_root());
-        assert!(model(&reverse).items[&id].is_archived_root());
-    }
 }
 
 #[test]

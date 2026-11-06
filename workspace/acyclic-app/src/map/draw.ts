@@ -51,7 +51,6 @@ export function elementsOf(
         lit ? "lit" : "",
         dim ? "dim" : "",
         selected ? "selected" : "",
-        node.archived ? "archived" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
         node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",

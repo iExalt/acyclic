@@ -13,12 +13,12 @@ use crate::resolve::repository_name;
 const IN_A_TERMINAL: &str =
     "No command keeps this value: settle it in a terminal by writing the field you want";
 
-/// A value of a conflict in `field`, with the command that keeps it, as `command` (the API's body) and `run` (the
+/// A value of a conflict, with the command that keeps it, as `command` (the API's body) and `run` (the
 /// terminal's line), or `why` none does.
-pub(crate) fn kept_json(model: &Model, field: &str, kept: &Kept) -> Json {
+pub(crate) fn kept_json(model: &Model, kept: &Kept) -> Json {
     let (command, why) = match command(model, &kept.keep) {
         Ok(command) => (Some(command), None),
-        Err(why) => (None, Some(why_not(field, why))),
+        Err(why) => (None, Some(why_not(why))),
     };
     json!({
         "value": kept.value,
@@ -136,16 +136,6 @@ fn command(model: &Model, keep: &Keep) -> Result<Command, Unkept> {
                 Err(Unkept::NoCommand)
             },
         },
-        Keep::Reopen(item) => Ok(Command {
-            words: ["item", "reopen"],
-            subject: ("item", item.clone()),
-            flags: Vec::new(),
-        }),
-        Keep::Archive(item) => Ok(Command {
-            words: ["item", "archive"],
-            subject: ("item", item.clone()),
-            flags: Vec::new(),
-        }),
         Keep::Not(why) => Err(why.clone()),
     }
 }
@@ -168,8 +158,8 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
         ItemAssign::Repository(repository, false) => {
             ("no-repository", Flag::Each(repository.clone()))
         },
-        // Not edits: `keeps` keeps these by finishing or archiving.
-        ItemAssign::Evidence(_) | ItemAssign::Archive => {
+        // Not an edit: `keeps` keeps evidence by finishing.
+        ItemAssign::Evidence(_) => {
             unreachable!("an edit doesn't write {assign:?}")
         },
     };
@@ -205,23 +195,16 @@ const fn clear(flag: &str) -> &'static str {
     }
 }
 
-/// Why no command keeps a value of `field`.
-fn why_not(field: &str, why: Unkept) -> String {
+/// Why no command keeps a value.
+fn why_not(why: Unkept) -> String {
     match why {
         Unkept::NeedsEvidence => "Keep done in a terminal: run acyclic item done with its evidence".to_owned(),
         Unkept::NoClear => "This field can't be cleared".to_owned(),
-        Unkept::NotDone if field == "evidence" => {
-            "Settle its state first, then keep this evidence".to_owned()
-        },
-        Unkept::NotDone => "Only done work is reopened".to_owned(),
+        Unkept::NotDone => "Settle its state first, then keep this evidence".to_owned(),
         Unkept::NameAlsoConflicted => {
             "Its owner and name are both written apart: settle them together with acyclic repository edit, giving \
              --name <OWNER/NAME>"
                 .to_owned()
-        },
-        Unkept::Ineligible(reasons) => {
-            let reasons: Vec<String> = reasons.iter().map(ToString::to_string).collect();
-            format!("It can't be archived: {}", reasons.join("; "))
         },
         Unkept::Refused(violations) => {
             let violations: Vec<String> = violations.iter().map(ToString::to_string).collect();
@@ -271,7 +254,7 @@ mod identity_tests {
                     force: true,
                 }])),
             };
-            let shown = super::kept_json(&model, "evidence", &kept);
+            let shown = super::kept_json(&model, &kept);
             assert_eq!(!shown["command"].is_null(), executable, "{shown}");
             assert_eq!(shown["run"].is_string(), executable, "{shown}");
             assert_eq!(shown["why"].is_string(), !executable, "{shown}");

@@ -4,7 +4,6 @@
 import type { LucideIcon } from "lucide-react";
 
 export {
-  Archive,
   ArrowUpLeft,
   Check,
   ChevronRight,

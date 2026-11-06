@@ -429,7 +429,7 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
     for read in [
         json!({"item": "list"}),
         json!("needs"),
-        json!({"thread": {"ready": {}}}),
+        json!({"thread": "ready"}),
         json!({"item": {"show": {"items": ["a"]}}}),
         json!({"thread": "list"}),
         json!({"thread": {"show": {"threads": ["t"]}}}),
@@ -444,7 +444,6 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
         json!({"item": {"done": {"item": "a", "evidence": "n"}}}),
         json!({"item": {"add": {"id": "a", "title": "A"}}}),
         json!({"item": {"edit": {"item": "a", "no-thread": true, "waits-for": ["b"]}}}),
-        json!({"item": {"archive": {"item": "a"}}}),
         json!({"item": {"delete": {"item": "a"}}}),
         json!({"item": {"edit": {"item": "a", "no-waits-for": ["b"]}}}),
         json!({"thread": {"add": {"title": "T"}}}),

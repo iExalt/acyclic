@@ -3,7 +3,7 @@ import { addCommand } from "./edits";
 import type { Intent } from "./nav";
 import { createTracker, type Notice, type Ports, UNDO_KEY, UNDOING } from "./tracker";
 
-type Fault = "busy" | "archived" | "changed-since" | "lost" | "lost-applied" | "500";
+type Fault = "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
 
 /** A command's name, as the server's tests name it: `needs`, `item list`, `item edit`. */
 function nameOf(body: unknown): string {
@@ -41,7 +41,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
       throw new TypeError("Failed to fetch");
     }
     if (fault === "500") return new Response("oops", { status: 500 });
-    if (fault === "busy" || fault === "archived" || fault === "changed-since")
+    if (fault === "busy" || fault === "self-link" || fault === "changed-since")
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
     const conditions = (request as { expect?: { kind: string; item?: string; field?: string; value?: unknown }[] })
       .expect;
@@ -68,7 +68,6 @@ function server(titles: Record<string, string> = { a: "A" }) {
           state: "backlog",
           notes: null,
           size: null,
-          archived: false,
           links: { waits_for: [], waited_on_by: [] },
         })),
       );
@@ -116,7 +115,7 @@ describe("a tracker's writes", () => {
   it("gives a refused add's form back with what was typed, drawing nothing", async () => {
     const { tracker, moves, backend } = open();
     await tracker.refresh();
-    backend.fail("item add", "archived");
+    backend.fail("item add", "self-link");
     expect(await tracker.send(addCommand(added), { select: "n", pin: null }, { kind: "add", item: added })).toBe(false);
     expect(moves.at(-1)).toMatchObject({ kind: "redraft", adding: { parent: null, draft: { title: "New" } } });
     expect(tracker.snapshot()).toMatchObject({ pending: null, busy: false, notice: { lasts: "refusal" } });
@@ -154,7 +153,7 @@ describe("a tracker's writes", () => {
 
   it("sends only the observed opaque need identities and keeps them on busy retry", async () => {
     const { tracker, backend } = open();
-    backend.needsRows.push({ kind: "reopened", identity: "opaque-core-entry" });
+    backend.needsRows.push({ kind: "done-waiting", identity: "opaque-core-entry" });
     await tracker.refresh();
     backend.fail("item edit", "busy");
     await tracker.send(rename("a", "B"), { select: "a", pin: null });

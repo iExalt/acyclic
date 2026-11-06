@@ -352,25 +352,15 @@ function Conflicts({
 
 /** Where an item stands, with a parent's leaves counted by stage. */
 function ItemStatus({ item }: { item: Item }) {
-  const archived = item.archived ? <span className="muted">, archived</span> : null;
   if (item.progress !== undefined)
     return (
       <>
-        <span>
-          {item.stage === undefined ? stateWords(item.progress.state) : <StageLabel stage={item.stage} />}
-          {/* Everything under it archived says so; it being archived too goes without saying. */}
-          {item.progress.counts.leaves === 0 ? " (all archived)" : archived}
-        </span>
+        <span>{item.stage === undefined ? stateWords(item.progress.state) : <StageLabel stage={item.stage} />}</span>
         {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
       </>
     );
   // A leaf core hasn't placed is one drawn before the server has it: its stage comes with the server's read, and its
   // state, backlog, would say something else first.
-  if (item.stage === undefined && !item.archived) return <span className="muted">Saving…</span>;
-  return (
-    <span>
-      {item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}
-      {archived}
-    </span>
-  );
+  if (item.stage === undefined) return <span className="muted">Saving…</span>;
+  return <span>{item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}</span>;
 }

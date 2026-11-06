@@ -19,22 +19,20 @@ const base = [
   item("plant", "garden"),
   item("water", "plant"),
   item("tools", null, ["dig"], { thread: "t" }),
-  item("old", null, [], { archived: true }),
 ];
 
 interface Shot {
   items: Item[];
   collapsed?: string[];
-  archived?: boolean;
   selection?: Selection;
   colour?: string;
   routed?: boolean;
 }
 
 /** The elements for a plan as the Map would draw it, with every node placed by its index. */
-function elements({ items, collapsed = [], archived = false, selection, colour, routed = false }: Shot): Drawn[] {
+function elements({ items, collapsed = [], selection, colour, routed = false }: Shot): Drawn[] {
   const model = buildModel(items);
-  const view = visible(model, { collapsed: new Set(collapsed), showArchived: archived });
+  const view = visible(model, { collapsed: new Set(collapsed) });
   const placed: Placed = {
     width: 500,
     height: 500,
@@ -92,7 +90,6 @@ describe("draw", () => {
     ["lighting a thread", { items: base, selection: { item: null, thread: "t" }, colour: "#00ff00" }],
     ["adding an item", { items: [...base, item("hose", "plant", ["water"])] }],
     ["retitling an item", { items: base.map((one) => (one.id === "sow" ? { ...one, title: "Sow seeds" } : one)) }],
-    ["showing archived items", { items: base, archived: true }],
     ["dropping a link", { items: base.map((one) => (one.id === "sow" ? item("sow", "beds") : one)) }],
     ["dropping everything", { items: [] }],
   ];
@@ -238,7 +235,7 @@ describe("a junction's dot", () => {
   it("carries the data every node's style reads, so the renderer warns of nothing", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const model = buildModel(base);
-    const view = visible(model, { collapsed: new Set(), showArchived: false });
+    const view = visible(model, { collapsed: new Set() });
     const placed: Placed = {
       width: 500,
       height: 500,

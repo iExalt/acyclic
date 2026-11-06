@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   addressOf,
   depth,
-  type Found,
   type Intent,
   landing,
   landingPlace,
@@ -23,10 +22,9 @@ import {
   type World,
 } from "./nav";
 
-// Items a, b in thread t; c in none; d not drawn; e archived, hidden.
+// Items a, b in thread t; c in none; d not drawn.
 const world: World = {
   has: (id) => id !== "d",
-  archived: (id) => id === "e",
   threadOf: (id) => (id === "a" || id === "b" ? "t" : null),
   wide: true,
   dirty: false,
@@ -153,8 +151,8 @@ describe("itemThread", () => {
     });
     // A layer of its own under the thread's, so Back closes the thread before the item.
     expect(openLayers(openOf(step.place, world))).toEqual(["thread", "under"]);
-    // Gone or hidden since, it is no layer.
-    expect(openLayers(openOf({ ...step.place, cameFrom: { view: "map", by: "thread", item: "e" } }, world))).toEqual([
+    // Gone since, it is no layer.
+    expect(openLayers(openOf({ ...step.place, cameFrom: { view: "map", by: "thread", item: "d" } }, world))).toEqual([
       "thread",
     ]);
   });
@@ -551,20 +549,18 @@ describe("phone history depths", () => {
 
 describe("landing", () => {
   const plan = {
-    item: (id: string): Found => ({ here: "shown" as const, old: "archived" as const })[id] ?? null,
+    item: (id: string) => id === "here",
     thread: (id: string) => id === "t-1",
   };
 
-  it("opens what the plan holds as named, and an archived item with archived items shown", () => {
+  it("opens what the plan holds as named", () => {
     const wanted = { ...NOTHING, view: "map" as const, item: "here", thread: "t-1" };
-    expect(landing(wanted, plan)).toEqual({ wanted, archived: false, missing: [] });
-    expect(landing({ ...wanted, item: "old" }, plan)).toMatchObject({ archived: true, missing: [] });
+    expect(landing(wanted, plan)).toEqual({ wanted, missing: [] });
   });
 
   it("drops an item or thread the plan no longer holds, and says which, keeping the rest", () => {
     expect(landing({ ...NOTHING, view: "needs", item: "gone" }, plan)).toEqual({
       wanted: { ...NOTHING, view: "needs" },
-      archived: false,
       missing: ["item"],
     });
     expect(landing({ ...NOTHING, view: "threads", thread: "t-9" }, plan)).toMatchObject({
@@ -613,12 +609,6 @@ describe("Back and Forward", () => {
         place: at({ view: "map", thread: "t", cameFrom: { view: "map", by: "thread", item: "a" } }),
         requests: { frame: { thread: "t" } },
       },
-    ],
-    [
-      "an item's thread, the item hidden since, then Back, goes where the item came from",
-      overview,
-      [{ kind: "select", id: "e", pin: null }, { kind: "itemThread", id: "t" }, "back"],
-      { place: overview, requests: {} },
     ],
     [
       "an item opened on the Overview, then Back, comes back to the Overview",
@@ -694,17 +684,16 @@ describe("Back and Forward", () => {
     );
   });
 
-  it("lands a place an entry held as a link does: what is gone since dropped and named, an archived item shown", () => {
+  it("lands a place an entry held as a link does: what is gone since dropped and named", () => {
     const has = {
-      item: (id: string): Found => (id === "e" ? "archived" : id === "c" ? "shown" : null),
+      item: (id: string) => id === "c",
       thread: () => false,
     };
     const held = at({ view: "map", item: "gone", thread: "t", cameFrom: fromOverview });
     expect(landingPlace(held, has)).toEqual({
       place: { ...held, item: null, thread: null },
-      archived: false,
       missing: ["item", "thread"],
     });
-    expect(landingPlace({ ...held, item: "e", thread: null }, has)).toMatchObject({ archived: true, missing: [] });
+    expect(landingPlace({ ...held, item: "c", thread: null }, has)).toMatchObject({ missing: [] });
   });
 });

@@ -7,10 +7,10 @@ The tracker's command-line interface over `acyclic-core`.
 Every command's inputs follow these rules, so you can guess a command from its neighbours.
 
 1. **Verbs.** A command that acts on one kind of record sits in its group, as `acyclic <noun> <verb>`:
-   `item add|edit|show|list|done|reopen|archive|delete`, `thread add|edit|show|list|delete|ready|claim|release`,
+   `item add|edit|show|list|done|reopen|delete`, `thread add|edit|show|list|delete|ready|claim|release`,
    and `repository add|edit|show|list`. Only commands that act on the tracker or the tool sit at the
    top: `needs`, `init`, `sync`, `import`, `doctor`, `prime`, `id`, `serve`, `up` and `completions`. Actions that
-   aren't a field's value are verbs: `item reopen`, `item archive`, `item delete`, `thread delete`.
+   aren't a field's value are verbs: `item reopen`, `item delete`, `thread delete`.
 2. **Positionals** are only the subject, named for the entity: `<ITEM>`, `<THREAD>`, `<REPOSITORY>`. Read
    commands take one or more and answer as an array in the order given; write commands take one. The exceptions are
    the path of `init <PATH>`, the file of `import <FILE>` and the count of `id [COUNT]`.
@@ -71,7 +71,7 @@ Every command's output follows these rules, so you can guess a key from the inpu
    object with its details added at the top level, so a thread's `show` adds `members`, each an item summary that says
    whether it is `conflicted`.
 4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor` and `import`. An absent
-   scalar is `null`, an absent set is `[]`, and a flag such as `archived`, `reopened` or `conflicted` is
+   scalar is `null`, an absent set is `[]`, and a flag such as `conflicted` is
    always `true` or `false`. A scalar whose replicas disagree reads `{"conflict": […]}`, and `needs` lists it.
 5. **Writes** return `{changed, <entity>: id, …}`; `item done` adds the `evidence` it recorded, as
    `{commit: "owner/name@sha", text}`. An item add, edit or import returns `placed`: the items that joined a thread

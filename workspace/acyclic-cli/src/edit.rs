@@ -9,7 +9,6 @@
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
 use acyclic_core::model::{By, ItemState, Model, Size, WriteError};
-use acyclic_core::ready::Readiness;
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
     self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
@@ -408,6 +407,8 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         Rule::SelfLink => WriteError::SelfLink(record.map_or("", Record::id).to_owned()).into(),
         Rule::ParentCycle(_) => WriteError::ParentCycle(record.map_or("", Record::id).to_owned()).into(),
         Rule::LinkCycle(cycle) => WriteError::LinkCycle(cycle.clone()).into(),
+        Rule::LineageLink { from, to } => CliError::refused("lineage-link", violation.to_string())
+            .with(json!({"item": from, "waits_for": to})),
         Rule::TitleTaken(other) => {
             let (of, id) = (other.kind(), other.id());
             CliError::refused(
@@ -425,14 +426,6 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             format!("repository {other} is named {} already", name.unwrap_or(taken)),
         )
         .with(json!({"id": other})),
-        Rule::ArchivedOpen(root) => CliError::refused(
-            "archived",
-            format!(
-                "item {root} is archived, and work under it that isn't done would be hidden; `acyclic item reopen` \
-                 takes done work out of the archive"
-            ),
-        )
-        .with(json!({"root": root})),
         Rule::NotReady(None) => {
             let id = record.map_or("", Record::id);
             CliError::new(
@@ -453,16 +446,16 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             )
             .with(json!({"readiness": status}))
         },
-        Rule::OpenWork { open, held } => {
+        Rule::ParentDone => {
             let id = record.map_or("", Record::id);
             CliError::refused(
-                "not-ready",
+                "parent",
                 format!(
-                    "item {id} can't be finished yet: it has open children or is held back; `acyclic item show {id}` \
-                     says which"
+                    "item {id} has children, so it reads done once they are: finish its leaves instead (forcing \
+                     doesn't change this)"
                 ),
             )
-            .with(json!({"readiness": Readiness::Parent, "open": open, "held": held}))
+            .with(json!({"item": id}))
         },
         Rule::EvidenceDiffers => {
             let id = record.map_or("", Record::id);

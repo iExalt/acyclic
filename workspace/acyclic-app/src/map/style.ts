@@ -1,5 +1,4 @@
-// How the Map draws its nodes and links: boxes are the zones of the map and items its stations, crossed out when
-// archived, and a lit thread takes its line's colour.
+// How the Map draws its nodes and links: boxes are the zones of the map and items its stations, and a lit thread takes its line's colour.
 
 import type cytoscape from "cytoscape";
 import type { Stage } from "../api";
@@ -14,13 +13,6 @@ export const FONT = "Overpass, system-ui, sans-serif";
 export const WEIGHT = { regular: 500, bold: 700 } as const;
 /** Where tiles start drawing, over every box at any depth: z-indexes below it are boxes and the links among them. */
 export const TILES = 1000;
-
-/** An inline SVG, as the renderer takes an image. */
-const svg = (size: number, body: string) =>
-  `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${body}</svg>`)}`;
-/** Lines across what is archived, crossing it out: a tile that repeats seamlessly, each line 8 px from the next. */
-export const hatchOf = (p: Palette) =>
-  svg(8, `<path d="M-2 2l4-4M0 8l8-8M6 10l4-4" stroke="${p.muted}" stroke-width="1"/>`);
 
 /** Each stage's tint, and a quieter title for work finished or set aside. */
 const stagesOf = (p: Palette): cytoscape.StylesheetJson =>
@@ -61,7 +53,6 @@ export function styleFor(p: Palette, family = FONT): cytoscape.StylesheetJson {
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
-  const HATCH = hatchOf(p);
   return [
     // Cytoscape darkens where a press lands, a grey disc on the background and a shade over a node; a press here
     // selects, and the selection shows that.
@@ -152,28 +143,6 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "font-weight": WEIGHT.bold,
       },
     },
-    // Archived items are crossed out with lines; an open archived box, which holds them, has a dashed edge instead.
-    {
-      selector: "node.leaf.archived",
-      style: {
-        "background-image": (node: cytoscape.NodeSingular) => [HATCH, node.data("mark")],
-        "background-repeat": ["repeat", "no-repeat"],
-        "background-image-opacity": [0.3, 1],
-        "background-position-x": ["0px", "0px"],
-        "background-position-y": ["0px", "0px"],
-      },
-    },
-    {
-      selector: "node.collapsed.archived",
-      style: {
-        "background-image": (node: cytoscape.NodeSingular) => [HATCH, node.data("mark")],
-        "background-repeat": ["repeat", "no-repeat"],
-        "background-image-opacity": [0.3, 1],
-        "background-position-x": ["0px", "0px"],
-        "background-position-y": ["0px", "0px"],
-      },
-    },
-    { selector: "node.box.archived", style: { "border-style": "dashed", "border-color": p.muted } },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
     // Outside the thread lit, a tile fades but its title stays legible, muted at full strength, since it can still be
     // picked. The selection is never dimmed.
@@ -187,7 +156,6 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       style: { "background-opacity": 1, "background-color": faded(p.tints[stage], p.box) },
     })),
     { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
-    { selector: "node.leaf.archived.dim", style: { "background-image-opacity": [0.1, 0.35] } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue, a dark one close to
     // ink: an ink edge twice a lit one's, and a faint halo around it that widens the node, as a focused tile's; a
     // stronger one read as a second ring.

@@ -26,11 +26,10 @@ interface RawItem {
   state: Raw<string>;
   notes: Raw<string>;
   size: Raw<string>;
-  archived: boolean;
   links: { waits_for: string[]; waited_on_by: string[] };
   /**
-   * Where it stands, as core tells it: a leaf's own stage, or a parent's from its leaves. An archived item has none,
-   * nor a parent with no leaves to count.
+   * Where it stands, as core tells it: a leaf's own stage, or a parent's from its leaves. A parent with no leaves to
+   * count has none.
    */
   stage?: Stage;
   /** A parent's state as the work under it makes it, and its leaves counted by stage; a leaf has none. */
@@ -158,7 +157,6 @@ const REFUSALS: Record<string, string> = {
   "parent-cycle": "An item can't go inside itself, or inside anything under it",
   "link-cycle": "That link would close a loop: the items would wait on each other",
   "self-link": "An item can't link to itself",
-  archived: "That would leave unfinished work inside an archived project, where it would be hidden",
   deleted: "That item was deleted after it was added: send it again to add it anew",
   "not-found": "It isn't in the plan",
   "changed-since": "Changed since, so it can't be undone",
@@ -222,7 +220,7 @@ export interface Thread {
   title: string;
   /** The threads whose work its own waits on. */
   waitsFor: string[];
-  /** Its member leaves by stage, as core counts them: every one but those archived. */
+  /** Its member leaves by stage, as core counts them: as core counts them. */
   counts: Counts;
 }
 

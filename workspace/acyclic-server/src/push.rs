@@ -642,8 +642,13 @@ pub fn line(entry: &Value) -> String {
             entry["id"].as_str().unwrap_or_default(),
             entry["field"].as_str().unwrap_or_default()
         ),
-        "reopened" => format!("{} was reopened", title(&entry["item"])),
-        "done-early" => format!("{} is done with work in it open", title(&entry["item"])),
+        "done-waiting" => {
+            format!(
+                "{} is done but waits for {}",
+                title(&entry["item"]),
+                title(&entry["waits_for"])
+            )
+        },
         "contest" => {
             format!("{} has a claim to sort out", title(&entry["thread"]))
         },
@@ -680,7 +685,7 @@ mod tests {
 
     #[test]
     fn large_core_identities_still_make_new_needs_plannable() {
-        let entry = json!({"kind": "reopened", "item": {"id": "a"}});
+        let entry = json!({"kind": "contest", "thread": {"id": "t"}});
         let identity = "x".repeat(16 * 1024 + 1);
         let current = [(&entry, identity.clone())];
         assert_eq!(new_entries(&current, &BTreeSet::new()), [&entry]);
@@ -709,7 +714,9 @@ mod tests {
         ]});
         assert_eq!(key(&cycle), "thread-cycle:t:u");
         assert_eq!(line(&cycle), "T, U wait on each other");
-        let long = json!({"kind": "reopened", "item": {"id": "a", "title": "x".repeat(500)}});
+        let long = json!({
+            "kind": "done-waiting", "item": {"id": "a", "title": "x".repeat(500)}, "waits_for": {"id": "b"},
+        });
         assert_eq!(line(&long).chars().count(), 140);
     }
 }

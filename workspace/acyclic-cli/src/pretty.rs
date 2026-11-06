@@ -34,7 +34,7 @@ pub(crate) fn render(
             &columns(&["id", "title", "state", "thread", "readiness"]),
             width,
         ),
-        Command::Thread(ThreadCommand::Ready { .. }) => ready(data, width),
+        Command::Thread(ThreadCommand::Ready) => ready(data, width),
         Command::Thread(ThreadCommand::List) => threads(data, width),
         Command::Import { .. } => import(data),
         Command::Init { .. } => format!(

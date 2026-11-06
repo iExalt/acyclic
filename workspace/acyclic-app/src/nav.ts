@@ -80,8 +80,6 @@ export const START: Place = {
 export interface World {
   /** Whether the item is drawn. */
   has: (id: string) => boolean;
-  /** Whether the item is hidden, in an archived subtree while archived items aren't shown. */
-  archived: (id: string) => boolean;
   /** The thread an item is in, if any. */
   threadOf: (id: string) => string | null;
   /** Side by side rather than a phone's one column. */
@@ -121,7 +119,7 @@ export type Intent =
   | { kind: "follow"; id: string; pin: string | null }
   /** A tap on the Map: an item, or the background (null), which makes the Map where the user is. */
   | { kind: "tap"; id: string | null }
-  /** The item selected went away, deleted or hidden with archived items. */
+  /** The item selected went away. */
   | { kind: "gone" }
   /** A thread's row or tile anywhere: to the Map, the thread picked with its panel, its items framed. */
   | { kind: "thread"; id: string }
@@ -343,7 +341,7 @@ function selectItem(place: Place, id: string, pin: string | null, world: World):
  * Closes one layer: an item chosen from a thread's panel goes back to the thread, whose own close goes back further, to
  * the item it was opened from if that is still shown, brought into view.
  */
-function shut(place: Place, layer: Layer, world: Pick<World, "has" | "archived">): Step {
+function shut(place: Place, layer: Layer, world: Pick<World, "has">): Step {
   const only = (next: Place): Step => ({ place: next, requests: {} });
   const goBack = (next: Place): Place => ({
     ...next,
@@ -375,9 +373,9 @@ function shut(place: Place, layer: Layer, world: Pick<World, "has" | "archived">
 }
 
 /** The item the thread open was opened from, if it is still shown: else closing the thread goes back past it. */
-function itemUnder(place: Place, world: Pick<World, "has" | "archived">): string | null {
+function itemUnder(place: Place, world: Pick<World, "has">): string | null {
   const item = place.cameFrom?.by === "thread" ? place.cameFrom.item : undefined;
-  return place.thread !== null && item !== undefined && world.has(item) && !world.archived(item) ? item : null;
+  return place.thread !== null && item !== undefined && world.has(item) ? item : null;
 }
 
 // What's on top: the one sheet shown over the Map, which Escape and Back close first. One order for both, so a key
@@ -407,7 +405,7 @@ export interface Open {
 export type Layer = "command" | "mode" | "add" | "projects" | "item" | "thread" | "under" | "away";
 
 /** What of `place` is open as a layer: an item only once drawn; the projects' sheet and a view away only on a phone. */
-export function openOf(place: Place, world: Pick<World, "has" | "archived" | "wide">): Open {
+export function openOf(place: Place, world: Pick<World, "has" | "wide">): Open {
   return {
     command: place.overlays.command,
     mode: place.overlays.mode.kind !== "idle",
@@ -584,43 +582,35 @@ export function placeIn(state: unknown): Place | null {
 
 /**
  * What of a place an entry held opens in the plan as it is, as `landing` says of a link: an item or a thread gone since
- * is dropped, and named, and an archived item opens with archived items shown.
+ * is dropped, and named.
  */
 export function landingPlace(
   place: Place,
   has: Parameters<typeof landing>[1],
-): { place: Place; archived: boolean; missing: ("item" | "thread")[] } {
+): { place: Place; missing: ("item" | "thread")[] } {
   const found = landing({ view: place.view, item: place.item, thread: place.thread, needsAt: place.needsAt }, has);
   return {
     place: { ...place, item: found.wanted.item, thread: found.wanted.thread },
-    archived: found.archived,
     missing: found.missing,
   };
 }
 
-/** What the plan holds of something an address names: the item drawn, hidden in an archived subtree, or gone. */
-export type Found = "shown" | "archived" | null;
-
 /**
  * What of `wanted` opens in the plan as it is: an item or a thread it no longer holds is dropped, and named, so a link
- * gone stale says so rather than opening an empty Map; an archived item opens with archived items shown.
+ * gone stale says so rather than opening an empty Map.
  */
 export function landing(
   wanted: Wanted,
-  has: { item: (id: string) => Found; thread: (id: string) => boolean },
-): { wanted: Wanted; archived: boolean; missing: ("item" | "thread")[] } {
-  const item = wanted.item === null ? null : has.item(wanted.item);
+  has: { item: (id: string) => boolean; thread: (id: string) => boolean },
+): { wanted: Wanted; missing: ("item" | "thread")[] } {
+  const itemGone = wanted.item !== null && !has.item(wanted.item);
   const threadGone = wanted.thread !== null && !has.thread(wanted.thread);
   return {
     wanted: {
       ...wanted,
-      item: item === null ? null : wanted.item,
+      item: itemGone ? null : wanted.item,
       thread: threadGone ? null : wanted.thread,
     },
-    archived: item === "archived",
-    missing: [
-      ...(wanted.item !== null && item === null ? ["item" as const] : []),
-      ...(threadGone ? ["thread" as const] : []),
-    ],
+    missing: [...(itemGone ? ["item" as const] : []), ...(threadGone ? ["thread" as const] : [])],
   };
 }

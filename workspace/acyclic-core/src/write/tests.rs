@@ -166,8 +166,7 @@ fn waiter_guard_covers_new_direct_and_ancestor_waiters_and_keeps_original_waiter
             add("ancestor", vec![ItemAssign::Thread(Some("t".into()))]),
         ],
     );
-    let done = ItemAssign::State(ItemState::Done);
-    commit_ok(&mut r, 2, vec![item("parent", done.clone()), item("done", done)]);
+    commit_ok(&mut r, 2, vec![item("done", ItemAssign::State(ItemState::Done))]);
     let guard = |baselines| Expectation::WaitersStartedAtMost {
         item: "done".into(),
         baselines: StartedBaselines(baselines),
@@ -291,12 +290,7 @@ fn done_tree() -> Replica {
             ),
         ],
     );
-    let done = ItemAssign::State(ItemState::Done);
-    commit_ok(
-        &mut r,
-        2,
-        vec![item("root", done.clone()), item("mid", done.clone()), item("leaf", done)],
-    );
+    commit_ok(&mut r, 2, vec![item("leaf", ItemAssign::State(ItemState::Done))]);
     r
 }
 
@@ -383,83 +377,27 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
 }
 
 #[test]
-fn done_work_set_back_is_reopened_and_leaves_the_archive_keeping_its_evidence() {
+fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes() {
     let mut r = done_tree();
-    let evidence = Evidence { text: Some("shipped".into()), ..Evidence::default() };
-    commit_ok(
-        &mut r,
-        3,
-        vec![item("leaf", ItemAssign::Evidence(Some(evidence))), item("root", ItemAssign::Archive)],
-    );
-    let outcome = commit_ok(&mut r, 4, vec![item("leaf", ItemAssign::State(ItemState::Backlog))]);
-    let m = read(&r);
-    assert_eq!(m.items["leaf"].reopened, Value::One(Reopened { archived: true }));
-    assert_eq!(m.items["root"].archived, Value::None);
-    assert!(
-        outcome
-            .steps
-            .iter()
-            .any(|step| step.write == Written::Unarchive("root".into()) && !step.asked)
-    );
-    // Finished again, the flag clears.
-    commit_ok(&mut r, 5, vec![item("leaf", ItemAssign::State(ItemState::Done))]);
-    assert_eq!(read(&r).items["leaf"].reopened, Value::None);
-}
-
-#[test]
-fn reopening_siblings_under_one_archived_root_flags_each_as_archived_in_any_order() {
-    for order in [["mid", "other"], ["other", "mid"]] {
-        let mut r = done_tree();
-        commit_ok(&mut r, 3, vec![add("other", vec![ItemAssign::Parent(Some("root".into()))])]);
-        commit_ok(
-            &mut r,
-            4,
-            vec![
-                item("other", ItemAssign::State(ItemState::Done)),
-                item("leaf", ItemAssign::State(ItemState::Done)),
-            ],
-        );
-        commit_ok(&mut r, 5, vec![item("root", ItemAssign::Archive)]);
-        let back = order.iter().map(|id| item(id, ItemAssign::State(ItemState::Backlog))).collect();
-        commit_ok(&mut r, 6, back);
-        let m = read(&r);
-        for id in order {
-            assert_eq!(
-                m.items[id].reopened,
-                Value::One(Reopened { archived: true }),
-                "{id} in {order:?}"
-            );
-        }
-        assert_eq!(m.items["root"].archived, Value::None);
-    }
-}
-
-#[test]
-fn archiving_a_root_while_reopening_under_it_is_refused_rather_than_undone() {
-    let r = done_tree();
-    let rules = refused(
-        &r,
-        vec![
-            item("root", ItemAssign::Archive),
-            item("leaf", ItemAssign::State(ItemState::Backlog)),
-        ],
-    );
-    assert!(rules.contains(&Rule::ArchivedOpen("root".into())), "{rules:?}");
-}
-
-#[test]
-fn settling_a_state_conflict_that_held_done_is_no_reopen() {
-    // One replica finishes the leaf while another sets it back to the backlog without seeing that.
-    let mut a = done_tree();
-    commit_ok(&mut a, 3, vec![item("leaf", ItemAssign::State(ItemState::Parked))]);
-    let mut c = replica("c");
-    c.join(&a.state).unwrap();
-    commit_ok(&mut a, 4, vec![item("leaf", ItemAssign::State(ItemState::Done))]);
-    commit_ok(&mut c, 4, vec![item("leaf", ItemAssign::State(ItemState::Backlog))]);
-    a.join(&c.state).unwrap();
-    assert!(read(&a).items["leaf"].state.is_conflict());
-    commit_ok(&mut a, 5, vec![item("leaf", ItemAssign::State(ItemState::Backlog))]);
-    assert_eq!(read(&a).items["leaf"].reopened, Value::None);
+    commit_ok(&mut r, 3, vec![add("other", vec![])]);
+    let lineage = |from: &str, to: &str| Rule::LineageLink { from: from.into(), to: to.into() };
+    let waits = |from: &str, to: &str| item(from, ItemAssign::WaitsFor(to.into(), true));
+    assert!(refused(&r, vec![waits("leaf", "root")]).contains(&lineage("leaf", "root")));
+    assert!(refused(&r, vec![waits("root", "leaf")]).contains(&lineage("root", "leaf")));
+    // A move that puts two linked items in one line is refused too.
+    commit_ok(&mut r, 4, vec![waits("other", "mid")]);
+    let moved = refused(&r, vec![item("mid", ItemAssign::Parent(Some("other".into())))]);
+    assert!(moved.contains(&lineage("other", "mid")), "{moved:?}");
+    // One a sync brought holds no other write back.
+    let mut synced = done_tree();
+    commit_ok(&mut synced, 3, vec![add("x", vec![])]);
+    let mut apart = replica("b");
+    apart.join(&synced.state).unwrap();
+    commit_ok(&mut synced, 4, vec![waits("x", "leaf")]);
+    commit_ok(&mut apart, 4, vec![item("leaf", ItemAssign::Parent(Some("x".into())))]);
+    synced.join(&apart.state).unwrap();
+    assert!(read(&synced).ancestors("leaf").contains(&"x"));
+    commit_ok(&mut synced, 5, vec![item("mid", ItemAssign::Title("Mid".into()))]);
 }
 
 #[test]
@@ -641,7 +579,6 @@ fn change(tc: &TestCase) -> Change {
         5 => ItemAssign::Thread(tc.draw(gs::booleans()).then(|| "t".to_owned())),
         6 => ItemAssign::Repository("r".into(), tc.draw(gs::booleans())),
         7 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
-        8 => ItemAssign::Archive,
         _ => return add(&id, vec![]),
     };
     Change::Set(Assign::Item(id, assign))
@@ -716,18 +653,16 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
         finishing(&r, "lone", None, false, true),
         [Rule::NotReady(Some(Readiness::Unthreaded))]
     );
-    assert_eq!(
-        finishing(&r, "parent", None, false, true),
-        [Rule::OpenWork { open: vec!["child".into()], held: None }]
-    );
+    // A parent reads done once its leaves are, so storing done on one is refused, forced or not.
+    assert_eq!(finishing(&r, "parent", None, false, true), [Rule::ParentDone]);
+    assert_eq!(finishing(&r, "parent", None, true, false), [Rule::ParentDone]);
     assert_eq!(finishing(&r, "lone", None, true, true), []);
     // Someone else's claim holds the thread's work back from the finisher.
     crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), false).unwrap();
     let held = Readiness::Claimed { holder: "session/other".into() };
     assert_eq!(finishing(&r, "free", None, false, true), [Rule::NotReady(Some(held))]);
-    // A parent whose work is done may be finished.
     commit_ok(&mut r, 3, vec![item("child", ItemAssign::State(ItemState::Done))]);
-    assert_eq!(finishing(&r, "parent", None, false, true), []);
+    assert_eq!(finishing(&r, "parent", None, false, true), [Rule::ParentDone]);
     let ghost = Change::Finish { item: "ghost".into(), evidence: None, force: true };
     assert_eq!(refused(&r, vec![ghost]), [Rule::NoRecord(Record::Item("ghost".into()))]);
 }

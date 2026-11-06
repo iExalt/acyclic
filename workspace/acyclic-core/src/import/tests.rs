@@ -16,7 +16,6 @@ pub(super) fn item(n: u8, state: Option<State>, parent: Option<u8>) -> Item {
         repositories: None,
         waits_for: None,
         size: None,
-        archived: false,
         evidence: None,
     }
 }

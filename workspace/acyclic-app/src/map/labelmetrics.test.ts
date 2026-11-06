@@ -7,7 +7,7 @@ const normalized = (text: string) => text.replace(/`([^`]+)`/g, "$1").replace(/\
 describe("map label metrics", () => {
   it("keeps an ordinary title at the existing tile size and adds its stage as words", () => {
     const measured = metricsOf(
-      { title: "Fix the map", kind: "leaf", hidden: 0, archived: false, stage: "ready", progress: null },
+      { title: "Fix the map", kind: "leaf", hidden: 0, stage: "ready", progress: null },
       fonts,
     );
     expect(measured).toMatchObject({ width: 200, height: 64, lines: ["Fix the map", "Ready"] });
@@ -16,7 +16,7 @@ describe("map label metrics", () => {
   it("wraps full titles, long unbroken tokens, multiline text and Unicode graphemes without truncating them", () => {
     const token = "supercalifragilisticexpialidocious".repeat(2);
     const title = `A long \`title\`\nwith 🧑🏽‍🚀 and ${token}`;
-    const measured = metricsOf({ title, kind: "leaf", hidden: 0, archived: false, stage: null, progress: null }, fonts);
+    const measured = metricsOf({ title, kind: "leaf", hidden: 0, stage: null, progress: null }, fonts);
     expect(normalized(measured.lines.join(""))).toBe(normalized(title));
     expect(measured.lines.some((line) => line.includes("🧑🏽‍🚀"))).toBe(true);
     expect(measured.textWidth).toBe(126);
@@ -25,7 +25,7 @@ describe("map label metrics", () => {
     expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
     expect(
       metricsOf(
-        { title: "Run `acyclic up` on the Mac", kind: "leaf", hidden: 0, archived: false, stage: null, progress: null },
+        { title: "Run `acyclic up` on the Mac", kind: "leaf", hidden: 0, stage: null, progress: null },
         fonts,
       ).lines.join(""),
     ).toBe("Run acyclic up on the Mac");
@@ -42,7 +42,7 @@ describe("map label metrics", () => {
       unthreaded: 0,
     };
     const measured = metricsOf(
-      { title: "Release", kind: "collapsed", hidden: 18, archived: false, stage: "in-progress", progress },
+      { title: "Release", kind: "collapsed", hidden: 18, stage: "in-progress", progress },
       fonts,
     );
     expect(normalized(measured.lines.join(""))).toContain(normalized("Release (+18)"));
@@ -57,7 +57,6 @@ describe("map label metrics", () => {
         title: "A finished thread with a long name",
         kind: "collapsed",
         hidden: 0,
-        archived: false,
         stage: "done",
         progress: null,
         doneBox: { kind: "thread", thread: "release" },
@@ -73,7 +72,7 @@ describe("map label metrics", () => {
 
   it("shows Needs a thread even though a tile without a thread has no stage icon", () => {
     const measured = metricsOf(
-      { title: "Unassigned", kind: "leaf", hidden: 0, archived: false, stage: "unthreaded", progress: null },
+      { title: "Unassigned", kind: "leaf", hidden: 0, stage: "unthreaded", progress: null },
       fonts,
     );
     expect(measured.lines).toEqual(["Unassigned", "Needs a thread"]);
@@ -81,16 +80,12 @@ describe("map label metrics", () => {
   });
 
   it("keeps a short box header and grows it to fit every title and status line", () => {
-    const short = metricsOf(
-      { title: "Box", kind: "box", hidden: 0, archived: false, stage: null, progress: null },
-      fonts,
-    );
+    const short = metricsOf({ title: "Box", kind: "box", hidden: 0, stage: null, progress: null }, fonts);
     const long = metricsOf(
       {
         title: "A box title that needs several lines",
         kind: "box",
         hidden: 0,
-        archived: false,
         stage: "blocked",
         progress: null,
       },
