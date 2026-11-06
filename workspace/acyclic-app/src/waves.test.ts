@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 import { outlineOf } from "./outline";
-import { projectLabels, wavesView } from "./waves";
+import { projectLabels, scopeThreads, wavesView } from "./waves";
 
 // Project p holds a's work and some of b's, project q the rest of b's; c waits on b, and b and d on each other.
 const items = [
@@ -67,5 +67,33 @@ describe("projectLabels", () => {
 
   it("keeps other project labels in their original order", () => {
     expect(projectLabels(["Beta", " alpha ", "Gamma"], "Alpha")).toEqual(["Beta", "Gamma"]);
+  });
+});
+
+describe("scopeThreads", () => {
+  const some = {
+    threads: [
+      { id: "a", title: "A", task: null, waitsFor: [], counts: none },
+      { id: "b", title: "B", task: null, waitsFor: ["a"], counts: none },
+      { id: "c", title: "C", task: null, waitsFor: ["b"], counts: none },
+      { id: "x", title: "X", task: null, waitsFor: [], counts: none },
+    ],
+    waves: [["a"], ["b"], ["c"]],
+    anytime: ["x"],
+  };
+
+  it("keeps the threads asked for, closes the gap a wave leaves, and drops waits on those left out", () => {
+    const kept = scopeThreads(some, new Set(["a", "c"]));
+    expect(kept.waves).toEqual([["a"], ["c"]]);
+    expect(kept.anytime).toEqual([]);
+    expect(kept.threads.map((one) => [one.id, one.waitsFor])).toEqual([
+      ["a", []],
+      ["c", []],
+    ]);
+    expect(scopeThreads(some, new Set(["x"]))).toMatchObject({ waves: [], anytime: ["x"] });
+  });
+
+  it("leaves every thread as it was when all are kept", () => {
+    expect(scopeThreads(some, new Set(["a", "b", "c", "x"]))).toEqual(some);
   });
 });

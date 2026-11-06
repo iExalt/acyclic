@@ -117,10 +117,22 @@ export interface ViewState {
   collapsed: ReadonlySet<string>;
 }
 
-/** The view the Map opens on: the roots open, every box below them collapsed. */
+/**
+ * Whether the item is a finished epic: a box at the top with leaves, each done or canceled. Its progress says so, as
+ * the stages but canceled add up to its leaves.
+ */
+export function finishedEpic(model: Model, id: string): boolean {
+  const progress = model.items.get(id)?.progress ?? null;
+  return (
+    (model.depth.get(id) ?? 0) === 0 && model.children.has(id) && progress !== null && progress.done === progress.leaves
+  );
+}
+
+/** The view the Map opens on: each box below the top collapsed, and a finished epic folded at the top. */
 export function defaultView(model: Model): ViewState {
   const collapsed = new Set<string>();
-  for (const [id, d] of model.depth) if (d >= 1 && model.children.has(id)) collapsed.add(id);
+  for (const [id, d] of model.depth)
+    if ((d >= 1 || finishedEpic(model, id)) && model.children.has(id)) collapsed.add(id);
   return { collapsed };
 }
 

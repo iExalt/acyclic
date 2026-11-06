@@ -12,6 +12,8 @@ import { useSheet } from "./Sheet";
 
 export interface ProjectsProps {
   outline: Outline;
+  /** The initiative the epics are in, which the heading names; null with no initiative in context. */
+  initiative: string | null;
   lines: ReadonlyMap<string, Line>;
   /** The thread picked, whose rows are pressed. */
   picked: string | null;
@@ -21,7 +23,15 @@ export interface ProjectsProps {
   onSelectProject: (id: string) => void;
 }
 
-export function Projects({ outline, lines, picked, current, onPickThread, onSelectProject }: ProjectsProps) {
+export function Projects({
+  outline,
+  initiative,
+  lines,
+  picked,
+  current,
+  onPickThread,
+  onSelectProject,
+}: ProjectsProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const reveal = (project: string | undefined) =>
     project !== undefined && setOpen((was) => (was.has(project) ? was : new Set([...was, project])));
@@ -64,7 +74,15 @@ export function Projects({ outline, lines, picked, current, onPickThread, onSele
   return (
     <div className="outline">
       <h2 className="heading">
-        Projects <span className="count">{outline.projects.length}</span>
+        <span>
+          {initiative === null ? (
+            "Epics"
+          ) : (
+            <>
+              Epics in <Prose text={initiative} />
+            </>
+          )}
+        </span>
       </h2>
       <ul>
         {outline.projects.map((project) => {

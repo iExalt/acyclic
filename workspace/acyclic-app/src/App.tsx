@@ -28,11 +28,13 @@ import { Icon, X } from "./icons";
 import {
   contextOf,
   contextTitle,
+  inContext,
   type ListScope,
   needInitiatives,
   startProject,
   switcherRows,
   threadInitiatives,
+  threadsIn,
 } from "./initiatives";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
 import { byTitle, linesOf } from "./lines";
@@ -74,7 +76,7 @@ import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
 import { createTracker, type Notice } from "./tracker";
-import { wavesView } from "./waves";
+import { scopeThreads, wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -162,6 +164,9 @@ export function App() {
   const worldNow = useRef<Omit<World, "dirty">>({
     has: () => false,
     threadOf: () => null,
+    initiativeOf: () => null,
+    initiativesOf: () => [],
+    contextOf: (chosen) => chosen,
     wide: false,
   });
   const historyMove = useRef<(place: Place, hint: HistoryHint, retainPurpose?: boolean) => void>(() => undefined);
@@ -261,9 +266,12 @@ export function App() {
   /** The switcher's rows, and the initiative in context: the one chosen, else the first. */
   const switcher = useMemo(() => switcherRows(loaded?.initiatives ?? [], model), [loaded, model]);
   const context = contextOf(place.initiative, switcher);
+  const ofThreads = useMemo(
+    () => (model === null ? new Map<string, Set<string | null>>() : threadInitiatives(model)),
+    [model],
+  );
   const scope = useMemo<ListScope>(() => {
     const none: ReadonlySet<string | null> = new Set([null]);
-    const ofThreads = model === null ? new Map<string, Set<string | null>>() : threadInitiatives(model);
     return {
       order: switcher.map((one) => one.id),
       context,
@@ -272,23 +280,45 @@ export function App() {
       ofNeed: (need) => needInitiatives(need, model, ofThreads),
       ofProject: (id) => new Set([model?.items.get(id)?.initiative ?? null]),
     };
-  }, [switcher, context, model]);
+  }, [switcher, context, model, ofThreads]);
+  // The Map, the Threads view and the sidebar's epics show the initiative in context alone; the lists show every one.
+  const inScope = useMemo(() => inContext(shown, context), [shown, context]);
+  const scopedModel = useMemo(() => (loaded === null ? null : buildModel(inScope)), [loaded, inScope]);
+  const scopedThreads = useMemo(() => threadsIn(sorted, ofThreads, context), [sorted, ofThreads, context]);
+  const scopedOutline = useMemo(
+    () =>
+      scopedModel === null
+        ? null
+        : outlineOf(
+            scopedModel,
+            scopedThreads.map((one) => one.id),
+          ),
+    [scopedModel, scopedThreads],
+  );
   const chooseInitiative = (id: string) => go({ kind: "initiative", id });
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
-    () => (loaded === null || outline === null ? null : wavesView(loaded.threads, outline)),
-    [loaded, outline],
+    () =>
+      loaded === null || scopedOutline === null
+        ? null
+        : wavesView(scopeThreads(loaded.threads, new Set(scopedThreads.map((one) => one.id))), scopedOutline),
+    [loaded, scopedOutline, scopedThreads],
   );
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   worldNow.current = {
     has: (id) => model?.items.has(id) ?? false,
     threadOf: (id) => model?.items.get(id)?.thread ?? null,
+    initiativeOf: (id) => model?.items.get(id)?.initiative ?? null,
+    initiativesOf: (thread) => [...(ofThreads.get(thread) ?? [])].filter((id): id is string => id !== null),
+    contextOf: (chosen) => contextOf(chosen, switcher),
     wide,
   };
   const current = useMemo(
     () =>
-      model === null || outline === null ? { project: null, thread: null } : currentRows(model, outline, selected),
-    [model, outline, selected],
+      model === null || scopedOutline === null
+        ? { project: null, thread: null }
+        : currentRows(model, scopedOutline, selected),
+    [model, scopedOutline, selected],
   );
   // An item that went away, deleted or moved out of reach elsewhere, is no longer
   // selected: what's selected is drawn, so the panel and the address never name an item the Map doesn't show.
@@ -884,9 +914,10 @@ export function App() {
       // With one initiative there is nothing to tell apart, so the bar leaves it unsaid.
       context={wide || switcher.length < 2 ? null : contextTitle(context, switcher)}
       outline={
-        outline === null || !wide ? null : (
+        scopedOutline === null || !wide ? null : (
           <Projects
-            outline={outline}
+            outline={scopedOutline}
+            initiative={contextTitle(context, switcher)}
             lines={lines}
             picked={thread}
             current={current}
@@ -920,7 +951,7 @@ export function App() {
           }
         >
           <PlanMap
-            items={shown}
+            items={inScope}
             thread={thread}
             lines={lines}
             palette={palette}
@@ -1051,11 +1082,12 @@ export function App() {
             busy={busy}
           />
         )}
-        {panel === "projects" && outline !== null ? (
+        {panel === "projects" && scopedOutline !== null ? (
           <ProjectsSheet onClose={() => go({ kind: "shut", layer: "projects" })} onDismiss={() => closeTop.current(1)}>
             <InitiativeSwitcher rows={switcher} context={context} onChoose={chooseInitiative} />
             <Projects
-              outline={outline}
+              outline={scopedOutline}
+              initiative={contextTitle(context, switcher)}
               lines={lines}
               picked={thread}
               current={current}

@@ -176,12 +176,17 @@ def reveal_need_target(target):
 
 
 class Plan:
-    """The tracker's items, and what the Map's views of them must show."""
+    """The tracker's items under the initiative in context, which the Map draws alone, and what its views of them must
+    show. The app puts the busiest initiative in context first, which is the fixture's; the items of the others are
+    kept apart in `elsewhere`."""
 
     def __init__(self, env):
         ids = [row["id"] for row in json.loads(run(env, "item", "list"))["data"]["items"]]
         rows = json.loads(run(env, "item", "show", *ids))["data"]
-        self.items = {row["id"]: row for row in rows}
+        by_initiative = Counter(row["initiative"] for row in rows)
+        self.initiative = by_initiative.most_common(1)[0][0]
+        self.elsewhere = {row["id"]: row for row in rows if row["initiative"] != self.initiative}
+        self.items = {row["id"]: row for row in rows if row["initiative"] == self.initiative}
         self.parent = {id: row["parent"] for id, row in self.items.items()}
         # The fixture's first thread: its ids rise in the order its records were made.
         self.first_thread = min(
@@ -198,9 +203,17 @@ class Plan:
     def depth(self, id):
         return len(self.chain(id)) - 1
 
+    def folded(self):
+        """The epics at the top that are finished, which the Map folds at once: each has leaves, all done or canceled."""
+        parents = {parent for parent in self.parent.values() if parent in self.items}
+        open_roots = {self.chain(id)[-1] for id in self.items if id not in parents and self.items[id]["stage"] not in ("done", "canceled")}
+        return {id for id in self.items if self.depth(id) == 0 and id in parents and id not in open_roots}
+
     def default(self):
-        """The default view's nodes: every item shown down to depth 1, below which every box is collapsed."""
-        return [id for id in self.items if self.depth(id) <= 1]
+        """The default view's nodes: every item shown down to depth 1, below which every box is collapsed, and a
+        finished epic at the top folded into one."""
+        folded = self.folded()
+        return [id for id in self.items if self.depth(id) <= 1 and (self.depth(id) == 0 or self.chain(id)[-1] not in folded)]
 
     def children(self, id):
         return [one for one in self.items if self.parent[one] == id]
@@ -2043,6 +2056,14 @@ def outline_journey(page, view, plan, name, failures):
             failures.append(f"{name}: choosing {title} didn't mark it in the switcher")
         if f"initiative={initiative}" not in page.url:
             failures.append(f"{name}: choosing {title} left the address {page.url}")
+        # The Map draws the initiative in context alone: the other's epic and its tasks, none of the first's, and it
+        # settles on them. A tracker with nothing in the other leaves the Map empty.
+        try:
+            wait_drawn(page, len(plan.elsewhere))
+            settled_map(page)
+        except PlaywrightTimeout:
+            drawn = page.get_by_test_id("map").evaluate("m => ({ ...m.dataset })")
+            failures.append(f"{name}: choosing {title} left the Map {drawn}, not settled on its {len(plan.elsewhere)} items")
         if phone:
             page.get_by_test_id("projects-button").click()
             sheet.wait_for(state="detached", timeout=5_000)
@@ -2062,6 +2083,18 @@ def outline_journey(page, view, plan, name, failures):
             page.get_by_test_id("projects-button").click()
             sheet.wait_for(state="detached", timeout=5_000)
         wait_drawn(page, len(plan.default()))
+        # An item opened from another initiative puts its own in context: an address naming one of the first's items
+        # under the second's lands on the first, and the Map draws it and the item selected.
+        leaf = next(id for id in plan.default() if not plan.children(id))
+        page.goto(f"{page.url.split('?')[0]}?item={leaf}&initiative={initiative}")
+        try:
+            page.wait_for_url(re.compile(f"initiative={was}"), timeout=10_000)
+            wait_drawn(page, len(plan.default()))
+            page.get_by_test_id("inspector").wait_for(timeout=10_000)
+            page.keyboard.press("Escape")
+            page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: opening {leaf} under {title} left the address {page.url}, not its own initiative")
     # Only a leaf is in a thread, and the Map draws one once the box above it is open.
     picked = next(
         id
@@ -2191,8 +2224,21 @@ def outline_journey(page, view, plan, name, failures):
     print(f"{name}: selecting {picked} marked its project and its thread's row, and its thread opened from it")
 
 
+def waves_in_context(plan, listed, anytime=True):
+    """The wave each thread is in as the Threads view of the initiative in context numbers it: the threads with a task
+    in it, in the waves the tracker computed across every thread, a wave left with none dropped so the numbers have no
+    gaps. A thread of one stands for its loose task."""
+    members = {row["thread"] for row in plan.items.values() if row["thread"]}
+    members |= {row["id"] for row in listed["threads"] if row.get("task") in plan.items}
+    kept = [[id for id in ids if id in members] for ids in listed["waves"]]
+    want = {id: str(at + 1) for at, ids in enumerate(ids for ids in kept if ids) for id in ids}
+    if anytime:
+        want |= {id: "anytime" for id in listed["anytime"] if id in members}
+    return want
+
+
 @timed
-def threads_journey(page, view, env, name, failures):
+def threads_journey(page, view, env, plan, name, failures):
     """The Threads view names every wait, and shows related arrows on hover when wide; picking a tile opens its panel."""
     if page.locator("[data-testid=thread-panel], [data-testid=inspector]").count():
         page.keyboard.press("Escape")
@@ -2202,8 +2248,10 @@ def threads_journey(page, view, env, name, failures):
         )
     to_map(page)
     listed = json.loads(run(env, "thread", "list"))["data"]
-    want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
-    want |= {id: "anytime" for id in listed["anytime"]}
+    want = waves_in_context(plan, listed)
+    # The other initiatives' threads are left out, and the proof is not vacuous: the tracker has some.
+    if len(want) == len(listed["threads"]) and plan.elsewhere:
+        failures.append(f"{name}: the tracker has no thread outside the initiative in context to leave out")
     page.locator("[data-view=threads]").click()
     page.get_by_test_id("threads-view").wait_for()
     got = page.locator(".wave [data-thread-tile]").evaluate_all(
@@ -4188,10 +4236,11 @@ def shard_run(shard):
                     )
                     # The sidebar counts the plan's items; a phone's bar leaves the count out.
                     counted = page.get_by_test_id("item-count")
-                    count = counted.inner_text() if counted.count() else str(len(plan.items))
-                    if count != str(len(plan.items)):
+                    total = len(plan.items) + len(plan.elsewhere)
+                    count = counted.inner_text() if counted.count() else str(total)
+                    if count != str(total):
                         failures.append(
-                            f"{name}: the page lists {count} items, expected {len(plan.items)}"
+                            f"{name}: the page lists {count} items, expected {total}"
                         )
                     installable(context, page, origin, name, failures)
                     overview_journey(page, view, name, failures)
@@ -4199,7 +4248,7 @@ def shard_run(shard):
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, plan, name, failures)
-                    threads_journey(page, view, env, name, failures)
+                    threads_journey(page, view, env, plan, name, failures)
                     deep_link_journey(context, origin, view, plan, name, failures)
                     history_journey(context, origin, view, plan, name, failures)
                     command_journey(page, view, origin, plan, name, failures)
@@ -4284,7 +4333,7 @@ def shard_run(shard):
                         "webkit desktop",
                     )
                     listed = json.loads(run(env, "thread", "list"))["data"]
-                    want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
+                    want = waves_in_context(plan, listed, anytime=False)
                     page.locator("[data-view=threads]").click()
                     verify_thread_arrows(page, listed, want, "webkit desktop", failures)
                     if errors:

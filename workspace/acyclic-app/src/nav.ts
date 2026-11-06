@@ -88,6 +88,12 @@ export interface World {
   has: (id: string) => boolean;
   /** The thread an item is in, if any. */
   threadOf: (id: string) => string | null;
+  /** The initiative an item is under, or null when it is under none or the plan lacks it. */
+  initiativeOf: (id: string) => string | null;
+  /** The initiatives a thread has tasks in; none for a thread of none. */
+  initiativesOf: (thread: string) => readonly string[];
+  /** The initiative in context, given the one chosen: the chosen one while it exists, else the first. */
+  contextOf: (chosen: string | null) => string | null;
   /** Side by side rather than a phone's one column. */
   wide: boolean;
   /** A form holds what the user typed. */
@@ -179,7 +185,25 @@ export type Intent =
 /** The place after `intent`, and what it asks of what is drawn. */
 export function navigate(place: Place, intent: Intent, world: World): Step {
   const step = move(place, intent, world);
-  return settle(place, step);
+  return inContext(settle(place, step), world);
+}
+
+/**
+ * The Map and the Threads view show one initiative, so what is opened from elsewhere puts its initiative in context:
+ * the item selected, else the thread picked, when none of its tasks is under the initiative already in context. Moving
+ * between items of one initiative leaves it alone.
+ */
+function inContext({ place, requests }: Step, world: World): Step {
+  const context = world.contextOf(place.initiative);
+  const home =
+    place.item !== null
+      ? world.initiativeOf(place.item)
+      : place.thread !== null
+        ? (world.initiativesOf(place.thread).find((id) => id === context) ??
+          world.initiativesOf(place.thread)[0] ??
+          null)
+        : null;
+  return home === null || home === context ? { place, requests } : { place: { ...place, initiative: home }, requests };
 }
 
 /**
@@ -256,8 +280,18 @@ function move(place: Place, intent: Intent, world: World): Step {
         requests: { frame: { thread: intent.id } },
       };
     }
-    case "initiative":
-      return only({ ...place, initiative: intent.id });
+    case "initiative": {
+      // The Map draws one initiative, so what is open that isn't in the one chosen closes.
+      const now = world.contextOf(intent.id);
+      const keepItem = place.item !== null && world.initiativeOf(place.item) === now;
+      const keepThread = place.thread !== null && world.initiativesOf(place.thread).includes(now ?? "");
+      return only({
+        ...place,
+        initiative: intent.id,
+        item: keepItem ? place.item : null,
+        thread: keepThread ? place.thread : null,
+      });
+    }
     case "goTo": {
       // An item is shown on the Map, so going to another view leaves it. The Overview and Needs you are lists, over
       // which a thread's panel would only cover what the user went to see; the Threads view shows it picked.
