@@ -1,0 +1,50 @@
+name: Build one release archive
+description: Builds the acyclic binary for a target, checks it runs, and uploads its archive; the caller has checked the commit out and set TARGET and ACYCLIC_REQUIRE_APP
+
+inputs:
+  target:
+    description: The Rust target triple to build
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        key: ${{ inputs.target }}
+    - run: rustup target add "$TARGET"
+      shell: bash
+    # ring, under rustls, compiles C; a static build needs musl's compiler wrapper, for the runner's own architecture.
+    - name: Install musl's C compiler
+      if: contains(inputs.target, 'musl')
+      run: |
+        sudo apt-get install -y --no-install-recommends musl-tools
+        echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+      shell: bash
+    - run: mise run build:app
+      shell: bash
+    - run: cargo build --release --locked -p acyclic --target "$TARGET"
+      shell: bash
+    - name: Check the binary runs, and is static on Linux
+      run: |
+        bin="target/$TARGET/release/acyclic"
+        "$bin" --version
+        case "$TARGET" in
+          *linux*) file "$bin" | tee /dev/stderr | grep -q 'static' ;;
+        esac
+      shell: bash
+    - name: Package
+      run: |
+        version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "acyclic") | .version')
+        stage="acyclic-$version-$TARGET"
+        mkdir -p "dist/$stage"
+        cp "target/$TARGET/release/acyclic" LICENSE "dist/$stage/"
+        mise run notices -- "dist/$stage/THIRD_PARTY_NOTICES.md"
+        tar -czf "dist/$stage.tar.gz" -C dist "$stage"
+      shell: bash
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: archive-${{ inputs.target }}
+        path: dist/*.tar.gz
+        if-no-files-found: error
