@@ -779,6 +779,16 @@ button.icon[aria-pressed="true"] {
   align-items: center;
   border-radius: var(--radius);
 }
+/* The whole row fills under the pointer, its chevron as much as its title, rather than the one button it is over. The
+   marked project's row keeps its bar. Only where there is hover, as for every button. */
+@media (hover: hover) {
+  .project > .project-row:hover {
+    background: var(--hover);
+  }
+  .project-row > button:hover:not(:disabled) {
+    background: transparent;
+  }
+}
 .project[aria-current="true"] > .project-row {
   background: var(--tile);
   box-shadow: inset 3px 0 0 var(--ink);
@@ -1275,6 +1285,10 @@ code {
   padding: 0 0.15em;
   border-radius: 4px;
   background: var(--ground);
+}
+/* A long path in backticks wraps rather than running past the panel, which would scroll sideways. */
+.notes code {
+  overflow-wrap: anywhere;
 }
 .notes {
   margin-top: 14px;
@@ -2290,6 +2304,12 @@ dl.facts .chip.line {
   }
   .inspector .notes {
     font-size: 15px;
+  }
+  /* The New item panel's title and Close button where the item panel's header puts its own. */
+  .form-head {
+    align-items: start;
+    margin: -18px -8px 8px 0;
+    padding: 12px 0 4px;
   }
   .inspector .muted,
   .inspector .why {
