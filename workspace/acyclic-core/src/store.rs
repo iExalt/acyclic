@@ -1,16 +1,17 @@
 //! State stored in a tracker repository: each replica's state ref holds its whole state as a tree, and its audit log
 //! keeps the events behind its batches, one ref per month.
 //!
-//! A batch reads the replica's state, applies a pure closure, writes the changed files and the day's events with one
-//! `git fast-import` into a single pack, and moves the state ref and the month's log ref in one
-//! `git update-ref --stdin` transaction with compare-and-swap, so both move or neither does. Writers queue on a lock,
-//! so a lost race means something outside acyclic moved a ref, and the batch fails. Only plumbing is used; nothing is
-//! checked out.
+//! A batch reads the replica's state, applies a pure closure, writes the changed files and the day's events as one
+//! pack, and moves the state ref and the month's log ref in one ref transaction with compare-and-swap, so both move or
+//! neither does. Writers queue on a lock, so a lost race means something outside acyclic moved a ref, and the batch
+//! fails. Only plumbing is used; nothing is checked out, and no `git` program is run: the repository is read and
+//! written through `gix`.
 //!
 //! Reads come from a cache of the parsed state kept beside the repository for the state ref's current tip, and the
-//! store repacks itself once packs pile up, so git's share of a command stays small and steady; parsing and
-//! rewriting the state still grow with the tracker. The repack runs `git gc --auto`, which skips repacking for a day
-//! after a run that warned, as git records in `gc.log`; packs pile up meanwhile.
+//! store repacks itself once packs pile up, so the repository's share of a command stays small and steady; parsing and
+//! rewriting the state still grow with the tracker. The repack is `gc` with `--auto`'s conditions, started by the
+//! command that crossed them and run beside it (see [`Maintenance`]); one that began in the last 30 seconds keeps the
+//! next from starting, so a repack that fails is retried at that pace.
 
 mod cache;
 mod git;
@@ -26,47 +27,83 @@ use serde_json::Value as Json;
 use crate::state::{self, Dot, Journal, Key, Millis, Replica, ReplicaId, State};
 use crate::time::civil;
 use cache::{Cache, Found};
-use git::{Git, NewCommit};
+pub(crate) use git::Git;
+use git::{NewCommit, PushRef, Refused};
 
-/// The variables by which git finds a repository and its objects other than by the path it is given, or takes
-/// settings from its caller.
-const LOCATING: [&str; 11] = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_QUARANTINE_PATH",
-    "GIT_NAMESPACE",
-    "GIT_COMMON_DIR",
-    "GIT_PREFIX",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_COUNT",
-];
+/// What `acyclic init` needs from a repository, without a `git` process.
+pub mod setup {
+    use std::path::{Path, PathBuf};
 
-/// Of the variables `names`, those [`git_at`] removes: [`LOCATING`] and the settings `GIT_CONFIG_KEY_<n>` and
-/// `GIT_CONFIG_VALUE_<n>` pass.
-fn unset(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
-    names
-        .filter(|name| {
-            let name = name.to_string_lossy();
-            LOCATING.contains(&name.as_ref())
-                || name.starts_with("GIT_CONFIG_KEY_")
-                || name.starts_with("GIT_CONFIG_VALUE_")
-        })
-        .collect()
-}
+    use super::{Git, StoreError};
 
-/// `git -C <repo>`, finding the repository by that path alone and taking no settings from the environment, even
-/// when git's environment names another repository, as a git hook's does. Every git acyclic runs starts here.
-#[must_use]
-pub fn git_at(repo: &Path) -> std::process::Command {
-    let mut command = std::process::Command::new("git");
-    for name in unset(std::env::vars_os().map(|(name, _)| name)) {
-        command.env_remove(name);
+    /// Whether `path` is inside a repository.
+    #[must_use]
+    pub fn is_repository(path: &Path) -> bool {
+        path.exists() && Git::new(path).handle().is_ok()
     }
-    command.arg("-C").arg(repo);
-    command
+
+    /// The value of a configuration key, from every source: the last one.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `path` isn't a repository.
+    pub fn config_value(path: &Path, key: &str) -> Result<Option<String>, StoreError> {
+        Git::new(path).config_value(key)
+    }
+
+    /// The URL of the remote `name`, with `insteadOf` rules applied, when it exists.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `path` isn't a repository.
+    pub fn remote_url(path: &Path, name: &str) -> Result<Option<String>, StoreError> {
+        Git::new(path).remote_url(name)
+    }
+
+    /// Points the remote `name` at `url`, adding it when missing; whether that changed anything.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the configuration can't be written.
+    pub fn set_remote_url(path: &Path, name: &str, url: &str) -> Result<bool, StoreError> {
+        let git = Git::new(path);
+        if git.remote_url(name)?.as_deref() == Some(url) {
+            return Ok(false);
+        }
+        git.set_remote_url(name, url)?;
+        Ok(true)
+    }
+
+    /// Creates a repository with a work tree at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the repository can't be created.
+    pub fn init_repository(path: &Path) -> Result<(), StoreError> {
+        super::git::init(path)
+    }
+
+    /// Whether `remote` has the ref `reference`, asked from the repository at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the remote can't be reached.
+    pub fn remote_has_ref(path: &Path, remote: &str, reference: &str) -> Result<bool, StoreError> {
+        let patterns = [reference.to_owned()];
+        let found = if Git::new(path).handle().is_ok() {
+            Git::new(path).list_remote(remote, &patterns)?
+        } else {
+            super::git::list_remote_anywhere(path, remote, &patterns)?
+        };
+        Ok(found.contains_key(reference))
+    }
+
+    /// The work tree, or else the directory, of the repository that contains `path`, when there is one.
+    #[must_use]
+    pub fn enclosing_repository(path: &Path) -> Option<PathBuf> {
+        let git = Git::new(path);
+        git.toplevel().ok().or_else(|| git.git_dir().ok())
+    }
 }
 
 /// The git config key holding this clone's replica id.
@@ -82,7 +119,9 @@ pub enum StoreError {
     Git(String),
     /// Something moved a ref between its read and its update, though writers hold the batch lock.
     Conflict,
-    /// A ref lock is held. Locks are never removed automatically: a stalled git process could still finish.
+    /// A ref lock is held. A lock on this replica's own state, log or join refs that is a minute old and found by a writer
+    /// with the batch lock is a dead writer's and is removed; any other is left alone, since the process holding it could
+    /// still finish.
     Locked {
         /// The lock file.
         path: PathBuf,
@@ -105,6 +144,9 @@ pub enum StoreError {
         /// Why, as git reports it.
         reason: String,
     },
+    /// A fetch was refused because an object it received failed the check that `fetch.fsckObjects` or `transfer.fsckObjects` asks
+    /// for. Nothing it received was kept, and no ref moved.
+    ObjectsRefused(String),
 }
 
 impl fmt::Display for StoreError {
@@ -117,7 +159,7 @@ impl fmt::Display for StoreError {
                 if let Some(age) = age_seconds {
                     write!(f, " ({age} s old)")?;
                 }
-                write!(f, "; if no git process holds it, delete that file")
+                write!(f, "; if nothing holds it, delete that file")
             },
             Self::State(err) => err.fmt(f),
             Self::Config(message) => write!(f, "tracker not set up: {message}"),
@@ -136,6 +178,12 @@ impl fmt::Display for StoreError {
             Self::Rejected { reference, reason } => {
                 write!(f, "the remote refused {reference}: {reason}")
             },
+            Self::ObjectsRefused(report) => write!(
+                f,
+                "the fetched objects failed the check that `fetch.fsckObjects` or `transfer.fsckObjects` asks for, and none were \
+                 kept: {}",
+                report.trim_end()
+            ),
         }
     }
 }
@@ -221,6 +269,52 @@ pub struct Tracker {
     origin: bool,
     /// Whether every write ends with a push: `acyclic.pushAfterWrite` in the clone's git config.
     push_after_write: bool,
+    /// How the repack runs once it is due.
+    maintenance: Maintenance,
+    /// How old a lock on this replica's refs is before a writer that holds the batch lock removes it.
+    stale_lock: std::time::Duration,
+}
+
+/// How the store repacks itself once git's thresholds are crossed. `git gc --auto` detached into the background and
+/// outlived the command; a repack inside the command would make it wait, once in dozens of writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Maintenance {
+    /// Repack before the command returns: simple and deterministic, but the command waits for it.
+    Inline,
+    /// Repack on a thread and go on, for a process that lives on, such as the server.
+    Thread,
+    /// Repack in a process of its own that outlives the command, for the command line. The binary must call
+    /// [`run_maintenance_child`] first thing in `main`; a run began less than 30 seconds ago keeps the next from starting.
+    Process,
+}
+
+static MAINTENANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn default_maintenance() -> Maintenance {
+    match MAINTENANCE.load(Ordering::Relaxed) {
+        1 => Maintenance::Thread,
+        2 => Maintenance::Process,
+        _ => Maintenance::Inline,
+    }
+}
+
+/// Sets how trackers opened from now on repack: the process's choice, made once at startup.
+pub fn set_maintenance(how: Maintenance) {
+    MAINTENANCE.store(
+        match how {
+            Maintenance::Inline => 0,
+            Maintenance::Thread => 1,
+            Maintenance::Process => 2,
+        },
+        Ordering::Relaxed,
+    );
+}
+
+/// Runs the repack that a parent started with [`Maintenance::Process`], when this process was started for it: call
+/// this first thing in `main` and return when it says so.
+#[must_use]
+pub fn run_maintenance_child() -> bool {
+    git::maintenance_child()
 }
 
 /// What a sync did.
@@ -259,10 +353,7 @@ pub const UNUSED_CONFIG: &str = "acyclic.replica-unused";
 ///
 /// Fails when git fails.
 pub fn init_replica(path: &Path, id: &ReplicaId) -> Result<(), StoreError> {
-    let git = Git::new(path);
-    git.run(["config", REPLICA_CONFIG, id.as_str()], None, &[])?;
-    git.run(["config", UNUSED_CONFIG, id.as_str()], None, &[])?;
-    Ok(())
+    Git::new(path).set_config(&[(REPLICA_CONFIG, id.as_str()), (UNUSED_CONFIG, id.as_str())])
 }
 
 /// Six hex digits that differ between clones and runs.
@@ -421,17 +512,20 @@ impl Tracker {
     /// Fails when the replica id is missing or invalid, or git fails.
     pub fn open(path: &Path) -> Result<(Self, Option<ReplicaId>), StoreError> {
         let git = Git::new(path);
-        // The replica's settings and git's repacking thresholds in one process; git prints names in lower case.
+        // The replica's settings and git's repacking thresholds: the first value in git's order, as `git config
+        // --get-regexp` lists them and the first match of each is taken.
         let settings = git
-            .text([
-                "config",
-                "--get-regexp",
-                r"^(acyclic\.|gc\.auto$|gc\.autopacklimit$|remote\.origin\.url$)",
+            .config_values(&[
+                REPLICA_CONFIG,
+                UNUSED_CONFIG,
+                PUSH_AFTER_WRITE_CONFIG,
+                "gc.auto",
+                "gc.autopacklimit",
+                "remote.origin.url",
             ])
+            // A directory that isn't a repository has no replica id, which is what the error below says.
             .unwrap_or_default();
-        let setting = |name: &str| {
-            settings.lines().find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
-        };
+        let setting = |name: &str| settings.get(name).map(String::as_str);
         let number = |name, default| setting(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         let upkeep =
             Upkeep { loose: number("gc.auto", 6_700), packs: number("gc.autopacklimit", 50) };
@@ -446,7 +540,7 @@ impl Tracker {
         let unused = setting(UNUSED_CONFIG) == Some(id.as_str());
         crate::probe::mark("open: git config");
         let tip = git.resolve(&state_ref(&id))?;
-        crate::probe::mark("open: git rev-parse");
+        crate::probe::mark("open: resolve the state ref");
         let tracker = |git, replica, unused, tip| Self {
             git,
             replica,
@@ -455,6 +549,8 @@ impl Tracker {
             upkeep,
             origin,
             push_after_write,
+            maintenance: default_maintenance(),
+            stale_lock: STALE_LOCK,
         };
         if tip.is_some() {
             return Ok((tracker(git, id, false, tip), None));
@@ -474,6 +570,21 @@ impl Tracker {
         };
         init_replica(path, &fresh)?;
         Ok((tracker(git, fresh.clone(), true, None), Some(fresh)))
+    }
+
+    /// Sets how old a lock on this replica's own refs must be before a writer removes it, for tests that need a short one.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_stale_lock(mut self, age: std::time::Duration) -> Self {
+        self.stale_lock = age;
+        self
+    }
+
+    /// Chooses how this tracker repacks, instead of the process's choice.
+    #[must_use]
+    pub fn with_maintenance(mut self, how: Maintenance) -> Self {
+        self.maintenance = how;
+        self
     }
 
     /// This replica's id.
@@ -564,13 +675,13 @@ impl Tracker {
         });
         let Upkeep { loose: max_loose, packs: max_packs } = self.upkeep;
         if max_loose > 0 && (loose * 256 > max_loose || (max_packs > 0 && packs > max_packs)) {
-            let _ = self.git.run(["gc", "--auto", "--quiet"], None, &[]);
+            self.git.auto_maintenance(self.maintenance);
         }
     }
 
     /// Deletes a scratch ref, best effort: a repack holding the lock only means it lingers until the next try.
     fn drop_scratch(&self, scratch: &str) {
-        let _ = self.git.run(["update-ref", "-d", scratch], None, &[]);
+        let _ = self.git.delete_ref(scratch, None);
     }
 
     fn cache(&self) -> Result<Cache, StoreError> {
@@ -651,8 +762,7 @@ impl Tracker {
         }
         crate::probe::mark("batch: log events");
         let seconds = at.div_euclid(1_000);
-        let commit = |scratch, parent, files, message| NewCommit {
-            scratch,
+        let commit = |parent, files, message| NewCommit {
             parent,
             files,
             replica: self.replica.as_str(),
@@ -660,27 +770,23 @@ impl Tracker {
             message,
         };
         let ids = self.git.import_commits(&[
-            commit(SCRATCH_STATE, tip.as_deref(), &state_files, "batch"),
-            commit(SCRATCH_LOG, segment_tip.as_deref(), &files, "events"),
+            commit(tip.as_deref(), &state_files, "batch"),
+            commit(segment_tip.as_deref(), &files, "events"),
         ])?;
         let [commit, log_commit] = [&ids[0], &ids[1]].map(String::clone);
-        crate::probe::mark("batch: git fast-import");
+        crate::probe::mark("batch: write the objects");
 
         let mut transaction = self.git.transaction()?;
         transaction.update(&state_name, &commit, tip.as_deref())?;
         transaction.update(&segment, &log_commit, segment_tip.as_deref())?;
-        transaction.prepare()?;
-        if let Some(hook) = &hooks.after_prepare {
-            hook();
-        }
-        transaction.commit()?;
-        crate::probe::mark("batch: git update-ref");
+        transaction.commit(hooks.after_prepare.as_deref())?;
+        crate::probe::mark("batch: update the refs");
         self.cache()?.write_after(&found, &commit, &state, journal.keys());
         self.maintain();
         crate::probe::mark("batch: upkeep");
         if self.unused.swap(false, Ordering::Relaxed) {
             // Another worktree may have cleared it already; the state ref now vouches for the id either way.
-            let _ = self.git.run(["config", "--unset", UNUSED_CONFIG], None, &[]);
+            let _ = self.git.unset_config(UNUSED_CONFIG);
         }
         Ok(Outcome::Committed { commit })
     }
@@ -701,7 +807,29 @@ impl Tracker {
             .open(&path)
             .map_err(|e| StoreError::Git(format!("can't open {}: {e}", path.display())))?;
         file.lock().map_err(|e| StoreError::Git(format!("can't lock {}: {e}", path.display())))?;
+        self.sweep_stale_locks();
         Ok(file)
+    }
+
+    /// Removes the lock files a dead writer left on the refs that only a holder of the batch lock changes: this replica's
+    /// state and log refs and its join markers. `git update-ref` released its locks when its parent died, and a process
+    /// of ours can't. Called with the batch lock held, which is what makes it safe: the operating system releases that lock
+    /// when its holder dies, and a live writer of these refs holds it from before it takes the ref locks until after it
+    /// has committed them, a `reference-transaction` hook that takes minutes included, so a ref lock found by a second
+    /// writer that has the batch lock was left by a writer that is dead. The age is a margin, not the proof, for
+    /// something outside acyclic changing these refs by hand. Locks on any other ref (fetched refs, pending prunes,
+    /// `packed-refs`, a repack's) are never removed: a writer without the batch lock may hold them, and as with Git the
+    /// next write reports [`StoreError::Locked`] with the file to delete.
+    fn sweep_stale_locks(&self) {
+        let Ok(common) = self.git.common_dir() else { return };
+        let own = [
+            format!("refs/heads/state/{}.lock", self.replica),
+            format!("refs/heads/log/{}", self.replica),
+            format!("refs/acyclic/joined/{}", self.replica),
+        ];
+        for entry in own {
+            remove_stale_locks(&common.join(entry), self.stale_lock);
+        }
     }
 
     /// This replica's segments in a namespace: for each month, its highest generation's ref and tip. Readers take the
@@ -770,11 +898,7 @@ impl Tracker {
                     .collect();
                 if !kept.is_empty() {
                     let tree = self.git.write_tree(None, &kept)?;
-                    let seconds = self
-                        .git
-                        .text(["show", "-s", "--format=%ct", &segment.tip])?
-                        .parse()
-                        .unwrap_or(0);
+                    let seconds = self.git.commit_seconds(&segment.tip)?;
                     let commit =
                         self.git.commit(&tree, None, self.replica.as_str(), seconds, "prune")?;
                     let next =
@@ -786,9 +910,8 @@ impl Tracker {
                 dropped.extend(expired.iter().map(|path| format!("{}:{path}", segment.reference)));
             }
         }
-        if let Some(mut transaction) = transaction {
-            transaction.prepare()?;
-            transaction.commit()?;
+        if let Some(transaction) = transaction {
+            transaction.commit(None)?;
             self.drop_scratch(SCRATCH_LOG);
         }
         Ok(dropped)
@@ -803,18 +926,12 @@ impl Tracker {
     /// Fails when git fails.
     pub fn fetch(&self, remote: &str) -> Result<(), StoreError> {
         let base = remote_base(remote);
-        let mut args: Vec<String> = NETWORK
-            .into_iter()
-            .chain(["fetch", "--quiet", "--prune", remote])
-            .map(str::to_owned)
-            .collect();
-        args.push(format!("+refs/heads/state/*:{base}state/*"));
+        let mut specs = vec![format!("+refs/heads/state/*:{base}state/*")];
         for prefix in self.segment_prefixes() {
             let path = &prefix["refs/heads/".len()..];
-            args.push(format!("+{prefix}*:{base}{path}*"));
+            specs.push(format!("+{prefix}*:{base}{path}*"));
         }
-        self.git.run(args, None, &[])?;
-        Ok(())
+        self.git.fetch(remote, &specs)
     }
 
     /// The prefixes of this replica's log segments.
@@ -836,17 +953,9 @@ impl Tracker {
         let mine = state_ref(&self.replica);
         let tracking = format!("{}{}", tracking_prefix(remote), self.replica);
         let segment_prefixes = self.segment_prefixes();
-        let listing = self.git.text(
-            ["ls-remote", remote, mine.as_str()]
-                .into_iter()
-                .map(str::to_owned)
-                .chain(segment_prefixes.iter().map(|prefix| format!("{prefix}*"))),
-        )?;
-        let theirs: BTreeMap<String, String> = listing
-            .lines()
-            .filter_map(|line| line.split_once('\t'))
-            .map(|(id, name)| (name.to_owned(), id.to_owned()))
-            .collect();
+        let patterns: Vec<String> =
+            std::iter::once(mine.clone()).chain(segment_prefixes.iter().cloned()).collect();
+        let theirs = self.git.list_remote(remote, &patterns)?;
         // This replica's refs, its pending deletions and the lease's tip, in one process.
         let pruned_prefixes: Vec<String> = segment_prefixes.iter().map(|p| pruned_ref(p)).collect();
         let patterns: Vec<&str> = [mine.as_str(), tracking.as_str()]
@@ -871,20 +980,25 @@ impl Tracker {
         let lease = local.remove(&tracking).unwrap_or_default();
         let (pending, ours): (BTreeMap<String, String>, BTreeMap<String, String>) =
             local.into_iter().partition(|(name, _)| name.starts_with(PRUNED));
-        let mut args: Vec<String> = NETWORK
-            .into_iter()
-            .chain(["push", "--atomic", "--porcelain"])
-            .map(str::to_owned)
-            .collect();
-        let mut refspecs = Vec::new();
+        let mut refs = Vec::new();
         for (name, id) in &ours {
             if theirs.get(name) == Some(id) {
                 continue;
             }
-            if *name == mine {
-                args.push(format!("--force-with-lease={name}:{lease}"));
-            }
-            refspecs.push(format!("{name}:{name}"));
+            // The state ref moves under a lease on the tip this clone last pushed or fetched, since a squash
+            // rewrites it; a segment only grows, so it is pushed against what the remote has.
+            let is_state = *name == mine;
+            let lease = if is_state {
+                Some(lease.clone()).filter(|l| !l.is_empty())
+            } else {
+                theirs.get(name).cloned()
+            };
+            refs.push(PushRef {
+                name: name.clone(),
+                lease,
+                new: Some(id.clone()),
+                rewrite: is_state,
+            });
         }
         let mut settled = Vec::new();
         for (marker, tip) in &pending {
@@ -892,36 +1006,32 @@ impl Tracker {
             match theirs.get(&name) {
                 None => settled.push((marker, tip)),
                 // Delete only what this replica wrote: the pruned tip or an earlier push of it.
-                Some(remote_tip)
-                    if self
-                        .git
-                        .run(["merge-base", "--is-ancestor", remote_tip, tip], None, &[])
-                        .is_ok() =>
-                {
-                    args.push(format!("--force-with-lease={name}:{remote_tip}"));
-                    refspecs.push(format!(":{name}"));
+                Some(remote_tip) if self.git.is_ancestor(remote_tip, tip) => {
+                    refs.push(PushRef {
+                        name,
+                        lease: Some(remote_tip.clone()),
+                        new: None,
+                        rewrite: false,
+                    });
                     settled.push((marker, tip));
                 },
                 Some(_) => {},
             }
         }
-        if !refspecs.is_empty() {
-            args.push(remote.to_owned());
-            args.extend(refspecs.iter().cloned());
-            let output = self.git.output(&args)?;
-            if !output.status.success() {
-                return Err(push_failure(&mine, &output));
-            }
+        if !refs.is_empty()
+            && let Err(refused) = self.git.push(remote, &refs)?
+        {
+            return Err(push_failure(&mine, refused));
         }
         if let Some(tip) = ours.get(&mine)
             && *tip != lease
         {
-            self.git.run(["update-ref", &tracking, tip], None, &[])?;
+            self.git.set_ref(&tracking, tip)?;
         }
         for (marker, tip) in settled {
-            self.git.run(["update-ref", "-d", marker, tip], None, &[])?;
+            self.git.delete_ref(marker, Some(tip))?;
         }
-        Ok(refspecs.len())
+        Ok(refs.len())
     }
 
     /// The month's current segment ref among `refs` (the highest generation, or generation 1 when none) and its tip.
@@ -976,7 +1086,6 @@ impl Tracker {
             let at = state.context.clocks.get(&self.replica).copied().unwrap_or(0);
             let files = file_bytes(state.changed_files_since(&journal));
             let commit = NewCommit {
-                scratch: SCRATCH_STATE,
                 parent: tip.as_deref(),
                 files: &files,
                 replica: self.replica.as_str(),
@@ -984,7 +1093,7 @@ impl Tracker {
                 message: "join",
             };
             let commit = self.git.import_commits(&[commit])?.remove(0);
-            crate::probe::mark("join: commit");
+            crate::probe::mark("join: write the objects");
             Outcome::Committed { commit }
         };
         let mut transaction = self.git.transaction()?;
@@ -994,8 +1103,7 @@ impl Tracker {
         for (marker, tip) in markers {
             transaction.set(marker, tip)?;
         }
-        transaction.prepare()?;
-        transaction.commit()?;
+        transaction.commit(None)?;
         crate::probe::mark("join: update refs");
         if let Outcome::Committed { commit } = &outcome {
             self.cache()?.write_after(&found, commit, &state, journal.keys());
@@ -1059,14 +1167,13 @@ impl Tracker {
         if fetched_own != last_seen
             && let Some(remote_tip) = &fetched_own
         {
-            let ours = local.get(&mine).is_some_and(|local| {
-                self.git.run(["merge-base", "--is-ancestor", remote_tip, local], None, &[]).is_ok()
-            });
+            let ours =
+                local.get(&mine).is_some_and(|local| self.git.is_ancestor(remote_tip, local));
             if !ours {
                 match &last_seen {
-                    Some(tip) => self.git.run(["update-ref", &own, tip], None, &[])?,
-                    None => self.git.run(["update-ref", "-d", &own], None, &[])?,
-                };
+                    Some(tip) => self.git.set_ref(&own, tip)?,
+                    None => self.git.delete_ref(&own, None)?,
+                }
                 return Err(StoreError::Duplicate(self.replica.clone()));
             }
         }
@@ -1132,15 +1239,14 @@ impl Tracker {
         let Some(tip) = self.git.resolve(&state_ref(&self.replica))? else {
             return Ok(None);
         };
-        let tree = self.git.text(["rev-parse", &format!("{tip}^{{tree}}")])?;
-        let seconds = self.git.text(["show", "-s", "--format=%ct", &tip])?.parse().unwrap_or(0);
+        let tree = self.git.tree_of(&tip)?;
+        let seconds = self.git.commit_seconds(&tip)?;
         let commit = self.git.commit(&tree, None, self.replica.as_str(), seconds, "squash")?;
         let cache = self.cache()?;
         let state = cache.read(&tip).map(|(state, _)| state);
         let mut transaction = self.git.transaction()?;
         transaction.update(&state_ref(&self.replica), &commit, Some(&tip))?;
-        transaction.prepare()?;
-        transaction.commit()?;
+        transaction.commit(None)?;
         self.drop_scratch(SCRATCH_STATE);
         if let Some(state) = state {
             // The same tree under a new tip.
@@ -1149,11 +1255,6 @@ impl Tracker {
         Ok(Some(commit))
     }
 }
-
-/// Settings for git's fetches and pushes: no background maintenance, and a transfer slower than 1,000 bytes a second
-/// for 30 seconds fails over HTTP rather than hanging the sync, and the server's writes queued behind it.
-const NETWORK: [&str; 6] =
-    ["-c", "maintenance.auto=false", "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
 
 /// The namespaces holding monthly segments: audit logs.
 const NAMESPACES: [&str; 1] = ["log"];
@@ -1187,31 +1288,35 @@ fn joined_prefix(replica: &ReplicaId, remote: &str) -> String {
     tracking_prefix(remote).replacen("/remotes/", &format!("/joined/{replica}/"), 1)
 }
 
-/// Classifies a failed push from its porcelain output: a stale lease on the state ref, another refused ref, or a
-/// failure to reach the remote at all.
-fn push_failure(state: &str, output: &std::process::Output) -> StoreError {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let refused = stdout.lines().filter_map(|line| {
-        let mut fields = line.strip_prefix("!\t")?.split('\t');
-        let destination = fields.next()?.rsplit(':').next()?.to_owned();
-        let reason = fields.next().unwrap_or_default().to_owned();
-        Some((destination, reason))
-    });
-    // An atomic push reports every other ref as refused too; the cause is the one refused for itself.
-    let mut cause = None;
-    for (reference, reason) in refused {
-        if !reason.contains("atomic push failed") {
-            cause = Some((reference, reason));
-            break;
-        }
-        cause.get_or_insert((reference, reason));
+/// Classifies a refused push: a stale lease on the state ref, or another refused ref. An atomic push moves nothing when
+/// any ref is refused, so the cause is the state ref's stale lease when there is one, else the first refusal.
+fn push_failure(state: &str, refused: Vec<Refused>) -> StoreError {
+    if refused.iter().any(|r| matches!(r, Refused::Stale(name) if name == state)) {
+        return StoreError::RemoteMoved;
     }
-    match cause {
-        Some((reference, reason)) if reference == state && reason.contains("stale info") => {
-            StoreError::RemoteMoved
+    match refused.into_iter().next() {
+        Some(Refused::Stale(reference)) => {
+            StoreError::Rejected { reference, reason: "stale info".to_owned() }
         },
-        Some((reference, reason)) => StoreError::Rejected { reference, reason },
-        None => StoreError::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
+        Some(Refused::Rejected(reference, reason)) => StoreError::Rejected { reference, reason },
+        None => StoreError::Git("the push was refused".to_owned()),
+    }
+}
+
+/// How old a lock file on this replica's own refs is before the next writer removes it.
+const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Removes the lock files at `path` or below it that are at least `stale` old. Best effort.
+fn remove_stale_locks(path: &Path, stale: std::time::Duration) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return };
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(path).into_iter().flatten().filter_map(Result::ok) {
+            remove_stale_locks(&entry.path(), stale);
+        }
+    } else if path.extension().is_some_and(|ext| ext == "lock")
+        && meta.modified().ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age >= stale)
+    {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -1264,23 +1369,6 @@ fn read_files(git: &Git, commit: &str) -> Result<BTreeMap<String, String>, Store
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn git_finds_the_repository_by_its_path_alone() {
-        let names = [
-            "GIT_DIR",
-            "GIT_CONFIG_KEY_0",
-            "GIT_CONFIG_VALUE_0",
-            "GIT_CONFIG_PARAMETERS",
-            "PATH",
-            "GIT_TRACE",
-        ];
-        let unset = unset(names.iter().map(std::ffi::OsString::from));
-        assert_eq!(
-            unset,
-            ["GIT_DIR", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS"]
-        );
-    }
 
     #[test]
     fn months_follow_the_utc_calendar() {

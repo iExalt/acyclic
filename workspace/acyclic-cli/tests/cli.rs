@@ -360,3 +360,12 @@ fn a_merged_commit_counts_done_from_another_thread_through_the_clone_mapped_by_o
     let (_, used) = sh.output("item show Used", &at_home);
     assert_eq!(used["data"][0]["readiness"]["status"], "ready", "{used}");
 }
+
+/// A directory that isn't a tracker is a setup problem, `no-replica`, as it always was, and not a Git failure.
+#[test]
+fn a_directory_that_is_no_repository_is_no_replica_not_a_git_failure() {
+    let mut sh = Shell::new();
+    std::fs::create_dir(sh.path().join("tracker")).unwrap();
+    let (code, out) = sh.output("item list", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (5, Some("no-replica")), "{out}");
+}

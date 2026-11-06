@@ -563,6 +563,8 @@ fn failed(what: &str, err: impl std::fmt::Display) -> CliError {
 ///
 /// When the settings are wrong or the address can't be bound.
 pub fn start(start: Start<'_>, tracker: PathBuf, env: &Env) -> Result<(), CliError> {
+    // The server lives on, so a repack can run on a thread beside its requests.
+    acyclic_core::store::set_maintenance(acyclic_core::store::Maintenance::Thread);
     match start {
         Start::Serve(options) => serve(options, tracker, env),
         Start::Up(options) => up(options, tracker, env),
