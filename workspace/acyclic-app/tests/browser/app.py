@@ -2893,10 +2893,21 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     wait_drawn(page, count)
     reopened = geometry([project, other])
     held(page, project, frame, "reopening after Undo", name, failures)
-    if not same_node(folded["nodes"][other], before["nodes"][other]) or not same_node(
-        reopened["nodes"][other], before["nodes"][other]
-    ):
-        failures.append(f"{name}: folding after Undo moved the other root")
+    # "Slide into the gap" (fac642): the fold gives up room, and the other root may close into it, only up or left and
+    # by no more than the box gave up; reopening returns it exactly.
+    gave_w = before["nodes"][project]["w"] - folded["nodes"][project]["w"]
+    gave_h = before["nodes"][project]["h"] - folded["nodes"][project]["h"]
+    slid_x = before["nodes"][other]["x"] - folded["nodes"][other]["x"]
+    slid_y = before["nodes"][other]["y"] - folded["nodes"][other]["y"]
+    if not (-1 <= slid_x <= gave_w + 1 and -1 <= slid_y <= gave_h + 1):
+        failures.append(
+            f"{name}: folding after Undo moved the other root other than up or left by the room given up: "
+            f"{before['nodes'][other]} -> {folded['nodes'][other]}, gave {gave_w}x{gave_h}"
+        )
+    if any(abs(folded["nodes"][other][field] - before["nodes"][other][field]) > 1 for field in ("w", "h")):
+        failures.append(f"{name}: folding after Undo resized the other root")
+    if not same_node(reopened["nodes"][other], before["nodes"][other]):
+        failures.append(f"{name}: reopening after Undo did not restore the other root")
     hold_during_gesture(page, env, project, other, chain, name, failures)
     print(f"{name}: a phone shrink repacked the roots, Undo restored them, and a later fold held them")
 

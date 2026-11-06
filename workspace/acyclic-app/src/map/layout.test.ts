@@ -374,6 +374,54 @@ describe("place", () => {
     expect((await place(at(["x"]), walked, engine.layBox, PORTRAIT)).nodes).toEqual(yOpen.nodes);
   });
 
+  it("pulls the boxes under or beside a box that closes into the room it gave up, and returns them when it reopens", async () => {
+    // A tall box opened where the top level was packed, with others stacked and set beside it.
+    const kids = (parent: string, n: number) => Array.from({ length: n }, (_, i) => item(`${parent}${i}`, parent));
+    const items = [
+      item("big"),
+      ...kids("big", 8),
+      item("under"),
+      ...kids("under", 2),
+      item("side"),
+      ...kids("side", 2),
+      item("last"),
+      ...kids("last", 2),
+    ];
+    const model = buildModel(items);
+    const engine = grid();
+    const cache = new LayoutCache();
+    const packed = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const shut = await place(visible(model, { collapsed: new Set(["big"]) }), cache, engine.layBox, PORTRAIT);
+    const corner = (placed: typeof packed, id: string) => ({ x: placed.nodes.get(id)?.x, y: placed.nodes.get(id)?.y });
+    const [was, now] = [packed.nodes.get("big"), shut.nodes.get("big")];
+    const gave = (was?.height ?? 0) - (now?.height ?? 0);
+    expect(gave).toBeGreaterThan(0);
+    expect(corner(shut, "big")).toEqual(corner(packed, "big"));
+    let pulled = 0;
+    for (const id of ["under", "side", "last"]) {
+      const [from, to] = [corner(packed, id), corner(shut, id)];
+      // Only ever up or left, by no more than it gave up, and never into another box.
+      expect(to.y).toBeLessThanOrEqual(from.y ?? 0);
+      expect(to.x).toBeLessThanOrEqual(from.x ?? 0);
+      expect((from.y ?? 0) - (to.y ?? 0)).toBeLessThanOrEqual(gave);
+      if (to.x !== from.x || to.y !== from.y) pulled++;
+    }
+    expect(pulled).toBeGreaterThan(0);
+    const ids = ["big", "under", "side", "last"];
+    for (const a of ids)
+      for (const b of ids.filter((id) => id > a)) {
+        const [p, q] = [shut.nodes.get(a), shut.nodes.get(b)];
+        if (p === undefined || q === undefined) throw new Error("missing node");
+        expect(p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height).toBe(false);
+      }
+    // Open again, every box is where it was packed.
+    const reopened = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    expect(reopened.nodes).toEqual(packed.nodes);
+    // And closed again, they take the same places.
+    expect(
+      (await place(visible(model, { collapsed: new Set(["big"]) }), cache, engine.layBox, PORTRAIT)).nodes,
+    ).toEqual(shut.nodes);
+  });
   it("finds every layout in the cache on returning to a view", async () => {
     const engine = grid();
     const cache = new LayoutCache();

@@ -145,6 +145,10 @@ export function hold(
       return right(old(first), old(id)) && old(id).y >= old(first).y ? [{ me, then, beside: true }] : [];
     }),
   );
+  const standsAfter = (first: Placed, me: Placed) => below(first, me) || (right(first, me) && me.y >= first.y);
+  const kept = [...waits].flatMap(([id, firsts]) =>
+    firsts.filter((first) => standsAfter(old(first), old(id))).map((first) => ({ id, first })),
+  );
   // Each move only ever takes a box right or down, past what it met: a few rounds settle any plan but a ring.
   for (let round = 0; round <= 4 * now.length; round++) {
     let moved = false;
@@ -167,6 +171,7 @@ export function hold(
       if (beside && !right(then, me) && !below(then, me)) [me.x, moved] = [then.x + then.width + GAP, true];
     }
     if (!moved) {
+      close(at, new Set(at.keys()), old, kept, standsAfter);
       const width = Math.max(0, ...now.map((box) => box.x + box.width));
       const height = Math.max(0, ...now.map((box) => box.y + box.height));
       return {
@@ -177,4 +182,78 @@ export function hold(
     }
   }
   return undefined;
+}
+
+/**
+ * Closes the room a box gave up by shrinking from the size it was packed at: a box that stood below it, under its old
+ * footprint, moves up by at most the height it gave up, and one beside it, level with its old footprint, left by at most
+ * the width, each as far as it can without coming within the gap of another box or standing before what it waits on, and
+ * after the boxes above or before it have moved. A slide of less than the gap is not made. Boxes outside those shadows stay. Only the packing and the sizes now
+ * decide it, so a box grown back to its packed size takes everything back to the packing.
+ */
+function close(
+  boxes: Map<string, Placed & { id?: string }>,
+  stays: ReadonlySet<string>,
+  old: (id: string) => Placed,
+  kept: readonly { id: string; first: string }[],
+  standsAfter: (first: Placed, me: Placed) => boolean,
+) {
+  const shrunk = [...stays].flatMap((id) => {
+    const [was, now] = [old(id), boxes.get(id)];
+    return now !== undefined && (now.width < was.width || now.height < was.height)
+      ? [{ id, was, up: Math.max(0, was.height - now.height), left: Math.max(0, was.width - now.width) }]
+      : [];
+  });
+  if (shrunk.length === 0) return;
+  const overlaps = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 && b0 < a1;
+  const firsts = (id: string) => kept.filter((one) => one.id === id).map((one) => one.first);
+  // Up first, top to bottom, then left, left to right: each box follows the one ahead of it into the room.
+  for (const axis of ["y", "x"] as const) {
+    const order = [...stays].sort((a, b) => {
+      const [p, q] = [boxes.get(a), boxes.get(b)];
+      return axis === "y"
+        ? (p?.y ?? 0) - (q?.y ?? 0) || (p?.x ?? 0) - (q?.x ?? 0)
+        : (p?.x ?? 0) - (q?.x ?? 0) || (p?.y ?? 0) - (q?.y ?? 0);
+    });
+    for (const id of order) {
+      const me = boxes.get(id);
+      if (me === undefined) continue;
+      let room = 0;
+      for (const s of shrunk) {
+        if (s.id === id) continue;
+        const was = old(id);
+        const shadow =
+          axis === "y"
+            ? was.y >= s.was.y + s.was.height && overlaps(was.x, was.x + was.width, s.was.x, s.was.x + s.was.width)
+            : was.x >= s.was.x + s.was.width && overlaps(was.y, was.y + was.height, s.was.y, s.was.y + s.was.height);
+        if (shadow) room = Math.max(room, axis === "y" ? s.up : s.left);
+      }
+      if (room === 0) continue;
+      for (const [other, a] of boxes) {
+        if (other === id) continue;
+        if (axis === "y") {
+          if (a.y < me.y && overlaps(a.x - GAP, a.x + a.width + GAP, me.x, me.x + me.width))
+            room = Math.min(room, me.y - (a.y + a.height + GAP));
+        } else if (a.x < me.x && overlaps(a.y - GAP, a.y + a.height + GAP, me.y, me.y + me.height)) {
+          room = Math.min(room, me.x - (a.x + a.width + GAP));
+        }
+      }
+      // Not before what it waits on, however it stood after it.
+      for (const first of firsts(id)) {
+        const then = boxes.get(first);
+        if (then === undefined || !standsAfter(then, me)) continue;
+        let most = -1;
+        if (axis === "y") {
+          if (me.y >= then.y + then.height + GAP) most = me.y - (then.y + then.height + GAP);
+          if (me.x >= then.x + then.width + GAP) most = Math.max(most, me.y - then.y);
+        } else {
+          if (me.y >= then.y + then.height + GAP) most = Number.POSITIVE_INFINITY;
+          if (me.x >= then.x + then.width + GAP) most = Math.max(most, me.x - (then.x + then.width + GAP));
+        }
+        room = Math.min(room, most);
+      }
+      // A sliver is no use: it would only make the box jitter.
+      if (room >= GAP) me[axis] -= room;
+    }
+  }
 }
