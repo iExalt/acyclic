@@ -234,9 +234,7 @@ describe("hold, closing a box", () => {
         }
       }
       // Grown back, every box is where it was packed.
-      expect(hold({ children: kids, layout: packed }, kids, waits)?.at, `seed ${seed}: reopened`).toEqual(
-        packed.at,
-      );
+      expect(hold({ children: kids, layout: packed }, kids, waits)?.at, `seed ${seed}: reopened`).toEqual(packed.at);
     }
     expect(slid).toBeGreaterThan(50);
   });
