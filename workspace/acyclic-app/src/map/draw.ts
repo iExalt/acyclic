@@ -117,7 +117,7 @@ export function elementsOf(
 
 /**
  * A tile's thread as its marks show it, or null for one in no thread, in a thread of one (a task alone, which has no
- * stripe or badge, as one in no thread has none), or in one the plan doesn't list.
+ * thread colour, as one in no thread has none), or in one the plan doesn't list.
  */
 function threadOf(thread: string | null, lines: ReadonlyMap<string, Line>) {
   const line = thread === null ? undefined : lines.get(thread);

@@ -120,7 +120,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       selector: "node.box.one-line",
       style: { "text-margin-y": (node: cytoscape.NodeSingular) => Number(node.data("header") ?? STRIP) / 2 + 8 },
     },
-    // A tile's marks, its thread's stripe and badge and its stage's icon, with its title between them.
+    // A tile's marks, its thread's stripe and its stage's icon, with its title between them.
     {
       selector: "node.leaf",
       style: {
@@ -137,7 +137,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       },
     },
     ...stagesOf(p),
-    // A box's title starts at its left, after the chevron and the icon of where its work stands.
+    // A box's title starts at its left, after the chevron.
     {
       selector: "node.box, node.collapsed",
       style: { "text-halign": "left-inside", "text-margin-x": BOX_TEXT_LEFT },

@@ -1,7 +1,5 @@
-// What an item carries besides its title: its thread's stripe down the left and its badge beside it, as the sidebar
-// leads a thread's row with its badge, and an icon for its stage at the right, which its tint repeats so no stage is
-// told by colour alone. Drawn as one image per tile, since the
-// renderer gives a node a single label. Pure, so every stage's mark is tested without a canvas.
+// A tile's thread stripe at the left and stage icon at the right. Boxes keep their fold chevron at the left.
+// Drawn as one image per tile, since the renderer gives a node a single label. Pure, so marks need no canvas to test.
 
 import type { Stage } from "../api";
 import { STAGE_ICONS as ICONS, QUIET } from "../stages";
@@ -11,15 +9,11 @@ export { QUIET };
 import type { Palette } from "../palette";
 import { STRIP, TITLE } from "./chevron";
 
-/** How wide the stripe is, and where the badge and the icon sit, in the Map's units. */
+/** The stripe's width and the stage icon's size, in the Map's units. */
 const STRIPE = 6;
-const BADGE_AT = 14;
-const BADGE = 20;
-/** The room a badge takes, a little more than its own width. */
-const BADGE_ROOM = 22;
 const ICON = 16;
-/** The room the marks take from a tile's title: the stripe and badge at its left, the icon at its right. */
-export const MARKS_LEFT = BADGE_AT + BADGE_ROOM + 8;
+/** Room for the stripe at the left and the stage icon at the right. */
+export const MARKS_LEFT = STRIPE + 8;
 export const MARKS_RIGHT = ICON + 14;
 
 /** A tile's thread as its marks show it: the line's colour and ink. */
@@ -30,7 +24,7 @@ export interface Thread {
 
 /**
  * The marks' image for a tile `width` by `height`, as SVG markup. The `reserve` at its foot, a stub's room, is left
- * clear: its stripe runs the whole height, and the badge and icon sit mid-way in the rest.
+ * clear: its stripe runs the whole height, and the icon sits mid-way in the rest.
  */
 export function markSvg(
   stage: Stage | null,
@@ -42,10 +36,9 @@ export function markSvg(
 ): string {
   const middle = (height - reserve) / 2;
   const parts: string[] = [];
-  // A task in no thread has a thread's stripe and dot, left grey: the muted ink in place of a line's colour.
+  // A task in no thread has a thread's stripe, left grey: the muted ink in place of a line's colour.
   const colour = thread === null ? palette.muted : thread.colour;
   parts.push(`<rect width="${STRIPE}" height="${height}" fill="${colour}"/>`);
-  parts.push(`<circle cx="${BADGE_AT + BADGE / 2}" cy="${middle}" r="5" fill="${colour}"/>`);
   if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }
@@ -54,13 +47,11 @@ export function markSvg(
 const CHEVRONS = { box: "M2 4l4 4 4-4", collapsed: "M4 2l4 4-4 4" };
 const CHEVRON = 12;
 
-/** Where a box's title starts: after its chevron and the icon of where its work stands. */
-export const BOX_TEXT_LEFT = TITLE - 4 + ICON + 6;
+/** Keep the title beyond the chevron's 44-unit touch target, with its existing gap. */
+export const BOX_TEXT_LEFT = 54;
 
 /**
- * A box's marks: its chevron at the left of its title strip, then the icon of where its work stands as a whole, so a
- * done box is told from one in progress or waiting at a glance, leading its title as a status leads a project's name.
- * Drawn over the strip, or a collapsed box's whole height.
+ * A box's chevron at the left and stage icon at the right, over its title strip or collapsed height.
  */
 export function boxMarkSvg(
   kind: "box" | "collapsed",
@@ -78,7 +69,7 @@ export function boxMarkSvg(
   const left = (TITLE - CHEVRON) / 2;
   const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
-  if (stage !== null) parts.push(iconAt(stage, TITLE - 4, middle, palette));
+  if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   // A finished thread's box: its thread's stripe down the left, as its items carry it.
   if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${tall}" fill="${thread.colour}"/>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${parts.join("")}</svg>`;

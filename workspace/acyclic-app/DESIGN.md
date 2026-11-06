@@ -53,7 +53,7 @@ two in step.
   needs the user, conflicts, threads that wait on each other, and links that cross boxes.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
   a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
-  title muted at full strength, since it can still be picked; its badge and stage icon fade with it, below 3:1, on
+  title muted at full strength, since it can still be picked; its stripe and stage icon fade with it, below 3:1, on
   purpose, as the title carries it. Its fill stays opaque, the colour it would show at 35 % over its box, so a link
   across boxes passes beneath it.
 - **Danger:** red, as text only.
@@ -174,16 +174,16 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 - **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons, each count
   set apart by its icon rather than a comma, which only a screen reader reads; a Map box's line of counts, drawn as text
   on the canvas, which sets no icon inside a line, takes the commas. An item in no thread is a thread of one, so its
-  stage reads like any other's (ready, or in progress once claimed); on the Map it carries a thread's stripe and dot,
-  same size and place, in the muted ink instead of a line's colour, with no ring, and its stage's icon ends the line.
-  The editor says a state in words ("Open", "In progress"), Open with how it shows (ready or waiting, by its waits), and
-  a finished item's state as the panel's stage, as text: finishing sets it, not the form.
+  stage reads like any other's (ready, or in progress once claimed); on the Map it carries a thread's stripe, the same
+  size and place, in the muted ink instead of a line's colour, with no ring, and its stage's icon ends the line. The
+  editor says a state in words ("Open", "In progress"), Open with how it shows (ready or waiting, by its waits), and a
+  finished item's state as the panel's stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
   what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
   more; "Starts with", its first items alone, meant nothing to the user. Then its notes.
 - **A thread of one is a task alone.** Its row or tile, in Up next, In progress, the Threads view, the outline and the
   command menu, reads as a thread's does but takes no line's colour: its badge is the thread's dot in the muted ink, as
-  the Map's grey dot and stripe, and a tile's left edge is that grey; both clear 3:1 on every tint but stay quieter than
+  the Map's grey stripe, and a tile's left edge is that grey; both clear 3:1 on every tint but stay quieter than
   a line's colour. Opening it opens the task, as an item's row does, not a thread's panel, and the item's panel names no
   thread for it. A thread holding a title of its own, once a second item joined, is a thread like any other.
 - **Thread badges:** a dot in its line's colour. A badge, and a stage's icon, stand on the middle of the
@@ -384,16 +384,17 @@ before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its full title, then its
-  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Stalled, Waiting, Parked
-  and Canceled. Canceled is a circle struck through, in the quiet ink.
-- **A project tells where it stands.** An open box's chevron and stage icon stay in the first 52 px strip; its full
-  title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
-  fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (done once all of it
-  is; else in progress once work under it has started and some of what is left isn't parked; else stalled, else ready,
-  else waiting, else parked; canceled leaves are left out, and a box with only those reads
-  canceled); one with no leaf to count, as on a cycle of parents, says its own state. Its title is muted once done or
-  held up, as an item's title is.
+- **Map item marks:** the thread colour is the stripe on the left, with no dot beside it. The full title and stage word
+  sit between that stripe and the stage icon on the right, including on collapsed done and parked boxes. Stage words use
+  the canonical vocabulary: Done, In progress, Ready, Stalled, Waiting, Parked and Canceled. Canceled is a circle struck
+  through, in the quiet ink.
+- **A project tells where it stands.** An open box's chevron stays at the left and its stage icon at the right of the
+  first 52 px strip; its full title, stage word, counts, hidden count and done-box note wrap below or beside them as
+  needed. Its header grows to fit, and the child content starts below it. The stage is the work's whole stage, as core
+  tells it (done once all of it is; else in progress once work under it has started and some of what is left isn't
+  parked; else stalled, else ready, else waiting, else parked; canceled leaves are left out, and a box with only those
+  reads canceled); one with no leaf to count, as on a cycle of parents, says its own state. Its title is muted once done
+  or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
