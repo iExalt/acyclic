@@ -142,6 +142,7 @@ describe("a task in no thread, a thread of one", () => {
         {
           id: "p",
           title: "P",
+          noInitiative: true,
           threads: [
             { id: "t", also: [] },
             { id: "claimed.one", also: [] },
