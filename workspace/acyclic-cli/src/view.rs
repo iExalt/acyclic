@@ -75,7 +75,8 @@ pub(crate) struct View<'a> {
 }
 
 impl View<'_> {
-    /// The item summary: `{id, title, state, parent, thread, readiness}`, with its `stage` (a
+    /// The item summary: `{id, title, state, parent, initiative, thread, readiness}`, where `initiative` is the
+    /// initiative it is under, or `null` for an item in none, with its `stage` (a
     /// parent's rolled up from its leaves and the claims on their threads, none with no leaf to count), and a parent's
     /// `progress`, `{counts}`, from the leaves under it. `counts`
     /// has its leaves, and each leaf under its stage, so the stages add up to `leaves`. An id the model lacks has only its
@@ -83,8 +84,8 @@ impl View<'_> {
     pub fn item_row(&self, id: &str) -> Result<Json, CliError> {
         let Some(item) = self.model.items.get(id) else {
             return Ok(json!({
-                "id": id, "title": null, "state": null, "parent": null, "thread": null,
-                "readiness": null,
+                "id": id, "title": null, "state": null, "parent": null, "initiative": null,
+                "thread": null, "readiness": null,
             }));
         };
         let mut row = json!({
@@ -92,6 +93,7 @@ impl View<'_> {
             "title": item.title,
             "state": state(item),
             "parent": item.parent,
+            "initiative": self.model.initiative_of(id),
             "thread": self.model.thread_value(item),
             "readiness": self.readiness.of(id)?,
         });
@@ -183,7 +185,9 @@ impl View<'_> {
         let name = |id: &str| -> String {
             let task = self.model.shown_as_task(id).unwrap_or(id);
             let title = self.model.items.get(task).map(|item| &item.title);
-            let title = title.or_else(|| self.model.threads.get(id).map(|thread| &thread.title));
+            let title = title
+                .or_else(|| self.model.initiatives.get(id).map(|initiative| &initiative.title))
+                .or_else(|| self.model.threads.get(id).map(|thread| &thread.title));
             title
                 .and_then(|title| title.all().first().map(|first| (*first).clone()))
                 .unwrap_or_else(|| id.to_owned())
@@ -218,6 +222,9 @@ impl View<'_> {
                 Entry::EmptyThread { thread: id, fix } => {
                     json!({"kind": entry.kind(), "thread": thread(id), "fix": fix})
                 },
+                Entry::ParentMissing { item, parent } => json!({
+                    "kind": entry.kind(), "item": self.item_row(item)?, "parent": parent,
+                }),
                 Entry::DoneWaiting { item, waits_for }
                 | Entry::WaitsOnCanceled { item, waits_for } => json!({
                     "kind": entry.kind(), "item": self.item_row(item)?, "waits_for": self.item_row(waits_for)?,
@@ -339,6 +346,37 @@ impl View<'_> {
         }
         Ok(rows)
     }
+}
+
+/// The initiative summary: `{id, title, counts}`, where `counts.items` counts the items directly under it.
+pub(crate) fn initiative_row(model: &Model, record: &acyclic_core::model::Initiative) -> Json {
+    json!({
+        "id": record.id, "title": record.title,
+        "counts": {"items": model.children(&record.id).len()},
+    })
+}
+
+/// An initiative in full: its summary, its notes and the items directly under it.
+pub(crate) fn initiative(model: &Model, record: &acyclic_core::model::Initiative) -> Json {
+    with(
+        initiative_row(model, record),
+        json!({"notes": record.notes, "children": model.children(&record.id)}),
+    )
+}
+
+/// The tops of the trees that sit in no initiative: items whose parent is unset or names nothing there is. They read as
+/// a bucket until each is given an initiative, so no list hides them, and each is on Needs you as a missing parent.
+pub(crate) fn no_initiative(model: &Model) -> Json {
+    let names_something = |parent: &String| {
+        model.items.contains_key(parent) || model.initiatives.contains_key(parent)
+    };
+    let roots: Vec<&str> = model
+        .items
+        .values()
+        .filter(|item| !item.parent.all().into_iter().any(names_something))
+        .map(|item| item.id.as_str())
+        .collect();
+    json!({"items": roots})
 }
 
 /// The repository summary: `{id, owner, name, default_branch}`.
@@ -485,7 +523,7 @@ mod tests {
             let row = view.item_row("c").unwrap();
             assert_eq!(
                 row,
-                json!({"id": "c", "title": "C", "state": "open", "parent": null, "thread": null,
+                json!({"id": "c", "title": "C", "state": "open", "parent": null, "initiative": null, "thread": null,
                        "readiness": {"readiness": "waiting", "waiting": {"a": {"why": "open"}}}, "stage": "waiting"})
             );
             // A parent's summary adds its leaves counted by stage; a leaf's has none.
@@ -603,8 +641,9 @@ mod tests {
         scope::edit(&mut mac, &member("e", Some("t")), user).unwrap();
         link(&mut mac, "e", "c", user).unwrap();
         // Two replicas disagree about an item's parent.
+        model::add_initiative(&mut mac, "init", "Init", user).unwrap();
         let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
-        set_parent(&mut mac, "b", None, user).unwrap();
+        set_parent(&mut mac, "b", Some("init"), user).unwrap();
         set_parent(&mut pi, "b", Some("a"), user).unwrap();
         mac.join(pi.state()).unwrap();
         viewing(&mac, |view| {
@@ -618,14 +657,14 @@ mod tests {
             let parent = conflicts.iter().find(|c| c["field"] == "parent").unwrap();
             assert_eq!(parent["record"], "item");
             assert_eq!(parent["item"]["id"], "b");
-            assert_eq!(parent["values"], json!([null, "a"]));
+            assert_eq!(parent["values"], json!(["init", "a"]));
             // Each value with the command that keeps it.
             let runs: Vec<&Json> =
                 parent["keeps"].as_array().unwrap().iter().map(|k| &k["run"]).collect();
             assert_eq!(
                 runs,
                 [
-                    &json!("acyclic item edit b --no-parent"),
+                    &json!("acyclic item edit b --parent init"),
                     &json!("acyclic item edit b --parent a")
                 ]
             );
@@ -662,6 +701,31 @@ mod tests {
                 }
                 follows_the_conventions(shown, "needs");
             }
+        });
+    }
+
+    #[test]
+    fn an_initiative_is_a_row_its_items_name_it_and_items_in_none_are_a_bucket() {
+        let mut r = tracker();
+        model::add_initiative(&mut r, "init", "Init", by(USER)).unwrap();
+        model::add_initiative(&mut r, "idle", "Idle", by(USER)).unwrap();
+        set_parent(&mut r, "goal", Some("init"), by(USER)).unwrap();
+        set_parent(&mut r, "late", Some("init"), by(USER)).unwrap();
+        viewing(&r, |view| {
+            let model = view.model;
+            assert_eq!(
+                initiative_row(model, &model.initiatives["init"]),
+                json!({"id": "init", "title": "Init", "counts": {"items": 2}})
+            );
+            assert_eq!(initiative_row(model, &model.initiatives["idle"])["counts"]["items"], 0);
+            let shown = initiative(model, &model.initiatives["init"]);
+            assert_eq!(shown["children"], json!(["goal", "late"]));
+            assert_eq!(shown["notes"], Json::Null);
+            // An item names the initiative above it, however deep; the tops of the trees in none are the bucket.
+            assert_eq!(view.item_row("a").unwrap()["initiative"], "init");
+            assert_eq!(view.item_row("c").unwrap()["initiative"], Json::Null);
+            assert_eq!(no_initiative(model), json!({"items": ["c", "d"]}));
+            follows_the_conventions(&shown, "initiative");
         });
     }
 }

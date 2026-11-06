@@ -1,4 +1,4 @@
-//! Deleting an item: a tombstone, so a replica that never saw the deletion can't bring the item back.
+//! Deleting an item, thread or initiative: a tombstone, so a replica that never saw the deletion can't bring the item back.
 //!
 //! Deleting writes `deleted: true` on the item. Every reader leaves a deleted item out, and every checked write
 //! treats it as missing (`model::existing`), so a replica that has seen the tombstone refuses to link, move, claim,
@@ -25,8 +25,8 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, By, Model, Value, WriteError};
-use crate::schema::item as field;
-use crate::state::{Error, Replica};
+use crate::schema::{initiative, item as field, kind};
+use crate::state::{Error, Key, Replica};
 
 /// Why an item isn't deleted.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -56,6 +56,11 @@ pub enum Reason {
     /// It is a loose task's thread of one, which stays: a tombstone on it would leave the task unclaimable alone.
     /// Its task leaves it by being deleted, or by being moved into another thread.
     TaskThread,
+    /// Items are under the initiative.
+    HoldsItems {
+        /// The items directly under it.
+        items: Vec<String>,
+    },
     /// Items are in the thread.
     HasMembers {
         /// The members.
@@ -77,6 +82,9 @@ impl fmt::Display for Reason {
             Self::TaskThread => {
                 write!(f, "it is a task's own thread, which goes when the task does")
             },
+            Self::HoldsItems { items } => {
+                write!(f, "items are under it ({})", crate::say::list(items, ", "))
+            },
             Self::HasMembers { members } => {
                 write!(f, "items are in it ({})", crate::say::list(members, ", "))
             },
@@ -96,6 +104,15 @@ pub enum DeleteError {
         /// Why not.
         reasons: Vec<Reason>,
     },
+    /// No such initiative, or it was deleted.
+    NoInitiative(String),
+    /// The initiative holds items.
+    InitiativeInUse {
+        /// The initiative.
+        initiative: String,
+        /// Why not.
+        reasons: Vec<Reason>,
+    },
     /// No such thread, or it was deleted.
     NoThread(String),
     /// The thread is in use.
@@ -111,9 +128,12 @@ impl fmt::Display for DeleteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(err) => err.fmt(f),
-            Self::InUse { item: id, reasons } | Self::ThreadInUse { thread: id, reasons } => {
+            Self::InUse { item: id, reasons }
+            | Self::ThreadInUse { thread: id, reasons }
+            | Self::InitiativeInUse { initiative: id, reasons } => {
                 write!(f, "{id} can't be deleted: {}", crate::say::list(reasons, "; "))
             },
+            Self::NoInitiative(id) => write!(f, "no initiative {id}"),
             Self::NoThread(id) => write!(f, "no thread {id}"),
         }
     }
@@ -197,6 +217,32 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     if alone {
         claim::release(replica, &claim::thread_key(&one)?, by.actor);
     }
+    Ok(true)
+}
+
+/// Deletes an initiative, or does nothing when it is deleted already; returns whether it wrote. An initiative that
+/// holds items, an item directly under it however it came to, is refused: move or delete them first.
+///
+/// # Errors
+///
+/// Fails when the initiative doesn't exist, when an item is under it, or when the state layer refuses.
+pub fn delete_initiative(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
+    let key = Key::new(kind::INITIATIVE, id).map_err(WriteError::from)?;
+    if model::is_deleted(&replica.state, &key) {
+        return Ok(false);
+    }
+    let model = Model::read(&replica.state)?;
+    if !model.initiatives.contains_key(id) {
+        return Err(DeleteError::NoInitiative(id.to_owned()));
+    }
+    let items: Vec<String> = model.children(id).into_iter().map(str::to_owned).collect();
+    if !items.is_empty() {
+        return Err(DeleteError::InitiativeInUse {
+            initiative: id.to_owned(),
+            reasons: vec![Reason::HoldsItems { items }],
+        });
+    }
+    model::put(replica, &key, initiative::DELETED, Some(&true), by)?;
     Ok(true)
 }
 

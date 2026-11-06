@@ -59,7 +59,7 @@ pub enum Format {
 
 /// The top level's help sections, in order: the groups, then the commands that act on the tracker or the tool.
 pub const SECTIONS: [(&str, &[&str]); 2] = [
-    ("Command Groups", &["item", "thread", "repository"]),
+    ("Command Groups", &["initiative", "item", "thread", "repository"]),
     (
         "Other Commands",
         &["needs", "init", "sync", "prime", "id", "import", "doctor", "serve", "up", "completions"],
@@ -175,6 +175,9 @@ pub enum Command {
     },
     /// Lists entities that can't be read.
     Doctor,
+    /// Adds, edits, shows, lists and deletes initiatives, the long-lived bodies of work that items sit under.
+    #[command(subcommand)]
+    Initiative(InitiativeCommand),
     /// Adds, edits, shows, lists, finishes, reopens and deletes items.
     #[command(subcommand)]
     Item(ItemCommand),
@@ -295,14 +298,20 @@ impl Command {
             Self::Serve(_) | Self::Up(_) => Class::Server,
             Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
             Self::Needs
+            | Self::Initiative(InitiativeCommand::List | InitiativeCommand::Show { .. })
             | Self::Item(ItemCommand::List | ItemCommand::Show { .. })
             | Self::Thread(
-                ThreadCommand::List | ThreadCommand::Show { .. } | ThreadCommand::Ready,
+                ThreadCommand::List | ThreadCommand::Show { .. } | ThreadCommand::Ready { .. },
             )
             | Self::Repository(RepositoryCommand::List | RepositoryCommand::Show { .. }) => {
                 Class::Read
             },
-            Self::Item(
+            Self::Initiative(
+                InitiativeCommand::Add { .. }
+                | InitiativeCommand::Edit(_)
+                | InitiativeCommand::Delete { .. },
+            )
+            | Self::Item(
                 ItemCommand::Add { .. }
                 | ItemCommand::Edit(_)
                 | ItemCommand::Done { .. }
@@ -332,6 +341,9 @@ impl Command {
         match self {
             Self::Item(ItemCommand::Show { items }) if items.is_empty() => {
                 Err(usage("item show needs at least one item"))
+            },
+            Self::Initiative(InitiativeCommand::Show { initiatives }) if initiatives.is_empty() => {
+                Err(usage("initiative show needs at least one initiative"))
             },
             Self::Thread(ThreadCommand::Show { threads }) if threads.is_empty() => {
                 Err(usage("thread show needs at least one thread"))
@@ -365,6 +377,7 @@ impl Command {
                 }
                 Ok(())
             },
+            Self::Initiative(InitiativeCommand::Edit(edit)) => edit.validate(),
             Self::Item(ItemCommand::Edit(edit)) => edit.validate(),
             Self::Thread(ThreadCommand::Edit(edit)) => edit.validate(),
             _ => Ok(()),
@@ -447,7 +460,8 @@ pub enum ItemCommand {
         /// Its title.
         #[arg(short = 't', long)]
         title: String,
-        /// Its parent.
+        /// Its parent: an initiative or an item. Left out, it goes under the tracker's only initiative, and with none
+        /// or several the add is refused, naming them.
         #[arg(short = 'p', long)]
         parent: Option<String>,
         /// Its thread. Left out, it joins the thread its parent's other children share, finished ones included, and is
@@ -515,10 +529,6 @@ pub enum ItemCommand {
 
 /// What `item edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each `--no-field` and `--force` is a flag of its own"
-)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemEdit {
     /// The item.
@@ -526,13 +536,9 @@ pub struct ItemEdit {
     /// A new title.
     #[arg(short = 't', long)]
     pub title: Option<String>,
-    /// Put it under this parent.
+    /// Put it under this parent, an initiative or an item. An item always has one, so there is no flag to clear it.
     #[arg(short = 'p', long)]
     pub parent: Option<String>,
-    /// Put it at the top level.
-    #[arg(long)]
-    #[serde(default)]
-    pub no_parent: bool,
     /// Put it in this thread, taking it out of any other.
     #[arg(long)]
     pub thread: Option<String>,
@@ -567,10 +573,67 @@ pub struct ItemEdit {
 
 impl ItemEdit {
     fn validate(&self) -> Result<(), CliError> {
-        clears("parent", self.parent.is_some(), self.no_parent)?;
         clears("thread", self.thread.is_some(), self.no_thread)?;
         clears("notes", self.notes.is_some(), self.no_notes)?;
         overlaps("waits-for", &self.waits_for, &self.no_waits_for)
+    }
+}
+
+/// The initiative commands.
+#[derive(Debug, Subcommand, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", rename_all_fields = "kebab-case", deny_unknown_fields)]
+pub enum InitiativeCommand {
+    /// Adds an initiative; adding it again with the same fields changes nothing, and with other fields is refused.
+    Add {
+        /// The new initiative's id, a `UUIDv7` (`acyclic id` prints one); left out, the tracker makes one.
+        #[arg(long)]
+        id: Option<String>,
+        /// Its title.
+        #[arg(short = 't', long)]
+        title: String,
+        /// Its notes.
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Edits an initiative: `--field` sets a field, `--no-field` clears it.
+    Edit(InitiativeEdit),
+    /// Shows initiatives with the items directly under them, as an array in the order given.
+    Show {
+        /// The initiatives.
+        #[arg(required = true, value_name = "INITIATIVE")]
+        #[serde(default)]
+        initiatives: Vec<String>,
+    },
+    /// Lists every initiative, by id, with how many items sit directly under each and the items that are in none.
+    List,
+    /// Deletes an initiative no item is under. Its id is never used again.
+    Delete {
+        /// The initiative.
+        initiative: String,
+    },
+}
+
+/// What `initiative edit` changes.
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InitiativeEdit {
+    /// The initiative.
+    pub initiative: String,
+    /// A new title.
+    #[arg(short = 't', long)]
+    pub title: Option<String>,
+    /// New notes.
+    #[arg(long)]
+    pub notes: Option<String>,
+    /// Clear its notes.
+    #[arg(long)]
+    #[serde(default)]
+    pub no_notes: bool,
+}
+
+impl InitiativeEdit {
+    fn validate(&self) -> Result<(), CliError> {
+        clears("notes", self.notes.is_some(), self.no_notes)
     }
 }
 
@@ -603,8 +666,14 @@ pub enum ThreadCommand {
     },
     /// Lists every thread, by id, with its done and open leaves.
     List,
-    /// Lists threads with ready work, the actor's own first, each with its ready items.
-    Ready,
+    /// Lists threads with ready work, the actor's own first, each with its ready items; `--initiative` keeps those with
+    /// a task under one initiative.
+    Ready {
+        /// The initiative.
+        #[arg(long)]
+        #[serde(default)]
+        initiative: Option<String>,
+    },
     /// Claims a thread with ready work, or renews the actor's claim on it.
     Claim {
         /// The thread.

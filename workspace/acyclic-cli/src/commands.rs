@@ -20,11 +20,13 @@ use serde_json::{Value as Json, json};
 
 use crate::Env;
 use crate::args::{
-    Class, Cli, Command, ItemCommand, LEASE_MAX_MINUTES, RepositoryCommand, StateWord,
-    ThreadCommand,
+    Class, Cli, Command, InitiativeCommand, ItemCommand, LEASE_MAX_MINUTES, RepositoryCommand,
+    StateWord, ThreadCommand,
 };
 use crate::context;
-use crate::edit::{self, Adding, Change, Delta, ItemFields, RepositoryFields, ThreadFields};
+use crate::edit::{
+    self, Adding, Change, Delta, InitiativeFields, ItemFields, RepositoryFields, ThreadFields,
+};
 use crate::error::{CliError, exit};
 use crate::resolve::Records;
 use crate::view::{self, View};
@@ -205,7 +207,11 @@ impl<'a> CommandContext<'a> {
             | Command::Completions { .. } => {
                 unreachable!("handled before dispatch")
             },
-            Command::Thread(ThreadCommand::Ready) => self.ready(),
+            Command::Thread(ThreadCommand::Ready { initiative }) => self.ready(initiative.as_deref()),
+            Command::Initiative(InitiativeCommand::List) => self.initiatives(),
+            Command::Initiative(InitiativeCommand::Show { initiatives }) => {
+                self.show_initiatives(initiatives)
+            },
             Command::Item(ItemCommand::List) => self.list(),
             Command::Item(ItemCommand::Show { items }) => self.show(items),
             Command::Needs => self.needs(),
@@ -262,7 +268,7 @@ impl<'a> CommandContext<'a> {
             Command::Item(ItemCommand::Edit(edit)) => {
                 let fields = ItemFields {
                     title: edit.title.clone(),
-                    parent: Change::of(edit.parent.clone(), edit.no_parent),
+                    parent: Change::of(edit.parent.clone(), false),
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
                     force: edit.force,
@@ -428,6 +434,47 @@ impl<'a> CommandContext<'a> {
                     Ok(json!({"repository": id}))
                 })
             },
+            Command::Initiative(InitiativeCommand::Add { id: given, title, notes }) => {
+                let fields = InitiativeFields {
+                    title: Some(title.clone()),
+                    notes: Change::of(notes.clone(), false),
+                };
+                self.write(|replica, by| {
+                    let (id, adding) = match given {
+                        Some(given) => (edit::given_id(given)?, Adding::Given),
+                        None => (acyclic_core::ids::new(), Adding::Minted),
+                    };
+                    let outcome = edit::commit(replica, by, None, false, |_| {
+                        Ok(edit::initiative_changes(&id, &fields, adding))
+                    })?;
+                    self.remember(&outcome.after);
+                    Ok(json!({"initiative": id, "title": title}))
+                })
+            },
+            Command::Initiative(InitiativeCommand::Edit(edit)) => {
+                let fields = InitiativeFields {
+                    title: edit.title.clone(),
+                    notes: Change::of(edit.notes.clone(), edit.no_notes),
+                };
+                let initiative = &edit.initiative;
+                self.write(|replica, by| {
+                    let mut id = String::new();
+                    let outcome = edit::commit(replica, by, None, false, |model| {
+                        id = Records::of(model).initiative(initiative)?;
+                        Ok(edit::initiative_changes(&id, &fields, Adding::No))
+                    })?;
+                    self.remember(&outcome.after);
+                    Ok(json!({"initiative": id}))
+                })
+            },
+            Command::Initiative(InitiativeCommand::Delete { initiative }) => {
+                self.write(|replica, by| {
+                    let found = Records::of(&Model::read(replica.state())?).initiative(initiative);
+                    let id = deletable(found, initiative, replica.state(), kind::INITIATIVE)?;
+                    delete::delete_initiative(replica, &id, by)?;
+                    Ok(json!({"initiative": id}))
+                })
+            },
             Command::Thread(ThreadCommand::Delete { thread }) => self.write(|replica, by| {
                 let found = Records::of(&Model::read(replica.state())?).thread(thread);
                 let id = deletable(found, thread, replica.state(), kind::THREAD)?;
@@ -482,7 +529,7 @@ impl<'a> CommandContext<'a> {
         let unchecked = RefCell::new(Vec::new());
         let meta = Meta { actor: self.actor.clone() };
         let expected = self.expected.as_deref();
-        self.tracker.batch(&meta, self.now, false, &project_root, |replica, at| {
+        self.tracker.batch(&meta, self.now, false, &initiative_of, |replica, at| {
             if let Some(expected) = expected {
                 let model = Model::read(replica.state())?;
                 let mismatches = write::check_expected(replica.state(), &model, expected, at)?;
@@ -561,7 +608,10 @@ impl<'a> CommandContext<'a> {
         meant: impl FnOnce() -> String,
     ) -> CliError {
         let Some(named) = named else { return error };
-        if error.code != "not-found" || error.message != format!("no item {named}") {
+        if error.code != "not-found"
+            || ![format!("no item {named}"), format!("no item or initiative {named}")]
+                .contains(&error.message)
+        {
             return error;
         }
         match self.read() {
@@ -588,12 +638,37 @@ impl<'a> CommandContext<'a> {
         read(&View { state: &state, model: &model, readiness: &readiness, now: self.now })
     }
 
-    fn ready(&self) -> Result<Json, CliError> {
+    /// The threads with ready work; with `initiative`, those with a task under it, so a thread shows under every
+    /// initiative one of its tasks is in.
+    fn ready(&self, initiative: Option<&str>) -> Result<Json, CliError> {
         self.with_view(|view| {
-            let ready = view.readiness.ready(&self.actor)?;
+            let mut ready = view.readiness.ready(&self.actor)?;
             acyclic_core::probe::mark("readiness");
+            if let Some(reference) = initiative {
+                let wanted = Records::of(view.model).initiative(reference)?;
+                ready.retain(|row| thread_in_initiative(view.model, &row.thread, &wanted));
+            }
             Ok(json!({"ready": view.ready_rows(&ready)?}))
         })
+    }
+
+    /// Every initiative by id, with the items that are in none: the tops of the trees with no initiative above.
+    fn initiatives(&self) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let rows: Vec<Json> =
+            model.initiatives.values().map(|record| view::initiative_row(&model, record)).collect();
+        Ok(json!({"initiatives": rows, "no_initiative": view::no_initiative(&model)}))
+    }
+
+    fn show_initiatives(&self, ids: &[String]) -> Result<Json, CliError> {
+        let (_, model) = self.read()?;
+        let records = Records::of(&model);
+        let mut shown = Vec::with_capacity(ids.len());
+        for reference in ids {
+            let id = records.initiative(reference)?;
+            shown.push(view::initiative(&model, &model.initiatives[&id]));
+        }
+        Ok(Json::Array(shown))
     }
 
     fn list(&self) -> Result<Json, CliError> {
@@ -718,6 +793,7 @@ impl<'a> CommandContext<'a> {
         Ok(json!({
             "replica": self.tracker.replica().as_str(),
             "counts": {
+                "initiatives": model.initiatives.len(),
                 "items": model.items.len(),
                 "links": model.links.len(),
                 "threads": model.threads.len(),
@@ -1004,6 +1080,37 @@ mod acknowledged_entries_tests {
     }
 }
 
+#[cfg(test)]
+mod partition_tests {
+    use acyclic_core::model::{By, add_initiative, add_item, set_parent};
+    use acyclic_core::scope::USER;
+    use acyclic_core::state::{Key, Replica, ReplicaId, State};
+
+    use super::initiative_of;
+
+    #[test]
+    fn audit_events_go_to_the_initiative_the_chain_of_parents_ends_in() {
+        let by = By { actor: USER, at: 1 };
+        let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+        add_initiative(&mut r, "init", "Init", by).unwrap();
+        for id in ["epic", "task", "bare", "loop"] {
+            add_item(&mut r, id, id, by).unwrap();
+        }
+        set_parent(&mut r, "epic", Some("init"), by).unwrap();
+        set_parent(&mut r, "task", Some("epic"), by).unwrap();
+        // A parent that names nothing, written as a sync could leave it.
+        r.write(&Key::new("item", "loop").unwrap(), "parent", USER, 2, Some("gone".into()))
+            .unwrap();
+        let of = |kind: &str, id: &str| initiative_of(r.state(), &Key::new(kind, id).unwrap());
+        assert_eq!(of("initiative", "init").as_deref(), Some("init"), "an initiative's own events");
+        assert_eq!(of("item", "epic").as_deref(), Some("init"));
+        assert_eq!(of("item", "task").as_deref(), Some("init"), "however deep");
+        assert_eq!(of("item", "bare"), None, "an item in no initiative shares one file");
+        assert_eq!(of("item", "loop"), None, "and one whose parent names nothing");
+        assert_eq!(of("thread", "t"), None);
+    }
+}
+
 /// The record a delete names: the one the resolver `found`, or, named by its full id, one deleted already, which
 /// deleting again changes nothing.
 fn deletable(
@@ -1171,27 +1278,38 @@ pub(crate) fn existing_thread(
     }
 }
 
-/// The project root an entity's audit events go to: an item's topmost ancestor, or none for a top-level item and
-/// anything that isn't an item.
-fn project_root(state: &State, key: &Key) -> Option<String> {
-    if key.kind != kind::ITEM {
-        return None;
+/// Whether a thread has a task under `initiative`: any member of it, or the task a thread of one is derived from.
+fn thread_in_initiative(model: &Model, thread: &str, initiative: &str) -> bool {
+    model
+        .members(thread)
+        .into_iter()
+        .chain(model.task_of(thread))
+        .any(|task| model.initiatives_of(task).contains(&initiative))
+}
+
+/// The initiative an entity's audit events go to: an initiative's own id, and an item's initiative, the top of its chain
+/// of parents when that is an initiative record. None for anything else, and for an item in no initiative, whose events
+/// share one file.
+fn initiative_of(state: &State, key: &Key) -> Option<String> {
+    match key.kind.as_str() {
+        kind::INITIATIVE => return Some(key.id.clone()),
+        kind::ITEM => {},
+        _ => return None,
     }
     let mut seen = std::collections::BTreeSet::from([key.id.clone()]);
     let mut current = key.clone();
-    let mut top = None;
     loop {
         let parent = state
             .field(&current, field::PARENT)
             .and_then(|register| register.values().next())
-            .and_then(|value| value.value.as_str().map(str::to_owned));
-        match parent {
-            Some(parent) if seen.insert(parent.clone()) => {
-                current = Key::new(kind::ITEM, &parent).ok()?;
-                top = Some(parent);
-            },
-            _ => return top,
+            .and_then(|value| value.value.as_str().map(str::to_owned))?;
+        if Key::new(kind::INITIATIVE, &parent).is_ok_and(|held| state.entity(&held).is_some()) {
+            return Some(parent);
         }
+        if !seen.insert(parent.clone()) {
+            return None;
+        }
+        current = Key::new(kind::ITEM, &parent).ok()?;
     }
 }
 
@@ -1368,6 +1486,7 @@ pub(crate) fn import_json(report: &import::Report, dry_run: bool) -> Json {
     let mut data = json!({
         "dry_run": dry_run,
         "counts": {
+            "initiatives": report.initiatives,
             "repositories": report.repositories,
             "items": report.items,
             "links": report.links,

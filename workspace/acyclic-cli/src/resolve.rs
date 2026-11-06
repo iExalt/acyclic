@@ -1,10 +1,12 @@
-//! Naming a record: every argument that names one item, thread or repository record goes through [`Records::item`],
-//! [`Records::thread`] or [`Records::repository`], which look only among records of that kind.
+//! Naming a record: every argument that names one item, initiative, thread or repository record goes through
+//! [`Records::item`], [`Records::initiative`], [`Records::thread`] or [`Records::repository`], which look only among
+//! records of that kind, except [`Records::parent`], which looks among items and initiatives together, since an item's
+//! parent is either.
 //!
 //! A reference is, in order:
 //!
 //! 1. a full UUID, in any case: that record;
-//! 2. an item's or thread's exact title, open or done alike, or a repository's `owner/name` in any case:
+//! 2. an item's, initiative's or thread's exact title, open or done alike, or a repository's `owner/name` in any case:
 //!    the one record that has it, refused as `ambiguous` when several do;
 //! 3. the end of exactly one record's id, at least [`MIN_ENDING`] characters, in any case.
 //!
@@ -17,7 +19,8 @@
 //! A removal (`--no-waits-for`) first looks among the ids the record holds, by exact id or an ending, with [`held`],
 //! so it lets go of an element whose record is gone; only when none matches do these rules apply.
 //!
-//! Pretty output names items and threads by [`endings`] over the same candidates, lengthened past any other record's
+//! Pretty output names items and initiatives (together, since a parent is either) and threads by [`endings`] over the
+//! same candidates, lengthened past any other record's
 //! title, so every ending it prints names its record, and repositories by their `owner/name`. The exception is an id
 //! shorter than [`MIN_ENDING`], which no command makes: it prints whole, and names nothing.
 
@@ -46,6 +49,9 @@ struct Candidate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Item,
+    Initiative,
+    /// An item or an initiative: what `--parent` names.
+    Parent,
     Thread,
     Repository,
 }
@@ -54,8 +60,20 @@ impl Kind {
     fn noun(self) -> &'static str {
         match self {
             Self::Item => "item",
+            Self::Initiative => "initiative",
+            Self::Parent => "item or initiative",
             Self::Thread => "thread",
             Self::Repository => "repository",
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Item => "items",
+            Self::Initiative => "initiatives",
+            Self::Parent => "items or initiatives",
+            Self::Thread => "threads",
+            Self::Repository => "repositories",
         }
     }
 
@@ -69,6 +87,9 @@ impl Kind {
 pub(crate) struct Records<'a> {
     model: &'a Model,
     items: Vec<Candidate>,
+    initiatives: Vec<Candidate>,
+    /// The items and the initiatives together, built on first use: only a parent is named among both.
+    parents: std::cell::OnceCell<Vec<Candidate>>,
     /// Built on first use: most commands name no thread, and a tracker of loose tasks has a thread for each.
     threads: std::cell::OnceCell<Vec<Candidate>>,
     repositories: Vec<Candidate>,
@@ -87,6 +108,15 @@ impl<'a> Records<'a> {
                 task: None,
             })
             .collect();
+        let initiatives = model
+            .initiatives
+            .values()
+            .map(|initiative| Candidate {
+                id: initiative.id.clone(),
+                names: initiative.title.all().into_iter().cloned().collect(),
+                task: None,
+            })
+            .collect();
         let repositories = model
             .repositories
             .values()
@@ -96,7 +126,14 @@ impl<'a> Records<'a> {
                 task: None,
             })
             .collect();
-        Self { model, items, threads: std::cell::OnceCell::new(), repositories }
+        Self {
+            model,
+            items,
+            initiatives,
+            parents: std::cell::OnceCell::new(),
+            threads: std::cell::OnceCell::new(),
+            repositories,
+        }
     }
 
     /// Every thread, a loose task's thread of one among them, which a claim makes. One shown as its task is named by
@@ -131,6 +168,25 @@ impl<'a> Records<'a> {
         resolve(Kind::Item, reference, &self.items)
     }
 
+    /// The initiative `reference` names.
+    pub(crate) fn initiative(&self, reference: &str) -> Result<String, CliError> {
+        resolve(Kind::Initiative, reference, &self.initiatives)
+    }
+
+    /// The item or initiative `reference` names, as `--parent` does: a title that an item and an initiative both
+    /// have is ambiguous.
+    pub(crate) fn parent(&self, reference: &str) -> Result<String, CliError> {
+        resolve(Kind::Parent, reference, self.parents())
+    }
+
+    fn parents(&self) -> &[Candidate] {
+        self.parents.get_or_init(|| {
+            let mut both = self.items.clone();
+            both.extend(self.initiatives.iter().cloned());
+            both
+        })
+    }
+
     /// The thread `reference` names.
     pub(crate) fn thread(&self, reference: &str) -> Result<String, CliError> {
         resolve(Kind::Thread, reference, self.threads())
@@ -141,9 +197,10 @@ impl<'a> Records<'a> {
         resolve(Kind::Repository, reference, &self.repositories)
     }
 
-    /// The items, or with `items` false the threads, each by the shortest ending of its id that names it.
+    /// The items and initiatives, or with `items` false the threads, each by the shortest ending of its id that names
+    /// it; an item and an initiative are named among each other, as a parent is.
     pub(crate) fn endings(&self, items: bool) -> BTreeMap<String, String> {
-        let candidates = if items { &self.items[..] } else { self.threads() };
+        let candidates = if items { self.parents() } else { self.threads() };
         let mut found = endings(candidates.iter().map(|c| c.id.as_str()));
         // An ending that is another record's title would resolve as ambiguous: it grows until it isn't, at the
         // latest to the whole id.
@@ -194,7 +251,7 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate]) -> Result<Stri
     }
     let named = |name: &String| match kind {
         Kind::Repository => name.eq_ignore_ascii_case(reference),
-        Kind::Item | Kind::Thread => name == reference,
+        Kind::Item | Kind::Initiative | Kind::Parent | Kind::Thread => name == reference,
     };
     let by_name: Vec<&Candidate> =
         candidates.iter().filter(|c| c.names.iter().any(named)).collect();
@@ -212,10 +269,10 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate]) -> Result<Stri
         ([_, _, ..], _) => Err(ambiguous(
             kind,
             &format!(
-                "{reference:?} is the {} of {} {}s",
+                "{reference:?} is the {} of {} {}",
                 name_word(kind),
                 by_name.len(),
-                kind.noun()
+                kind.plural()
             ),
             &by_name,
         )),
@@ -237,7 +294,7 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate]) -> Result<Stri
         ([], [one]) if long => Ok(one.id.clone()),
         ([], [_, _, ..]) if long => Err(ambiguous(
             kind,
-            &format!("{reference:?} ends the ids of {} {}s", by_ending.len(), kind.noun()),
+            &format!("{reference:?} ends the ids of {} {}", by_ending.len(), kind.plural()),
             &by_ending,
         )),
         ([], [one]) => Err(CliError::new(
@@ -310,6 +367,11 @@ fn ambiguous(kind: Kind, why: &str, candidates: &[&Candidate]) -> CliError {
 fn not_found(kind: Kind, reference: &str, meant: &[&Candidate]) -> CliError {
     let message = match kind {
         Kind::Item => format!("no item {reference}"),
+        Kind::Parent => format!("no item or initiative {reference}"),
+        Kind::Initiative => format!(
+            "no initiative {reference}; `acyclic initiative list` lists them, and `acyclic initiative add --title \
+             <TITLE>` adds one"
+        ),
         Kind::Thread => format!(
             "no thread {reference}; `acyclic thread list` lists them, and `acyclic thread add --title <TITLE>` adds one"
         ),

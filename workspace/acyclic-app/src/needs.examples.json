@@ -4,13 +4,14 @@
     {
       "field": "parent",
       "id": "01900000-0000-7000-8000-0000000000a1",
-      "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"parent\":\"01900000-0000-7000-8000-0000000000b1\"}}},\"value\":\"01900000-0000-7000-8000-0000000000b1\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"no-parent\":true}}},\"value\":null}],\"entry\":{\"entry\":\"conflict\",\"field\":\"parent\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
+      "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"parent\":\"01900000-0000-7000-8000-0000000000b1\"}}},\"value\":\"01900000-0000-7000-8000-0000000000b1\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"parent\":\"01900000-0000-7000-8000-0000000000ff\"}}},\"value\":\"01900000-0000-7000-8000-0000000000ff\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"parent\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
         "parent": {
           "conflict": [
             "01900000-0000-7000-8000-0000000000b1",
-            null
+            "01900000-0000-7000-8000-0000000000ff"
           ]
         },
         "readiness": {
@@ -53,12 +54,12 @@
             "item": {
               "edit": {
                 "item": "01900000-0000-7000-8000-0000000000a1",
-                "no-parent": true
+                "parent": "01900000-0000-7000-8000-0000000000ff"
               }
             }
           },
-          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --no-parent",
-          "value": null,
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a1 --parent 01900000-0000-7000-8000-0000000000ff",
+          "value": "01900000-0000-7000-8000-0000000000ff",
           "why": null
         }
       ],
@@ -69,7 +70,7 @@
       "summary": "One: its parent was written differently on two machines",
       "values": [
         "01900000-0000-7000-8000-0000000000b1",
-        null
+        "01900000-0000-7000-8000-0000000000ff"
       ]
     },
     {
@@ -78,10 +79,11 @@
       "identity": "{\"choices\":[{\"command\":null,\"value\":\"done\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
         "parent": {
           "conflict": [
             "01900000-0000-7000-8000-0000000000b1",
-            null
+            "01900000-0000-7000-8000-0000000000ff"
           ]
         },
         "readiness": {
@@ -142,10 +144,11 @@
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"One\"}}},\"value\":\"One\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a1\",\"title\":\"Two\"}}},\"value\":\"Two\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"title\",\"id\":\"01900000-0000-7000-8000-0000000000a1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a1",
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
         "parent": {
           "conflict": [
             "01900000-0000-7000-8000-0000000000b1",
-            null
+            "01900000-0000-7000-8000-0000000000ff"
           ]
         },
         "readiness": {
@@ -213,7 +216,8 @@
       "identity": "{\"choices\":[{\"command\":null,\"value\":\"done\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a7\",\"state\":\"canceled\"}}},\"value\":\"canceled\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000a7\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a7",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "fields": [
             "state"
@@ -267,7 +271,8 @@
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"open\"}}},\"value\":\"open\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000b1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000b1",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "progress": {
           "counts": {
             "canceled": 0,
@@ -340,7 +345,8 @@
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@abc1234\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"abc1234\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}},{\"command\":{\"item\":{\"done\":{\"commit\":\"me/code@def5678\",\"force\":true,\"item\":\"01900000-0000-7000-8000-0000000000e1\"}}},\"value\":{\"commit\":\"def5678\",\"repository\":\"01900000-0000-7000-8000-0000000000c1\"}}],\"entry\":{\"entry\":\"conflict\",\"field\":\"evidence\",\"id\":\"01900000-0000-7000-8000-0000000000e1\",\"kind\":\"item\"}}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000e1",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "readiness": "done"
         },
@@ -508,7 +514,8 @@
       "identity": "{\"entry\":\"done-waiting\",\"item\":\"01900000-0000-7000-8000-0000000000a4\",\"waits_for\":\"01900000-0000-7000-8000-0000000000a3\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a4",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "readiness": "done"
         },
@@ -523,7 +530,8 @@
       "summary": "Early is done but waits for Late",
       "waits_for": {
         "id": "01900000-0000-7000-8000-0000000000a3",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "readiness": "ready"
         },
@@ -537,7 +545,8 @@
       "identity": "{\"entry\":\"waits-on-canceled\",\"item\":\"01900000-0000-7000-8000-0000000000a6\",\"waits_for\":\"01900000-0000-7000-8000-0000000000a5\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000a6",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "readiness": "waiting",
           "waiting": {
@@ -557,7 +566,8 @@
       "summary": "Waiting waits for Dropped, which was canceled",
       "waits_for": {
         "id": "01900000-0000-7000-8000-0000000000a5",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "readiness": {
           "readiness": "canceled"
         },
@@ -568,11 +578,52 @@
       }
     },
     {
+      "identity": "{\"entry\":\"parent-missing\",\"item\":\"01900000-0000-7000-8000-0000000000a9\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a9",
+        "initiative": null,
+        "parent": null,
+        "readiness": {
+          "readiness": "ready"
+        },
+        "stage": "ready",
+        "state": "open",
+        "thread": null,
+        "title": "Lost 01900000-0000-7000-8000-0000000000a9"
+      },
+      "key": "parent-missing:01900000-0000-7000-8000-0000000000a9",
+      "kind": "parent-missing",
+      "notify": false,
+      "parent": null,
+      "summary": "Lost 01900000-0000-7000-8000-0000000000a9 is in no initiative: it has no parent"
+    },
+    {
+      "identity": "{\"entry\":\"parent-missing\",\"item\":\"01900000-0000-7000-8000-0000000000aa\",\"parent\":\"gone\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000aa",
+        "initiative": null,
+        "parent": "gone",
+        "readiness": {
+          "readiness": "ready"
+        },
+        "stage": "ready",
+        "state": "open",
+        "thread": null,
+        "title": "Lost 01900000-0000-7000-8000-0000000000aa"
+      },
+      "key": "parent-missing:01900000-0000-7000-8000-0000000000aa:gone",
+      "kind": "parent-missing",
+      "notify": false,
+      "parent": "gone",
+      "summary": "Lost 01900000-0000-7000-8000-0000000000aa: its parent gone doesn't exist"
+    },
+    {
       "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread",
       "identity": "{\"entry\":\"thread-on-parent\",\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread\"}",
       "item": {
         "id": "01900000-0000-7000-8000-0000000000b1",
-        "parent": null,
+        "initiative": "01900000-0000-7000-8000-0000000000ff",
+        "parent": "01900000-0000-7000-8000-0000000000ff",
         "progress": {
           "counts": {
             "canceled": 0,

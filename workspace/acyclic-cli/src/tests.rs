@@ -160,6 +160,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::new("invalid-commit", exit::USAGE, ""),
         CliError::new("invalid-id", exit::USAGE, ""),
         CliError::new("ambiguous", exit::USAGE, ""),
+        CliError::refused("parent-required", ""),
+        CliError::refused("id-taken", ""),
         CliError::new("invalid-actor", exit::USAGE, ""),
         CliError::new("config", exit::CONFIG, ""),
         CliError::new("no-remote", exit::CONFIG, ""),
@@ -354,6 +356,7 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
             "import: dry_run",
             "import: file",
             "import: schema",
+            "initiative show: initiatives",
             "item show: items",
             "repository show: repositories",
             "thread show: threads",
@@ -519,7 +522,7 @@ fn every_command_follows_the_input_conventions() {
     // Positionals are the subject's id, named for the entity; these are the only others.
     let exceptions =
         [("init", "path"), ("completions", "shell"), ("import", "file"), ("id", "count")];
-    let entities = ["ITEM", "THREAD", "REPOSITORY"];
+    let entities = ["INITIATIVE", "ITEM", "THREAD", "REPOSITORY"];
     // A long flag has the same short form, or none, in every command that takes it.
     let mut shorts = std::collections::BTreeMap::new();
     for (path, command) in &commands {
@@ -634,7 +637,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
     };
     for line in [
         "acyclic item edit a --notes x --no-notes",
-        "acyclic item edit a --parent b --no-parent",
+        "acyclic initiative edit i --notes x --no-notes",
         "acyclic item edit a --thread t --no-thread",
         "acyclic item edit a --waits-for b --no-waits-for b",
         "acyclic thread edit t --notes b --no-notes",

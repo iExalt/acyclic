@@ -109,8 +109,8 @@ pub mod setup {
 /// The git config key holding this clone's replica id.
 pub const REPLICA_CONFIG: &str = "acyclic.replica";
 
-/// The audit-log file for items in no project.
-pub const NO_PROJECT: &str = "_";
+/// The audit-log file for items in no initiative.
+pub const NO_INITIATIVE: &str = "_";
 
 /// Why a store operation failed.
 #[derive(Debug)]
@@ -229,7 +229,7 @@ pub struct Meta {
     pub actor: String,
 }
 
-/// Maps an entity to its project root's id, or `None` for no project.
+/// Maps an entity to its initiative's id, or `None` for no initiative.
 pub type RootOf<'a> = &'a dyn Fn(&State, &Key) -> Option<String>;
 
 /// Failpoints for crash tests.
@@ -393,7 +393,7 @@ fn day_of(at: Millis) -> String {
     format!("{:02}", civil(at).2)
 }
 
-/// A log file's path in its month's segment: a directory per project root and a file per day, so a batch appends
+/// A log file's path in its month's segment: a directory per initiative and a file per day, so a batch appends
 /// to one day's events rather than rewriting the month's.
 fn log_path(root: &str, day: &str) -> String {
     format!("{root}/{day}.jsonl")
@@ -435,7 +435,7 @@ struct WrittenValue {
     value: Json,
 }
 
-/// The changed fields since the journal began, by project root. An entity's root is found in the state after the
+/// The changed fields since the journal began, by initiative. An entity's root is found in the state after the
 /// batch, or failing that in the state before it, which a swap with the journal restores for the moment.
 fn diff(
     after: &mut State,
@@ -460,7 +460,7 @@ fn diff(
             .flat_map(|e| e.keys())
             .chain(new.into_iter().flat_map(|e| e.keys()))
             .collect();
-        let root = root.unwrap_or_else(|| NO_PROJECT.to_owned());
+        let root = root.unwrap_or_else(|| NO_INITIATIVE.to_owned());
         for field in fields {
             let was = old.and_then(|entity| entity.get(field));
             let now = new.and_then(|entity| entity.get(field));
@@ -850,7 +850,7 @@ impl Tracker {
         Ok(segments)
     }
 
-    /// Prunes sealed segments: a project root's file is dropped once every event in it is older than its retention
+    /// Prunes sealed segments: a initiative's file is dropped once every event in it is older than its retention
     /// in months (with one month's retention, September's file goes on 1 November), but only where `archived_ok`
     /// confirms the archived subtrees it covers have their records. A segment is replaced by the next generation, a
     /// parentless commit without the dropped files, so the old events become unreachable; a segment left empty is

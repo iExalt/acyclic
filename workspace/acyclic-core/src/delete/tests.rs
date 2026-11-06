@@ -147,15 +147,19 @@ fn delete_wins_a_join_and_what_was_attached_meanwhile_reads_as_dangling() {
         let ids: Vec<&str> = model.items.keys().map(String::as_str).collect();
         assert_eq!(ids, ["kid", "other"]);
         // ...and what refers to it surfaces for the user.
-        let dangling: Vec<(String, String, Option<String>)> = needs_of(joined)
+        let mut dangling: Vec<(String, String, Option<String>)> = needs_of(joined)
             .into_iter()
             .filter_map(|entry| match entry {
                 Entry::Dangling { id, field, target, fix, .. } if target == "gone" => {
                     Some((id, field, fix))
                 },
+                Entry::ParentMissing { item, parent: Some(target) } if target == "gone" => {
+                    Some((item, "parent".to_owned(), None))
+                },
                 _ => None,
             })
             .collect();
+        dangling.sort();
         let fix = "acyclic item edit other --no-waits-for gone".to_owned();
         assert_eq!(
             dangling,
@@ -216,7 +220,10 @@ fn a_tasks_thread_of_one_is_never_deleted_but_deleting_the_task_lets_its_own_cla
     assert!(model.is_emptied_one(&one));
     let readiness = ReadinessEvaluator::new(&r.state, &model, 7);
     assert!(
-        needs_you(&r.state, &model, &readiness, 7).unwrap().is_empty(),
+        needs_you(&r.state, &model, &readiness, 7)
+            .unwrap()
+            .iter()
+            .all(|entry| matches!(entry, Entry::ParentMissing { .. })),
         "emptied and unheld is hidden"
     );
 
@@ -224,4 +231,85 @@ fn a_tasks_thread_of_one_is_never_deleted_but_deleting_the_task_lets_its_own_cla
     let one_y = crate::ids::one("y");
     claim::claim(&mut r, &one_y, "session/other", 8, (10_000, 10_000), true).unwrap();
     assert_eq!(refusal(&mut r, "y", user(9)), ["claimed"]);
+}
+
+/// An initiative `id` with a title, as the judge writes it.
+fn with_initiative(r: &mut Replica, id: &str, at: Millis) {
+    crate::model::add_initiative(r, id, id, user(at)).unwrap();
+}
+
+#[test]
+fn an_initiative_is_deleted_only_while_no_item_is_under_it_and_its_tombstone_is_permanent() {
+    let mut r = with_items(&["a"]);
+    with_initiative(&mut r, "init", 1);
+    set_parent(&mut r, "a", Some("init"), user(2)).unwrap();
+    let refused = delete_initiative(&mut r, "init", user(3));
+    assert_eq!(
+        refused,
+        Err(DeleteError::InitiativeInUse {
+            initiative: "init".into(),
+            reasons: vec![Reason::HoldsItems { items: vec!["a".into()] }],
+        })
+    );
+    assert_eq!(refused.unwrap_err().to_string(), "init can't be deleted: items are under it (a)");
+    // Moving the item out frees it; a second delete changes nothing.
+    with_initiative(&mut r, "other", 4);
+    set_parent(&mut r, "a", Some("other"), user(4)).unwrap();
+    assert_eq!(delete_initiative(&mut r, "init", user(5)), Ok(true));
+    assert_eq!(delete_initiative(&mut r, "init", user(5)), Ok(false));
+    assert_eq!(
+        delete_initiative(&mut r, "nowhere", user(5)),
+        Err(DeleteError::NoInitiative("nowhere".into()))
+    );
+    let model = Model::read(&r.state).unwrap();
+    assert!(!model.initiatives.contains_key("init") && model.initiatives.contains_key("other"));
+    // The id is retired for good: not for another initiative, and not for an item either.
+    assert!(matches!(
+        crate::model::add_initiative(&mut r, "init", "Again", user(6)),
+        Err(WriteError::Deleted(_))
+    ));
+    let at = user(6);
+    let taken = crate::write::commit(&mut r, at, false, |_| {
+        Ok::<_, ()>(crate::write::ChangeSet(vec![crate::write::Change::Add {
+            record: crate::write::Record::Item("init".into()),
+            minted: false,
+            on_repeat: crate::write::Repeat::Refuse,
+            with: vec![crate::write::Assign::Item(
+                "init".into(),
+                crate::write::ItemAssign::Title("T".into()),
+            )],
+        }]))
+    });
+    assert!(
+        matches!(taken, Err(crate::write::CommitError::Refused(ref v, _))
+            if v.iter().any(|v| matches!(&v.rule, crate::write::Rule::IdTaken(_)))),
+        "{taken:?}"
+    );
+}
+
+#[test]
+fn an_item_added_under_an_initiative_deleted_apart_reads_as_a_missing_parent_in_either_join_order()
+{
+    let mut mac = replica("mac");
+    with_initiative(&mut mac, "init", 1);
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+    // Apart: mac deletes the empty initiative while pi adds an item under it.
+    assert_eq!(delete_initiative(&mut mac, "init", user(2)), Ok(true));
+    add_item(&mut pi, "kid", "Kid", user(2)).unwrap();
+    set_parent(&mut pi, "kid", Some("init"), user(2)).unwrap();
+    let mut one = Replica::open(ReplicaId::new("a").unwrap(), mac.state().clone());
+    one.join(pi.state()).unwrap();
+    let mut other = Replica::open(ReplicaId::new("b").unwrap(), pi.state().clone());
+    other.join(mac.state()).unwrap();
+    for joined in [&one, &other] {
+        let model = Model::read(joined.state()).unwrap();
+        // Delete wins: the initiative is gone from every reader, and the item reads as in no initiative.
+        assert!(model.initiatives.is_empty());
+        assert_eq!(model.initiative_of("kid"), None);
+        assert_eq!(
+            needs_of(joined),
+            [Entry::ParentMissing { item: "kid".into(), parent: Some("init".into()) }]
+        );
+    }
+    assert_eq!(one.state().to_files(), other.state().to_files());
 }

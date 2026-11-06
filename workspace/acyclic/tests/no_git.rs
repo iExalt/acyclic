@@ -212,6 +212,8 @@ fn wait_for_upkeep_to_end(repository: &Path) {
 }
 
 const A: &str = "01900000-0000-7000-8000-0000000000a1";
+/// The tracker's one initiative, which an item added with no parent goes under.
+const INITIATIVE: &str = "initiative add --id 01900000-0000-7000-8000-0000000000f0 --title Home";
 const B: &str = "01900000-0000-7000-8000-0000000000b1";
 
 fn two_machines(format: Format) {
@@ -227,6 +229,10 @@ fn two_machines(format: Format) {
     }
     git(&mac, &["config", "acyclic.pushAfterWrite", "true"]);
 
+    // Each machine's first write is the same initiative, which joins to one: neither syncs before writing, so each
+    // marker is cleared by a write of its own.
+    tripwire.run(&home, &mac, INITIATIVE);
+    tripwire.run(&home, &pi, INITIATIVE);
     tripwire.run(&home, &mac, &format!("item add --id {A} --title A"));
     assert!(
         git(&shared, &["for-each-ref", "--format=%(refname)", "refs/heads/state/"])
@@ -292,6 +298,7 @@ fn many_small_writes_stay_packed_and_complete_without_git() {
     git(dir.path(), &["init", "--quiet", "--bare", "shared.git"]);
     let mac = init(&tripwire, &home, dir.path(), "mac", "../shared.git");
     git(&mac, &["config", "gc.autoPackLimit", "3"]);
+    tripwire.run(&home, &mac, INITIATIVE);
     for n in 0..12 {
         tripwire.run(
             &home,
@@ -350,6 +357,7 @@ fn the_users_git_configuration_and_hooks_apply_without_git() {
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     git(&mac, &["config", "acyclic.pushAfterWrite", "true"]);
 
+    tripwire.run(&home, &mac, INITIATIVE);
     tripwire.run(&home, &mac, &format!("item add --id {A} --title A"));
     let seen = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(

@@ -154,9 +154,7 @@ fn add(
     parent: Option<&str>,
 ) -> Result<Outcome, Box<dyn std::error::Error>> {
     let mut with = vec![Assign::Item(id.into(), ItemAssign::Title(id.into()))];
-    with.extend(
-        parent.map(|parent| Assign::Item(id.into(), ItemAssign::Parent(Some(parent.into())))),
-    );
+    with.extend(parent.map(|parent| Assign::Item(id.into(), ItemAssign::Parent(parent.into()))));
     let add = Change::Add {
         record: Record::Item(id.into()),
         minted: false,
@@ -170,9 +168,9 @@ fn set_parent(
     replica: &mut Replica,
     by: By<'_>,
     id: &str,
-    parent: Option<&str>,
+    parent: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let parent = ItemAssign::Parent(parent.map(str::to_owned));
+    let parent = ItemAssign::Parent(parent.to_owned());
     commit(replica, by, vec![Change::Set(Assign::Item(id.into(), parent))]).map(drop)
 }
 
@@ -218,26 +216,27 @@ fn concurrent_edits_conflict_and_a_resolution_clears_them_unless_it_races_anothe
 }
 
 #[test]
-fn a_move_to_the_top_racing_another_move_conflicts_until_one_is_chosen() {
+fn moves_racing_conflict_until_one_is_chosen() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| {
         add(r, by, "p", None)?;
         add(r, by, "q", None)?;
+        add(r, by, "s", None)?;
         add(r, by, "x", Some("p")).map(drop)
     });
     pair.spread(&pair.mac);
-    // The user moves x to the top level, a clear of its parent, while an agent moves it under q.
-    pair.user(&pair.mac, &|r, by| set_parent(r, by, "x", None));
-    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| set_parent(r, by, "x", Some("q")));
+    // The user moves x under s while an agent moves it under q.
+    pair.user(&pair.mac, &|r, by| set_parent(r, by, "x", "s"));
+    Pair::edit(&pair.pi, "session/pi", NOW, &|r, by| set_parent(r, by, "x", "q"));
     pair.exchange();
     let state = pair.assert_settled();
     let parent = &Model::read(&state).unwrap().items["x"].parent;
-    assert_eq!(*parent, model::Value::Conflict(vec![None, Some("q".to_owned())]));
+    assert_eq!(*parent, model::Value::Conflict(vec![Some("s".to_owned()), Some("q".to_owned())]));
     assert!(pair.needs(NOW).contains(&conflict("x", "parent")));
-    pair.user(&pair.pi, &|r, by| set_parent(r, by, "x", None));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "x", "q"));
     pair.spread(&pair.pi);
     let state = pair.assert_settled();
-    assert_eq!(Model::read(&state).unwrap().items["x"].parent, model::Value::None);
+    assert_eq!(Model::read(&state).unwrap().items["x"].parent, model::Value::One("q".to_owned()));
     assert!(!pair.needs(NOW).contains(&conflict("x", "parent")));
 }
 
@@ -247,11 +246,12 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
     pair.user(&pair.mac, &|r, by| {
         add(r, by, "a", None)?;
         add(r, by, "b", None)?;
-        add(r, by, "c", Some("a")).map(drop)
+        add(r, by, "c", Some("a"))?;
+        add(r, by, "z", None).map(drop)
     });
     pair.spread(&pair.mac);
-    pair.user(&pair.mac, &|r, by| set_parent(r, by, "a", Some("b")));
-    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", Some("a")));
+    pair.user(&pair.mac, &|r, by| set_parent(r, by, "a", "b"));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", "a"));
     pair.exchange();
     let state = pair.assert_settled();
     assert!(pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));
@@ -268,7 +268,7 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
         assert_eq!(added.placed(), Vec::new(), "nothing to inherit");
         Ok(())
     });
-    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", None));
+    pair.user(&pair.pi, &|r, by| set_parent(r, by, "b", "z"));
     pair.exchange();
     pair.assert_settled();
     assert!(!pair.needs(NOW).iter().any(|e| matches!(e, Entry::ParentCycle { .. })));

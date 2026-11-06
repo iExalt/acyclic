@@ -1,4 +1,4 @@
-//! The model: items, links, threads and repositories, read as a typed snapshot of the state. Records are written
+//! The model: initiatives, items, links, threads and repositories, read as a typed snapshot of the state. Records are written
 //! through the write module's judge; the per-field writes here serve it, deletes and, with the
 //! `fixtures` feature, tests. Nothing derived is stored: roles, membership and cycles are computed on read.
 //!
@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph;
-use crate::schema::{RETIRED, RETIRED_SETS, item as field, kind, link, repository, thread};
+use crate::schema::{
+    RETIRED, RETIRED_SETS, initiative, item as field, kind, link, repository, thread,
+};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
@@ -171,13 +173,11 @@ enum LinkKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
-    /// No children.
-    #[serde(rename = "item")]
-    Leaf,
-    /// Children, under a parent.
-    Group,
-    /// Top level with children.
-    Project,
+    /// An item with children directly under an initiative, or in no initiative at all, which reads as the level an
+    /// initiative's work sits at.
+    Epic,
+    /// Any other item: one with no children, or one deeper than an epic.
+    Task,
 }
 
 /// An item as read.
@@ -251,6 +251,18 @@ pub struct Link {
     pub to: String,
 }
 
+/// An initiative as read: a long-lived body of work, a record of its own that items sit under. It is never work, so it
+/// has no state, evidence, thread or links.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Initiative {
+    /// The initiative's id, which an item's `parent` names.
+    pub id: String,
+    /// A short title.
+    pub title: Value<String>,
+    /// Its notes.
+    pub notes: Value<String>,
+}
+
 /// A thread as read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Thread {
@@ -278,6 +290,8 @@ pub struct Repository {
 /// A snapshot of the model, read once from a state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Model {
+    /// Initiatives by id.
+    pub initiatives: BTreeMap<String, Initiative>,
     /// Items by id.
     pub items: BTreeMap<String, Item>,
     /// Present links, sorted.
@@ -286,7 +300,7 @@ pub struct Model {
     pub threads: BTreeMap<String, Thread>,
     /// Repository records by id.
     pub repositories: BTreeMap<String, Repository>,
-    /// The keys of deleted items and threads, which no other field holds: an id deleted is never used again.
+    /// The keys of deleted initiatives, items and threads, which no other field holds: an id deleted is never used again.
     pub(crate) deleted: BTreeSet<Key>,
     /// Each live entity's fields that hold different values, as `(kind, id, field)`.
     pub(crate) conflicts: BTreeSet<(String, String, String)>,
@@ -355,6 +369,7 @@ impl Model {
     }
 
     fn merge(&mut self, other: Self) {
+        self.initiatives.extend(other.initiatives);
         self.items.extend(other.items);
         self.links.extend(other.links);
         self.threads.extend(other.threads);
@@ -398,9 +413,17 @@ impl Model {
 
     fn add(&mut self, state: &State, key: &Key) -> Result<(), Error> {
         match key.kind.as_str() {
-            // A deleted item or thread is gone from every reader; see `crate::delete`.
-            kind::ITEM | kind::THREAD if is_deleted(state, key) => {
+            // A deleted initiative, item or thread is gone from every reader; see `crate::delete`.
+            kind::INITIATIVE | kind::ITEM | kind::THREAD if is_deleted(state, key) => {
                 self.deleted.insert(key.clone());
+            },
+            kind::INITIATIVE => {
+                let record = Initiative {
+                    id: key.id.clone(),
+                    title: value(state, key, initiative::TITLE)?,
+                    notes: value(state, key, initiative::NOTES)?,
+                };
+                self.initiatives.insert(key.id.clone(), record);
             },
             kind::ITEM => {
                 let item = read_item(state, key)?;
@@ -492,17 +515,53 @@ impl Model {
         found
     }
 
-    /// An item's role. A conflicted parent isn't top level.
+    /// An item's role: an epic when it has children and sits directly under an initiative, or under none at all, and a
+    /// task otherwise. A conflicted parent is no initiative.
     #[must_use]
     pub fn role(&self, id: &str) -> Role {
-        let Some(item) = self.items.get(id) else { return Role::Leaf };
-        if self.children(id).is_empty() {
-            Role::Leaf
-        } else if item.parent == Value::None {
-            Role::Project
-        } else {
-            Role::Group
+        let Some(item) = self.items.get(id) else { return Role::Task };
+        let top = match &item.parent {
+            Value::None => true,
+            Value::One(parent) => self.initiatives.contains_key(parent),
+            Value::Conflict(_) => false,
+        };
+        if top && !self.children(id).is_empty() { Role::Epic } else { Role::Task }
+    }
+
+    /// The initiatives an item is under, sorted: those at the top of the chain of its ancestors, more than one only
+    /// where a conflicted parent leads to several. None means the item is in no initiative.
+    #[must_use]
+    pub fn initiatives_of(&self, id: &str) -> Vec<&str> {
+        let mut found: Vec<&str> = self
+            .ancestors(id)
+            .into_iter()
+            .filter_map(|above| self.initiatives.get_key_value(above).map(|(id, _)| id.as_str()))
+            .collect();
+        found.sort_unstable();
+        found
+    }
+
+    /// The initiative an item is under, when it is under exactly one.
+    #[must_use]
+    pub fn initiative_of(&self, id: &str) -> Option<&str> {
+        match self.initiatives_of(id)[..] {
+            [only] => Some(only),
+            _ => None,
         }
+    }
+
+    /// Whether `id` names an initiative or an item, live or deleted, other than a record of kind `own`: an item's `parent`
+    /// names either by its id alone, so no id may name both.
+    #[must_use]
+    pub fn id_held_beyond(&self, own: &str, id: &str) -> bool {
+        let held = |of: &str, live: bool| -> bool {
+            live || Key::new(of, id).is_ok_and(|key| self.deleted.contains(&key))
+        };
+        let others: [(&str, bool); 2] = [
+            (kind::INITIATIVE, self.initiatives.contains_key(id)),
+            (kind::ITEM, self.items.contains_key(id)),
+        ];
+        others.into_iter().any(|(of, live)| of != own && held(of, live))
     }
 
     /// A parent's leaves done and in all, or `None` for a leaf. A done stored on a parent, as older versions wrote,
@@ -877,6 +936,27 @@ fixture! {
 }
 
 fixture! {
+    /// Creates an initiative with a title.
+    ///
+    /// # Errors
+    ///
+    /// Fails on an invalid id, on the id of a deleted initiative, or when the state layer refuses.
+    fn add_initiative(
+        replica: &mut Replica,
+        id: &str,
+        title: &str,
+        by: By<'_>,
+    ) -> Result<Key, WriteError> {
+        let key = Key::new(kind::INITIATIVE, name(id)?)?;
+        if is_deleted(&replica.state, &key) {
+            return Err(WriteError::Deleted(id.to_owned()));
+        }
+        put(replica, &key, initiative::TITLE, Some(&title), by)?;
+        Ok(key)
+    }
+}
+
+fixture! {
     /// Sets an item's state. Setting the state it already has, alone, writes nothing, so re-marking done never moves
     /// when it was done.
     ///
@@ -898,12 +978,12 @@ fixture! {
 }
 
 fixture! {
-    /// Moves an item under `parent`, or to the top level with `None`.
+    /// Moves an item under `parent`, an item or an initiative, or to the top level with `None`.
     ///
     /// # Errors
     ///
-    /// Fails when either item doesn't exist, when the move would put the item under itself or a descendant, or when the
-    /// state layer refuses.
+    /// Fails when the item or the parent doesn't exist, when the move would put the item under itself or a descendant,
+    /// or when the state layer refuses.
     fn set_parent(
         replica: &mut Replica,
         id: &str,
@@ -912,7 +992,10 @@ fixture! {
     ) -> Result<(), WriteError> {
         let key = existing(&replica.state, id)?;
         if let Some(parent) = parent {
-            existing(&replica.state, parent)?;
+            let initiative = Key::new(kind::INITIATIVE, name(parent)?)?;
+            if replica.state.entity(&initiative).is_none() || is_deleted(&replica.state, &initiative) {
+                existing(&replica.state, parent)?;
+            }
             let model = Model::read(&replica.state)?;
             if parent == id || model.ancestors(parent).contains(&id) {
                 return Err(WriteError::ParentCycle(id.to_owned()));

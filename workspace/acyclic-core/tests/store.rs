@@ -46,7 +46,7 @@ fn meta() -> Meta {
     Meta { actor: "actor/user".to_owned() }
 }
 
-fn no_project(_: &State, _: &Key) -> Option<String> {
+fn no_initiative(_: &State, _: &Key) -> Option<String> {
     None
 }
 
@@ -57,7 +57,7 @@ fn item(id: &str) -> Key {
 fn write(tracker: &Tracker, id: &str, field: &str, value: serde_json::Value) -> Outcome {
     let key = item(id);
     tracker
-        .batch(&meta(), NOW, false, &no_project, |replica, at| {
+        .batch(&meta(), NOW, false, &no_initiative, |replica, at| {
             replica.write(&key, field, "actor/user", at, Some(value.clone())).map(|_| ())
         })
         .unwrap()
@@ -145,14 +145,15 @@ fn an_unchanged_batch_commits_nothing() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
-    let outcome =
-        tracker.batch(&meta(), NOW, false, &no_project, |_, _| Ok::<(), StateError>(())).unwrap();
+    let outcome = tracker
+        .batch(&meta(), NOW, false, &no_initiative, |_, _| Ok::<(), StateError>(()))
+        .unwrap();
     assert_eq!(outcome, Outcome::Unchanged);
     assert!(tracker.load().unwrap().0.is_none());
 }
 
 #[test]
-fn events_go_to_their_project_roots_file_with_their_actor() {
+fn events_go_to_their_partitions_file_with_their_actor() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
@@ -162,7 +163,13 @@ fn events_go_to_their_project_roots_file_with_their_actor() {
     tracker
         .batch(&meta, NOW, false, &root_of, |replica, at| {
             replica.write(&actor, "agent", "actor/user", at, Some(json!("claude")))?;
-            replica.write(&item("p1"), "title", "session/mac", at, Some(json!("in a project")))?;
+            replica.write(
+                &item("p1"),
+                "title",
+                "session/mac",
+                at,
+                Some(json!("in an initiative")),
+            )?;
             Ok::<(), StateError>(())
         })
         .unwrap();
@@ -182,7 +189,7 @@ fn a_new_month_starts_a_new_segment() {
     write(&tracker, "a1", "f", json!(1));
     let november = 1_793_491_200_000; // 2026-11-01
     tracker
-        .batch(&meta(), november, false, &no_project, |replica, at| {
+        .batch(&meta(), november, false, &no_initiative, |replica, at| {
             replica.write(&item("a1"), "f", "actor/user", at, Some(json!(2))).map(|_| ())
         })
         .unwrap();
@@ -206,7 +213,7 @@ fn crash_child() {
         &meta(),
         NOW,
         false,
-        &no_project,
+        &no_initiative,
         |replica, at| {
             replica.write(&key, "f", "actor/user", at, Some(json!("crashed"))).map(|_| ())
         },
@@ -235,7 +242,7 @@ fn crash_at(point: &str) {
     // The transaction ran in the dead process, so its locks stay. Inside the first minute the next batch says so and
     // moves nothing, since the holder could still be finishing.
     let key = item("a1");
-    let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
+    let result = tracker.batch(&meta(), NOW, false, &no_initiative, |replica, at| {
         replica.write(&key, "f", "actor/user", at, Some(json!("after"))).map(|_| ())
     });
     let Err(BatchError::Store(StoreError::Locked { path: lock, .. })) = result else {
@@ -262,7 +269,7 @@ fn a_large_batch_writes_a_pack_not_loose_objects() {
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
     tracker
-        .batch(&meta(), NOW, false, &no_project, |replica, at| {
+        .batch(&meta(), NOW, false, &no_initiative, |replica, at| {
             (0..500).try_for_each(|n| {
                 replica
                     .write(&item(&format!("i{n}")), "f", "actor/user", at, Some(json!(n)))
@@ -357,7 +364,7 @@ fn stale_locks_are_removed_only_where_the_batch_lock_proves_the_holder_dead() {
     }
     // The `packed-refs` lock of a repack, if it is one, is not ours to take: the write is refused and says which file.
     let key = item("a1");
-    let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
+    let result = tracker.batch(&meta(), NOW, false, &no_initiative, |replica, at| {
         replica.write(&key, "f", "actor/user", at, Some(json!(2))).map(|_| ())
     });
     match result {
@@ -404,7 +411,7 @@ fn a_hook_that_outlasts_the_stale_lock_age_keeps_its_locks_from_a_second_writer(
         // The second writer starts after the lock is older than the stale age.
         std::thread::sleep(std::time::Duration::from_millis(900));
         let key = item("a2");
-        let result = second.batch(&meta(), NOW, false, &no_project, |replica, at| {
+        let result = second.batch(&meta(), NOW, false, &no_initiative, |replica, at| {
             replica.write(&key, "g", "actor/user", at, Some(json!("second"))).map(|_| ())
         });
         result.expect("the second writer waits for the first, and then writes");
@@ -467,7 +474,7 @@ fn a_held_lock_fails_clearly_and_is_left_alone() {
     let lock = path.join(".git/refs/heads/state/mac.lock");
     std::fs::write(&lock, "").unwrap();
     let key = item("a1");
-    let result = tracker.batch(&meta(), NOW, false, &no_project, |replica, at| {
+    let result = tracker.batch(&meta(), NOW, false, &no_initiative, |replica, at| {
         replica.write(&key, "f", "actor/user", at, Some(json!(2))).map(|_| ())
     });
     match result {
@@ -518,7 +525,7 @@ fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
     };
     // Enough state that a small batch's changes make a delta smaller than a sixteenth of the base.
     tracker
-        .batch(&meta(), NOW, false, &no_project, |replica, at| {
+        .batch(&meta(), NOW, false, &no_initiative, |replica, at| {
             (0..40).try_for_each(|n| {
                 let value = json!("x".repeat(100));
                 replica
@@ -651,7 +658,7 @@ fn a_backward_clock_is_refused() {
     write(&tracker, "a1", "f", json!(1));
     let key = item("a1");
     let shared = Arc::new(key);
-    let result = tracker.batch(&meta(), NOW - 3_600_000, false, &no_project, |replica, at| {
+    let result = tracker.batch(&meta(), NOW - 3_600_000, false, &no_initiative, |replica, at| {
         replica.write(&shared, "f", "actor/user", at, Some(json!(2))).map(|_| ())
     });
     assert!(matches!(
@@ -660,7 +667,7 @@ fn a_backward_clock_is_refused() {
     ));
 }
 
-/// A batch at `at` writing one field of an item in project `p0` and one in no project.
+/// A batch at `at` writing one field of an item in initiative `p0` and one in no initiative.
 fn write_month(tracker: &Tracker, at: Millis, value: i64) {
     let root_of = |_: &State, key: &Key| (key.id.starts_with('p')).then(|| "p0".to_owned());
     tracker
@@ -687,7 +694,7 @@ fn pruning_replaces_expired_segments_with_a_new_generation() {
     let (tracker, _) = Tracker::open(&path).unwrap();
     write_month(&tracker, JULY, 1);
     write_month(&tracker, AUGUST, 2);
-    // September holds only the project's file.
+    // September holds only the initiative's file.
     let root_of = |_: &State, _: &Key| Some("p0".to_owned());
     tracker
         .batch(&meta(), SEPTEMBER, false, &root_of, |replica, at| {

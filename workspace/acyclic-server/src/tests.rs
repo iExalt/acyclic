@@ -274,6 +274,8 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         assert_eq!(code, exit::OK, "{envelope}");
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    // An item needs a parent, and goes under the tracker's only initiative.
+    run(json!({"initiative": {"add": {"title": "Default"}}}));
     let item = "01900000-0000-7000-8000-0000000000a1";
     let thread = "01900000-0000-7000-8000-0000000000f1";
     let target = "01900000-0000-7000-8000-0000000000b1";
@@ -380,6 +382,8 @@ fn app_state_undo_guard_refuses_a_new_started_waiter_without_mutating_the_tracke
         assert_eq!(code, exit::OK, "{envelope}");
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    // An item needs a parent, and goes under the tracker's only initiative.
+    run(json!({"initiative": {"add": {"title": "Default"}}}));
     let thread = "01900000-0000-7000-8000-0000000000f2";
     let done = "01900000-0000-7000-8000-0000000000a2";
     let waiter = "01900000-0000-7000-8000-0000000000b2";
@@ -429,7 +433,8 @@ fn reads_and_writes_run_but_nothing_that_touches_the_servers_files() {
     for read in [
         json!({"item": "list"}),
         json!("needs"),
-        json!({"thread": "ready"}),
+        json!({"thread": {"ready": {}}}),
+        json!({"initiative": "list"}),
         json!({"item": {"show": {"items": ["a"]}}}),
         json!({"thread": "list"}),
         json!({"thread": {"show": {"threads": ["t"]}}}),
@@ -538,6 +543,8 @@ fn the_api_is_compressed_when_it_pays_and_the_apps_files_only_once() {
         assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    // An item needs a parent, and goes under the tracker's only initiative.
+    run(json!({"initiative": {"add": {"title": "Default"}}}));
     run(
         json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "a long title ".repeat(200)}}}),
     );
@@ -599,6 +606,8 @@ fn every_command_the_app_sends_runs_through_the_api() {
         assert_eq!(acyclic_cli::call(command, tracker.clone(), &Env::default()).0, 0);
     };
     run(json!({"init": {"path": tracker, "replica": "mac"}}));
+    // An item needs a parent, and goes under the tracker's only initiative.
+    run(json!({"initiative": {"add": {"title": "Default"}}}));
     run(json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000a1", "title": "A"}}}));
     run(
         json!({"item": {"add": {"id": "01900000-0000-7000-8000-0000000000b1", "title": "B", "parent": "01900000-0000-7000-8000-0000000000a1"}}}),

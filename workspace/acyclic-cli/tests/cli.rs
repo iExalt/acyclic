@@ -61,6 +61,9 @@ impl Shell {
 
 const AGENT: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac")];
 
+/// The tracker's one initiative, which an item added with no parent goes under.
+const INITIATIVE: &str = "initiative add --id 01900000-0000-7000-8000-0000000000f0 --title Home";
+
 fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .arg("-C")
@@ -95,6 +98,7 @@ fn shared() -> Shell {
 fn two_machines() -> Shell {
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    sh.run(INITIATIVE, AGENT);
     sh.run("item add --title First", AGENT);
     sh.run("sync", AGENT);
     assert_eq!(sh.run("init pi --replica pi --remote ../shared.git", &[]), 0);
@@ -119,6 +123,7 @@ fn two_machines_sync_through_a_shared_repository() {
     assert_eq!((code, out["error"]["code"].as_str()), (5, Some("no-remote")));
     let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
     assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "a remote added later");
+    sh.run(INITIATIVE, AGENT);
     sh.run("item add --title First", AGENT);
     let (code, out) = sh.output("sync", AGENT);
     assert_eq!((code, out["data"]["pushed"].as_u64().is_some_and(|n| n > 0)), (0, true));
@@ -141,6 +146,7 @@ fn two_machines_sync_through_a_shared_repository() {
 fn a_fresh_replica_can_continue_after_the_old_clock_jumps_ahead() {
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    assert_eq!(sh.run(INITIATIVE, AGENT), 0);
     let thread = "01900000-0000-7000-8000-0000000000f1".to_owned();
     let item = "01900000-0000-7000-8000-0000000000a1".to_owned();
     assert_eq!(sh.run(&format!("thread add --id {thread} --title Work"), AGENT), 0);
@@ -233,6 +239,7 @@ fn init_checks_the_effective_origin_before_changing_a_new_destination() {
     let mut sh = shared();
     let (code, out) = sh.output("init tracker --replica mac --remote ../shared.git", &[]);
     assert_eq!(code, 0, "{out}");
+    sh.run(INITIATIVE, AGENT);
     sh.run("item add --title First", AGENT);
     sh.run("sync", AGENT);
 
@@ -274,6 +281,7 @@ fn init_checks_the_effective_origin_before_changing_a_new_destination() {
 fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_sync() {
     let mut sh = shared();
     assert_eq!(sh.run("init tracker --replica mac --remote ../shared.git", &[]), 0);
+    assert_eq!(sh.run(INITIATIVE, AGENT), 0);
     git(&sh.path().join("tracker"), &["config", "acyclic.pushAfterWrite", "true"]);
     let (_, out) = sh.output("item add --title Pushed", AGENT);
     assert_eq!(out["data"]["push"]["ok"].as_bool(), Some(true), "{out}");
@@ -287,20 +295,19 @@ fn a_write_asked_to_push_reports_it_and_a_failed_push_shows_in_needs_until_a_syn
 }
 
 #[test]
-fn a_move_to_the_top_racing_another_machines_move_is_a_conflict_until_moved_again() {
+fn moves_to_different_parents_racing_are_a_conflict_until_moved_again() {
     let mut sh = two_machines();
     sh.run("item add --title Parent", AGENT);
-    sh.run("item edit First --parent Parent", AGENT);
+    sh.run("item add --title Other", AGENT);
     sh.run("sync", AGENT);
     sh.run("sync", PI);
-    sh.run("item edit First --no-parent", AGENT);
-    sh.run("item add --title Other", PI);
+    sh.run("item edit First --parent Parent", AGENT);
     sh.run("item edit First --parent Other", PI);
     sh.run("sync", PI);
     sh.run("sync", AGENT);
     assert_eq!(needs(&mut sh)[0]["kind"], "conflict");
-    let (_, out) = sh.output("item edit First --no-parent", AGENT);
-    assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move to the top resolves it");
+    let (_, out) = sh.output("item edit First --parent Home", AGENT);
+    assert_eq!(out["data"]["changed"].as_bool(), Some(true), "a move resolves it");
     assert_eq!(needs(&mut sh), Vec::<serde_json::Value>::new());
 }
 
@@ -345,6 +352,7 @@ fn a_merged_commit_counts_done_from_another_thread_through_the_clone_mapped_by_o
     let at_home = [("HOME", home.as_str()), ("ACYCLIC_ACTOR", "session/mac")];
     assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
     for line in [
+        INITIATIVE,
         "repository add --name me/code --default-branch main",
         "thread add --title Build",
         "thread add --title Use",

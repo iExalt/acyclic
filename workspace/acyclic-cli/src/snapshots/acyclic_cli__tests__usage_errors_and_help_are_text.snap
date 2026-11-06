@@ -7,6 +7,7 @@ The acyclic tracker. Every command prints one JSON document when piped and text 
 Usage: acyclic [OPTIONS] <COMMAND>
 
 Command Groups:
+  initiative   Adds, edits, shows, lists and deletes initiatives, the long-lived bodies of work that items sit under
   item         Adds, edits, shows, lists, finishes, reopens and deletes items
   thread       Adds, edits, shows and lists threads, and finds, claims and releases ready work
   repository   Adds, edits, shows and lists repository records

@@ -180,11 +180,12 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
     }
     let plan = json!({
         "format": "acyclic-import",
-        "version": 3,
+        "version": 4,
+        "initiatives": [{"id": id("home"), "title": "Home"}],
         "items": items().iter().map(|key| {
             let waits_for: Vec<String> =
                 WAITS.iter().filter(|(from, _)| from == key).map(|(_, to)| id(to)).collect();
-            json!({"id": id(key), "title": key, "thread": id(&thread_of(key)), "waits_for": waits_for})
+            json!({"id": id(key), "title": key, "parent": id("home"), "thread": id(&thread_of(key)), "waits_for": waits_for})
         }).collect::<Vec<_>>(),
         "threads": threads.keys().map(|key| json!({"id": id(key), "title": key})).collect::<Vec<_>>(),
     });
@@ -242,13 +243,14 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
         }
     }
 
-    // The audit log, in order: the import, then each thread's one claim and one release, and each item's one done.
+    // The audit log: the import, then each thread's one claim and one release, and each item's one done.
     let log = git(&tracker, &["for-each-ref", "--format=%(refname)", "refs/heads/log/"]);
     let reference = log.trim();
     assert_eq!(reference.lines().count(), 1, "one replica, one segment: {log}");
     let files = git(&tracker, &["ls-tree", "-r", "--name-only", reference]);
-    // One file, so its lines are the log's order.
-    assert_eq!(files.lines().count(), 1, "{files}");
+    // The log has a file for the initiative and one for the threads. A file's lines are in order, so the order checks
+    // below are between items, which share the initiative's file.
+    assert_eq!(files.lines().count(), 2, "{files}");
     let events: Vec<Value> = files
         .lines()
         .flat_map(|file| {
@@ -259,7 +261,8 @@ fn agents_in_separate_worktrees_finish_every_item_once_and_in_order() {
         })
         .collect();
     let items = items();
-    assert_eq!(events.len(), 1 + 2 * threads.len() + items.len(), "no write lost or repeated");
+    // The import is one event in each file.
+    assert_eq!(events.len(), 2 + 2 * threads.len() + items.len(), "no write lost or repeated");
     let mut dots = BTreeSet::new();
     let mut claims: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
     let mut dones: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();

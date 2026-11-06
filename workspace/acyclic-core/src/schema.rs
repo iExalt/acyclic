@@ -11,6 +11,8 @@ pub mod kind {
     pub const THREAD: &str = "thread";
     /// A code repository record.
     pub const REPOSITORY: &str = "repository";
+    /// An initiative: a long-lived body of work that items sit under.
+    pub const INITIATIVE: &str = "initiative";
 }
 
 /// Item fields. Fields older versions wrote and no longer read, such as `gate` and the `area/`, `resource/` and
@@ -58,6 +60,17 @@ pub mod link {
     pub const BLOCKS: &str = "blocks";
     /// Whether the link exists; cleared to remove it, and a concurrent re-add wins.
     pub const PRESENT: &str = "present";
+}
+
+/// Initiative fields. An item's `parent` may name an initiative by its id, so the ids of items and initiatives never
+/// overlap.
+pub mod initiative {
+    /// A short title.
+    pub const TITLE: &str = "title";
+    /// Its notes, stored as `notes`: unlike a thread's, they have no older name.
+    pub const NOTES: &str = "notes";
+    /// Set when the initiative is deleted; the same field as an item's, read by `model::is_deleted`.
+    pub const DELETED: &str = super::item::DELETED;
 }
 
 /// Repository record fields.

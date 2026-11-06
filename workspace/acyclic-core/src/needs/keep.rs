@@ -4,10 +4,11 @@
 use serde_json::Value as Json;
 
 use crate::model::{By, Evidence, Item, ItemState, Model, Value, shown_state};
-use crate::schema::{item as field, kind, link, repository, thread};
+use crate::schema::{initiative, item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
-    self, Assign, Change, ChangeSet, ItemAssign, RepositoryAssign, ThreadAssign, Violation,
+    self, Assign, Change, ChangeSet, InitiativeAssign, ItemAssign, RepositoryAssign, ThreadAssign,
+    Violation,
 };
 
 /// One value a field was written apart, and how to keep it.
@@ -35,6 +36,8 @@ pub enum Unkept {
     NeedsEvidence,
     /// The field can't be cleared.
     NoClear,
+    /// An item always belongs to a parent, so a clear of it, as an older replica could write, is no value to keep.
+    NoParent,
     /// The value isn't one the field holds.
     Unreadable,
     /// No command writes the field.
@@ -134,9 +137,18 @@ fn keep(
         (kind::ITEM, field::NOTES) => {
             parsed(value).map_or(Keep::Not(Unkept::Unreadable), |v| item(ItemAssign::Notes(v)))
         },
-        (kind::ITEM, field::PARENT) => {
-            parsed(value).map_or(Keep::Not(Unkept::Unreadable), |v| item(ItemAssign::Parent(v)))
+        (kind::ITEM, field::PARENT) => match parsed(value) {
+            None => Keep::Not(Unkept::Unreadable),
+            Some(None) => Keep::Not(Unkept::NoParent),
+            Some(Some(parent)) => item(ItemAssign::Parent(parent)),
         },
+        (kind::INITIATIVE, initiative::TITLE) => required(parsed(value), &|t| {
+            set(Assign::Initiative(id.to_owned(), InitiativeAssign::Title(t)))
+        }),
+        (kind::INITIATIVE, initiative::NOTES) => parsed(value)
+            .map_or(Keep::Not(Unkept::Unreadable), |v| {
+                set(Assign::Initiative(id.to_owned(), InitiativeAssign::Notes(v)))
+            }),
         (kind::ITEM, field::THREAD) => {
             parsed(value).map_or(Keep::Not(Unkept::Unreadable), |v| item(ItemAssign::Thread(v)))
         },

@@ -53,6 +53,8 @@ expression: table
 2 invalid-commit
 2 invalid-id
 2 ambiguous
+1 parent-required
+1 id-taken
 2 invalid-actor
 5 config
 5 no-remote

@@ -130,6 +130,9 @@ fn init(dir: &Path, name: &str, remote: Option<&str>) -> PathBuf {
     dir.join(name)
 }
 
+/// The tracker's one initiative, which an item added with no parent goes under.
+const INITIATIVE: &str = "initiative add --id 01900000-0000-7000-8000-0000000000f0 --title Home";
+
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
@@ -140,6 +143,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
+    cli(&tracker, INITIATIVE);
     cli(&tracker, "item add --id 01900000-0000-7000-8000-0000000000a1 --title A");
     let (_server, address) = serve(&tracker, &[]);
 
@@ -159,6 +163,7 @@ fn the_server_refuses_strangers_and_reads_as_the_cli_does() {
 fn up_serves_anything_on_the_machine_but_other_origins() {
     let dir = tempfile::tempdir().unwrap();
     let tracker = init(dir.path(), "mac", None);
+    cli(&tracker, INITIATIVE);
     cli(&tracker, "item add --id 01900000-0000-7000-8000-0000000000a1 --title A");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
@@ -223,6 +228,9 @@ fn the_server_writes_as_the_user_and_syncs_with_other_replicas() {
     git(dir.path(), &["init", "--quiet", "--bare", "shared.git"]);
     let server = init(dir.path(), "server", Some("../shared.git"));
     let phone = init(dir.path(), "phone", Some("../shared.git"));
+    cli(&server, INITIATIVE);
+    cli(&server, "sync");
+    cli(&phone, "sync");
     git(&server, &["config", "acyclic.pushAfterWrite", "true"]);
     let (_server, address) = serve(&server, &["--sync-every", "1"]);
 
