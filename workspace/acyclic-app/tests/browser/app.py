@@ -1702,10 +1702,11 @@ def map_journey(page, view, plan, name, failures, hint=None):
             failures.append(
                 f"{name}: a wheel notch zoomed the Map by {ratio:.3f}, not 1.12"
             )
-    # Expand a box inside a root, then collapse it again: the count follows, and the box holds still on screen. Only
-    # a box the layout moves proves the Map pans to match, so boxes are tried, biggest first, until one has moved.
-    # The pan that holds it still knows nothing of the screen's size or of touch, so the phone, which finds the box
-    # first, only taps; the desktop, starting from the box it found, measures that it held still.
+    # Expand a box inside a root, then collapse it again: the count follows, and the root holds still on screen, as
+    # DESIGN.md has it, though the box may move inside it. Only a box the layout moves shows the screen holds at the
+    # root, not at the box, so boxes are tried, biggest first, until one has moved. The pan that holds the root still
+    # knows nothing of the screen's size or of touch, so the phone, which finds the box first, only taps; the desktop,
+    # starting from the box it found, measures that its root held still.
     still = not view.get("has_touch")
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
     moved, box, checked = 0, None, False
@@ -1714,9 +1715,10 @@ def map_journey(page, view, plan, name, failures, hint=None):
         key=lambda id: (id != hint, -len(plan.children(id)), id),
     ):
         centre(page, box)
+        root = plan.chain(box)[-1]
         placed = page.get_by_test_id("map").evaluate(corner, box)
         # Where it settles after expanding is where it starts collapsing.
-        before = settled_corner(page, box) if still else None
+        before = settled_corner(page, root) if still else None
         for action, nodes in [
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
@@ -1730,12 +1732,12 @@ def map_journey(page, view, plan, name, failures, hint=None):
                     checked = True
             if not still:
                 continue
-            after = settled_corner(page, box)
+            after = settled_corner(page, root)
             shift = max(abs(after["x"] - before["x"]), abs(after["y"] - before["y"]))
             moved = max(moved, shift)
             if shift > 2:
                 failures.append(
-                    f"{name}: {action} {box} moved it by {shift:.0f} px on screen"
+                    f"{name}: {action} {box} moved its root {root} by {shift:.0f} px on screen"
                 )
             before = after
         if relaid:
