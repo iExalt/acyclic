@@ -22,19 +22,6 @@ const stagesOf = (p: Palette): cytoscape.StylesheetJson =>
     style: { "background-color": p.tints[stage], color: QUIET.has(stage) ? p.muted : p.ink },
   }));
 
-/** `colour` at a dimmed node's 35 % over `under`, as `#rrggbb`: what it shows when drawn translucent there. */
-export function faded(colour: string, under: string): string {
-  const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
-  const [top, bottom] = [channels(colour), channels(under)];
-  return `#${top
-    .map((value, at) =>
-      Math.round(0.35 * value + 0.65 * (bottom[at] ?? 0))
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
-}
-
 const made = new WeakMap<Palette, Map<string, cytoscape.StylesheetJson>>();
 
 /** The Map's stylesheet in a palette, made once for each. */
@@ -155,18 +142,6 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       },
     },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
-    // Outside the thread lit, a tile fades but its title stays legible, muted at full strength, since it can still be
-    // picked. The selection is never dimmed.
-    {
-      selector: "node.dim",
-      style: { "background-opacity": 0.35, "border-opacity": 0.35, "background-image-opacity": 0.35, color: p.muted },
-    },
-    // A dimmed tile looks as faint, but opaque, so a link across boxes, drawn under the tiles, doesn't show through it.
-    ...(Object.keys(p.tints) as Stage[]).map((stage) => ({
-      selector: `node.leaf.dim.stage-${stage}`,
-      style: { "background-opacity": 1, "background-color": faded(p.tints[stage], p.box) },
-    })),
-    { selector: "node.collapsed.dim", style: { "background-opacity": 1, "background-color": faded(p.tile, p.box) } },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue, a dark one close to
     // ink: an ink edge twice a lit one's, and a faint halo around it that widens the node, as a focused tile's; a
     // stronger one read as a second ring.
@@ -236,14 +211,12 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "z-index": (node: cytoscape.NodeSingular) => TILES + 2 * (node.data("layer") as number) + 1,
       },
     },
-    { selector: "node.stub.dim", style: { opacity: 0.35 } },
     {
       selector: "edge.crossing",
       style: { "line-style": "dashed", "line-color": p.signal, "target-arrow-color": p.signal },
     },
     // A lit thread's links are its route, in its line's colour; one across boxes keeps its dash.
     { selector: "edge.lit", style: { width: 2.25, "line-color": "data(line)", "target-arrow-color": "data(line)" } },
-    { selector: "edge.dim", style: { opacity: 0.35 } },
     // The hovered item's links, in ink over whatever else they are, as the Threads view lights a hovered tile's.
     { selector: "edge.hovered", style: { width: 2.25, "line-color": p.ink, "target-arrow-color": p.ink } },
     // Where a trunk splits: a dot in the links' colour, over them, told from two links crossing.

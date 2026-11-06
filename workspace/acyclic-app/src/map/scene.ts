@@ -13,7 +13,7 @@ import { type Segments, segmentsOf } from "./route";
 export interface Selection {
   item: string | null;
   thread: string | null;
-  /** The item under the pointer, whose links show, as the selection's do, while the rest recede. */
+  /** The item under the pointer, whose links show, as the selection's do, without fading other elements. */
   hovered?: string | null;
 }
 export interface SceneNode {
@@ -37,7 +37,6 @@ export interface SceneNode {
   /** How deep it is drawn, so a box lies under what it holds. */
   layer: number;
   lit: boolean;
-  dim: boolean;
   selected: boolean;
 }
 
@@ -70,20 +69,17 @@ export interface SceneEdge {
   route: Segments | null;
   /** Joins two of the lit thread's nodes, so the thread reads as a route in its line's colour. */
   lit: boolean;
-  /** Outside the lit thread while one is lit, or not the hovered item's while one is hovered. */
-  dim: boolean;
   /** One of the hovered item's links. */
   hovered: boolean;
 }
 
-/** A dot where a trunk of links leaving one node splits, lit or dimmed with a link that splits there. */
+/** A dot where a trunk of links leaving one node splits, lit with a link that splits there. */
 export interface SceneJunction {
   id: string;
   owners: string[];
   x: number;
   y: number;
   lit: boolean;
-  dim: boolean;
 }
 
 /** A dashed line in a box between its items aside, which can start any time, and its graph. */
@@ -112,7 +108,6 @@ export interface SceneStub {
   height: number;
   /** One more than its node's, to be drawn over it. */
   layer: number;
-  dim: boolean;
 }
 
 export interface Scene {
@@ -166,9 +161,6 @@ export function scene(
       height: at.height,
       layer: depth,
       lit: lit.has(node.id),
-      // Dimming says "not in this thread"; a box isn't a member just because it holds members, so it isn't dimmed. Nor is
-      // the selection, outside the thread or not.
-      dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
       selected: node.id === selection.item,
     });
     if (metrics.stub !== null) {
@@ -184,7 +176,6 @@ export function scene(
         width,
         height: STUB_CHIP,
         layer: depth + 1,
-        dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
       });
     }
   }
@@ -215,12 +206,9 @@ export function scene(
       implied,
       route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
-      dim: thread !== null && !joins && !touches,
       hovered: shows,
     });
   }
-  // Only dim for hover when a connection is highlighted; the lit thread's route stays lit.
-  if (edges.some((edge) => edge.hovered)) for (const edge of edges) edge.dim ||= !edge.hovered && !edge.lit;
   // A dot drawn once where several links split, lit if any of them is.
   const junctions = new Map<string, SceneJunction>();
   for (const edge of edges)
@@ -233,7 +221,6 @@ export function scene(
         x: at.x,
         y: at.y,
         lit: edge.lit || (was?.lit ?? false),
-        dim: edge.dim && (was?.dim ?? true),
       });
     }
   const dividers: SceneDivider[] = [];

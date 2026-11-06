@@ -61,7 +61,7 @@ describe("frame-first expansion", () => {
     apply(
       core,
       now,
-      next.map((one) => ({ ...one, classes: `${one.classes} dim` })),
+      next.map((one) => ({ ...one, classes: `${one.classes} hovered` })),
       view,
     );
     expect(core.$id("child").style("visibility")).toBe("hidden");

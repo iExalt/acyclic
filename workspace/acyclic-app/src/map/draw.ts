@@ -28,7 +28,7 @@ export function elementsOf(
   const layers = new Map(scene.nodes.map((node) => [node.id, node.layer]));
   const line = colour ?? palette.ink;
   return [
-    ...scene.nodes.map(({ lit, dim, selected, ...node }) => ({
+    ...scene.nodes.map(({ lit, selected, ...node }) => ({
       group: "nodes" as const,
       data: {
         ...node,
@@ -52,7 +52,6 @@ export function elementsOf(
       classes: [
         node.kind,
         lit ? "lit" : "",
-        dim ? "dim" : "",
         selected ? "selected" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
         node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
@@ -76,7 +75,7 @@ export function elementsOf(
         full: stub.full,
       },
       position: { x: stub.x, y: stub.y },
-      classes: ["stub", stub.dim ? "dim" : ""].join(" "),
+      classes: "stub",
     })),
     // Over the links, under what they join.
     ...scene.junctions.map((junction) => ({
@@ -85,7 +84,7 @@ export function elementsOf(
       data: { id: junction.id, owners: junction.owners, ...(junction.lit ? { line } : {}), textWidth: 0 },
       position: { x: junction.x, y: junction.y },
       // Not "lit": that names the thread's items, which a dot isn't.
-      classes: ["junction", junction.lit ? "junction-lit" : "", junction.dim ? "dim" : ""].join(" "),
+      classes: ["junction", junction.lit ? "junction-lit" : ""].join(" "),
     })),
     // Over its box, under everything in it.
     ...scene.dividers.map((divider) => ({
@@ -116,7 +115,6 @@ export function elementsOf(
         edge.crossing ? "crossing" : "",
         edge.route === null ? "" : "routed",
         edge.lit ? "lit" : "",
-        edge.dim ? "dim" : "",
         edge.hovered ? "hovered" : "",
       ].join(" "),
     })),

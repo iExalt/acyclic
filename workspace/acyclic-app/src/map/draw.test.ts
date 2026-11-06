@@ -81,6 +81,32 @@ const fresh = (next: Drawn[]) => {
   return core;
 };
 
+it("keeps unrelated tiles, junctions and links opaque during hover and thread selection", () => {
+  for (const palette of [PALETTES.dark, PALETTES.light]) {
+    for (const selection of [
+      { item: null, thread: null, hovered: "tools" },
+      { item: null, thread: "t" },
+      { item: "dig", thread: null },
+    ]) {
+      const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(palette) });
+      try {
+        apply(core, new Map(), elements({ items: base, selection, routed: true }));
+        expect(core.edges().length).toBeGreaterThan(0);
+        expect(core.nodes(".junction").length).toBeGreaterThan(0);
+        expect(core.elements(selection.hovered ? "edge.hovered" : "edge.lit").length).toBeGreaterThan(0);
+        for (const element of core.elements()) expect(Number(element.style("opacity"))).toBe(1);
+        for (const node of core.nodes(".leaf, .collapsed")) {
+          for (const property of ["background-opacity", "border-opacity", "background-image-opacity"]) {
+            expect(Number(node.style(property))).toBe(1);
+          }
+        }
+      } finally {
+        core.destroy();
+      }
+    }
+  }
+});
+
 describe("a task in no thread of its own", () => {
   const marks = (thread: string | null) => {
     const items = [item("solo", null, [], { thread }), item("other", null, [], { thread: "t" })];
