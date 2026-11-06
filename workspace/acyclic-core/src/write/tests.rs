@@ -567,7 +567,7 @@ fn change(tc: &TestCase) -> Change {
     let pick = |tc: &TestCase| ids[tc.draw(gs::integers::<usize>().max_value(6))].to_owned();
     let maybe = |tc: &TestCase| tc.draw(gs::booleans()).then(|| pick(tc));
     let id = pick(tc);
-    let assign = match tc.draw(gs::integers::<u8>().max_value(8)) {
+    let assign = match tc.draw(gs::integers::<u8>().max_value(7)) {
         0 => ItemAssign::Title(pick(tc)),
         1 => ItemAssign::Notes(maybe(tc)),
         2 => ItemAssign::State(
@@ -576,8 +576,7 @@ fn change(tc: &TestCase) -> Change {
         ),
         3 => ItemAssign::Parent(maybe(tc)),
         4 => ItemAssign::Thread(tc.draw(gs::booleans()).then(|| "t".to_owned())),
-        5 => ItemAssign::Repository("r".into(), tc.draw(gs::booleans())),
-        6 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
+        5 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
         _ => return add(&id, vec![]),
     };
     Change::Set(Assign::Item(id, assign))

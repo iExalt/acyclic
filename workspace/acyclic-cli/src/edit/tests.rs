@@ -1,6 +1,6 @@
 use acyclic_core::model;
 use acyclic_core::schema::kind;
-use acyclic_core::scope::{ScopeEdit, USER};
+use acyclic_core::scope::USER;
 use acyclic_core::state::{ReplicaId, State};
 
 use super::*;
@@ -103,78 +103,6 @@ fn item(replica: &Replica, id: &str) -> acyclic_core::model::Item {
 }
 
 #[test]
-fn explicit_repository_adds_survive_unseen_removes_in_either_join_order() {
-    let mut base = replica();
-    let repository =
-        RepositoryFields { name: Some("example/code".into()), default_branch: Some("main".into()) };
-    add_repository(&mut base, "r", &repository, USER_BY).unwrap();
-    add_item(
-        &mut base,
-        "a",
-        &ItemFields {
-            title: Some("A".into()),
-            repositories: Delta { add: vec!["r".into()], remove: vec![] },
-            ..ItemFields::default()
-        },
-        USER_BY,
-    )
-    .unwrap();
-    add_thread(
-        &mut base,
-        "t",
-        &ThreadFields {
-            title: Some("T".into()),
-            repositories: Delta { add: vec!["r".into()], remove: vec![] },
-            ..ThreadFields::default()
-        },
-        USER_BY,
-    )
-    .unwrap();
-
-    let base = base.state().clone();
-    let mut added = Replica::open(ReplicaId::new("add").unwrap(), base.clone());
-    let mut removed = Replica::open(ReplicaId::new("remove").unwrap(), base);
-    let add_item_fields = ItemFields {
-        repositories: Delta { add: vec!["r".into()], remove: vec![] },
-        ..Default::default()
-    };
-    let remove_item_fields = ItemFields {
-        repositories: Delta { add: vec![], remove: vec!["r".into()] },
-        ..Default::default()
-    };
-    let add_thread_fields = ThreadFields {
-        repositories: Delta { add: vec!["r".into()], remove: vec![] },
-        ..Default::default()
-    };
-    let remove_thread_fields = ThreadFields {
-        repositories: Delta { add: vec![], remove: vec!["r".into()] },
-        ..Default::default()
-    };
-    let by_add = By { actor: "session/add", at: 2 };
-    let by_remove = By { actor: "session/remove", at: 2 };
-    assert!(edit_item(&mut added, "a", &add_item_fields, by_add).unwrap().changes());
-    assert!(edit_thread(&mut added, "t", &add_thread_fields, by_add).unwrap().changes());
-    edit_item(&mut removed, "a", &remove_item_fields, by_remove).unwrap();
-    edit_thread(&mut removed, "t", &remove_thread_fields, by_remove).unwrap();
-    let removed_at = removed.changes();
-    assert!(!edit_item(&mut removed, "a", &remove_item_fields, by_remove).unwrap().changes());
-    assert!(!edit_thread(&mut removed, "t", &remove_thread_fields, by_remove).unwrap().changes());
-    assert_eq!(removed.changes(), removed_at);
-
-    for (id, first, second) in [
-        ("join-add-first", added.state().clone(), removed.state().clone()),
-        ("join-remove-first", removed.state().clone(), added.state().clone()),
-    ] {
-        let mut joined = Replica::open(ReplicaId::new(id).unwrap(), State::new());
-        joined.join(&first).unwrap();
-        joined.join(&second).unwrap();
-        let model = Model::read(joined.state()).unwrap();
-        assert!(model.items["a"].repositories.contains("r"), "{id}");
-        assert!(model.threads["t"].repositories.contains("r"), "{id}");
-    }
-}
-
-#[test]
 fn an_add_repeated_changes_nothing_and_one_that_differs_is_refused() {
     let mut r = replica();
     let full = ItemFields {
@@ -228,13 +156,6 @@ fn an_edit_refuses_what_is_unknown_and_clears_what_it_is_told_to() {
     add_item(&mut r, "a", &with_notes, AGENT).unwrap();
     for (what, fields) in [
         ("thread", ItemFields { thread: Change::Set("nope".into()), ..ItemFields::default() }),
-        (
-            "repository",
-            ItemFields {
-                repositories: Delta { add: vec!["nope".into()], remove: vec![] },
-                ..ItemFields::default()
-            },
-        ),
         ("parent", ItemFields { parent: Change::Set("nope".into()), ..ItemFields::default() }),
     ] {
         assert_eq!(code(edit_item(&mut r, "a", &fields, AGENT)), "not-found", "{what}");
@@ -248,25 +169,15 @@ fn an_edit_refuses_what_is_unknown_and_clears_what_it_is_told_to() {
 }
 
 #[test]
-fn an_explicit_repository_add_reasserts_while_clearing_a_thread_remains_a_noop() {
+fn clearing_an_already_clear_thread_is_a_noop() {
     let mut r = replica();
     let thread = ThreadFields { title: Some("T".into()), ..ThreadFields::default() };
     add_thread(&mut r, "t", &thread, USER_BY).unwrap();
-    let repository = RepositoryFields { name: Some("o/r".into()), ..RepositoryFields::default() };
-    add_repository(&mut r, "r", &repository, USER_BY).unwrap();
     let in_t = ItemFields { thread: Change::Set("t".into()), ..titled("A") };
     add_item(&mut r, "a", &in_t, USER_BY).unwrap();
-    let out_of_t = ItemFields {
-        thread: Change::Clear,
-        repositories: Delta { add: vec!["r".into()], remove: vec![] },
-        ..ItemFields::default()
-    };
-    edit_item(&mut r, "a", &out_of_t, AGENT).unwrap();
-    let held = item(&r, "a");
-    assert_eq!((held.thread.one(), held.repositories.len()), (None, 1));
-    let before = r.changes();
-    assert!(edit_item(&mut r, "a", &out_of_t, AGENT).unwrap().changes());
-    assert!(r.changes() > before, "an explicit repository add records a fresh add dot");
+    let clear_thread = ItemFields { thread: Change::Clear, ..ItemFields::default() };
+    edit_item(&mut r, "a", &clear_thread, AGENT).unwrap();
+    assert_eq!(item(&r, "a").thread.one(), None);
     let clear_thread = ItemFields { thread: Change::Clear, ..ItemFields::default() };
     let before = r.changes();
     edit_item(&mut r, "a", &clear_thread, AGENT).unwrap();
@@ -321,54 +232,9 @@ fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() 
 }
 
 #[test]
-fn a_repository_with_no_record_is_removed_by_the_id_it_is_held_by() {
-    let mut r = replica();
-    add_item(&mut r, "a", &titled("A"), USER_BY).unwrap();
-    add_thread(
-        &mut r,
-        "t",
-        &ThreadFields { title: Some("T".into()), ..ThreadFields::default() },
-        USER_BY,
-    )
-    .unwrap();
-    // Held as if written by another replica whose record this one never got.
-    let item_held =
-        ScopeEdit::ItemRepository { item: "a".into(), repository: "gone".into(), present: true };
-    let thread_held = ScopeEdit::ThreadRepository {
-        thread: "t".into(),
-        repository: "gone".into(),
-        present: true,
-    };
-    for held in [&item_held, &thread_held] {
-        acyclic_core::scope::edit(&mut r, held, USER_BY).unwrap();
-    }
-    let gone = Delta { add: vec![], remove: vec!["gone".into()] };
-    edit_item(
-        &mut r,
-        "a",
-        &ItemFields { repositories: gone.clone(), ..ItemFields::default() },
-        AGENT,
-    )
-    .unwrap();
-    edit_thread(
-        &mut r,
-        "t",
-        &ThreadFields { repositories: gone, ..ThreadFields::default() },
-        AGENT,
-    )
-    .unwrap();
-    let model = Model::read(r.state()).unwrap();
-    assert!(model.items["a"].repositories.is_empty() && model.threads["t"].repositories.is_empty());
-}
-
-#[test]
 fn adding_a_thread_or_repository_again_needs_the_same_fields() {
     let mut r = replica();
-    let thread = ThreadFields {
-        title: Some("T".into()),
-        brief: Change::Set("B".into()),
-        ..ThreadFields::default()
-    };
+    let thread = ThreadFields { title: Some("T".into()), brief: Change::Set("B".into()) };
     add_thread(&mut r, "t", &thread, AGENT).unwrap();
     let before = r.changes();
     add_thread(&mut r, "t", &thread, AGENT).unwrap();
@@ -409,22 +275,12 @@ fn an_item_added_under_a_threads_member_joins_the_thread_and_says_so() {
 }
 
 #[test]
-fn an_edit_naming_a_missing_thread_or_repository_writes_nothing() {
+fn an_edit_naming_a_missing_thread_writes_nothing() {
     let mut r = replica();
     add_item(&mut r, "a", &titled("Before"), AGENT).unwrap();
     let before = r.changes();
-    for (what, fields) in [
-        ("thread", ItemFields { thread: Change::Set("nope".into()), ..titled("After") }),
-        (
-            "repository",
-            ItemFields {
-                repositories: Delta { add: vec!["nope".into()], remove: vec![] },
-                ..titled("After")
-            },
-        ),
-    ] {
-        assert_eq!(code(edit_item(&mut r, "a", &fields, AGENT)), "not-found", "{what}");
-    }
+    let fields = ItemFields { thread: Change::Set("nope".into()), ..titled("After") };
+    assert_eq!(code(edit_item(&mut r, "a", &fields, AGENT)), "not-found");
     assert_eq!((r.changes(), item(&r, "a").title.one().cloned()), (before, Some("Before".into())));
 }
 
@@ -493,33 +349,6 @@ fn adding_and_removing_one_record_is_refused_however_each_is_spelled() {
         item(ItemFields { waits_for: both("Ship it", ending), ..ItemFields::default() }),
         "usage"
     );
-    assert_eq!(
-        item(ItemFields { repositories: both("ME/Garden", &id(3)), ..ItemFields::default() }),
-        "usage"
-    );
-    let thread =
-        ThreadFields { repositories: both(&id(3), "me/garden"), ..ThreadFields::default() };
-    assert_eq!(code(thread.resolve(&model, &records, None)), "usage");
-}
-
-#[test]
-fn one_repository_named_twice_is_written_once() {
-    let garden =
-        RepositoryFields { name: Some("me/garden".into()), default_branch: Some("main".into()) };
-    // Two spellings of one record resolve to the same id twice.
-    let written = |named: Vec<String>| {
-        let mut r = replica();
-        add_repository(&mut r, &id(3), &garden, USER_BY).unwrap();
-        add_item(&mut r, "a", &titled("A"), USER_BY).unwrap();
-        let before = r.changes();
-        let fields = ItemFields {
-            repositories: Delta { add: named, remove: vec![] },
-            ..ItemFields::default()
-        };
-        edit_item(&mut r, "a", &fields, AGENT).unwrap();
-        r.changes() - before
-    };
-    assert_eq!(written(vec![id(3), id(3)]), written(vec![id(3)]));
 }
 
 #[test]

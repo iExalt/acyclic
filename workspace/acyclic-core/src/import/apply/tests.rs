@@ -36,7 +36,7 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     let mut r = replica();
     let report = apply(&valid(), &mut r, by(USER, 1)).unwrap();
     assert_eq!((report.repositories, report.items, report.links, report.threads), (1, 3, 1, 1));
-    // Each record is a creation with the fields it was given; a set shows whole, and a link names its ends.
+    // Each record is a creation with the fields it was given, and a link names its ends.
     let changes = serde_json::to_value(&report.changes).unwrap();
     let find = |entity: &str, n: u8| {
         changes
@@ -49,7 +49,6 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     assert_eq!(changes.as_array().unwrap().len(), 1 + 1 + 3 + 1);
     assert_eq!(find("repository", 1)["action"], "create");
     assert_eq!(find("repository", 1)["fields"]["owner"], json!({"from": null, "to": "example"}));
-    assert_eq!(find("item", 11)["fields"]["repositories"], json!({"from": [], "to": [id(1)]}));
     assert_eq!(find("item", 11)["fields"]["parent"], json!({"from": null, "to": id(10)}));
     assert_eq!(find("item", 12)["fields"]["thread"], json!({"from": null, "to": id(20)}));
     let link = changes.as_array().unwrap().iter().find(|c| c["entity"] == "link").unwrap();
@@ -60,7 +59,6 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     let m = model(&r);
     let a = &m.items[&id(11)];
     assert_eq!(a.parent, Value::One(id(10)));
-    assert_eq!(a.repositories, [id(1)].into());
     // A new item left without a state is in the backlog.
     assert_eq!(m.items[&id(10)].state, Value::One(ItemState::Backlog));
     // The evidence keeps the repository and the SHA apart.
@@ -86,8 +84,8 @@ fn what_a_document_leaves_out_is_kept() {
     let mut doc = valid();
     doc.items[1].title = "Renamed".to_owned();
     for left in &mut doc.items {
-        (left.state, left.thread, left.repositories, left.waits_for, left.parent, left.evidence) =
-            (None, None, None, None, None, None);
+        (left.state, left.thread, left.waits_for, left.parent, left.evidence) =
+            (None, None, None, None, None);
     }
     let report = apply(&doc, &mut r, by(USER, 3)).unwrap();
     assert_eq!(
@@ -97,7 +95,7 @@ fn what_a_document_leaves_out_is_kept() {
     );
     let m = model(&r);
     let (kept, done) = (&m.items[&id(11)], &m.items[&id(12)]);
-    assert_eq!((kept.parent.one(), kept.repositories.len()), (Some(&id(10)), 1));
+    assert_eq!(kept.parent.one(), Some(&id(10)));
     assert_eq!(m.thread_of(&id(11)), Some(id(20).as_str()));
     assert_eq!((done.state.one(), done.done_at), (Some(&ItemState::Done), done_at));
     assert!(done.evidence.one().is_some());
@@ -110,11 +108,9 @@ fn a_list_given_replaces_the_records_own() {
     let mut doc = valid();
     doc.items.push(item(13, None, None));
     doc.items[1].waits_for = Some(vec![id(13)]);
-    doc.items[1].repositories = Some(vec![]);
     let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
     let m = model(&r);
     assert_eq!(m.links, [model::Link { from: id(11), to: id(13) }]);
-    assert!(m.items[&id(11)].repositories.is_empty());
     let changes = serde_json::to_value(&report.changes).unwrap();
     let removed: Vec<&Json> =
         changes.as_array().unwrap().iter().filter(|c| c["action"] == "remove").collect();
@@ -144,7 +140,6 @@ fn references_may_name_the_trackers_records_but_not_unknown_ones() {
     let mut next = item(30, None, Some(10));
     next.thread = Some(id(20));
     next.waits_for = Some(vec![id(12)]);
-    next.repositories = Some(vec![id(1)]);
     doc.items.push(next);
     apply(&doc, &mut r, by(USER, 2)).unwrap();
     assert_eq!(model(&r).thread_of(&id(30)), Some(id(20).as_str()));
@@ -233,12 +228,7 @@ fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
 fn a_deleted_thread_is_refused_as_a_deleted_item_is() {
     let mut r = replica();
     let mut doc = Import::new();
-    doc.threads = vec![crate::import::Thread {
-        id: id(21),
-        title: "Gone".into(),
-        brief: None,
-        repositories: None,
-    }];
+    doc.threads = vec![crate::import::Thread { id: id(21), title: "Gone".into(), brief: None }];
     apply(&doc, &mut r, by(USER, 1)).unwrap();
     assert!(crate::delete::delete_thread(&mut r, &id(21), by(USER, 2)).unwrap());
     let err = apply(&doc, &mut r, by(USER, 3)).unwrap_err();

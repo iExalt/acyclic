@@ -135,7 +135,7 @@ _Avoid_: blocker link, depends_on, blocks (in prose), hard dependency, relates t
 Stored data keeps the older kind name `blocks` for a waits-for link.
 
 **Dangling reference**:
-A parent, thread, repository or waits-for target that names a record that doesn't exist or was deleted. It lands on
+A parent, thread or waits-for target that names a record that doesn't exist or was deleted. It lands on
 the needs-you list, and an item whose thread dangles counts as in no thread.
 _Avoid_: broken link, orphan
 
@@ -159,8 +159,8 @@ _Avoid_: instance, node
 **Conflict**:
 A field holding two values that replicas wrote without seeing each other's, kept side by side until someone writes
 the field again. Clearing a field counts as a value, so a clear and a set made apart conflict too: moving an item to
-the top level while an agent moves it elsewhere asks which move stands. Sets of things, such as waits-for and
-repositories, don't conflict: an add the remover never saw survives.
+the top level while an agent moves it elsewhere asks which move stands. Waits-for links don't conflict: an add the
+remover never saw survives.
 _Avoid_: merge conflict (nothing blocks a sync)
 
 ## Relationships

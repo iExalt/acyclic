@@ -35,7 +35,6 @@ fn git_finds_a_commit_on_the_default_branch_of_a_clone_or_its_remote() {
         owner: Value::None,
         name: Value::None,
         default_branch: Value::One(branch.to_owned()),
-        installation: Value::None,
     };
     let main = record("main");
     // Each check looks the branch up afresh, as each command does.
@@ -73,7 +72,6 @@ fn an_unmapped_repository_or_branch_is_unchecked() {
         owner: Value::None,
         name: Value::None,
         default_branch: Value::One("main".to_owned()),
-        installation: Value::None,
     };
     let none = GitAncestry::new(|_: &Repository| None);
     assert_eq!(
@@ -102,7 +100,6 @@ fn refresh_fetches_a_merge_made_since_the_clones_last_fetch() {
         owner: Value::None,
         name: Value::None,
         default_branch: Value::One("main".to_owned()),
-        installation: Value::None,
     };
     let ancestry = GitAncestry::new(|_: &Repository| Some(clone.clone()));
     assert_eq!(ancestry.check(&record, &squashed), Check::UnknownCommit, "not fetched yet");

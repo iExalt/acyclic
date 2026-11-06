@@ -1,7 +1,7 @@
 //! Applying a validated import to a replica: an upsert, judged as one change set by [`crate::write`]. Every field the
 //! document sets is written when it differs, so importing the same document twice writes nothing. A single value the
-//! document leaves out is kept; a list it gives (an item's `waits_for` and `repositories`, a thread's `repositories`)
-//! is the whole of it, so what the list leaves out is removed. The judge refuses references to nothing, repository
+//! document leaves out is kept; a list it gives (an item's `waits_for`) is the whole of it, so what the list leaves
+//! out is removed. The judge refuses references to nothing, repository
 //! names another record holds, cycles the import would close, and evidence on work that isn't done, and
 //! brings what any write brings: done work set back is reopened, and new or moved work with no thread joins the one
 //! passed down to it.
@@ -277,32 +277,6 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
                     )));
                 }
             }
-            if let Some(list) = &item.repositories {
-                let held = before
-                    .items
-                    .get(id)
-                    .map(|i| i.repositories.iter().collect())
-                    .unwrap_or_default();
-                for (repository, present) in list_changes(&held, list, adding) {
-                    changes.push(Write::Set(Assign::Item(
-                        id.clone(),
-                        ItemAssign::Repository(repository, present),
-                    )));
-                }
-            }
-        }
-        for record in &doc.threads {
-            if let Some(list) = &record.repositories {
-                let held = before
-                    .threads
-                    .get(&record.id)
-                    .map(|t| t.repositories.iter().collect())
-                    .unwrap_or_default();
-                for (repository, present) in list_changes(&held, list, adding) {
-                    let assign = ThreadAssign::Repository(repository, present);
-                    changes.push(Write::Set(Assign::Thread(record.id.clone(), assign)));
-                }
-            }
         }
     }
     for item in &doc.items {
@@ -452,7 +426,6 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
 /// Where in the document a field is, as a validation error says it.
 fn where_in(at: &FieldAddr) -> String {
     let field = match &at.field {
-        FieldName::Repository(_) => "repositories",
         FieldName::WaitsFor(_) => "waits_for",
         other => other.name(),
     };
@@ -505,49 +478,13 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
                 let entity = at.record.kind();
                 let n = row(&mut report, entity, at.record.id());
                 let fields = &mut report.changes[n].fields;
-                match &at.field {
-                    FieldName::Repository(element) => {
-                        let held = held_set(before, &at.record);
-                        let edit = fields
-                            .entry("repositories".to_owned())
-                            .or_insert_with(|| Edit { from: json!(held), to: json!(held) });
-                        let mut to: BTreeSet<String> =
-                            serde_json::from_value(edit.to.clone()).expect("a set of names");
-                        if assign_present(assign) {
-                            to.insert(element.clone());
-                        } else {
-                            to.remove(element);
-                        }
-                        edit.to = json!(to);
-                    },
-                    field => {
-                        let edit = Edit { from: held(before, &at), to: assign.value() };
-                        fields.insert(field.name().replace('-', "_"), edit);
-                    },
-                }
+                let edit = Edit { from: held(before, &at), to: assign.value() };
+                fields.insert(at.field.name().replace('-', "_"), edit);
             },
             Written::Place(_) => {},
         }
     }
     report
-}
-
-fn assign_present(assign: &Assign) -> bool {
-    matches!(
-        assign,
-        Assign::Item(_, ItemAssign::Repository(_, true))
-            | Assign::Thread(_, ThreadAssign::Repository(_, true))
-    )
-}
-
-/// A record's repository set before the import.
-fn held_set(before: &Model, record: &Record) -> BTreeSet<String> {
-    match record {
-        Record::Item(id) => before.items.get(id).map(|i| i.repositories.clone()),
-        Record::Thread(id) => before.threads.get(id).map(|t| t.repositories.clone()),
-        Record::Repository(_) => None,
-    }
-    .unwrap_or_default()
 }
 
 /// A field's value before the import: `null` when unset or new, and a conflict as `{"conflict": [values]}`.
