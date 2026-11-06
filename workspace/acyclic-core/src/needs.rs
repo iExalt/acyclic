@@ -1,5 +1,5 @@
 //! The needs-you list, computed on read: everything waiting on the user, as the state shows it (conflicts, cycles,
-//! contests, done work waiting on open work, items with no parent, dangling references).
+//! contests, done work waiting on open work, items with no parent, items that share a title, dangling references).
 
 use std::collections::BTreeSet;
 
@@ -110,6 +110,12 @@ pub enum Entry {
         #[serde(skip_serializing_if = "Option::is_none")]
         parent: Option<String>,
     },
+    /// Items in one initiative, or all in none, that hold one title, as a sync of two replicas that each made it apart
+    /// can leave: the user renames or finishes all but one. The tracker refuses to make such a pair itself.
+    DuplicateTitle {
+        /// The items, sorted.
+        items: Vec<String>,
+    },
     /// A thread stored on an item that has children, as a sync or `item edit --thread` on a parent can leave one:
     /// reads ignore it, so the user decides whether to clear it.
     ThreadOnParent {
@@ -139,7 +145,9 @@ impl Entry {
         let parts: Vec<&str> = match self {
             Self::Conflict { kind: record, id, field } => vec![kind, record, id, field],
             Self::Unpushed { remote } => vec![kind, remote],
-            Self::WaitsForCycle { items } | Self::ParentCycle { items } => {
+            Self::WaitsForCycle { items }
+            | Self::ParentCycle { items }
+            | Self::DuplicateTitle { items } => {
                 std::iter::once(kind).chain(items.iter().map(String::as_str)).collect()
             },
             Self::ThreadCycle { threads } => {
@@ -182,6 +190,7 @@ impl Entry {
             Self::WaitsOnCanceled { .. } => "waits-on-canceled",
             Self::Dangling { .. } => "dangling",
             Self::ParentMissing { .. } => "parent-missing",
+            Self::DuplicateTitle { .. } => "duplicate-title",
             Self::ThreadOnParent { .. } => "thread-on-parent",
             Self::EmptyThread { .. } => "empty-thread",
         }
@@ -236,6 +245,11 @@ impl Entry {
             Self::ParentMissing { item, parent: Some(parent) } => {
                 format!("{}: its parent {parent} doesn't exist", name(item))
             },
+            Self::DuplicateTitle { items } => format!(
+                "{} items in one initiative share the title {}",
+                items.len(),
+                items.first().map_or_else(String::new, |first| name(first))
+            ),
             Self::ThreadOnParent { item, thread, fix: _ } => {
                 format!("{} has children, so its thread {} is ignored", name(item), name(thread))
             },
@@ -255,7 +269,7 @@ impl Entry {
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
     /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to
-    /// nothing, an item with no parent) and threads with no item, which agents leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
+    /// nothing, an item with no parent, two items with one title) and threads with no item, which agents leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
     pub const fn notifies(&self) -> bool {
         match self {
@@ -272,6 +286,7 @@ impl Entry {
             | Self::Stalled { .. }
             | Self::EmptyThread { .. }
             | Self::ParentMissing { .. }
+            | Self::DuplicateTitle { .. }
             | Self::Dangling { .. } => false,
         }
     }
@@ -310,6 +325,11 @@ pub fn needs_you(
     waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
     parent_missing(model, &mut entries);
+    for items in model.duplicate_titles() {
+        entries.insert(Entry::DuplicateTitle {
+            items: items.into_iter().map(str::to_owned).collect(),
+        });
+    }
     thread_membership(state, model, now, &mut entries)?;
     Ok(entries.into_iter().collect())
 }

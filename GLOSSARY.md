@@ -107,7 +107,8 @@ _Avoid_: closed
 
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, done work waiting on
-work that isn't, work waiting on canceled work, claims two holders clash over, and references to what doesn't exist.
+work that isn't, work waiting on canceled work, claims two holders clash over, items in one initiative that share a
+title (`duplicate-title`, which doesn't notify), and references to what doesn't exist.
 The app calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 

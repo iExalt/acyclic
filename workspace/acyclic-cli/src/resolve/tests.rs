@@ -1,5 +1,5 @@
 use acyclic_core::delete::delete_item;
-use acyclic_core::model::{self, By, ItemState, add_item, set_state};
+use acyclic_core::model::{self, By, ItemState, add_initiative, add_item, set_parent, set_state};
 use acyclic_core::schema::{kind, repository};
 use acyclic_core::scope::USER;
 use acyclic_core::state::{Key, Replica, ReplicaId, State};
@@ -13,7 +13,7 @@ fn id(tail: &str) -> String {
     format!("01900000-0000-7000-8000-{tail:0>12}")
 }
 
-/// Items: "Plant" twice (one done), "Water", "Weed", whose id ends in Water's id's last 6 characters, and a deleted
+/// Items: "Plant" twice (one done), "Sow" in each of two initiatives, "Water", "Weed", whose id ends in Water's id's last 6 characters, and a deleted
 /// "Gone"; a repository iExalt/acyclic and one other/acyclic.
 fn tracker() -> Replica {
     let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
@@ -28,6 +28,12 @@ fn tracker() -> Replica {
         add_item(&mut r, &id(tail), title, BY).unwrap();
     }
     set_state(&mut r, &id("a2"), ItemState::Done, BY).unwrap();
+    // "Sow" in two initiatives.
+    for (tail, initiative) in [("a3", id("d1")), ("a4", id("d2"))] {
+        add_initiative(&mut r, &initiative, "North or south", BY).unwrap();
+        add_item(&mut r, &id(tail), "Sow", BY).unwrap();
+        set_parent(&mut r, &id(tail), Some(&initiative), BY).unwrap();
+    }
     delete_item(&mut r, &id("c0ffee"), BY).unwrap();
     for (tail, owner) in [("e1", "iExalt"), ("e2", "other")] {
         let key = Key::new(kind::REPOSITORY, &id(tail)).unwrap();
@@ -77,11 +83,14 @@ fn a_title_matches_only_as_typed() {
 #[test]
 fn what_names_several_records_or_too_little_is_refused_with_the_candidates() {
     with(|records| {
-        let shared = records.item("Plant").unwrap_err();
+        // The same title in several initiatives is refused, listing each.
+        let shared = records.item("Sow").unwrap_err();
         assert_eq!(
             (shared.code, candidates(&shared)),
-            ("ambiguous", vec![id("a1").as_str(), id("a2").as_str()])
+            ("ambiguous", vec![id("a3").as_str(), id("a4").as_str()])
         );
+        // Unfinished work and a finished leaf with one title: the unfinished work is meant.
+        assert_eq!(records.item("Plant").unwrap(), id("a1"));
         // Water's id ends in "abcdef", and so does Weed's; "Water"'s title alone is fine.
         let endings = records.item("abcdef").unwrap_err();
         assert_eq!(candidates(&endings), [id("abcdef"), id("12abcdef")]);
@@ -132,11 +141,11 @@ fn a_title_that_is_another_records_ending_is_refused_naming_both() {
 fn every_printed_ending_names_its_own_record() {
     with(|records| {
         let endings = records.endings(true);
-        assert_eq!(endings.len(), 5, "the deleted item has none");
+        assert_eq!(endings.len(), 9, "the deleted item has none");
         assert_eq!(endings[&id("abcdef")], "0abcdef", "longer where another id shares its end");
         for (full, ending) in &endings {
             assert!(ending.len() >= MIN_ENDING);
-            assert_eq!(&records.item(ending).unwrap(), full, "{ending}");
+            assert_eq!(&records.parent(ending).unwrap(), full, "{ending}");
         }
     });
 }
@@ -154,7 +163,7 @@ fn an_ending_another_records_title_holds_grows_until_it_names_its_own() {
     assert_eq!(endings[&id("c0ffee")], "0c0ffee");
     assert_eq!(endings[&id("123456")], "123456", "its own title names it too");
     for (full, ending) in &endings {
-        assert_eq!(&records.item(ending).unwrap(), full, "{ending}");
+        assert_eq!(&records.parent(ending).unwrap(), full, "{ending}");
     }
 }
 

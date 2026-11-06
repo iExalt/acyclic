@@ -588,8 +588,9 @@ pub enum Change {
     Add {
         /// The record.
         record: Record,
-        /// Whether its id was made for this add rather than chosen by the caller: a minted item or thread may not
-        /// take the title of open work, since a retried add would otherwise make a twin.
+        /// Whether its id was made for this add rather than chosen by the caller: a minted thread may not take the
+        /// title of another, since a retried add would otherwise make a twin. An item's title is judged however its id
+        /// was made.
         minted: bool,
         /// What an add of a record that exists does.
         on_repeat: Repeat,
@@ -702,7 +703,8 @@ pub enum Rule {
     /// A new initiative or item would take the id of this record of the other kind, or of one deleted: an item's
     /// `parent` names either by its id alone.
     IdTaken(Record),
-    /// A minted record would take the title of this open one.
+    /// A record would take the title of this one: a minted thread another thread's, an item the title of one in its
+    /// initiative that has not finished, or is a parent.
     TitleTaken(Record),
     /// A repository would take `owner/name` that this other record has, or could have once its conflict is settled.
     NameTaken {
@@ -1261,6 +1263,7 @@ impl Judging<'_, '_> {
         }
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
+        found.extend(taken_item_titles(self.before, after, steps));
         found.extend(cancel_rules(self.before, steps));
         self.violations.extend(found);
     }
@@ -1560,7 +1563,8 @@ fn taken_names(after: &Model, steps: &[Step]) -> Vec<Violation> {
     found
 }
 
-/// Minted items and threads whose title open work already has: a retried add would otherwise make a twin.
+/// Minted threads whose title another thread already has: a retried add would otherwise make a twin. An item's title
+/// has its own rule, [`taken_item_titles`].
 fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Violation> {
     let created: BTreeSet<&Record> = steps
         .iter()
@@ -1571,47 +1575,78 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
         .collect();
     let mut found = Vec::new();
     for (n, change) in changes.0.iter().enumerate() {
-        let Change::Add { record, minted: true, .. } = change else { continue };
+        let Change::Add { record: record @ Record::Thread(id), minted: true, .. } = change else {
+            continue;
+        };
         if !created.contains(record) {
             continue;
         }
-        let other = match record {
-            Record::Item(id) => {
-                let Some(title) = after.items.get(id).and_then(|item| item.title.one()) else {
-                    continue;
-                };
-                after
-                    .items
-                    .values()
-                    .find(|other| {
-                        other.id != *id
-                            && other.title.all().contains(&title)
-                            && !other.is_finished()
-                    })
-                    .map(|other| Record::Item(other.id.clone()))
-            },
-            Record::Thread(id) => {
-                let Some(title) = after.threads.get(id).and_then(|thread| thread.title.one())
-                else {
-                    continue;
-                };
-                after
-                    .threads
-                    .values()
-                    .find(|other| {
-                        other.id != *id
-                            && other.title.all().contains(&title)
-                            && !after.is_emptied_one(&other.id)
-                    })
-                    .map(|other| Record::Thread(other.id.clone()))
-            },
-            Record::Initiative(_) | Record::Repository(_) => None,
+        let Some(title) = after.threads.get(id).and_then(|thread| thread.title.one()) else {
+            continue;
         };
+        let other = after.threads.values().find(|other| {
+            other.id != *id
+                && other.title.all().contains(&title)
+                && !after.is_emptied_one(&other.id)
+        });
         if let Some(other) = other {
             found.push(Violation {
                 change: Some(n),
                 at: Some(FieldAddr { record: record.clone(), field: FieldName::Title }),
-                rule: Rule::TitleTaken(other),
+                rule: Rule::TitleTaken(Record::Thread(other.id.clone())),
+            });
+        }
+    }
+    found
+}
+
+/// Items whose write brings them a title another item in their initiative holds: added, renamed, moved (with all they
+/// hold, since the initiative they are in changes), reopened or un-canceled, or given a first child, which makes a
+/// finished leaf a parent that keeps its name. A clash the tracker already had, as a sync can make, isn't refused again
+/// while the pair stands: only what the change set makes is.
+fn taken_item_titles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
+    let mut touched: BTreeMap<&str, usize> = BTreeMap::new();
+    for step in steps.iter().filter(|step| step.asked) {
+        match &step.write {
+            Written::Create(Record::Item(id))
+            | Written::Assign(Assign::Item(id, ItemAssign::Title(_) | ItemAssign::State(_))) => {
+                touched.entry(id).or_insert(step.change);
+            },
+            Written::Assign(Assign::Item(id, ItemAssign::Parent(parent))) => {
+                for moved in after.subtree(id) {
+                    touched.entry(moved).or_insert(step.change);
+                }
+                touched.entry(parent).or_insert(step.change);
+            },
+            _ => {},
+        }
+    }
+    let clashing: BTreeSet<(&str, &str)> = after
+        .duplicate_titles()
+        .into_iter()
+        .flat_map(|group| {
+            group.iter().flat_map(|a| group.iter().map(move |b| (*a, *b))).collect::<Vec<_>>()
+        })
+        .filter(|(a, b)| a != b)
+        .collect();
+    let already: BTreeSet<(&str, &str)> = before
+        .duplicate_titles()
+        .into_iter()
+        .flat_map(|group| {
+            group.iter().flat_map(|a| group.iter().map(move |b| (*a, *b))).collect::<Vec<_>>()
+        })
+        .collect();
+    let mut found = Vec::new();
+    for (id, n) in touched {
+        let other = clashing.iter().find(|(a, b)| *a == id && !already.contains(&(*a, *b)));
+        if let Some((_, other)) = other {
+            found.push(Violation {
+                change: Some(n),
+                at: Some(FieldAddr {
+                    record: Record::Item(id.to_owned()),
+                    field: FieldName::Title,
+                }),
+                rule: Rule::TitleTaken(Record::Item((*other).to_owned())),
             });
         }
     }

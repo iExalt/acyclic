@@ -790,3 +790,40 @@ fn a_clear_raced_against_a_move_is_no_value_to_keep() {
         "{kept:?}"
     );
 }
+
+#[test]
+fn two_replicas_making_one_title_apart_leave_a_duplicate_on_the_list_that_never_notifies() {
+    let mut a = replica("a");
+    crate::model::add_initiative(&mut a, "init", "Init", user(1)).unwrap();
+    crate::model::add_initiative(&mut a, "other", "Other", user(1)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    // Each made "Sow" without seeing the other's; one more in another initiative is no twin.
+    add_item(&mut a, "x", "Sow", user(2)).unwrap();
+    set_parent(&mut a, "x", Some("init"), user(2)).unwrap();
+    for (id, parent) in [("y", "init"), ("z", "other")] {
+        add_item(&mut b, id, "Sow", user(2)).unwrap();
+        set_parent(&mut b, id, Some(parent), user(2)).unwrap();
+    }
+    assert!(!list(&a).iter().any(|entry| matches!(entry, Entry::DuplicateTitle { .. })));
+    a.join(&b.state).unwrap();
+
+    let twins: Vec<Entry> = list(&a)
+        .into_iter()
+        .filter(|entry| matches!(entry, Entry::DuplicateTitle { .. }))
+        .collect();
+    assert_eq!(twins, [Entry::DuplicateTitle { items: vec!["x".into(), "y".into()] }]);
+    let entry = &twins[0];
+    assert_eq!(entry.kind(), "duplicate-title");
+    assert_eq!(entry.key(), "duplicate-title:x:y");
+    assert_eq!(entry.identity(), r#"{"entry":"duplicate-title","items":["x","y"]}"#);
+    assert!(!entry.notifies());
+    assert_eq!(
+        entry.summary(&|id| if id == "x" { "Sow".into() } else { id.into() }),
+        "2 items in one initiative share the title Sow"
+    );
+
+    // Finishing one leaf frees the title, and the entry goes.
+    model::set_state(&mut a, "y", ItemState::Done, user(3)).unwrap();
+    assert!(!list(&a).iter().any(|entry| matches!(entry, Entry::DuplicateTitle { .. })));
+}

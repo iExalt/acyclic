@@ -308,9 +308,10 @@ fn a_minted_add_whose_title_open_work_has_is_refused_naming_it() {
         ("already-exists", json!({"id": "a"}))
     );
     assert!(add_item(&mut r, "a", &titled("Sow"), USER_BY).is_ok());
-    assert!(
-        add_item(&mut r, "c", &titled("Sow"), USER_BY).is_ok(),
-        "an id the caller chose isn't judged by title"
+    // A chosen id is judged by title too, naming the item that has it.
+    assert_eq!(
+        add_item(&mut r, "c", &titled("Sow"), USER_BY).unwrap_err().details,
+        json!({"id": "a"})
     );
     // Threads match on title too, apart from items.
     minted(&mut r, kind::THREAD, "t", "Sow").unwrap();

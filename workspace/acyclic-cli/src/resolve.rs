@@ -6,8 +6,10 @@
 //! A reference is, in order:
 //!
 //! 1. a full UUID, in any case: that record;
-//! 2. an item's, initiative's or thread's exact title, open or done alike, or a repository's `owner/name` in any case:
-//!    the one record that has it, refused as `ambiguous` when several do;
+//! 2. an item's, initiative's or thread's exact title, or a repository's `owner/name` in any case: the one record that
+//!    has it, refused as `ambiguous` when several do. A title unfinished work shares with finished leaves names the
+//!    unfinished work, since a finished leaf's title is free to take again; the same title in several initiatives is
+//!    ambiguous, listing each;
 //! 3. the end of exactly one record's id, at least [`MIN_ENDING`] characters, in any case.
 //!
 //! Every rule is judged before deciding, so a reference that is one record's title and another's id ending is refused
@@ -43,6 +45,9 @@ struct Candidate {
     names: Vec<String>,
     /// The id of the task a thread of one is derived from, which names it too, in full or by an ending.
     task: Option<String>,
+    /// Whether its names are held against others': false for a finished leaf, whose title is free to take again, so a
+    /// title that it and unfinished work share names the unfinished work.
+    holds: bool,
 }
 
 /// The kind of record an argument names.
@@ -106,6 +111,7 @@ impl<'a> Records<'a> {
                 id: item.id.clone(),
                 names: item.title.all().into_iter().cloned().collect(),
                 task: None,
+                holds: model.holds_title(&item.id),
             })
             .collect();
         let initiatives = model
@@ -115,6 +121,7 @@ impl<'a> Records<'a> {
                 id: initiative.id.clone(),
                 names: initiative.title.all().into_iter().cloned().collect(),
                 task: None,
+                holds: true,
             })
             .collect();
         let repositories = model
@@ -124,6 +131,7 @@ impl<'a> Records<'a> {
                 id: record.id.clone(),
                 names: repository_name(record).into_iter().collect(),
                 task: None,
+                holds: true,
             })
             .collect();
         Self {
@@ -157,7 +165,7 @@ impl<'a> Records<'a> {
                                 thread.title.all().into_iter().cloned().collect()
                             }),
                         };
-                    Candidate { task: task.map(str::to_owned), id, names }
+                    Candidate { task: task.map(str::to_owned), id, names, holds: true }
                 })
                 .collect()
         })
@@ -253,8 +261,13 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate]) -> Result<Stri
         Kind::Repository => name.eq_ignore_ascii_case(reference),
         Kind::Item | Kind::Initiative | Kind::Parent | Kind::Thread => name == reference,
     };
-    let by_name: Vec<&Candidate> =
+    let mut by_name: Vec<&Candidate> =
         candidates.iter().filter(|c| c.names.iter().any(named)).collect();
+    // A title that unfinished work and finished leaves share names the unfinished work; the same title in several
+    // initiatives stays ambiguous, with those as its candidates.
+    if by_name.iter().any(|c| c.holds) {
+        by_name.retain(|c| c.holds);
+    }
     let lower = reference.to_ascii_lowercase();
     let ends = |c: &&Candidate| {
         !lower.is_empty()

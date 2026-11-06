@@ -529,7 +529,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread add --title Work
     "details": {
       "id": "01900000-0000-7000-8000-0000000000f1"
     },
-    "message": "thread 01900000-0000-7000-8000-0000000000f1 has this title, so the add would make a second; change that one with `acyclic thread edit 01900000-0000-7000-8000-0000000000f1`, or give this one another title"
+    "message": "thread 01900000-0000-7000-8000-0000000000f1 has this title, so this would make a second; change that one with `acyclic thread edit 01900000-0000-7000-8000-0000000000f1`, or give this one another title"
   },
   "ok": false
 }
@@ -1448,37 +1448,28 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c3 --title Goal
+# exit 1
+{
+  "error": {
+    "code": "already-exists",
+    "details": {
+      "id": "01900000-0000-7000-8000-0000000000c1"
+    },
+    "message": "item 01900000-0000-7000-8000-0000000000c1 has this title in the same initiative, so this would make a second; change that one with `acyclic item edit 01900000-0000-7000-8000-0000000000c1`, or give this one another title"
+  },
+  "ok": false
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c3 --title Aim
 # exit 0
 {
   "data": {
     "changed": true,
     "item": "01900000-0000-7000-8000-0000000000c3",
     "placed": [],
-    "title": "Goal"
+    "title": "Aim"
   },
   "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic item show Goal
-# exit 2
-{
-  "error": {
-    "code": "ambiguous",
-    "details": {
-      "candidates": [
-        {
-          "id": "01900000-0000-7000-8000-0000000000c1",
-          "title": "Goal"
-        },
-        {
-          "id": "01900000-0000-7000-8000-0000000000c3",
-          "title": "Goal"
-        }
-      ]
-    },
-    "message": "\"Goal\" is the title of 2 items: 01900000-0000-7000-8000-0000000000c1 (Goal), 01900000-0000-7000-8000-0000000000c3 (Goal); name one by its full id or a longer ending"
-  },
-  "ok": false
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-0000000000c4 --title Part --parent 0000c3

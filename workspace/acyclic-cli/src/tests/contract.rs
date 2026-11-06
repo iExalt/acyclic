@@ -279,9 +279,10 @@ fn a_journey_through_the_contract() {
     sh.run("thread claim Follow-ups", AGENT);
     sh.run("item done Part", AGENT);
     assert_eq!(sh.output("item show Goal", AGENT).1["data"][0]["stage"], "done");
-    // A done item's title is free again, though the title then names both.
-    sh.run(&format!("item add --id {g2} --title Goal"), AGENT);
-    assert_eq!(sh.output("item show Goal", AGENT).1["error"]["code"], "ambiguous");
+    // A parent that reads done keeps its name, so no second item in its initiative takes it.
+    let (code, out) = sh.output(&format!("item add --id {g2} --title Goal"), AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("already-exists")), "{out}");
+    sh.run(&format!("item add --id {g2} --title Aim"), AGENT);
     sh.run(&format!("item add --id {g2a} --title Part --parent 0000c3"), AGENT);
     assert_eq!(sh.run("item done 0000c3 --force", AGENT), 1, "forcing doesn't finish a parent");
     // Only an item nothing refers to is deleted, and it is gone for good.
@@ -627,7 +628,9 @@ fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_ne
         format!("item add --id {x} --title Alpha"),
         format!("item add --id {y} --title Beta"),
         format!("item add --id {} --title Twin", id("a3")),
-        format!("item add --id {} --title Twin", id("a4")),
+        // One title in two initiatives is no clash, and names neither alone.
+        format!("initiative add --id {} --title Elsewhere", id("b1")),
+        format!("item add --id {} --title Twin --parent Elsewhere", id("a4")),
     ] {
         assert_eq!(sh.run(&line, AGENT), 0, "{line}");
     }
@@ -667,7 +670,7 @@ fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_ne
     };
     // One write, as an add is: the same count of commits the tracker keeps for it.
     let before = commits(&sh);
-    sh.run(&format!("item add --id {} --title Gamma", id("a5")), AGENT);
+    sh.run(&format!("item add --id {} --title Gamma --parent Default", id("a5")), AGENT);
     let ordinary = commits(&sh) - before;
     let before = commits(&sh);
     let (code, claimed) = sh.output("thread claim Alpha", AGENT);
@@ -1181,6 +1184,7 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         (key("item", &e1), "evidence", evidence("abc1234"), evidence("def5678")),
     ];
     let lost = [(id("a9"), None), (id("aa"), Some("gone"))];
+    let (twins, default) = ([id("ab"), id("ac")], id(DEFAULT_INITIATIVE));
     let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
     let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
     tracker
@@ -1202,6 +1206,13 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
                 if let Some(parent) = parent {
                     replica.write(&key, "parent", "actor/user", at, Some(json!(parent)))?;
                 }
+            }
+            // Two items of one initiative with one title, as two replicas making it apart would join into.
+            for made in &twins {
+                let key = acyclic_core::state::Key::new("item", made).unwrap();
+                replica.write(&key, "title", "actor/user", at, Some(json!("Twin")))?;
+                replica.write(&key, "state", "actor/user", at, Some(json!("backlog")))?;
+                replica.write(&key, "parent", "actor/user", at, Some(json!(default)))?;
             }
             for (key, name, mine, theirs) in &apart {
                 replica.write(key, name, "actor/user", at, Some(mine.clone()))?;
