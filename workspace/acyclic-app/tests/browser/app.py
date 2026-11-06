@@ -2125,11 +2125,11 @@ def outline_journey(page, view, plan, name, failures):
             page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: opening {leaf} under {title} left the address {page.url}, not its own initiative")
-    # Only a leaf is in a thread, and the Map draws one once the box above it is open.
+    # Pick unfinished work: done leaves can stay folded inside Done after their parent opens.
     picked = next(
         id
         for id in sorted(plan.items)
-        if plan.depth(id) == 2 and not plan.children(id) and plan.items[id]["thread"]
+        if plan.depth(id) == 2 and not plan.children(id) and plan.items[id]["thread"] and plan.items[id]["stage"] == "ready"
     )
     box = plan.parent[picked]
     project, thread = plan.chain(picked)[-1], plan.items[picked]["thread"]
@@ -3514,10 +3514,10 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 @timed
 def fold_journey(page, view, env, plan, name, failures):
-    """A finished thread's items in a box fold into one box, named after it, on the Map; the command menu still finds
-    one of them, opening every box above it."""
+    """A thread's done items fold while it still has work left; search opens every box above a done item."""
     box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id))
     thread = json.loads(run(env, "thread", "add", "--title", "Folded away"))["data"]["thread"]
+    unfinished = json.loads(run(env, "item", "add", "--title", "Still to finish", "--parent", box, "--thread", thread))["data"]["item"]
     items = []
     for title in ("Fold the first", "Fold the second"):
         added = json.loads(run(env, "item", "add", "--title", title, "--parent", box, "--thread", thread))
@@ -3534,11 +3534,17 @@ def fold_journey(page, view, env, plan, name, failures):
         arg=[folded, f"~done {box}"],
         timeout=20_000,
     )
+    page.wait_for_function(
+        "id => { const m = document.querySelector('[data-testid=map]');"
+        " return m?.dataset.state === 'drawn' && m.cy.getElementById(id).nonempty(); }",
+        arg=unfinished,
+        timeout=10_000,
+    )
     drawn = page.get_by_test_id("map").evaluate(
         "(m, ids) => ids.filter(id => m.cy.getElementById(id).nonempty())", items
     )
     if drawn:
-        failures.append(f"{name}: a finished thread's items {drawn} were drawn rather than folded")
+        failures.append(f"{name}: a thread's done items {drawn} were drawn rather than folded")
     menu = page.get_by_test_id("command-menu")
     if view.get("has_touch"):
         page.locator("[data-action=search]").tap()
@@ -3557,7 +3563,7 @@ def fold_journey(page, view, env, plan, name, failures):
             timeout=10_000,
         )
         page.screenshot(path=SHOTS / f"app-{name}-fold.png")
-        print(f"{name}: a finished thread folded into one box, and the command menu unfolded it to {items[0]}")
+        print(f"{name}: a partial thread folded its done items, and the command menu unfolded it to {items[0]}")
     except PlaywrightTimeout:
         failures.append(f"{name}: the command menu's folded item {items[0]} wasn't unfolded into view")
     finally:

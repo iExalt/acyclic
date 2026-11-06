@@ -450,15 +450,15 @@ before what went wrong.
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.
 - **Finished work folds away** (`src/map/fold.ts`), so what is left reads first (the user: "it's hard to tell what's
-  done and what's not done"). In a box, a finished thread's items, two or more, are one done box named after the
+  done and what's not done"). In a box, a thread's done items, two or more, are one done box named after the
   thread, its stripe in the thread's colour, its name on two lines over how many are done; finished work that no link
   ties, through other finished work, to anything left in the box goes into one box, Done, last in its columns ("37
   done in 5 threads"), when it holds two or more and something stands beside it. Done boxes open folded and fold as
-  boxes do; unfolded, a finished thread's is a frame around its items with its name and chevron, the user's pick over a
-  Fold button in the thread's panel or a Fold tile. A tap on a finished thread's box anywhere but its chevron picks the
+  boxes do; unfolded, a thread's done box is a frame around its items with its name and chevron, the user's pick over a
+  Fold button in the thread's panel or a Fold tile. A tap on a thread's done box anywhere but its chevron picks the
   thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
-  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. A thread is finished once
-  every leaf is done or canceled, but canceled work isn't folded: it stays beside the Done box as the quiet tile it is.
+  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. Done items fold even
+  while their thread has work left, but canceled work isn't folded: it stays beside the Done box as a quiet tile.
 - **Canceled work** reads as dropped, not delivered: a struck-through circle in the muted ink on a notch-greyer tint (a
   restrained default). The item form's State select sets it and Open undoes it, and Undo of a cancel sets the state
   back. A box counts its canceled leaves apart ("2 canceled").

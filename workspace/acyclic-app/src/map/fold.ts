@@ -1,4 +1,4 @@
-// Finished work folded away on the Map. In each box, a finished thread's items there become one box named after the
+// Finished work folded away on the Map. In each box, a thread's done items there become one box named after the
 // thread, and the finished work no link ties to anything unfinished in the box goes into one box, Done, at the end of
 // its columns, so what is left to do reads first. Each is a done box, which only the Map's drawing holds: folded, it
 // is drawn as a tile, and unfolded, as a frame around what it holds, so folding, links, lighting and bringing an item
@@ -17,7 +17,7 @@ export function isRest(id: string): boolean {
   return id.startsWith(DONE);
 }
 
-/** What a done box holds: a finished thread's items, or the rest of a box's finished work. */
+/** What a done box holds: a thread's done items, or the rest of a box's finished work. */
 export type DoneBox = { kind: "thread"; thread: string } | { kind: "rest"; threads: number };
 
 /** Whether an id names a done box rather than an item. */
@@ -32,27 +32,17 @@ export interface Folded {
 }
 
 /**
- * Folds the finished work in each box of `model`. A thread is finished when every leaf it has is
- * done or canceled, and a canceled leaf stays where it is, out of the Done box. Each finished thread with two or more of a box's leaves becomes a box in that box. Those boxes and the box's
- * other done leaves that are finished (a finished thread's last one there, or one in no thread) go into the box's
- * Done box, unless a link inside the box joins them, directly or through each other, to anything else; it
- * forms only when it would hold two or more and leave something beside it. `titleOf` names a thread.
+ * Folds the finished work in each box of `model`, whether or not its thread has work left.
+ * Each thread with two or more done leaves in a box becomes a box there. Those boxes and the
+ * other done leaves go into the box's Done box, unless a link inside the box joins them,
+ * directly or through each other, to anything else. It forms only when it would hold two or
+ * more and leave something beside it. Canceled leaves stay out. `titleOf` names a thread.
  */
 export function foldDone(model: Model, titleOf: (thread: string) => string | null): Folded {
   const live = (item: MapItem) => !model.children.has(item.id);
   // A thread the plan doesn't name, as one deleted elsewhere, counts as none.
   const threadOf = (item: MapItem) => (item.thread !== null && titleOf(item.thread) !== null ? item.thread : null);
-  const finished = new Map<string, boolean>();
-  for (const item of model.items.values()) {
-    const thread = threadOf(item);
-    // Canceled work is finished too, but stays out of the Done box: only done leaves fold.
-    if (thread !== null && live(item))
-      finished.set(thread, (finished.get(thread) ?? true) && (item.stage === "done" || item.stage === "canceled"));
-  }
-  const doneLeaf = (item: MapItem) => {
-    const thread = threadOf(item);
-    return live(item) && item.stage === "done" && (thread === null || finished.get(thread) === true);
-  };
+  const doneLeaf = (item: MapItem) => live(item) && item.stage === "done";
 
   const items = new Map(model.items);
   const children = new Map(model.children);
@@ -89,7 +79,7 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       return item !== undefined && doneLeaf(item) ? [item] : [];
     });
     if (done.length === 0) continue;
-    // Each finished thread's leaves here, in the order the box lists them.
+    // Each thread's done leaves here, in the order the box lists them.
     const byThread = new Map<string, string[]>();
     for (const item of done) {
       const thread = threadOf(item);
