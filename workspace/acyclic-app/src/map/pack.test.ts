@@ -171,4 +171,95 @@ describe("hold, over random packings", () => {
             ).not.toBeNull();
     }
   });
+
+  const rect = (layout: ReturnType<typeof pack>, list: { id: string; width: number; height: number }[], id: string) => {
+    const at = layout.at[id] ?? { x: NaN, y: NaN };
+    const kid = list.find((one) => one.id === id) ?? box(id, NaN, NaN);
+    return { ...at, width: kid.width, height: kid.height };
+  };
+  const standsAfter = (a: ReturnType<typeof rect>, b: typeof a) =>
+    b.y >= a.y + a.height + 24 || (b.y >= a.y && b.x >= a.x + a.width + 24);
+
+  /** What changes the set of boxes or links, over a packed plan: sizes stay as they were. */
+  it("keeps boxes clear, after their waits and, but for what waits on a new link, where they were, when boxes or links change", () => {
+    let settled = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const next = random(seed);
+      const size = () => 50 + Math.floor(next() * 400);
+      const kids = Array.from({ length: 4 + Math.floor(next() * 9) }, (_, n) => box(`k${n}`, size(), size()));
+      const waits = new Map(
+        kids.map((kid, n) => [kid.id, kids.filter((_, m) => m < n && next() < 0.2).map((k) => k.id)]),
+      );
+      const packed = pack(kids, waits, 1);
+      const was = { children: kids, layout: packed, waits };
+      const check = (what: string, now: typeof kids, by: Map<string, string[]>, moves: (id: string) => boolean) => {
+        const held = hold(was, now, by);
+        // A plan whose moves don't settle packs afresh, which is not held.
+        if (held === undefined) return;
+        settled++;
+        for (const [n, a] of now.entries())
+          for (const b of now.slice(n + 1))
+            expect(crowd(rect(held, now, a.id), rect(held, now, b.id)), `seed ${seed} ${what}: ${a.id}, ${b.id}`).toBe(
+              false,
+            );
+        for (const [id, firsts] of by)
+          for (const first of firsts) {
+            const wasAfter = standsAfter(rect(packed, kids, first), rect(packed, kids, id));
+            const isNew = !(waits.get(id) ?? []).includes(first);
+            if (wasAfter || isNew)
+              expect(
+                standsAfter(rect(held, now, first), rect(held, now, id)),
+                `seed ${seed} ${what}: ${id} after ${first}`,
+              ).toBe(true);
+          }
+        for (const kid of kids)
+          if (now.some((one) => one.id === kid.id) && !moves(kid.id))
+            expect(held.at[kid.id], `seed ${seed} ${what}: ${kid.id} stays`).toEqual(packed.at[kid.id]);
+      };
+      const downstream = (from: string[], by: Map<string, string[]>) => {
+        const out = new Set(from);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const [id, ones] of by)
+            if (!out.has(id) && ones.some((one) => out.has(one))) {
+              out.add(id);
+              grew = true;
+            }
+        }
+        return out;
+      };
+      // A box added, waiting on some of the others, and now and then waited on by one.
+      const added = box("new", size(), size());
+      const waiters = kids.filter(() => next() < 0.1).map((k) => k.id);
+      // Not on what waits on it, which would make a ring.
+      const below = downstream(waiters, waits);
+      const firsts = kids.filter((k) => next() < 0.3 && !below.has(k.id)).map((k) => k.id);
+      const withNew = new Map(waits);
+      withNew.set("new", firsts);
+      for (const id of waiters) withNew.set(id, [...(withNew.get(id) ?? []), "new"]);
+      const unmoved = downstream(waiters, withNew);
+      check("add", [...kids, added], withNew, (id) => unmoved.has(id));
+      // A box removed, with the waits through it dropped.
+      const gone = kids[Math.floor(next() * kids.length)]?.id ?? "";
+      const without = new Map(
+        [...waits].filter(([id]) => id !== gone).map(([id, ones]) => [id, ones.filter((one) => one !== gone)]),
+      );
+      check(
+        "remove",
+        kids.filter((kid) => kid.id !== gone),
+        without,
+        () => false,
+      );
+      // A link added from a later box to an earlier one's dependent: the dependent, and what waits on it, may move.
+      const [first, then] = [kids[1], kids[kids.length - 1]];
+      if (first !== undefined && then !== undefined && first.id !== then.id) {
+        const linked = new Map(waits);
+        linked.set(then.id, [...(linked.get(then.id) ?? []).filter((one) => one !== first.id), first.id]);
+        const moves = downstream([then.id], linked);
+        check("link", kids, linked, (id) => moves.has(id));
+      }
+    }
+    // Most plans hold; the rest fall back, so this doesn't pass on a hold that never returns.
+    expect(settled).toBeGreaterThan(600);
+  });
 });

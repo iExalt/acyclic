@@ -20,6 +20,10 @@ describe("Layouts", () => {
     expect(await fresh).not.toBeNull();
   });
 
+  // A shape other than the one displayed packs afresh, which is what keeps a request waiting on the engine: a box added
+  // alone is held, not packed.
+  const WIDE = PORTRAIT * 2;
+
   it("does not promote an overtaken root packing, even when it finishes last", async () => {
     let releaseOld: ((layout: BoxLayout) => void) | undefined;
     let waitingForOld = false;
@@ -57,7 +61,7 @@ describe("Layouts", () => {
       visible(buildModel([item("a"), item("a1", "a"), item("b"), item("c")]), {
         collapsed: new Set(),
       }),
-      PORTRAIT,
+      WIDE,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(waitingForOld).toBe(true);
@@ -81,7 +85,7 @@ describe("Layouts", () => {
       visible(buildModel([item("a"), item("a1", "a"), item("b"), item("c")]), {
         collapsed: new Set(["a"]),
       }),
-      PORTRAIT,
+      WIDE,
     );
     expect(third?.nodes.get("b")).toMatchObject({ y: packed?.nodes.get("b")?.y });
   });

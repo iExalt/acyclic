@@ -108,9 +108,20 @@ describe("place", () => {
     expect(grew.laidOut).not.toContain(ROOT);
     const corner = (placed: typeof was, id: string) => [placed.nodes.get(id)?.x, placed.nodes.get(id)?.y];
     for (const id of ["top", "far"]) expect(corner(grew, id)).toEqual(corner(was, id));
-    // A new top-level box packs the top level again; a fresh cache, as a reload has, does too.
-    const added = await place(visible(buildModel([...plan, item("near")]), open), cache, engine.layBox, PORTRAIT);
-    expect(added.laidOut).toContain(ROOT);
+    // A new top-level box leaves every other one where it was, and holds from there: the next fold keeps them too.
+    const before = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    const grown = buildModel([...plan, item("near")]);
+    const added = await place(visible(grown, open), cache, engine.layBox, PORTRAIT);
+    expect(added.laidOut).not.toContain(ROOT);
+    expect(added.nodes.has("near")).toBe(true);
+    for (const id of ["top", "far"]) expect(corner(added, id)).toEqual(corner(before, id));
+    const foldedAfter = await place(visible(grown, { collapsed: new Set(["top"]) }), cache, engine.layBox, PORTRAIT);
+    expect(foldedAfter.laidOut).toEqual([]);
+    for (const id of ["top", "far", "near"]) expect(corner(foldedAfter, id)).toEqual(corner(added, id));
+    // Taking it away again returns to the original packing.
+    const removed = await place(visible(model, open), cache, engine.layBox, PORTRAIT);
+    expect(removed.nodes).toEqual(before.nodes);
+    // A fresh cache, as a reload has, packs the top level.
     const fresh = await place(
       visible(model, { collapsed: new Set(["top"]) }),
       new LayoutCache(),

@@ -178,6 +178,11 @@ export class LayoutCache {
     return this.displayed?.topology === rootKey(input) ? this.displayed : undefined;
   }
 
+  /** The last accepted root's packing, whatever its topology, for holding where a changed top level keeps its boxes. */
+  previousRoot() {
+    return this.displayed?.baseline;
+  }
+
   rememberRoot(input: BoxInput, source: string, baseline: { input: BoxInput; layout: BoxLayout }) {
     const key = historyKey(input, source);
     this.roots.delete(key);
@@ -298,7 +303,7 @@ export async function place(
         // the earlier source baseline and recreate a held view, even though that view was never freshly packed.
         const exactRoot = id === ROOT ? cache.root(input, source) : undefined;
         const displayed = id === ROOT ? cache.displayedRoot(input) : undefined;
-        const baseline = exactRoot ?? displayed?.baseline;
+        const baseline = exactRoot ?? displayed?.baseline ?? (id === ROOT ? cache.previousRoot() : undefined);
         const shrink =
           id === ROOT &&
           exactRoot === undefined &&
@@ -316,8 +321,10 @@ export async function place(
           }
         }
         // ROOT is alone on the final level: after its last await, save the baseline and displayed-size comparator
-        // together only if no newer request overtook it. A held result is never promoted as a packing baseline.
-        const nextBaseline = heldRoot ? baseline : layout === undefined ? undefined : { input, layout };
+        // together only if no newer request overtook it. A result held for the same boxes and links is never promoted
+        // as a packing baseline; one held across an added or removed box or link is, so the next edit holds from it.
+        const kept = heldRoot && baseline !== undefined && rootKey(baseline.input) === rootKey(input);
+        const nextBaseline = kept ? baseline : { input, layout };
         if (id === ROOT && nextBaseline !== undefined && isCurrent()) cache.rememberRoot(input, source, nextBaseline);
         boxes.set(id, layout);
       }),
@@ -358,17 +365,19 @@ export async function place(
 }
 
 /**
- * The top level's last packing, held for a top level `now` of the same boxes in the same order, with the same links and
- * shape: each box where it was packed, but for what one larger than it was packed at now covers. Undefined for any
- * other change, which packs it again.
+ * The top level's last packing, held for a top level `now` with the same shape: each box that was there where it was
+ * packed, but for what one larger than it was packed at now covers, a box added where packing puts it around them, and
+ * a box that waits on a link added after what it waits on. Undefined when the shape changed or the boxes can't be
+ * held, which packs it again.
  */
 export function held(last: { input: BoxInput; layout: BoxLayout } | null, now: BoxInput): BoxLayout | undefined {
   if (last === null) return undefined;
   const was = last.input;
-  if (was.aspect !== now.aspect || was.children.length !== now.children.length) return undefined;
-  if (JSON.stringify(was.edges) !== JSON.stringify(now.edges)) return undefined;
-  if (!now.children.every((child, n) => was.children[n]?.id === child.id)) return undefined;
-  const waits = new Map<string, string[]>();
-  for (const { source, target } of now.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
-  return hold({ children: was.children, layout: last.layout }, now.children, waits);
+  if (was.aspect !== now.aspect) return undefined;
+  const waitsOf = (input: BoxInput) => {
+    const waits = new Map<string, string[]>();
+    for (const { source, target } of input.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
+    return waits;
+  };
+  return hold({ children: was.children, layout: last.layout, waits: waitsOf(was) }, now.children, waitsOf(now));
 }

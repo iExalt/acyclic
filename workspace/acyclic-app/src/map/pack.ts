@@ -51,15 +51,19 @@ export function pack(
   return best?.laid ?? { width: 2 * PAD, height: 2 * PAD, at: {} };
 }
 
-/** Packs the children within `limit` wide, each at the highest, then leftmost, place it may take. */
+/**
+ * Packs the children within `limit` wide, each at the highest, then leftmost, place it may take, around the boxes
+ * already `placed`, to which each is added.
+ */
 function packTo(
   children: readonly ({ id: string } & Size)[],
   waits: ReadonlyMap<string, readonly string[]>,
   limit: number,
+  placed = new Map<string, Placed>(),
 ): BoxLayout {
-  const placed = new Map<string, Placed>();
   const at: Record<string, { x: number; y: number }> = {};
-  let [right, bottom] = [0, 0];
+  let right = Math.max(0, ...[...placed.values()].map((box) => box.x + box.width));
+  let bottom = Math.max(0, ...[...placed.values()].map((box) => box.y + box.height));
   for (const child of children) {
     const firsts = (waits.get(child.id) ?? []).flatMap((id) => placed.get(id) ?? []);
     const byY = [...placed.values()].sort((a, b) => a.y - b.y);
@@ -113,14 +117,20 @@ function placing(
 }
 
 /**
- * The top level `was` packed to, for the same `children` at their sizes now: each where it was packed, but for what a
- * box larger than it was packed at now covers, which moves away from it the way it stood from it when packed, right if
- * it stood on its right and down if below, and stays after what it waits on. Where a box stands so depends only on the
+ * The top level `was` packed to, for `children` at their sizes now: each box that was there stays where it was packed,
+ * but for what a box larger than it was packed at now covers, which moves away from it the way it stood from it when
+ * packed, right if it stood on its right and down if below, and stays after what it waits on. A box added takes the
+ * place packing would give it, around the others. A box that now waits on a link added, and one that waits on a box that
+ * had to move, is placed the same way, rather than moving the boxes around it. Where a box stands so depends only on the
  * packing and the sizes now, not on the order boxes grew and shrank in. Undefined if the moves don't settle, as boxes
- * pushing each other round a ring would, which packs it afresh.
+ * pushing each other round a ring would, or if no box is left where it was, which packs it afresh.
  */
 export function hold(
-  was: { children: readonly ({ id: string } & Size)[]; layout: BoxLayout },
+  was: {
+    children: readonly ({ id: string } & Size)[];
+    layout: BoxLayout;
+    waits?: ReadonlyMap<string, readonly string[]>;
+  },
   children: readonly ({ id: string } & Size)[],
   waits: ReadonlyMap<string, readonly string[]>,
 ): BoxLayout | undefined {
@@ -133,18 +143,69 @@ export function hold(
   const old = (id: string) => packed.get(id) ?? { x: 0, y: 0, width: 0, height: 0 };
   const right = (a: Placed, b: Placed) => b.x >= a.x + a.width + GAP;
   const below = (a: Placed, b: Placed) => b.y >= a.y + a.height + GAP;
-  const now = children.map((child) => ({ id: child.id, ...old(child.id), width: child.width, height: child.height }));
-  const at = new Map(now.map((box) => [box.id, box]));
+  const standsAfter = (first: Placed, me: Placed) => below(first, me) || (right(first, me) && me.y >= first.y);
+  const wasWaits = was.waits ?? waits;
   // What a box waits on and stood after when packed, below it or level with it or lower on its right, it stays after.
-  // Packing breaks a cycle of waits somewhere, and what it left before what it waits on stays there.
-  const after = [...waits].flatMap(([id, firsts]) =>
-    firsts.flatMap((first) => {
-      const [me, then] = [at.get(id), at.get(first)];
-      if (me === undefined || then === undefined) return [];
-      if (below(old(first), old(id))) return [{ me, then, beside: false }];
-      return right(old(first), old(id)) && old(id).y >= old(first).y ? [{ me, then, beside: true }] : [];
-    }),
+  // Packing breaks a cycle of waits somewhere, and what it left before what it waits on stays there. A link added is
+  // kept too, wherever the boxes end up.
+  const kept = [...waits].flatMap(([id, firsts]) =>
+    firsts.flatMap((first) =>
+      packed.has(id) && (!(wasWaits.get(id) ?? []).includes(first) || standsAfter(old(first), old(id)))
+        ? [{ id, first }]
+        : [],
+    ),
   );
+  const free = new Set(children.filter((child) => !packed.has(child.id)).map((child) => child.id));
+  // Each round settles the boxes that stay, places the free ones around them, and frees any box that waits on a free
+  // one or on a link added and is not after it: one more each time, so the rounds end.
+  for (let round = 0; round <= children.length; round++) {
+    const now = children
+      .filter((child) => !free.has(child.id))
+      .map((child) => ({ id: child.id, ...old(child.id), width: child.width, height: child.height }));
+    if (now.length === 0 && children.length > 0) return undefined;
+    if (!settle(now, old, kept)) return undefined;
+    const boxes = new Map<string, Placed>(now.map((box) => [box.id, { ...box }]));
+    const stays = new Set(boxes.keys());
+    const added = placing(
+      children.filter((child) => free.has(child.id)),
+      waits,
+      KEYS[0] ?? ((box: Size) => box.width),
+    );
+    const edge = Math.max(0, ...now.map((box) => box.x + box.width), was.layout.width - 2 * PAD);
+    const at = packTo(added, waits, Math.max(edge, ...added.map((child) => child.width)), boxes).at;
+    const late = kept.filter(
+      ({ id, first }) => stays.has(id) && !standsAfter(boxes.get(first) ?? old(first), boxes.get(id) ?? old(id)),
+    );
+    if (late.length > 0) {
+      for (const { id } of late) free.add(id);
+      continue;
+    }
+    const width = Math.max(0, ...[...boxes.values()].map((box) => box.x + box.width));
+    const height = Math.max(0, ...[...boxes.values()].map((box) => box.y + box.height));
+    return {
+      width: width + 2 * PAD,
+      height: height + 2 * PAD,
+      at: { ...Object.fromEntries(now.map((box) => [box.id, { x: box.x + PAD, y: box.y + PAD }])), ...at },
+    };
+  }
+  return undefined;
+}
+
+/** Moves the boxes that meet, and those that wait on one not before them, right or down until they settle, or not. */
+function settle(
+  now: ({ id: string } & Placed)[],
+  old: (id: string) => Placed,
+  kept: readonly { id: string; first: string }[],
+): boolean {
+  const right = (a: Placed, b: Placed) => b.x >= a.x + a.width + GAP;
+  const below = (a: Placed, b: Placed) => b.y >= a.y + a.height + GAP;
+  const at = new Map(now.map((box) => [box.id, box]));
+  const after = kept.flatMap(({ id, first }) => {
+    const [me, then] = [at.get(id), at.get(first)];
+    if (me === undefined || then === undefined) return [];
+    if (below(old(first), old(id))) return [{ me, then, beside: false }];
+    return right(old(first), old(id)) && old(id).y >= old(first).y ? [{ me, then, beside: true }] : [];
+  });
   // Each move only ever takes a box right or down, past what it met: a few rounds settle any plan but a ring.
   for (let round = 0; round <= 4 * now.length; round++) {
     let moved = false;
@@ -166,15 +227,7 @@ export function hold(
       if (me.y < least) [me.y, moved] = [least, true];
       if (beside && !right(then, me) && !below(then, me)) [me.x, moved] = [then.x + then.width + GAP, true];
     }
-    if (!moved) {
-      const width = Math.max(0, ...now.map((box) => box.x + box.width));
-      const height = Math.max(0, ...now.map((box) => box.y + box.height));
-      return {
-        width: width + 2 * PAD,
-        height: height + 2 * PAD,
-        at: Object.fromEntries(now.map((box) => [box.id, { x: box.x + PAD, y: box.y + PAD }])),
-      };
-    }
+    if (!moved) return true;
   }
-  return undefined;
+  return false;
 }
