@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.7.0](https://github.com/iExalt/acyclic/compare/v0.6.0...v0.7.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* adding, renaming, moving, reopening or un-canceling an item can now be refused when its title is taken in its initiative. Item candidates in `ambiguous` errors gain `initiative`. Needs you gains the `duplicate-title` kind.
+* `item add` needs a parent. `--no-parent` is removed. Import accepts only version 4. `role` loses `group`. The dangling-parent Needs-you kind becomes `parent-missing`. `thread ready` is a struct variant on the wire (`{"thread":{"ready":{}}}`). The audit log moves to per-initiative files.
+* the `unthreaded` readiness, stage, count and Needs-you kind are gone. Thread rows gain `task`, and thread ids may now end in `.one`. A leaf in no thread is ready and claimable.
+* a lapsed claim on ready work reads `stalled`, not `ready`. JSON gains the stage `stalled`, the counts key `stalled`, the thread readiness `stalled`, the `stalled` flag on `thread ready` rows, and the Needs-you kind `stalled`.
+* a parent's stored thread no longer counts anywhere. New items no longer fall back to an ancestor's thread or skip done siblings. `item add` can now refuse with `thread-unclear`, and Needs you has two new kinds: `thread-on-parent` and `empty-thread`.
+* `canceled` is the first stored state older replicas cannot read. Upgrade every replica before canceling anything. New fields: the state value `canceled`, the stage `canceled`, the counts key `canceled`, the wait reason `canceled`, and the Needs-you kind `waits-on-canceled`.
+* Thread rows in JSON no longer have `heads` or `counts`. `thread list` shows `done` and `leaves` columns. Needs entries gain `summary`.
+* `thread ready` orders threads and items by id rather than by title, and Up next is ordered by id rather than by wave.
+* thread JSON has `notes` where it had `brief`, and `thread add` and `thread edit` take `--notes` and `--no-notes` (the old flags and the import key `brief` are still accepted). Readiness JSON is tagged `readiness` instead of `status`. Needs, doctor and import-report entries name a `record` instead of an `entity`. The `link-cycle` need kind and error code are now `waits-for-cycle`. `progress` is `{counts}` only, so `progress.state` is gone.
+* Readiness JSON's `blocked` tag is now `waiting`, and the stage counts key `blocked` is now `waiting`. Item state shows as `open` where it said `backlog`. `--state` takes `open` or `parked`, and still accepts `backlog`. Imports accept `open` and `backlog`.
+* `item add`, `item edit`, `thread add` and `thread edit` no longer accept `-r`, `--repository` or `--no-repository`. Item and thread JSON no longer has `repositories`, and repository JSON no longer has `installation`. `repository show` returns only the repository record, because its item and thread lists came from the removed sets. Imports that carry `repositories` on an item or thread, or `installation` on a repository, are refused, and the error names the key. The needs list no longer reports dangling repositories on items or threads.
+* `item add` and `item edit` no longer accept `--size` or `--no-size`. Item JSON no longer has `size`. Imports that carry a `size` key are refused, and the error names the key. The app's edit contract drops the `size` field.
+* `item archive` and `thread ready --include-archived` are removed. Imports that carry an `archived` key, or store done on a parent, are refused. Item JSON no longer has `archived` or `reopened`. `item reopen` refuses parents, with error `parent`, and items that aren't done, with `not-done`. A waits-for link between an item and its ancestor or descendant is refused with `lineage-link`.
+* readiness loses `in-review` and `unverified`, and a wait's `why` loses them too. Stage loses `in-review`. `progress.counts` loses `in_review`, and `done` counts only done leaves. `needs` no longer lists `unverified`. `item done --commit` and `import` refuse unmerged or unknown commits with code `unmerged`, and `doctor` adds `commits`. Rust callers:
+* **core:** Rust callers must use `ready::ReadinessEvaluator` for the former `ready::Readiness` calculator, `ready::Readiness` for `ready::Status`, `ready::ThreadReadiness` for `ready::ThreadStatus`, and `model::Role::Leaf` for `model::Role::Item`. The public CLI `args::StateWord` is a validated newtype rather than an enum and no longer implements `clap::ValueEnum`; construct it through `TryFrom<ItemState>` instead of its former variants. `import::State` remains a compatibility re-export of `model::ItemState`. JSON retains the `status` key and `item` leaf role, and `--state` continues to accept only `backlog` and `parked`.
+* preserve scoped writes and report internal import refusals ([#151](https://github.com/iExalt/acyclic/issues/151))
+* guard tracker setup and archive lifecycle ([#149](https://github.com/iExalt/acyclic/issues/149))
+
+### Features
+
+* add initiative records as the top level, and require every item to have a parent ([230d77f](https://github.com/iExalt/acyclic/commit/230d77fc556863dc4d05ebd83fd37b5c42c5114d))
+* add the canceled state ([47747ce](https://github.com/iExalt/acyclic/commit/47747ce63e0d916313a593f71e7d8427e237815f))
+* **app:** add an initiative switcher and group the lists under initiatives ([5f3bf7a](https://github.com/iExalt/acyclic/commit/5f3bf7ad0cb79b440bfde15944d64009ea9630f7))
+* **app:** glide the Map's tiles to their new places and wait out a gesture before redrawing ([#197](https://github.com/iExalt/acyclic/issues/197)) ([3b2989e](https://github.com/iExalt/acyclic/commit/3b2989e5257ef91f5896df6d1839657668f4ce0c))
+* **app:** scope the Map, Threads view and outline to the initiative in context ([891b990](https://github.com/iExalt/acyclic/commit/891b99025c31f4ff2b44b91dc983ffdfff872818))
+* **app:** show work that crosses initiatives as stubs ([266dced](https://github.com/iExalt/acyclic/commit/266dced859825798a02bdae56bcbf0ab941480f0))
+* **app:** slide boxes into the room a closed box gives up ([#198](https://github.com/iExalt/acyclic/issues/198)) ([6a7a207](https://github.com/iExalt/acyclic/commit/6a7a2076b92234cc8d821d0d74abeec942f9fb2b))
+* check commit evidence when it is written, not on every read ([db5d246](https://github.com/iExalt/acyclic/commit/db5d246de034ecfbd28a07c4c12bac7b118e69c5))
+* **core:** run the store on gix, with no git executable ([#165](https://github.com/iExalt/acyclic/issues/165)) ([aefc921](https://github.com/iExalt/acyclic/commit/aefc921dc12c732cb42773f2f00d521e0da57cbc))
+* derive a parent's done from its leaves and retire archiving ([44e38aa](https://github.com/iExalt/acyclic/commit/44e38aa4931457d3afd901a96e18529ea599ea51))
+* make titles unique among unfinished items within an initiative ([596e127](https://github.com/iExalt/acyclic/commit/596e127ad7fe81f79894f0d14d49a1f6ec6f7070))
+* new children inherit their siblings' thread and moves never change one ([c4b5eff](https://github.com/iExalt/acyclic/commit/c4b5effc43e519092db36c9ce468c66f474425da))
+* order ready work by id ([36400f4](https://github.com/iExalt/acyclic/commit/36400f47c268a1b3c4b96be616c52ed5972a3261))
+* read a task in no thread as a thread of one, so it is ready and claimed like any thread ([646dc9e](https://github.com/iExalt/acyclic/commit/646dc9e98c3dad816f8f4ced3b712e49689926ae))
+* read a thread whose lease ran out as stalled, and renew leases after a batch's writes ([0d57a5b](https://github.com/iExalt/acyclic/commit/0d57a5bf4ffc2bcd50fe55be0907bb520699ad0d))
+* retire item and thread repository sets and repository installation ([419e109](https://github.com/iExalt/acyclic/commit/419e109c44e5a258e817ba556386228e038fbc5c))
+* retire the item size field and let retired fields lie dormant ([2ca7727](https://github.com/iExalt/acyclic/commit/2ca7727ef027ced0b89caa74213c447919dc4447))
+* retire thread heads and word Needs you once in core ([ac8e55d](https://github.com/iExalt/acyclic/commit/ac8e55da245271b7f3d30f19d7f88c3365d6def1))
+* say notes, readiness and record, and retire a parent's progress state ([e78f666](https://github.com/iExalt/acyclic/commit/e78f6663aec78724ec4d1c23766d4ec1b6440bbb))
+* say waiting for blocked work and open for backlog ([dcca254](https://github.com/iExalt/acyclic/commit/dcca254f5797935a53ee90ac0f2fa4288fe9f89f))
+* show a task in no thread as a task alone in the app, and quiet the stalled look ([fe6a611](https://github.com/iExalt/acyclic/commit/fe6a6114bc74573ceec7b597cb70284d4449699b))
+
+
+### Bug Fixes
+
+* **app:** clarify task labels and fit full Map titles ([0fba049](https://github.com/iExalt/acyclic/commit/0fba04921cf1324bf3de50b1a1fe66be28813813))
+* **app:** keep search results visible and preserve map pins ([#160](https://github.com/iExalt/acyclic/issues/160)) ([c1b313c](https://github.com/iExalt/acyclic/commit/c1b313c7ef11632ba22f197ac85d8cac487bb5fe))
+* **app:** preserve navigation history and prioritize exact search matches ([#159](https://github.com/iExalt/acyclic/issues/159)) ([99a1cdc](https://github.com/iExalt/acyclic/commit/99a1cdcbf9cd64d7a78ac20cefd1aea8d00ea103))
+* **app:** refine phone forms, notices, and touch interactions ([37c1e38](https://github.com/iExalt/acyclic/commit/37c1e38df1251f5325a98b3fd000f8166098440f))
+* **app:** say when the Map has settled, and wait on it in the journeys ([#191](https://github.com/iExalt/acyclic/issues/191)) ([28810a7](https://github.com/iExalt/acyclic/commit/28810a72e1fda0970b3d5c13a5880d75e843a33e))
+* **app:** stabilize map packing, framing, and thread order ([1abe43a](https://github.com/iExalt/acyclic/commit/1abe43af2cf7cb99a03e4928de8c30c4990e6cb9))
+* clarify claim renewal and safe clock recovery ([#153](https://github.com/iExalt/acyclic/issues/153)) ([a70d00b](https://github.com/iExalt/acyclic/commit/a70d00b42b5a6a2b5689610f8867cfcbd9632d72))
+* describe import updates and tracker sync results ([#156](https://github.com/iExalt/acyclic/issues/156)) ([f2b8ac4](https://github.com/iExalt/acyclic/commit/f2b8ac4ec48843e6f8dc54d37e87c25e68fa2040))
+* explain the six-character minimum when an id ending is too short ([#179](https://github.com/iExalt/acyclic/issues/179)) ([10ae37b](https://github.com/iExalt/acyclic/commit/10ae37b223d9e43219a5c81f188ac0b28a2e4c69))
+* give crates made from the template kebab-case package names ([#182](https://github.com/iExalt/acyclic/issues/182)) ([b6a0db0](https://github.com/iExalt/acyclic/commit/b6a0db0162eaf6da7b35f471b12812604a8001f6))
+* guard app undo, conflict choices, and need acknowledgments ([703cf8a](https://github.com/iExalt/acyclic/commit/703cf8a4cff4fd052a1d24ee42ddcb64dfcd8a8e))
+* guard tracker setup and archive lifecycle ([#149](https://github.com/iExalt/acyclic/issues/149)) ([9d3e4cd](https://github.com/iExalt/acyclic/commit/9d3e4cd3a5cd0e25dcbae054a7f609c0643cb6f9))
+* hold only the pressed remove button and leave no hover tint after a tap ([#187](https://github.com/iExalt/acyclic/issues/187)) ([bb1cd54](https://github.com/iExalt/acyclic/commit/bb1cd545cd9f03bc9f2660a662e733dbf5783575))
+* keep fetches from prompting on a terminal ([#180](https://github.com/iExalt/acyclic/issues/180)) ([709af2a](https://github.com/iExalt/acyclic/commit/709af2a80a9d114cb7af6cbc8a73d084ef261cf9))
+* keep item status and error explanations consistent ([#157](https://github.com/iExalt/acyclic/issues/157)) ([9a841ed](https://github.com/iExalt/acyclic/commit/9a841ed6374d5db590f9ad9fd0271ab9a1f70c32))
+* keep the fixture generator's threads from forming cycles and shape small fixtures like large ones ([#190](https://github.com/iExalt/acyclic/issues/190)) ([9accd8d](https://github.com/iExalt/acyclic/commit/9accd8d0fac9f823ad35eda1d48be8aae10b6164))
+* let pick mode take typing to find the target and round the Needs you focus ring ([#185](https://github.com/iExalt/acyclic/issues/185)) ([48f92c2](https://github.com/iExalt/acyclic/commit/48f92c2af98e426a0dc386cba6d3036f7e023906))
+* preserve scoped writes and report internal import refusals ([#151](https://github.com/iExalt/acyclic/issues/151)) ([62cc12b](https://github.com/iExalt/acyclic/commit/62cc12bd7a0e7272e94b6106689a9cf8d11cde1d))
+* report write refusals and conflict choices accurately ([#155](https://github.com/iExalt/acyclic/issues/155)) ([3b3eb25](https://github.com/iExalt/acyclic/commit/3b3eb25a8c3fe17fb03d51b714294d016584d073))
+* restore actionable tracker setup and diagnostics ([#152](https://github.com/iExalt/acyclic/issues/152)) ([e0fafdb](https://github.com/iExalt/acyclic/commit/e0fafdb3a60a15306842c8a13f7db9ac8619dc0b))
+* stop a GET from creating the push key ([#178](https://github.com/iExalt/acyclic/issues/178)) ([a9cb699](https://github.com/iExalt/acyclic/commit/a9cb699959852d5d3257a91bce4811e48dd17c92))
+* wrap long code in notes, fill a project's whole row on hover, and line up the New item header with the item panel's ([#188](https://github.com/iExalt/acyclic/issues/188)) ([1f89e9c](https://github.com/iExalt/acyclic/commit/1f89e9ce168d12bdb78791d1b8ede992998207fd))
+
+
+### Performance Improvements
+
+* **core:** touch a pack once when a sync rewrites what it fetched ([38ad06e](https://github.com/iExalt/acyclic/commit/38ad06e72f7f930a9ff50b1668e2cba61cb5d30f))
+* skip the whole-tracker cycle and lineage walks when a change set writes no parent or link ([#194](https://github.com/iExalt/acyclic/issues/194)) ([cb38ef5](https://github.com/iExalt/acyclic/commit/cb38ef568cc3bdc19ae815cb1dc7fea913dd5711))
+
+
+### Code Refactoring
+
+* **core:** align tracker terminology ([d510ed2](https://github.com/iExalt/acyclic/commit/d510ed2a9d74fdd40deea8a5a1a870f59fdfe887))
+
 ## [0.6.0](https://github.com/iExalt/acyclic/compare/v0.5.2...v0.6.0) (2026-11-03)
 
 
