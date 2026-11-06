@@ -406,8 +406,9 @@ before what went wrong.
   line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
   at a glance (the user's ask).
 - **Stubs name what crosses.** A wait from an unfinished item to an item in another initiative leaves the plan drawn,
-  so no edge shows it; the item's tile, or the folded box that hides it, carries a stub instead: a dashed chip at its
-  foot, in the signal's colour as a link across boxes is (the user did not object to the mock's dashed amber), naming
+  so no edge shows it; the item's tile, or the folded box that hides it, carries a stub instead: a quiet dashed chip at its
+  foot (the user asked for it quieter than the mock's amber: muted text and dash, so it draws less than a real block),
+  its arrow alone in the signal's colour, as a link across boxes is, naming
   the initiative and the item, `Initiative: item`, cut to the tile with an ellipsis, with "+n" for each further one. A
   hover (a title on the Map) names them all in full, and a tap opens the first, in its own initiative. The tile grows
   by the chip's room, its title and marks centred above it, so the layout is as before with taller tiles; an open
@@ -518,8 +519,8 @@ before what went wrong.
 - 2026-11-04: source updates that only shrink top-level boxes repack them automatically; chevron folds still hold their
   places, and Undo restores the earlier source's packing.
 - 2026-11-06: work that crosses initiatives is shown, not drawn: stubs on the Map and in the Threads view (see "Stubs
-  name what crosses" and the Threads view's trays), and the Map's no-link column is Unlinked. The look reuses the signal
-  and the mock's dashed chips, to which the user did not object.
+  name what crosses" and the Threads view's trays), and the Map's no-link column is Unlinked. The look is the mock's dashed chips made quieter at the
+  user's ask: muted text and dash, the arrow alone in the signal's colour.
 - 2026-11-06: the initiative switcher is a sidebar section, and a phone's Outline sheet opens on it ("A: sidebar
   list"), the lists group their rows under initiative sub-headings with a trailing label on a phone ("Grouped"), Up
   next fits the first view at 1280 x 800, and New item defaults to the initiative in context; the user chose them. The

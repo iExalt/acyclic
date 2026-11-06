@@ -188,7 +188,7 @@ them, so they stand in columns before the box's graph. It says nothing of thread
 _Avoid_: Any time (for items), loose (kept for a task alone in its thread)
 
 **Stub**:
-How a view names work in another initiative that it doesn't draw: a dashed chip in the signal's colour, naming the
+How a view names work in another initiative that it doesn't draw: a quiet dashed chip, its arrow in the signal's colour, naming the
 initiative and the item or thread, that opens it. The Map has one on a tile (or a folded box) whose item waits for
 work in another initiative; the Threads view has one on a thread's tile for a thread in an earlier wave there, and one
 for each of its tasks in another initiative.

@@ -54,7 +54,10 @@ export function ThreadsView({ view, lines, picked, wide, onPick, onOpen }: Threa
     // A stub opens what it names, in its own initiative; the full name is its title, where the text is cut short.
     const stub = (key: string, lead: string, where: string, name: string, open: () => void) => (
       <button key={key} type="button" className="stub" title={`${lead}${where}: ${name}`} onClick={open}>
-        <span aria-hidden="true">{lead === "" ? "↗ " : `${lead.trimEnd()} ↗ `}</span>
+        <span aria-hidden="true">{lead}</span>
+        <span className="arrow" aria-hidden="true">
+          ↗{" "}
+        </span>
         <span className="visually-hidden">{lead}</span>
         <span className="where">{where}: </span>
         <span className="named">{name}</span>

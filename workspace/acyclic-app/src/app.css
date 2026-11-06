@@ -961,8 +961,9 @@ button.project-title {
 .thread-tile .looped {
   color: var(--signal);
 }
-/* What a thread has in another initiative, in a tray under its tile that carries on its stripe: a stub for each, dashed
-   in the signal's colour as a link across boxes is on the Map, which opens what it names. */
+/* What a thread has in another initiative, in a tray under its tile that carries on its stripe: a stub for each, a
+   quiet dashed chip, muted, so it draws less than a real block, with only its arrow in the signal's colour as a link
+   across boxes is on the Map; it opens what it names. */
 .has-away > .thread-tile {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -988,14 +989,17 @@ button.project-title {
   min-height: 28px;
   padding: 2px 8px;
   align-items: center;
-  border: 1px dashed var(--signal);
+  border: 1px dashed var(--muted);
   border-radius: 6px;
   background: transparent;
-  color: var(--signal);
+  color: var(--muted);
   font-size: 0.8rem;
   font-weight: 600;
   text-align: left;
   white-space: pre;
+}
+.away .stub .arrow {
+  color: var(--signal);
 }
 .away .stub .where {
   font-weight: 750;

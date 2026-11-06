@@ -107,11 +107,11 @@ describe("a stub for waits outside the plan", () => {
   it("names the initiative and the item, cut to the chip, with the rest counted and every one in the hover", () => {
     const one = metricsOf({ ...leaf, outside: [gate] }, fonts).stub;
     expect(one?.target).toBe("g");
-    expect(one?.text.startsWith("↗ Home lab: ")).toBe(true);
+    expect(one?.text.startsWith("Home lab: ")).toBe(true);
     expect(one?.text.endsWith("…")).toBe(true);
     expect(one?.full).toBe("Home lab: Reserve the ingress address");
     const short = { id: "s", title: "Ping", initiative: "Lab" };
-    expect(metricsOf({ ...leaf, outside: [short] }, fonts).stub?.text).toBe("↗ Lab: Ping");
+    expect(metricsOf({ ...leaf, outside: [short] }, fonts).stub?.text).toBe("Lab: Ping");
     const many = metricsOf({ ...leaf, outside: [short, gate, { ...gate, id: "h" }] }, fonts).stub;
     expect(many?.text.endsWith(" +2")).toBe(true);
     expect(many?.target).toBe("s");

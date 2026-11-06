@@ -351,7 +351,7 @@ describe("a stub", () => {
     const stub = shot(true).find((one) => one.classes.includes("stub"));
     expect(stub?.data).toMatchObject({
       id: "stub a",
-      label: "↗ Home lab: Far",
+      label: "Home lab: Far",
       target: "far",
       full: "Home lab: Far",
       layer: 1,

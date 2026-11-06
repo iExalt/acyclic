@@ -16,12 +16,13 @@ export const LINE_HEIGHT = 16.25;
 export const STUB_CHIP = 20;
 export const STUB_ROOM = 30;
 export const STUB_INSET = 8;
-/** The room the chip's dashes and its arrow take from its text at either end. */
-const STUB_PAD = 8;
+/** Where a chip's text starts, after its arrow, and the room it leaves at the right. */
+export const STUB_TEXT_LEFT = 26;
+const STUB_TEXT_RIGHT = 8;
 
 /** What a stub says of the waits that leave the initiative: one line, and everything it names for a hover. */
 export interface StubLine {
-  /** The first wait, cut to the chip, and how many more there are. */
+  /** The first wait, cut to the chip beside its arrow, and how many more there are. */
   text: string;
   /** Every wait named in full, one a line. */
   full: string;
@@ -84,9 +85,10 @@ export function stubOf(
   const first = outside[0];
   if (first === undefined) return null;
   const more = outside.length > 1 ? ` +${outside.length - 1}` : "";
-  const room = width - 2 * STUB_INSET - 2 * STUB_PAD - measure(more);
+  const room = width - 2 * STUB_INSET - STUB_TEXT_LEFT - STUB_TEXT_RIGHT - measure(more);
   return {
-    text: cut(`↗ ${first.initiative}: ${first.title}`, room, measure) + more,
+    // The arrow is drawn apart, in the signal's colour, which a label's one colour can't give.
+    text: cut(`${first.initiative}: ${first.title}`, room, measure) + more,
     full: outside.map((one) => `${one.initiative}: ${one.title}`).join("\n"),
     target: first.id,
   };
