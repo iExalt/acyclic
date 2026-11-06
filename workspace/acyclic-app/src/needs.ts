@@ -198,7 +198,7 @@ function viewOf(
       };
     }
     case "unthreaded":
-      return { ...base, text: summary, detail: item === null ? null : titled(item), note: EDIT_THREAD };
+      return { ...base, text: summary, detail: null, note: EDIT_THREAD };
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix);

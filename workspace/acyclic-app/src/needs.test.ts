@@ -141,7 +141,7 @@ describe("needView", () => {
     const loose = needView(example("unthreaded"), none);
     expect(loose).toMatchObject({
       text: "Loose needs a thread",
-      detail: "Loose",
+      detail: null,
       note: "Open it to choose its thread in its editor",
     });
     expect(needView(example("done-waiting"), none).text).toBe("Early is done but waits for Late");
