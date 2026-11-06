@@ -313,19 +313,15 @@ fn many_small_writes_stay_packed_and_complete_without_git() {
             &mac,
             &format!("item add --id 01900000-0000-7000-8000-00000000c{n:03x} --title c{n}"),
         );
+        // A running repack can leave later writes' packs behind; settle it before the next write.
+        wait_for_upkeep_to_end(&mac);
     }
-    // Upkeep may run in the background, so give it time; the packs of 12 writes would number 12 without it.
     let packs = mac.join(".git/objects/pack");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while count_files(&packs, "pack") > 4 {
-        assert!(
-            Instant::now() < deadline,
-            "the store never repacked: {} packs",
-            count_files(&packs, "pack")
-        );
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    wait_for_upkeep_to_end(&mac);
+    assert!(
+        count_files(&packs, "pack") <= 3,
+        "the store never repacked: {} packs",
+        count_files(&packs, "pack")
+    );
     let listed = tripwire.run(&home, &mac, "item list").to_string();
     for n in 0..12 {
         assert!(listed.contains(&format!("c{n}\"")), "repacking lost c{n}: {listed}");
