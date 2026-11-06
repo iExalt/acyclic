@@ -6,7 +6,7 @@ import { Fragment, type ReactNode } from "react";
 import type { Counts, Item } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { ChevronRight, Icon } from "./icons";
-import { type Group, groupRows, groupTitle, type ListScope, rowLabel, shownGroups } from "./initiatives";
+import { fitsFirstView, type Group, groupRows, groupTitle, type ListScope, rowLabel, shownGroups } from "./initiatives";
 import type { Line } from "./lines";
 import { countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
@@ -97,15 +97,29 @@ export function Overview({
       </li>
     );
   };
-  /** `rows` under their initiatives' headings when wide, else one list; at most `limit` rows show, the rest counted. */
-  const listed = <T,>(
+  /** `rows` grouped, and the first `limit` of them, within `fits` once headings take room, as the list shows them. */
+  const laid = <T,>(
     rows: readonly T[],
     of: (row: T) => ReadonlySet<string | null>,
     limit: number,
-    row: (one: T, label: string | null) => ReactNode,
+    fits?: (rows: number, groups: number) => boolean,
   ) => {
     const groups = groupRows(rows, of, scope.order, scope.context);
-    const shown = shownGroups(groups, limit);
+    const shown = shownGroups(groups, limit, headed ? fits : undefined);
+    // A thread in several initiatives is shown under each, and counted once.
+    return { groups, shown, count: new Set(shown.flatMap((group) => group.rows)).size };
+  };
+  const needsLaid = laid(needs, scope.ofNeed, needsShown);
+  const workingLaid = laid(working, scope.ofThread, THREADS_SHOWN);
+  // Up next stays whole in the first view at 1280 x 800, so headings count against its rows.
+  const nextLaid = laid(next, scope.ofThread, THREADS_SHOWN, fitsFirstView);
+  /** The rows laid out as `laid` says: under their initiatives' headings when wide, else one list with labels. */
+  const listed = <T,>(
+    layout: ReturnType<typeof laid<T>>,
+    of: (row: T) => ReadonlySet<string | null>,
+    row: (one: T, label: string | null) => ReactNode,
+  ) => {
+    const { groups, shown } = layout;
     if (!headed)
       return (
         <ul className="rows">
@@ -156,7 +170,7 @@ export function Overview({
             Nothing needs you. Conflicts, cycles and done work still waiting on open work show here.
           </p>
         ) : (
-          listed(needs, scope.ofNeed, needsShown, (need, label) => {
+          listed(needsLaid, scope.ofNeed, (need, label) => {
             const view = needView(need, lines, titleOf);
             return (
               <li key={view.key}>
@@ -181,7 +195,7 @@ export function Overview({
             );
           })
         )}
-        {more(needsShown, needs.length, "in Needs you", () => onNeeds())}
+        {more(needsLaid.count, needs.length, "in Needs you", () => onNeeds())}
       </section>
 
       <div className="overview-pair">
@@ -193,9 +207,9 @@ export function Overview({
           {working.length === 0 ? (
             <p className="empty">No thread has work in progress or in review.</p>
           ) : (
-            listed(working, scope.ofThread, THREADS_SHOWN, (id, label) => thread(id, label))
+            listed(workingLaid, scope.ofThread, (id, label) => thread(id, label))
           )}
-          {more(THREADS_SHOWN, working.length, "in Threads", () => onView("threads"))}
+          {more(workingLaid.count, working.length, "in Threads", () => onView("threads"))}
         </section>
 
         <section className="overview-section" aria-labelledby="overview-next">
@@ -210,9 +224,9 @@ export function Overview({
           {next.length === 0 ? (
             <p className="empty">No thread has work ready to start.</p>
           ) : (
-            listed(next, scope.ofThread, THREADS_SHOWN, (id, label) => thread(id, label))
+            listed(nextLaid, scope.ofThread, (id, label) => thread(id, label))
           )}
-          {more(THREADS_SHOWN, next.length, "in Threads", () => onView("threads"))}
+          {more(nextLaid.count, next.length, "in Threads", () => onView("threads"))}
         </section>
       </div>
 
@@ -229,9 +243,8 @@ export function Overview({
           <p className="empty">No projects yet: add an item, and work inside it.</p>
         ) : (
           listed(
-            outline.projects,
+            laid(outline.projects, (project) => scope.ofProject(project.id), Number.POSITIVE_INFINITY),
             (project) => scope.ofProject(project.id),
-            Number.POSITIVE_INFINITY,
             (project, label) => {
               const progress = items.get(project.id)?.progress;
               return (

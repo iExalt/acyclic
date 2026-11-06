@@ -120,16 +120,21 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   the busiest first so the order stays put as the choice changes. Choosing a row puts that initiative in context and
   opens nothing; the row is filled and its count in the ink, as the muted count read 4.3:1 on the fill in light. The
   initiative in context is kept in the navigation place and the address (`?initiative=`), so a reload keeps it, and
-  until one is chosen it is the first row. It orders the lists, is where New item goes, and marks the switcher; it does
-  not yet scope the Map or the Threads view.
+  until one is chosen it is the first row. A history entry holds its initiative: Back and Forward restore it, except for
+  an entry written before one was chosen, which leaves the one in context. The address bar's link carries it; the link
+  copied from an item's or a thread's panel does not. It orders the lists, is where New item goes, and marks the
+  switcher; it does not yet scope the Map or the Threads view.
 - **The lists group by initiative** (the user's pick, "Grouped"): the Overview's Needs you, In progress, Up next and
   projects, and Needs you's view, cover every initiative, the one in context first, the rest in the switcher's order,
   then rows in none under "No initiative". Wide, a sub-heading names each group with its count and the rows carry no
   label; on a phone, with no room for headings, each row ends in its initiative's name in the muted ink instead. A
   thread with tasks in several initiatives is under each, and a phone's label names the first with the count of the
   rest ("Big +1"). An entry takes its item's initiative, else its thread's. Wide, the Overview's thread and project
-  titles are one line, cut short with the whole on hover, so Up next's rows have a known height and its whole block,
-  eight rows and their headings, fits the first view at 1280 x 800.
+  titles are one line, cut short with the whole on hover, so Up next's rows have a known height and its whole block
+  fits the first view at 1280 x 800. That holds with any number of initiatives because Up next is bounded: each row
+  takes 60 px and each heading 44, and rows stop where they would end past 770 px, so eight rows under up to three
+  headings show, and fewer under more (one row under each of six), the rest counted in "more in Threads". A phone has
+  no headings, so only the eight rows apply.
 - **The Overview, wide:** Needs you beside In progress, with Up next under it, once the Overview is 680 px wide, a 976
   px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
   stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px

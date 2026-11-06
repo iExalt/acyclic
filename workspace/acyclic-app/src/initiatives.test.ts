@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contextOf,
   contextTitle,
+  fitsFirstView,
   groupRows,
   groupTitle,
   needInitiatives,
@@ -137,6 +138,26 @@ describe("shownGroups", () => {
     expect(shownGroups(groups, 3)).toEqual([{ initiative: "a", rows: [1, 2, 3] }]);
     expect(shownGroups(groups, 99)).toEqual(groups);
   });
+
+  it("stops where the rows and headings no longer fit, so Up next stays in the first view however many initiatives", () => {
+    const many = Array.from({ length: 8 }, (_, at) => ({ initiative: `i${at}`, rows: [at] }));
+    const shown = shownGroups(many, 8, fitsFirstView);
+    expect(shown.length).toBeLessThan(8);
+    expect(fitsFirstView(8, 3)).toBe(true);
+    expect(fitsFirstView(8, 4)).toBe(false);
+    expect(fitsFirstView(shown.length, shown.length)).toBe(true);
+    // Eight rows in two groups, as on a real tracker, are all shown.
+    expect(
+      shownGroups(
+        [
+          { initiative: "a", rows: [1, 2, 3, 4, 5] },
+          { initiative: "b", rows: [6, 7, 8] },
+        ],
+        8,
+        fitsFirstView,
+      ),
+    ).toHaveLength(2);
+  });
 });
 
 describe("rowLabel, a phone's trailing label for a row", () => {
@@ -151,8 +172,9 @@ describe("rowLabel, a phone's trailing label for a row", () => {
     expect(rowLabel([], titles)).toBe("No initiative");
   });
 
-  it("reads as the id when the title isn't known, rather than as nothing", () => {
-    expect(rowLabel(["gone"], titles)).toBe("gone");
+  it("reads No initiative for an initiative the titles lack, as the headings group it", () => {
+    expect(rowLabel(["gone"], titles)).toBe("No initiative");
+    expect(rowLabel(["big", "gone"], titles)).toBe("Big +1");
   });
 
   it("names the one in context first when a row is in several, counting the rest", () => {
@@ -184,6 +206,31 @@ describe("what a thread and an entry are in", () => {
     expect(needInitiatives(need({ threads: [{ id: "t1" }, { id: "t2" }] }), model, of)).toEqual(
       new Set(["big", "small", null]),
     );
+  });
+
+  describe("an entry naming its items in an array", () => {
+    const of = threadInitiatives(model);
+    const need = (rest: Record<string, unknown>): Need => ({ kind: "x", ...rest });
+
+    it("`items`, as a cycle does, goes under each item's initiative, the plan saying where they are", () => {
+      expect(needInitiatives(need({ items: [{ id: "a" }, { id: "s" }] }), model, of)).toEqual(
+        new Set(["big", "small"]),
+      );
+    });
+
+    it("`dependents` and `open`, as done work waiting on open work does, go under each one's own", () => {
+      expect(
+        needInitiatives(
+          need({ dependents: [{ id: "x", initiative: "big" }], open: [{ id: "l", initiative: null }] }),
+          model,
+          of,
+        ),
+      ).toEqual(new Set(["big", null]));
+    });
+
+    it("`items` of a duplicate title, which two initiatives may hold, go under the initiative they are in", () => {
+      expect(needInitiatives(need({ items: [{ id: "s" }, { id: "e2" }] }), model, of)).toEqual(new Set(["small"]));
+    });
   });
 
   it("puts an entry about nothing the plan holds with the rows in none", () => {

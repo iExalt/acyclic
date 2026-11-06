@@ -108,38 +108,60 @@ export function groupRows<T>(
 
 /**
  * The first `limit` rows across `groups`, in order, each group keeping its heading only while it has rows shown: what
- * a list shows before it says how many more.
+ * a list shows before it says how many more. Rows stop where `fits(rows, groups)`, asked of the rows and headings
+ * shown with the next row added, says they no longer fit.
  */
-export function shownGroups<T>(groups: readonly Group<T>[], limit: number): Group<T>[] {
-  let left = limit;
+export function shownGroups<T>(
+  groups: readonly Group<T>[],
+  limit: number,
+  fits: (rows: number, groups: number) => boolean = () => true,
+): Group<T>[] {
   const out: Group<T>[] = [];
+  let rows = 0;
   for (const group of groups) {
-    if (left <= 0) break;
-    out.push({ ...group, rows: group.rows.slice(0, left) });
-    left -= group.rows.length;
+    const shown: T[] = [];
+    for (const row of group.rows) {
+      if (rows >= limit || !fits(rows + 1, out.length + 1)) break;
+      shown.push(row);
+      rows += 1;
+    }
+    if (shown.length === 0) break;
+    out.push({ ...group, rows: shown });
+    if (shown.length < group.rows.length) break;
   }
   return out;
 }
 
 /**
+ * Whether `rows` rows under `groups` headings of Up next fit the first view at 1280 x 800: measured, each row takes
+ * 60 px and each heading 44 px, and eight rows under two headings end at 698 px, so a bottom of at most 770 px (30 px
+ * short of the fold) allows eight rows under three headings, or fewer rows under more; the rest is counted in "more".
+ */
+export const fitsFirstView = (rows: number, groups: number) => 60 * rows + 44 * groups <= 640;
+
+/**
  * A row's trailing label on a phone, where there are no headings: its initiative's title, the first when it is in
- * several with a count of the rest; "No initiative" for one in none. An initiative the titles lack reads as its id.
+ * several with a count of the rest; "No initiative" for one in none, or in one the titles lack.
  */
 export function rowLabel(
   initiatives: ReadonlySet<string | null> | readonly (string | null)[],
   titles: ReadonlyMap<string, string>,
   context: string | null = null,
 ): string {
-  const ids = [...new Set(initiatives)];
+  // An initiative the titles lack is in none, as the headings group it.
+  const ids = [...new Set([...initiatives].map((id) => (id !== null && titles.has(id) ? id : null)))];
   // The one in context reads first, then the rest as given, and none last.
   const rank = (id: string | null) => (id === null ? 2 : id === context ? 0 : 1);
   ids.sort((a, b) => rank(a) - rank(b));
   const first = ids[0] ?? null;
-  const name = first === null ? NO_INITIATIVE : (titles.get(first) ?? first);
+  const name = first === null ? NO_INITIATIVE : (titles.get(first) ?? NO_INITIATIVE);
   return ids.length > 1 ? `${name} +${ids.length - 1}` : name;
 }
 
-/** The initiative a needs-you entry is about: its item's, else its thread's tasks', else none. */
+/**
+ * The initiatives a needs-you entry is about: those of every item it names, whether as `item`, or among its `items`,
+ * `dependents` and `open`, and of the tasks of every thread it names; none when it names nothing the plan holds.
+ */
 export function needInitiatives(
   need: Need,
   model: Model | null,
@@ -149,17 +171,19 @@ export function needInitiatives(
     typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string"
       ? (value as { id: string; initiative?: unknown })
       : null;
-  const item = row(need.item);
-  if (item !== null) {
-    // The entry says where its item is; failing that, the plan does.
-    if (typeof item.initiative === "string") return new Set([item.initiative]);
-    if (item.initiative === null) return new Set([null]);
-    const known = model?.items.get(item.id);
-    if (known !== undefined) return new Set([known.initiative]);
-  }
-  const threads = [need.thread, ...(Array.isArray(need.threads) ? need.threads : [])];
+  const list = (value: unknown) => (Array.isArray(value) ? value : []);
   const found = new Set<string | null>();
-  for (const thread of threads) {
+  for (const value of [need.item, ...list(need.items), ...list(need.dependents), ...list(need.open)]) {
+    const item = row(value);
+    if (item === null) continue;
+    // The entry says where its item is; failing that, the plan does.
+    if (typeof item.initiative === "string" || item.initiative === null) found.add(item.initiative);
+    else {
+      const known = model?.items.get(item.id);
+      if (known !== undefined) found.add(known.initiative);
+    }
+  }
+  for (const thread of [need.thread, ...list(need.threads)]) {
     const id = row(thread)?.id;
     for (const initiative of (id === undefined ? undefined : ofThread.get(id)) ?? []) found.add(initiative);
   }
