@@ -3973,13 +3973,17 @@ def labels_journey(browser, link, ids, titles):
 
     def check_labels(found):
         for node, title in zip(found["nodes"], titles):
-            assert re.sub(r"\s", "", title) in re.sub(r"\s", "", node["label"]), node
+            if node["id"] == ids[0]:
+                assert re.sub(r"\s", "", title) in re.sub(r"\s", "", node["label"]), node
             assert all(width <= node["textWidth"] + 1 for width in node["widths"]), node
             body, ink = node["body"], node["ink"]
             assert ink["x1"] >= body["x1"] - 1 and ink["x2"] <= body["x2"] + 1, node
             assert ink["y1"] >= body["y1"] - 1 and ink["y2"] <= body["y2"] + 1, node
         root, long, ready = found["nodes"]
         assert "Ready" in long["label"] and "Ready" in ready["label"], found
+        assert "…" in long["label"], long
+        assert abs(long["body"]["w"] - ready["body"]["w"]) < 0.5, found
+        assert abs(long["body"]["h"] - ready["body"]["h"]) < 0.5, found
         assert root["header"] > 72, root
         assert all(
             child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1
@@ -4000,6 +4004,10 @@ def labels_journey(browser, link, ids, titles):
             assert ink["x2"] <= found["viewport"]["width"] and ink["y2"] <= found["viewport"]["height"], found
             assert all("Overpass" in node["family"] for node in found["nodes"]), found
             check_labels(found)
+            tap_middle(page, view, ids[1])
+            inspector = page.get_by_test_id("inspector")
+            inspector.get_by_role("heading", name=titles[1], exact=True).wait_for()
+            inspector.get_by_role("button", name="Close", exact=True).click()
             point = page.get_by_test_id("map").evaluate(
                 r"""(m,id)=>{
                     const n=m.cy.getElementById(id), box=n.renderedBoundingBox({includeLabels:false}), rect=m.getBoundingClientRect();

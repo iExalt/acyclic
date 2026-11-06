@@ -1,5 +1,5 @@
 // The Map's labels and the room they need, shared by layout and drawing so titles never get laid out at one size and
-// rendered at another. Text wraps without losing characters, including a word or grapheme wider than the line.
+// rendered at another. Item titles are clamped to a common tile size; box headers grow with their content.
 
 import { countsText } from "../api";
 import { STAGE_WORDS } from "../stages";
@@ -9,6 +9,7 @@ import type { Kind, VisibleNode } from "./model";
 
 export const TILE_WIDTH = 200;
 export const MIN_NODE_HEIGHT = 64;
+export const ITEM_HEIGHT = 86;
 export const BASE_HEADER = 52;
 export const LINE_HEIGHT = 16.25;
 
@@ -58,22 +59,40 @@ export function metricsOf(
 ): LabelMetrics {
   const available = textWidth(node.kind, width);
   const title = node.title.replace(/`([^`]+)`/g, "$1");
-  const lines =
-    node.kind === "leaf"
-      ? [...wrap(title, available, fonts.regular), ...(node.stage === null ? [] : [STAGE_WORDS[node.stage]])]
-      : boxLines(node, title, available, fonts.bold);
-  const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
   const stub = node.kind === "box" ? null : stubOf(node.outside ?? [], width, fonts.regular);
   const reserve = stub === null ? 0 : STUB_ROOM;
+  const titleLines = Math.floor((ITEM_HEIGHT - reserve - 20) / LINE_HEIGHT) - (node.stage === null ? 0 : 1);
+  const lines =
+    node.kind === "leaf"
+      ? [
+          ...clampTitle(title, available, titleLines, fonts.regular),
+          ...(node.stage === null ? [] : [STAGE_WORDS[node.stage]]),
+        ]
+      : boxLines(node, title, available, fonts.bold);
+  const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
   return {
     width,
-    height: Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)) + reserve,
+    height:
+      node.kind === "leaf"
+        ? ITEM_HEIGHT
+        : Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)) + reserve,
     reserve,
     stub,
     header,
     textWidth: available,
     lines,
   };
+}
+
+/** Wrap a title, then fit an ellipsis to its last visible line without splitting a grapheme. */
+function clampTitle(title: string, width: number, limit: number, measure: Measure): string[] {
+  const lines = wrap(title, width, measure);
+  if (lines.length <= limit) return lines;
+  const shown = lines.slice(0, limit);
+  const tail = graphemes((shown.pop() ?? "").trimEnd());
+  while (tail.length > 0 && measure(tail.join("") + "…") > width) tail.pop();
+  shown.push(tail.join("").trimEnd() + "…");
+  return shown;
 }
 
 /** The one line a tile or folded box carries for its waits outside the plan: the first, "+n" for the rest. */
@@ -113,10 +132,6 @@ function boxLines(
 }
 
 function wrap(text: string, width: number, measure: Measure): string[] {
-  const segmenter =
-    typeof Intl.Segmenter === "undefined" ? null : new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  const graphemes = (value: string) =>
-    segmenter === null ? fallbackGraphemes(value) : [...segmenter.segment(value)].map(({ segment }) => segment);
   const out: string[] = [];
   for (const paragraph of text.split("\n")) {
     let line = "";
@@ -144,6 +159,12 @@ function wrap(text: string, width: number, measure: Measure): string[] {
     out.push(line);
   }
   return out.length === 0 ? [""] : out;
+}
+
+function graphemes(value: string): string[] {
+  const segmenter =
+    typeof Intl.Segmenter === "undefined" ? null : new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return segmenter === null ? fallbackGraphemes(value) : [...segmenter.segment(value)].map(({ segment }) => segment);
 }
 
 function fallbackGraphemes(value: string): string[] {
