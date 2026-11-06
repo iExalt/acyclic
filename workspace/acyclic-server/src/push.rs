@@ -172,15 +172,27 @@ impl Push {
         Self { inner: Arc::new(inner), trigger: OnceLock::new() }
     }
 
-    /// The server's VAPID public key, base64url, made on first use.
+    /// Makes and saves the server's VAPID key if there is none, so that [`Push::public_key`] only reads.
     ///
     /// # Errors
     ///
-    /// The key can't be read or written.
+    /// The key is garbled, or can't be written.
+    pub fn prepare(&self) -> Result<(), Refused> {
+        let _files =
+            self.inner.files.lock().map_err(|_| Refused("the push files are in use".into()))?;
+        self.inner.key().map(drop)
+    }
+
+    /// The server's VAPID public key, base64url, as saved: reading it makes nothing.
+    ///
+    /// # Errors
+    ///
+    /// The key isn't made yet (see [`Push::prepare`]) or is garbled.
     pub fn public_key(&self) -> Result<String, Refused> {
         let _files =
             self.inner.files.lock().map_err(|_| Refused("the push files are in use".into()))?;
-        let key = self.inner.key()?;
+        let key =
+            self.inner.saved_key()?.ok_or_else(|| Refused("the push key isn't made yet".into()))?;
         Ok(Base64UrlUnpadded::encode_string(&key.verifying_key().to_sec1_bytes()))
     }
 
@@ -503,16 +515,21 @@ impl Inner {
 
     /// The server's VAPID key, made and saved on first use. The caller holds [`Inner::files`].
     fn key(&self) -> Result<SigningKey, Refused> {
-        if let Some(saved) = self.load::<String>("vapid.key") {
-            let bytes = Base64UrlUnpadded::decode_vec(&saved)
-                .map_err(|_| Refused("vapid.key is garbled".into()))?;
-            return SigningKey::from_slice(&bytes)
-                .map_err(|_| Refused("vapid.key is garbled".into()));
+        if let Some(saved) = self.saved_key()? {
+            return Ok(saved);
         }
         let key = fresh_key();
         self.save("vapid.key", &Base64UrlUnpadded::encode_string(&key.to_bytes()))?;
         SigningKey::from_slice(&key.to_bytes())
             .map_err(|_| Refused("the new VAPID key is unusable".into()))
+    }
+
+    /// The saved VAPID key, if there is one. The caller holds [`Inner::files`].
+    fn saved_key(&self) -> Result<Option<SigningKey>, Refused> {
+        let Some(saved) = self.load::<String>("vapid.key") else { return Ok(None) };
+        let garbled = || Refused("vapid.key is garbled".into());
+        let bytes = Base64UrlUnpadded::decode_vec(&saved).map_err(|_| garbled())?;
+        SigningKey::from_slice(&bytes).map(Some).map_err(|_| garbled())
     }
 
     fn devices(&self) -> Vec<Subscription> {

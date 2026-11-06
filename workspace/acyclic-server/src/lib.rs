@@ -672,6 +672,10 @@ fn run(
         .build()
         .map_err(|err| failed("starting the runtime", err))?;
     let server = Arc::new(Server::new(config));
+    // Pushing without its key degrades to refusals, so a failure here doesn't stop the server.
+    if let Err(push::Refused(why)) = server.push.prepare() {
+        eprintln!("acyclic: push has no key: {why}");
+    }
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(bind)
             .await
