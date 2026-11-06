@@ -51,7 +51,7 @@ export const UNMEASURED: Fonts = { regular: () => 0, bold: () => 0 };
 
 /** How wide a node's label may be drawn: a tile's between its marks, a box's after its chevron. */
 export function textWidthOf(kind: Kind, width: number): number {
-  return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : BOX_TEXT_LEFT + 10));
+  return Math.max(40, width - (kind === "leaf" ? MARKS_LEFT + MARKS_RIGHT : BOX_TEXT_LEFT + MARKS_RIGHT));
 }
 
 export interface SceneEdge {

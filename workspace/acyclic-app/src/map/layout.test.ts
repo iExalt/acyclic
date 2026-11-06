@@ -178,7 +178,7 @@ describe("place", () => {
     expect(novelShort.source).not.toBe(medium.source);
     expect(novelShort.source).not.toBe(long.source);
     expect(medium.headers.get("a")).toBe(65);
-    expect(long.headers.get("a")).toBe(114);
+    expect(long.headers.get("a")).toBe(130);
     expect(novelShort.headers.get("a")).toBe(52);
     const run = (input: ReturnType<typeof prepare>) =>
       place(input.view, metricsCache, measured, PORTRAIT, () => true, input.source, input.sizes, input.headers);

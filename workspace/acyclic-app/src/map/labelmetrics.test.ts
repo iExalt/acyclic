@@ -19,7 +19,7 @@ describe("map label metrics", () => {
     const measured = metricsOf({ title, kind: "leaf", hidden: 0, stage: null, progress: null }, fonts);
     expect(normalized(measured.lines.join(""))).toBe(normalized(title));
     expect(measured.lines.some((line) => line.includes("🧑🏽‍🚀"))).toBe(true);
-    expect(measured.textWidth).toBe(126);
+    expect(measured.textWidth).toBe(156);
     expect(measured.height).toBeGreaterThan(64);
     expect(measured.height).toBeGreaterThanOrEqual(Math.ceil(measured.lines.length * 16.25 + 20));
     expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
