@@ -13,9 +13,12 @@ runs:
   using: composite
   steps:
     - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+    - id: profiles
+      run: echo "hash=$(sh scripts/profile-hash.sh)" >> "$GITHUB_OUTPUT"
+      shell: bash
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
-        key: ${{ inputs.target }}
+        key: ${{ inputs.target }}-${{ steps.profiles.outputs.hash }}
     - run: rustup target add "$TARGET"
       shell: bash
     # ring, under rustls, compiles C; a static build needs musl's compiler wrapper, for the runner's own architecture.
