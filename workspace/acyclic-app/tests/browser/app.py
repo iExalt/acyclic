@@ -3841,8 +3841,9 @@ def push_journey(context, page, env, origin, name, failures):
 
 
 # Each shard builds its own tracker and server, so none waits on another: the desktop journeys and WebKit's desktop, the
-# phone journeys with the notifying browser and WebKit's phone, the two small ones, and the 3,500-item one, whose tracker
-# takes a third of its time to build.
+# phone journeys that edit with the notifying browser and WebKit's phone, the two small ones with the phone's outline, deep-link
+# and history journeys, and the 3,500-item one, whose tracker takes a third of its time to build. The phone alone ran a third longer
+# than any other shard, so three of its journeys, which only read the plan, run beside the small ones.
 SHARDS = ("desktop", "phone", "small", "large")
 
 
@@ -4252,6 +4253,26 @@ def shard_run(shard):
                     failures.append(f"phone shrink: the page threw or logged errors: {errors}")
                 context.close()
 
+                # The phone's journeys that only read the plan: each opens its own pages or starts from the Map, and none
+                # leaves the tracker changed, so they hold on a tracker of their own as on the phone shard's.
+                plan, link, env, _ = serve(350)
+                name, view = "phone", VIEWS["phone"]
+                context, page, origin, errors = open_app(chromium, view, link, failures, name)
+                # What the phone shard's earlier journeys left: the plan as built, with the Map chosen. The outline's journey asserts that the
+                # first initiative is in context when it opens the switcher.
+                total = len(plan.items) + len(plan.elsewhere)
+                counted = page.get_by_test_id("item-count")
+                count = counted.inner_text() if counted.count() else str(total)
+                if count != str(total):
+                    failures.append(f"{name}: the page lists {count} items, expected {total}")
+                to_map(page)
+                outline_journey(page, view, plan, name, failures)
+                deep_link_journey(context, origin, view, plan, name, failures)
+                history_journey(context, origin, view, plan, name, failures)
+                if errors:
+                    failures.append(f"{name}: the page threw or logged errors: {errors}")
+                context.close()
+
                 chromium.close()
             elif shard == "large":
                 chromium = playwright.chromium.launch()
@@ -4299,10 +4320,13 @@ def shard_run(shard):
                     to_map(page)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
-                    outline_journey(page, view, plan, name, failures)
+                    # The phone's outline, deep-link and history journeys run in the small shard.
+                    if name == "desktop":
+                        outline_journey(page, view, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
-                    deep_link_journey(context, origin, view, plan, name, failures)
-                    history_journey(context, origin, view, plan, name, failures)
+                    if name == "desktop":
+                        deep_link_journey(context, origin, view, plan, name, failures)
+                        history_journey(context, origin, view, plan, name, failures)
                     command_journey(page, view, origin, plan, name, failures)
                     if name == "desktop":
                         cross_origin_journey(context, origin, env, name, failures)
