@@ -4,7 +4,7 @@
 // and none of this shows.
 
 import { type PointerEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
-import { type Detent, detentAfter, draggableFrom, firstHeight, type Sample, SLOP, velocity } from "./sheets";
+import { type Detent, detentAfter, draggableFrom, endOnRow, firstHeight, type Sample, SLOP, velocity } from "./sheets";
 
 export interface SheetDrag {
   detent: Detent;
@@ -33,15 +33,12 @@ export function useSheet(panel: RefObject<HTMLElement | null>, onClose: () => vo
     const measure = () => {
       const main = sheet.querySelector<HTMLElement>("[data-main]");
       // From the sheet's top, as if unscrolled, wherever in it the main thing sits.
-      const measured =
-        main === null
-          ? 0
-          : Math.ceil(
-              main.getBoundingClientRect().bottom -
-                sheet.getBoundingClientRect().top +
-                sheet.scrollTop +
-                Number.parseFloat(getComputedStyle(sheet).paddingBottom),
-            );
+      const from = sheet.getBoundingClientRect().top - sheet.scrollTop;
+      const below = Number.parseFloat(getComputedStyle(sheet).paddingBottom);
+      const end = (row: Element) => Math.ceil(row.getBoundingClientRect().bottom - from + below);
+      const rows = [...sheet.querySelectorAll("dl.facts dd, .links li")].map(end);
+      // Ending on a row, not through one, which the first height would cut under the bar.
+      const measured = main === null ? 0 : endOnRow(end(main), rows);
       // Written only when it changes: the sheet's rise to it is a transition, which a write each render would hold back.
       if (measured === needs.current && sheet.style.getPropertyValue("--first") !== "") return;
       needs.current = measured;

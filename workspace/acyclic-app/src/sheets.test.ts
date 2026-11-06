@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detentAfter, draggableFrom, firstHeight, PEEK, velocity } from "./sheets";
+import { detentAfter, draggableFrom, endOnRow, firstHeight, PEEK, velocity } from "./sheets";
 
 describe("velocity", () => {
   it("reads a drag's speed from its last 100 ms, not from its start", () => {
@@ -71,5 +71,22 @@ describe("draggableFrom", () => {
     expect(draggableFrom(inside(false))).toBe(true);
     expect(draggableFrom(inside(true))).toBe(false);
     expect(draggableFrom(null)).toBe(false);
+  });
+});
+
+describe("endOnRow", () => {
+  // Status ends at 110, Thread at 150, Parent at 190, as at 390 px wide.
+  const ends = [110, 150, 190];
+  it("rises from the least height to the end of the row it would cut", () => {
+    expect(endOnRow(110, ends)).toBe(150);
+    expect(endOnRow(150, ends)).toBe(150);
+  });
+  it("keeps a status that already ends past the least height on its row", () => {
+    expect(endOnRow(160, ends)).toBe(190);
+    expect(endOnRow(190, ends)).toBe(190);
+  });
+  it("never goes below the main thing's end, nor reaches past a row for a block", () => {
+    expect(endOnRow(170, [110, 400])).toBe(170);
+    expect(endOnRow(120, [])).toBe(120);
   });
 });

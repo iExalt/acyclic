@@ -92,7 +92,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Sheets, on a phone:** two heights. A panel's first is 144 px: its title, its status and its main action, so the Map
   keeps most of the screen beside it (the user: "This hurts especially when browsing half the map and half an item"),
   taller only where a long title or status pushes the main action, or an item's status, further down; while it loads,
-  200 px, more than it will need, so what the Map frames above it stays clear. The outline's, a list to pick from,
+  200 px, more than it will need, so what the Map frames above it stays clear. Either height ends on a row, within a
+  row's height of it, so no row is cut through its text under the tab bar. The outline's, a list to pick from,
   half, at least 320 px. Full reaches the bar. The handle, a button in a strip at the top of the header, which stays in
   view as the sheet scrolls, switches them; it is 28 px tall, an exception to the 44 px targets, as a taller strip would
   push every panel down or lie over its buttons, and the title starts below it. A drag on it or on the header's free
@@ -208,7 +209,7 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   project label matching the thread name after trimming whitespace and ignoring case is omitted; distinct names remain.
 - **Hover:** controls and rows fill with `--hover`, ink at 7 %, which shows on white sheets too; a filled button fades a
   little toward the ground instead. A view's row fills so too, lighter than the view shown, which keeps its fill under
-  the pointer.
+  the pointer. Only where there is hover: a tap leaves no tint behind on a touch screen.
 - **Notes,** an item's and a thread's: a small, safe part of Markdown, built as elements: code, strong (which may hold
   code) and emphasis. Nothing else is read, and never as markup.
 - **Command menu:** a field over a list, the chosen row filled with a bar at its start, square where the bar runs; Close
@@ -275,10 +276,11 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   now waits for Dig", "Sow no longer waits for Dig"), a move "Moved X back", selecting X where it is again, fields "Set
   X back". Undo uses the same placement as other notices. Its actions remain available with its full text in the bounded
   disclosure or floating area; elsewhere its text wraps in the slot.
-- **Settling keeps the keyboard in place.** An action in Needs you is held, not disabled, while its
-  write is out, so focus stays on it; only the pressed one looks held, as greying every one said they were all at work.
-  Once what it settled goes, focus goes to the next entry's action, else to the view. What a one-press
-  decision did is said once saved ("Used parked for state"), in its notice and to a screen reader politely.
+- **Settling keeps the keyboard in place.** An action in Needs you is held, not disabled, while its write is out, so
+  focus stays on it; only the pressed one looks held, as greying every one said they were all at work; an item panel's
+  remove buttons and Edit are held so too. Once what it settled goes, focus goes to the next entry's action, else to the
+  view. What a one-press decision did is said once saved ("Used parked for state"), in its notice and to a screen reader
+  politely.
 - **A notification never reloads the app:** the open app is asked to show what it names (Needs you's view, for the
   server's), over the view shown if it names none, and waits, saying so, while a form holds what the user typed.
 - **Opening from a row lands on its entry:** a Needs you row on the Overview goes to Needs you's view there, the entry
