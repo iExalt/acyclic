@@ -207,7 +207,8 @@ impl View<'_> {
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": entry.kind(), "item": self.item_row(item)?, "fix": fix})
                 },
-                Entry::DoneWaiting { item, waits_for } => json!({
+                Entry::DoneWaiting { item, waits_for }
+                | Entry::WaitsOnCanceled { item, waits_for } => json!({
                     "kind": entry.kind(), "item": self.item_row(item)?, "waits_for": self.item_row(waits_for)?,
                 }),
                 Entry::Dangling { kind, id, field, target, fix } => {
@@ -289,12 +290,12 @@ fn links(all: &[Link], id: &str) -> Json {
 }
 
 /// Leaves by stage, as a parent's or a thread's `progress.counts` gives them: `leaves` in all, and each leaf under its
-/// stage, so the stages add up to `leaves`.
+/// stage, so the stages add up to `leaves`. Canceled leaves are counted apart, under `canceled`, and are not leaves.
 fn stage_counts(stages: &Stages) -> Json {
     json!({
         "done": stages.done, "leaves": stages.total(),
         "in_progress": stages.in_progress, "ready": stages.ready, "waiting": stages.waiting,
-        "parked": stages.parked, "unthreaded": stages.unthreaded,
+        "parked": stages.parked, "unthreaded": stages.unthreaded, "canceled": stages.canceled,
     })
 }
 
@@ -445,7 +446,7 @@ mod tests {
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
                 json!({"counts": {"done": 0, "leaves": 2, "in_progress": 2,
-                       "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0}})
+                       "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0, "canceled": 0}})
             );
             // And its stage, rolled up from them under the key a leaf's has: in progress while their thread is
             // claimed though none is started.

@@ -60,8 +60,10 @@ Only waits-for orders work: ids, titles and thread membership never do, so say e
 
 For example, `acyclic item edit 'Beds' --thread 'Garden' --no-notes --waits-for 'Soil' --no-waits-for 'Clay'` moves
 Beds into the Garden thread, clears its notes, makes it wait for Soil and no longer for Clay. Thread membership is
-`acyclic item edit --thread` (`--no-thread` takes the item out of its thread). `--state` sets `open` or `parked`;
-`item done` sets `done` on a leaf, and `item reopen` makes a done leaf open again; a parent is done once
+`acyclic item edit --thread` (`--no-thread` takes the item out of its thread). `--state` sets `open`, `parked` or
+`canceled`: canceled drops the item, which then counts as neither done nor open and puts work waiting on it on `needs`;
+done work is reopened before it can be canceled, `--force` cancels over another holder's claim, and `--state open`
+undoes it. `item done` sets `done` on a leaf, and `item reopen` makes a done leaf open again; a parent is done once
 its leaves are, and is never finished or reopened by hand. What is under way shows in an item's
 `stage`, from its thread's claim, not in its state.
 

@@ -506,6 +506,8 @@ mod tests {
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
         assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
+        // Canceled is written only by a person's explicit edit, so no fixture carries it.
+        assert_eq!(stats.state_share(State::Canceled), 0.0, "{at}");
 
         let near =
             |rate: f64, target: f64, tolerance: f64| (rate - target).abs() <= target * tolerance;

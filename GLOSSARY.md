@@ -61,14 +61,24 @@ _Avoid_: round, tier
 An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member.
 _Avoid_: lock, assignment
 
+**Canceled**:
+An item dropped on purpose: neither done nor open. It is set with `item edit --state canceled` and undone with
+`--state open`; done work is reopened before it can be canceled. A canceled leaf leaves its parent's counts, which roll
+up from the other leaves, and has a count of its own, `canceled`. It never meets a dependency, so work waiting directly
+on it goes on the needs-you list.
+_Avoid_: dropped, abandoned
+
+**Finished**:
+Done or canceled. A dependency is met only by done work; a thread is finished when every leaf is done or canceled.
+
 **Deleted**:
 An item or thread removed for good: gone from every view and every reader, and its id never used again.
 _Avoid_: closed
 
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, done work waiting on
-work that isn't, claims two holders clash over, references to what doesn't exist, and items in no thread. The app calls
-it Needs you, and shows it as a view of its own.
+work that isn't, work waiting on canceled work, claims two holders clash over, references to what doesn't exist, and
+items in no thread. The app calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
 ## The app
@@ -104,22 +114,25 @@ _Avoid_: group (for this), container, lane
 **Done box**:
 A box the Map makes of finished work, which holds no item of its own: a finished thread's items in a box, named after
 the thread, or the box's other finished work that no link ties to anything left there, named Done, last in its
-columns. A thread is finished when every leaf it has is done.
+columns. A thread is finished when every leaf it has is done or canceled, and a thread with none isn't. Canceled
+work stays out of the Done box.
 _Avoid_: pile, group, archive
 
 **State**:
-What is set by hand on an item: `open`, `parked` or `done`. An unset state reads as `open`. State is stored;
-readiness and stage are computed on read. A parent's stage derives from its leaves, and may be in progress.
+What is set by hand on an item: `open`, `parked`, `done` or `canceled`. An unset state reads as `open`. State is
+stored; readiness and stage are computed on read. A parent's stage derives from its leaves, and may be in progress.
 Stored data keeps the older value `backlog` for open, so replicas of older versions keep reading it; commands and
-imports still take `backlog` as open, and nothing shows it.
+imports still take `backlog` as open, and nothing shows it. `canceled` is newer than the rest: replicas of older
+versions can't read it, so every replica upgrades before anything is canceled.
 _Avoid_: backlog (for open)
 
 **Stage**:
-Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, waiting, parked, or
-needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in its state or thread. A
-parent's comes from its leaves: done once every leaf is; before that, in progress once any work below has started and
-some of what is left isn't parked; otherwise ready, waiting, parked or needs a thread by its leaves. The code word for
-needs a thread is `unthreaded`; the app shows a stage as an item's Status.
+Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, waiting, parked,
+canceled, or needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in its state or
+thread. A parent's comes from its leaves, those canceled left out: done once every other leaf is; before that, in
+progress once any work below has started and some of what is left isn't parked; otherwise ready, waiting, parked or
+needs a thread by its leaves. A parent with only canceled leaves, or canceled by hand, reads canceled. The code word
+for needs a thread is `unthreaded`; the app shows a stage as an item's Status.
 _Avoid_: phase, step, blocked (for waiting)
 
 **Status**:

@@ -99,6 +99,14 @@ describe("undo", () => {
     expect(removed?.holds(after("sow", { links, stage: "in-progress" }))).toBe(false);
   });
 
+  it("takes a cancel back by setting the state it was open again, expecting canceled", () => {
+    const undo = undoOf({ item: { edit: { item: "dig", state: "canceled" } } }, before);
+    expect(undo?.command).toEqual({ item: { edit: { item: "dig", state: "open" } } });
+    expect(undo?.expect[0]).toEqual({ kind: "item-field", item: "dig", field: "state", value: "canceled" });
+    expect(undo?.holds(after("dig", { state: "canceled", stage: "canceled" }))).toBe(true);
+    expect(undo?.holds(after("dig", { state: "open" }))).toBe(false);
+  });
+
   it("sets a state back only while nothing waiting on the item, or on a box above it, has started since", () => {
     const done = undoOf({ item: { edit: { item: "dig", state: "done" } } }, before);
     expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "open" } } });

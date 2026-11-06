@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stageCounts, stageCountWords, stateWords } from "./stages";
+import { QUIET, STAGE_ICONS, STAGE_WORDS, stageCounts, stageCountWords, stateWords } from "./stages";
 
 describe("a state in words", () => {
   it("reads as a sentence starts it", () => {
@@ -17,13 +17,25 @@ describe("stageCounts", () => {
       waiting: 0,
       parked: 0,
       unthreaded: 1,
+      canceled: 2,
     };
     expect(stageCounts(counts)).toEqual([
       { stage: "done", count: 7 },
       { stage: "in-progress", count: 1 },
       { stage: "ready", count: 3 },
       { stage: "unthreaded", count: 1 },
+      { stage: "canceled", count: 2 },
     ]);
+  });
+});
+
+describe("canceled", () => {
+  it("has its word, icon and a quiet look like the other work set aside", () => {
+    expect(STAGE_WORDS.canceled).toBe("Canceled");
+    expect(STAGE_ICONS.canceled).toContain("<circle");
+    expect(QUIET.has("canceled")).toBe(true);
+    expect(stateWords("canceled")).toBe("Canceled");
+    expect(stageCountWords("canceled", 2)).toBe("canceled");
   });
 });
 

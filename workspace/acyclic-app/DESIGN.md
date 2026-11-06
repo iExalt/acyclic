@@ -42,8 +42,8 @@ unless the menu's Theme picks one on the device (System, Light or Dark; System b
 two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
-  Map's items and boxes). A tile in progress takes a cooler tint, one done, waiting or parked a greyer one; one in
-  review keeps the tile's, its icon saying so, after a tint read as a selection.
+  Map's items and boxes). A tile in progress takes a cooler tint, one done, waiting, parked or canceled a greyer one;
+  one in review keeps the tile's, its icon saying so, after a tint read as a selection.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
@@ -340,13 +340,14 @@ before what went wrong.
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its full title, then its
-  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Waiting, Parked and Needs a
-  thread.
+  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Waiting, Parked, Canceled
+  and Needs a thread. Canceled is a circle struck through, in the quiet ink.
 - **A project tells where it stands.** An open box's chevron and stage icon stay in the first 52 px strip; its full
   title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
   fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (done once all of it
   is; else in progress once work under it has started and some of what is left isn't parked; else ready, else waiting,
-  else parked, else needs a thread); one with no leaf to count, as on a cycle of parents, says its own state. Its title
+  else parked, else needs a thread; canceled leaves are left out, and a box with only those reads canceled); one with
+  no leaf to count, as on a cycle of parents, says its own state. Its title
   is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
@@ -400,7 +401,11 @@ before what went wrong.
   boxes do; unfolded, a finished thread's is a frame around its items with its name and chevron, the user's pick over a
   Fold button in the thread's panel or a Fold tile. A tap on a finished thread's box anywhere but its chevron picks the
   thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
-  as its target. Finding a folded item, or opening a link to it, unfolds every box above it.
+  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. A thread is finished once
+  every leaf is done or canceled, but canceled work isn't folded: it stays beside the Done box as the quiet tile it is.
+- **Canceled work** reads as dropped, not delivered: a struck-through circle in the muted ink on a notch-greyer tint (a
+  restrained default). The item form's State select sets it and Open undoes it, and Undo of a cancel sets the state
+  back. A box counts its canceled leaves apart ("2 canceled").
 - **The wheel zooms 12 % a notch** of a Mac's mouse, which scrolls 80 px, and in step with the pixels where a notch
   scrolls more (15 % for 100 px), with Ctrl held or not; a trackpad's scroll and pinch zoom smoothly, as Cytoscape's.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past

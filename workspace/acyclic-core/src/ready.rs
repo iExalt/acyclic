@@ -1,4 +1,4 @@
-//! Readiness, computed on read from the state alone: a dependency is met once it is done. Reads never run git: commit evidence is checked when it is written.
+//! Readiness, computed on read from the state alone: a dependency is met once it is done, never by being canceled. Reads never run git: commit evidence is checked when it is written.
 //!
 //! Only leaves are claimed or ready. A dependency on a parent is met once everything under it meets it, each child
 //! judged as a dependency of its own: a parent's stored done is ignored, and a parked parent meets none.
@@ -23,6 +23,8 @@ pub use waves::Waves;
 pub enum Wait {
     /// It isn't done.
     Open,
+    /// It is canceled, which meets no dependency: what waits for it is the user's to settle.
+    Canceled,
 }
 
 /// An item's readiness.
@@ -65,6 +67,8 @@ pub enum Readiness {
     Parked,
     /// Done.
     Done,
+    /// Canceled.
+    Canceled,
 }
 
 impl Readiness {
@@ -144,7 +148,7 @@ pub struct ReadyThread {
     pub items: Vec<String>,
 }
 
-/// Where a leaf stands, in six words that tell all of them apart: what the app draws on each item and counts under
+/// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
 /// each parent. In progress means ready in a thread someone holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -161,6 +165,8 @@ pub enum Stage {
     Parked,
     /// In no thread, so never ready.
     Unthreaded,
+    /// Dropped on purpose, or under a part that is.
+    Canceled,
 }
 
 /// A parent's leaves counted by stage.
@@ -173,6 +179,8 @@ pub struct Stages {
     pub waiting: usize,
     pub parked: usize,
     pub unthreaded: usize,
+    /// Leaves canceled: not among the others, and not in [`Stages::total`].
+    pub canceled: usize,
 }
 
 impl Stages {
@@ -184,6 +192,7 @@ impl Stages {
             Stage::Waiting => &mut self.waiting,
             Stage::Parked => &mut self.parked,
             Stage::Unthreaded => &mut self.unthreaded,
+            Stage::Canceled => &mut self.canceled,
         };
         *slot += count;
     }
@@ -195,8 +204,9 @@ impl Stages {
     #[must_use]
     pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
         let finished = self.done;
+        // Canceled leaves are left out of the roll-up; a parent with nothing else reads canceled.
         if self.total() == 0 {
-            return None;
+            return (self.canceled > 0).then_some(Stage::Canceled);
         }
         if finished == self.total() {
             return Some(Stage::Done);
@@ -233,7 +243,14 @@ impl Stages {
         Ok(stages)
     }
 
-    /// The leaves counted, every stage together.
+    /// Whether a thread with these member leaves is finished: it has some, and each is done or canceled. An empty
+    /// thread is not finished.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.total() == self.done && self.done + self.canceled > 0
+    }
+
+    /// The leaves counted, every stage together but canceled.
     #[must_use]
     pub fn total(&self) -> usize {
         self.done + self.in_progress + self.ready + self.waiting + self.parked + self.unthreaded
@@ -323,6 +340,9 @@ impl<'a> ReadinessEvaluator<'a> {
         if item.is_done() {
             return Some(Readiness::Done);
         }
+        if item.is_canceled() {
+            return Some(Readiness::Canceled);
+        }
         if self.cyclic.contains(id) {
             return Some(Readiness::InCycle);
         }
@@ -362,7 +382,7 @@ impl<'a> ReadinessEvaluator<'a> {
             .flatten()
             .copied()
             // Finished work is skipped.
-            .filter(|id| !self.model.items[*id].is_done())
+            .filter(|id| !self.model.items[*id].is_finished())
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
             .map(str::to_owned)
             .collect();
@@ -415,13 +435,17 @@ impl<'a> ReadinessEvaluator<'a> {
         }
         let Some(item) = self.model.items.get(id) else { return Ok(None) };
         // Done work is done whatever else holds it, such as threads two clones wrote apart: the model counts it so.
-        let finished = item.is_done() && self.model.children(id).is_empty();
-        let stage = if finished {
+        // Canceled work likewise.
+        let leaf = self.model.children(id).is_empty();
+        let stage = if leaf && item.is_done() {
             Some(Stage::Done)
+        } else if leaf && item.is_canceled() {
+            Some(Stage::Canceled)
         } else {
             self.of(id)?.and_then(|status| match status {
                 Readiness::Parent => None,
                 Readiness::Done => Some(Stage::Done),
+                Readiness::Canceled => Some(Stage::Canceled),
                 Readiness::Parked => Some(Stage::Parked),
                 Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
                 Readiness::Ready => Some(Stage::Ready),
@@ -450,16 +474,21 @@ impl<'a> ReadinessEvaluator<'a> {
         }
         let mut stages = Stages::default();
         let parked = item.state == Value::One(ItemState::Parked);
-        self.tally(id, parked, &mut BTreeSet::from([id]), &mut stages)?;
+        let canceled = item.state == Value::One(ItemState::Canceled);
+        self.tally(id, parked, canceled, &mut BTreeSet::from([id]), &mut stages)?;
         let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
-        Ok(Some(Rollup { stages, stage: stages.rolled_up(claimed) }))
+        // A part canceled by hand reads canceled, whatever its leaves say.
+        let stage = if canceled { Some(Stage::Canceled) } else { stages.rolled_up(claimed) };
+        Ok(Some(Rollup { stages, stage }))
     }
 
-    /// Counts the leaves under `id` by stage, walking as the model's own tally does: each item once, and the open leaves of a part parked by hand as parked.
+    /// Counts the leaves under `id` by stage, walking as the model's own tally does: each item once, and the open
+    /// leaves of a part parked by hand as parked, or canceled by hand as canceled.
     fn tally<'b>(
         &self,
         id: &'b str,
         parked: bool,
+        canceled: bool,
         seen: &mut BTreeSet<&'b str>,
         stages: &mut Stages,
     ) -> Result<(), Error>
@@ -473,11 +502,19 @@ impl<'a> ReadinessEvaluator<'a> {
             let Some(item) = self.model.items.get(child) else { continue };
             if self.model.children(child).is_empty() {
                 let stage = self.stage(child)?.unwrap_or(Stage::Waiting);
-                let open = stage != Stage::Done;
-                stages.add(if parked && open { Stage::Parked } else { stage }, 1);
+                let open = !matches!(stage, Stage::Done | Stage::Canceled);
+                let stage = if canceled && open {
+                    Stage::Canceled
+                } else if parked && open {
+                    Stage::Parked
+                } else {
+                    stage
+                };
+                stages.add(stage, 1);
             } else {
                 let parks = parked || item.state == Value::One(ItemState::Parked);
-                self.tally(child, parks, seen, stages)?;
+                let cancels = canceled || item.state == Value::One(ItemState::Canceled);
+                self.tally(child, parks, cancels, seen, stages)?;
             }
         }
         Ok(())
@@ -492,8 +529,10 @@ impl<'a> ReadinessEvaluator<'a> {
         for child in self.model.children(id) {
             let Some(item) = self.model.items.get(child) else { continue };
             // A done stored on a parent, as older versions wrote, is ignored: its leaves decide.
-            let finished = item.is_done() && self.model.children(child).is_empty();
-            if !seen.insert(child) || finished || item.state == Value::One(ItemState::Parked) {
+            let finished = item.is_finished() && self.model.children(child).is_empty();
+            let set_aside =
+                matches!(item.state, Value::One(ItemState::Parked | ItemState::Canceled));
+            if !seen.insert(child) || finished || set_aside {
                 continue;
             }
             if !self.model.children(child).is_empty() {
@@ -546,10 +585,18 @@ impl<'a> ReadinessEvaluator<'a> {
     fn dependency_wait(&self, dependent: &str, dependency: &str) -> Option<Wait> {
         let Some(item) = self.model.items.get(dependency) else { return Some(Wait::Open) };
         if self.model.children(dependency).is_empty() {
-            return (!item.is_done()).then_some(Wait::Open);
+            if item.is_done() {
+                return None;
+            }
+            return Some(if item.is_canceled() { Wait::Canceled } else { Wait::Open });
         }
         if item.state == Value::One(ItemState::Parked) {
             return Some(Wait::Open);
+        }
+        // A part canceled by hand, or with nothing under it but canceled work, is canceled as a whole; one with a
+        // canceled leaf among others is waited for as a whole, and proceeds when its other work is done.
+        if self.model.reads_canceled(dependency) {
+            return Some(Wait::Canceled);
         }
         self.leaves_wait(dependent, dependency)
     }
@@ -565,6 +612,7 @@ impl<'a> ReadinessEvaluator<'a> {
         self.model
             .children(parent)
             .into_iter()
+            .filter(|child| !self.model.reads_canceled(child))
             .find_map(|child| self.dependency_wait(dependent, child))
     }
 }

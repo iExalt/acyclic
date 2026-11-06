@@ -116,8 +116,8 @@ pub struct Item {
     /// Design notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// The item's state; left out, an existing item keeps its own and a new one is open. `backlog`, as older
-    /// documents say, reads as open.
+    /// The item's state: `open`, `parked`, `done` or `canceled`; left out, an existing item keeps its own and a new
+    /// one is open. `backlog`, as older documents say, reads as open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<State>,
     /// The parent item.
@@ -246,6 +246,8 @@ pub enum ValidationError {
     EvidenceNotDone(String),
     /// Done on an item with children, which reads done once they are.
     DoneParent(String),
+    /// Canceled on an item that is done, or a parent that reads done: it is reopened first.
+    CanceledDone(String),
     /// A repository's name that isn't `owner/name`.
     InvalidRepositoryName {
         /// The repository.
@@ -313,6 +315,9 @@ impl fmt::Display for ValidationError {
                     f,
                     "item {item} has children, so it reads done once they are: leave its state out"
                 )
+            },
+            Self::CanceledDone(item) => {
+                write!(f, "item {item} is done, so it can't be canceled until it is reopened")
             },
             Self::InvalidRepositoryName { repository, name } => {
                 write!(f, "repository {repository}: {name:?} isn't owner/name")

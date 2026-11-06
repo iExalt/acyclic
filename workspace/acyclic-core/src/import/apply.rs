@@ -367,6 +367,9 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
             (Rule::ParentDone, Some(at)) => {
                 unfinished.push(ValidationError::DoneParent(at.record.id().to_owned()));
             },
+            (Rule::CancelDone, Some(at)) => {
+                unfinished.push(ValidationError::CanceledDone(at.record.id().to_owned()));
+            },
             (Rule::InvalidCommit, Some(at)) => {
                 let item = at.record.id();
                 let commit = doc

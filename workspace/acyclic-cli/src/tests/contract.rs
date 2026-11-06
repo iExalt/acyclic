@@ -663,6 +663,92 @@ fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
     }
 }
 
+/// Canceling is `item edit --state canceled` and `--state open` undoes it: stored as `canceled`, counted apart from
+/// the leaves, never meeting what waited on it, refused on done work and over another's claim unless forced.
+#[test]
+fn canceled_work_is_counted_apart_blocks_nothing_and_is_refused_over_done_work_and_claims() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let [dep, held, done, waiter, parent_id, kept, finished, work] =
+        ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "f1"].map(id);
+    for line in [
+        format!("repository add --id {} --name me/code --default-branch main", id("c1")),
+        format!("thread add --id {work} --title Work"),
+        format!("item add --id {dep} --title X --thread {work}"),
+        format!("item add --id {held} --title Y --thread {work}"),
+        format!("item add --id {done} --title D --thread {work}"),
+        format!("item add --id {waiter} --title W --thread {work} --waits-for {dep}"),
+        format!("item add --id {parent_id} --title P --thread {work}"),
+        format!("item add --id {kept} --title C1 --thread {work} --parent {parent_id}"),
+        format!("item add --id {finished} --title C2 --thread {work} --parent {parent_id}"),
+        format!("item done {done} --commit me/code@abc1234 --force"),
+        format!("item done {finished} --commit me/code@abc1234 --force"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    let row = |sh: &mut Shell, item: &str| {
+        sh.output(&format!("item show {item}"), AGENT).1["data"][0].clone()
+    };
+    // Canceling drops it: its own stage, and what waited for it waits for the user, not for the work.
+    assert_eq!(sh.run(&format!("item edit {dep} --state canceled"), &[]), 0);
+    let shown = row(&mut sh, &dep);
+    assert_eq!((&shown["state"], &shown["stage"]), (&json!("canceled"), &json!("canceled")));
+    assert_eq!(row(&mut sh, &waiter)["readiness"]["waiting"][&dep], json!({"why": "canceled"}));
+    let (_, needs) = sh.output("needs", AGENT);
+    let kinds: Vec<_> = needs["data"]["needs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| (&n["kind"], &n["notify"], &n["summary"]))
+        .collect();
+    assert!(
+        kinds.contains(&(
+            &json!("waits-on-canceled"),
+            &json!(true),
+            &json!("W waits for X, which was canceled")
+        )),
+        "{kinds:?}"
+    );
+    // A canceled leaf leaves its parent's leaves, and the parent rolls up from the rest.
+    assert_eq!(sh.run(&format!("item edit {kept} --state canceled"), &[]), 0);
+    let parent = row(&mut sh, &parent_id);
+    assert_eq!(parent["stage"], json!("done"));
+    assert_eq!(
+        parent["progress"]["counts"],
+        json!({"done": 1, "leaves": 1, "in_progress": 0, "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0, "canceled": 1})
+    );
+    // Done work, and a parent that reads done, are reopened first, forced or not.
+    for item in [&done, &parent_id] {
+        for force in ["", " --force"] {
+            let (code, out) = sh.output(&format!("item edit {item} --state canceled{force}"), &[]);
+            assert_eq!((code, &out["error"]["code"]), (1, &json!("done")), "{out}");
+        }
+    }
+    // Another holder's claim refuses unless forced; the actor's own doesn'work.
+    assert_eq!(sh.run(&format!("thread claim {work}"), AGENT), 0);
+    let (code, out) = sh.output(&format!("item edit {held} --state canceled"), &[]);
+    assert_eq!((code, &out["error"]["code"]), (1, &json!("claimed")), "{out}");
+    assert_eq!(sh.run(&format!("item edit {held} --state canceled --force"), &[]), 0);
+    assert_eq!(sh.run(&format!("item edit {dep} --state open"), AGENT), 0);
+    assert_eq!(row(&mut sh, &dep)["state"], json!("open"));
+    // Stored as `canceled`, for the ones canceled; open is still stored as `backlog`.
+    let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
+    let (_, state) = tracker.load().unwrap();
+    let stored = |id: &String| {
+        let key = acyclic_core::state::Key::new("item", id).unwrap();
+        state.field(&key, "state").unwrap().values().map(|v| v.value.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        [&dep, &held, &kept, &done].map(stored),
+        [
+            vec![json!("backlog")],
+            vec![json!("canceled")],
+            vec![json!("canceled")],
+            vec![json!("done")]
+        ]
+    );
+}
+
 /// A thread's notes read as `notes` and are written under the older field `brief`, which replicas of older versions
 /// read: from `--notes`, the older `--brief` and `--no-brief`, the app's edit expecting the notes it read (or, as
 /// older clients say, its brief), and an import naming them `notes` or `brief`.
@@ -807,6 +893,15 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         format!("item add --id {} --title Late --thread {t1}", id("a3")),
         format!("item add --id {} --title Early --thread {t1} --waits-for {}", id("a4"), id("a3")),
         format!("item done {} --commit me/code@abc1234 --force", id("a4")),
+        // Work that waits for canceled work, and an item to be canceled on one replica and done on another.
+        format!("item add --id {} --title Dropped --thread {t1}", id("a5")),
+        format!(
+            "item add --id {} --title Waiting --thread {t1} --waits-for {}",
+            id("a6"),
+            id("a5")
+        ),
+        format!("item add --id {} --title Disputed --thread {t1}", id("a7")),
+        format!("item edit {} --state canceled", id("a5")),
     ] {
         assert_eq!(sh.run(&line, AGENT), 0, "{line}");
     }
@@ -816,6 +911,7 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
     let apart = [
         (key("item", &a1), "title", json!("One"), json!("Two")),
         (key("item", &a1), "state", json!("done"), json!("parked")),
+        (key("item", &id("a7")), "state", json!("done"), json!("canceled")),
         // Stored as `backlog`, shown and kept as `open`.
         (key("item", &p1), "state", json!("backlog"), json!("parked")),
         (key("item", &a1), "parent", json!(p1), json!(null)),

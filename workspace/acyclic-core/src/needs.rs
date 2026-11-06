@@ -76,6 +76,14 @@ pub enum Entry {
         /// The leaf it waits for.
         waits_for: String,
     },
+    /// Unfinished work that waits directly for canceled work, which neither unblocks it nor ever will: the user
+    /// decides whether it still makes sense, as by dropping the wait or canceling it too.
+    WaitsOnCanceled {
+        /// The unfinished item.
+        item: String,
+        /// The canceled item, or the part that reads canceled, it waits for.
+        waits_for: String,
+    },
     /// A reference to something that doesn't exist.
     Dangling {
         /// The referring record's kind.
@@ -110,7 +118,9 @@ impl Entry {
             Self::Contest { thread, holders: _ } => vec![kind, thread],
             Self::ClockAhead { thread, holder } => vec![kind, thread, holder],
             Self::Unthreaded { item, fix: _ } => vec![kind, item],
-            Self::DoneWaiting { item, waits_for } => vec![kind, item, waits_for],
+            Self::DoneWaiting { item, waits_for } | Self::WaitsOnCanceled { item, waits_for } => {
+                vec![kind, item, waits_for]
+            },
             Self::Dangling { kind: record, id, field, target, fix: _ } => {
                 vec![kind, record, id, field, target]
             },
@@ -132,6 +142,7 @@ impl Entry {
             Self::ClockAhead { .. } => "clock-ahead",
             Self::Unthreaded { .. } => "unthreaded",
             Self::DoneWaiting { .. } => "done-waiting",
+            Self::WaitsOnCanceled { .. } => "waits-on-canceled",
             Self::Dangling { .. } => "dangling",
         }
     }
@@ -167,6 +178,9 @@ impl Entry {
             Self::DoneWaiting { item, waits_for } => {
                 format!("{} is done but waits for {}", name(item), name(waits_for))
             },
+            Self::WaitsOnCanceled { item, waits_for } => {
+                format!("{} waits for {}, which was canceled", name(item), name(waits_for))
+            },
             Self::Dangling { kind, id, field, target, fix: _ } => {
                 if (kind.as_str(), field.as_str()) == (crate::schema::kind::ITEM, "waits-for") {
                     format!("{} waits for {target}, which doesn't exist", name(id))
@@ -199,7 +213,8 @@ impl Entry {
             | Self::ParentCycle { .. }
             | Self::ThreadCycle { .. }
             | Self::Contest { .. }
-            | Self::DoneWaiting { .. } => true,
+            | Self::DoneWaiting { .. }
+            | Self::WaitsOnCanceled { .. } => true,
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
@@ -238,9 +253,10 @@ pub fn needs_you(
     }
     claims(state, model, now, &mut entries)?;
     done_waiting(model, readiness, &mut entries)?;
+    waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
     for (id, item) in &model.items {
-        if item.is_done() || !model.children(id).is_empty() {
+        if item.is_finished() || !model.children(id).is_empty() {
             continue;
         }
         unthreaded(model, item, &mut entries);
@@ -251,7 +267,7 @@ pub fn needs_you(
 /// Whether an item is an open, unparked leaf whose thread isn't in conflict: one `ready` lists only
 /// while a thread with a record holds it. A conflicted thread is left to its conflict entry.
 fn wants_thread(model: &Model, item: &model::Item) -> bool {
-    !item.is_done()
+    !item.is_finished()
         && model.children(&item.id).is_empty()
         && item.state != Value::One(model::ItemState::Parked)
         && !item.thread.is_conflict()
@@ -300,7 +316,8 @@ fn done_waiting(
 ) -> Result<(), Error> {
     for link in &model.links {
         let Some(target) = model.items.get(&link.to) else { continue };
-        if target.is_done() || !model.children(&link.to).is_empty() {
+        // Waiting for canceled work is its own entry.
+        if target.is_finished() || !model.children(&link.to).is_empty() {
             continue;
         }
         let stage = if model.children(&link.from).is_empty() {
@@ -311,6 +328,32 @@ fn done_waiting(
         if stage == Some(Stage::Done) {
             entries
                 .insert(Entry::DoneWaiting { item: link.from.clone(), waits_for: link.to.clone() });
+        }
+    }
+    Ok(())
+}
+
+/// Each unfinished item, leaf or parent, that waits directly for canceled work: a leaf canceled, or a part that reads
+/// canceled. A part with some canceled leaves among others reads by those others, so it flags nothing.
+fn waits_on_canceled(
+    model: &Model,
+    readiness: &ReadinessEvaluator<'_>,
+    entries: &mut BTreeSet<Entry>,
+) -> Result<(), Error> {
+    for link in &model.links {
+        if !model.items.contains_key(&link.from) || !model.reads_canceled(&link.to) {
+            continue;
+        }
+        let stage = if model.children(&link.from).is_empty() {
+            readiness.stage(&link.from)?
+        } else {
+            readiness.progress(&link.from)?.and_then(|rollup| rollup.stage)
+        };
+        if !matches!(stage, Some(Stage::Done | Stage::Canceled)) {
+            entries.insert(Entry::WaitsOnCanceled {
+                item: link.from.clone(),
+                waits_for: link.to.clone(),
+            });
         }
     }
     Ok(())

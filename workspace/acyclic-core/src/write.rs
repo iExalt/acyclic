@@ -583,6 +583,15 @@ pub enum Change {
         /// Finish it although it isn't ready or someone else holds it, or replace its evidence.
         force: bool,
     },
+    /// Cancels an item: dropped on purpose, so neither done nor open. Done work isn't canceled without being reopened
+    /// first, nor is a parent that reads done. Unless forced, no one else may hold a live claim on the thread of an
+    /// open leaf at or under it.
+    Cancel {
+        /// The item.
+        item: String,
+        /// Cancel it although someone else holds a claim on it.
+        force: bool,
+    },
 }
 
 /// What a caller means to change, judged and written as a whole. The order of its changes doesn't matter, except to
@@ -688,6 +697,13 @@ pub enum Rule {
     ParentDone,
     /// Done work would get other evidence than it was finished with.
     EvidenceDiffers,
+    /// The item is done, or a parent that reads done: reopen it before canceling.
+    CancelDone,
+    /// Someone else holds a live claim on the item's thread, or on one under it.
+    CancelHeld {
+        /// The holder.
+        holder: String,
+    },
     /// Evidence names a commit that isn't an object id.
     InvalidCommit,
     /// Evidence names a repository record missing these fields, so it could never be verified.
@@ -757,6 +773,8 @@ impl fmt::Display for Violation {
             Rule::NotReady(_) => write!(f, "{at}it isn't ready, or someone else holds it"),
             Rule::ParentDone => write!(f, "{at}it has children, so it reads done once they are"),
             Rule::EvidenceDiffers => write!(f, "{at}it is done with other evidence"),
+            Rule::CancelDone => write!(f, "{at}it is done, so reopen it to cancel it"),
+            Rule::CancelHeld { holder } => write!(f, "{at}{holder} holds a claim on its work"),
             Rule::InvalidCommit => {
                 write!(f, "{at}a commit is 7 to 64 hexadecimal characters, as git prints it")
             },
@@ -869,6 +887,7 @@ impl Judging<'_, '_> {
         let mut given: BTreeMap<FieldAddr, (usize, Json)> = BTreeMap::new();
         for (n, change) in changes.0.iter().enumerate() {
             let finish;
+            let cancel;
             let (record, assigns, repeat) = match change {
                 Change::Add { record, on_repeat, with, .. } => {
                     (record.clone(), with.as_slice(), Some(*on_repeat))
@@ -877,6 +896,10 @@ impl Judging<'_, '_> {
                 Change::Finish { item, evidence, .. } => {
                     finish = finishing(item, evidence.as_ref());
                     (Record::Item(item.clone()), finish.as_slice(), None)
+                },
+                Change::Cancel { item, .. } => {
+                    cancel = [Assign::Item(item.clone(), ItemAssign::State(ItemState::Canceled))];
+                    (Record::Item(item.clone()), cancel.as_slice(), None)
                 },
             };
             if record.key().is_ok_and(|key| self.before.is_deleted(&key)) {
@@ -888,6 +911,11 @@ impl Judging<'_, '_> {
                 && exists
             {
                 self.finishable(n, item, evidence.as_ref());
+            }
+            if let Change::Cancel { item, force: false } = change
+                && exists
+            {
+                self.cancelable(n, item);
             }
             match repeat {
                 Some(_) if !exists && created.insert(record.clone()) => {
@@ -958,6 +986,33 @@ impl Judging<'_, '_> {
         {
             let at = FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::Evidence };
             self.refuse(Some(n), Some(at), Rule::EvidenceDiffers);
+        }
+    }
+
+    /// Refuses to cancel work someone else holds a live claim on, judged on the model before, as the actor saw it.
+    /// Without readiness to judge by, there is no claim to see and nothing is refused.
+    fn cancelable(&mut self, n: usize, id: &str) {
+        let Some(readiness) = self.readiness else { return };
+        let at =
+            || Some(FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::State });
+        let mut holders = Vec::new();
+        for leaf in self.before.subtree(id) {
+            if !self.before.children(leaf).is_empty()
+                || self.before.items.get(leaf).is_none_or(Item::is_finished)
+            {
+                continue;
+            }
+            match readiness.of(leaf) {
+                Ok(Some(Readiness::Claimed { holder })) => holders.push(holder),
+                Ok(Some(Readiness::Contested { holders: held })) => holders.extend(held),
+                Err(_) => self.refuse(Some(n), at(), Rule::NotReady(None)),
+                Ok(_) => {},
+            }
+        }
+        holders.sort();
+        holders.dedup();
+        if let Some(holder) = holders.into_iter().find(|holder| holder != self.actor) {
+            self.refuse(Some(n), at(), Rule::CancelHeld { holder });
         }
     }
 
@@ -1064,7 +1119,7 @@ impl Judging<'_, '_> {
             .filter(|(_, id)| !threaded.contains(id))
             .filter_map(|(n, id)| {
                 let item = snapshot.items.get(id)?;
-                if item.thread != Value::None || item.is_done() {
+                if item.thread != Value::None || item.is_finished() {
                     return None;
                 }
                 let thread = passed_down(snapshot, item.parent.one()?)?;
@@ -1085,6 +1140,7 @@ impl Judging<'_, '_> {
         found.extend(new_lineage_links(self.before, after, steps));
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
+        found.extend(cancel_rules(self.before, steps));
         self.violations.extend(found);
     }
 }
@@ -1172,6 +1228,26 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
         }
     }
     found
+}
+
+/// Canceling done work, or a parent that reads done, is refused: reopen it first. Judged on the model before.
+fn cancel_rules(before: &Model, steps: &[Step]) -> Vec<Violation> {
+    steps
+        .iter()
+        .filter(|step| step.asked)
+        .filter_map(|step| match &step.write {
+            Written::Assign(assign @ Assign::Item(id, ItemAssign::State(ItemState::Canceled)))
+                if before.reads_done(id) =>
+            {
+                Some(Violation {
+                    change: Some(step.change),
+                    at: Some(assign.at()),
+                    rule: Rule::CancelDone,
+                })
+            },
+            _ => None,
+        })
+        .collect()
 }
 
 /// Cycles of parents or waits-for the change set closes: one already there stays the user's to break.
@@ -1355,7 +1431,9 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
                     .items
                     .values()
                     .find(|other| {
-                        other.id != *id && other.title.all().contains(&title) && !other.is_done()
+                        other.id != *id
+                            && other.title.all().contains(&title)
+                            && !other.is_finished()
                     })
                     .map(|other| Record::Item(other.id.clone()))
             },

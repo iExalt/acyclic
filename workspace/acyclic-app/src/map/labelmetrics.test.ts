@@ -40,6 +40,7 @@ describe("map label metrics", () => {
       waiting: 1,
       parked: 0,
       unthreaded: 0,
+      canceled: 0,
     };
     const measured = metricsOf(
       { title: "Release", kind: "collapsed", hidden: 18, stage: "in-progress", progress },

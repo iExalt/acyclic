@@ -209,6 +209,60 @@
     },
     {
       "field": "state",
+      "id": "01900000-0000-7000-8000-0000000000a7",
+      "identity": "{\"choices\":[{\"command\":null,\"value\":\"done\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000a7\",\"state\":\"canceled\"}}},\"value\":\"canceled\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000a7\",\"kind\":\"item\"}}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a7",
+        "parent": null,
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "readiness": "conflicted"
+        },
+        "stage": "waiting",
+        "state": {
+          "conflict": [
+            "done",
+            "canceled"
+          ]
+        },
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Disputed"
+      },
+      "keeps": [
+        {
+          "command": null,
+          "run": null,
+          "value": "done",
+          "why": "Keep done in a terminal: run acyclic item done with its evidence"
+        },
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000a7",
+                "state": "canceled"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000a7 --state canceled",
+          "value": "canceled",
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000a7:state",
+      "kind": "conflict",
+      "notify": true,
+      "record": "item",
+      "summary": "Disputed: its state was written differently on two machines",
+      "values": [
+        "done",
+        "canceled"
+      ]
+    },
+    {
+      "field": "state",
       "id": "01900000-0000-7000-8000-0000000000b1",
       "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"open\"}}},\"value\":\"open\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000b1\",\"kind\":\"item\"}}",
       "item": {
@@ -216,6 +270,7 @@
         "parent": null,
         "progress": {
           "counts": {
+            "canceled": 0,
             "done": 0,
             "in_progress": 0,
             "leaves": 1,
@@ -480,6 +535,40 @@
         "state": "open",
         "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "Late"
+      }
+    },
+    {
+      "identity": "{\"entry\":\"waits-on-canceled\",\"item\":\"01900000-0000-7000-8000-0000000000a6\",\"waits_for\":\"01900000-0000-7000-8000-0000000000a5\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a6",
+        "parent": null,
+        "readiness": {
+          "readiness": "waiting",
+          "waiting": {
+            "01900000-0000-7000-8000-0000000000a5": {
+              "why": "canceled"
+            }
+          }
+        },
+        "stage": "waiting",
+        "state": "open",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Waiting"
+      },
+      "key": "waits-on-canceled:01900000-0000-7000-8000-0000000000a6:01900000-0000-7000-8000-0000000000a5",
+      "kind": "waits-on-canceled",
+      "notify": true,
+      "summary": "Waiting waits for Dropped, which was canceled",
+      "waits_for": {
+        "id": "01900000-0000-7000-8000-0000000000a5",
+        "parent": null,
+        "readiness": {
+          "readiness": "canceled"
+        },
+        "stage": "canceled",
+        "state": "canceled",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Dropped"
       }
     }
   ]

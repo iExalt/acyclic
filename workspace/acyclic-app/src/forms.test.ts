@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { examples } from "./commands.examples.json";
-import { changes, draftOf, itemEdit, reopenCommand, stateHint } from "./forms";
+import { changes, draftOf, itemEdit, reopenCommand, STATES, stateHint } from "./forms";
 import { ID, item } from "./map/fixture";
 
 const example = (name: string) => {
@@ -39,6 +39,17 @@ describe("itemEdit", () => {
     // Notes and thread change elsewhere; the user changes only the title, and the editor still holds the old notes.
     expect(itemEdit("a", opened, { ...opened, title: "New" })).toEqual({ item: { edit: { item: "a", title: "New" } } });
     expect(changes(opened, { ...opened, title: " New ", notes: "" })).toEqual({ title: "New", notes: "" });
+  });
+});
+
+describe("canceling", () => {
+  it("is a state a command may set, saved as one edit and said plainly", () => {
+    expect(STATES).toContain("canceled");
+    const base = { title: "T", state: "open", thread: "", notes: "" };
+    expect(itemEdit("a", base, { ...base, state: "canceled" })).toEqual({
+      item: { edit: { item: "a", state: "canceled" } },
+    });
+    expect(stateHint({ state: "canceled", thread: "" }, true)).toMatch(/^Canceled work is dropped/);
   });
 });
 

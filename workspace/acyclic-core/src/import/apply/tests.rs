@@ -295,6 +295,21 @@ fn done_on_a_parent_is_refused_and_done_work_set_back_is_reopened() {
 }
 
 #[test]
+fn an_import_that_says_canceled_cancels_open_work_and_refuses_done_work() {
+    let mut r = imported();
+    let mut doc = Import::new();
+    doc.items = vec![item(11, Some(Planned::Canceled), Some(10))];
+    apply(&doc, &mut r, by(USER, 3)).unwrap();
+    assert_eq!(model(&r).items[&id(11)].state, Value::One(ItemState::Canceled));
+    // Done work is reopened before it is canceled.
+    doc.items = vec![item(12, Some(Planned::Canceled), None)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
+        panic!("canceled on done work accepted")
+    };
+    assert_eq!(errors, [ValidationError::CanceledDone(id(12))]);
+}
+
+#[test]
 fn a_deleted_thread_items_still_name_is_unknown_to_an_import() {
     let mut r = imported();
     // 20 emptied and deleted, while another replica's write still puts 11 in it.
