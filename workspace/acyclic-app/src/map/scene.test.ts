@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import type { Placed } from "./layout";
+import { type Placed, ROOT } from "./layout";
 import { buildModel, visible } from "./model";
 import { scene } from "./scene";
 
@@ -196,4 +196,10 @@ describe("scene stubs", () => {
     expect(drawn.nodes.find((node) => node.id === "a")?.reserve).toBeGreaterThan(0);
     expect(drawn.nodes.find((node) => node.id === "b")?.reserve).toBe(0);
   });
+});
+
+it("draws the root lane divider without a visible root box", () => {
+  const line = { x: 220, top: 12, bottom: 400 };
+  const out = scene(view, { ...placed, dividers: new Map([[ROOT, line]]) }, { item: null, thread: null }, threadOf);
+  expect(out.dividers).toEqual([{ id: `divider ${ROOT}`, owner: ROOT, ...line, layer: 0 }]);
 });

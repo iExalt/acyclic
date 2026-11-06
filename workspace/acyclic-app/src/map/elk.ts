@@ -156,10 +156,20 @@ export function elkLayBox(engine: Engine): LayBox {
     if (input.id === ROOT) {
       const waits = new Map<string, string[]>();
       for (const { source, target } of input.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
-      return pack(
-        dependencyOrder([...size.keys()], input.edges).flatMap((id) => size.get(id) ?? []),
-        waits,
-        input.aspect ?? PORTRAIT,
+      const aside = new Set(input.aside);
+      const forest = dependencyOrder([...size.keys()], input.edges).filter((id) => !aside.has(id));
+      const graph =
+        forest.length === 0
+          ? null
+          : pack(
+              forest.flatMap((id) => size.get(id) ?? []),
+              waits,
+              input.aspect ?? PORTRAIT,
+            );
+      return beside(
+        graph,
+        input.children.filter((child) => aside.has(child.id)),
+        PAD,
       );
     }
     const linked = new Set(input.edges.flatMap((edge) => [edge.source, edge.target]));

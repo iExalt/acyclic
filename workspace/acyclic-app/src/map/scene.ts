@@ -4,7 +4,7 @@
 import type { Stage } from "../api";
 import type { Measure } from "./fit";
 import { metricsOf, STUB_CHIP, STUB_INSET } from "./labelmetrics";
-import { type Placed, withinOneBox } from "./layout";
+import { type Placed, ROOT, withinOneBox } from "./layout";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, View } from "./model";
 import { type Segments, segmentsOf } from "./route";
@@ -224,6 +224,8 @@ export function scene(
       });
     }
   const dividers: SceneDivider[] = [];
+  const rootDivider = placed.dividers.get(ROOT);
+  if (rootDivider !== undefined) dividers.push({ id: `divider ${ROOT}`, owner: ROOT, ...rootDivider, layer: 0 });
   for (const node of nodes) {
     const line = node.kind === "box" ? placed.dividers.get(node.id) : undefined;
     if (line !== undefined) dividers.push({ id: `divider ${node.id}`, owner: node.id, ...line, layer: node.layer });

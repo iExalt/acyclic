@@ -528,3 +528,6 @@ before what went wrong.
   next fits the first view at 1280 x 800, and New item defaults to the initiative in context; the user chose them. The
   Map, Threads view and outline are scoped to it. Proposed: the initiative in context is kept in the address and the
   navigation place, orders the groups with the one in context first, and the Overview's Needs you rows keep wrapping.
+- 2026-11-06: top-level tasks with no dependency links stand in columns on the left of the packed boxes, with the
+  same dashed separator as inside an epic. Thread membership and stage do not affect placement. Folded boxes stay
+  with the boxes. The user approved the left-lane proposal and clarified that the rule is unlinked, not unthreaded.

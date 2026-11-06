@@ -686,3 +686,66 @@ describe("LayoutCache", () => {
     expect(cache.rootSize).toBe(2);
   });
 });
+
+describe("top-level task lane", () => {
+  const layBox = elkLayBox(new ELK());
+  const items = [
+    item("epic"),
+    item("nested", "epic"),
+    item("free"),
+    item("threaded", null, [], { thread: "t", state: "done" }),
+    item("linked", null, ["nested"]),
+  ];
+
+  it("keeps unlinked leaves left regardless of thread or state, and boxes and linked leaves right", async () => {
+    const model = buildModel(items);
+    for (const collapsed of [new Set<string>(), new Set(["epic"])]) {
+      const out = await place(visible(model, { collapsed }), new LayoutCache(), layBox, 1.6);
+      const line = out.dividers.get(ROOT);
+      if (line === undefined) throw new Error("Missing root divider");
+      for (const id of ["free", "threaded"]) {
+        const node = out.nodes.get(id);
+        if (node === undefined) throw new Error("Missing task");
+        expect(node.x + node.width).toBeLessThan(line.x);
+      }
+      for (const id of ["epic", "linked"]) expect(out.nodes.get(id)?.x ?? Number.NaN).toBeGreaterThan(line.x);
+    }
+    const alone = await place(visible(buildModel([item("a"), item("b")]), open), new LayoutCache(), layBox, 1.6);
+    expect(alone.dividers.has(ROOT)).toBe(false);
+  });
+
+  it("holds the lane and divider across folds, and clears a widened task even beside a lower box", async () => {
+    const model = buildModel([...items, item("second"), item("child", "second")]);
+    const cache = new LayoutCache();
+    const first = await place(visible(model, open), cache, layBox, 1.6);
+    const folded = await place(visible(model, { collapsed: new Set(["epic"]) }), cache, layBox, 1.6);
+    expect(folded.laidOut).not.toContain(ROOT);
+    expect(folded.dividers.get(ROOT)?.x ?? Number.NaN).toBe(first.dividers.get(ROOT)?.x ?? Number.NaN);
+    expect(folded.nodes.get("free")).toEqual(first.nodes.get("free"));
+    const grown = await place(
+      visible(model, open),
+      cache,
+      layBox,
+      1.6,
+      () => true,
+      "",
+      new Map([["free", { width: 900, height: 64 }]]),
+    );
+    const line = grown.dividers.get(ROOT);
+    if (line === undefined) throw new Error("Missing held root divider");
+    expect(line.x).toBe((grown.nodes.get("free")?.x ?? Number.NaN) + 920);
+    for (const id of ["epic", "second", "linked"]) expect(grown.nodes.get(id)?.x ?? Number.NaN).toBeGreaterThan(line.x);
+    expect(line.bottom).toBe(grown.height - 12);
+  });
+
+  it("invalidates root history when a leaf becomes a box or acquires a dependency", async () => {
+    const cache = new LayoutCache();
+    await place(visible(buildModel(items), open), cache, layBox, 1.6);
+    const parent = await place(visible(buildModel([...items, item("new", "free")]), open), cache, layBox, 1.6);
+    expect(parent.laidOut).toContain(ROOT);
+    expect(parent.nodes.get("free")?.x ?? Number.NaN).toBeGreaterThan(parent.dividers.get(ROOT)?.x ?? Number.NaN);
+    const linked = items.map((one) => (one.id === "free" ? item("free", null, ["nested"]) : one));
+    const after = await place(visible(buildModel(linked), open), cache, layBox, 1.6);
+    expect(after.nodes.get("free")?.x ?? Number.NaN).toBeGreaterThan(after.dividers.get(ROOT)?.x ?? Number.NaN);
+  });
+});

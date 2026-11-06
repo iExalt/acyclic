@@ -4197,6 +4197,7 @@ def shard_run(shard):
             run(env, "thread", "add", "--title", "Shrink proof")
             project = json.loads(run(env, "item", "add", "--title", "Tall chain"))["data"]["item"]
             other = json.loads(run(env, "item", "add", "--title", "Other root"))["data"]["item"]
+            run(env, "item", "add", "--title", "Other child", "--parent", other)
             run(env, "item", "add", "--title", "Any time", "--parent", project)
             chain = [
                 json.loads(

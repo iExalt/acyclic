@@ -26,6 +26,8 @@ export interface BoxInput {
   edges: { source: string; target: string }[];
   /** The width over height the top level is packed to; only the top level has one. */
   aspect?: number;
+  /** Unlinked top-level leaves, kept left of the packed boxes regardless of thread or stage. */
+  aside?: readonly string[];
   /** This box's independently measured title strip, also used above its graph and aside. */
   header?: number;
   /** Minimum outer width measured with the label so this box's own geometry participates in its cache key. */
@@ -197,7 +199,7 @@ export class LayoutCache {
 
 /** A root's source snapshot and topology/shape identify its original packing, independent of size and folds. */
 function rootKey(input: BoxInput): string {
-  return JSON.stringify([input.children.map(({ id }) => id), input.edges, input.aspect]);
+  return JSON.stringify([input.children.map(({ id }) => id), input.edges, input.aspect, input.aside]);
 }
 
 function historyKey(input: BoxInput, source: string): string {
@@ -259,6 +261,7 @@ export async function place(
   headers: ReadonlyMap<string, number> = new Map(),
 ): Promise<Placed> {
   const scope = scopes(view);
+  const rootLinked = new Set((scope.edges.get(ROOT) ?? []).flatMap((edge) => [edge.source, edge.target]));
   const boxes = new Map<string, BoxLayout>();
   const laidOut: string[] = [];
   const levels: string[][] = [];
@@ -282,7 +285,14 @@ export async function place(
             ...sizeOf(scope.kind.get(child), boxes, child, sizes),
           })),
           edges: scope.edges.get(id) ?? [],
-          ...(id === ROOT ? { aspect } : {}),
+          ...(id === ROOT
+            ? {
+                aspect,
+                aside: (scope.kids.get(ROOT) ?? []).filter(
+                  (child) => scope.kind.get(child) === "leaf" && !rootLinked.has(child),
+                ),
+              }
+            : {}),
           header: headers.get(id) ?? 52,
           minWidth: sizes.get(id)?.width ?? 200,
         };
@@ -291,6 +301,7 @@ export async function place(
           input.children,
           input.edges,
           input.aspect,
+          input.aside,
           input.header ?? 52,
           input.minWidth ?? 200,
         ]);
@@ -366,9 +377,24 @@ export function held(last: { input: BoxInput; layout: BoxLayout } | null, now: B
   if (last === null) return undefined;
   const was = last.input;
   if (was.aspect !== now.aspect || was.children.length !== now.children.length) return undefined;
+  if (JSON.stringify(was.aside) !== JSON.stringify(now.aside)) return undefined;
   if (JSON.stringify(was.edges) !== JSON.stringify(now.edges)) return undefined;
   if (!now.children.every((child, n) => was.children[n]?.id === child.id)) return undefined;
   const waits = new Map<string, string[]>();
   for (const { source, target } of now.edges) waits.set(target, [...(waits.get(target) ?? []), source]);
-  return hold({ children: was.children, layout: last.layout }, now.children, waits);
+  const layout = hold({ children: was.children, layout: last.layout }, now.children, waits);
+  if (layout === undefined || last.layout.divider === undefined) return layout;
+  const aside = new Set(now.aside);
+  let right = 12;
+  let left = Number.POSITIVE_INFINITY;
+  for (const child of now.children) {
+    const at = layout.at[child.id];
+    if (at === undefined) return undefined;
+    if (aside.has(child.id)) right = Math.max(right, at.x + child.width);
+    else left = Math.min(left, at.x);
+  }
+  // A wider aside must clear the entire forest, including boxes below its footprint.
+  const dx = Math.max(0, right + 40 - left);
+  for (const [id, at] of Object.entries(layout.at)) if (!aside.has(id)) at.x += dx;
+  return { ...layout, width: layout.width + dx, divider: { x: right + 20, top: 12, bottom: layout.height - 12 } };
 }
