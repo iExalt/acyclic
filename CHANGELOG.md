@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/iExalt/acyclic/compare/v0.7.2...v0.8.0) (2026-11-06)
+
+
+### Features
+
+* **app:** place unlinked top-level tasks left of epics ([#223](https://github.com/iExalt/acyclic/issues/223)) ([5a005af](https://github.com/iExalt/acyclic/commit/5a005afd8923d0c27ca0e2873a7cbbe57c798631))
+
+
+### Bug Fixes
+
+* **app:** remove redundant Map state labels ([#221](https://github.com/iExalt/acyclic/issues/221)) ([d04cb4c](https://github.com/iExalt/acyclic/commit/d04cb4c972afa0c219d9481311085b6c210f79d2))
+
 ## [0.7.2](https://github.com/iExalt/acyclic/compare/v0.7.1...v0.7.2) (2026-11-06)
 
 
