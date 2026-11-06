@@ -20,7 +20,7 @@ import { createGesture } from "./gesture";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
-import { track } from "./motion";
+import { busy, subscribe, track } from "./motion";
 import {
   firstView,
   fitPlan,
@@ -201,10 +201,12 @@ export default function PlanMap({
   const tapReveals = useRef(0);
   const watching = useRef<number | null>(null);
   /**
-   * The tile animations in flight, which keep the Map from settling. The one place an animation source plugs in: its
-   * running count replaces the 0, and its subscription calls `kickFramed` when an animation starts.
+   * The motion in flight, which keeps the Map from settling: tiles gliding, links fading in, and a redraw held back by a
+   * gesture (see `motion.ts`). A change in it, which `subscribe` reports, begins the watch again.
    */
-  const animating = (): number => 0;
+  const animating = (): number => busy();
+  const kick = useRef(() => {});
+  useEffect(() => subscribe(() => kick.current()), []);
   const activeNow = useRef(active);
   activeNow.current = active;
   const threadNow = useRef(thread);
@@ -249,6 +251,7 @@ export default function PlanMap({
     };
     watching.current = requestAnimationFrame(frame);
   }
+  kick.current = kickFramed;
   useEffect(
     () => () => {
       if (watching.current !== null) cancelAnimationFrame(watching.current);
@@ -462,11 +465,16 @@ export default function PlanMap({
       if (inside(event)) gesture.down(event.pointerId);
     };
     const up = (event: PointerEvent) => gesture.up(event.pointerId);
-    const alive = () => gesture.move();
-    const touched = (event: TouchEvent) => {
-      if (event.type === "touchstart" && !inside(event)) return;
-      gesture.touches(event.touches.length);
+    // A pointer moving with no button down is hover, or a release outside the page that was never seen: not a gesture.
+    const alive = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" && event.buttons === 0) gesture.up(event.pointerId);
+      else gesture.move();
     };
+    // Only the fingers on the Map count, wherever the touch that ended began.
+    const touched = (event: TouchEvent) =>
+      gesture.touches(
+        [...event.touches].filter((touch) => touch.target instanceof Node && element.contains(touch.target)).length,
+      );
     const forget = () => gesture.reset();
     const hiding = () => {
       if (document.hidden) gesture.reset();
@@ -477,7 +485,7 @@ export default function PlanMap({
     element.addEventListener("pointerdown", down, { capture: true, passive: true });
     for (const kind of ["pointerup", "pointercancel"] as const) window.addEventListener(kind, up, { capture: true });
     window.addEventListener("pointermove", alive, { capture: true, passive: true });
-    for (const kind of ["touchstart", "touchend", "touchcancel"] as const)
+    for (const kind of ["touchstart", "touchmove", "touchend", "touchcancel"] as const)
       window.addEventListener(kind, touched, { capture: true, passive: true });
     window.addEventListener("wheel", stepped, { capture: true, passive: true });
     window.addEventListener("blur", forget);
@@ -496,7 +504,7 @@ export default function PlanMap({
       for (const kind of ["pointerup", "pointercancel"] as const)
         window.removeEventListener(kind, up, { capture: true });
       window.removeEventListener("pointermove", alive, { capture: true });
-      for (const kind of ["touchstart", "touchend", "touchcancel"] as const)
+      for (const kind of ["touchstart", "touchmove", "touchend", "touchcancel"] as const)
         window.removeEventListener(kind, touched, { capture: true });
       window.removeEventListener("wheel", stepped, { capture: true });
       window.removeEventListener("blur", forget);
@@ -738,6 +746,7 @@ export default function PlanMap({
           setDrawnOnce(true);
         }),
       );
+      kickFramed();
     };
     // A repack of the top level waits for a gesture, and the latest one wins; the first draw, and a redraw that moves
     // nothing, as a selection or a hover does, never wait.

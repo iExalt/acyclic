@@ -160,6 +160,8 @@ export const GLIDE_MS = 200;
 /** A link's fade back in: it waits this long, then takes `FADE_MS`, so it is whole as the tiles settle. */
 const FADE_DELAY_MS = 50;
 const FADE_MS = 150;
+/** The most tiles that glide in one write; a write that would move more puts them all in place at once. */
+export const MAX_GLIDES = 300;
 
 interface Rect {
   x1: number;
@@ -322,7 +324,8 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
   const changes = diff(drawn, next);
   const to = new Map(next.map((element) => [element.data.id, element]));
   const glides = new Map<string, { x: number; y: number }>();
-  const hidden: string[] = [];
+  const candidates = new Map<string, { x: number; y: number }>();
+  const hidden = new Set<string>();
   const edges: Update[] = [];
   core.batch(() => {
     for (const id of changes.remove) {
@@ -346,27 +349,40 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
       }
       const element = change(update);
       if (update.position === null) continue;
-      const classes = to.get(update.id)?.classes ?? "";
+      const data = to.get(update.id)?.data;
       stopMoving(core, update.id);
-      const from = element.position();
-      if (isPlain(classes)) {
+      if (isPlain(to.get(update.id)?.classes ?? "")) {
         element.position(update.position);
-        hidden.push(update.id);
-      } else if (
+        hidden.add(update.id);
+        continue;
+      }
+      // Sizes are in the scene's data, which this write has just set.
+      const width = typeof data?.width === "number" ? data.width : element.width();
+      const height = typeof data?.height === "number" ? data.height : element.height();
+      if (
         glide !== undefined &&
         !glide.reduced &&
-        touchesView(glide.extent, from, update.position, element.width(), element.height())
-      ) {
-        glides.set(update.id, update.position);
-      } else {
-        element.position(update.position);
-      }
+        touchesView(glide.extent, element.position(), update.position, width, height)
+      )
+        candidates.set(update.id, update.position);
+      else element.position(update.position);
     }
+    // A mass move costs more than it shows, as every tile is an image: past the cap, all of it snaps.
+    if (candidates.size > MAX_GLIDES) for (const [id, at] of candidates) core.getElementById(id).position(at);
+    else for (const [id, at] of candidates) glides.set(id, at);
+    const gliding = (id: unknown) => glides.has(String(id));
     for (const update of edges) {
       const element = change(update);
       const ends = to.get(update.id)?.data;
-      if (glides.has(String(ends?.source)) || glides.has(String(ends?.target))) hidden.push(update.id);
+      if (gliding(ends?.source) || gliding(ends?.target)) hidden.add(update.id);
       else if (element.isEdge()) stopFading(core, update.id);
+    }
+    // What this write adds is drawn only once its tiles have settled, rather than at its final route between tiles
+    // still on their way.
+    for (const added of changes.add) {
+      const ends = added.data;
+      if (added.group === "edges" ? gliding(ends.source) || gliding(ends.target) : isPlain(added.classes))
+        hidden.add(added.data.id);
     }
   });
   // Started once the batch has settled, so a tile starts from where it is drawn.

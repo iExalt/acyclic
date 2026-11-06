@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rested = () => vi.waitFor(() => expect(busy()).toBe(0), { timeout: 2000, interval: 10 });
 
-import { apply, type Drawn, land, prefersReducedMotion, settle, settledBox, touchesView } from "./draw";
+import { apply, type Drawn, land, MAX_GLIDES, prefersReducedMotion, settle, settledBox, touchesView } from "./draw";
 import { busy } from "./motion";
 
 const node = (id: string, x: number, y: number, classes = "leaf"): Drawn => ({
@@ -129,6 +129,55 @@ describe("glide", () => {
     const stop = apply(core, new Map(), [node("b", 100, 0)]);
     apply(core, stop, [node("b", 7, 7)]);
     expect(core.getElementById("b").position()).toEqual({ x: 7, y: 7 });
+  });
+
+  it("hides a link added in the same write as a glide, and fades it in with the rest", async () => {
+    const was = apply(core, new Map(), start);
+    apply(core, was, [...moved, edge("a->c", "a", "c"), node("c", 300, 300)], glide);
+    expect(Number(core.getElementById("a->c").style("opacity"))).toBe(0);
+    expect(core.getElementById("c").position()).toEqual({ x: 300, y: 300 });
+    await rested();
+    expect(Number(core.getElementById("a->c").style("opacity"))).toBe(1);
+  });
+
+  it("puts every tile in place at once when more than the cap would glide", () => {
+    const row = (y: number) => Array.from({ length: MAX_GLIDES + 1 }, (_, i) => node(`n${i}`, i, y));
+    const was = apply(core, new Map(), row(0));
+    apply(core, was, row(50), glide);
+    expect(core.getElementById("n0").position()).toEqual({ x: 0, y: 50 });
+    expect(core.animated()).toBe(false);
+    expect(busy()).toBe(0);
+    const few = apply(core, new Map(row(50).map((one) => [one.data.id, one])), row(0).slice(0, MAX_GLIDES), glide);
+    expect(few.size).toBe(MAX_GLIDES);
+    expect(busy()).toBeGreaterThan(0);
+  });
+
+  it("never changes which box a tile is in: a node's box in its data stays what the scene says, mid-glide and at rest", async () => {
+    // A seeded walk of writes that move tiles about without moving any across boxes.
+    let seed = 7;
+    const rand = (below: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed % below;
+    };
+    const tile = (i: number, x: number, y: number): Drawn => ({
+      group: "nodes",
+      data: { id: `t${i}`, box: `box${i % 3}` },
+      position: { x, y },
+      classes: "leaf",
+    });
+    let held = apply(
+      core,
+      new Map(),
+      Array.from({ length: 12 }, (_, i) => tile(i, rand(500), rand(500))),
+    );
+    for (let write = 0; write < 8; write++) {
+      const next = Array.from({ length: 12 }, (_, i) => tile(i, rand(500), rand(500)));
+      held = apply(core, held, next, glide);
+      for (const one of core.nodes()) expect(one.data("box")).toBe(`box${Number(one.id().slice(1)) % 3}`);
+      await new Promise((done) => setTimeout(done, rand(60)));
+    }
+    await rested();
+    for (const [id, one] of held) expect(core.getElementById(id).data("box")).toBe(one.data.box);
   });
 
   it("tells a move in view from one out of it", () => {

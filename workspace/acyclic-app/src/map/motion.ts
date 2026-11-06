@@ -3,18 +3,30 @@
 //
 // API for readers:
 //   busy()          how many of those are going on now; 0 means the Map is at rest.
-//   subscribe(cb)   calls cb whenever busy() changes; returns a function that stops the calls.
+//   subscribe(cb)   calls cb after busy() changes, once per tick however many changes it saw; returns a function that
+//                   stops the calls.
 // `track` is for the Map's own code to count one piece of motion until it calls the function it returns.
 
 let running = 0;
 const listeners = new Set<() => void>();
+let queued = false;
+
+/** Tells the listeners once per tick, however many pieces of motion began or ended in it. */
+function changed() {
+  if (queued) return;
+  queued = true;
+  queueMicrotask(() => {
+    queued = false;
+    for (const listener of [...listeners]) listener();
+  });
+}
 
 /** How many tweens, fades and held-back redraws are going on now; 0 when the Map is at rest. */
 export function busy(): number {
   return running;
 }
 
-/** Calls `listener` whenever `busy()` changes. Returns the function that removes it. */
+/** Calls `listener` after `busy()` changes, once per tick. Returns the function that removes it. */
 export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
@@ -26,11 +38,11 @@ export function subscribe(listener: () => void): () => void {
 export function track(): () => void {
   let live = true;
   running++;
-  for (const listener of [...listeners]) listener();
+  changed();
   return () => {
     if (!live) return;
     live = false;
     running--;
-    for (const listener of [...listeners]) listener();
+    changed();
   };
 }

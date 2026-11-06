@@ -4,8 +4,11 @@
 
 /** How long after the last wheel step a wheel zoom counts as going on. */
 export const WHEEL_QUIET_MS = 300;
-/** How long a pointer or touch may be down without a sign of life before it is taken as stuck and cleared. */
-export const WATCHDOG_MS = 1500;
+/**
+ * How long a pointer or touch may be down without a sign of life (a pointer or touch move) before it is taken as stuck
+ * and cleared. A finger held still sends nothing, so this is long enough for a pause to read the plan under it.
+ */
+export const WATCHDOG_MS = 5000;
 
 export interface Timers {
   set(callback: () => void, ms: number): unknown;

@@ -552,10 +552,33 @@ def scheme_switch(page, name, failures):
     print(f"{name}: switched the scheme to light and back, the Map restyled in place")
 
 
+# Answers the page's reduced-motion query as "reduce" and every other query as the browser does, so the Map's tiles
+# snap to their places instead of gliding for about 200 ms. Only the Map's script reads that query: the stylesheet's own
+# reduced-motion rules, which stop the sheets' rise, are not touched, as they would be by emulating the preference.
+MAP_SNAPS = """() => {
+    const real = window.matchMedia.bind(window);
+    window.matchMedia = (query) => {
+        const media = real(query);
+        if (!String(query).includes('prefers-reduced-motion')) return media;
+        return new Proxy(media, {
+            get: (target, key) => {
+                if (key === 'matches') return true;
+                const value = Reflect.get(target, key);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+    };
+}"""
+
+
 @timed
-def open_app(browser, view, link, failures, name):
+def open_app(browser, view, link, failures, name, glide=False):
+    """Opens the app. The Map's tiles snap to their places, so a journey reads where they are without waiting out a
+    glide; `glide` leaves them gliding, for the journey that is about that."""
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
+    if not glide:
+        context.add_init_script(f"({MAP_SNAPS})()")
     page = context.new_page()
     page.route(
         "**/*",
@@ -2808,11 +2831,13 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         " const p = m?.cy.getElementById(project).boundingBox();"
         " const o = m?.cy.getElementById(other).boundingBox();"
         " return m?.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
+        " && !m.cy.elements().some((e) => e.animated())"
         " && Number(m.dataset.layouts) > layouts"
         " && p && p.h < oldHeight - 20 && o && o.y1 < oldY - 2; }",
         arg=[count, layouts_before, project, other, before["nodes"][project]["h"], before["nodes"][other]["y"]],
         timeout=20_000,
     )
+    settled_map(page)
     after = geometry([project, other, chain[-2]])
     updated = Plan(env)
 
@@ -2872,7 +2897,66 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
         reopened["nodes"][other], before["nodes"][other]
     ):
         failures.append(f"{name}: folding after Undo moved the other root")
+    hold_during_gesture(page, env, project, other, chain, name, failures)
     print(f"{name}: a phone shrink repacked the roots, Undo restored them, and a later fold held them")
+
+
+def hold_during_gesture(page, env, project, other, chain, name, failures):
+    """A write that repacks the top level while the pointer is down on the Map leaves the tiles where they are, and
+    draws once it is released: the new item appears and the roots move, gliding to their places."""
+    count = int(settled_map(page).get_attribute("data-nodes"))
+    ids = [project, other]
+    corners = """(m, ids) => Object.fromEntries(ids.map((id) => {
+        const b = m.cy.getElementById(id).boundingBox({ includeLabels: false });
+        return [id, [Math.round(b.x1), Math.round(b.y1), Math.round(b.w), Math.round(b.h)]];
+    }))"""
+    before = page.get_by_test_id("map").evaluate(corners, ids)
+    box = page.get_by_test_id("map").bounding_box()
+    # The Map's left edge, a tenth of the way down: clear of the Fit button and of the sheet that rises from below.
+    x, y = box["x"] + 6, box["y"] + box["height"] * 0.1
+    if not page.evaluate("([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid=map]') !== null", [x, y]):
+        failures.append(f"{name}: the Map's edge is covered, so a press there isn't on the Map")
+        return
+    page.mouse.move(x, y)
+    page.mouse.down()
+    try:
+        # A step added to the chain makes the tall root taller, so the other root has to move.
+        step = json.loads(run(env, "item", "add", "--title", "Held while pressed", "--parent", project))["data"]["item"]
+        run(env, "item", "edit", step, "--waits-for", chain[-1])
+        # Coming back to the app reads what changed meanwhile; the layout's answer clears the mark, so the window below
+        # starts once the repack is ready and waiting.
+        page.get_by_test_id("map").evaluate("m => { delete m.dataset.layoutMs; }")
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        page.wait_for_function(
+            "() => document.querySelector('[data-testid=map]').dataset.layoutMs !== undefined", timeout=20_000
+        )
+        held = page.get_by_test_id("map").evaluate(
+            """(m, [ids, step]) => new Promise((done) => {
+                const read = () => JSON.stringify([m.cy.getElementById(step).nonempty(), m.dataset.nodes,
+                    ids.map((id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false });
+                        return [Math.round(b.x1), Math.round(b.y1), Math.round(b.w), Math.round(b.h)]; })]);
+                const first = read(), start = performance.now(), seen = [];
+                const frame = () => {
+                    seen.push(read());
+                    if (performance.now() - start < 400) requestAnimationFrame(frame); else done({ first, seen });
+                };
+                frame();
+            })""",
+            [ids, step],
+        )
+        if any(one != held["first"] for one in held["seen"]) or json.loads(held["first"])[0]:
+            failures.append(f"{name}: the Map changed under a pressed pointer: {held['seen'][-1]}")
+        if json.loads(held["first"])[1] != str(count):
+            failures.append(f"{name}: the Map's tile count changed under a pressed pointer")
+    finally:
+        page.mouse.up()
+    wait_drawn(page, count + 1)
+    settled_map(page)
+    after = page.get_by_test_id("map").evaluate(corners, ids)
+    if not page.get_by_test_id("map").evaluate("(m, id) => m.cy.getElementById(id).nonempty()", step):
+        failures.append(f"{name}: the new item wasn't drawn once the pointer was released")
+    if after == before:
+        failures.append(f"{name}: the roots didn't move once the pointer was released: {before}")
 
 
 @timed
@@ -3971,7 +4055,7 @@ def shard_run(shard):
                 # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
                 shrink_link, shrink_env, project, other, chain = serve_shrink()
                 context, page, _, errors = open_app(
-                    chromium, VIEWS["phone"], shrink_link, failures, "phone shrink"
+                    chromium, VIEWS["phone"], shrink_link, failures, "phone shrink", glide=True
                 )
                 shrink_undo_journey(
                     page, VIEWS["phone"], shrink_env, project, other, chain, "phone shrink", failures
