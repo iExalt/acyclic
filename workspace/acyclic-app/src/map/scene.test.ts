@@ -75,7 +75,7 @@ describe("scene", () => {
     expect(scene(open, routed, { item: null, thread: "t" }, thread).edges.map((edge) => edge.id)).toContain("a->d");
   });
 
-  it("draws the lit thread's links as its route, across boxes too, and dims the rest", () => {
+  it("draws the lit thread's links as its route, across boxes too", () => {
     // Inside one box: a solid route.
     const both = buildModel([
       item("top"),
@@ -84,88 +84,49 @@ describe("scene", () => {
     ]);
     const open = visible(both, { collapsed: new Set() });
     const inside = scene(open, placed, { item: null, thread: "t" }, (id) => both.items.get(id)?.thread ?? null);
-    expect(inside.edges).toMatchObject([{ id: "a->b", crossing: false, lit: true, dim: false }]);
+    expect(inside.edges).toMatchObject([{ id: "a->b", crossing: false, lit: true }]);
     const picked = scene(view, placed, { item: null, thread: "t" }, threadOf);
-    expect(picked.edges.map((edge) => [edge.id, edge.crossing, edge.lit, edge.dim])).toEqual([
-      ["a->b", false, false, true],
-      ["a->c", true, true, false],
+    expect(picked.edges.map((edge) => [edge.id, edge.crossing, edge.lit])).toEqual([
+      ["a->b", false, false],
+      ["a->c", true, true],
     ]);
-    // A link of the selected item's stays undimmed, though outside its thread.
+    // A selected item's link stays visible outside its thread.
     const selected = scene(view, placed, { item: "b", thread: "t" }, threadOf);
-    expect(selected.edges.find((edge) => edge.id === "a->b")).toMatchObject({ lit: false, dim: false });
+    expect(selected.edges.find((edge) => edge.id === "a->b")).toMatchObject({ lit: false });
     // So does a crossing drawn for the selected item.
     const crossing = scene(view, placed, { item: "c", thread: "u" }, threadOf);
-    expect(crossing.edges.find((edge) => edge.id === "a->c")).toMatchObject({ crossing: true, lit: false, dim: false });
-    expect(scene(view, placed, { item: null, thread: null }, threadOf).edges.every((edge) => !edge.dim)).toBe(true);
+    expect(crossing.edges.find((edge) => edge.id === "a->c")).toMatchObject({ crossing: true, lit: false });
   });
 
-  it("shows a hovered item's links, across boxes too, and dims the rest", () => {
+  it("shows a hovered item's links, across boxes too", () => {
     const hovered = scene(view, placed, { item: null, thread: null, hovered: "c" }, threadOf);
-    expect(hovered.edges.map((edge) => [edge.id, edge.hovered, edge.dim])).toEqual([
-      ["a->b", false, true],
-      ["a->c", true, false],
+    expect(hovered.edges.map((edge) => [edge.id, edge.hovered])).toEqual([
+      ["a->b", false],
+      ["a->c", true],
     ]);
     // The lit thread's route stays lit while another item is hovered.
     const lit = scene(view, placed, { item: null, thread: "t", hovered: "b" }, threadOf);
-    expect(lit.edges.find((edge) => edge.id === "a->c")).toMatchObject({ lit: true, dim: false });
-    // A box opened under the pointer shows nothing of its own, and dims nothing.
+    expect(lit.edges.find((edge) => edge.id === "a->c")).toMatchObject({ lit: true });
+    // A box opened under the pointer shows nothing of its own.
     const opened = scene(view, placed, { item: null, thread: null, hovered: "top" }, threadOf);
-    expect(opened.edges.every((edge) => !edge.dim && !edge.hovered)).toBe(true);
-  });
-
-  it("leaves edge and junction emphasis alone when hover highlights no connection", () => {
-    const isolated = buildModel([...plan, item("alone", "top")]);
-    const open = visible(isolated, { collapsed: new Set() });
-    const layout: Placed = {
-      ...placed,
-      nodes: new Map(open.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }])),
-      routes: new Map([
-        [
-          "a->b",
-          [
-            { x: 5, y: 5 },
-            { x: 25, y: 5 },
-          ],
-        ],
-      ]),
-      junctions: new Map([["a->b", [{ x: 15, y: 5 }]]]),
-    };
-    for (const thread of [null, "t"]) {
-      const rest = scene(open, layout, { item: null, thread }, threadOf);
-      const hovered = scene(open, layout, { item: null, thread, hovered: "alone" }, threadOf);
-      expect(rest.edges.length).toBeGreaterThan(0);
-      expect(rest.junctions.length).toBeGreaterThan(0);
-      expect(hovered.edges).toEqual(rest.edges);
-      expect(hovered.junctions).toEqual(rest.junctions);
-    }
-    // Even if a tile has a connection, one hidden as redundant cannot be highlighted.
-    const redundant = { ...layout, redundant: new Set(["a->b"]) };
-    const rest = scene(open, redundant, { item: "c", thread: "u" }, threadOf);
-    const hovered = scene(open, redundant, { item: "c", thread: "u", hovered: "b" }, threadOf);
-    expect(rest.edges).toMatchObject([{ id: "a->c", dim: false, hovered: false }]);
-    expect(hovered.edges).toEqual(rest.edges);
+    expect(opened.edges.every((edge) => !edge.hovered)).toBe(true);
   });
 
   it("routes a thread through the collapsed box that hides a member", () => {
     const closed = visible(model, { collapsed: new Set(["top"]) });
     const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);
     // Both now sit at the top level, so the link no longer crosses boxes.
-    expect(drawn.edges).toMatchObject([{ id: "top->c", crossing: false, lit: true, dim: false }]);
+    expect(drawn.edges).toMatchObject([{ id: "top->c", crossing: false, lit: true }]);
   });
 
-  it("lights up the selected item's thread and dims other items, but not the boxes around them", () => {
+  it("lights up the selected item's thread", () => {
     const lit = scene(view, placed, { item: "a", thread: null }, threadOf);
-    const marks = lit.nodes.map((node) => `${node.id}:${node.lit ? "lit" : node.dim ? "dim" : "-"}`);
+    const marks = lit.nodes.map((node) => `${node.id}:${node.lit ? "lit" : "-"}`);
     // Roots come in id order, so c before top.
-    expect(marks).toEqual(["c:lit", "top:-", "a:lit", "b:dim"]);
+    expect(marks).toEqual(["c:lit", "top:-", "a:lit", "b:-"]);
     expect(lit.thread).toBe("t");
     // A picked thread wins over the selected item's own.
     expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).thread).toBe("t");
-    expect(scene(view, placed, { item: "b", thread: null }, threadOf).nodes.some((node) => node.dim)).toBe(false);
-    // Selected outside the thread picked, an item is drawn whole.
-    expect(scene(view, placed, { item: "b", thread: "t" }, threadOf).nodes.find((node) => node.id === "b")?.dim).toBe(
-      false,
-    );
   });
 
   it("places nodes by their centres, a box under what it holds, and labels a collapsed box with what it hides", () => {
@@ -234,19 +195,5 @@ describe("scene stubs", () => {
     expect(drawn.stubs[0]?.y).toBe(10 + 94 - 8 - 10);
     expect(drawn.nodes.find((node) => node.id === "a")?.reserve).toBeGreaterThan(0);
     expect(drawn.nodes.find((node) => node.id === "b")?.reserve).toBe(0);
-  });
-
-  it("dims a stub with its tile, outside the lit thread", () => {
-    const threaded = buildModel(
-      [item("a", null, [], { thread: "t" }), item("b", null, [], { thread: "u" })],
-      new Map([["b", [gate]]]),
-    );
-    const view = visible(threaded, { collapsed: new Set() });
-    const at: Placed = {
-      ...placed,
-      nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 300, y: 0, width: 200, height: 94 }])),
-    };
-    const drawn = scene(view, at, { item: null, thread: "t" }, (id) => threaded.items.get(id)?.thread ?? null);
-    expect(drawn.stubs.map((stub) => stub.dim)).toEqual([true]);
   });
 });

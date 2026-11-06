@@ -51,11 +51,8 @@ two in step.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
 - **Signal:** amber in the dark scheme, a dark brown that reads at 4.5:1 in the light; text and dashes only. What
   needs the user, conflicts, threads that wait on each other, and links that cross boxes.
-- **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. A dimmed link, outside
-  a lit thread, falls below that on purpose: it is there to recede. A dimmed item fades its fill and marks but keeps its
-  title muted at full strength, since it can still be picked; its stripe and stage icon fade with it, below 3:1, on
-  purpose, as the title carries it. Its fill stays opaque, the colour it would show at 35 % over its box, so a link
-  across boxes passes beneath it.
+- **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. Hover and selection
+  highlight related items and links while other Map elements keep their usual colour and opacity.
 - **Danger:** red, as text only.
 - **Lines:** each thread's colour, from an Okhsl lightness band per scheme, every hue at the same share of the colour
   it can hold, so every line's badge takes a readable ink. Hues step round the wheel by a hash of the thread's id,
@@ -397,10 +394,10 @@ before what went wrong.
   or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
-- **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
-  the other links recede, the tiles staying as they are; a folded box shows its items' links; the links a drawn way
+- **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too;
+  other links and tiles keep their usual appearance. A folded box shows its items' links; the links a drawn way
   already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
-  shows them all. Hovering an item with no highlightable link leaves the other links at their current emphasis.
+  shows them all.
 - **Unlinked comes first.** Items with no link inside their box (the glossary's Unlinked; Any time is the Threads
   view's word, for threads) stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed

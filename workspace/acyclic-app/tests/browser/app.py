@@ -481,14 +481,13 @@ READ_SCHEME = """m => {
     const probe = document.body.appendChild(document.createElement('i'));
     const v = (n) => { probe.style.color = `var(${n})`; return hex(getComputedStyle(probe).color); };
     const leaf = m.cy.nodes('.leaf.stage-ready').first();
-    const closed = m.cy.nodes('.collapsed').not('.lit, .selected, .dim').first();
+    const closed = m.cy.nodes('.collapsed').not('.lit, .selected').first();
     const open = m.cy.nodes('.box').not('.lit, .selected').first();
     const plain = m.cy.edges().not('.lit, .crossing').first();
     const badge = document.querySelector('[data-testid=thread-panel] .badge');
     return {
         css: { ground: v('--ground'), tile: v('--tile'), box: v('--box'), rule: v('--rule'), muted: v('--muted'), link: v('--link'), ink: v('--ink') },
         leaf: leaf.nonempty() ? hex(leaf.style('background-color')) : null,
-        leafDim: leaf.hasClass('dim'),
         closed: closed.nonempty() ? [hex(closed.style('background-color')), hex(closed.style('border-color'))] : null,
         open: open.nonempty() ? [hex(open.style('background-color')), hex(open.style('border-color'))] : null,
         edge: plain.nonempty() ? hex(plain.style('line-color')) : null,
@@ -500,14 +499,6 @@ READ_SCHEME = """m => {
                  lit: m.cy.nodes('.lit').length, selected: m.cy.nodes('.selected').length },
     };
 }"""
-
-
-def faded(colour, under):
-    """`colour` at 35 % over `under`, as style.ts's `faded` draws a dimmed tile."""
-    return "#" + "".join(
-        f"{int(0.35 * int(colour[at : at + 2], 16) + 0.65 * int(under[at : at + 2], 16) + 0.5):02x}"
-        for at in (1, 3, 5)
-    )
 
 
 def luminance(colour):
@@ -530,8 +521,7 @@ def scheme_switch(page, name, failures):
     def follows(scheme, now):
         css = now["css"]
         wrong = []
-        # A dimmed tile is drawn opaque, in its colour faded over its box's.
-        tile = faded(css["tile"], css["box"]) if now["leafDim"] else css["tile"]
+        tile = css["tile"]
         if now["leaf"] not in (None, tile):
             wrong.append(f"a tile {now['leaf']}, not {tile}")
         if now["closed"] not in (None, [css["tile"], css["muted"]]):
