@@ -718,6 +718,28 @@ fn canceling_refuses_done_work_and_another_holders_claim_unless_forced_and_frees
 }
 
 #[test]
+fn canceling_work_that_waits_in_a_thread_someone_else_holds_is_refused_unless_forced() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("x", vec![ItemAssign::Thread(Some("t".into()))]),
+            add(
+                "y",
+                vec![ItemAssign::Thread(Some("t".into())), ItemAssign::WaitsFor("x".into(), true)],
+            ),
+        ],
+    );
+    crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), false).unwrap();
+    assert_eq!(read(&r).items["y"].state, Value::One(ItemState::Backlog));
+    let held = Rule::CancelHeld { holder: "session/other".into() };
+    assert_eq!(canceling(&r, "y", false), [held]);
+    assert_eq!(canceling(&r, "y", true), []);
+}
+
+#[test]
 fn evidence_must_be_able_to_verify_and_done_work_keeps_what_it_was_finished_with() {
     let mut r = replica("a");
     let repository = |id: &str, more: Vec<RepositoryAssign>| Change::Add {

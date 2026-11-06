@@ -542,18 +542,25 @@ impl Model {
         }
     }
 
-    /// Whether an item reads as canceled: a leaf by its own state, a parent canceled by hand or with every leaf under
-    /// it canceled.
+    /// Whether an item reads as canceled, unless it reads done: a leaf by its own state, a parent canceled by hand or
+    /// with every leaf under it canceled, and anything under a part canceled by hand, as that part cancels what is
+    /// open beneath it. A leaf reading canceled has the stage canceled.
     #[must_use]
     pub fn reads_canceled(&self, id: &str) -> bool {
         let Some(item) = self.items.get(id) else { return false };
-        match self.progress(id) {
+        if self.reads_done(id) {
+            return false;
+        }
+        let own = match self.progress(id) {
             Some(progress) => {
                 item.state == Value::One(ItemState::Canceled)
                     || (progress.total == 0 && progress.canceled > 0)
             },
             None => item.is_canceled(),
-        }
+        };
+        own || self.ancestors(id).into_iter().any(|above| {
+            self.items.get(above).is_some_and(|a| a.state == Value::One(ItemState::Canceled))
+        })
     }
 
     /// Whether an item reads as finished: done or canceled.

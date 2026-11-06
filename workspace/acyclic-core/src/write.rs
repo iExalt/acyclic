@@ -997,16 +997,13 @@ impl Judging<'_, '_> {
             || Some(FieldAddr { record: Record::Item(id.to_owned()), field: FieldName::State });
         let mut holders = Vec::new();
         for leaf in self.before.subtree(id) {
-            if !self.before.children(leaf).is_empty()
-                || self.before.items.get(leaf).is_none_or(Item::is_finished)
-            {
+            if !self.before.children(leaf).is_empty() || self.before.reads_finished(leaf) {
                 continue;
             }
-            match readiness.of(leaf) {
-                Ok(Some(Readiness::Claimed { holder })) => holders.push(holder),
-                Ok(Some(Readiness::Contested { holders: held })) => holders.extend(held),
+            // The claims on its thread, whatever else holds the leaf back: waiting work is held too.
+            match readiness.holders(leaf) {
+                Ok(held) => holders.extend(held),
                 Err(_) => self.refuse(Some(n), at(), Rule::NotReady(None)),
-                Ok(_) => {},
             }
         }
         holders.sort();

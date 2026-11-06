@@ -340,7 +340,7 @@ impl<'a> ReadinessEvaluator<'a> {
         if item.is_done() {
             return Some(Readiness::Done);
         }
-        if item.is_canceled() {
+        if self.model.reads_canceled(id) {
             return Some(Readiness::Canceled);
         }
         if self.cyclic.contains(id) {
@@ -382,7 +382,7 @@ impl<'a> ReadinessEvaluator<'a> {
             .flatten()
             .copied()
             // Finished work is skipped.
-            .filter(|id| !self.model.items[*id].is_finished())
+            .filter(|id| !self.model.reads_finished(id))
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
             .map(str::to_owned)
             .collect();
@@ -399,6 +399,15 @@ impl<'a> ReadinessEvaluator<'a> {
         } else {
             ThreadReadiness::Ready { items }
         })
+    }
+
+    /// The holders of the live claims covering an item: those on its thread.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a claim can't be read.
+    pub fn holders(&self, id: &str) -> Result<Vec<String>, Error> {
+        Ok(claim::holders(&claim::covering(self.state, self.model, id, self.now)?))
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
@@ -588,7 +597,11 @@ impl<'a> ReadinessEvaluator<'a> {
             if item.is_done() {
                 return None;
             }
-            return Some(if item.is_canceled() { Wait::Canceled } else { Wait::Open });
+            return Some(if self.model.reads_canceled(dependency) {
+                Wait::Canceled
+            } else {
+                Wait::Open
+            });
         }
         if item.state == Value::One(ItemState::Parked) {
             return Some(Wait::Open);

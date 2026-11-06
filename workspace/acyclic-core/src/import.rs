@@ -37,7 +37,8 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
     {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
   ],
   "items": [
-    // Required: id and title. "state" is open, parked or done, open for a new item.
+    // Required: id and title. "state" is open, parked, done or canceled, open for a new item. Canceled skips the check
+    // for another holder's claim that `item edit --state canceled` makes, as done work skips the one finishing makes.
     // Optional: parent, thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
     // given replaces the record's: [] clears it.

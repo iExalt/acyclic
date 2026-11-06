@@ -163,6 +163,45 @@ fn a_canceled_dependency_never_unblocks_but_an_epic_waits_on_its_other_work() {
 }
 
 #[test]
+fn open_leaves_under_a_part_canceled_by_hand_read_canceled_until_it_is_opened_again() {
+    let mut r = replica("a");
+    items(&mut r, &["part", "leaf", "done", "w"]);
+    for kid in ["leaf", "done"] {
+        set_parent(&mut r, kid, Some("part"), by(2)).unwrap();
+    }
+    link(&mut r, "w", "leaf", by(2)).unwrap();
+    done_with(&mut r, "done", None);
+    let ready = |r: &Replica| {
+        let model = Model::read(&r.state).unwrap();
+        flat(&ReadinessEvaluator::new(&r.state, &model, NOW).ready("actor/user").unwrap())
+    };
+    assert_eq!(ready(&r), ["leaf"]);
+    set_state(&mut r, "part", ItemState::Canceled, by(3)).unwrap();
+    // The open leaf reads canceled and isn't offered; done work stays done; its dependent waits on canceled work.
+    assert_eq!(status(&r, "leaf"), Readiness::Canceled);
+    assert_eq!(status(&r, "done"), Readiness::Done);
+    assert_eq!(ready(&r).len(), 0);
+    assert_eq!(status(&r, "w"), waiting_on(&[("leaf", Wait::Canceled)]));
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    assert_eq!(evaluator.stage("leaf").unwrap(), Some(Stage::Canceled));
+    assert!(model.reads_finished("leaf") && !model.reads_canceled("done"));
+    let needs = crate::needs::needs_you(&r.state, &model, &evaluator, NOW).unwrap();
+    let flagged =
+        crate::needs::Entry::WaitsOnCanceled { item: "w".into(), waits_for: "leaf".into() };
+    assert!(needs.contains(&flagged), "{needs:?}");
+    // Opened again, all of it comes back.
+    set_state(&mut r, "part", ItemState::Backlog, by(4)).unwrap();
+    assert_eq!(status(&r, "leaf"), Readiness::Ready);
+    assert_eq!(status(&r, "w"), waiting_on(&[("leaf", Wait::Open)]));
+    assert_eq!(ready(&r), ["leaf"]);
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    let needs = crate::needs::needs_you(&r.state, &model, &evaluator, NOW).unwrap();
+    assert!(!needs.contains(&flagged));
+}
+
+#[test]
 fn a_thread_is_finished_when_every_leaf_is_done_or_canceled_and_an_empty_one_is_not() {
     let mut r = replica("a");
     items(&mut r, &["x", "y"]);
