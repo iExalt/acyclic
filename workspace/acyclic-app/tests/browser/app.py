@@ -183,6 +183,7 @@ class Plan:
     def __init__(self, env):
         ids = [row["id"] for row in json.loads(run(env, "item", "list"))["data"]["items"]]
         rows = json.loads(run(env, "item", "show", *ids))["data"]
+        # The app puts the busiest initiative first in context, as `switcherRows` in src/initiatives.ts orders them.
         by_initiative = Counter(row["initiative"] for row in rows)
         self.initiative = by_initiative.most_common(1)[0][0]
         self.elsewhere = {row["id"]: row for row in rows if row["initiative"] != self.initiative}

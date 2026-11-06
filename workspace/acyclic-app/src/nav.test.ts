@@ -769,6 +769,19 @@ describe("the initiative in context", () => {
     });
   });
 
+  it("leaves a form holding typing alone: choosing another initiative that would close the item says so instead", () => {
+    const open = at({ view: "map", initiative: "i1", item: "a" });
+    expect(go(open, { kind: "initiative", id: "i2" }, { ...homes, dirty: true })).toEqual({
+      place: open,
+      requests: { unsaved: true },
+    });
+    // Nothing closes, so the form stays and the choice goes through.
+    expect(go(open, { kind: "initiative", id: "i1" }, { ...homes, dirty: true }).place.initiative).toBe("i1");
+    expect(
+      go(at({ initiative: "i1" }), { kind: "initiative", id: "i2" }, { ...homes, dirty: true }).place.initiative,
+    ).toBe("i2");
+  });
+
   it("survives a reload: it is in the address, read back, and an address without it leaves the one in context", () => {
     expect(addressOf({ ...NOTHING, initiative: "i2" })).toBe("/?initiative=i2");
     expect(addressOf({ ...NOTHING, view: "needs", initiative: "i2" }, "?engine=inline")).toBe(

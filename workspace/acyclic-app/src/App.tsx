@@ -295,7 +295,9 @@ export function App() {
           ),
     [scopedModel, scopedThreads],
   );
-  const chooseInitiative = (id: string) => go({ kind: "initiative", id });
+  const chooseInitiative = (id: string) => {
+    if (go({ kind: "initiative", id }).requests.unsaved) tell(UNSAVED);
+  };
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
     () =>

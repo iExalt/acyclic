@@ -285,6 +285,9 @@ function move(place: Place, intent: Intent, world: World): Step {
       const now = world.contextOf(intent.id);
       const keepItem = place.item !== null && world.initiativeOf(place.item) === now;
       const keepThread = place.thread !== null && world.initiativesOf(place.thread).includes(now ?? "");
+      const closes = (place.item !== null && !keepItem) || (place.thread !== null && !keepThread);
+      // A form holding what the user typed is never closed under them, as follow and close leave it.
+      if (closes && world.dirty) return { place, requests: { unsaved: true } };
       return only({
         ...place,
         initiative: intent.id,
