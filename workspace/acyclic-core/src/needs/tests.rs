@@ -344,3 +344,119 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
             .all(|(_, keep)| *keep == Keep::Not(Unkept::NameAlsoConflicted))
     );
 }
+
+/// One entry of each kind, with the key and identity it has always had. The identity is the serialized entry and
+/// keys the notified needs on every user's devices, so a change here re-notifies them: it must be deliberate.
+fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
+    let s = |text: &str| text.to_owned();
+    let v = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+    vec![
+        (
+            Entry::Conflict { kind: s("thread"), id: s("t"), field: s("brief") },
+            "conflict",
+            "conflict:thread:t:brief",
+            r#"{"entry":"conflict","kind":"thread","id":"t","field":"brief"}"#,
+        ),
+        (
+            Entry::Unpushed { remote: s("origin") },
+            "unpushed",
+            "unpushed:origin",
+            r#"{"entry":"unpushed","remote":"origin"}"#,
+        ),
+        (
+            Entry::WaitsForCycle { items: v(&["a", "b"]) },
+            "waits-for-cycle",
+            "waits-for-cycle:a:b",
+            r#"{"entry":"waits-for-cycle","items":["a","b"]}"#,
+        ),
+        (
+            Entry::ParentCycle { items: v(&["a", "b"]) },
+            "parent-cycle",
+            "parent-cycle:a:b",
+            r#"{"entry":"parent-cycle","items":["a","b"]}"#,
+        ),
+        (
+            Entry::ThreadCycle { threads: v(&["t", "u"]) },
+            "thread-cycle",
+            "thread-cycle:t:u",
+            r#"{"entry":"thread-cycle","threads":["t","u"]}"#,
+        ),
+        (
+            Entry::Contest { thread: s("t"), holders: v(&["x", "y"]) },
+            "contest",
+            "contest:t",
+            r#"{"entry":"contest","thread":"t","holders":["x","y"]}"#,
+        ),
+        (
+            Entry::ClockAhead { thread: s("t"), holder: s("x") },
+            "clock-ahead",
+            "clock-ahead:t:x",
+            r#"{"entry":"clock-ahead","thread":"t","holder":"x"}"#,
+        ),
+        (
+            Entry::Unthreaded { item: s("a"), fix: s("acyclic item edit a --thread <THREAD>") },
+            "unthreaded",
+            "unthreaded:a",
+            r#"{"entry":"unthreaded","item":"a","fix":"acyclic item edit a --thread <THREAD>"}"#,
+        ),
+        (
+            Entry::DoneWaiting { item: s("a"), waits_for: s("b") },
+            "done-waiting",
+            "done-waiting:a:b",
+            r#"{"entry":"done-waiting","item":"a","waits_for":"b"}"#,
+        ),
+        (
+            Entry::Dangling {
+                kind: s("item"),
+                id: s("a"),
+                field: s("thread"),
+                target: s("t"),
+                fix: Some(s("fix")),
+            },
+            "dangling",
+            "dangling:item:a:thread:t",
+            r#"{"entry":"dangling","kind":"item","id":"a","field":"thread","target":"t","fix":"fix"}"#,
+        ),
+    ]
+}
+
+#[test]
+fn every_kind_keeps_the_tag_key_and_identity_devices_already_know_it_by() {
+    for (entry, kind, key, identity) in each_kind() {
+        assert_eq!(entry.kind(), kind);
+        assert_eq!(entry.key(), key);
+        assert_eq!(entry.identity(), identity);
+        assert_eq!(serde_json::to_value(&entry).unwrap()["entry"], kind);
+    }
+}
+
+#[test]
+fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
+    let name = |id: &str| id.to_uppercase();
+    let said: Vec<String> = each_kind().iter().map(|(entry, ..)| entry.summary(&name)).collect();
+    assert_eq!(
+        said,
+        [
+            "T: its notes was written differently on two machines",
+            "This clone holds writes origin lacks",
+            "Items wait for each other in a cycle: A, B",
+            "Parents form a cycle: A, B",
+            "Threads wait for each other in a cycle: T, U",
+            "T has a claim to sort out",
+            "T has a claim by x that starts in the future",
+            "A needs a thread",
+            "A is done but waits for B",
+            "A: its thread names t, which doesn't exist",
+        ]
+    );
+    let waits = Entry::Dangling {
+        kind: "item".into(),
+        id: "a".into(),
+        field: "waits-for".into(),
+        target: "q".into(),
+        fix: None,
+    };
+    assert_eq!(waits.summary(&name), "A waits for q, which doesn't exist");
+    // No wording leaks the stored link name.
+    assert!(each_kind().iter().all(|(entry, ..)| !entry.summary(&name).contains("blocks")));
+}

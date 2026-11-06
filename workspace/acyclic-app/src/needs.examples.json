@@ -66,6 +66,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "item",
+      "summary": "One: its parent was written differently on two machines",
       "values": [
         "01900000-0000-7000-8000-0000000000b1",
         null
@@ -129,6 +130,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "item",
+      "summary": "One: its state was written differently on two machines",
       "values": [
         "done",
         "parked"
@@ -199,6 +201,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "item",
+      "summary": "One: its title was written differently on two machines",
       "values": [
         "One",
         "Two"
@@ -270,6 +273,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "item",
+      "summary": "Parent: its state was written differently on two machines",
       "values": [
         "open",
         "parked"
@@ -330,6 +334,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "item",
+      "summary": "Shipped: its evidence was written differently on two machines",
       "values": [
         {
           "commit": "abc1234",
@@ -377,6 +382,7 @@
       "kind": "conflict",
       "notify": true,
       "record": "repository",
+      "summary": "01900000-0000-7000-8000-0000000000c2: its owner was written differently on two machines",
       "values": [
         "me",
         "you"
@@ -418,15 +424,8 @@
       "kind": "conflict",
       "notify": true,
       "record": "thread",
+      "summary": "Work: its notes was written differently on two machines",
       "thread": {
-        "counts": {
-          "conflicted": 0,
-          "done": 1,
-          "members": 3
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a1"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f1",
         "title": "Work"
       },
@@ -434,6 +433,54 @@
         "Why",
         null
       ]
+    },
+    {
+      "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>",
+      "identity": "{\"entry\":\"unthreaded\",\"item\":\"01900000-0000-7000-8000-0000000000a2\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a2",
+        "parent": null,
+        "readiness": {
+          "readiness": "unthreaded"
+        },
+        "stage": "unthreaded",
+        "state": "open",
+        "thread": null,
+        "title": "Loose"
+      },
+      "key": "unthreaded:01900000-0000-7000-8000-0000000000a2",
+      "kind": "unthreaded",
+      "notify": false,
+      "summary": "Loose needs a thread"
+    },
+    {
+      "identity": "{\"entry\":\"done-waiting\",\"item\":\"01900000-0000-7000-8000-0000000000a4\",\"waits_for\":\"01900000-0000-7000-8000-0000000000a3\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000a4",
+        "parent": null,
+        "readiness": {
+          "readiness": "done"
+        },
+        "stage": "done",
+        "state": "done",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Early"
+      },
+      "key": "done-waiting:01900000-0000-7000-8000-0000000000a4:01900000-0000-7000-8000-0000000000a3",
+      "kind": "done-waiting",
+      "notify": true,
+      "summary": "Early is done but waits for Late",
+      "waits_for": {
+        "id": "01900000-0000-7000-8000-0000000000a3",
+        "parent": null,
+        "readiness": {
+          "readiness": "ready"
+        },
+        "stage": "ready",
+        "state": "open",
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Late"
+      }
     }
   ]
 }

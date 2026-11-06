@@ -126,12 +126,11 @@ waits-for and thread it belongs with.
    to finish someone else's work. A parent needs no `item done`: its `stage` reads done once every leaf under it is,
    and work waiting on it waits on those leaves. `acyclic thread release <thread>` once none of its items is left ready.
 4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread is set with
-   `acyclic item edit --thread`. `acyclic thread list` lists the threads with their counts, and `acyclic thread show
-   <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its open leaves that
-   nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
-   make it wait for that one. `thread list` also puts the threads with work left in `waves`, first to last, each after
-   the threads its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under
-   `anytime`.
+   `acyclic item edit --thread`. `acyclic thread list` lists the threads with their done and total leaves, and
+   `acyclic thread show <thread>` lists each member with its state and readiness. Ready work is ordered by id; when one
+   item needs another, make it wait for that one. `thread list` also puts the threads with work left in `waves`, first
+   to last, each after the threads its work waits on (a row's `waits_for`), with those that wait on none and that none
+   waits on under `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
    --thread`, and give each a title and notes. New or moved work joins the thread its parent passes down, or else the
    one its siblings share; an add, a move under another parent or an import reports it as `placed`. Threads whose

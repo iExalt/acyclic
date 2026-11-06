@@ -128,10 +128,16 @@ function viewOf(
     named();
     return line.name;
   };
+  /** The line's name in place of the thread's title that core's line starts with, which the badge then leads. */
+  const threadFirst = (text: string, one: Row | null, name: (thread: Row) => string) => {
+    const title = one === null ? "" : titled(one);
+    if (one === null || title === "" || !text.startsWith(title)) return text;
+    const said = name(one);
+    return said === title ? text : said + text.slice(title.length);
+  };
   const threadName = (id: string) => lines.get(id)?.name ?? id;
-  /** An entity the entry names by id, by its name. */
-  const nameOf = (entity: string, id: string) =>
-    entity === "item" ? titleOf(id) : entity === "thread" ? threadName(id) : id;
+  // The core's one line for the entry: every kind's words are written there, once.
+  const summary = str(need.summary);
   const base = {
     // The list's own key, which the server's pushes use too.
     key: str(need.key),
@@ -145,8 +151,6 @@ function viewOf(
   };
   switch (need.kind) {
     case "conflict": {
-      const entity = str(need.record);
-      const id = str(need.id);
       const field = str(need.field);
       const actions: Action[] = [];
       const why: string[] = [];
@@ -175,48 +179,33 @@ function viewOf(
       }
       return {
         ...base,
-        text: `${nameOf(entity, id)}: its ${field} was written differently on two machines`,
+        text: summary,
         actions,
         note: why.length === 0 ? null : why.join("; "),
       };
     }
     case "thread-cycle":
-      return {
-        ...base,
-        text: `Threads wait on each other in a cycle: ${threads.map(lineName).join(", ")}`,
-        note: IN_A_TERMINAL,
-      };
+      return { ...base, text: summary, note: IN_A_TERMINAL };
     case "dangling": {
-      const name = nameOf(str(need.record), str(need.id));
       // A waits-for naming an item that is gone reads as the plan does, with the CLI's own fix.
       if (str(need.record) === "item" && str(need.field) === "waits-for")
-        return {
-          ...base,
-          text: `${name} waits for ${shown(need.target)}, which doesn't exist`,
-          note: str(need.fix) || IN_A_TERMINAL,
-        };
+        return { ...base, text: summary, note: str(need.fix) || IN_A_TERMINAL };
       return {
         ...base,
-        text: `${name}: its ${str(need.field)} names ${shown(need.target)}, which doesn't exist`,
+        text: summary,
         // An item in a thread that is gone is in none, which its editor puts right.
         note: str(need.record) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
       };
     }
-    case "unthreaded": {
-      return {
-        ...base,
-        text: "Needs a thread",
-        detail: item === null ? null : titled(item),
-        note: EDIT_THREAD,
-      };
-    }
+    case "unthreaded":
+      return { ...base, text: summary, detail: null, note: EDIT_THREAD };
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix);
       return {
         ...base,
         items: [...base.items, ...named.map((one) => one.id)],
-        text: describe(need.kind, item, thread, named, lineName),
+        text: threadFirst(summary, thread, lineName),
         note: hint === "" ? IN_A_TERMINAL : hint,
       };
     }
@@ -236,26 +225,4 @@ export function structuralKey(value: unknown): string {
     return `{${fields.map(([key, child]) => `${JSON.stringify(key)}:${structuralKey(child)}`).join(",")}}`;
   }
   return JSON.stringify(value) ?? String(value);
-}
-
-/** A line for a kind the app only shows. */
-function describe(
-  kind: string,
-  item: Row | null,
-  thread: Row | null,
-  named: Row[],
-  name: (thread: Row) => string,
-): string {
-  const subject = item !== null ? titled(item) : thread !== null ? name(thread) : named.map(titled).join(", ");
-  const words: Record<string, string> = {
-    unpushed: "This clone holds writes the remote lacks",
-    "waits-for-cycle": "Links form a cycle",
-    "parent-cycle": "Parents form a cycle",
-    contest: "Two holders claim one thread",
-    "clock-ahead": "A claim's clock runs ahead",
-    unthreaded: "Needs a thread",
-    "done-waiting": "Done, but waits for work that isn't",
-  };
-  const said = words[kind] ?? kind;
-  return subject === "" ? said : `${said}: ${subject}`;
 }

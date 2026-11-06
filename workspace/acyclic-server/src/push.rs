@@ -629,39 +629,11 @@ fn key(entry: &Value) -> String {
     entry["key"].as_str().unwrap_or_default().to_owned()
 }
 
-/// A need in a line, for a notification.
+/// A need in a line, for a notification: the core's own words, which the needs list carries as `summary`.
 #[must_use]
 pub fn line(entry: &Value) -> String {
-    let title = |row: &Value| {
-        row["title"].as_str().or_else(|| row["id"].as_str()).unwrap_or("?").to_owned()
-    };
-    let text = match entry["kind"].as_str().unwrap_or_default() {
-        "conflict" => format!(
-            "{} {}'s {} was written differently on two machines",
-            entry["record"].as_str().unwrap_or_default(),
-            entry["id"].as_str().unwrap_or_default(),
-            entry["field"].as_str().unwrap_or_default()
-        ),
-        "done-waiting" => {
-            format!(
-                "{} is done but waits for {}",
-                title(&entry["item"]),
-                title(&entry["waits_for"])
-            )
-        },
-        "contest" => {
-            format!("{} has a claim to sort out", title(&entry["thread"]))
-        },
-        "waits-for-cycle" | "parent-cycle" => "Items form a cycle".to_owned(),
-        "thread-cycle" => {
-            let threads: Vec<String> =
-                entry["threads"].as_array().into_iter().flatten().map(title).collect();
-            format!("{} wait on each other", threads.join(", "))
-        },
-        other => format!("{other} needs you"),
-    };
     // Well within a push's 4 KB, however long the titles.
-    text.chars().take(140).collect()
+    entry["summary"].as_str().unwrap_or_default().chars().take(140).collect()
 }
 
 #[cfg(test)]
@@ -708,15 +680,24 @@ mod tests {
     }
 
     #[test]
-    fn a_need_reads_as_one_line_and_is_known_by_the_key_the_list_gives() {
-        let cycle = json!({"kind": "thread-cycle", "key": "thread-cycle:t:u", "threads": [
-            {"id": "t", "title": "T"}, {"id": "u", "title": "U"},
-        ]});
-        assert_eq!(key(&cycle), "thread-cycle:t:u");
-        assert_eq!(line(&cycle), "T, U wait on each other");
-        let long = json!({
-            "kind": "done-waiting", "item": {"id": "a", "title": "x".repeat(500)}, "waits_for": {"id": "b"},
+    fn a_need_reads_as_the_cores_line_cut_short_and_is_known_by_the_key_the_list_gives() {
+        let cycle = json!({
+            "kind": "thread-cycle", "key": "thread-cycle:t:u",
+            "summary": "Threads wait for each other in a cycle: T, U",
         });
+        assert_eq!(key(&cycle), "thread-cycle:t:u");
+        assert_eq!(line(&cycle), "Threads wait for each other in a cycle: T, U");
+        let long = json!({"kind": "done-waiting", "summary": "x".repeat(500)});
         assert_eq!(line(&long).chars().count(), 140);
+    }
+
+    #[test]
+    fn rewording_a_need_does_not_tell_of_it_again() {
+        let before = json!({"kind": "contest", "identity": "id-1", "summary": "T has a claim"});
+        let after = json!({"kind": "contest", "identity": "id-1", "summary": "Claims on T clash"});
+        assert_ne!(line(&before), line(&after));
+        // What was told is kept by identity, and only identity decides what is new.
+        let told = BTreeSet::from(["id-1".to_owned()]);
+        assert_eq!(new_entries(&[(&after, "id-1".to_owned())], &told).len(), 0);
     }
 }

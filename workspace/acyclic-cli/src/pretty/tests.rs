@@ -56,11 +56,9 @@ fn lists_are_tables_fitted_to_a_terminal_and_bare_in_a_pipe() {
 #[test]
 fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
     let ready = json!({"ready": [
-        {"id": "t1", "title": "Garden", "heads": ["beds"],
-         "counts": {"members": 2, "done": 0, "conflicted": 0},
+        {"id": "t1", "title": "Garden", "progress": {"counts": {"done": 1, "leaves": 3}},
          "items": [item("beds", "Beds", "ready"), item("path", "Path", "ready")]},
-        {"id": "t2", "title": "Kitchen", "heads": ["tap"],
-         "counts": {"members": 1, "done": 0, "conflicted": 0},
+        {"id": "t2", "title": "Kitchen", "progress": {"counts": {"done": 0, "leaves": 1}},
          "items": [item("tap", "Tap", "ready")]},
     ]});
     let threads = json!({"threads": ready["ready"], "waves": [["t1"]], "anytime": ["t2"]});

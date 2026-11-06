@@ -227,7 +227,7 @@ fn ready(data: &Json, width: Option<u16>) -> String {
     table(lines.iter().collect(), &columns, width)
 }
 
-/// `thread list`: each thread's summary, with its counts as columns, and its wave: a number, `any` for a thread that
+/// `thread list`: each thread's summary, with its done and total leaves as columns, and its wave: a number, `any` for a thread that
 /// can start any time, or nothing once its work is done.
 fn threads(data: &Json, width: Option<u16>) -> String {
     let mut wave: BTreeMap<&str, String> = BTreeMap::new();
@@ -247,15 +247,13 @@ fn threads(data: &Json, width: Option<u16>) -> String {
         .map(|thread| {
             serde_json::json!({
                 "id": thread["id"], "title": thread["title"],
-                "members": thread["counts"]["members"], "done": thread["counts"]["done"], "heads": thread["heads"],
+                "done": thread["progress"]["counts"]["done"], "leaves": thread["progress"]["counts"]["leaves"],
                 "wave": thread["id"].as_str().and_then(|id| wave.get(id)),
             })
         })
         .collect();
-    let columns: Vec<String> = ["id", "title", "members", "done", "wave", "heads"]
-        .iter()
-        .map(|key| (*key).to_owned())
-        .collect();
+    let columns: Vec<String> =
+        ["id", "title", "done", "leaves", "wave"].iter().map(|key| (*key).to_owned()).collect();
     table(lines.iter().collect(), &columns, width)
 }
 

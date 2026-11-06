@@ -138,7 +138,6 @@ describe("thread", () => {
             id: ID.t,
             title: "T",
             notes: { conflict: ["x", "y"] },
-            heads: [ID.a],
             members: [{ id: ID.a, title: "A" }],
           },
         ],
