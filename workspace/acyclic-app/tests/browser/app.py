@@ -574,7 +574,7 @@ MAP_SNAPS = """() => {
 @timed
 def open_app(browser, view, link, failures, name, glide=False):
     """Opens the app. The Map's tiles snap to their places, so a journey reads where they are without waiting out a
-    glide; `glide` leaves them gliding, for the journey that is about that."""
+    glide; `glide` leaves them gliding, for the journeys that are about that."""
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
     if not glide:
@@ -4093,8 +4093,10 @@ def shard_run(shard):
                 for name, view in VIEWS.items():
                     if name != shard:
                         continue
+                    # The desktop journeys run with the glide on: a chevron's anchor, a pick's reveal and the command
+                    # menu's jump are held against tiles that are still moving. The phone's snap, for its time.
                     context, page, origin, errors = open_app(
-                        chromium, view, link, failures, name
+                        chromium, view, link, failures, name, glide=name == "desktop"
                     )
                     # The sidebar counts the plan's items; a phone's bar leaves the count out.
                     counted = page.get_by_test_id("item-count")

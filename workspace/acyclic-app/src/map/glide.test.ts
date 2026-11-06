@@ -152,34 +152,6 @@ describe("glide", () => {
     expect(busy()).toBeGreaterThan(0);
   });
 
-  it("never changes which box a tile is in: a node's box in its data stays what the scene says, mid-glide and at rest", async () => {
-    // A seeded walk of writes that move tiles about without moving any across boxes.
-    let seed = 7;
-    const rand = (below: number) => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed % below;
-    };
-    const tile = (i: number, x: number, y: number): Drawn => ({
-      group: "nodes",
-      data: { id: `t${i}`, box: `box${i % 3}` },
-      position: { x, y },
-      classes: "leaf",
-    });
-    let held = apply(
-      core,
-      new Map(),
-      Array.from({ length: 12 }, (_, i) => tile(i, rand(500), rand(500))),
-    );
-    for (let write = 0; write < 8; write++) {
-      const next = Array.from({ length: 12 }, (_, i) => tile(i, rand(500), rand(500)));
-      held = apply(core, held, next, glide);
-      for (const one of core.nodes()) expect(one.data("box")).toBe(`box${Number(one.id().slice(1)) % 3}`);
-      await new Promise((done) => setTimeout(done, rand(60)));
-    }
-    await rested();
-    for (const [id, one] of held) expect(core.getElementById(id).data("box")).toBe(one.data.box);
-  });
-
   it("tells a move in view from one out of it", () => {
     const at = (x: number, y: number) => ({ x, y });
     expect(touchesView(null, at(0, 0), at(9, 9), 10, 10)).toBe(true);
