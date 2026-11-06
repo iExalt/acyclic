@@ -5,6 +5,9 @@ inputs:
   target:
     description: The Rust target triple to build
     required: true
+  reuse-notices:
+    description: Whether to restore the crates' licence notices from a cache; a build that publishes sets it to false, and generates them afresh
+    default: "true"
 
 runs:
   using: composite
@@ -34,7 +37,16 @@ runs:
           *linux*) file "$bin" | tee /dev/stderr | grep -q 'static' ;;
         esac
       shell: bash
+    # The crates' licences depend only on what the key hashes, so an unchanged Cargo.lock restores them instead of
+    # matching every licence file again. The v1 is a salt: bump it to discard an entry that is bad.
+    - if: inputs.reuse-notices == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/notices-crates.md
+        key: notices-crates-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'mise.toml', 'scripts/notices.sh', 'scripts/notices/**', 'workspace/*/Cargo.toml') }}
     - name: Package
+      env:
+        NOTICES_CRATES: ${{ inputs.reuse-notices == 'true' && format('{0}/notices-crates.md', runner.temp) || '' }}
       run: |
         version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "acyclic") | .version')
         stage="acyclic-$version-$TARGET"
