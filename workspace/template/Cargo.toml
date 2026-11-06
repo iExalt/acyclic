@@ -1,5 +1,5 @@
 [package]
-name = "{{crate_name}}"
+name = "{{project-name}}"
 version.workspace = true
 edition.workspace = true
 readme = "README.md"
