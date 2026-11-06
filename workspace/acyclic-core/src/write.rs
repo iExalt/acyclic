@@ -1253,13 +1253,25 @@ impl Judging<'_, '_> {
         let mut found = assign_rules(after, steps);
         found.extend(empty_creates(steps));
         found.extend(shared_ids(self.before, steps));
-        found.extend(new_cycles(self.before, after, steps));
-        found.extend(new_lineage_links(self.before, after, steps));
+        // Cycles and lineage links are walks of the whole tracker, and only a write of a parent or a link can change
+        // them, so a change set with none (a title, a state, notes) has nothing new to find.
+        if steps.iter().any(|step| writes_graph(&step.write)) {
+            found.extend(new_cycles(self.before, after, steps));
+            found.extend(new_lineage_links(self.before, after, steps));
+        }
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
         found.extend(cancel_rules(self.before, steps));
         self.violations.extend(found);
     }
+}
+
+/// Whether a write sets an item's parent or a waits-for link: the only writes that change what `after` holds of either.
+fn writes_graph(write: &Written) -> bool {
+    matches!(
+        write,
+        Written::Assign(Assign::Item(_, ItemAssign::Parent(_) | ItemAssign::WaitsFor(..)))
+    )
 }
 
 /// New records need an emitted field write; a projected `Written::Create` alone has no effect when applied.
