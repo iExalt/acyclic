@@ -81,8 +81,7 @@ jobs:
       # A cache of its own, holding only the journeys profile the check builds, not the dev build an older cache had.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: browser-journeys
-          key: ${{ steps.profiles.outputs.hash }}
+          shared-key: browser-journeys-${{ steps.profiles.outputs.hash }}
       - id: pnpm
         run: echo "store=$(pnpm --dir workspace/acyclic-app store path)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
