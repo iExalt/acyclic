@@ -17,18 +17,19 @@ describe("needView", () => {
       ],
       PALETTES.dark,
     );
-    const waiting = (id: string, title: string) => needView({ kind: "contest", thread: { id, title } }, lines);
+    const waiting = (id: string, title: string) =>
+      needView({ kind: "contest", thread: { id, title }, summary: `${title} has a claim to sort out` }, lines);
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
     expect(waiting("t3", "Ship it")).toMatchObject({
-      text: "Two holders claim one thread: Ship it now",
+      text: "Ship it now has a claim to sort out",
       line: lines.get("t3"),
       thread: "t3",
       threads: [],
     });
     // A thread the list lacks has no badge, and its row the title the entry gives.
     expect(waiting("t9", "Gone")).toMatchObject({
-      text: "Two holders claim one thread: Gone",
+      text: "Gone has a claim to sort out",
       line: undefined,
       thread: null,
       threads: [{ id: "t9", title: "Gone" }],
@@ -69,6 +70,8 @@ describe("needView", () => {
           .filter((command) => command !== null),
       );
       expect(view.key).toBe(need.key);
+      // Its words are the core's, as sent.
+      expect(view.text).toBe(need.summary);
     }
     const state = needView(field("state"), none);
     expect(state.actions.map((one) => one.label)).toEqual(["Use parked"]);
@@ -84,10 +87,14 @@ describe("needView", () => {
     const parent = field("parent");
     const titles = (id: string) => (id === parent.id ? "First" : "Parent");
     const moved = needView(parent, none, titles);
-    expect(moved.text).toBe("First: its parent was written differently on two machines");
     expect(moved.actions.map((one) => one.label)).toEqual(["Use Parent", "Use the top level"]);
-    const gone = needView({ kind: "dangling", record: "item", id: "a", field: "parent", target: "q" }, none, titles);
-    expect(gone.text).toBe("Parent: its parent names q, which doesn't exist");
+    const said = "Parent: its parent names q, which doesn't exist";
+    const gone = needView(
+      { kind: "dangling", record: "item", id: "a", field: "parent", target: "q", summary: said },
+      none,
+      titles,
+    );
+    expect(gone.text).toBe(said);
   });
 
   it("says a dangling waits-for as the plan reads, with the CLI's fix, and any other dangling field as before", () => {
@@ -100,6 +107,7 @@ describe("needView", () => {
         field: "waits-for",
         target: "q",
         fix: "acyclic item edit a --no-waits-for q",
+        summary: "A waits for q, which doesn't exist",
       },
       none,
       titles,
@@ -107,8 +115,12 @@ describe("needView", () => {
     expect(waits.text).toBe("A waits for q, which doesn't exist");
     expect(waits.note).toBe("acyclic item edit a --no-waits-for q");
     // The waiting item itself gone leaves the older shape, kept as it was.
-    const orphan = needView({ kind: "dangling", record: "link", id: "x", field: "end", target: "q" }, none, titles);
-    expect(orphan.text).toBe("x: its end names q, which doesn't exist");
+    const orphan = needView(
+      { kind: "dangling", record: "link", id: "x", field: "end", target: "q", summary: "x: its end names q" },
+      none,
+      titles,
+    );
+    expect(orphan.text).toBe("x: its end names q");
     // An item in a thread that is gone is opened from its row to choose another, as an item in none is.
     const ghost = needView(
       { kind: "dangling", record: "item", id: "a", field: "thread", target: "t", item: item("a") },
@@ -119,16 +131,20 @@ describe("needView", () => {
   });
 
   it("shows a kind it has no command for with what it names and the CLI's hint", () => {
-    const cycle = needView({ kind: "parent-cycle", items: [item("a"), item("b")] }, none);
+    const cycle = needView(
+      { kind: "parent-cycle", items: [item("a"), item("b")], summary: "Parents form a cycle: A, B" },
+      none,
+    );
     expect(cycle).toMatchObject({ text: "Parents form a cycle: A, B", items: ["a", "b"], actions: [] });
-    // An item needing a thread says so in words, not the CLI's command, and names the item once, as its row.
-    const loose = needView({ kind: "unthreaded", item: item("o"), fix: "acyclic item edit o --thread <THREAD>" }, none);
+    // An item needing a thread says so in the core's words, not the CLI's command, and the item is its row.
+    const example = (kind: string) => (examples.needs as Need[]).find((need) => need.kind === kind) as Need;
+    const loose = needView(example("unthreaded"), none);
     expect(loose).toMatchObject({
-      text: "Needs a thread",
-      items: ["o"],
+      text: "Loose needs a thread",
+      detail: "Loose",
       note: "Open it to choose its thread in its editor",
     });
-    expect(needView({ kind: "something-new" }, none).text).toBe("something-new");
+    expect(needView(example("done-waiting"), none).text).toBe("Early is done but waits for Late");
     // The key is the list's, whatever the entry names.
     expect(needView({ kind: "contest", key: "contest:t", thread: thread("t"), holders: ["x"] }, none).key).toBe(
       "contest:t",
@@ -137,13 +153,19 @@ describe("needView", () => {
 
   it("names the threads a cycle holds, and a title written apart as its first value", () => {
     const cycle = needView(
-      { kind: "thread-cycle", key: "thread-cycle:t:u", threads: [thread("t"), thread("u")], notify: true },
+      {
+        kind: "thread-cycle",
+        key: "thread-cycle:t:u",
+        threads: [thread("t"), thread("u")],
+        notify: true,
+        summary: "Threads wait for each other in a cycle: T, U",
+      },
       none,
     );
     expect(cycle).toMatchObject({
       key: "thread-cycle:t:u",
       kind: "thread-cycle",
-      text: "Threads wait on each other in a cycle: T, U",
+      text: "Threads wait for each other in a cycle: T, U",
       threads: [
         { id: "t", title: "T" },
         { id: "u", title: "U" },
@@ -155,9 +177,8 @@ describe("needView", () => {
     expect(isCollapsible(needView({ kind: "thread-cycle", threads: [thread("t")] }, none))).toBe(false);
     // A conflicted title reads as its first value, as the item's own panel shows it, not as its id.
     const torn = { id: "b", title: { conflict: ["Bee", "Bea"] } };
-    expect(needView({ kind: "waits-for-cycle", items: [item("a"), torn] }, none).text).toBe(
-      "Links form a cycle: A, Bee",
-    );
+    const said = "Items wait for each other in a cycle: A, Bee";
+    expect(needView({ kind: "waits-for-cycle", items: [item("a"), torn], summary: said }, none).text).toBe(said);
   });
 });
 

@@ -802,6 +802,11 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         format!("item add --id {p1} --title Parent --thread {t1}"),
         format!("item add --id {e1} --title Shipped --thread {t1}"),
         format!("item done {e1} --commit me/code@abc1234 --force"),
+        // Two needs that aren't conflicts, for the app to read the core's words for.
+        format!("item add --id {} --title Loose", id("a2")),
+        format!("item add --id {} --title Late --thread {t1}", id("a3")),
+        format!("item add --id {} --title Early --thread {t1} --waits-for {}", id("a4"), id("a3")),
+        format!("item done {} --commit me/code@abc1234 --force", id("a4")),
     ] {
         assert_eq!(sh.run(&line, AGENT), 0, "{line}");
     }

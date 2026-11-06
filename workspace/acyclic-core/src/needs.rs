@@ -97,27 +97,84 @@ impl Entry {
     /// known as the same. Lists that change while the need stands, such as a contest's holders, stay out of it. Ids and field names hold no `:`.
     #[must_use]
     pub fn key(&self) -> String {
+        let kind = self.kind();
         let parts: Vec<&str> = match self {
-            Self::Conflict { kind, id, field } => vec!["conflict", kind, id, field],
-            Self::Unpushed { remote } => vec!["unpushed", remote],
-            Self::WaitsForCycle { items } => {
-                std::iter::once("waits-for-cycle").chain(items.iter().map(String::as_str)).collect()
-            },
-            Self::ParentCycle { items } => {
-                std::iter::once("parent-cycle").chain(items.iter().map(String::as_str)).collect()
+            Self::Conflict { kind: record, id, field } => vec![kind, record, id, field],
+            Self::Unpushed { remote } => vec![kind, remote],
+            Self::WaitsForCycle { items } | Self::ParentCycle { items } => {
+                std::iter::once(kind).chain(items.iter().map(String::as_str)).collect()
             },
             Self::ThreadCycle { threads } => {
-                std::iter::once("thread-cycle").chain(threads.iter().map(String::as_str)).collect()
+                std::iter::once(kind).chain(threads.iter().map(String::as_str)).collect()
             },
-            Self::Contest { thread, holders: _ } => vec!["contest", thread],
-            Self::ClockAhead { thread, holder } => vec!["clock-ahead", thread, holder],
-            Self::Unthreaded { item, fix: _ } => vec!["unthreaded", item],
-            Self::DoneWaiting { item, waits_for } => vec!["done-waiting", item, waits_for],
-            Self::Dangling { kind, id, field, target, fix: _ } => {
-                vec!["dangling", kind, id, field, target]
+            Self::Contest { thread, holders: _ } => vec![kind, thread],
+            Self::ClockAhead { thread, holder } => vec![kind, thread, holder],
+            Self::Unthreaded { item, fix: _ } => vec![kind, item],
+            Self::DoneWaiting { item, waits_for } => vec![kind, item, waits_for],
+            Self::Dangling { kind: record, id, field, target, fix: _ } => {
+                vec![kind, record, id, field, target]
             },
         };
         parts.join(":")
+    }
+
+    /// The kind's tag, as the entry serializes it and the CLI and app name it: the one place these strings are
+    /// written.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Conflict { .. } => "conflict",
+            Self::Unpushed { .. } => "unpushed",
+            Self::WaitsForCycle { .. } => "waits-for-cycle",
+            Self::ParentCycle { .. } => "parent-cycle",
+            Self::ThreadCycle { .. } => "thread-cycle",
+            Self::Contest { .. } => "contest",
+            Self::ClockAhead { .. } => "clock-ahead",
+            Self::Unthreaded { .. } => "unthreaded",
+            Self::DoneWaiting { .. } => "done-waiting",
+            Self::Dangling { .. } => "dangling",
+        }
+    }
+
+    /// One line saying what the need is, for a notification, a terminal and the app. `name` gives an item's or a
+    /// thread's title by id, or the id when it has none. The words are the core's alone, so every surface says
+    /// the same thing; with no catch-all arm, a new kind fails to compile until it has words. A line is display
+    /// only: nothing may key on it, as the key and the identity do.
+    #[must_use]
+    pub fn summary(&self, name: &dyn Fn(&str) -> String) -> String {
+        let names = |ids: &[String]| ids.iter().map(|id| name(id)).collect::<Vec<_>>().join(", ");
+        match self {
+            Self::Conflict { kind, id, field } => format!(
+                "{}: its {} was written differently on two machines",
+                name(id),
+                crate::model::shown_field(kind, field)
+            ),
+            Self::Unpushed { remote } => format!("This clone holds writes {remote} lacks"),
+            Self::WaitsForCycle { items } => {
+                format!("Items wait for each other in a cycle: {}", names(items))
+            },
+            Self::ParentCycle { items } => format!("Parents form a cycle: {}", names(items)),
+            Self::ThreadCycle { threads } => {
+                format!("Threads wait for each other in a cycle: {}", names(threads))
+            },
+            Self::Contest { thread, holders: _ } => {
+                format!("{} has a claim to sort out", name(thread))
+            },
+            Self::ClockAhead { thread, holder } => {
+                format!("{} has a claim by {holder} that starts in the future", name(thread))
+            },
+            Self::Unthreaded { item, fix: _ } => format!("{} needs a thread", name(item)),
+            Self::DoneWaiting { item, waits_for } => {
+                format!("{} is done but waits for {}", name(item), name(waits_for))
+            },
+            Self::Dangling { kind, id, field, target, fix: _ } => {
+                if (kind.as_str(), field.as_str()) == (crate::schema::kind::ITEM, "waits-for") {
+                    format!("{} waits for {target}, which doesn't exist", name(id))
+                } else {
+                    format!("{}: its {field} names {target}, which doesn't exist", name(id))
+                }
+            },
+        }
     }
 
     /// A compact canonical identity for this exact core entry, before a CLI or app adds display details.

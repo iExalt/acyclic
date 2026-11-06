@@ -168,13 +168,21 @@ impl View<'_> {
 }
 
 impl View<'_> {
-    /// The needs-you list: each entry is `{kind, key, identity, notify, …}`, with item and thread entries embedding
+    /// The needs-you list: each entry is `{kind, key, identity, summary, notify, …}`, with item and thread entries embedding
     /// their summaries, and a conflict listing its `values` and how to `resolve` it.
-    /// `notify` says whether the user's devices are told of it.
+    /// `summary` is the core's one line for it. `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
         let thread = |id: &str| thread_row(self.model, id);
         let items = |ids: &[String]| -> Result<Json, CliError> {
             Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
+        };
+        // Titles as people read them: a title written apart reads as its first value, and an id with none as itself.
+        let name = |id: &str| -> String {
+            let title = self.model.items.get(id).map(|item| &item.title);
+            let title = title.or_else(|| self.model.threads.get(id).map(|thread| &thread.title));
+            title
+                .and_then(|title| title.all().first().map(|first| (*first).clone()))
+                .unwrap_or_else(|| id.to_owned())
         };
         let mut found = Vec::with_capacity(entries.len());
         for entry in entries {
@@ -182,32 +190,29 @@ impl View<'_> {
                 Entry::Conflict { kind, id, field } => {
                     self.conflict(entry, kind, id, field, &thread)?
                 },
-                Entry::Unpushed { remote } => json!({"kind": "unpushed", "remote": remote}),
-                Entry::WaitsForCycle { items: ids } => {
-                    json!({"kind": "waits-for-cycle", "items": items(ids)?})
-                },
-                Entry::ParentCycle { items: ids } => {
-                    json!({"kind": "parent-cycle", "items": items(ids)?})
+                Entry::Unpushed { remote } => json!({"kind": entry.kind(), "remote": remote}),
+                Entry::WaitsForCycle { items: ids } | Entry::ParentCycle { items: ids } => {
+                    json!({"kind": entry.kind(), "items": items(ids)?})
                 },
                 Entry::ThreadCycle { threads } => json!({
-                    "kind": "thread-cycle",
+                    "kind": entry.kind(),
                     "threads": threads.iter().map(|id| thread(id)).collect::<Vec<_>>(),
                 }),
                 Entry::Contest { thread: id, holders } => {
-                    json!({"kind": "contest", "thread": thread(id), "holders": holders})
+                    json!({"kind": entry.kind(), "thread": thread(id), "holders": holders})
                 },
                 Entry::ClockAhead { thread: id, holder } => {
-                    json!({"kind": "clock-ahead", "thread": thread(id), "holder": holder})
+                    json!({"kind": entry.kind(), "thread": thread(id), "holder": holder})
                 },
                 Entry::Unthreaded { item, fix } => {
-                    json!({"kind": "unthreaded", "item": self.item_row(item)?, "fix": fix})
+                    json!({"kind": entry.kind(), "item": self.item_row(item)?, "fix": fix})
                 },
                 Entry::DoneWaiting { item, waits_for } => json!({
-                    "kind": "done-waiting", "item": self.item_row(item)?, "waits_for": self.item_row(waits_for)?,
+                    "kind": entry.kind(), "item": self.item_row(item)?, "waits_for": self.item_row(waits_for)?,
                 }),
                 Entry::Dangling { kind, id, field, target, fix } => {
                     let mut shown = json!({
-                        "kind": "dangling", "record": kind, "id": id, "field": field, "target": target,
+                        "kind": entry.kind(), "record": kind, "id": id, "field": field, "target": target,
                     });
                     if let Some(fix) = fix {
                         shown["fix"] = json!(fix);
@@ -220,6 +225,7 @@ impl View<'_> {
                 },
             };
             shown["key"] = entry.key().into();
+            shown["summary"] = entry.summary(&name).into();
             if !matches!(entry, Entry::Conflict { .. }) {
                 shown["identity"] = entry.identity().into();
             }
@@ -246,7 +252,7 @@ impl View<'_> {
             kept.iter().map(|kept| crate::keep::kept_json(self.model, kept)).collect();
         let identity = crate::keep::conflict_identity(self.model, entry, &kept);
         let mut shown = json!({
-            "kind": "conflict", "record": entity, "id": id,
+            "kind": entry.kind(), "record": entity, "id": id,
             "field": acyclic_core::model::shown_field(entity, field), "values": values,
             "keeps": keeps, "identity": identity,
         });
@@ -569,6 +575,15 @@ mod tests {
                 assert!(shown["kind"].is_string(), "{shown}");
                 // Each carries the core's key, which the app and pushes use as given.
                 assert_eq!(shown["key"], json!(entry.key()), "{shown}");
+                // And the core's line, which is display only: the identity never carries it.
+                assert!(shown["summary"].as_str().is_some_and(|line| !line.is_empty()), "{shown}");
+                assert!(
+                    !shown["identity"]
+                        .as_str()
+                        .unwrap()
+                        .contains(shown["summary"].as_str().unwrap()),
+                    "{shown}"
+                );
                 if matches!(entry, Entry::Conflict { .. }) {
                     let identity: Json =
                         serde_json::from_str(shown["identity"].as_str().unwrap()).unwrap();
