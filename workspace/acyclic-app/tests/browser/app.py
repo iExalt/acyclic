@@ -3092,6 +3092,8 @@ def guarded_undo_race(page, view, env, plan, name, failures, errors):
     page.reload()
     to_map(page)
     wait_drawn(page, len(plan.default()))
+    # The tile is tapped where it is read, so the Map must have stopped moving: drawn is not settled.
+    settled_map(page)
     candidates = [id for id in plan.default() if not plan.children(id)]
     if not candidates:
         failures.append(f"{name}: no visible leaf was available for the guarded Undo race")
