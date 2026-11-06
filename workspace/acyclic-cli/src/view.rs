@@ -117,9 +117,12 @@ impl View<'_> {
     /// item row.
     pub fn ready_rows(&self, ready: &[ReadyThread]) -> Result<Vec<Json>, CliError> {
         let mut rows = Vec::new();
-        for ReadyThread { thread, items } in ready {
+        for ReadyThread { thread, items, stalled } in ready {
             let found = items.iter().map(|id| self.item_row(id)).collect::<Result<Vec<_>, _>>()?;
-            rows.push(with(thread_row(self.model, thread), json!({"items": found})));
+            rows.push(with(
+                thread_row(self.model, thread),
+                json!({"stalled": stalled, "items": found}),
+            ));
         }
         Ok(rows)
     }
@@ -204,6 +207,10 @@ impl View<'_> {
                 Entry::ClockAhead { thread: id, holder } => {
                     json!({"kind": entry.kind(), "thread": thread(id), "holder": holder})
                 },
+                Entry::Stalled { thread: id, holder, expired_at } => json!({
+                    "kind": entry.kind(), "thread": thread(id), "holder": holder,
+                    "expired_at": expired_at,
+                }),
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": entry.kind(), "item": self.item_row(item)?, "fix": fix})
                 },
@@ -301,7 +308,8 @@ fn stage_counts(stages: &Stages) -> Json {
     json!({
         "done": stages.done, "leaves": stages.total(),
         "in_progress": stages.in_progress, "ready": stages.ready, "waiting": stages.waiting,
-        "parked": stages.parked, "unthreaded": stages.unthreaded, "canceled": stages.canceled,
+        "stalled": stages.stalled, "parked": stages.parked, "unthreaded": stages.unthreaded,
+        "canceled": stages.canceled,
     })
 }
 
@@ -466,7 +474,7 @@ mod tests {
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
                 json!({"counts": {"done": 0, "leaves": 2, "in_progress": 2,
-                       "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0, "canceled": 0}})
+                       "ready": 0, "stalled": 0, "waiting": 0, "parked": 0, "unthreaded": 0, "canceled": 0}})
             );
             // And its stage, rolled up from them under the key a leaf's has: in progress while their thread is
             // claimed though none is started.
@@ -520,7 +528,9 @@ mod tests {
         let r = tracker();
         viewing(&r, |view| {
             let items = ["a", "b", "late"].map(str::to_owned).to_vec();
-            let rows = view.ready_rows(&[ReadyThread { thread: "t".into(), items }]).unwrap();
+            let rows = view
+                .ready_rows(&[ReadyThread { thread: "t".into(), items, stalled: false }])
+                .unwrap();
             let summary = thread_row(view.model, "t");
             for (name, value) in summary.as_object().unwrap() {
                 assert_eq!(&rows[0][name], value, "{name}");

@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, Model, Value};
-use crate::ready::{ReadinessEvaluator, Stage};
+use crate::ready::{ReadinessEvaluator, Stage, ThreadReadiness};
 use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
@@ -61,6 +61,15 @@ pub enum Entry {
         thread: String,
         /// The holder.
         holder: String,
+    },
+    /// A thread holds only expired claims yet has work ready: its holder stopped without finishing or releasing it.
+    Stalled {
+        /// The thread.
+        thread: String,
+        /// The holder of the claim that ran out last.
+        holder: String,
+        /// When that lease ran out, as RFC 3339 in UTC.
+        expired_at: String,
     },
     /// An open leaf in no thread, or in one with no record, which is never ready until it joins one.
     Unthreaded {
@@ -136,7 +145,10 @@ impl Entry {
             Self::Contest { thread, holders: _ } | Self::EmptyThread { thread, fix: _ } => {
                 vec![kind, thread]
             },
-            Self::ClockAhead { thread, holder } => vec![kind, thread, holder],
+            Self::ClockAhead { thread, holder }
+            | Self::Stalled { thread, holder, expired_at: _ } => {
+                vec![kind, thread, holder]
+            },
             Self::Unthreaded { item, fix: _ } => vec![kind, item],
             Self::DoneWaiting { item, waits_for } | Self::WaitsOnCanceled { item, waits_for } => {
                 vec![kind, item, waits_for]
@@ -161,6 +173,7 @@ impl Entry {
             Self::ThreadCycle { .. } => "thread-cycle",
             Self::Contest { .. } => "contest",
             Self::ClockAhead { .. } => "clock-ahead",
+            Self::Stalled { .. } => "stalled",
             Self::Unthreaded { .. } => "unthreaded",
             Self::DoneWaiting { .. } => "done-waiting",
             Self::WaitsOnCanceled { .. } => "waits-on-canceled",
@@ -197,6 +210,9 @@ impl Entry {
             Self::ClockAhead { thread, holder } => {
                 format!("{} has a claim by {holder} that starts in the future", name(thread))
             },
+            Self::Stalled { thread, holder, expired_at } => {
+                format!("{} has stalled: {holder}'s claim ran out at {expired_at}", name(thread))
+            },
             Self::Unthreaded { item, fix: _ } => format!("{} needs a thread", name(item)),
             Self::DoneWaiting { item, waits_for } => {
                 format!("{} is done but waits for {}", name(item), name(waits_for))
@@ -229,7 +245,7 @@ impl Entry {
     }
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
-    /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked), items in no
+    /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to nothing, a merge that can't be checked), items in no
     /// thread, which agents leave routinely, and threads with no item, which they leave between writes, stay on the
     /// list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
@@ -245,6 +261,7 @@ impl Entry {
             | Self::ThreadOnParent { .. } => true,
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
+            | Self::Stalled { .. }
             | Self::Unthreaded { .. }
             | Self::EmptyThread { .. }
             | Self::Dangling { .. } => false,
@@ -280,7 +297,7 @@ pub fn needs_you(
     for threads in readiness.thread_cycles()? {
         entries.insert(Entry::ThreadCycle { threads: threads.into_iter().collect() });
     }
-    claims(state, model, now, &mut entries)?;
+    claims(state, model, readiness, now, &mut entries)?;
     done_waiting(model, readiness, &mut entries)?;
     waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
@@ -343,6 +360,7 @@ fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) 
 fn claims(
     state: &State,
     model: &Model,
+    readiness: &ReadinessEvaluator<'_>,
     now: Millis,
     entries: &mut BTreeSet<Entry>,
 ) -> Result<(), Error> {
@@ -357,6 +375,13 @@ fn claims(
         let holders = claim::holders(&live);
         if holders.len() > 1 {
             entries.insert(Entry::Contest { thread: id.clone(), holders });
+        }
+        // Only a thread no claim holds can have stalled, so the cheap test comes before reading its members.
+        if live.is_empty()
+            && claim::lapsed(state, &claim::thread_key(id)?, now)?.is_some()
+            && let ThreadReadiness::Stalled { holder, expired_at, .. } = readiness.thread(id)?
+        {
+            entries.insert(Entry::Stalled { thread: id.clone(), holder, expired_at });
         }
     }
     Ok(())

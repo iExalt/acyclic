@@ -7,6 +7,7 @@ const NONE: Counts = {
   leaves: 0,
   in_progress: 0,
   ready: 0,
+  stalled: 0,
   waiting: 0,
   parked: 0,
   unthreaded: 0,
@@ -28,6 +29,15 @@ describe("the Overview's threads", () => {
       working: ["thread-2", "Thread-8", "thread-10"],
       next: ["thread-3", "thread-5", "Thread-6", "thread-20"],
     });
+  });
+
+  it("keeps a stalled thread under work, whose holder's lease ran out, and not among those to start", () => {
+    const counts = new Map([
+      ["thread-1", { ...NONE, leaves: 2, stalled: 2 }],
+      ["thread-2", { ...NONE, leaves: 2, stalled: 1, done: 1 }],
+      ["thread-3", { ...NONE, leaves: 1, ready: 1 }],
+    ]);
+    expect(threadLists(counts)).toEqual({ working: ["thread-1", "thread-2"], next: ["thread-3"] });
   });
 
   it("has nothing to start when every thread is at work or waiting, or there are none", () => {

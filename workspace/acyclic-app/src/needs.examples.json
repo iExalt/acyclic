@@ -276,6 +276,7 @@
             "leaves": 1,
             "parked": 0,
             "ready": 0,
+            "stalled": 0,
             "unthreaded": 0,
             "waiting": 1
           }
@@ -490,6 +491,19 @@
       ]
     },
     {
+      "expired_at": "2026-10-14T23:00:00Z",
+      "holder": "session/mac",
+      "identity": "{\"entry\":\"stalled\",\"thread\":\"01900000-0000-7000-8000-0000000000f3\",\"holder\":\"session/mac\",\"expired_at\":\"2026-10-14T23:00:00Z\"}",
+      "key": "stalled:01900000-0000-7000-8000-0000000000f3:session/mac",
+      "kind": "stalled",
+      "notify": false,
+      "summary": "Stale has stalled: session/mac's claim ran out at 2026-10-14T23:00:00Z",
+      "thread": {
+        "id": "01900000-0000-7000-8000-0000000000f3",
+        "title": "Stale"
+      }
+    },
+    {
       "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>",
       "identity": "{\"entry\":\"unthreaded\",\"item\":\"01900000-0000-7000-8000-0000000000a2\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>\"}",
       "item": {
@@ -585,6 +599,7 @@
             "leaves": 1,
             "parked": 0,
             "ready": 0,
+            "stalled": 0,
             "unthreaded": 0,
             "waiting": 1
           }

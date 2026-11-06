@@ -151,7 +151,7 @@ describe("scene", () => {
 
 describe("buildModel", () => {
   it("takes a parent's progress from its item, and none when it has no leaves", () => {
-    const none = { in_progress: 0, ready: 0, waiting: 0, parked: 0, unthreaded: 0, canceled: 0 };
+    const none = { in_progress: 0, ready: 0, stalled: 0, waiting: 0, parked: 0, unthreaded: 0, canceled: 0 };
     const progress = (done: number, leaves: number) => ({ state: "done", counts: { ...none, done, leaves } });
     const model = buildModel([
       item("p", null, [], { progress: progress(2, 2) }),

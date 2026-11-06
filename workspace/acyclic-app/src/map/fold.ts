@@ -165,6 +165,7 @@ const NONE: Counts = {
   leaves: 0,
   in_progress: 0,
   ready: 0,
+  stalled: 0,
   waiting: 0,
   parked: 0,
   unthreaded: 0,

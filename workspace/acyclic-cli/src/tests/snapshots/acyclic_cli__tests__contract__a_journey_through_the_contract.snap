@@ -138,6 +138,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "title": "First"
           }
         ],
+        "stalled": false,
         "title": "Start"
       }
     ]
@@ -320,6 +321,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "leaves": 2,
           "parked": 0,
           "ready": 0,
+          "stalled": 0,
           "unthreaded": 0,
           "waiting": 0
         }
@@ -379,6 +381,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "title": "Second"
           }
         ],
+        "stalled": false,
         "title": "Start"
       }
     ]
@@ -520,6 +523,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "title": "Second"
           }
         ],
+        "stalled": false,
         "title": "Work"
       }
     ]
@@ -610,6 +614,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
             "leaves": 0,
             "parked": 0,
             "ready": 0,
+            "stalled": 0,
             "unthreaded": 0,
             "waiting": 0
           }
@@ -627,6 +632,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
             "leaves": 2,
             "parked": 0,
             "ready": 1,
+            "stalled": 0,
             "unthreaded": 0,
             "waiting": 0
           }
@@ -722,6 +728,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "leaves": 2,
           "parked": 0,
           "ready": 1,
+          "stalled": 0,
           "unthreaded": 0,
           "waiting": 0
         }
@@ -1312,6 +1319,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
           "leaves": 1,
           "parked": 0,
           "ready": 0,
+          "stalled": 0,
           "unthreaded": 0,
           "waiting": 0
         }

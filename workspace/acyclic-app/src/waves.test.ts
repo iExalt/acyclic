@@ -15,7 +15,17 @@ const items = [
   item("c1", "q", [], { thread: "c" }),
   item("d1", "q", [], { thread: "d" }),
 ];
-const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, waiting: 0, parked: 0, unthreaded: 0, canceled: 0 };
+const none = {
+  done: 0,
+  leaves: 0,
+  in_progress: 0,
+  ready: 0,
+  stalled: 0,
+  waiting: 0,
+  parked: 0,
+  unthreaded: 0,
+  canceled: 0,
+};
 const listed = {
   threads: [
     { id: "a", title: "A", waitsFor: [], counts: { ...none, leaves: 2, done: 2 } },

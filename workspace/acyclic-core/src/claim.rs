@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::model::Model;
-use crate::ready::{ReadinessEvaluator, ThreadReadiness};
+use crate::ready::{ReadinessEvaluator, Stage, ThreadReadiness};
 use crate::schema::kind;
 use crate::state::{CLOCK_SKEW_MS, Dot, Error, Key, Millis, Replica, State};
 
@@ -57,6 +57,33 @@ pub fn live(state: &State, item: &Key, now: Millis) -> Result<Vec<Claim>, Error>
     }
     claims.sort_by(|a, b| (a.lease_start, &a.replica).cmp(&(b.lease_start, &b.replica)));
     Ok(claims)
+}
+
+/// The claim that ran out last on an entity no claim holds at `now`: its latest expired lease, the lower replica
+/// first on a tie. `None` while any claim holds, and when there was never a claim with a time lease.
+///
+/// # Errors
+///
+/// Fails when a claim value can't be read.
+pub fn lapsed(state: &State, item: &Key, now: Millis) -> Result<Option<Claim>, Error> {
+    let mut last: Option<Claim> = None;
+    for value in state.field(item, FIELD).into_iter().flatten().map(|(_, v)| &v.value) {
+        let claim: Claim = serde_json::from_value(value.clone()).map_err(|e| {
+            Error::Format(format!("unreadable claim on {} {}: {e}", item.kind, item.id))
+        })?;
+        let Some(expires) = claim.lease_expires else { continue };
+        if now < expires {
+            return Ok(None);
+        }
+        let later = last.as_ref().is_none_or(|held| {
+            (held.lease_expires, std::cmp::Reverse(&held.replica))
+                < (Some(expires), std::cmp::Reverse(&claim.replica))
+        });
+        if later {
+            last = Some(claim);
+        }
+    }
+    Ok(last)
 }
 
 /// The claim that wins at `now`: the same on every replica holding the same state. A contest's loser must check this
@@ -182,9 +209,11 @@ impl From<Error> for ClaimError {
 }
 
 /// Renews the time leases this replica recorded whose holders are still at work: each winning thread claim with less
-/// than half of `lease` left whose holder wrote something other than a claim within the last `lease`. The CLI calls it
-/// at the start of each of its write batches, whoever writes; a sync doesn't. A holder that stopped writing, such as a
-/// conversation that ended, keeps no claim past its lease. Renewals keep their lease start and are written by the replica.
+/// than half of `lease` left, on a thread with work left to do, whose holder wrote something other than a claim within
+/// the last `lease`. The CLI calls it at the end of each write batch that succeeded, so the batch's own writes count
+/// as activity; a sync doesn't call it. A batch that released the claim, or finished the thread's last item, leaves
+/// nothing to renew. A holder that stopped writing, such as a conversation that ended, keeps no claim past its lease.
+/// Renewals keep their lease start and are written by the replica, so they are never activity themselves.
 ///
 /// # Panics
 ///
@@ -223,6 +252,25 @@ pub fn renew_leases(
         if claim.replica == mine && due && active {
             renewals.push((key.clone(), claim));
         }
+    }
+    if !renewals.is_empty() {
+        // A thread whose work is all finished has nothing left to hold. The model is read only when a renewal is due.
+        let model = Model::read(&replica.state)?;
+        let readiness = ReadinessEvaluator::new(&replica.state, &model, now);
+        let mut unfinished = Vec::new();
+        for (key, claim) in renewals {
+            let mut open = false;
+            for id in
+                model.items.values().filter(|i| model.thread_of(&i.id) == Some(key.id.as_str()))
+            {
+                open |=
+                    !matches!(readiness.stage(&id.id)?, None | Some(Stage::Done | Stage::Canceled));
+            }
+            if open {
+                unfinished.push((key, claim));
+            }
+        }
+        renewals = unfinished;
     }
     let actor = format!("replica/{mine}");
     for (key, claim) in &renewals {

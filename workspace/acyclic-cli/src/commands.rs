@@ -472,7 +472,7 @@ impl<'a> CommandContext<'a> {
         read().unwrap_or_default()
     }
 
-    /// Runs one batch as the actor. Lease renewal rides along, so a batch can commit though the command changed
+    /// Runs one batch as the actor. Lease renewal rides along after the command's own writes, so a batch can commit though the command changed
     /// nothing; `changed` says whether the command itself changed anything.
     fn write(
         &self,
@@ -494,8 +494,6 @@ impl<'a> CommandContext<'a> {
                     .with(json!({"mismatches": mismatches})));
                 }
             }
-            claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
-            acyclic_core::probe::mark("batch: renew leases");
             let before_needs =
                 self.observed.as_ref().and_then(|_| notifying_entries(replica.state(), at));
             let before = replica.changes();
@@ -505,6 +503,10 @@ impl<'a> CommandContext<'a> {
             let commits_before = crate::evidence::commits(&Model::read(replica.state())?);
             let data = apply(replica, By { actor: &self.actor, at })?;
             let changed = replica.changes() != before;
+            // Renewal follows the batch's own writes, which count as activity; a failed batch returned above and
+            // renews nothing.
+            claim::renew_leases(replica, at, LEASE, MAX_LEASE)?;
+            acyclic_core::probe::mark("batch: renew leases");
             if changed {
                 *unchecked.borrow_mut() = crate::evidence::check(
                     self.env,

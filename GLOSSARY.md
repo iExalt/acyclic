@@ -61,6 +61,13 @@ _Avoid_: round, tier
 An agent's time-limited hold on a thread it is working on. The holder and its subagents work every member.
 _Avoid_: lock, assignment
 
+**Stalled**:
+A thread whose claim field holds only expired claims while it has ready work: its holder stopped without releasing it.
+Nothing is stored; it is read from the claims. Its ready items read as the stage stalled, `thread ready` still lists it
+by id, and the needs-you list names its last holder and when the lease ran out. A thread whose work all waits reads as
+waiting. A release, a new claim or finishing every item ends it. Anyone may claim it.
+_Avoid_: abandoned, orphaned
+
 **Canceled**:
 An item dropped on purpose: neither done nor open. It is set with `item edit --state canceled` and undone with
 `--state open`; done work is reopened before it can be canceled. A canceled leaf leaves its parent's counts, which roll
@@ -126,14 +133,13 @@ imports still take `backlog` as open, and nothing shows it. `canceled` is newer 
 versions can't read it, so every replica upgrades before anything is canceled.
 _Avoid_: backlog (for open)
 
-**Stage**:
-Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, waiting, parked,
-canceled, or needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in its state or
-thread. A parent's comes from its leaves, those canceled left out: done once every other leaf is; before that, in
-progress once any work below has started and some of what is left isn't parked; otherwise ready, waiting, parked or
-needs a thread by its leaves. A parent with only canceled leaves, or canceled by hand, reads canceled. The code word
-for needs a thread is `unthreaded`; the app shows a stage as an item's Status.
-_Avoid_: phase, step, blocked (for waiting)
+**Stage**: Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, stalled,
+waiting, parked, canceled, or needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in
+its state or thread. A parent's comes from its leaves, those canceled left out: done once every other leaf is; before
+that, in progress once any work below has started and some of what is left isn't parked; otherwise stalled, ready,
+waiting, parked or needs a thread by its leaves. A parent with only canceled leaves, or canceled by hand, reads
+canceled. The code word for needs a thread is `unthreaded`; the app shows a stage as an item's Status. _Avoid_: phase,
+step, blocked (for waiting)
 
 **Status**:
 What a panel says of where something stands: an item's stage.
