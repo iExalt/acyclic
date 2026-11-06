@@ -3,8 +3,8 @@
 //! document leaves out is kept; a list it gives (an item's `waits_for`) is the whole of it, so what the list leaves
 //! out is removed. The judge refuses references to nothing, repository
 //! names another record holds, cycles the import would close, and evidence on work that isn't done, and
-//! brings what any write brings: done work set back is reopened, and new or moved work with no thread joins the one
-//! passed down to it.
+//! brings what any write brings: done work set back is reopened, and new work with no thread joins the one its
+//! siblings share, and the first child of a parent takes the parent's thread.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -37,7 +37,7 @@ pub struct Report {
     pub fields: usize,
     /// Each record the import creates, changes or removes, in the order they were met.
     pub changes: Vec<Change>,
-    /// The new or moved work with no thread that joined the one passed down to it.
+    /// The new work with no thread that joined the one its siblings, or its parent, hold.
     #[serde(skip)]
     pub placed: Vec<Inherited>,
 }
@@ -329,6 +329,7 @@ fn list_changes(held: &BTreeSet<&String>, wanted: &[String], adding: bool) -> Ve
 
 /// The judge's refusal in the import's own terms, one kind at a time as the import has always told them: a deleted
 /// record, then references to nothing and names taken, then evidence on open work, then cycles.
+#[expect(clippy::too_many_lines, reason = "one arm for each rule the import can break")]
 fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
     let mut deleted = None;
     let mut internal = false;
@@ -391,6 +392,12 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                 unknown.push(ValidationError::LineageLink {
                     item: from.clone(),
                     waits_for: to.clone(),
+                });
+            },
+            (Rule::ThreadUnclear { parent }, Some(at)) => {
+                unfinished.push(ValidationError::ThreadUnclear {
+                    item: at.record.id().to_owned(),
+                    parent: parent.clone(),
                 });
             },
             (Rule::SelfLink, Some(at)) => {

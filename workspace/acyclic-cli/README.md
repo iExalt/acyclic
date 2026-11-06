@@ -78,8 +78,8 @@ Every command's output follows these rules, so you can guess a key from the inpu
    scalar is `null`, an absent set is `[]`, and a flag such as `conflicted` is
    always `true` or `false`. A scalar whose replicas disagree reads `{"conflict": […]}`, and `needs` lists it.
 5. **Writes** return `{changed, <record>: id, …}`; `item done` adds the `evidence` it recorded, as
-   `{commit: "owner/name@sha", text}`. An item add, edit or import returns `placed`: the items that joined a thread
-   passed down to them, as `{item, thread}`.
+   `{commit: "owner/name@sha", text}`. An item add or an import returns `placed`: the new items that joined the thread
+   their siblings, or their parent, held, as `{item, thread}`. A move never changes a thread.
 6. **`import`** returns `counts` and `changes`, the records it creates or updates, each with the `fields` that change
    as `{from, to}`: `{record, id, action, fields}`, where `action` is `create` or `update`, or `remove` for a
    waits-for that an item's `waits_for` list left out. A waits-for is a `link` named by `from`, `kind` (`waits-for`)

@@ -343,6 +343,18 @@ fn cancel_refusal(rule: &Rule, record: Option<&Record>) -> CliError {
     }
 }
 
+/// A new item with no thread whose siblings don't share one.
+fn unclear_refusal(id: &str, parent: &str) -> CliError {
+    CliError::refused(
+        "thread-unclear",
+        format!(
+            "item {id} joins no thread by itself: the other children of {parent} are in different threads, or some \
+             in none; pass --thread <THREAD> or --no-thread"
+        ),
+    )
+    .with(json!({"item": id, "parent": parent}))
+}
+
 /// One violation as the CLI has always told it: its code, exit status, message and details. `name` is the
 /// `owner/name` a repository write gave, which a taken name repeats as given.
 fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) -> CliError {
@@ -409,6 +421,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             )
             .with(json!({"item": id}))
         },
+        Rule::ThreadUnclear { parent } => unclear_refusal(record.map_or("", Record::id), parent),
         Rule::CancelDone | Rule::CancelHeld { .. } => cancel_refusal(&violation.rule, record),
         Rule::EvidenceDiffers => {
             let id = record.map_or("", Record::id);

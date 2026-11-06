@@ -414,3 +414,35 @@ fn evidence_names_its_repository_by_owner_and_name_or_by_id() {
         "{unknown:?}"
     );
 }
+
+#[test]
+fn new_children_join_their_siblings_thread_and_moved_work_never_changes_a_thread() {
+    let mut r = imported();
+    let mut doc = valid();
+    doc.items.push(item(13, None, Some(10)));
+    doc.items.push(item(14, None, None));
+    let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
+    // 11 and 12 share thread 20, so the new child 13 follows them; 14 has no parent to follow.
+    assert_eq!(report.placed, [Inherited { item: id(13), thread: id(20) }]);
+    assert_eq!(model(&r).thread_of(&id(14)), None);
+    // Moving 14 under 10 puts it in no thread, though the siblings share one.
+    doc.items[4].parent = Some(id(10));
+    let report = apply(&doc, &mut r, by(USER, 3)).unwrap();
+    assert_eq!(report.placed, Vec::new());
+    assert_eq!(model(&r).thread_of(&id(14)), None);
+    // Siblings in different threads leave a new child to the document, which says so in its own terms.
+    doc.items[4].thread = Some(id(21));
+    doc.threads.push(crate::import::Thread { id: id(21), title: "Other".into(), notes: None });
+    apply(&doc, &mut r, by(USER, 4)).unwrap();
+    doc.items.push(item(15, None, Some(10)));
+    let before = r.state.clone();
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 5)) else {
+        panic!("a new child among siblings in different threads is refused");
+    };
+    assert_eq!(errors, [ValidationError::ThreadUnclear { item: id(15), parent: id(10) }]);
+    assert_eq!(r.state, before);
+    // Given a thread, it goes where the document says.
+    doc.items[5].thread = Some(id(21));
+    apply(&doc, &mut r, by(USER, 6)).unwrap();
+    assert_eq!(model(&r).thread_of(&id(15)), Some(id(21).as_str()));
+}

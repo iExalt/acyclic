@@ -1888,12 +1888,22 @@ HOSTILE = '<img src=x onerror="window.pwned = true">'
 def outline_journey(page, view, plan, name, failures):
     """Selecting an item marks its project and its thread's row there, opening the project. On a phone the projects
     come as a sheet over the item's, and Back closes the sheet first, staying in the app."""
+    # Only a leaf is in a thread, and the Map draws one once the box above it is open.
     picked = next(
-        id for id in sorted(plan.default()) if plan.depth(id) == 1 and plan.items[id]["thread"]
+        id
+        for id in sorted(plan.items)
+        if plan.depth(id) == 2 and not plan.children(id) and plan.items[id]["thread"]
     )
+    box = plan.parent[picked]
     project, thread = plan.chain(picked)[-1], plan.items[picked]["thread"]
-    centre(page, picked)
-    tap_box(page, view, picked, chevron=False)
+    centre(page, box)
+    tap_box(page, view, box)
+    page.wait_for_function(
+        "id => document.querySelector('[data-testid=map]').cy.getElementById(id).length === 1",
+        arg=picked,
+        timeout=10_000,
+    )
+    tap_middle(page, view, picked)
     inspector = page.get_by_test_id("inspector")
     inspector.wait_for()
     phone = view.get("has_touch")

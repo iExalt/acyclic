@@ -98,6 +98,24 @@ pub enum Entry {
         #[serde(skip_serializing_if = "Option::is_none")]
         fix: Option<String>,
     },
+    /// A thread stored on an item that has children, as a sync or `item edit --thread` on a parent can leave one:
+    /// reads ignore it, so the user decides whether to clear it.
+    ThreadOnParent {
+        /// The item with children.
+        item: String,
+        /// The thread stored on it.
+        thread: String,
+        /// The command that clears it.
+        fix: String,
+    },
+    /// A thread no item is in, as when its last item left or was never added: the user decides whether to fill it or
+    /// delete it.
+    EmptyThread {
+        /// The thread.
+        thread: String,
+        /// The command that deletes it.
+        fix: String,
+    },
 }
 
 impl Entry {
@@ -115,7 +133,9 @@ impl Entry {
             Self::ThreadCycle { threads } => {
                 std::iter::once(kind).chain(threads.iter().map(String::as_str)).collect()
             },
-            Self::Contest { thread, holders: _ } => vec![kind, thread],
+            Self::Contest { thread, holders: _ } | Self::EmptyThread { thread, fix: _ } => {
+                vec![kind, thread]
+            },
             Self::ClockAhead { thread, holder } => vec![kind, thread, holder],
             Self::Unthreaded { item, fix: _ } => vec![kind, item],
             Self::DoneWaiting { item, waits_for } | Self::WaitsOnCanceled { item, waits_for } => {
@@ -124,6 +144,7 @@ impl Entry {
             Self::Dangling { kind: record, id, field, target, fix: _ } => {
                 vec![kind, record, id, field, target]
             },
+            Self::ThreadOnParent { item, thread, fix: _ } => vec![kind, item, thread],
         };
         parts.join(":")
     }
@@ -144,6 +165,8 @@ impl Entry {
             Self::DoneWaiting { .. } => "done-waiting",
             Self::WaitsOnCanceled { .. } => "waits-on-canceled",
             Self::Dangling { .. } => "dangling",
+            Self::ThreadOnParent { .. } => "thread-on-parent",
+            Self::EmptyThread { .. } => "empty-thread",
         }
     }
 
@@ -188,6 +211,10 @@ impl Entry {
                     format!("{}: its {field} names {target}, which doesn't exist", name(id))
                 }
             },
+            Self::ThreadOnParent { item, thread, fix: _ } => {
+                format!("{} has children, so its thread {} is ignored", name(item), name(thread))
+            },
+            Self::EmptyThread { thread, fix: _ } => format!("{} has no items", name(thread)),
         }
     }
 
@@ -202,9 +229,9 @@ impl Entry {
     }
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
-    /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked) and items in no
-    /// thread, which agents leave routinely, stay on the list without a notification. With no catch-all arm, a new
-    /// kind fails to compile until it is placed here.
+    /// writes to push, a clock that ran ahead, a reference to nothing, a merge that can't be checked), items in no
+    /// thread, which agents leave routinely, and threads with no item, which they leave between writes, stay on the
+    /// list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
     pub const fn notifies(&self) -> bool {
         match self {
@@ -214,10 +241,12 @@ impl Entry {
             | Self::ThreadCycle { .. }
             | Self::Contest { .. }
             | Self::DoneWaiting { .. }
-            | Self::WaitsOnCanceled { .. } => true,
+            | Self::WaitsOnCanceled { .. }
+            | Self::ThreadOnParent { .. } => true,
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
+            | Self::EmptyThread { .. }
             | Self::Dangling { .. } => false,
         }
     }
@@ -255,6 +284,7 @@ pub fn needs_you(
     done_waiting(model, readiness, &mut entries)?;
     waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
+    thread_membership(model, &mut entries);
     for (id, item) in &model.items {
         if item.is_finished() || !model.children(id).is_empty() {
             continue;
@@ -264,19 +294,44 @@ pub fn needs_you(
     Ok(entries.into_iter().collect())
 }
 
+/// The threads stored on parents, which reads ignore, and the threads with no item in them.
+fn thread_membership(model: &Model, entries: &mut BTreeSet<Entry>) {
+    for id in model.items.keys() {
+        if let Some(thread) = model.ignored_thread(id) {
+            entries.insert(Entry::ThreadOnParent {
+                item: id.clone(),
+                thread: thread.to_owned(),
+                fix: format!("acyclic item edit {id} --no-thread"),
+            });
+        }
+    }
+    let occupied: BTreeSet<&str> = model
+        .items
+        .values()
+        .flat_map(|item| model.thread_value(item).all())
+        .map(String::as_str)
+        .collect();
+    for id in model.threads.keys().filter(|id| !occupied.contains(id.as_str())) {
+        entries.insert(Entry::EmptyThread {
+            thread: id.clone(),
+            fix: format!("acyclic thread delete {id}"),
+        });
+    }
+}
+
 /// Whether an item is an open, unparked leaf whose thread isn't in conflict: one `ready` lists only
 /// while a thread with a record holds it. A conflicted thread is left to its conflict entry.
 fn wants_thread(model: &Model, item: &model::Item) -> bool {
     !item.is_finished()
         && model.children(&item.id).is_empty()
         && item.state != Value::One(model::ItemState::Parked)
-        && !item.thread.is_conflict()
+        && !model.thread_value(item).is_conflict()
 }
 
 /// A leaf that wants a thread and names none, whatever else holds it back: `ready` never lists it. One that names a
 /// thread with no record is left to its dangling entry, which says so.
 fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) {
-    if !wants_thread(model, item) || item.thread.one().is_some() {
+    if !wants_thread(model, item) || model.thread_value(item).one().is_some() {
         return;
     }
     entries.insert(Entry::Unthreaded {
@@ -373,7 +428,9 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
         for parent in item.parent.all().into_iter().filter(|p| !model.items.contains_key(*p)) {
             add(kind::ITEM, id, "parent", parent, None);
         }
-        for thread in item.thread.all().into_iter().filter(|t| !model.threads.contains_key(*t)) {
+        for thread in
+            model.thread_value(item).all().into_iter().filter(|t| !model.threads.contains_key(*t))
+        {
             let fix = wants_thread(model, item)
                 .then(|| format!("acyclic item edit {id} --thread <THREAD>"));
             add(kind::ITEM, id, "thread", thread, fix);

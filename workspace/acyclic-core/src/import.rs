@@ -249,6 +249,13 @@ pub enum ValidationError {
     DoneParent(String),
     /// Canceled on an item that is done, or a parent that reads done: it is reopened first.
     CanceledDone(String),
+    /// A new item with no thread whose siblings are in different threads, or some in none: the document says which.
+    ThreadUnclear {
+        /// The new item.
+        item: String,
+        /// The parent whose children they are.
+        parent: String,
+    },
     /// A repository's name that isn't `owner/name`.
     InvalidRepositoryName {
         /// The repository.
@@ -320,6 +327,11 @@ impl fmt::Display for ValidationError {
             Self::CanceledDone(item) => {
                 write!(f, "item {item} is done, so it can't be canceled until it is reopened")
             },
+            Self::ThreadUnclear { item, parent } => write!(
+                f,
+                "item {item}: the other children of {parent} are in different threads, or some in none, so give it a \
+                 thread"
+            ),
             Self::InvalidRepositoryName { repository, name } => {
                 write!(f, "repository {repository}: {name:?} isn't owner/name")
             },

@@ -478,6 +478,52 @@ fn an_unreadable_state_points_to_doctor() {
     insta::assert_snapshot!(sh.transcript);
 }
 
+/// The wiring of a new child's thread: the flags, the refusal and its code, and what a write reports.
+#[test]
+fn a_new_child_joins_its_siblings_thread_and_the_flags_say_otherwise() {
+    let mut sh = Shell::new();
+    let [epic, t1, t2] = [id("e1"), id("f1"), id("f2")];
+    sh.run("init tracker --replica mac", &[]);
+    for line in [
+        format!("item add --id {epic} --title Epic"),
+        format!("thread add --id {t1} --title One"),
+        format!("thread add --id {t2} --title Two"),
+        format!("item add --title First --parent {epic} --thread {t1}"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    // Left out, the thread follows the siblings', and the write says so.
+    let (code, out) = sh.output(&format!("item add --title Second --parent {epic}"), AGENT);
+    assert_eq!((code, &out["data"]["placed"][0]["thread"]), (0, &json!(t1)), "{out}");
+    // Siblings that differ, or sit in none, refuse it; each way to say where it goes is accepted.
+    assert_eq!(sh.run(&format!("item add --title Third --parent {epic} --thread {t2}"), AGENT), 0);
+    let (code, out) = sh.output(&format!("item add --title Fourth --parent {epic}"), AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("thread-unclear")), "{out}");
+    assert_eq!(out["error"]["details"]["parent"], json!(epic));
+    assert!(out["error"]["message"].as_str().unwrap().contains("--no-thread"), "{out}");
+    assert_eq!(sh.run(&format!("item add --title Fourth --parent {epic} --no-thread"), AGENT), 0);
+    assert_eq!(sh.run("item add --title Both --thread x --no-thread", AGENT), 2, "contradiction");
+    assert_eq!(sh.run("item add --title Both --claim --no-thread", AGENT), 2, "contradiction");
+    // `--claim` claims the item's thread in the add's own write, and an item in none has nothing to claim.
+    let (code, out) = sh.output(&format!("item add --title Mine --thread {t2} --claim"), AGENT);
+    assert_eq!(
+        (code, &out["data"]["claim"]["thread"], &out["data"]["claim"]["claim"]["holder"]),
+        (0, &json!(t2), &json!("session/mac")),
+        "{out}"
+    );
+    let before = sh.output("item list", AGENT).1["data"]["items"].as_array().unwrap().len();
+    let (code, out) = sh.output("item add --title Loose --claim", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("no-thread")), "{out}");
+    let after = sh.output("item list", AGENT).1["data"]["items"].as_array().unwrap().len();
+    assert_eq!(before, after, "a refused claim leaves the add unwritten");
+    // The first child of a threaded item takes its thread, and the emptied parent shows nothing of it.
+    assert_eq!(sh.run(&format!("item add --id {} --title Leaf --thread {t1}", id("a9")), AGENT), 0);
+    let (_, out) = sh.output(&format!("item add --title Kid --parent {}", id("a9")), AGENT);
+    assert_eq!(out["data"]["placed"][0]["thread"], json!(t1), "{out}");
+    let (_, shown) = sh.output(&format!("item show {}", id("a9")), AGENT);
+    assert_eq!(shown["data"][0]["thread"], json!(null), "{shown}");
+}
+
 #[test]
 fn finishing_with_an_unreadable_claim_exits_six() {
     let mut sh = Shell::new();
@@ -526,9 +572,9 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
         .map(|k| dry["counts"][k].as_u64().unwrap())
         .sum();
     assert_eq!(u64::try_from(creates).unwrap(), 50 + counted);
-    // The plan's unthreaded work joins the threads above it.
+    // Nothing in a first import has siblings in the tracker to follow, and no thread above it is passed down.
     let inherited = dry["placed"].clone();
-    assert!(inherited.as_array().is_some_and(|i| !i.is_empty()), "{dry}");
+    assert_eq!(inherited, json!([]), "{dry}");
     assert_eq!(sh.output("doctor", AGENT).1["data"]["counts"]["items"], 0);
     let done = import(&mut sh, "");
     assert_eq!((done["changed"].as_bool(), &done["placed"]), (Some(true), &inherited));
@@ -845,6 +891,8 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         ),
         format!("item add --id {} --title Disputed --thread {t1}", id("a7")),
         format!("item edit {} --state canceled", id("a5")),
+        // A thread with nothing in it.
+        format!("thread add --id {} --title Idle", id("f2")),
     ] {
         assert_eq!(sh.run(&line, AGENT), 0, "{line}");
     }

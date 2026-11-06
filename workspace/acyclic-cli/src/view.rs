@@ -92,7 +92,7 @@ impl View<'_> {
             "title": item.title,
             "state": state(item),
             "parent": item.parent,
-            "thread": item.thread,
+            "thread": self.model.thread_value(item),
             "readiness": self.readiness.of(id)?,
         });
         if let Some(stage) = self.readiness.stage(id)? {
@@ -206,6 +206,12 @@ impl View<'_> {
                 },
                 Entry::Unthreaded { item, fix } => {
                     json!({"kind": entry.kind(), "item": self.item_row(item)?, "fix": fix})
+                },
+                Entry::ThreadOnParent { item, thread: held, fix } => json!({
+                    "kind": entry.kind(), "item": self.item_row(item)?, "thread": thread(held), "fix": fix,
+                }),
+                Entry::EmptyThread { thread: id, fix } => {
+                    json!({"kind": entry.kind(), "thread": thread(id), "fix": fix})
                 },
                 Entry::DoneWaiting { item, waits_for }
                 | Entry::WaitsOnCanceled { item, waits_for } => json!({
@@ -542,6 +548,19 @@ mod tests {
                 assert_eq!(&shown[name], value, "{name}");
             }
             follows_the_conventions(&shown, "thread");
+        });
+    }
+
+    #[test]
+    fn a_thread_stored_on_a_parent_is_in_no_row_member_list_or_thread() {
+        let mut r = tracker();
+        // `goal` has children, so a thread stored on it, as a sync can leave one, is ignored.
+        r.write(&model::item_key("goal").unwrap(), "thread", "session/mac", NOW, Some(json!("t")))
+            .unwrap();
+        viewing(&r, |view| {
+            assert_eq!(view.item_row("goal").unwrap()["thread"], json!(null));
+            let listed = thread_members(view.model);
+            assert_eq!(listed["t"].iter().filter(|member| member.item == "goal").count(), 0);
         });
     }
 

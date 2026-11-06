@@ -216,6 +216,8 @@ impl<'a> CommandContext<'a> {
                 title,
                 parent,
                 thread,
+                no_thread,
+                claim: claiming,
                 state,
                 notes,
                 waits_for,
@@ -223,7 +225,7 @@ impl<'a> CommandContext<'a> {
                 let fields = ItemFields {
                     title: Some(title.clone()),
                     parent: Change::of(parent.clone(), false),
-                    thread: Change::of(thread.clone(), false),
+                    thread: Change::of(thread.clone(), *no_thread),
                     state: state.map(StateWord::state),
                     force: false,
                     notes: Change::of(notes.clone(), false),
@@ -239,7 +241,12 @@ impl<'a> CommandContext<'a> {
                         Ok(edit::item_changes(&id, &fields, adding))
                     })?;
                     self.remember(&outcome.after);
-                    Ok(json!({"item": id, "placed": outcome.placed(), "title": title}))
+                    let mut data = json!({"item": id, "placed": outcome.placed(), "title": title});
+                    if *claiming {
+                        // In the same write: a refusal here leaves the add unwritten too.
+                        data["claim"] = claim_thread_of(replica, by, &id, &outcome.after)?;
+                    }
+                    Ok(data)
                 })
                 .map_err(|error| {
                     self.misplaced(error, parent.as_deref(), || {
@@ -749,24 +756,57 @@ impl<'a> CommandContext<'a> {
         let lease = lease.map_or(LEASE, |minutes| Millis::from(minutes) * MINUTE);
         self.write(|replica, by| {
             let (id, key) = existing_thread(replica, reference)?;
-            let thread = id.as_str();
-            claim::claim(replica, thread, by.actor, by.at, (lease, MAX_LEASE), !force).map_err(
-                |error| match error {
-                    claim::ClaimError::NotReady(status) => CliError::refused(
-                        "not-ready",
-                        format!(
-                            "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it; \
-                             `acyclic thread show {thread}` says why"
-                        ),
-                    )
-                    .with(json!({"readiness": status})),
-                    claim::ClaimError::State(error) => error.into(),
-                },
-            )?;
+            claim_thread(replica, by, &id, lease, !force)?;
             let held = claim::winner(replica.state(), &key, by.at)?;
-            Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
+            Ok(json!({"thread": id, "claim": held.as_ref().map(view::claim_json)}))
         })
     }
+}
+
+/// Claims the thread an item just added is in, as `item add --claim` does in the add's own write. An item in no
+/// thread has none to claim.
+fn claim_thread_of(
+    replica: &mut Replica,
+    by: By<'_>,
+    item: &str,
+    after: &Model,
+) -> Result<Json, CliError> {
+    let Some(thread) = after.thread_of(item) else {
+        return Err(CliError::refused(
+            "no-thread",
+            format!(
+                "item {item} is in no thread, so there is none to claim: give it one with --thread, or leave out \
+                 --claim"
+            ),
+        )
+        .with(json!({"item": item})));
+    };
+    claim_thread(replica, by, thread, LEASE, true)?;
+    let held = claim::winner(replica.state(), &claim::thread_key(thread)?, by.at)?;
+    Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
+}
+
+/// Claims `thread` for the actor, refusing as `acyclic thread claim` does.
+fn claim_thread(
+    replica: &mut Replica,
+    by: By<'_>,
+    thread: &str,
+    lease: Millis,
+    check_ready: bool,
+) -> Result<(), CliError> {
+    claim::claim(replica, thread, by.actor, by.at, (lease, MAX_LEASE), check_ready)
+        .map(drop)
+        .map_err(|error| match error {
+            claim::ClaimError::NotReady(status) => CliError::refused(
+                "not-ready",
+                format!(
+                    "thread {thread} isn't ready to claim: it has no ready work, or someone else holds it; \
+                     `acyclic thread show {thread}` says why"
+                ),
+            )
+            .with(json!({"readiness": status})),
+            claim::ClaimError::State(error) => error.into(),
+        })
 }
 
 /// The current notifying needs, keyed by the stable core key and carrying each exact compact identity.
@@ -1023,17 +1063,21 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
     let mut threads: BTreeMap<&str, Vec<Member<'_>>> =
         model.threads.keys().map(|id| (id.as_str(), Vec::new())).collect();
     for item in model.items.values() {
-        let named = item.thread.all();
+        let named = model.thread_value(item).all();
         for thread in &named {
             if let Some(members) = threads.get_mut(thread.as_str()) {
-                members.push(Member { item: &item.id, conflict: item.thread.is_conflict() });
+                members.push(Member {
+                    item: &item.id,
+                    conflict: model.thread_value(item).is_conflict(),
+                });
             }
         }
     }
     // Each thread's blocks links among its own members, gathered in one pass rather than once per thread.
     let mut links: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
-    let threads_of =
-        |id: &str| model.items.get(id).map(|item| item.thread.all()).unwrap_or_default();
+    let threads_of = |id: &str| {
+        model.items.get(id).map(|item| model.thread_value(item).all()).unwrap_or_default()
+    };
     for link in &model.links {
         let to = threads_of(&link.to);
         for thread in threads_of(&link.from).into_iter().filter(|thread| to.contains(thread)) {

@@ -204,7 +204,7 @@ pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool
     let members: Vec<String> = model
         .items
         .values()
-        .filter(|item| item.thread.all().iter().any(|thread| *thread == id))
+        .filter(|item| model.thread_value(item).all().iter().any(|thread| *thread == id))
         .map(|item| item.id.clone())
         .collect();
     if !members.is_empty() {

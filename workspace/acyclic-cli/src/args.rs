@@ -356,6 +356,15 @@ impl Command {
             | Self::Import { dry_run: true, schema: true, .. } => {
                 Err(usage("--schema prints an example: it takes no file and no --dry-run"))
             },
+            Self::Item(ItemCommand::Add { thread, no_thread, claim, .. }) => {
+                clears("thread", thread.is_some(), *no_thread)?;
+                if *claim && *no_thread {
+                    return Err(usage(
+                        "--claim claims the item's thread, so --no-thread contradicts it",
+                    ));
+                }
+                Ok(())
+            },
             Self::Item(ItemCommand::Edit(edit)) => edit.validate(),
             Self::Thread(ThreadCommand::Edit(edit)) => edit.validate(),
             _ => Ok(()),
@@ -441,9 +450,18 @@ pub enum ItemCommand {
         /// Its parent.
         #[arg(short = 'p', long)]
         parent: Option<String>,
-        /// Its thread.
+        /// Its thread. Left out, it joins the thread its parent's other children share, finished ones included, and is
+        /// refused when they differ or some are in none; with no other children it takes its parent's thread.
         #[arg(long)]
         thread: Option<String>,
+        /// Put it in no thread, where `--thread` would be refused or the siblings' thread is not wanted.
+        #[arg(long)]
+        #[serde(default)]
+        no_thread: bool,
+        /// Claim its thread in the same write, for the work it is the first of.
+        #[arg(long)]
+        #[serde(default)]
+        claim: bool,
         /// Its state; open by default.
         #[arg(short = 's', long, value_parser = state_words())]
         state: Option<StateWord>,

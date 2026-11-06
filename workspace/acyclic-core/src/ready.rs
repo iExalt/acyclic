@@ -382,12 +382,14 @@ impl<'a> ReadinessEvaluator<'a> {
 
     /// An item's readiness as though no thread were claimed, or `None` when it would be ready.
     fn unclaimed(&self, id: &str, item: &Item) -> Option<Readiness> {
-        let fields: Vec<String> =
-            [("state", item.state.is_conflict()), ("thread", item.thread.is_conflict())]
-                .into_iter()
-                .filter(|(_, conflicted)| *conflicted)
-                .map(|(name, _)| name.to_owned())
-                .collect();
+        let fields: Vec<String> = [
+            ("state", item.state.is_conflict()),
+            ("thread", self.model.thread_value(item).is_conflict()),
+        ]
+        .into_iter()
+        .filter(|(_, conflicted)| *conflicted)
+        .map(|(name, _)| name.to_owned())
+        .collect();
         if !fields.is_empty() {
             return Some(Readiness::Conflicted { fields });
         }
@@ -412,7 +414,7 @@ impl<'a> ReadinessEvaluator<'a> {
             return Some(Readiness::Waiting { waiting });
         }
         let threaded =
-            item.thread.one().is_some_and(|thread| self.model.threads.contains_key(thread));
+            self.model.thread_of(id).is_some_and(|thread| self.model.threads.contains_key(thread));
         (!threaded).then_some(Readiness::Unthreaded)
     }
 
@@ -428,7 +430,7 @@ impl<'a> ReadinessEvaluator<'a> {
         let members = self.members.get_or_init(|| {
             let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
             for item in self.model.items.values() {
-                if let Some(thread) = item.thread.one() {
+                if let Some(thread) = self.model.thread_value(item).one() {
                     members.entry(thread).or_default().push(&item.id);
                 }
             }
@@ -612,7 +614,7 @@ impl<'a> ReadinessEvaluator<'a> {
                 if self.claimed_under(child, seen)? {
                     return Ok(true);
                 }
-            } else if let Some(thread) = item.thread.one()
+            } else if let Some(thread) = self.model.thread_of(child)
                 && self.winner(thread)?.is_some()
             {
                 return Ok(true);

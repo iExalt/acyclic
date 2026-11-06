@@ -569,13 +569,28 @@ impl Model {
         self.reads_done(id) || self.reads_canceled(id)
     }
 
-    /// The items of a thread: those whose thread field is that thread alone. An item with a conflicted thread is in
-    /// neither.
+    /// An item's thread as reads see it: the one stored on it, unless it has children. A thread stored on a parent,
+    /// as a sync can leave one, is ignored, and Needs you lists it; see [`Self::ignored_thread`].
+    #[must_use]
+    pub fn thread_value<'m>(&'m self, item: &'m Item) -> &'m Value<String> {
+        static NONE: Value<String> = Value::None;
+        if self.children.contains_key(&item.id) { &NONE } else { &item.thread }
+    }
+
+    /// The thread stored on an item that has children, which reads ignore.
+    #[must_use]
+    pub fn ignored_thread(&self, id: &str) -> Option<&str> {
+        let item = self.items.get(id)?;
+        if self.children.contains_key(id) { item.thread.one().map(String::as_str) } else { None }
+    }
+
+    /// The items of a thread: those whose thread field, as read, is that thread alone. An item with a conflicted
+    /// thread is in neither, and nor is a parent.
     #[must_use]
     pub fn members(&self, thread: &str) -> Vec<&str> {
         self.items
             .values()
-            .filter(|item| item.thread.one().is_some_and(|t| t == thread))
+            .filter(|item| self.thread_value(item).one().is_some_and(|t| t == thread))
             .map(|item| item.id.as_str())
             .collect()
     }
@@ -583,7 +598,8 @@ impl Model {
     /// The thread an item belongs to, when it is in exactly one.
     #[must_use]
     pub fn thread_of(&self, id: &str) -> Option<&str> {
-        self.items.get(id).and_then(|item| item.thread.one()).map(String::as_str)
+        let item = self.items.get(id)?;
+        self.thread_value(item).one().map(String::as_str)
     }
 
     /// The cycles among waits-for links, each sorted.

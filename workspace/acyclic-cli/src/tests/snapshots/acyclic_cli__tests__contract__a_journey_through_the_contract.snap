@@ -542,7 +542,20 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
 # exit 0
 {
   "data": {
-    "needs": []
+    "needs": [
+      {
+        "fix": "acyclic thread delete 01900000-0000-7000-8000-0000000000f0",
+        "identity": "{\"entry\":\"empty-thread\",\"thread\":\"01900000-0000-7000-8000-0000000000f0\",\"fix\":\"acyclic thread delete 01900000-0000-7000-8000-0000000000f0\"}",
+        "key": "empty-thread:01900000-0000-7000-8000-0000000000f0",
+        "kind": "empty-thread",
+        "notify": false,
+        "summary": "Start has no items",
+        "thread": {
+          "id": "01900000-0000-7000-8000-0000000000f0",
+          "title": "Start"
+        }
+      }
+    ]
   },
   "ok": true
 }
@@ -1135,7 +1148,20 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
 # exit 0
 {
   "data": {
-    "needs": []
+    "needs": [
+      {
+        "fix": "acyclic thread delete 01900000-0000-7000-8000-0000000000f0",
+        "identity": "{\"entry\":\"empty-thread\",\"thread\":\"01900000-0000-7000-8000-0000000000f0\",\"fix\":\"acyclic thread delete 01900000-0000-7000-8000-0000000000f0\"}",
+        "key": "empty-thread:01900000-0000-7000-8000-0000000000f0",
+        "kind": "empty-thread",
+        "notify": false,
+        "summary": "Start has no items",
+        "thread": {
+          "id": "01900000-0000-7000-8000-0000000000f0",
+          "title": "Start"
+        }
+      }
+    ]
   },
   "ok": true
 }
