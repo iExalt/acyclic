@@ -202,10 +202,18 @@ fn assert_git_reads_it(repository: &Path) {
 }
 
 /// Waits until no upkeep is running in `repository`, so nothing outlives the journey's checks.
+///
+/// The store marks a repack from before its process starts until it ends, and clears the mark only when the repack
+/// settled, so the mark is what covers the gap between a write returning and its repack taking git's own locks. Waiting
+/// on git's locks alone returned in that gap, and a check then read packs the repack was removing.
 fn wait_for_upkeep_to_end(repository: &Path) {
     let common = repository.join(".git");
+    let running = || {
+        common.join("acyclic/maintenance").exists()
+            || ["gc.pid", "objects/maintenance.lock"].iter().any(|file| common.join(file).exists())
+    };
     let deadline = Instant::now() + Duration::from_secs(30);
-    while ["gc.pid", "objects/maintenance.lock"].iter().any(|file| common.join(file).exists()) {
+    while running() {
         assert!(Instant::now() < deadline, "upkeep never ended in {}", repository.display());
         std::thread::sleep(Duration::from_millis(100));
     }
