@@ -66,6 +66,8 @@ jobs:
       - uses: ./.github/actions/build-archive
         with:
           target: ${{ matrix.target }}
+          # A build that publishes (publish.yml calls this workflow with a ref) generates the notices afresh.
+          reuse-notices: ${{ inputs.ref == '' }}
 
   build-macos:
     name: build aarch64-apple-darwin
@@ -80,6 +82,7 @@ jobs:
       - uses: ./.github/actions/build-archive
         with:
           target: aarch64-apple-darwin
+          reuse-notices: ${{ inputs.ref == '' }}
 
   image:
     name: image ${{ matrix.arch }}

@@ -12,7 +12,9 @@ else
   crates=$(mktemp)
   trap 'rm -f "$crates"' EXIT
 fi
-if [ ! -s "$crates" ]; then
+if [ -s "$crates" ] && grep -q '^## Rust crates' "$crates"; then
+  echo "notices: reusing the crates' licences at $crates" >&2
+else
   cargo about generate --locked -c "$root/scripts/notices/about.toml" -m "$root/workspace/acyclic/Cargo.toml" \
     "$root/scripts/notices/crates.hbs" -o "$crates"
 fi
