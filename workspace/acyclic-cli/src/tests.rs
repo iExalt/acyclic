@@ -151,6 +151,8 @@ fn every_error_has_a_stable_code_and_exit() {
         CliError::refused("not-done", ""),
         CliError::refused("parent", ""),
         CliError::refused("lineage-link", ""),
+        CliError::refused("thread-unclear", ""),
+        CliError::refused("no-thread", ""),
         CliError::refused("incomplete-repository", ""),
         CliError::refused("nested-repository", ""),
         CliError::new("not-found", exit::NOT_FOUND, ""),

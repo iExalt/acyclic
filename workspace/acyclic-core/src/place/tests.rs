@@ -1,131 +1,106 @@
 use serde_json::json;
 
 use super::*;
-use crate::model::{ItemState, add_item, item_key, set_parent, set_state};
+use crate::model::{By, ItemState, Model, Value, add_item, item_key, set_parent, set_state};
 use crate::schema::item as field;
-use crate::state::{Key, ReplicaId, State};
+use crate::state::{Replica, ReplicaId, State};
 
 const USER: By<'static> = By { actor: "actor/user", at: 1 };
 
-fn replica_named(name: &str) -> Replica {
-    Replica::open(ReplicaId::new(name).unwrap(), State::new())
+/// A parent's children, each as its thread and state, and the thread the parent itself holds.
+struct Family {
+    children: &'static [(Option<&'static str>, ItemState)],
+    parent_thread: Option<&'static str>,
 }
 
-fn write(r: &mut Replica, key: &Key, name: &str, value: serde_json::Value) {
-    r.write(key, name, USER.actor, USER.at, Some(value)).unwrap();
-}
-
-fn add(r: &mut Replica, id: &str, parent: Option<&str>) {
-    add_item(r, id, &format!("Title {id}"), USER).unwrap();
-    if let Some(parent) = parent {
-        set_parent(r, id, Some(parent), USER).unwrap();
+fn model_of(family: &Family) -> (Model, Vec<String>) {
+    let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    add_item(&mut r, "p", "P", USER).unwrap();
+    let mut ids = Vec::new();
+    for (n, (thread, state)) in family.children.iter().enumerate() {
+        let id = format!("c{n}");
+        add_item(&mut r, &id, &id, USER).unwrap();
+        set_parent(&mut r, &id, Some("p"), USER).unwrap();
+        if let Some(thread) = thread {
+            let key = item_key(&id).unwrap();
+            r.write(&key, field::THREAD, USER.actor, 1, Some(json!(thread))).unwrap();
+        }
+        set_state(&mut r, &id, *state, USER).unwrap();
+        ids.push(id);
     }
-}
-
-fn set_thread(r: &mut Replica, id: &str, thread: &str) {
-    write(r, &item_key(id).unwrap(), field::THREAD, json!(thread));
-}
-
-/// Top `p`, group `g1` under it, and `g1`'s leaves `g1-00` to `g1-<n-1>`.
-fn group(n: usize) -> Replica {
-    let mut r = replica_named("mac");
-    add(&mut r, "p", None);
-    add(&mut r, "g1", Some("p"));
-    for i in 0..n {
-        add(&mut r, &format!("g1-{i:02}"), Some("g1"));
-    }
-    r
-}
-
-fn model(r: &Replica) -> Model {
-    Model::read(r.state()).unwrap()
-}
-
-fn place_one(r: &mut Replica, item: &str, actor: &'static str) -> Vec<Inherited> {
-    place(r, &[item.to_owned()], By { actor, at: 9 }).unwrap()
+    (Model::read(r.state()).unwrap(), ids)
 }
 
 #[test]
-fn new_work_joins_its_nearest_threaded_ancestor() {
-    let mut r = group(1);
-    set_thread(&mut r, "g1", "ok");
-    add(&mut r, "a", Some("g1-00"));
-    let placed = place_one(&mut r, "a", "session/mac");
-    assert_eq!(placed, [Inherited { item: "a".into(), thread: "ok".into() }]);
-    // A thread an item already has is never changed.
-    add(&mut r, "c", Some("g1-00"));
-    set_thread(&mut r, "c", "own");
-    assert_eq!(place_one(&mut r, "c", "session/mac"), Vec::new());
-    assert_eq!(model(&r).thread_of("c"), Some("own"));
-    // Work with no thread above it, or around it, stays as it is.
-    add(&mut r, "loner", None);
-    assert_eq!(place_one(&mut r, "loner", USER.actor), Vec::new());
-    // Under a parent in conflict there is no single line to inherit along.
-    let mut other = replica_named("pi");
-    add(&mut r, "torn", None);
-    other.join(r.state()).unwrap();
-    set_parent(&mut r, "torn", Some("g1-00"), By { actor: USER.actor, at: 20 }).unwrap();
-    set_parent(&mut other, "torn", Some("p"), By { actor: USER.actor, at: 20 }).unwrap();
-    r.join(other.state()).unwrap();
-    assert_eq!(inherited_thread(&model(&r), "torn"), None);
-}
-
-#[test]
-fn a_groups_new_work_joins_the_thread_its_other_work_is_in() {
-    let mut r = replica_named("mac");
-    add(&mut r, "move", None);
-    add(&mut r, "boxes", Some("move"));
-    assert_eq!(place_one(&mut r, "boxes", USER.actor), Vec::new(), "nothing to follow yet");
-    set_thread(&mut r, "boxes", "t");
-    for kid in ["pack", "van"] {
-        add(&mut r, kid, Some("move"));
-        let placed = place(&mut r, &[kid.to_owned()], USER).unwrap();
-        assert_eq!(placed[0].thread, "t");
+fn a_new_child_joins_the_thread_its_siblings_share_and_nothing_further_up() {
+    use ItemState::{Backlog, Canceled, Done};
+    let joins = |thread: &str| Placement::Joins(thread.to_owned());
+    let cases: [(&str, Family, Placement); 9] = [
+        (
+            "all agree",
+            Family { children: &[(Some("t"), Backlog), (Some("t"), Backlog)], parent_thread: None },
+            joins("t"),
+        ),
+        (
+            "disagree",
+            Family { children: &[(Some("t"), Backlog), (Some("u"), Backlog)], parent_thread: None },
+            Placement::Unclear,
+        ),
+        (
+            "some unthreaded",
+            Family { children: &[(Some("t"), Backlog), (None, Backlog)], parent_thread: None },
+            Placement::Unclear,
+        ),
+        (
+            "all unthreaded",
+            Family { children: &[(None, Backlog), (None, Done)], parent_thread: Some("up") },
+            Placement::Loose,
+        ),
+        (
+            "only done siblings",
+            Family { children: &[(Some("t"), Done), (Some("t"), Done)], parent_thread: None },
+            joins("t"),
+        ),
+        (
+            "only canceled siblings",
+            Family { children: &[(Some("t"), Canceled)], parent_thread: None },
+            joins("t"),
+        ),
+        (
+            "done and open siblings that agree",
+            Family {
+                children: &[(Some("t"), Done), (Some("t"), Backlog)],
+                parent_thread: Some("up"),
+            },
+            joins("t"),
+        ),
+        (
+            "no siblings under a threaded parent",
+            Family { children: &[], parent_thread: Some("up") },
+            joins("up"),
+        ),
+        (
+            "no siblings under an unthreaded parent",
+            Family { children: &[], parent_thread: None },
+            Placement::Loose,
+        ),
+    ];
+    for (name, family, expected) in cases {
+        let (model, ids) = model_of(&family);
+        let siblings: Vec<&str> = ids.iter().map(String::as_str).collect();
+        assert_eq!(placement(&model, &siblings, family.parent_thread), expected, "{name}");
     }
-    assert_eq!(model(&r).members("t").len(), 3);
 }
 
 #[test]
-fn siblings_pass_their_thread_down_only_when_they_agree() {
-    let mut r = group(2);
-    let shared = |r: &Replica| passed_down(&model(r), "g1").map(str::to_owned);
-    for leaf in ["g1-00", "g1-01"] {
-        set_thread(&mut r, leaf, "t");
-    }
-    set_thread(&mut r, "p", "up");
-    assert_eq!(shared(&r).as_deref(), Some("t"), "nearer than the grandparent's");
-    set_thread(&mut r, "g1-01", "u");
-    assert_eq!(shared(&r).as_deref(), Some("up"), "siblings that differ fall through");
-    set_state(&mut r, "g1-01", ItemState::Done, USER).unwrap();
-    assert_eq!(shared(&r).as_deref(), Some("t"), "finished work pulls nothing in");
-    // Siblings in conflict fall through; a parent in conflict stops the walk, however its children agree.
-    let mut other = replica_named("pi");
-    other.join(r.state()).unwrap();
-    let key = item_key("g1-00").unwrap();
-    other.write(&key, field::THREAD, USER.actor, 5, Some(json!("v"))).unwrap();
-    r.write(&key, field::THREAD, USER.actor, 5, Some(json!("t"))).unwrap();
-    r.join(other.state()).unwrap();
-    assert_eq!(shared(&r).as_deref(), Some("up"));
-    set_thread(&mut r, "g1-00", "t");
-    let key = item_key("g1").unwrap();
-    other.write(&key, field::THREAD, USER.actor, 6, Some(json!("v"))).unwrap();
-    r.write(&key, field::THREAD, USER.actor, 6, Some(json!("w"))).unwrap();
-    r.join(other.state()).unwrap();
-    assert_eq!(shared(&r), None);
-}
-
-#[test]
-fn concurrent_threads_agree_when_equal_and_conflict_when_not() {
-    let mut a = group(1);
-    let mut b = replica_named("pi");
-    b.join(a.state()).unwrap();
-    let key = item_key("g1-00").unwrap();
-    a.write(&key, field::THREAD, USER.actor, 5, Some(json!("t"))).unwrap();
-    b.write(&key, field::THREAD, USER.actor, 5, Some(json!("t"))).unwrap();
-    a.join(b.state()).unwrap();
-    assert_eq!(model(&a).thread_of("g1-00"), Some("t"), "inheritance sees one thread");
-    b.write(&key, field::THREAD, USER.actor, 6, Some(json!("u"))).unwrap();
-    a.write(&key, field::THREAD, USER.actor, 6, Some(json!("v"))).unwrap();
-    a.join(b.state()).unwrap();
-    assert!(model(&a).items["g1-00"].thread.is_conflict(), "and passes none down");
+fn siblings_in_conflict_leave_the_placement_to_the_caller() {
+    let family = Family { children: &[(Some("t"), ItemState::Backlog)], parent_thread: None };
+    let (mut model, ids) = model_of(&family);
+    let item = model.items.get_mut("c0").unwrap();
+    item.thread = Value::Conflict(vec![Some("t".into()), Some("u".into())]);
+    // Alone, and beside one that reads alike.
+    let one = [ids[0].as_str()];
+    let twins = [ids[0].as_str(), ids[0].as_str()];
+    assert_eq!(placement(&model, &one, None), Placement::Unclear);
+    assert_eq!(placement(&model, &twins, None), Placement::Unclear);
 }

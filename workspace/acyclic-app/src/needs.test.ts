@@ -152,6 +152,19 @@ describe("needView", () => {
       text: "Waiting waits for Dropped, which was canceled",
       actions: [],
     });
+    // A thread an item has children over is ignored, and the CLI's command clears it; an empty thread names itself.
+    const parent = example("thread-on-parent");
+    expect(needView(parent, none)).toMatchObject({
+      text: "Parent has children, so its thread Work is ignored",
+      items: [(parent.item as { id: string }).id],
+      actions: [],
+      note: parent.fix,
+    });
+    expect(parent.notify).toBe(true);
+    const empty = needView(example("empty-thread"), none);
+    expect(empty).toMatchObject({ text: "Idle has no items", items: [], actions: [] });
+    expect(empty.threads.map((one) => one.title)).toEqual(["Idle"]);
+    expect(example("empty-thread").notify).toBe(false);
     // The key is the list's, whatever the entry names.
     expect(needView({ kind: "contest", key: "contest:t", thread: thread("t"), holders: ["x"] }, none).key).toBe(
       "contest:t",

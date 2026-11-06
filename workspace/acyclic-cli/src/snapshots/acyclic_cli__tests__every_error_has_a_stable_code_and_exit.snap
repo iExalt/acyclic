@@ -44,6 +44,8 @@ expression: table
 1 not-done
 1 parent
 1 lineage-link
+1 thread-unclear
+1 no-thread
 1 incomplete-repository
 1 nested-repository
 3 not-found

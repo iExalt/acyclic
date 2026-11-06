@@ -1,5 +1,5 @@
 //! The one judge of writes to records. A caller states what it means to change as a [`ChangeSet`]; [`judge`] adds what
-//! every such change brings with it, whoever asks (new or moved work joins the thread passed down to it), projects the result onto the model in memory, and
+//! every such change brings with it, whoever asks (new work joins the thread its siblings share), projects the result onto the model in memory, and
 //! refuses it only for what it would break that wasn't broken before, naming every such violation. [`commit`] reads
 //! the model once, judges, and writes only an accepted change.
 
@@ -13,7 +13,7 @@ use crate::import::is_object_id;
 use crate::model::{
     self, By, Evidence, Item, ItemState, Model, Repository, Thread, Value, WriteError,
 };
-use crate::place::{Inherited, passed_down};
+use crate::place::{Inherited, Placement, placement};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error as StateError, Key, Millis, Replica, State};
@@ -606,7 +606,7 @@ pub enum Written {
     Create(Record),
     /// A field the change set sets, or one a consequence sets.
     Assign(Assign),
-    /// New or moved work joins the thread passed down to it.
+    /// New work joins the thread its siblings share, or its parent held.
     Place(Inherited),
 }
 
@@ -697,6 +697,11 @@ pub enum Rule {
     ParentDone,
     /// Done work would get other evidence than it was finished with.
     EvidenceDiffers,
+    /// A new item's siblings are in different threads, or some in none, so no thread follows from them.
+    ThreadUnclear {
+        /// The parent whose children they are.
+        parent: String,
+    },
     /// The item is done, or a parent that reads done: reopen it before canceling.
     CancelDone,
     /// Someone else holds a live claim on the item's thread, or on one under it.
@@ -773,6 +778,10 @@ impl fmt::Display for Violation {
             Rule::NotReady(_) => write!(f, "{at}it isn't ready, or someone else holds it"),
             Rule::ParentDone => write!(f, "{at}it has children, so it reads done once they are"),
             Rule::EvidenceDiffers => write!(f, "{at}it is done with other evidence"),
+            Rule::ThreadUnclear { parent } => write!(
+                f,
+                "{at}the other children of {parent} are in different threads, or some in none, so say which thread it joins"
+            ),
             Rule::CancelDone => write!(f, "{at}it is done, so reopen it to cancel it"),
             Rule::CancelHeld { holder } => write!(f, "{at}{holder} holds a claim on its work"),
             Rule::InvalidCommit => {
@@ -1088,9 +1097,10 @@ impl Judging<'_, '_> {
         }
     }
 
+    /// New work joins the thread its siblings share, finished ones included, and refuses to guess when they differ;
+    /// moves change no thread. An item that gains its first child gives its own thread up to it, or just drops it
+    /// when no new child takes it on. All judged on the model before, so one placement doesn't steer the next.
     fn place(&mut self, asked: &[(usize, Assign)]) {
-        // New or moved work with no thread joins the one passed down to it, all judged on one snapshot so one
-        // placement doesn't steer the next.
         let threaded: BTreeSet<&str> = asked
             .iter()
             .filter_map(|(_, assign)| match assign {
@@ -1098,33 +1108,59 @@ impl Judging<'_, '_> {
                 _ => None,
             })
             .collect();
-        let mut moved: Vec<(usize, &str)> = Vec::new();
+        let (before, after) = (self.before, &self.after);
+        let mut created: Vec<(usize, &str)> = Vec::new();
+        let mut entering: Vec<(usize, &str)> = Vec::new();
         for step in &self.steps {
-            match &step.write {
-                Written::Create(Record::Item(id))
-                | Written::Assign(Assign::Item(id, ItemAssign::Parent(_)))
-                    if !moved.iter().any(|(_, m)| *m == id) =>
-                {
-                    moved.push((step.change, id));
+            let id = match &step.write {
+                Written::Create(Record::Item(id)) => {
+                    created.push((step.change, id));
+                    id
                 },
-                _ => {},
+                Written::Assign(Assign::Item(id, ItemAssign::Parent(_))) => id,
+                _ => continue,
+            };
+            // Where it ends up, whichever write put it there.
+            if let Some(parent) = after.items.get(id).and_then(|item| item.parent.one()) {
+                // An item with children before has had its first already.
+                if before.children(parent).is_empty() && entering.iter().all(|(_, p)| p != parent) {
+                    entering.push((step.change, parent));
+                }
             }
         }
-        let snapshot = &self.after;
-        let placed: Vec<(usize, Inherited)> = moved
+        let mut placed = Vec::new();
+        let mut unclear = Vec::new();
+        for (n, id) in created {
+            let Some(item) = after.items.get(id) else { continue };
+            let Some(parent) = item.parent.one() else { continue };
+            if threaded.contains(id) || item.is_finished() {
+                continue;
+            }
+            let siblings: Vec<&str> =
+                before.children(parent).into_iter().filter(|sibling| *sibling != id).collect();
+            let held = after.items.get(parent).and_then(|p| p.thread.one()).map(String::as_str);
+            match placement(before, &siblings, held) {
+                Placement::Joins(thread) => {
+                    placed.push((n, Inherited { item: id.to_owned(), thread }));
+                },
+                Placement::Loose => {},
+                Placement::Unclear => unclear.push((n, id.to_owned(), parent.to_owned())),
+            }
+        }
+        let dropped: Vec<(usize, String)> = entering
             .into_iter()
-            .filter(|(_, id)| !threaded.contains(id))
-            .filter_map(|(n, id)| {
-                let item = snapshot.items.get(id)?;
-                if item.thread != Value::None || item.is_finished() {
-                    return None;
-                }
-                let thread = passed_down(snapshot, item.parent.one()?)?;
-                Some((n, Inherited { item: id.to_owned(), thread: thread.to_owned() }))
-            })
+            .filter(|(_, parent)| after.items.get(*parent).is_some_and(|p| p.thread != Value::None))
+            .map(|(n, parent)| (n, parent.to_owned()))
             .collect();
+        for (n, id, parent) in unclear {
+            let at = FieldAddr { record: Record::Item(id), field: FieldName::Thread };
+            self.refuse(Some(n), Some(at), Rule::ThreadUnclear { parent });
+        }
         for (n, placed) in placed {
             self.apply(n, false, Written::Place(placed));
+        }
+        for (n, parent) in dropped {
+            self.apply(n, false, Written::Assign(Assign::Item(parent, ItemAssign::Thread(None))));
         }
     }
 

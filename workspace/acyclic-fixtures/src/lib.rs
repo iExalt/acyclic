@@ -290,12 +290,15 @@ impl Generator {
     }
 
     /// Threads take contiguous runs of non-root items in depth-first order, so most stay within one umbrella; a few
-    /// swaps make some cross roots. About an eighth of the items stay unthreaded.
+    /// swaps make some cross roots. About an eighth of the items stay unthreaded, every parent among them.
     fn threads(&mut self) -> Vec<Option<usize>> {
         let count = self.scaled(21.0);
         let small = self.scaled(6.0).min(count - 1);
         let big = count - small;
-        let eligible: Vec<usize> = (0..self.total).filter(|&i| self.depth[i] >= 2).collect();
+        // Only leaves are in a thread: a thread on a parent is ignored when read.
+        let parents: HashSet<usize> = self.parent.iter().flatten().copied().collect();
+        let eligible: Vec<usize> =
+            (0..self.total).filter(|&i| self.depth[i] >= 2 && !parents.contains(&i)).collect();
         let unthreaded_target = (self.total as f64 * 0.125).round() as usize;
         let roots = self.total - eligible.len();
         let threaded = eligible.len() - unthreaded_target.saturating_sub(roots).min(eligible.len());
@@ -545,7 +548,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_368, 5_021_021_054_589_452_822));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_347, 14_666_096_642_313_301_582));
     }
 
     #[test]

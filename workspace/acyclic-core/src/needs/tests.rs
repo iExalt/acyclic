@@ -486,6 +486,22 @@ fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
             "dangling:item:a:thread:t",
             r#"{"entry":"dangling","kind":"item","id":"a","field":"thread","target":"t","fix":"fix"}"#,
         ),
+        (
+            Entry::ThreadOnParent {
+                item: s("a"),
+                thread: s("t"),
+                fix: s("acyclic item edit a --no-thread"),
+            },
+            "thread-on-parent",
+            "thread-on-parent:a:t",
+            r#"{"entry":"thread-on-parent","item":"a","thread":"t","fix":"acyclic item edit a --no-thread"}"#,
+        ),
+        (
+            Entry::EmptyThread { thread: s("t"), fix: s("acyclic thread delete t") },
+            "empty-thread",
+            "empty-thread:t",
+            r#"{"entry":"empty-thread","thread":"t","fix":"acyclic thread delete t"}"#,
+        ),
     ]
 }
 
@@ -517,6 +533,8 @@ fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
             "A is done but waits for B",
             "A waits for B, which was canceled",
             "A: its thread names t, which doesn't exist",
+            "A has children, so its thread T is ignored",
+            "T has no items",
         ]
     );
     let waits = Entry::Dangling {
@@ -529,4 +547,58 @@ fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
     assert_eq!(waits.summary(&name), "A waits for q, which doesn't exist");
     // No wording leaks the stored link name.
     assert!(each_kind().iter().all(|(entry, ..)| !entry.summary(&name).contains("blocks")));
+}
+
+/// Whether a kind of entry notifies, by kind.
+fn notifies(kind: &str) -> bool {
+    each_kind().into_iter().find(|(entry, ..)| entry.kind() == kind).unwrap().0.notifies()
+}
+
+#[test]
+fn a_thread_on_a_parent_and_an_empty_thread_are_listed_and_only_the_first_notifies() {
+    assert!(notifies("thread-on-parent"));
+    assert!(!notifies("empty-thread"));
+}
+
+#[test]
+fn a_thread_stored_on_a_parent_is_ignored_by_every_reader_and_listed() {
+    let mut r = replica("a");
+    let by = user(1);
+    for id in ["p", "kid", "solo"] {
+        add_item(&mut r, id, id, by).unwrap();
+    }
+    for held in ["t", "u", "empty"] {
+        model::set(&mut r, &Key::new(kind::THREAD, held).unwrap(), thread::TITLE, Some(&held), by)
+            .unwrap();
+    }
+    set_parent(&mut r, "kid", Some("p"), by).unwrap();
+    for (item, held) in [("kid", "t"), ("solo", "t")] {
+        edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
+            .unwrap();
+    }
+    // Written under the judge, `p` could not hold a thread once it had a child: a sync can leave it so.
+    r.write(&item_key("p").unwrap(), field::THREAD, USER, 2, Some(json!("u"))).unwrap();
+    // Listed, with the thread it is on and the thread it leaves empty.
+    let entries = list(&r);
+    let found: Vec<&str> = entries
+        .iter()
+        .map(Entry::kind)
+        .filter(|k| k.contains("thread-on") || k.contains("empty"))
+        .collect();
+    assert_eq!(found, ["thread-on-parent", "empty-thread", "empty-thread"], "{entries:?}");
+    assert!(entries.contains(&Entry::ThreadOnParent {
+        item: "p".into(),
+        thread: "u".into(),
+        fix: "acyclic item edit p --no-thread".into()
+    }));
+    let model = Model::read(&r.state).unwrap();
+    // Not a member, not in a thread, not readiness's, and no reason to keep the thread from being deleted.
+    assert_eq!(model.thread_of("p"), None);
+    assert_eq!(model.members("u"), Vec::<&str>::new());
+    assert_eq!(model.members("t"), ["kid", "solo"]);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
+    assert_eq!(readiness.of("p").unwrap(), Some(crate::ready::Readiness::Parent));
+    assert_eq!(readiness.thread("u").unwrap(), crate::ready::ThreadReadiness::NothingReady);
+    assert_eq!(claim::covering(&r.state, &model, "p", NOW).unwrap(), Vec::new());
+    assert!(crate::delete::delete_thread(&mut r.clone(), "u", by).unwrap());
 }

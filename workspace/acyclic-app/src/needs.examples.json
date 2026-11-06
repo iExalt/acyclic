@@ -293,7 +293,7 @@
             "parked"
           ]
         },
-        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "thread": null,
         "title": "Parent"
       },
       "keeps": [
@@ -569,6 +569,61 @@
         "state": "canceled",
         "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "Dropped"
+      }
+    },
+    {
+      "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread",
+      "identity": "{\"entry\":\"thread-on-parent\",\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread\"}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000b1",
+        "parent": null,
+        "progress": {
+          "counts": {
+            "canceled": 0,
+            "done": 0,
+            "in_progress": 0,
+            "leaves": 1,
+            "parked": 0,
+            "ready": 0,
+            "unthreaded": 0,
+            "waiting": 1
+          }
+        },
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "readiness": "conflicted"
+        },
+        "stage": "waiting",
+        "state": {
+          "conflict": [
+            "open",
+            "parked"
+          ]
+        },
+        "thread": null,
+        "title": "Parent"
+      },
+      "key": "thread-on-parent:01900000-0000-7000-8000-0000000000b1:01900000-0000-7000-8000-0000000000f1",
+      "kind": "thread-on-parent",
+      "notify": true,
+      "summary": "Parent has children, so its thread Work is ignored",
+      "thread": {
+        "id": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Work"
+      }
+    },
+    {
+      "fix": "acyclic thread delete 01900000-0000-7000-8000-0000000000f2",
+      "identity": "{\"entry\":\"empty-thread\",\"thread\":\"01900000-0000-7000-8000-0000000000f2\",\"fix\":\"acyclic thread delete 01900000-0000-7000-8000-0000000000f2\"}",
+      "key": "empty-thread:01900000-0000-7000-8000-0000000000f2",
+      "kind": "empty-thread",
+      "notify": false,
+      "summary": "Idle has no items",
+      "thread": {
+        "id": "01900000-0000-7000-8000-0000000000f2",
+        "title": "Idle"
       }
     }
   ]

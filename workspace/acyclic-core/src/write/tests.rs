@@ -400,27 +400,110 @@ fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes
     commit_ok(&mut synced, 5, vec![item("mid", ItemAssign::Title("Mid".into()))]);
 }
 
+fn thread_of(r: &Replica, id: &str) -> Option<String> {
+    read(r).items[id].thread.one().cloned()
+}
+
+fn under(parent: &str) -> ItemAssign {
+    ItemAssign::Parent(Some(parent.into()))
+}
+
 #[test]
-fn new_or_moved_work_joins_the_thread_passed_down_unless_given_one() {
+fn new_work_joins_its_siblings_thread_unless_given_one_and_a_move_changes_none() {
     let mut r = done_tree();
-    // The leaf open again, its thread is the one `mid`'s open children share.
-    commit_ok(&mut r, 3, vec![item("leaf", ItemAssign::State(ItemState::Backlog))]);
+    // `leaf` is done and the only child of `mid`, and it is in `t`: finished siblings still place new work.
     let outcome = commit_ok(
         &mut r,
-        4,
+        3,
         vec![
-            add("x", vec![ItemAssign::Parent(Some("mid".into()))]),
+            add("x", vec![under("mid")]),
             add("y", vec![]),
-            item("y", ItemAssign::Parent(Some("mid".into()))),
-            add("z", vec![ItemAssign::Parent(Some("mid".into())), ItemAssign::Thread(None)]),
+            item("y", under("mid")),
+            add("z", vec![under("mid"), ItemAssign::Thread(None)]),
         ],
     );
     let placed: Vec<(String, String)> =
         outcome.placed().into_iter().map(|placed| (placed.item, placed.thread)).collect();
     assert_eq!(placed, [("x".into(), "t".into()), ("y".into(), "t".into())]);
     // An item given a thread, even none, keeps what it was given.
-    assert_eq!(read(&r).items["z"].thread, Value::None);
-    assert_eq!(read(&r).items["x"].thread, Value::One("t".into()));
+    assert_eq!(thread_of(&r, "z"), None);
+    assert_eq!(thread_of(&r, "x"), Some("t".into()));
+    // A move never changes a thread: not given one, and not taking the siblings' either.
+    commit_ok(&mut r, 4, vec![add("loose", vec![]), add("other", vec![ItemAssign::Thread(None)])]);
+    let moved =
+        commit_ok(&mut r, 5, vec![item("loose", under("mid")), item("other", under("mid"))]);
+    assert_eq!(moved.placed(), Vec::new());
+    assert_eq!((thread_of(&r, "loose"), thread_of(&r, "other")), (None, None));
+    commit_ok(&mut r, 6, vec![thread("u"), item("x", ItemAssign::Thread(Some("u".into())))]);
+    commit_ok(&mut r, 7, vec![add("top", vec![]), item("x", under("top"))]);
+    assert_eq!(thread_of(&r, "x"), Some("u".into()));
+}
+
+#[test]
+fn siblings_that_disagree_or_part_in_none_refuse_a_new_child_unless_it_says_where_it_goes() {
+    let mut r = done_tree();
+    commit_ok(&mut r, 3, vec![thread("u"), add("w", vec![under("mid"), ItemAssign::Thread(None)])]);
+    // `leaf` is in `t`, `w` in none.
+    let unclear = Rule::ThreadUnclear { parent: "mid".into() };
+    assert_eq!(refused(&r, vec![add("x", vec![under("mid")])]), std::slice::from_ref(&unclear));
+    commit_ok(&mut r, 4, vec![item("w", ItemAssign::Thread(Some("u".into())))]);
+    assert_eq!(refused(&r, vec![add("x", vec![under("mid")])]), [unclear]);
+    // Each of the ways to say where it goes is judged as given.
+    let explicit = [ItemAssign::Thread(Some("u".into())), ItemAssign::Thread(None)];
+    for (id, assign) in ["ok1", "ok2"].into_iter().zip(explicit) {
+        commit_ok(&mut r, 5, vec![add(id, vec![under("mid"), assign])]);
+    }
+    // A moved item is never refused for it, and finished new work needs no thread.
+    commit_ok(&mut r, 6, vec![add("m", vec![])]);
+    commit_ok(&mut r, 7, vec![item("m", under("mid"))]);
+    commit_ok(&mut r, 8, vec![add("d", vec![under("mid"), ItemAssign::State(ItemState::Done)])]);
+}
+
+#[test]
+fn a_first_child_takes_its_parents_thread_or_a_move_or_an_explicit_thread_drops_it_in_one_write() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            thread("u"),
+            add("p", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("q", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("s", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("mv", vec![ItemAssign::Thread(Some("u".into()))]),
+            add("only", vec![ItemAssign::Thread(Some("t".into()))]),
+        ],
+    );
+    // A plain add: the thread moves from the parent to the child.
+    let outcome = commit_ok(&mut r, 2, vec![add("p1", vec![under("p")])]);
+    assert_eq!((thread_of(&r, "p"), thread_of(&r, "p1")), (None, Some("t".into())));
+    assert_eq!(outcome.placed().len(), 1);
+    // An explicit thread, even none, takes the child's own way and drops the parent's.
+    commit_ok(&mut r, 3, vec![add("q1", vec![under("q"), ItemAssign::Thread(Some("u".into()))])]);
+    assert_eq!((thread_of(&r, "q"), thread_of(&r, "q1")), (None, Some("u".into())));
+    commit_ok(&mut r, 4, vec![add("s1", vec![under("s"), ItemAssign::Thread(None)])]);
+    assert_eq!((thread_of(&r, "s"), thread_of(&r, "s1")), (None, None));
+    // A move drops it and leaves the moved item's own thread alone.
+    commit_ok(&mut r, 5, vec![item("mv", under("only"))]);
+    assert_eq!((thread_of(&r, "only"), thread_of(&r, "mv")), (None, Some("u".into())));
+    // Only the first child: a later one joins the siblings' thread and the parent holds nothing to drop.
+    let later = commit_ok(&mut r, 6, vec![add("p2", vec![under("p")])]);
+    assert_eq!(later.placed().len(), 1);
+    assert_eq!(thread_of(&r, "p2"), Some("t".into()));
+    // One write: a set refused for another reason leaves the parent's thread where it was.
+    commit_ok(&mut r, 7, vec![add("leafy", vec![ItemAssign::Thread(Some("t".into()))])]);
+    let before = r.state.clone();
+    let broken = ChangeSet(vec![
+        add("leafy1", vec![under("leafy")]),
+        item("leafy", ItemAssign::WaitsFor("leafy".into(), true)),
+    ]);
+    assert!(matches!(
+        commit(&mut r, by(8), false, |_| Ok::<_, ()>(broken)),
+        Err(CommitError::Refused(..))
+    ));
+    assert_eq!(r.state, before);
+    assert_eq!(thread_of(&r, "leafy"), Some("t".into()));
 }
 
 #[test]
