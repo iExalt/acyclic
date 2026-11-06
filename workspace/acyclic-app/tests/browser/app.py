@@ -3992,7 +3992,7 @@ def shard_run(shard):
 
 
 def main():
-    """Drives the three shards of the journeys at once, each in a process of its own with its own tracker, server and
+    """Drives the four shards of the journeys at once, each in a process of its own with its own tracker, server and
     browsers, and reports them as one run. A shard's lines are prefixed with its name, so a failure and its traceback
     say which shard raised it; its screenshots are named by journey, as before."""
     if "--shard" in sys.argv:
