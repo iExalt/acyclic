@@ -1,3 +1,3 @@
-# `{{crate_name}}`
+# `{{project-name}}`
 
 TODO: Describe this crate.
