@@ -37,7 +37,7 @@ describe("foldDone", () => {
     const reopened = fold(finished.map((one) => (one.id === "a2" ? { ...one, stage: "in-progress" as const } : one)));
     expect(sourceKey(renamed.model)).not.toBe(sourceKey(folded.model));
     expect(sourceKey(reordered.model)).toBe(sourceKey(folded.model));
-    // The raw item state/thread/parent are the same, but a stage under way means the thread no longer folds.
+    // The raw item state/thread/parent are the same, but a stage under way keeps that leaf out of done boxes.
     expect(sourceKey(reopened.model)).not.toBe(sourceKey(folded.model));
   });
 
@@ -79,7 +79,7 @@ describe("foldDone", () => {
     expect(kidsOf(folded, "p")).toEqual(["r", "x", "~thread p a", "~thread p b"]);
   });
 
-  it("leaves a thread with work left anywhere, even in another box or in review, as it is", () => {
+  it("folds done leaves even when their thread has ready or in-progress work in another box", () => {
     const folded = fold([
       item("p"),
       item("q"),
@@ -91,8 +91,37 @@ describe("foldDone", () => {
       item("b3", "q", [], { state: "in-progress", stage: "in-progress", thread: "b" }),
       ready("x", "p", null),
     ]);
-    expect(folded.doneBoxes.size).toBe(0);
-    expect(kidsOf(folded, "p")).toEqual(["a1", "a2", "b1", "b2", "x"]);
+    expect(kidsOf(folded, "p")).toEqual(["x", "~done p"]);
+    expect(kidsOf(folded, "~done p")).toEqual(["~thread p a", "~thread p b"]);
+    expect(kidsOf(folded, "q")).toEqual(["a3", "b3"]);
+    expect(folded.model.items.get("~done p")?.progress).toMatchObject({ done: 4, leaves: 4 });
+  });
+
+  it("folds a partial thread's loose done leaves beside its unfinished and canceled leaves", () => {
+    const folded = fold([
+      item("p"),
+      done("a1", "p", "a"),
+      done("r", "p", null),
+      ready("a2", "p", "a"),
+      item("a3", "p", [], { state: "canceled", stage: "canceled", thread: "a" }),
+    ]);
+    expect(kidsOf(folded, "~done p")).toEqual(["a1", "r"]);
+    expect(kidsOf(folded, "p")).toEqual(["a2", "a3", "~done p"]);
+    expect(folded.doneBoxes.get("~done p")).toEqual({ kind: "rest", threads: 1 });
+  });
+
+  it("keeps a partial thread's done leaves visible when linked to its unfinished work", () => {
+    const folded = fold([
+      item("p"),
+      done("a1", "p", "a"),
+      done("a2", "p", "a", ["a1"]),
+      ready("a3", "p", "a", ["a2"]),
+      done("r1", "p", null),
+      done("r2", "p", null),
+    ]);
+    expect(kidsOf(folded, "p")).toEqual(["a3", "~thread p a", "~done p"]);
+    expect(kidsOf(folded, "~done p")).toEqual(["r1", "r2"]);
+    expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);
   });
 
   it("makes no done box of one: a finished thread's only leaf in a box stays a tile, and the Done box needs two", () => {

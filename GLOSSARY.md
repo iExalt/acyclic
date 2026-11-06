@@ -155,10 +155,9 @@ How the Map draws an item with children, holding their tiles and boxes; folded, 
 _Avoid_: group (for this), container, lane
 
 **Done box**:
-A box the Map makes of finished work, which holds no item of its own: a finished thread's items in a box, named after
+A box the Map makes of finished work, which holds no item of its own: a thread's done items in a box, named after
 the thread, or the box's other finished work that no link ties to anything left there, named Done, last in its
-columns. A thread is finished when every leaf it has is done or canceled, and a thread with none isn't. Canceled
-work stays out of the Done box.
+columns. Done items can fold while their thread still has work left. Canceled work stays out of the Done box.
 _Avoid_: pile, group, archive
 
 **State**:
