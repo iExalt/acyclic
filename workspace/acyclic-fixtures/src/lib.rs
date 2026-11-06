@@ -8,7 +8,7 @@ pub mod stats;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use acyclic_core::import::{Evidence, Import, Item, Repository, State, Thread};
+use acyclic_core::import::{Evidence, Import, Initiative, Item, Repository, State, Thread};
 
 pub use rng::SplitMix64;
 
@@ -124,6 +124,7 @@ impl Generator {
     fn run(mut self) -> Import {
         self.repositories();
         self.tree();
+        self.initiative();
         self.states();
         let threads = self.threads();
         self.links(&threads);
@@ -241,6 +242,21 @@ impl Generator {
             }
         }
         debug_assert_eq!(self.import.items.len(), self.total);
+    }
+
+    /// The one initiative the roots are epics under: an item always has a parent, and a root's is an initiative.
+    fn initiative(&mut self) {
+        let id = self.id();
+        for (item, parent) in self.import.items.iter_mut().zip(&self.parent) {
+            if parent.is_none() {
+                item.parent = Some(id.clone());
+            }
+        }
+        self.import.initiatives.push(Initiative {
+            id,
+            title: "Example initiative".to_owned(),
+            notes: None,
+        });
     }
 
     /// Splits `total` into `parts` shares of about equal size, each at least 1 when possible.
@@ -646,7 +662,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_299, 11_358_292_599_230_118_913));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_535, 10_668_042_948_317_295_399));
     }
 
     #[test]

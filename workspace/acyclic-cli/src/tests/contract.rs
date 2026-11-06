@@ -743,10 +743,6 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     let mut sh = Shell::new();
     sh.init();
     let mut plan = acyclic_fixtures::generate(50, 7);
-    // Every new item needs a parent: what the plan leaves at the top goes under the tracker's initiative.
-    for item in plan.items.iter_mut().filter(|item| item.parent.is_none()) {
-        item.parent = Some(id(DEFAULT_INITIATIVE));
-    }
     let file = sh.path().join("plan.json");
     std::fs::write(&file, plan.to_json()).unwrap();
     let import = |sh: &mut Shell, extra: &str| {
@@ -762,7 +758,7 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     // Each record is listed as created, with its fields, and nothing has been written.
     let creates =
         dry["changes"].as_array().unwrap().iter().filter(|c| c["action"] == "create").count();
-    let counted: u64 = ["links", "threads", "repositories"]
+    let counted: u64 = ["links", "threads", "repositories", "initiatives"]
         .iter()
         .map(|k| dry["counts"][k].as_u64().unwrap())
         .sum();
