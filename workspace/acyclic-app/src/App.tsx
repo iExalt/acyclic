@@ -28,9 +28,11 @@ import { Icon, X } from "./icons";
 import {
   contextOf,
   contextTitle,
+  crossingWaits,
   inContext,
   type ListScope,
   needInitiatives,
+  rowLabel,
   startProject,
   switcherRows,
   threadInitiatives,
@@ -76,7 +78,7 @@ import { ThreadPanel } from "./ThreadPanel";
 import { ThreadsView } from "./ThreadsView";
 import { workingThreads } from "./threadLists";
 import { createTracker, type Notice } from "./tracker";
-import { scopeThreads, wavesView } from "./waves";
+import { outsideOf, scopeThreads, wavesView } from "./waves";
 import { useWide } from "./wide";
 
 // The Map's code (the renderer and the layout engine) is the bulk of the app; it loads while the tracker does.
@@ -299,13 +301,26 @@ export function App() {
     if (go({ kind: "initiative", id }).requests.unsaved) tell(UNSAVED);
   };
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
-  const waves = useMemo(
-    () =>
-      loaded === null || scopedOutline === null
-        ? null
-        : wavesView(scopeThreads(loaded.threads, new Set(scopedThreads.map((one) => one.id))), scopedOutline),
-    [loaded, scopedOutline, scopedThreads],
+  /** The waits of items in the initiative in context on items in another, which the Map draws as stubs. */
+  const outsideWaits = useMemo(
+    () => crossingWaits(shown, context, initiativeTitles),
+    [shown, context, initiativeTitles],
   );
+  const waves = useMemo(() => {
+    if (loaded === null || scopedOutline === null || model === null) return null;
+    const keep = new Set(scopedThreads.map((one) => one.id));
+    const none: ReadonlySet<string | null> = new Set([null]);
+    // A thread in another initiative is named by where it is; a tile names its tasks there and the waves it comes after.
+    const outside = outsideOf(
+      loaded.threads,
+      keep,
+      model,
+      context,
+      (id) => rowLabel(ofThreads.get(id) ?? none, initiativeTitles, context),
+      initiativeTitles,
+    );
+    return wavesView(scopeThreads(loaded.threads, keep), scopedOutline, outside);
+  }, [loaded, scopedOutline, scopedThreads, model, context, ofThreads, initiativeTitles]);
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   worldNow.current = {
     has: (id) => model?.items.has(id) ?? false,
@@ -343,6 +358,11 @@ export function App() {
   );
   /** To the Map for a thread, as its row or tile anywhere does: picked, its panel open, and its items framed. */
   const toThread = useCallback((id: string) => go(forThread(id)), [go, forThread]);
+
+  /** A stub's item opened, from the Map or the Threads view: in its own initiative, which is put in context. */
+  const openOutside = (id: string) => {
+    if (go({ kind: "follow", id, pin: selected }).requests.unsaved) tell(UNSAVED);
+  };
 
   const choose = useCallback(
     (target: Pick) => {
@@ -960,6 +980,8 @@ export function App() {
             selected={selected}
             onSelect={(id) => go({ kind: "tap", id })}
             onThread={toThread}
+            outside={outsideWaits}
+            onOpen={openOutside}
             focus={requests.focus}
             framed={requests.frame}
             active={view === "map"}
@@ -974,7 +996,7 @@ export function App() {
           <h1 className="visually-hidden">{view === "map" ? "Map" : "Threads"}</h1>
         ) : null}
         {view === "threads" && waves !== null ? (
-          <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={toThread} />
+          <ThreadsView view={waves} lines={lines} picked={thread} wide={wide} onPick={toThread} onOpen={openOutside} />
         ) : null}
         {view === "overview" ? (
           <Overview

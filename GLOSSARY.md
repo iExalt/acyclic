@@ -137,8 +137,9 @@ that initiative in context; a phone's bar names the one in context.
 _Avoid_: tabs, filter
 
 **Initiative in context**: The initiative the user chose in the switcher, else the first of it. The lists put its rows
-first, New item goes under it when no project is chosen, and the switcher marks it. It scopes nothing else: the
-Overview, Up next and Needs you still list every initiative. The address keeps it, so a reload does. _Avoid_: current
+first, New item goes under it when no project is chosen, and the switcher marks it. The Map, the Threads view and the
+outline show only its work, with a stub for what crosses; the Overview, Up next and Needs you still list every
+initiative. The address keeps it, so a reload does. _Avoid_: current
 initiative, active initiative, filter
 
 **Up next**:
@@ -180,6 +181,18 @@ What a panel says of where something stands: an item's stage.
 
 **Any time**:
 The threads in no wave: they wait on no thread and none waits on them.
+
+**Unlinked**:
+The Map's word for the items in a box with no link inside it: they wait for no item in the box and none in it waits for
+them, so they stand in columns before the box's graph. It says nothing of threads or waves, which is Any time's.
+_Avoid_: Any time (for items), loose (kept for a task alone in its thread)
+
+**Stub**:
+How a view names work in another initiative that it doesn't draw: a dashed chip in the signal's colour, naming the
+initiative and the item or thread, that opens it. The Map has one on a tile (or a folded box) whose item waits for
+work in another initiative; the Threads view has one on a thread's tile for a thread in an earlier wave there, and one
+for each of its tasks in another initiative.
+_Avoid_: ghost, placeholder
 
 ## Relationships between items
 

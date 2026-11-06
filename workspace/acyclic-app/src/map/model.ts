@@ -4,6 +4,15 @@
 import type { Counts, Item, Stage } from "../api";
 import { type DoneBox, noteOf } from "./fold";
 
+/** A wait that leaves the initiative drawn: the item waited for, and the initiative it is in, named. */
+export interface Crossing {
+  /** The item waited for. */
+  id: string;
+  title: string;
+  /** Its initiative's title, or "No initiative". */
+  initiative: string;
+}
+
 /** An item, with what the Map reads of it. */
 export interface MapItem {
   id: string;
@@ -19,6 +28,8 @@ export interface MapItem {
   progress: Counts | null;
   /** The items this one waits for. */
   waitsFor: string[];
+  /** The waits it has on items outside the plan drawn, which no edge shows. */
+  outside: Crossing[];
 }
 
 export interface Model {
@@ -33,7 +44,7 @@ export interface Model {
 export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): string {
   return JSON.stringify(
     [...model.items.values()]
-      .map(({ id, title, parent, thread, state, stage, progress, waitsFor }) => ({
+      .map(({ id, title, parent, thread, state, stage, progress, waitsFor, outside }) => ({
         id,
         title,
         parent,
@@ -43,12 +54,14 @@ export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> 
         progress,
         doneBox: doneBoxes.get(id) ?? null,
         waitsFor: [...waitsFor].sort(),
+        // Each takes a line of a tile's height, so it is part of the layout's source.
+        outside,
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
   );
 }
 
-export function buildModel(items: Item[]): Model {
+export function buildModel(items: Item[], outside: ReadonlyMap<string, Crossing[]> = new Map()): Model {
   const byId = new Map<string, MapItem>(
     items.map((item) => [
       item.id,
@@ -65,6 +78,7 @@ export function buildModel(items: Item[]): Model {
             ? null
             : item.progress.counts,
         waitsFor: [...item.links.waits_for],
+        outside: outside.get(item.id) ?? [],
       },
     ]),
   );
@@ -166,6 +180,8 @@ export interface VisibleNode {
   thread: string | null;
   /** A parent's leaves by stage, as its item has them. */
   progress: Counts | null;
+  /** The waits it, or what it hides, has outside the plan drawn: a tile's or a folded box's, which show them as stubs. */
+  outside: Crossing[];
   /** For a done box (see `fold.ts`), what it is and the words under its name; else absent. */
   doneBox?: DoneBox;
   note?: string;
@@ -261,6 +277,7 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
       stage: kids.length === 0 ? (item.stage ?? fallbackStage(item.state)) : item.stage,
       thread: item.thread,
       progress: item.progress,
+      outside: [],
       ...doneBoxOf(doneBoxes.get(id), item.progress),
     });
     for (const child of kids) walk(child, id, collapsed ? id : null);
@@ -290,6 +307,16 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
     return keys.get(key) ? { source, target, implied: true } : { source, target };
   });
 
+  // A stub is drawn on a tile or a folded box: an open box's own wait has no place in its title strip.
+  const stubbed = new Map(nodes.filter((node) => node.kind !== "box").map((node) => [node.id, node]));
+  for (const item of model.items.values()) {
+    const node = stubbed.get(stand.get(item.id) ?? "");
+    if (node === undefined) continue;
+    for (const crossing of item.outside)
+      if (!node.outside.some((one) => one.id === crossing.id)) node.outside.push(crossing);
+  }
+  for (const node of nodes) node.outside.sort(byCrossing);
+
   const threads = new Map<string, string[]>();
   for (const item of model.items.values()) {
     const at = stand.get(item.id);
@@ -301,6 +328,10 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
   for (const members of threads.values()) members.sort();
   return { nodes, edges, threads };
 }
+
+/** Crossings in the order a stub names them: by initiative, then title, then id. */
+export const byCrossing = (a: Crossing, b: Crossing) =>
+  a.initiative.localeCompare(b.initiative) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
 
 /** A done box's fields on its node, or none for an item. */
 function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { doneBox?: DoneBox; note?: string } {

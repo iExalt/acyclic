@@ -71,6 +71,7 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
       stage: "done",
       progress: counts,
       waitsFor: [],
+      outside: [],
     });
     children.set(id, members);
     depth.set(id, (depth.get(parent) ?? 0) + 1);

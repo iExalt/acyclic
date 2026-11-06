@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contextOf,
   contextTitle,
+  crossingWaits,
   fitsFirstView,
   groupRows,
   groupTitle,
@@ -298,5 +299,34 @@ describe("what the Map and the Threads view draw", () => {
     });
     const big = buildModel(inContext(items, "big"));
     expect(outlineOf(big, ["t1"]).projects.map((one) => one.id)).toEqual(["e1"]);
+  });
+});
+
+describe("crossingWaits", () => {
+  const titles = new Map([
+    ["big", "Big"],
+    ["small", "Small"],
+  ]);
+  const items = [
+    item("a", null, ["s", "l", "d", "gone"], { initiative: "big", stage: "ready" }),
+    item("d", null, [], { initiative: "big", stage: "done" }),
+    item("b", null, ["s"], { initiative: "big", stage: "done" }),
+    item("c", null, ["s"], { initiative: "big", state: "canceled" }),
+    item("s", null, [], { initiative: "small", title: "Zed" }),
+    item("l", null, [], { initiative: null, title: "Loose" }),
+  ];
+
+  it("names each wait an unfinished item in the initiative has on an item in another, in a stub's order", () => {
+    const found = crossingWaits(items, "big", titles);
+    expect([...found.keys()]).toEqual(["a"]);
+    expect(found.get("a")).toEqual([
+      { id: "l", title: "Loose", initiative: "No initiative" },
+      { id: "s", title: "Zed", initiative: "Small" },
+    ]);
+  });
+
+  it("leaves out waits inside the initiative, on what the plan lacks, and finished work's, and has none with no context", () => {
+    expect(crossingWaits(items, "small", titles).size).toBe(0);
+    expect(crossingWaits(items, null, titles).size).toBe(0);
   });
 });

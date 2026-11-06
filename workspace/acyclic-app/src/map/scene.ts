@@ -3,7 +3,7 @@
 
 import type { Stage } from "../api";
 import type { Measure } from "./fit";
-import { metricsOf } from "./labelmetrics";
+import { metricsOf, STUB_CHIP, STUB_INSET } from "./labelmetrics";
 import { type Placed, withinOneBox } from "./layout";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, View } from "./model";
@@ -23,6 +23,8 @@ export interface SceneNode {
   textWidth: number;
   header: number;
   kind: Kind;
+  /** The room at its foot a stub takes, which its label and marks leave clear; 0 with none. */
+  reserve: number;
   /** A tile's stage and thread, which its marks show; null for a box. */
   stage: Stage | null;
   thread: string | null;
@@ -92,8 +94,27 @@ export interface SceneDivider {
   layer: number;
 }
 
+/** A tile's or folded box's waits outside the plan, as one chip at its foot, which a tap opens. */
+export interface SceneStub {
+  id: string;
+  /** The node it stands on, and the item a tap opens. */
+  node: string;
+  target: string;
+  text: string;
+  /** Every wait it stands for, one a line, for a hover. */
+  full: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** One more than its node's, to be drawn over it. */
+  layer: number;
+  dim: boolean;
+}
+
 export interface Scene {
   nodes: SceneNode[];
+  stubs: SceneStub[];
   edges: SceneEdge[];
   junctions: SceneJunction[];
   dividers: SceneDivider[];
@@ -117,6 +138,7 @@ export function scene(
   const lit = new Set(thread === null ? [] : (view.threads.get(thread) ?? []));
   const layer = new Map<string, number>();
   const nodes: SceneNode[] = [];
+  const stubs: SceneStub[] = [];
   for (const node of view.nodes) {
     const at = placed.nodes.get(node.id);
     if (at === undefined) continue;
@@ -128,6 +150,7 @@ export function scene(
       label: metrics.lines.join("\n"),
       textWidth: metrics.textWidth,
       header: metrics.header || metrics.height,
+      reserve: metrics.reserve,
       kind: node.kind,
       // A box's, where its work stands as a whole, as core tells it.
       stage: node.stage,
@@ -144,6 +167,22 @@ export function scene(
       dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
       selected: node.id === selection.item,
     });
+    if (metrics.stub !== null) {
+      const width = at.width - 2 * STUB_INSET;
+      stubs.push({
+        id: `stub ${node.id}`,
+        node: node.id,
+        target: metrics.stub.target,
+        text: metrics.stub.text,
+        full: metrics.stub.full,
+        x: at.x + at.width / 2,
+        y: at.y + at.height - STUB_INSET - STUB_CHIP / 2,
+        width,
+        height: STUB_CHIP,
+        layer: depth + 1,
+        dim: thread !== null && !lit.has(node.id) && node.kind !== "box" && node.id !== selection.item,
+      });
+    }
   }
   const within = withinOneBox(view);
   // Only an item still drawn as one: a box opened under the pointer no longer shows links of its own.
@@ -196,5 +235,5 @@ export function scene(
     const line = node.kind === "box" ? placed.dividers.get(node.id) : undefined;
     if (line !== undefined) dividers.push({ id: `divider ${node.id}`, ...line, layer: node.layer });
   }
-  return { nodes, edges, junctions: [...junctions.values()], dividers, thread };
+  return { nodes, stubs, edges, junctions: [...junctions.values()], dividers, thread };
 }

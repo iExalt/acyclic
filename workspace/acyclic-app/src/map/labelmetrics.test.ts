@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { metricsOf } from "./labelmetrics";
+import { metricsOf, STUB_ROOM } from "./labelmetrics";
 
 const fonts = { regular: (text: string) => [...text].length * 8, bold: (text: string) => [...text].length * 8 };
 const normalized = (text: string) => text.replace(/`([^`]+)`/g, "$1").replace(/\s/g, "");
@@ -87,5 +87,34 @@ describe("map label metrics", () => {
     expect(long.header).toBe(81);
     expect(long.height).toBe(85);
     expect(long.lines.every((line) => fonts.bold(line.trimEnd()) <= long.textWidth)).toBe(true);
+  });
+});
+
+describe("a stub for waits outside the plan", () => {
+  const leaf = { title: "Fix the map", kind: "leaf", hidden: 0, stage: "ready", progress: null } as const;
+  const gate = { id: "g", title: "Reserve the ingress address", initiative: "Home lab" };
+
+  it("takes the room at a tile's foot, and a folded box's, and none for a tile with no wait outside", () => {
+    expect(metricsOf(leaf, fonts).stub).toBeNull();
+    expect(metricsOf(leaf, fonts).reserve).toBe(0);
+    const stubbed = metricsOf({ ...leaf, outside: [gate] }, fonts);
+    expect(stubbed).toMatchObject({ reserve: STUB_ROOM, height: 64 + STUB_ROOM });
+    expect(metricsOf({ ...leaf, kind: "collapsed", outside: [gate] }, fonts).reserve).toBe(STUB_ROOM);
+    // An open box has no place for one in its title strip.
+    expect(metricsOf({ ...leaf, kind: "box", outside: [gate] }, fonts)).toMatchObject({ reserve: 0, stub: null });
+  });
+
+  it("names the initiative and the item, cut to the chip, with the rest counted and every one in the hover", () => {
+    const one = metricsOf({ ...leaf, outside: [gate] }, fonts).stub;
+    expect(one?.target).toBe("g");
+    expect(one?.text.startsWith("↗ Home lab: ")).toBe(true);
+    expect(one?.text.endsWith("…")).toBe(true);
+    expect(one?.full).toBe("Home lab: Reserve the ingress address");
+    const short = { id: "s", title: "Ping", initiative: "Lab" };
+    expect(metricsOf({ ...leaf, outside: [short] }, fonts).stub?.text).toBe("↗ Lab: Ping");
+    const many = metricsOf({ ...leaf, outside: [short, gate, { ...gate, id: "h" }] }, fonts).stub;
+    expect(many?.text.endsWith(" +2")).toBe(true);
+    expect(many?.target).toBe("s");
+    expect(many?.full.split("\n")).toHaveLength(3);
   });
 });

@@ -22,9 +22,14 @@ export interface ThreadsViewProps {
   wide: boolean;
   /** Goes to the Map for the thread. */
   onPick: (id: string) => void;
+  /** Opens a task in another initiative, which puts that initiative in context. */
+  onOpen: (id: string) => void;
 }
 
-export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewProps) {
+/** The most tasks in other initiatives a tile names; the rest are counted. */
+const MOST_TASKS = 3;
+
+export function ThreadsView({ view, lines, picked, wide, onPick, onOpen }: ThreadsViewProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   // A state, not a ref: the arrows measure the columns once they are there, which a ref wouldn't tell them.
   const [columns, setColumns] = useState<HTMLDivElement | null>(null);
@@ -42,8 +47,21 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
   const tile = (one: ThreadTile) => {
     const line = lines.get(one.id);
     const projects = projectLabels(one.projects, line?.name ?? one.id);
+    const { after, looped, tasks } = one.outside;
+    const away = after.length + looped.length + tasks.length > 0;
+    // A thread's name for a stub, plain, as a chip has no room for its code spans.
+    const nameOf = (id: string) => (lines.get(id)?.name ?? id).replace(/`([^`]+)`/g, "$1");
+    // A stub opens what it names, in its own initiative; the full name is its title, where the text is cut short.
+    const stub = (key: string, lead: string, where: string, name: string, open: () => void) => (
+      <button key={key} type="button" className="stub" title={`${lead}${where}: ${name}`} onClick={open}>
+        <span aria-hidden="true">{lead === "" ? "↗ " : `${lead.trimEnd()} ↗ `}</span>
+        <span className="visually-hidden">{lead}</span>
+        <span className="where">{where}: </span>
+        <span className="named">{name}</span>
+      </button>
+    );
     return (
-      <li key={one.id}>
+      <li key={one.id} className={away ? "has-away" : undefined}>
         <button
           type="button"
           className="thread-tile"
@@ -69,6 +87,24 @@ export function ThreadsView({ view, lines, picked, wide, onPick }: ThreadsViewPr
           {one.after.length === 0 ? null : <span className="after">after {badges(one.after)}</span>}
           {one.looped.length === 0 ? null : <span className="looped">waits in a cycle with {badges(one.looped)}</span>}
         </button>
+        {away ? (
+          <div className="away" style={lineStyle(line)}>
+            {tasks
+              .slice(0, MOST_TASKS)
+              .map((task) => stub(`task ${task.id}`, "", task.initiative, task.title, () => onOpen(task.id)))}
+            {tasks.length > MOST_TASKS ? (
+              <span className="more">+{tasks.length - MOST_TASKS} more in other initiatives</span>
+            ) : null}
+            {after.map((other) =>
+              stub(`after ${other.id}`, "after ", other.initiative, nameOf(other.id), () => onPick(other.id)),
+            )}
+            {looped.map((other) =>
+              stub(`looped ${other.id}`, "waits in a cycle with ", other.initiative, nameOf(other.id), () =>
+                onPick(other.id),
+              ),
+            )}
+          </div>
+        ) : null}
       </li>
     );
   };
@@ -175,7 +211,8 @@ function Arrows({
         return {
           heading: heading ? box(heading) : { left: 0, top: 0, right: 0, bottom: 0 },
           tiles: tiles.flatMap((tile) => {
-            const drawn = wave?.querySelector(`[data-thread-tile="${CSS.escape(tile.id)}"]`);
+            // The tile's whole place, its stubs under it too, which no arrow may cross.
+            const drawn = wave?.querySelector(`[data-thread-tile="${CSS.escape(tile.id)}"]`)?.closest("li");
             return drawn ? [{ id: tile.id, box: box(drawn) }] : [];
           }),
         };

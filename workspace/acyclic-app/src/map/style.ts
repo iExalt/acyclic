@@ -51,6 +51,9 @@ export function styleFor(p: Palette, family = FONT): cytoscape.StylesheetJson {
   return style;
 }
 
+/** The shift up of a title that a stub's room at the foot of its node makes off-centre. */
+const lifted = (node: cytoscape.NodeSingular) => -Number(node.data("reserve") ?? 0) / 2;
+
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
   return [
@@ -128,6 +131,8 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "text-halign": "left-inside",
         "text-justification": "left",
         "text-margin-x": MARKS_LEFT,
+        // The room at its foot a stub takes is not the title's: the title is centred in what is left.
+        "text-margin-y": lifted,
       },
     },
     ...stagesOf(p),
@@ -141,6 +146,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       style: {
         "border-color": p.muted,
         "font-weight": WEIGHT.bold,
+        "text-margin-y": lifted,
       },
     },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
@@ -199,6 +205,26 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "segment-distances": (edge: cytoscape.EdgeSingular) => edge.data("distances") as string,
       },
     },
+    // A wait that leaves the initiative: a dashed chip in the signal's colour at a tile's foot, as a link across boxes
+    // is dashed in it; it takes a tap, which opens what it names.
+    {
+      selector: "node.stub",
+      style: {
+        "background-opacity": 0,
+        "border-width": 1,
+        "border-style": "dashed",
+        "border-opacity": 1,
+        "border-color": p.signal,
+        color: p.signal,
+        "font-size": 12,
+        "text-halign": "center",
+        "text-valign": "center",
+        "text-margin-x": 0,
+        "text-margin-y": 0,
+        "z-index": (node: cytoscape.NodeSingular) => TILES + 2 * (node.data("layer") as number) + 1,
+      },
+    },
+    { selector: "node.stub.dim", style: { opacity: 0.35 } },
     {
       selector: "edge.crossing",
       style: { "line-style": "dashed", "line-color": p.signal, "target-arrow-color": p.signal },

@@ -202,3 +202,27 @@ describe("finished epics", () => {
     expect(opened.has("gone")).toBe(true);
   });
 });
+
+describe("waits outside the plan", () => {
+  const gate = { id: "far", title: "Far", initiative: "Home lab" };
+  const near = [item("top"), item("a", "top", [], { stage: "ready" }), item("box", "top"), item("in", "box")];
+  const outside = new Map([
+    ["a", [gate]],
+    ["in", [gate, { id: "far2", title: "Another", initiative: "Atlas" }]],
+  ]);
+
+  it("puts them on a tile, and on the folded box that hides one, sorted by initiative then title", () => {
+    const model = buildModel(near, outside);
+    const open = visible(model, { collapsed: new Set() });
+    expect(open.nodes.find((node) => node.id === "a")?.outside).toEqual([gate]);
+    expect(open.nodes.find((node) => node.id === "in")?.outside.map((one) => one.id)).toEqual(["far2", "far"]);
+    const folded = visible(model, { collapsed: new Set(["box"]) });
+    expect(folded.nodes.find((node) => node.id === "box")?.outside.map((one) => one.id)).toEqual(["far2", "far"]);
+  });
+
+  it("has no place for them on an open box, and changes the layout's source, as a stub changes a tile's height", () => {
+    const model = buildModel(near, new Map([["box", [gate]]]));
+    expect(visible(model, { collapsed: new Set() }).nodes.find((node) => node.id === "box")?.outside).toEqual([]);
+    expect(sourceKey(buildModel(near, outside))).not.toBe(sourceKey(buildModel(near)));
+  });
+});

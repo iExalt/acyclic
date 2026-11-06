@@ -35,7 +35,7 @@ export function elementsOf(
         ...(lit ? { line } : {}),
         mark:
           node.kind === "leaf"
-            ? markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette)
+            ? markOf(node.stage, threadOf(node.thread, lines), node.width, node.height, palette, node.reserve)
             : boxMarkOf(
                 node.kind,
                 node.stage,
@@ -44,6 +44,7 @@ export function elementsOf(
                 palette,
                 threadOf(node.thread, lines),
                 node.header,
+                node.reserve,
               ),
       },
       position: { x: node.x, y: node.y },
@@ -56,6 +57,23 @@ export function elementsOf(
         node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",
       ].join(" "),
+    })),
+    // On its tile, which it is drawn over, as a dashed chip.
+    ...scene.stubs.map((stub) => ({
+      group: "nodes" as const,
+      data: {
+        id: stub.id,
+        label: stub.text,
+        // The chip's own width is the room its text may take, as no label is wrapped again.
+        textWidth: stub.width,
+        width: stub.width,
+        height: stub.height,
+        layer: stub.layer,
+        target: stub.target,
+        full: stub.full,
+      },
+      position: { x: stub.x, y: stub.y },
+      classes: ["stub", stub.dim ? "dim" : ""].join(" "),
     })),
     // Over the links, under what they join.
     ...scene.junctions.map((junction) => ({
@@ -312,7 +330,7 @@ export function settledBox(core: Core, id: string): BoundingBox12 & BoundingBoxW
   return { ...box, x1: box.x1 + dx, x2: box.x2 + dx, y1: box.y1 + dy, y2: box.y2 + dy };
 }
 
-const isPlain = (classes: string) => /\b(junction|divider)\b/.test(classes);
+const isPlain = (classes: string) => /\b(junction|divider|stub)\b/.test(classes);
 
 /**
  * Takes the renderer from the elements `drawn` to `next`, and returns what it now holds, with every position its

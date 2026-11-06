@@ -738,6 +738,18 @@ describe("the initiative in context", () => {
     expect(lands({ kind: "select", id: "e", pin: null }, overview)).toBe("i2");
   });
 
+  it("opens what a stub names in its own initiative: its item from the Map, its thread from the Threads view", () => {
+    const map = at({ view: "map", initiative: "i1", item: "a" });
+    const opened = go(map, { kind: "follow", id: "e", pin: "a" }, homes);
+    expect(opened.place).toMatchObject({ view: "map", initiative: "i2", item: "e" });
+    const threads = at({ view: "threads", initiative: "i1" });
+    const there = go(threads, { kind: "thread", id: "u" }, homes);
+    expect(there.place).toMatchObject({ view: "map", initiative: "i2", thread: "u" });
+    expect(there.requests.frame).toEqual({ thread: "u" });
+    // With edits unsaved, the stub asks first, as every way of opening an item does.
+    expect(go(map, { kind: "follow", id: "e", pin: "a" }, { ...homes, dirty: true }).requests.unsaved).toBe(true);
+  });
+
   it("stays put moving between items of one initiative, or to one with none known", () => {
     const here = at({ view: "map", initiative: "i1", item: "a" });
     expect(go(here, { kind: "select", id: "b", pin: null }, homes).place.initiative).toBe("i1");

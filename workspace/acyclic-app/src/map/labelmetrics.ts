@@ -3,7 +3,7 @@
 
 import { countsText } from "../api";
 import { STAGE_WORDS } from "../stages";
-import type { Measure } from "./fit";
+import { cut, type Measure } from "./fit";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, VisibleNode } from "./model";
 
@@ -11,6 +11,23 @@ export const TILE_WIDTH = 200;
 export const MIN_NODE_HEIGHT = 64;
 export const BASE_HEADER = 52;
 export const LINE_HEIGHT = 16.25;
+
+/** A stub's chip: its height, the room it takes at the foot of a tile, and its inset from the tile's edges. */
+export const STUB_CHIP = 20;
+export const STUB_ROOM = 30;
+export const STUB_INSET = 8;
+/** The room the chip's dashes and its arrow take from its text at either end. */
+const STUB_PAD = 8;
+
+/** What a stub says of the waits that leave the initiative: one line, and everything it names for a hover. */
+export interface StubLine {
+  /** The first wait, cut to the chip, and how many more there are. */
+  text: string;
+  /** Every wait named in full, one a line. */
+  full: string;
+  /** The item a tap opens: the first named. */
+  target: string;
+}
 
 export interface LabelFonts {
   regular: Measure;
@@ -20,6 +37,9 @@ export interface LabelFonts {
 export interface LabelMetrics {
   width: number;
   height: number;
+  /** What the foot of a leaf or folded box holds besides its label: the room of its stub, else 0. */
+  reserve: number;
+  stub: StubLine | null;
   header: number;
   textWidth: number;
   lines: string[];
@@ -30,7 +50,8 @@ export function textWidth(kind: Kind, width: number): number {
 }
 
 export function metricsOf(
-  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress" | "note" | "doneBox">,
+  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress" | "note" | "doneBox"> &
+    Partial<Pick<VisibleNode, "outside">>,
   fonts: LabelFonts,
   width = TILE_WIDTH,
 ): LabelMetrics {
@@ -41,12 +62,33 @@ export function metricsOf(
       ? [...wrap(title, available, fonts.regular), ...(node.stage === null ? [] : [STAGE_WORDS[node.stage]])]
       : boxLines(node, title, available, fonts.bold);
   const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
+  const stub = node.kind === "box" ? null : stubOf(node.outside ?? [], width, fonts.regular);
+  const reserve = stub === null ? 0 : STUB_ROOM;
   return {
     width,
-    height: Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)),
+    height: Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)) + reserve,
+    reserve,
+    stub,
     header,
     textWidth: available,
     lines,
+  };
+}
+
+/** The one line a tile or folded box carries for its waits outside the plan: the first, "+n" for the rest. */
+export function stubOf(
+  outside: readonly { id: string; title: string; initiative: string }[],
+  width: number,
+  measure: Measure,
+): StubLine | null {
+  const first = outside[0];
+  if (first === undefined) return null;
+  const more = outside.length > 1 ? ` +${outside.length - 1}` : "";
+  const room = width - 2 * STUB_INSET - 2 * STUB_PAD - measure(more);
+  return {
+    text: cut(`↗ ${first.initiative}: ${first.title}`, room, measure) + more,
+    full: outside.map((one) => `${one.initiative}: ${one.title}`).join("\n"),
+    target: first.id,
   };
 }
 
