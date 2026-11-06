@@ -1,4 +1,5 @@
-// When the Map has settled: its camera framed and no tile animation in flight, decided apart from the renderer so every case is tested without a canvas.
+// When the Map has settled, its camera framed and no tile animation in flight, decided apart from the renderer so
+// every case is tested without a canvas.
 
 /** Consecutive animation frames the viewport must hold before the camera counts as framed. */
 export const CALM_FRAMES = 2;

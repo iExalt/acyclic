@@ -183,8 +183,8 @@ export default function PlanMap({
   const tapReveals = useRef(0);
   const watching = useRef<number | null>(null);
   /**
-   * The tile animations in flight, which keep the Map from settling. The one place the motion module plugs in: its
-   * running-tween count replaces the 0, and its subscription calls `kickFramed` when a tween starts.
+   * The tile animations in flight, which keep the Map from settling. The one place an animation source plugs in: its
+   * running count replaces the 0, and its subscription calls `kickFramed` when an animation starts.
    */
   const animating = (): number => 0;
   const activeNow = useRef(active);
@@ -192,10 +192,11 @@ export default function PlanMap({
   const threadNow = useRef(thread);
   threadNow.current = thread;
   /**
-   * Says on the host, in `data-settled`, whether the Map has settled, its camera framed and no tile animating: "true" once the plan is laid out and drawn, no
-   * camera intent can still move it (a reveal parked for want of an open part of the Map does not count), and the zoom
-   * and pan have held for two animation frames; "false" while a layout, an intent or a movement is in flight. Watched
-   * frame by frame from here until it is true, and begun again by anything that may move the camera.
+   * Says on the host, in `data-settled`, whether the Map has settled, its camera framed and no tile animating: "true"
+   * once the plan is laid out and drawn, no camera intent can still move it (a reveal parked for want of an open
+   * part of the Map does not count), and the zoom and pan have held for two animation frames; "false" while a layout,
+   * an intent or a movement is in flight. Watched frame by frame from here until it is true, and begun again by
+   * anything that may move the camera.
    */
   function kickFramed() {
     const element = host.current;
@@ -510,6 +511,7 @@ export default function PlanMap({
         if (newlyCovered(node.renderedBoundingBox({ includeLabels: false }), was, size, coverOf(element))) {
           const request = { id, centered: false, picked: false };
           shown.current = request;
+          kickFramed();
           tryShow();
         }
       }
@@ -676,8 +678,9 @@ export default function PlanMap({
     kickFramed();
   }, [drawn, placed, colour, lines, palette, model, view, aspect, source]);
 
-  // A change that will lay out or move the camera, noted before its layout is back, so the signal never reads a stale "true".
-  useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected]);
+  // A change that will lay out or move the camera, noted before its layout is back, so the signal never reads a stale
+  // "true"; and the Map becoming active, since the watch stops while it is not, and a Map drawn then is unsettled.
+  useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected, active]);
 
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
   // user came to the Map for is framed instead.
