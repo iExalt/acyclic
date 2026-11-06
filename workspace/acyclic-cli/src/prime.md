@@ -114,14 +114,18 @@ waits-for and thread it belongs with.
    `acyclic item show <item>...` explains items, as an array in the order given: their readiness, children and their
    thread's claims.
 2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
-   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any
-   write through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder
-   has written something other than a claim in the last 60 minutes. Renewal resets the lease to 60 minutes, regardless
-   of the initial `--lease`. `sync` doesn't renew. Don't use `--force` to take
-   someone else's work. If `thread claim` or `acyclic thread show <thread>` says another holder wins a contest for your
-   thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
-   only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>` still
-   names you as holder.
+   `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any write
+   through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder has
+   written something other than a claim in the last 60 minutes, counting that write itself. Renewal resets the lease to
+   60 minutes, regardless of the initial `--lease`. A write that releases the claim, finishes the thread's last item or
+   fails renews nothing, and `sync` doesn't renew. Finish each item as you go, and when you spend long on code without
+   writing to the tracker, run `acyclic thread claim <thread>` again as a heartbeat: it renews your claim. A thread
+   whose claims have all lapsed while it has ready work is stalled: `thread ready` lists it, marked `stalled`, among
+   those nobody holds, `acyclic needs` lists it with its last holder, and anyone may claim it. Don't use `--force` to
+   take someone else's work. If `thread claim` or `acyclic thread show <thread>` says another holder wins a contest for
+   your thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it
+   drops only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>`
+   still names you as holder.
 3. `acyclic item done <item> --commit <owner/name>@<sha>` once its pull request has merged, naming the commit that
    landed on the default branch (the squash commit), or `--evidence` when the result isn't a commit. See "Details". It
    finishes only what your thread holds, or what is ready, and a parent once its children are done; don't use `--force`

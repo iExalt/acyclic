@@ -165,6 +165,15 @@ describe("needView", () => {
     expect(empty).toMatchObject({ text: "Idle has no items", items: [], actions: [] });
     expect(empty.threads.map((one) => one.title)).toEqual(["Idle"]);
     expect(example("empty-thread").notify).toBe(false);
+    // A stalled thread is named with its badge-led title, the last holder and when the lease ran out, in core's words.
+    expect(needView(example("stalled"), none)).toMatchObject({
+      text: "Stale has stalled: session/mac's claim ran out at 2026-10-14T23:00:00Z",
+      kind: "stalled",
+      actions: [],
+      threads: [{ id: "01900000-0000-7000-8000-0000000000f3", title: "Stale" }],
+    });
+    // A busy agent can read as stalled, so it stays on the list without a notification.
+    expect(example("stalled").notify).toBe(false);
     // The key is the list's, whatever the entry names.
     expect(needView({ kind: "contest", key: "contest:t", thread: thread("t"), holders: ["x"] }, none).key).toBe(
       "contest:t",

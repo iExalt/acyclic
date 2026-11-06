@@ -408,8 +408,60 @@ fn canceled_written_against_done_on_two_replicas_conflicts_and_each_side_is_offe
     }
 }
 
+fn list_at(r: &Replica, now: Millis) -> Vec<Entry> {
+    let model = Model::read(&r.state).unwrap();
+    let readiness = ReadinessEvaluator::new(&r.state, &model, now);
+    needs_you(&r.state, &model, &readiness, now).unwrap()
+}
+
+#[test]
+fn a_stalled_thread_reaches_needs_you_with_its_last_holder_until_it_is_claimed_released_or_finished()
+ {
+    let mut r = replica("a");
+    let by = user(1);
+    for id in ["x", "gated"] {
+        add_item(&mut r, id, id, by).unwrap();
+    }
+    for (item, held) in [("x", "t"), ("gated", "u")] {
+        model::set(&mut r, &Key::new(kind::THREAD, held).unwrap(), thread::TITLE, Some(&held), by)
+            .unwrap();
+        edit(&mut r, &ScopeEdit::Member { item: item.into(), thread: Some(held.into()) }, by)
+            .unwrap();
+    }
+    // `u` holds only work waiting for `x`, so only `t` has ready work.
+    link(&mut r, "gated", "x", by).unwrap();
+    claim::claim(&mut r, "t", "session/a", 0, (1_000, 1_000), false).unwrap();
+    claim::claim(&mut r, "u", "session/b", 0, (1_000, 1_000), false).unwrap();
+    let stalled = |r: &Replica, now| -> Vec<Entry> {
+        list_at(r, now).into_iter().filter(|e| e.kind() == "stalled").collect()
+    };
+    assert_eq!(stalled(&r, 999), [], "held until its lease ends");
+    let entry = Entry::Stalled {
+        thread: "t".into(),
+        holder: "session/a".into(),
+        expired_at: crate::time::rfc3339(1_000),
+    };
+    assert_eq!(stalled(&r, 1_000), std::slice::from_ref(&entry), "not u, whose work only waits");
+    assert!(!entry.notifies(), "a busy agent can read as stalled: standing, not pushed");
+    // Releasing, a fresh claim and finishing all end it.
+    let mut released = r.clone();
+    claim::release(&mut released, &claim::thread_key("t").unwrap(), "session/a");
+    assert_eq!(stalled(&released, 1_000), []);
+    let mut taken = r.clone();
+    claim::claim(&mut taken, "t", "session/c", 1_000, (1_000, 1_000), true).unwrap();
+    assert_eq!(stalled(&taken, 1_001), []);
+    // Finishing `t`'s only item leaves it nothing; `u`'s work is ready now, so `u` is the one that stalled.
+    model::set_state(&mut r, "x", ItemState::Done, user(2)).unwrap();
+    let threads: Vec<String> = stalled(&r, 1_000)
+        .into_iter()
+        .filter_map(|e| if let Entry::Stalled { thread, .. } = e { Some(thread) } else { None })
+        .collect();
+    assert_eq!(threads, ["u"]);
+}
+
 /// One entry of each kind, with the key and identity it has always had. The identity is the serialized entry and
 /// keys the notified needs on every user's devices, so a change here re-notifies them: it must be deliberate.
+#[expect(clippy::too_many_lines, reason = "one row for each kind")]
 fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
     let s = |text: &str| text.to_owned();
     let v = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
@@ -455,6 +507,16 @@ fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
             "clock-ahead",
             "clock-ahead:t:x",
             r#"{"entry":"clock-ahead","thread":"t","holder":"x"}"#,
+        ),
+        (
+            Entry::Stalled {
+                thread: s("t"),
+                holder: s("x"),
+                expired_at: s("2026-10-21T00:00:00Z"),
+            },
+            "stalled",
+            "stalled:t:x",
+            r#"{"entry":"stalled","thread":"t","holder":"x","expired_at":"2026-10-21T00:00:00Z"}"#,
         ),
         (
             Entry::Unthreaded { item: s("a"), fix: s("acyclic item edit a --thread <THREAD>") },
@@ -529,6 +591,7 @@ fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
             "Threads wait for each other in a cycle: T, U",
             "T has a claim to sort out",
             "T has a claim by x that starts in the future",
+            "T has stalled: x's claim ran out at 2026-10-21T00:00:00Z",
             "A needs a thread",
             "A is done but waits for B",
             "A waits for B, which was canceled",

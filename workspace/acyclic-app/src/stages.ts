@@ -15,6 +15,8 @@ export const STAGE_ICONS: Record<Stage, string> = {
   unthreaded: '<circle cx="8" cy="8" r="6" stroke-dasharray="3 2.4"/>',
   // A circle struck through: dropped on purpose, never done.
   canceled: '<circle cx="8" cy="8" r="6"/><path d="M3.8 12.2l8.4-8.4"/>',
+  // A circle with an exclamation mark: ready, yet its holder's lease ran out and it wants a new one.
+  stalled: '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v3.4M8 10.6v.6"/>',
 };
 
 /** Each stage's word, as a sentence starts it. */
@@ -27,6 +29,7 @@ export const STAGE_WORDS: Record<Stage, string> = {
   // A status, and what settles it: an item in no thread is never ready.
   unthreaded: "Needs a thread",
   canceled: "Canceled",
+  stalled: "Stalled",
 };
 
 /** `count` leaves at `stage`, as a parent's counts say it: "3 ready", "1 needs a thread", "3 need a thread". */
@@ -43,6 +46,7 @@ export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
   const all: [Stage, number][] = [
     ["done", counts.done],
     ["in-progress", counts.in_progress],
+    ["stalled", counts.stalled],
     ["ready", counts.ready],
     ["waiting", counts.waiting],
     ["parked", counts.parked],

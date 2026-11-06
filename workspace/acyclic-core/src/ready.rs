@@ -113,6 +113,16 @@ pub enum ThreadReadiness {
         /// The members ready to work on, by id.
         items: Vec<String>,
     },
+    /// Holds only expired claims, yet has members ready to work on: its holder stopped without releasing it. Anyone
+    /// may claim it, as an unclaimed thread.
+    Stalled {
+        /// The holder of the claim that ran out last.
+        holder: String,
+        /// When that lease ran out, as RFC 3339 in UTC.
+        expired_at: String,
+        /// The members ready to work on, by id.
+        items: Vec<String>,
+    },
 }
 
 impl ThreadReadiness {
@@ -120,7 +130,7 @@ impl ThreadReadiness {
     #[must_use]
     pub fn claimable_by(&self, actor: &str) -> bool {
         match self {
-            Self::Ready { .. } => true,
+            Self::Ready { .. } | Self::Stalled { .. } => true,
             Self::Claimed { holder, .. } => holder == actor,
             Self::Contested { holders, .. } => holders.first().is_some_and(|h| h == actor),
             _ => false,
@@ -131,9 +141,10 @@ impl ThreadReadiness {
     #[must_use]
     pub fn items(&self) -> &[String] {
         match self {
-            Self::Ready { items } | Self::Claimed { items, .. } | Self::Contested { items, .. } => {
-                items
-            },
+            Self::Ready { items }
+            | Self::Claimed { items, .. }
+            | Self::Contested { items, .. }
+            | Self::Stalled { items, .. } => items,
             _ => &[],
         }
     }
@@ -146,10 +157,12 @@ pub struct ReadyThread {
     pub thread: String,
     /// Its ready members, by id in natural order.
     pub items: Vec<String>,
+    /// Whether it holds only expired claims: it is listed among the unclaimed threads, marked.
+    pub stalled: bool,
 }
 
-/// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
-/// each parent. In progress means ready in a thread someone holds.
+/// Where a leaf stands, in eight words that tell all of them apart: what the app draws on each item and counts under
+/// each parent. In progress means ready in a thread someone holds; stalled, ready in one whose holder's lease ran out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Stage {
@@ -167,6 +180,8 @@ pub enum Stage {
     Unthreaded,
     /// Dropped on purpose, or under a part that is.
     Canceled,
+    /// Ready in a thread whose claims have all expired.
+    Stalled,
 }
 
 /// A parent's leaves counted by stage.
@@ -181,6 +196,8 @@ pub struct Stages {
     pub unthreaded: usize,
     /// Leaves canceled: not among the others, and not in [`Stages::total`].
     pub canceled: usize,
+    /// Leaves ready in a thread whose claims have all expired.
+    pub stalled: usize,
 }
 
 impl Stages {
@@ -193,14 +210,15 @@ impl Stages {
             Stage::Parked => &mut self.parked,
             Stage::Unthreaded => &mut self.unthreaded,
             Stage::Canceled => &mut self.canceled,
+            Stage::Stalled => &mut self.stalled,
         };
         *slot += count;
     }
 
     /// The stage of a parent with these leaves, `claimed` when a live claim holds the thread of an open leaf under it:
     /// done once every leaf is; before that, in progress once any work
-    /// below has started and some of what is left isn't parked; otherwise ready, waiting, parked or needs a thread by
-    /// its leaves, in that order. `None` with no leaf to count.
+    /// below has started and some of what is left isn't parked; otherwise stalled, ready, waiting, parked or needs a thread
+    /// by its leaves, in that order. `None` with no leaf to count.
     #[must_use]
     pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
         let finished = self.done;
@@ -211,11 +229,12 @@ impl Stages {
         if finished == self.total() {
             return Some(Stage::Done);
         }
-        let open = self.in_progress + self.ready + self.waiting + self.unthreaded;
+        let open = self.in_progress + self.stalled + self.ready + self.waiting + self.unthreaded;
         if open > 0 && (self.in_progress > 0 || finished > 0 || claimed) {
             return Some(Stage::InProgress);
         }
         [
+            (self.stalled, Stage::Stalled),
             (self.ready, Stage::Ready),
             (self.waiting, Stage::Waiting),
             (self.parked, Stage::Parked),
@@ -253,7 +272,13 @@ impl Stages {
     /// The leaves counted, every stage together but canceled.
     #[must_use]
     pub fn total(&self) -> usize {
-        self.done + self.in_progress + self.ready + self.waiting + self.parked + self.unthreaded
+        self.done
+            + self.in_progress
+            + self.stalled
+            + self.ready
+            + self.waiting
+            + self.parked
+            + self.unthreaded
     }
 }
 
@@ -278,6 +303,8 @@ pub struct ReadinessEvaluator<'a> {
     members: OnceCell<BTreeMap<&'a str, Vec<&'a str>>>,
     /// Each thread's winning claim, memoized.
     winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
+    /// Each thread's claim that ran out last while none holds, memoized.
+    lapsed: RefCell<BTreeMap<String, Option<claim::Claim>>>,
     /// Each item's stage, memoized, since a rollup counts every leaf under every parent.
     stages: RefCell<BTreeMap<String, Option<Stage>>>,
     /// Whether any item's state holds canceled, found on first use.
@@ -306,6 +333,7 @@ impl<'a> ReadinessEvaluator<'a> {
             links_from,
             members: OnceCell::new(),
             winners: RefCell::default(),
+            lapsed: RefCell::default(),
             stages: RefCell::default(),
             any_canceled: OnceCell::new(),
             under_canceled: OnceCell::new(),
@@ -454,10 +482,16 @@ impl<'a> ReadinessEvaluator<'a> {
         if let Some(holder) = holders.pop() {
             return Ok(ThreadReadiness::Claimed { holder, items });
         }
-        Ok(if items.is_empty() {
-            ThreadReadiness::NothingReady
-        } else {
-            ThreadReadiness::Ready { items }
+        if items.is_empty() {
+            return Ok(ThreadReadiness::NothingReady);
+        }
+        Ok(match self.lapsed(thread)? {
+            Some(lapsed) => ThreadReadiness::Stalled {
+                holder: lapsed.holder,
+                expired_at: crate::time::rfc3339(lapsed.lease_expires.unwrap_or_default()),
+                items,
+            },
+            None => ThreadReadiness::Ready { items },
         })
     }
 
@@ -489,10 +523,14 @@ impl<'a> ReadinessEvaluator<'a> {
             if !status.claimable_by(actor) || status.items().is_empty() {
                 continue;
             }
-            let own = !matches!(status, ThreadReadiness::Ready { .. });
+            let own = matches!(
+                status,
+                ThreadReadiness::Claimed { .. } | ThreadReadiness::Contested { .. }
+            );
+            let stalled = matches!(status, ThreadReadiness::Stalled { .. });
             let mut items = status.items().to_vec();
             items.sort_by(|a, b| natural::cmp(a, b));
-            ready.push((!own, ReadyThread { thread: id.clone(), items }));
+            ready.push((!own, ReadyThread { thread: id.clone(), items, stalled }));
         }
         ready.sort_by(|(a, x), (b, y)| a.cmp(b).then_with(|| natural::cmp(&x.thread, &y.thread)));
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
@@ -517,18 +555,23 @@ impl<'a> ReadinessEvaluator<'a> {
         } else if leaf && item.is_canceled() {
             Some(Stage::Canceled)
         } else {
-            self.of(id)?.and_then(|status| match status {
-                Readiness::Parent => None,
-                Readiness::Done => Some(Stage::Done),
-                Readiness::Canceled => Some(Stage::Canceled),
-                Readiness::Parked => Some(Stage::Parked),
-                Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
-                Readiness::Ready => Some(Stage::Ready),
-                Readiness::Unthreaded => Some(Stage::Unthreaded),
-                Readiness::Waiting { .. } | Readiness::InCycle | Readiness::Conflicted { .. } => {
-                    Some(Stage::Waiting)
-                },
-            })
+            match self.of(id)? {
+                Some(Readiness::Ready) if self.stalled(id)? => Some(Stage::Stalled),
+                found => found.and_then(|status| match status {
+                    Readiness::Parent => None,
+                    Readiness::Done => Some(Stage::Done),
+                    Readiness::Canceled => Some(Stage::Canceled),
+                    Readiness::Parked => Some(Stage::Parked),
+                    Readiness::Claimed { .. } | Readiness::Contested { .. } => {
+                        Some(Stage::InProgress)
+                    },
+                    Readiness::Ready => Some(Stage::Ready),
+                    Readiness::Unthreaded => Some(Stage::Unthreaded),
+                    Readiness::Waiting { .. }
+                    | Readiness::InCycle
+                    | Readiness::Conflicted { .. } => Some(Stage::Waiting),
+                }),
+            }
         };
         self.stages.borrow_mut().insert(id.to_owned(), stage);
         Ok(stage)
@@ -654,6 +697,25 @@ impl<'a> ReadinessEvaluator<'a> {
         let winner = claim::winner(self.state, &claim::thread_key(thread)?, self.now)?;
         self.winners.borrow_mut().insert(thread.to_owned(), winner.clone());
         Ok(winner)
+    }
+
+    /// The claim that ran out last on a thread nobody holds now, memoized: `None` while a claim holds it, or when it
+    /// never had a claim with a time lease. Such a thread with ready work is stalled.
+    fn lapsed(&self, thread: &str) -> Result<Option<claim::Claim>, Error> {
+        if let Some(lapsed) = self.lapsed.borrow().get(thread) {
+            return Ok(lapsed.clone());
+        }
+        let lapsed = claim::lapsed(self.state, &claim::thread_key(thread)?, self.now)?;
+        self.lapsed.borrow_mut().insert(thread.to_owned(), lapsed.clone());
+        Ok(lapsed)
+    }
+
+    /// Whether a ready item sits in a stalled thread: one with a record, whose claims have all expired.
+    fn stalled(&self, id: &str) -> Result<bool, Error> {
+        match self.model.thread_of(id).filter(|thread| self.model.threads.contains_key(*thread)) {
+            Some(thread) => Ok(self.lapsed(thread)?.is_some()),
+            None => Ok(false),
+        }
     }
 
     /// Why `dependency` doesn't yet satisfy `dependent`, or `None` when it does.

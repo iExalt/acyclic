@@ -37,6 +37,7 @@ describe("map label metrics", () => {
       leaves: 4,
       in_progress: 1,
       ready: 1,
+      stalled: 0,
       waiting: 1,
       parked: 0,
       unthreaded: 0,

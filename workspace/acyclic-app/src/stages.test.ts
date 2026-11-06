@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PALETTES } from "./palette";
 import { QUIET, STAGE_ICONS, STAGE_WORDS, stageCounts, stageCountWords, stateWords } from "./stages";
 
 describe("a state in words", () => {
@@ -14,6 +15,7 @@ describe("stageCounts", () => {
       leaves: 12,
       in_progress: 1,
       ready: 3,
+      stalled: 1,
       waiting: 0,
       parked: 0,
       unthreaded: 1,
@@ -22,6 +24,7 @@ describe("stageCounts", () => {
     expect(stageCounts(counts)).toEqual([
       { stage: "done", count: 7 },
       { stage: "in-progress", count: 1 },
+      { stage: "stalled", count: 1 },
       { stage: "ready", count: 3 },
       { stage: "unthreaded", count: 1 },
       { stage: "canceled", count: 2 },
@@ -36,6 +39,19 @@ describe("canceled", () => {
     expect(QUIET.has("canceled")).toBe(true);
     expect(stateWords("canceled")).toBe("Canceled");
     expect(stageCountWords("canceled", 2)).toBe("canceled");
+  });
+});
+
+describe("stalled", () => {
+  it("has its word, icon and a tint of its own in both schemes, and is not drawn quiet", () => {
+    expect(STAGE_WORDS.stalled).toBe("Stalled");
+    expect(STAGE_ICONS.stalled).toContain("<circle");
+    expect(QUIET.has("stalled")).toBe(false);
+    expect(stageCountWords("stalled", 2)).toBe("stalled");
+    for (const palette of Object.values(PALETTES)) {
+      expect(palette.tints.stalled).not.toBe(palette.tints.ready);
+      expect(palette.tints.stalled).not.toBe(palette.tints["in-progress"]);
+    }
   });
 });
 

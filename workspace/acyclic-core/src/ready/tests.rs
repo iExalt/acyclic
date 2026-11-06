@@ -502,10 +502,10 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
         ReadinessEvaluator::new(&r.state, &model, now).progress("goal").unwrap().unwrap().stage
     };
     assert_eq!(state(&r, NOW), Some(Stage::Ready));
-    // A claim lasts its lease: the parent reads in progress while it lives, and ready again once it lapses.
+    // A claim lasts its lease: the parent reads in progress while it lives, and stalled once it lapses with work still ready.
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     assert_eq!(state(&r, NOW), Some(Stage::InProgress));
-    assert_eq!(state(&r, 2_000), Some(Stage::Ready));
+    assert_eq!(state(&r, 2_000), Some(Stage::Stalled));
     // Parked work isn't being worked, though its thread is claimed.
     set_state(&mut r, "x", ItemState::Parked, by(3)).unwrap();
     assert_eq!(state(&r, NOW), Some(Stage::Ready));
@@ -910,6 +910,7 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         parked,
         unthreaded,
         canceled: 0,
+        stalled: 0,
     };
     for (stages, claimed, stage) in [
         (of(0, 0, 0, 0, 0, 0), false, None),
@@ -920,6 +921,9 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         // A live claim below starts it, even with only waiting work.
         (of(0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
         (of(0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
+        // Stalled work reads before ready work, and once started counts as started.
+        (Stages { stalled: 1, ..of(0, 0, 2, 0, 0, 0) }, false, Some(Stage::Stalled)),
+        (Stages { stalled: 1, ..of(1, 0, 0, 0, 0, 0) }, false, Some(Stage::InProgress)),
         (of(0, 0, 0, 1, 1, 1), false, Some(Stage::Waiting)),
         // What is left all parked, by hand or under a parked part, reads parked however much is done.
         (of(2, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
@@ -931,4 +935,111 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
     ] {
         assert_eq!(stages.rolled_up(claimed), stage, "{stages:?} claimed {claimed}");
     }
+}
+
+/// A replica with items `x` and `y` in `main`, claimed by `session/a` from 10 for 100: the lease ends at 110.
+fn lapsing() -> Replica {
+    let mut r = replica("a");
+    items(&mut r, &["x", "y"]);
+    claim::claim(&mut r, "main", "session/a", 10, (100, 100), false).unwrap();
+    r
+}
+
+fn main_at(r: &Replica, at: Millis) -> ThreadReadiness {
+    let model = Model::read(&r.state).unwrap();
+    ReadinessEvaluator::new(&r.state, &model, at).thread("main").unwrap()
+}
+
+fn stage_at(r: &Replica, id: &str, at: Millis) -> Option<Stage> {
+    let model = Model::read(&r.state).unwrap();
+    ReadinessEvaluator::new(&r.state, &model, at).stage(id).unwrap()
+}
+
+#[test]
+fn a_thread_holding_only_expired_claims_with_ready_work_is_stalled_and_its_items_read_stalled() {
+    let mut r = lapsing();
+    let both = vec!["x".to_owned(), "y".to_owned()];
+    let held = ThreadReadiness::Claimed { holder: "session/a".into(), items: both.clone() };
+    assert_eq!(main_at(&r, 109), held, "live until the lease ends");
+    let stalled = ThreadReadiness::Stalled {
+        holder: "session/a".into(),
+        expired_at: crate::time::rfc3339(110),
+        items: both,
+    };
+    assert_eq!(main_at(&r, 110), stalled);
+    assert!(stalled.claimable_by("session/b"), "anyone may take it");
+    assert_eq!(stage_at(&r, "x", 109), Some(Stage::InProgress));
+    assert_eq!(stage_at(&r, "x", 110), Some(Stage::Stalled));
+    // The work is still ready: only the stage reads stalled.
+    let model = Model::read(&r.state).unwrap();
+    assert_eq!(
+        ReadinessEvaluator::new(&r.state, &model, 110).of("x").unwrap(),
+        Some(Readiness::Ready)
+    );
+    // A parent counts its stalled leaves, and reads stalled when nothing else is going on.
+    add_item(&mut r, "p", "p", by(1)).unwrap();
+    set_parent(&mut r, "x", Some("p"), by(1)).unwrap();
+    set_parent(&mut r, "y", Some("p"), by(1)).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    let rollup = ReadinessEvaluator::new(&r.state, &model, 110).progress("p").unwrap().unwrap();
+    assert_eq!(
+        (rollup.stages.stalled, rollup.stages.total(), rollup.stage),
+        (2, 2, Some(Stage::Stalled))
+    );
+}
+
+#[test]
+fn a_thread_whose_remaining_work_all_waits_is_waiting_not_stalled() {
+    let mut r = lapsing();
+    add_item(&mut r, "gate", "gate", by(1)).unwrap();
+    link(&mut r, "x", "gate", by(1)).unwrap();
+    link(&mut r, "y", "gate", by(1)).unwrap();
+    assert_eq!(main_at(&r, 500), ThreadReadiness::NothingReady);
+    assert_eq!(stage_at(&r, "x", 500), Some(Stage::Waiting));
+}
+
+#[test]
+fn releasing_finishing_everything_or_a_fresh_claim_ends_a_stall() {
+    let r = lapsing();
+    assert!(matches!(main_at(&r, 500), ThreadReadiness::Stalled { .. }));
+    let mut released = r.clone();
+    assert!(claim::release(&mut released, &claim::thread_key("main").unwrap(), "session/a"));
+    assert!(matches!(main_at(&released, 500), ThreadReadiness::Ready { .. }));
+    let mut done = r.clone();
+    for id in ["x", "y"] {
+        done_with(&mut done, id, None);
+    }
+    assert_eq!(main_at(&done, 500), ThreadReadiness::NothingReady);
+    // A fresh claim, with the check on, overwrites the expired value rather than adding to it.
+    let mut taken = r.clone();
+    claim::claim(&mut taken, "main", "session/b", 500, (100, 100), true).unwrap();
+    let items = vec!["x".to_owned(), "y".to_owned()];
+    assert_eq!(
+        main_at(&taken, 501),
+        ThreadReadiness::Claimed { holder: "session/b".into(), items }
+    );
+    let key = claim::thread_key("main").unwrap();
+    assert_eq!(
+        taken.state.field(&key, claim::FIELD).unwrap().len(),
+        1,
+        "the expired value is gone"
+    );
+    // The old holder resumes the same way.
+    claim::claim(&mut r.clone(), "main", "session/a", 500, (100, 100), true).unwrap();
+}
+
+#[test]
+fn ready_lists_a_stalled_thread_in_id_order_among_the_unclaimed_marked_stalled() {
+    let mut r = replica("a");
+    for (item, thread_id) in [("w", "t1"), ("x", "t2"), ("y", "t3"), ("z", "t0")] {
+        add_item(&mut r, item, item, by(1)).unwrap();
+        thread(&mut r, item, thread_id);
+    }
+    claim::claim(&mut r, "t2", "session/old", 10, (100, 100), false).unwrap();
+    claim::claim(&mut r, "t3", "session/me", 400, (200, 200), false).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    let listed = ReadinessEvaluator::new(&r.state, &model, 500).ready("session/me").unwrap();
+    let rows: Vec<(&str, bool)> = listed.iter().map(|t| (t.thread.as_str(), t.stalled)).collect();
+    // The actor's own claimed thread first, then the unclaimed and stalled by id.
+    assert_eq!(rows, [("t3", false), ("t0", false), ("t1", false), ("t2", true)]);
 }

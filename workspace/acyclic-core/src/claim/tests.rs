@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{By, add_item, item_key, put, set};
+use crate::model::{By, ItemState, add_item, item_key, put, set, set_state};
 use crate::schema::{item as field, thread as thread_field};
 use crate::state::ReplicaId;
 
@@ -136,6 +136,65 @@ fn renew_leases_extend_only_active_winners_to_the_default_lease() {
     // A renewed claim is still its holder's to release, though the replica wrote it.
     assert!(release(&mut a, &busy, "session/busy"));
     assert!(winner(&a.state, &busy, 1_100).unwrap().is_none());
+}
+
+/// A claim by `session/s` at 0 for a lease of `1_000` on a thread `t` holding `items`, recorded by replica `a`.
+fn leased(items: &[&str]) -> Replica {
+    let mut r = replica("a");
+    thread(&mut r, "t", items);
+    claim(&mut r, "t", "session/s", 0, (LEASE, LEASE), false).unwrap();
+    r
+}
+
+fn expires(r: &Replica, at: Millis) -> Option<Millis> {
+    winner(&r.state, &thread_key("t").unwrap(), at).unwrap().and_then(|c| c.lease_expires)
+}
+
+#[test]
+fn finishing_an_item_after_three_quarters_of_the_lease_renews_it() {
+    // Claimed at 0:00 for an hour, an item finished at 0:45: the finish itself is the activity that renews.
+    let mut r = leased(&["x", "y"]);
+    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap(), [], "no activity yet");
+    set_state(&mut r, "x", ItemState::Done, by("session/s", 750)).unwrap();
+    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap(), vec![thread_key("t").unwrap()]);
+    assert_eq!(expires(&r, 750), Some(750 + LEASE));
+}
+
+#[test]
+fn a_batch_that_released_the_claim_renews_nothing() {
+    let mut r = leased(&["x", "y"]);
+    set(&mut r, &item_key("x").unwrap(), field::NOTES, Some(&"n"), by("session/s", 750)).unwrap();
+    assert!(release(&mut r, &thread_key("t").unwrap(), "session/s"));
+    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap(), []);
+    assert_eq!(expires(&r, 750), None);
+}
+
+#[test]
+fn a_batch_that_finished_the_last_item_renews_nothing() {
+    let mut r = leased(&["x", "y"]);
+    set_state(&mut r, "x", ItemState::Done, by("session/s", 700)).unwrap();
+    set_state(&mut r, "y", ItemState::Canceled, by("session/s", 750)).unwrap();
+    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap(), []);
+    assert_eq!(expires(&r, 750), Some(LEASE), "the lease runs out on its own");
+}
+
+#[test]
+fn work_that_only_waits_still_renews() {
+    let mut r = leased(&["x"]);
+    add_item(&mut r, "gate", "gate", by("session/s", 700)).unwrap();
+    crate::model::link(&mut r, "x", "gate", by("session/s", 750)).unwrap();
+    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap().len(), 1);
+}
+
+#[test]
+fn a_renewal_is_not_activity_so_it_cannot_keep_a_silent_holder_going() {
+    let mut r = leased(&["x"]);
+    set(&mut r, &item_key("x").unwrap(), field::NOTES, Some(&"n"), by("session/s", 100)).unwrap();
+    assert_eq!(renew_leases(&mut r, 600, LEASE, LEASE).unwrap().len(), 1);
+    assert_eq!(expires(&r, 600), Some(600 + LEASE));
+    // Due again at 1_150, but the last write besides renewals is older than a lease: nothing renews.
+    assert_eq!(renew_leases(&mut r, 1_150, LEASE, LEASE).unwrap(), []);
+    assert_eq!(expires(&r, 1_150), Some(600 + LEASE));
 }
 
 #[test]

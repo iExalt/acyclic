@@ -862,12 +862,89 @@ fn no_output_says_a_retired_word() {
     assert!(read > 2, "the snapshots moved");
 }
 
+/// Leases renew once a command's own writes are in, and a thread whose lease ran out with work ready reads stalled.
+#[test]
+fn a_finish_renews_the_lease_a_refused_command_does_not_and_a_lapsed_lease_stalls_the_thread() {
+    const MINUTE: i64 = 60_000;
+    let mut sh = Shell::new();
+    let start: i64 = NOW.parse().unwrap();
+    let at = |minutes: i64| (start + minutes * MINUTE).to_string();
+    let run = |sh: &mut Shell, line: &str, actor: &str, minutes: i64| {
+        let now = at(minutes);
+        sh.output(line, &[("ACYCLIC_ACTOR", actor), ("ACYCLIC_NOW", &now)])
+    };
+    let lease_end = |sh: &mut Shell, minutes: i64| {
+        let (_, shown) = run(sh, "thread show Work", "session/mac", minutes);
+        shown["data"][0]["claims"][0]["lease_expires_at"].as_str().map(str::to_owned)
+    };
+    let minute = |minutes: i64| acyclic_core::time::rfc3339(start + minutes * MINUTE);
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    for line in [
+        "thread add --title Work",
+        "item add --title First --thread Work",
+        "item add --title Second --thread Work",
+        "thread claim Work",
+    ] {
+        assert_eq!(run(&mut sh, line, "session/mac", 0).0, 0, "{line}");
+    }
+    assert_eq!(lease_end(&mut sh, 1), Some(minute(60)));
+    // Another agent's refused finish writes nothing and renews nothing, though the lease is nearly out.
+    assert_eq!(run(&mut sh, "item done First", "session/pi", 44).0, 1);
+    assert_eq!(lease_end(&mut sh, 44), Some(minute(60)));
+    // The holder's own finish at 0:45 counts as activity, and the lease reads renewed.
+    assert_eq!(run(&mut sh, "item done First", "session/mac", 45).0, 0);
+    assert_eq!(lease_end(&mut sh, 45), Some(minute(105)));
+    // Finishing the last item renews nothing: the lease runs out on its own, with no work left to stall.
+    assert_eq!(run(&mut sh, "item done Second", "session/mac", 100).0, 0);
+    assert_eq!(lease_end(&mut sh, 100), Some(minute(105)));
+
+    // Past the lease, new work in the thread is ready under only an expired claim: stalled, and listed for anyone.
+    assert_eq!(run(&mut sh, "item add --title Third --thread Work", "session/pi", 106).0, 0);
+    let (_, ready) = run(&mut sh, "thread ready", "session/pi", 106);
+    assert_eq!(ready["data"]["ready"][0]["stalled"], json!(true), "{ready}");
+    assert_eq!(ready["data"]["ready"][0]["items"][0]["stage"], json!("stalled"));
+    let (_, shown) = run(&mut sh, "thread show Work", "session/pi", 106);
+    assert_eq!(shown["data"][0]["readiness"]["readiness"], json!("stalled"));
+    assert_eq!(shown["data"][0]["progress"]["counts"]["stalled"], json!(1));
+    let (_, needs) = run(&mut sh, "needs", "session/pi", 106);
+    let stalled: Vec<&serde_json::Value> = needs["data"]["needs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["kind"] == "stalled")
+        .collect();
+    assert_eq!(stalled.len(), 1, "{needs}");
+    assert_eq!(
+        (&stalled[0]["holder"], &stalled[0]["expired_at"], &stalled[0]["notify"]),
+        (&json!("session/mac"), &json!(minute(105)), &json!(false))
+    );
+    // Claiming it works as claiming a ready thread does.
+    assert_eq!(run(&mut sh, "thread claim Work", "session/pi", 106).0, 0);
+    let (_, ready) = run(&mut sh, "thread ready", "session/pi", 107);
+    assert_eq!(ready["data"]["ready"][0]["stalled"], json!(false));
+}
+
+/// A thread whose holder stopped without releasing it, with work ready: claimed two hours ago for a minute. It goes
+/// first, since a replica refuses a write stamped before its last.
+fn add_stalled_thread(sh: &mut Shell) {
+    let earlier = [("ACYCLIC_ACTOR", "session/mac"), ("ACYCLIC_NOW", "1792015200000")];
+    for line in [
+        format!("thread add --id {} --title Stale", id("f3")),
+        format!("item add --id {} --title Abandoned --thread {}", id("a8"), id("f3")),
+        format!("thread claim {} --lease 1", id("f3")),
+    ] {
+        let (code, out) = sh.output(&line, &earlier);
+        assert_eq!(code, 0, "{line}: {out}");
+    }
+}
+
 /// The needs list the app's tests read, made here so they read what this build sends, with a conflict for each way a
 /// value is kept. `UPDATE_EXAMPLES=1` writes it; otherwise it must match.
 #[test]
 fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_conflict() {
     let mut sh = Shell::new();
     sh.run("init tracker --replica mac", &[]);
+    add_stalled_thread(&mut sh);
     let (a1, p1, e1, t1, r1, r2) = (id("a1"), id("b1"), id("e1"), id("f1"), id("c1"), id("c2"));
     for line in [
         format!("repository add --id {r1} --name me/code --default-branch main"),
