@@ -9,6 +9,7 @@ import { Badge, lineStyle } from "./Badge";
 import type { Edited } from "./edits";
 import { useFocusIn } from "./focus";
 import { reopenCommand } from "./forms";
+import { useHeld } from "./held";
 import { ItemEditor } from "./ItemEditor";
 import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
 import type { Line } from "./lines";
@@ -130,6 +131,8 @@ export function Inspector({
   );
   const panel = useRef<HTMLElement>(null);
   const sheet = useSheet(panel, onDismiss);
+  // A removed link's row goes with its button: the keyboard goes on to the row that took its place, else to the panel.
+  const held = useHeld(busy, [...item.links.waits_for, ...item.links.waited_on_by].join("\n"));
   useFocusIn(panel);
   const chip = (id: string) => {
     const stage = stageOf(id);
@@ -168,8 +171,12 @@ export function Inspector({
                   type="button"
                   className="unlink"
                   aria-label={`Remove the link to ${titleOf(id)}`}
-                  disabled={busy}
-                  onClick={() => unlink(id)}
+                  {...held(
+                    `${testid}:${id}`,
+                    () => unlink(id),
+                    () =>
+                      panel.current?.querySelector<HTMLElement>(`[data-testid="${testid}"] .unlink`) ?? panel.current,
+                  )}
                 >
                   <Icon of={X} size={16} />
                 </button>
@@ -198,10 +205,13 @@ export function Inspector({
             className="close"
             aria-label="Edit"
             title="Edit"
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              if (!busy) setEditing(true);
+            }}
             data-action="edit"
             {...key("Edit", "E")}
-            disabled={editing || busy}
+            disabled={editing}
+            aria-disabled={busy || undefined}
           >
             <Icon of={Pencil} />
           </button>
