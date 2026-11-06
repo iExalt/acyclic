@@ -121,6 +121,7 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
     };
 
     let server = Arc::new(Server::new(config.clone()));
+    server.push.prepare().unwrap();
     let router = routes(Arc::clone(&server), tailscale());
     let (status, key) = call(&router, Method::GET, "/api/push/key", String::new()).await;
     assert_eq!(status, StatusCode::OK, "{key}");
@@ -259,4 +260,41 @@ async fn new_needs_are_pushed_once_to_each_device_and_a_gone_device_is_dropped()
         (StatusCode::BAD_REQUEST, &json!("push")),
         "{answer}"
     );
+}
+
+#[tokio::test]
+async fn getting_the_push_key_makes_none_but_preparing_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let env =
+        Env { vars: [("HOME".to_owned(), home.display().to_string())].into(), ..Env::default() };
+    let config = || Config {
+        tracker: dir.path().join("tracker"),
+        env: env.clone(),
+        static_dir: None,
+        push: Settings::default(),
+    };
+    let get = async |server: &Arc<Server>| {
+        let request = Request::builder()
+            .uri("/api/push/key")
+            .header("host", HOST_NAME)
+            .header(IDENTITY, LOGIN)
+            .body(Body::empty())
+            .unwrap();
+        let response = routes(Arc::clone(server), tailscale()).oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice::<Value>(&body).unwrap())
+    };
+
+    let server = Arc::new(Server::new(config()));
+    let (status, answer) = get(&server).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
+    assert!(!home.join(".config/acyclic/push/vapid.key").exists(), "a GET made the key");
+
+    server.push.prepare().unwrap();
+    let (status, first) = get(&server).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(get(&server).await.1, first);
+    assert_eq!(get(&Arc::new(Server::new(config()))).await.1, first);
 }
