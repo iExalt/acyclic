@@ -80,15 +80,16 @@ applies a whole plan document, its records named by ids from `acyclic id`, and `
 change. `acyclic import --schema` prints the plan format. `acyclic thread delete` deletes a thread no item is in and
 no one holds a live claim on.
 
-Every item belongs to an initiative, directly or through its parent: an initiative is a long-lived body of work, a record
-of its own (`acyclic initiative add|edit|show|list|delete`), and an item under it is an epic once it has children, and
-a task otherwise; anything deeper than an epic is a task. `item add` requires a parent, named with `--parent` by title,
-id or the end of an id, and an initiative may be named as an item may. Left out, it goes under the tracker's only
-initiative; with none or several the add is refused as `parent-required`, naming the choices. No flag clears a parent:
-an item moves under another. An item with no parent, which an older version made, reads as in no initiative, and
-`acyclic needs` lists it as `parent-missing`, as it does an item whose parent was deleted. An initiative is deleted only
-when no item is under it, and its id is never used again; `acyclic thread ready --initiative <INITIATIVE>` lists the
-threads with a task under it. An import (`acyclic import --schema`) needs a parent on every new item.
+Every item belongs to an initiative, directly or through its parent: an initiative is a long-lived body of work, a
+record of its own (`acyclic initiative add|edit|show|list|delete`), and an item under it is an epic once it has
+children, and a task otherwise; anything deeper than an epic is a task. `item add` requires a parent, named with
+`--parent` by title, id or the end of an id, and an initiative may be named as an item may. Left out, it goes under the
+tracker's only initiative; with none or several the add is refused as `parent-required`, naming the choices. No flag
+clears a parent: an item moves under another. An item with no parent, which an older version made, reads as in no
+initiative, and `acyclic needs` lists it as `parent-missing`, as it does an item whose parent was deleted. An initiative
+is deleted only when no item is under it, and its id is never used again;
+`acyclic thread ready --initiative <INITIATIVE>` lists the threads with a task under it. An import
+(`acyclic import --schema`) needs a parent on every new item.
 
 Before adding work, read the plan with `acyclic initiative list`, `acyclic item list` and `acyclic thread list`, and
 give the item the parent, waits-for and thread it belongs with.

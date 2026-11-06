@@ -191,10 +191,8 @@ _Avoid_: broken link, orphan
 The repository that holds one trust domain's items and their changes; it is not where project knowledge is kept.
 _Avoid_: board, project (for the repository)
 
-**Record**:
-A stored entry in the tracker, such as an initiative, item, thread or repository, named by its id. JSON names its kind under
-`record`, as in a conflict or a dangling reference.
-_Avoid_: entity
+**Record**: A stored entry in the tracker, such as an initiative, item, thread or repository, named by its id. JSON
+names its kind under `record`, as in a conflict or a dangling reference. _Avoid_: entity
 
 **Session**:
 The server token issued by `acyclic up` for access to the app and API. The stored actor kind `session/<id>` keeps
