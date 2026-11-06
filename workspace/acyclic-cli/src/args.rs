@@ -564,14 +564,14 @@ pub enum ThreadCommand {
     },
     /// Edits a thread: `--field` sets a field, `--no-field` clears it.
     Edit(ThreadEdit),
-    /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
+    /// Shows threads with each member's title, state and readiness, as an array in the order given.
     Show {
         /// The threads.
         #[arg(required = true, value_name = "THREAD")]
         #[serde(default)]
         threads: Vec<String>,
     },
-    /// Lists every thread, by id, with its members and its heads: the open leaves nothing in it orders.
+    /// Lists every thread, by id, with its done and open leaves.
     List,
     /// Lists threads with ready work, the actor's own first, each with its ready items.
     Ready,

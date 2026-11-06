@@ -6,7 +6,7 @@ import { PALETTES } from "./palette";
 
 const item = (id: string) => ({ id, title: id.toUpperCase() });
 const none = new Map<string, Line>();
-const thread = (id: string, heads: string[] = []) => ({ id, title: id.toUpperCase(), heads });
+const thread = (id: string) => ({ id, title: id.toUpperCase() });
 
 describe("needView", () => {
   it("names a thread as the thread list does, with its badge, and as the entry gives it where the list lacks it", () => {
@@ -17,8 +17,7 @@ describe("needView", () => {
       ],
       PALETTES.dark,
     );
-    const waiting = (id: string, title: string) =>
-      needView({ kind: "contest", thread: { id, title, heads: [] } }, lines);
+    const waiting = (id: string, title: string) => needView({ kind: "contest", thread: { id, title } }, lines);
     // The list's title wins over the one the entry carries, which may be older.
     // The badge-led text picks its thread, so the entry has no row repeating it.
     expect(waiting("t3", "Ship it")).toMatchObject({

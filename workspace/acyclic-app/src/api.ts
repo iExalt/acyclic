@@ -256,7 +256,6 @@ export interface ThreadDetail {
   id: string;
   title: string;
   notes: string | null;
-  heads: string[];
   members: { id: string; title: string }[];
 }
 

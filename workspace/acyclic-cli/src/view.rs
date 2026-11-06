@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
-use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value, shown_state};
+use acyclic_core::model::{Item, ItemState, Link, Model, Value, shown_state};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{ReadinessEvaluator, ReadyThread, Stages};
 use acyclic_core::state::{Millis, State};
@@ -116,13 +116,10 @@ impl View<'_> {
     /// One row per thread with ready work, in the order given: the thread's summary and its ready `items`, each an
     /// item row.
     pub fn ready_rows(&self, ready: &[ReadyThread]) -> Result<Vec<Json>, CliError> {
-        let members = thread_members(self.model);
-        let heads = self.model.heads_index();
         let mut rows = Vec::new();
         for ReadyThread { thread, items } in ready {
             let found = items.iter().map(|id| self.item_row(id)).collect::<Result<Vec<_>, _>>()?;
-            let listed = members.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
-            rows.push(with(thread_row(&heads, thread, listed), json!({"items": found})));
+            rows.push(with(thread_row(self.model, thread), json!({"items": found})));
         }
         Ok(rows)
     }
@@ -158,7 +155,7 @@ impl View<'_> {
         }
         let thread = self.model.threads.get(id);
         Ok(with(
-            thread_row(&self.model.heads_index(), id, listed),
+            thread_row(self.model, id),
             json!({
                 "readiness": self.readiness.thread(id)?,
                 "progress": self.thread_progress(listed)?,
@@ -175,19 +172,7 @@ impl View<'_> {
     /// their summaries, and a conflict listing its `values` and how to `resolve` it.
     /// `notify` says whether the user's devices are told of it.
     pub fn needs(&self, entries: &[Entry]) -> Result<Vec<Json>, CliError> {
-        let members = thread_members(self.model);
-        let heads = self.model.heads_index();
-        // A thread's row walks its heads, and threads waiting on each other in a cycle name each other, so each row is
-        // built once: per mention, a plan of thousands of items took seconds.
-        let rows: std::cell::RefCell<BTreeMap<String, Json>> = std::cell::RefCell::default();
-        let thread = |id: &str| {
-            rows.borrow_mut()
-                .entry(id.to_owned())
-                .or_insert_with(|| {
-                    thread_row(&heads, id, members.get(id).map_or(&[][..], Vec::as_slice))
-                })
-                .clone()
-        };
+        let thread = |id: &str| thread_row(self.model, id);
         let items = |ids: &[String]| -> Result<Json, CliError> {
             Ok(Json::Array(ids.iter().map(|id| self.item_row(id)).collect::<Result<_, _>>()?))
         };
@@ -307,29 +292,15 @@ fn stage_counts(stages: &Stages) -> Json {
     })
 }
 
-/// The thread summary: `{id, title, heads, counts: {members, done, conflicted}}`, counting members; its `progress`,
-/// where a thread list or show gives it, counts member leaves. A thread only an item names has no
-/// title.
-pub(crate) fn thread_row(heads: &Heads<'_>, id: &str, members: &[Member<'_>]) -> Json {
-    let model = heads.model();
-    let thread = model.threads.get(id);
-    let done = members.iter().filter(|m| model.reads_done(m.item)).count();
-    let conflicted = members.iter().filter(|m| m.conflict).count();
-    json!({
-        "id": id,
-        "title": thread.map(|t| &t.title),
-        "heads": heads.of(id),
-        "counts": {"members": members.len(), "done": done, "conflicted": conflicted},
-    })
+/// The thread summary: `{id, title}`; its `progress`, where a thread list or show gives it, counts member leaves. A
+/// thread only an item names has no title.
+pub(crate) fn thread_row(model: &Model, id: &str) -> Json {
+    json!({"id": id, "title": model.threads.get(id).map(|t| &t.title)})
 }
 
 /// Every thread's summary, in id order.
 pub(crate) fn thread_rows(model: &Model) -> Vec<Json> {
-    let heads = model.heads_index();
-    thread_members(model)
-        .into_iter()
-        .map(|(id, members)| thread_row(&heads, id, &members))
-        .collect()
+    thread_members(model).into_keys().map(|id| thread_row(model, id)).collect()
 }
 
 /// The repository summary: `{id, owner, name, default_branch}`.
@@ -523,8 +494,7 @@ mod tests {
         viewing(&r, |view| {
             let items = ["a", "b", "late"].map(str::to_owned).to_vec();
             let rows = view.ready_rows(&[ReadyThread { thread: "t".into(), items }]).unwrap();
-            let listed = thread_members(view.model);
-            let summary = thread_row(&view.model.heads_index(), "t", &listed["t"]);
+            let summary = thread_row(view.model, "t");
             for (name, value) in summary.as_object().unwrap() {
                 assert_eq!(&rows[0][name], value, "{name}");
             }
@@ -542,12 +512,11 @@ mod tests {
         viewing(&clean, |view| {
             let listed = thread_members(view.model);
             let shown = view.thread("t", &listed["t"]).unwrap();
-            assert_eq!(shown["counts"], json!({"members": 3, "done": 0, "conflicted": 0}));
             let members: Vec<&Json> =
                 shown["members"].as_array().unwrap().iter().map(|m| &m["id"]).collect();
             assert_eq!(members, ["a", "b", "late"]);
             assert_eq!(shown["members"][2]["conflicted"], false);
-            let row = thread_row(&view.model.heads_index(), "t", &listed["t"]);
+            let row = thread_row(view.model, "t");
             for (name, value) in row.as_object().unwrap() {
                 assert_eq!(&shown[name], value, "{name}");
             }
@@ -594,11 +563,7 @@ mod tests {
             );
             // A thread cycle embeds each thread's summary.
             let cycle = of("thread-cycle")[0];
-            let listed = thread_members(view.model);
-            assert_eq!(
-                cycle["threads"],
-                json!(["t", "u"].map(|id| thread_row(&view.model.heads_index(), id, &listed[id])))
-            );
+            assert_eq!(cycle["threads"], json!(["t", "u"].map(|id| thread_row(view.model, id))));
             assert_eq!(cycle["notify"], true);
             for (entry, shown) in entries.iter().zip(&needs) {
                 assert!(shown["kind"].is_string(), "{shown}");

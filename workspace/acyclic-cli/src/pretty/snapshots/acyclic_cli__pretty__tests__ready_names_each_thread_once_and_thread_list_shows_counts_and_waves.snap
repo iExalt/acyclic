@@ -1,12 +1,12 @@
 ---
 source: workspace/acyclic-cli/src/pretty/tests.rs
-expression: "format!(\"{}\\n{}\", render(&command(\"thread ready\"), &ready, None),\nrender(&command(\"thread list\"), &threads, None))"
+expression: "format!(\"{}\\n{}\",\nrender(&command(\"thread ready\"), &ready, None, &BTreeMap::new()),\nrender(&command(\"thread list\"), &threads, None, &BTreeMap::new()))"
 ---
 THREAD      ITEM  TITLE
 t1 Garden   beds  Beds
             path  Path
 t2 Kitchen  tap   Tap
 
-ID  TITLE    MEMBERS  DONE  WAVE  HEADS
-t1  Garden   2        0     1     beds
-t2  Kitchen  1        0     any   tap
+ID  TITLE    DONE  LEAVES  WAVE
+t1  Garden   1     3       1
+t2  Kitchen  0     1       any

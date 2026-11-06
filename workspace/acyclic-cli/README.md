@@ -67,11 +67,11 @@ Every command's output follows these rules, so you can guess a key from the inpu
    `waited_on_by`, what waits for it.
 3. **One summary per record**, defined once and shared. An item is `{id, title, state, parent, thread, readiness}`,
    its `readiness` tagged by kind as `{readiness: "waiting", waiting}`;
-   `thread ready` lists thread summaries, each with its ready `items`. A thread is `{id, title, heads, counts}` and a
+   `thread ready` lists thread summaries, each with its ready `items`. A thread is `{id, title}` and a
    repository record `{id, owner, name, default_branch}`. `list` returns the summaries and `show` returns the same
    object with its details added at the top level, so a thread's `show` adds `members`, each an item summary that says
    whether it is `conflicted`.
-4. **Collections are arrays,** and counts sit under `counts`, as in a thread's summary, `doctor` and `import`. An absent
+4. **Collections are arrays,** and counts sit under `counts`, as in a `progress`, `doctor` and `import`. An absent
    scalar is `null`, an absent set is `[]`, and a flag such as `conflicted` is
    always `true` or `false`. A scalar whose replicas disagree reads `{"conflict": […]}`, and `needs` lists it.
 5. **Writes** return `{changed, <record>: id, …}`; `item done` adds the `evidence` it recorded, as

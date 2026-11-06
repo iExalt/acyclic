@@ -419,14 +419,6 @@
       "notify": true,
       "record": "thread",
       "thread": {
-        "counts": {
-          "conflicted": 0,
-          "done": 1,
-          "members": 3
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a1"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f1",
         "title": "Work"
       },

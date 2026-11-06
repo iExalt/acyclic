@@ -124,14 +124,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "data": {
     "ready": [
       {
-        "counts": {
-          "conflicted": 0,
-          "done": 0,
-          "members": 2
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a1"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f0",
         "items": [
           {
@@ -291,14 +283,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "replica": "mac"
         }
       ],
-      "counts": {
-        "conflicted": 0,
-        "done": 1,
-        "members": 2
-      },
-      "heads": [
-        "01900000-0000-7000-8000-0000000000a2"
-      ],
       "id": "01900000-0000-7000-8000-0000000000f0",
       "members": [
         {
@@ -380,14 +364,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "data": {
     "ready": [
       {
-        "counts": {
-          "conflicted": 0,
-          "done": 1,
-          "members": 2
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a2"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f0",
         "items": [
           {
@@ -529,14 +505,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
   "data": {
     "ready": [
       {
-        "counts": {
-          "conflicted": 0,
-          "done": 0,
-          "members": 1
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a2"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f1",
         "items": [
           {
@@ -619,12 +587,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
     ],
     "threads": [
       {
-        "counts": {
-          "conflicted": 0,
-          "done": 0,
-          "members": 0
-        },
-        "heads": [],
         "id": "01900000-0000-7000-8000-0000000000f0",
         "progress": {
           "counts": {
@@ -641,14 +603,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "waits_for": []
       },
       {
-        "counts": {
-          "conflicted": 0,
-          "done": 1,
-          "members": 2
-        },
-        "heads": [
-          "01900000-0000-7000-8000-0000000000a2"
-        ],
         "id": "01900000-0000-7000-8000-0000000000f1",
         "progress": {
           "counts": {
@@ -683,9 +637,9 @@ THREAD       ITEM    TITLE
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread list -o pretty
 # exit 0
-ID      TITLE  MEMBERS  DONE  WAVE  HEADS
-0000f0  Start  0        0
-0000f1  Work   2        1     any   0000a2
+ID      TITLE  DONE  LEAVES  WAVE
+0000f0  Start  0     0
+0000f1  Work   1     2       any
 
 $ ACYCLIC_ACTOR=session/mac acyclic item show First -o pretty
 # exit 0
@@ -716,14 +670,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
   "data": [
     {
       "claims": [],
-      "counts": {
-        "conflicted": 0,
-        "done": 1,
-        "members": 2
-      },
-      "heads": [
-        "01900000-0000-7000-8000-0000000000a2"
-      ],
       "id": "01900000-0000-7000-8000-0000000000f1",
       "members": [
         {
