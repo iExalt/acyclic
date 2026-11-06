@@ -54,6 +54,7 @@ import {
 import type { Seen } from "./notices";
 import { Overview } from "./Overview";
 import { currentRows, outlineOf } from "./outline";
+import { PickBar } from "./PickBar";
 import { Projects, ProjectsSheet } from "./Projects";
 import { PALETTES, setTheme, type Theme, useScheme, useTheme } from "./palette";
 import { drawn as drawnOver } from "./reads";
@@ -172,6 +173,8 @@ export function App() {
   const { command: showCommand, mode, add: adding, projects: showProjects } = place.overlays;
   /** The command menu lists only what has a key, as ? asks. */
   const [shortcutsOnly, setShortcutsOnly] = useState(false);
+  /** What the menu starts with: the key typed at a pick bar, which finds the target. */
+  const [findFirst, setFindFirst] = useState("");
   /** Single-key shortcuts, on unless switched off on this device. */
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem(SHORTCUTS_KEY) !== "off");
   const wide = useWide();
@@ -290,6 +293,10 @@ export function App() {
     },
     [model, mode, send, go, tracker, tell],
   );
+  // The key that opened the find is for that opening only: the next menu starts empty.
+  useEffect(() => {
+    if (!showCommand) setFindFirst("");
+  }, [showCommand]);
   const open = openOf(place, worldNow.current);
   /**
    * The layer shown under the command menu, or on top without it: the menu opens over a panel without closing it, so
@@ -371,6 +378,7 @@ export function App() {
           menu: seen.menu,
           dirty: dirtyForm(),
           typing: typingIn(event.target),
+          picking: event.target instanceof HTMLElement && event.target.dataset.pickBar !== undefined,
           rows: rowsInView().length,
         });
         if (next.action !== null || next.pending !== null) event.preventDefault();
@@ -673,8 +681,9 @@ export function App() {
   onKeyAction.current = (action) => {
     if (action.kind === "go") goTo(action.view);
     else if (action.kind === "add") startAdd(null);
-    else if (action.kind === "search" || action.kind === "help") {
+    else if (action.kind === "search" || action.kind === "help" || action.kind === "find") {
       setShortcutsOnly(action.kind === "help");
+      setFindFirst(action.kind === "find" ? action.text : "");
       go({ kind: "command", open: true });
     } else if (action.kind === "edit") onItem("edit");
     else if (action.kind === "move") onItem("move");
@@ -688,6 +697,7 @@ export function App() {
       entries={menuEntries}
       keys={shortcuts ? SHORTCUTS : null}
       shortcutsOnly={shortcutsOnly && picking === null}
+      initial={findFirst}
       placeholder={
         shortcutsOnly && picking === null
           ? "Keyboard shortcuts"
@@ -927,7 +937,7 @@ export function App() {
         ) : null}
         {commandMenu}
         {panel === "mode" ? (
-          <div className="sheet prompt" data-testid="prompt">
+          <PickBar>
             <span className="grow">{prompt}</span>
             {mode.kind === "move" ? (
               <button type="button" onClick={() => choose({ kind: "top" })} data-action="top-level">
@@ -937,7 +947,7 @@ export function App() {
             <button type="button" className="quiet" onClick={() => choose({ kind: "cancel" })}>
               Cancel
             </button>
-          </div>
+          </PickBar>
         ) : panel === "add" && adding !== null ? (
           <AddForm
             key={adding.parent ?? ""}

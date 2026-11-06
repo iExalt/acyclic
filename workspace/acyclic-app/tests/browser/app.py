@@ -2373,6 +2373,24 @@ def edit_journey(page, view, env, plan, box, name, failures):
     # It waits for the first leaf: the Map draws the link from the first leaf to it, and the tracker has it that way.
     edge = f"{first}->{added}"
     item_action(page, "waits-for")
+    # The pick bar has the focus, so typing finds the target in the menu, starting with the key (M would otherwise
+    # move), and Escape from the menu gives the focus back to the bar, the wait going on.
+    bar_focused = "bar => bar === document.activeElement"
+    if not page.get_by_test_id("prompt").evaluate(bar_focused):
+        failures.append(f"{name}: the link's pick bar didn't take the focus")
+    else:
+        page.keyboard.press("m")
+        try:
+            find = page.get_by_test_id("command-menu").get_by_role("combobox")
+            find.wait_for(timeout=5_000)
+            if find.input_value() != "m":
+                failures.append(f"{name}: typing at the pick bar found {find.input_value()!r}, not 'm'")
+            page.keyboard.press("Escape")
+            page.get_by_test_id("command-menu").wait_for(state="detached", timeout=5_000)
+            if not page.get_by_test_id("prompt").evaluate(bar_focused):
+                failures.append(f"{name}: leaving the find didn't give the pick bar the focus back")
+        except PlaywrightTimeout:
+            failures.append(f"{name}: typing at the pick bar didn't open and close the find")
     # A target refused, the box holding it, shows its whole reason however narrow the screen: the link waits on.
     tap_middle(page, view, second)
     refused = show_notice(page)

@@ -15,7 +15,9 @@ export type KeyAction =
   | { kind: "move" }
   | { kind: "link" }
   | { kind: "addInside" }
-  | { kind: "row"; by: 1 | -1 };
+  | { kind: "row"; by: 1 | -1 }
+  /** Typing at a pick bar: the menu opens to find the target, with what was typed. */
+  | { kind: "find"; text: string };
 
 /** When G was pressed, waiting for the letter that says where to go; null when nothing waits. */
 export type Waiting = number | null;
@@ -39,6 +41,8 @@ export interface KeyContext {
   dirty: boolean;
   /** The key went to a field, or anything else that takes typing. */
   typing: boolean;
+  /** The key went to a move's or link's pick bar itself, which waits for a target: typing finds one. */
+  picking?: boolean;
   /** The rows J and K step through in the list in view: with none, they are left to the page. */
   rows: number;
 }
@@ -74,6 +78,13 @@ export function step(
   if (!context.enabled || context.menu || context.typing || context.dirty) return none;
   if (press.isComposing || press.keyCode === 229 || press.repeat) return none;
   if (press.ctrlKey || press.metaKey || press.altKey) return none;
+  if (context.picking === true) {
+    // Typing is a search for the target, not a shortcut; Enter opens the same search, empty.
+    if (press.key === "Enter") return { pending: null, action: { kind: "find", text: "" } };
+    return press.key.length === 1 && press.key !== " "
+      ? { pending: null, action: { kind: "find", text: press.key } }
+      : none;
+  }
   // ? sits on a shifted key on most layouts: the character is what counts.
   if (press.key === "?") return { pending: null, action: { kind: "help" } };
   if (press.shiftKey) return none;
