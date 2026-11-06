@@ -98,8 +98,8 @@ pub enum Entry {
         #[serde(skip_serializing_if = "Option::is_none")]
         fix: Option<String>,
     },
-    /// A thread stored on an item that has children, as a sync can leave one though no single write may: reads
-    /// ignore it, so the user decides whether to clear it.
+    /// A thread stored on an item that has children, as a sync or `item edit --thread` on a parent can leave one:
+    /// reads ignore it, so the user decides whether to clear it.
     ThreadOnParent {
         /// The item with children.
         item: String,
