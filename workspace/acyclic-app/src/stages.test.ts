@@ -18,7 +18,6 @@ describe("stageCounts", () => {
       stalled: 1,
       waiting: 0,
       parked: 0,
-      unthreaded: 1,
       canceled: 2,
     };
     expect(stageCounts(counts)).toEqual([
@@ -26,7 +25,6 @@ describe("stageCounts", () => {
       { stage: "in-progress", count: 1 },
       { stage: "stalled", count: 1 },
       { stage: "ready", count: 3 },
-      { stage: "unthreaded", count: 1 },
       { stage: "canceled", count: 2 },
     ]);
   });
@@ -38,7 +36,7 @@ describe("canceled", () => {
     expect(STAGE_ICONS.canceled).toContain("<circle");
     expect(QUIET.has("canceled")).toBe(true);
     expect(stateWords("canceled")).toBe("Canceled");
-    expect(stageCountWords("canceled", 2)).toBe("canceled");
+    expect(stageCountWords("canceled")).toBe("canceled");
   });
 });
 
@@ -47,7 +45,7 @@ describe("stalled", () => {
     expect(STAGE_WORDS.stalled).toBe("Stalled");
     expect(STAGE_ICONS.stalled).toContain("<circle");
     expect(QUIET.has("stalled")).toBe(false);
-    expect(stageCountWords("stalled", 2)).toBe("stalled");
+    expect(stageCountWords("stalled")).toBe("stalled");
     for (const palette of Object.values(PALETTES)) {
       expect(palette.tints.stalled).not.toBe(palette.tints.ready);
       expect(palette.tints.stalled).not.toBe(palette.tints["in-progress"]);
@@ -56,11 +54,7 @@ describe("stalled", () => {
 });
 
 describe("stageCountWords", () => {
-  it("agrees with its count, so a count of items needing a thread reads as a sentence", () => {
-    expect([1, 3].map((count) => `${count} ${stageCountWords("unthreaded", count)}`)).toEqual([
-      "1 needs a thread",
-      "3 need a thread",
-    ]);
-    expect(stageCountWords("in-progress", 2)).toBe("in progress");
+  it("says a stage in lower case, as a count follows it", () => {
+    expect(stageCountWords("in-progress")).toBe("in progress");
   });
 });

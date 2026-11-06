@@ -126,7 +126,8 @@ pub fn thread_key(thread: &str) -> Result<Key, Error> {
     Key::new(kind::THREAD, thread)
 }
 
-/// The live claims that cover an item: those on its thread, when it is in exactly one thread that has a record.
+/// The live claims that cover an item: those on its thread, when it is in exactly one thread that has a record, or
+/// is a loose task, whose thread of one covers it.
 ///
 /// # Errors
 ///
@@ -137,13 +138,14 @@ pub fn covering(
     item: &str,
     now: Millis,
 ) -> Result<Vec<Claim>, Error> {
-    match model.thread_of(item).filter(|thread| model.threads.contains_key(*thread)) {
-        Some(thread) => live(state, &thread_key(thread)?, now),
+    match model.held_thread(item) {
+        Some(thread) => live(state, &thread_key(&thread)?, now),
         None => Ok(Vec::new()),
     }
 }
 
-/// Claims a thread for `holder`, or renews the claim `holder` already wins. The lease runs for `lease` from `at`,
+/// Claims a thread for `holder`, or renews the claim `holder` already wins. A loose task's thread of one is made by its
+/// claim: the same write names it on the task, so the task is in it from then on. The lease runs for `lease` from `at`,
 /// capped at `max_lease`. A renewal keeps its original lease start, so renewing never loses a contest, and its write
 /// supersedes the other contestants' values: an ordinary resolving write.
 ///
@@ -156,7 +158,7 @@ pub fn covering(
 ///
 /// # Errors
 ///
-/// Fails when the thread has no record, when it isn't claimable and the claim isn't forced, when another
+/// Fails when the thread doesn't exist, when it isn't claimable and the claim isn't forced, when another
 /// holder wins the thread in this replica's view (so a claim never silently replaces one it has seen; only claims made
 /// without seeing each other contest), or on an unreadable claim.
 pub fn claim(
@@ -168,7 +170,7 @@ pub fn claim(
     check_ready: bool,
 ) -> Result<Dot, ClaimError> {
     let model = Model::read(&replica.state)?;
-    if !model.threads.contains_key(thread) {
+    if !model.thread_exists(thread) {
         return Err(Error::NoThread(thread.to_owned()).into());
     }
     if check_ready {
@@ -190,6 +192,18 @@ pub fn claim(
     };
     let value = serde_json::to_value(claim).expect("a claim always serializes");
     let dot = replica.write(&key, FIELD, holder, at, Some(value))?;
+    // The task joins its thread of one in the same write, as a task is a member only by naming its thread. Two
+    // replicas claiming it apart name the same thread, so they agree on it and contest the claim.
+    if let Some(task) = crate::ids::task_of_one(thread).filter(|task| model.is_loose(task)) {
+        let task = Key::new(kind::ITEM, task)?;
+        replica.write(
+            &task,
+            crate::schema::item::THREAD,
+            holder,
+            at,
+            Some(serde_json::json!(thread)),
+        )?;
+    }
     Ok(dot.expect("a write with a value mints a dot"))
 }
 

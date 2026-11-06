@@ -168,7 +168,6 @@ const NONE: Counts = {
   stalled: 0,
   waiting: 0,
   parked: 0,
-  unthreaded: 0,
   canceled: 0,
 };
 

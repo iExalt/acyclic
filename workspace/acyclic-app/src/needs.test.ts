@@ -139,14 +139,7 @@ describe("needView", () => {
       none,
     );
     expect(cycle).toMatchObject({ text: "Parents form a cycle: A, B", items: ["a", "b"], actions: [] });
-    // An item needing a thread says so in the core's words, not the CLI's command, and the item is its row.
     const example = (kind: string) => (examples.needs as Need[]).find((need) => need.kind === kind) as Need;
-    const loose = needView(example("unthreaded"), none);
-    expect(loose).toMatchObject({
-      text: "Loose needs a thread",
-      detail: null,
-      note: "Open it to choose its thread in its editor",
-    });
     expect(needView(example("done-waiting"), none).text).toBe("Early is done but waits for Late");
     expect(needView(example("waits-on-canceled"), none)).toMatchObject({
       text: "Waiting waits for Dropped, which was canceled",

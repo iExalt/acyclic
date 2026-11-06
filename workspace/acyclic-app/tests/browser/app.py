@@ -422,7 +422,7 @@ READ_SCHEME = """m => {
     // A custom property as the browser resolves it, since the build may write a colour shorter.
     const probe = document.body.appendChild(document.createElement('i'));
     const v = (n) => { probe.style.color = `var(${n})`; return hex(getComputedStyle(probe).color); };
-    const leaf = m.cy.nodes('.leaf.stage-ready, .leaf.stage-unthreaded').first();
+    const leaf = m.cy.nodes('.leaf.stage-ready').first();
     const closed = m.cy.nodes('.collapsed').not('.lit, .selected, .dim').first();
     const open = m.cy.nodes('.box').not('.lit, .selected').first();
     const plain = m.cy.edges().not('.lit, .crossing').first();
@@ -3684,7 +3684,7 @@ def labels_journey(browser, link, ids, titles):
             assert ink["x1"] >= body["x1"] - 1 and ink["x2"] <= body["x2"] + 1, node
             assert ink["y1"] >= body["y1"] - 1 and ink["y2"] <= body["y2"] + 1, node
         root, long, ready = found["nodes"]
-        assert "Needs a thread" in long["label"] and "Ready" in ready["label"], found
+        assert "Ready" in long["label"] and "Ready" in ready["label"], found
         assert root["header"] > 72, root
         assert all(
             child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1

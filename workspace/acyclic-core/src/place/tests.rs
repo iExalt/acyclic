@@ -104,3 +104,34 @@ fn siblings_in_conflict_leave_the_placement_to_the_caller() {
     assert_eq!(placement(&model, &one, None), Placement::Unclear);
     assert_eq!(placement(&model, &twins, None), Placement::Unclear);
 }
+
+#[test]
+fn a_sibling_claimed_alone_in_its_thread_of_one_still_counts_as_loose_until_the_thread_graduates() {
+    use crate::claim::claim;
+    let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    for id in ["p", "x", "y"] {
+        add_item(&mut r, id, id, USER).unwrap();
+    }
+    for id in ["x", "y"] {
+        set_parent(&mut r, id, Some("p"), USER).unwrap();
+    }
+    claim(&mut r, &crate::ids::one("x"), "session/s", 2, (60_000, 60_000), true).unwrap();
+    let read = |r: &Replica| Model::read(r.state()).unwrap();
+    // Loose siblings, one claimed: they still agree, so a new sibling is loose and joins nothing.
+    assert_eq!(placement(&read(&r), &["x", "y"], None), Placement::Loose);
+    assert_eq!(placement(&read(&r), &["x"], None), Placement::Loose);
+    // Graduated: another member and a title make it an ordinary thread, which counts.
+    let one = crate::ids::one("x");
+    add_item(&mut r, "z", "z", USER).unwrap();
+    r.write(&item_key("z").unwrap(), field::THREAD, USER.actor, 3, Some(json!(one))).unwrap();
+    r.write(
+        &crate::claim::thread_key(&one).unwrap(),
+        crate::schema::thread::TITLE,
+        USER.actor,
+        3,
+        Some(json!("X")),
+    )
+    .unwrap();
+    assert_eq!(placement(&read(&r), &["x"], None), Placement::Joins(one.clone()));
+    assert_eq!(placement(&read(&r), &["x", "y"], None), Placement::Unclear);
+}

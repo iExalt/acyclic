@@ -14,7 +14,7 @@ use acyclic_core::state::{Millis, State};
 use acyclic_core::time::rfc3339;
 use serde_json::{Map, Value as Json, json};
 
-use crate::commands::{Member, thread_members};
+use crate::commands::Member;
 use crate::error::CliError;
 use crate::resolve::repository_name;
 
@@ -181,7 +181,8 @@ impl View<'_> {
         };
         // Titles as people read them: a title written apart reads as its first value, and an id with none as itself.
         let name = |id: &str| -> String {
-            let title = self.model.items.get(id).map(|item| &item.title);
+            let task = self.model.shown_as_task(id).unwrap_or(id);
+            let title = self.model.items.get(task).map(|item| &item.title);
             let title = title.or_else(|| self.model.threads.get(id).map(|thread| &thread.title));
             title
                 .and_then(|title| title.all().first().map(|first| (*first).clone()))
@@ -211,9 +212,6 @@ impl View<'_> {
                     "kind": entry.kind(), "thread": thread(id), "holder": holder,
                     "expired_at": expired_at,
                 }),
-                Entry::Unthreaded { item, fix } => {
-                    json!({"kind": entry.kind(), "item": self.item_row(item)?, "fix": fix})
-                },
                 Entry::ThreadOnParent { item, thread: held, fix } => json!({
                     "kind": entry.kind(), "item": self.item_row(item)?, "thread": thread(held), "fix": fix,
                 }),
@@ -308,20 +306,39 @@ fn stage_counts(stages: &Stages) -> Json {
     json!({
         "done": stages.done, "leaves": stages.total(),
         "in_progress": stages.in_progress, "ready": stages.ready, "waiting": stages.waiting,
-        "stalled": stages.stalled, "parked": stages.parked, "unthreaded": stages.unthreaded,
-        "canceled": stages.canceled,
+        "stalled": stages.stalled, "parked": stages.parked, "canceled": stages.canceled,
     })
 }
 
-/// The thread summary: `{id, title}`; its `progress`, where a thread list or show gives it, counts member leaves. A
-/// thread only an item names has no title.
+/// The thread summary: `{id, title, task}`; its `progress`, where a thread list or show gives it, counts member leaves.
+/// A thread only an item names has no title. A loose task's thread of one, as long as it has no title of its own, is
+/// shown as the task: its `title` is the task's and `task` its id, which is `null` for every other thread.
 pub(crate) fn thread_row(model: &Model, id: &str) -> Json {
-    json!({"id": id, "title": model.threads.get(id).map(|t| &t.title)})
+    if let Some(task) = model.shown_as_task(id) {
+        return json!({"id": id, "title": model.items[task].title, "task": task});
+    }
+    json!({"id": id, "title": model.threads.get(id).map(|t| &t.title), "task": null})
 }
 
-/// Every thread's summary, in id order.
-pub(crate) fn thread_rows(model: &Model) -> Vec<Json> {
-    thread_members(model).into_keys().map(|id| thread_row(model, id)).collect()
+impl View<'_> {
+    /// Every thread's summary, in id order: those with a record and a loose task's thread of one, but not a thread of
+    /// one with no member that nobody holds, which is gone from the list though it keeps its record.
+    pub fn thread_rows(
+        &self,
+        members: &BTreeMap<String, Vec<Member<'_>>>,
+    ) -> Result<Vec<Json>, CliError> {
+        let mut rows = Vec::new();
+        for (id, listed) in members {
+            let held = || -> Result<bool, CliError> {
+                Ok(!claim::live(self.state, &claim::thread_key(id)?, self.now)?.is_empty())
+            };
+            if listed.is_empty() && self.model.is_emptied_one(id) && !held()? {
+                continue;
+            }
+            rows.push(thread_row(self.model, id));
+        }
+        Ok(rows)
+    }
 }
 
 /// The repository summary: `{id, owner, name, default_branch}`.
@@ -343,6 +360,7 @@ mod tests {
     use acyclic_core::state::{Key, Replica, ReplicaId};
 
     use super::*;
+    use crate::commands::thread_members;
 
     const NOW: Millis = 1_000;
 
@@ -474,7 +492,7 @@ mod tests {
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
                 json!({"counts": {"done": 0, "leaves": 2, "in_progress": 2,
-                       "ready": 0, "stalled": 0, "waiting": 0, "parked": 0, "unthreaded": 0, "canceled": 0}})
+                       "ready": 0, "stalled": 0, "waiting": 0, "parked": 0, "canceled": 0}})
             );
             // And its stage, rolled up from them under the key a leaf's has: in progress while their thread is
             // claimed though none is started.

@@ -80,7 +80,27 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
 # exit 0
 {
   "data": {
-    "ready": []
+    "ready": [
+      {
+        "id": "01900000-0000-7000-8000-0000000000a1.one",
+        "items": [
+          {
+            "id": "01900000-0000-7000-8000-0000000000a1",
+            "parent": null,
+            "readiness": {
+              "readiness": "ready"
+            },
+            "stage": "ready",
+            "state": "open",
+            "thread": null,
+            "title": "First"
+          }
+        ],
+        "stalled": false,
+        "task": "01900000-0000-7000-8000-0000000000a1",
+        "title": "First"
+      }
+    ]
   },
   "ok": true
 }
@@ -139,6 +159,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           }
         ],
         "stalled": false,
+        "task": null,
         "title": "Start"
       }
     ]
@@ -322,7 +343,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "parked": 0,
           "ready": 0,
           "stalled": 0,
-          "unthreaded": 0,
           "waiting": 0
         }
       },
@@ -333,6 +353,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
         ],
         "readiness": "claimed"
       },
+      "task": null,
       "title": "Start"
     }
   ],
@@ -382,6 +403,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           }
         ],
         "stalled": false,
+        "task": null,
         "title": "Start"
       }
     ]
@@ -524,6 +546,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
           }
         ],
         "stalled": false,
+        "task": null,
         "title": "Work"
       }
     ]
@@ -556,6 +579,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
         "summary": "Start has no items",
         "thread": {
           "id": "01900000-0000-7000-8000-0000000000f0",
+          "task": null,
           "title": "Start"
         }
       }
@@ -615,10 +639,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
             "parked": 0,
             "ready": 0,
             "stalled": 0,
-            "unthreaded": 0,
             "waiting": 0
           }
         },
+        "task": null,
         "title": "Start",
         "waits_for": []
       },
@@ -633,10 +657,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
             "parked": 0,
             "ready": 1,
             "stalled": 0,
-            "unthreaded": 0,
             "waiting": 0
           }
         },
+        "task": null,
         "title": "Work",
         "waits_for": []
       }
@@ -729,7 +753,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "parked": 0,
           "ready": 1,
           "stalled": 0,
-          "unthreaded": 0,
           "waiting": 0
         }
       },
@@ -739,6 +762,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
         ],
         "readiness": "ready"
       },
+      "task": null,
       "title": "Work"
     }
   ],
@@ -1104,10 +1128,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "notes": null,
       "parent": null,
       "readiness": {
-        "readiness": "unthreaded"
+        "readiness": "ready"
       },
       "role": "item",
-      "stage": "unthreaded",
+      "stage": "ready",
       "state": "open",
       "thread": null,
       "title": "Second"
@@ -1165,6 +1189,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic needs
         "summary": "Start has no items",
         "thread": {
           "id": "01900000-0000-7000-8000-0000000000f0",
+          "task": null,
           "title": "Start"
         }
       }
@@ -1320,7 +1345,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
           "parked": 0,
           "ready": 0,
           "stalled": 0,
-          "unthreaded": 0,
           "waiting": 0
         }
       },

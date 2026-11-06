@@ -33,7 +33,6 @@ describe("layout source identity", () => {
       stalled: 0,
       waiting: 0,
       parked: 0,
-      unthreaded: 0,
       canceled: 0,
     };
     const progressed = buildModel([item("box", null, [], { progress: { counts } })]);

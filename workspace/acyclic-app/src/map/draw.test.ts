@@ -118,7 +118,6 @@ describe("draw", () => {
       stalled: 0,
       waiting: 1,
       parked: 0,
-      unthreaded: 0,
       canceled: 0,
     };
     const counted = base.map((one) => (one.id === "beds" ? { ...one, progress: { counts } } : one));
@@ -143,7 +142,7 @@ describe("draw", () => {
     });
   });
 
-  it("changes an unthreaded selection in classes only, and leaves unlit color out of data", () => {
+  it("changes a selection of no thread in classes only, and leaves unlit color out of data", () => {
     const before = elements(start);
     const selected = elements({ items: base, selection: { item: "sow", thread: null } });
     for (const element of selected) {

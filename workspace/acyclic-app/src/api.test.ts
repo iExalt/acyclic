@@ -218,23 +218,21 @@ describe("countsText", () => {
     stalled: 0,
     waiting: 0,
     parked: 0,
-    unthreaded: 0,
     canceled: 0,
   };
 
   it("names every stage and leaves out stages with none", () => {
     const all = {
       done: 3,
-      leaves: 8,
+      leaves: 7,
       in_progress: 1,
       ready: 1,
       stalled: 0,
       waiting: 1,
       parked: 1,
-      unthreaded: 1,
       canceled: 0,
     };
-    expect(countsText(all)).toBe("3 done, 1 in progress, 1 ready, 1 waiting, 1 parked, 1 needs a thread");
+    expect(countsText(all)).toBe("3 done, 1 in progress, 1 ready, 1 waiting, 1 parked");
     expect(countsText({ ...none, leaves: 2, waiting: 2 })).toBe("2 waiting");
   });
 });

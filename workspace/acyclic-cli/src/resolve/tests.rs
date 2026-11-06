@@ -102,11 +102,11 @@ fn what_names_several_records_or_too_little_is_refused_with_the_candidates() {
             (bare.code, candidates(&bare)),
             ("not-found", vec![id("e1").as_str(), id("e2").as_str()])
         );
-        assert_eq!(
-            records.thread(&id("a1")).unwrap_err().code,
-            "not-found",
-            "an item isn't a thread"
-        );
+        // Done work is no thread; a loose task is its own, named by its id, an ending of it or its title.
+        assert_eq!(records.thread(&id("a2")).unwrap_err().code, "not-found");
+        let one = acyclic_core::ids::one(&id("a1"));
+        assert_eq!(records.thread(&id("a1")).unwrap(), one);
+        assert_eq!(records.thread("Water").unwrap(), acyclic_core::ids::one(&id("abcdef")));
     });
 }
 

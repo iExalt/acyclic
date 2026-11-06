@@ -71,13 +71,6 @@ pub enum Entry {
         /// When that lease ran out, as RFC 3339 in UTC.
         expired_at: String,
     },
-    /// An open leaf in no thread, or in one with no record, which is never ready until it joins one.
-    Unthreaded {
-        /// The item.
-        item: String,
-        /// The command that puts it in a thread.
-        fix: String,
-    },
     /// Done work that waits for a leaf that isn't done, as when what it waits for was reopened or added later.
     DoneWaiting {
         /// The done item.
@@ -149,7 +142,6 @@ impl Entry {
             | Self::Stalled { thread, holder, expired_at: _ } => {
                 vec![kind, thread, holder]
             },
-            Self::Unthreaded { item, fix: _ } => vec![kind, item],
             Self::DoneWaiting { item, waits_for } | Self::WaitsOnCanceled { item, waits_for } => {
                 vec![kind, item, waits_for]
             },
@@ -174,7 +166,6 @@ impl Entry {
             Self::Contest { .. } => "contest",
             Self::ClockAhead { .. } => "clock-ahead",
             Self::Stalled { .. } => "stalled",
-            Self::Unthreaded { .. } => "unthreaded",
             Self::DoneWaiting { .. } => "done-waiting",
             Self::WaitsOnCanceled { .. } => "waits-on-canceled",
             Self::Dangling { .. } => "dangling",
@@ -213,7 +204,6 @@ impl Entry {
             Self::Stalled { thread, holder, expired_at } => {
                 format!("{} has stalled: {holder}'s claim ran out at {expired_at}", name(thread))
             },
-            Self::Unthreaded { item, fix: _ } => format!("{} needs a thread", name(item)),
             Self::DoneWaiting { item, waits_for } => {
                 format!("{} is done but waits for {}", name(item), name(waits_for))
             },
@@ -246,8 +236,7 @@ impl Entry {
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
     /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to
-    /// nothing, a merge that can't be checked), items in no thread, which agents leave routinely, and threads with no
-    /// item, which they leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
+    /// nothing, a merge that can't be checked) and threads with no item, which agents leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
     pub const fn notifies(&self) -> bool {
         match self {
@@ -262,7 +251,6 @@ impl Entry {
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Stalled { .. }
-            | Self::Unthreaded { .. }
             | Self::EmptyThread { .. }
             | Self::Dangling { .. } => false,
         }
@@ -301,18 +289,19 @@ pub fn needs_you(
     done_waiting(model, readiness, &mut entries)?;
     waits_on_canceled(model, readiness, &mut entries)?;
     dangling(model, &mut entries);
-    thread_membership(model, &mut entries);
-    for (id, item) in &model.items {
-        if item.is_finished() || !model.children(id).is_empty() {
-            continue;
-        }
-        unthreaded(model, item, &mut entries);
-    }
+    thread_membership(state, model, now, &mut entries)?;
     Ok(entries.into_iter().collect())
 }
 
-/// The threads stored on parents, which reads ignore, and the threads with no item in them.
-fn thread_membership(model: &Model, entries: &mut BTreeSet<Entry>) {
+/// The threads stored on parents, which reads ignore, and the threads with no item in them. A loose task's thread of
+/// one with no item is listed only while someone holds it: it can't be deleted, so its holder's lease, which runs out
+/// on its own, is the end of it.
+fn thread_membership(
+    state: &State,
+    model: &Model,
+    now: Millis,
+    entries: &mut BTreeSet<Entry>,
+) -> Result<(), Error> {
     for id in model.items.keys() {
         if let Some(thread) = model.ignored_thread(id) {
             entries.insert(Entry::ThreadOnParent {
@@ -329,32 +318,26 @@ fn thread_membership(model: &Model, entries: &mut BTreeSet<Entry>) {
         .map(String::as_str)
         .collect();
     for id in model.threads.keys().filter(|id| !occupied.contains(id.as_str())) {
-        entries.insert(Entry::EmptyThread {
-            thread: id.clone(),
-            fix: format!("acyclic thread delete {id}"),
-        });
+        let fix = if crate::ids::task_of_one(id).is_some() {
+            if claim::live(state, &claim::thread_key(id)?, now)?.is_empty() {
+                continue;
+            }
+            format!("acyclic thread release {id}")
+        } else {
+            format!("acyclic thread delete {id}")
+        };
+        entries.insert(Entry::EmptyThread { thread: id.clone(), fix });
     }
+    Ok(())
 }
 
-/// Whether an item is an open, unparked leaf whose thread isn't in conflict: one `ready` lists only
-/// while a thread with a record holds it. A conflicted thread is left to its conflict entry.
+/// Whether an item is an open, unparked leaf whose thread isn't in conflict, which a thread of its own could take on.
+/// A conflicted thread is left to its conflict entry.
 fn wants_thread(model: &Model, item: &model::Item) -> bool {
     !item.is_finished()
         && model.children(&item.id).is_empty()
         && item.state != Value::One(model::ItemState::Parked)
         && !model.thread_value(item).is_conflict()
-}
-
-/// A leaf that wants a thread and names none, whatever else holds it back: `ready` never lists it. One that names a
-/// thread with no record is left to its dangling entry, which says so.
-fn unthreaded(model: &Model, item: &model::Item, entries: &mut BTreeSet<Entry>) {
-    if !wants_thread(model, item) || model.thread_value(item).one().is_some() {
-        return;
-    }
-    entries.insert(Entry::Unthreaded {
-        fix: format!("acyclic item edit {} --thread <THREAD>", item.id),
-        item: item.id.clone(),
-    });
 }
 
 fn claims(

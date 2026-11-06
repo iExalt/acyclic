@@ -197,8 +197,6 @@ function viewOf(
         note: str(need.record) === "item" && str(need.field) === "thread" ? EDIT_THREAD : IN_A_TERMINAL,
       };
     }
-    case "unthreaded":
-      return { ...base, text: summary, detail: null, note: EDIT_THREAD };
     default: {
       const named = [...rows(need.items), ...rows(need.dependents), ...rows(need.open)];
       const hint = str(need.fix);

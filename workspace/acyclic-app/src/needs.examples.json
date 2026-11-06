@@ -277,7 +277,6 @@
             "parked": 0,
             "ready": 0,
             "stalled": 0,
-            "unthreaded": 0,
             "waiting": 1
           }
         },
@@ -483,6 +482,7 @@
       "summary": "Work: its notes was written differently on two machines",
       "thread": {
         "id": "01900000-0000-7000-8000-0000000000f1",
+        "task": null,
         "title": "Work"
       },
       "values": [
@@ -500,27 +500,9 @@
       "summary": "Stale has stalled: session/mac's claim ran out at 2026-10-14T23:00:00Z",
       "thread": {
         "id": "01900000-0000-7000-8000-0000000000f3",
+        "task": null,
         "title": "Stale"
       }
-    },
-    {
-      "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>",
-      "identity": "{\"entry\":\"unthreaded\",\"item\":\"01900000-0000-7000-8000-0000000000a2\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000a2 --thread <THREAD>\"}",
-      "item": {
-        "id": "01900000-0000-7000-8000-0000000000a2",
-        "parent": null,
-        "readiness": {
-          "readiness": "unthreaded"
-        },
-        "stage": "unthreaded",
-        "state": "open",
-        "thread": null,
-        "title": "Loose"
-      },
-      "key": "unthreaded:01900000-0000-7000-8000-0000000000a2",
-      "kind": "unthreaded",
-      "notify": false,
-      "summary": "Loose needs a thread"
     },
     {
       "identity": "{\"entry\":\"done-waiting\",\"item\":\"01900000-0000-7000-8000-0000000000a4\",\"waits_for\":\"01900000-0000-7000-8000-0000000000a3\"}",
@@ -600,7 +582,6 @@
             "parked": 0,
             "ready": 0,
             "stalled": 0,
-            "unthreaded": 0,
             "waiting": 1
           }
         },
@@ -626,6 +607,7 @@
       "summary": "Parent has children, so its thread Work is ignored",
       "thread": {
         "id": "01900000-0000-7000-8000-0000000000f1",
+        "task": null,
         "title": "Work"
       }
     },
@@ -638,6 +620,7 @@
       "summary": "Idle has no items",
       "thread": {
         "id": "01900000-0000-7000-8000-0000000000f2",
+        "task": null,
         "title": "Idle"
       }
     }

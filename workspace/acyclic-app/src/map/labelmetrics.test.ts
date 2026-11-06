@@ -40,7 +40,6 @@ describe("map label metrics", () => {
       stalled: 0,
       waiting: 1,
       parked: 0,
-      unthreaded: 0,
       canceled: 0,
     };
     const measured = metricsOf(
@@ -70,15 +69,6 @@ describe("map label metrics", () => {
     expect(measured.lines).toContain("Done");
     expect(normalized(measured.lines.join(""))).toContain(normalized("12 done"));
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
-  });
-
-  it("shows Needs a thread even though a tile without a thread has no stage icon", () => {
-    const measured = metricsOf(
-      { title: "Unassigned", kind: "leaf", hidden: 0, stage: "unthreaded", progress: null },
-      fonts,
-    );
-    expect(measured.lines).toEqual(["Unassigned", "Needs a thread"]);
-    expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
 
   it("keeps a short box header and grows it to fit every title and status line", () => {

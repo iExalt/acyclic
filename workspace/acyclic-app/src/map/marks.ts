@@ -48,9 +48,7 @@ export function markSvg(
   } else {
     parts.push(`<circle cx="${left + BADGE / 2}" cy="${middle}" r="5" fill="${thread.colour}"/>`);
   }
-  // With no thread, the ring at its left already says what its stage would repeat.
-  if (stage !== null && !(stage === "unthreaded" && thread === null))
-    parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
+  if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
 }
 

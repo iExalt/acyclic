@@ -99,7 +99,7 @@ fn the_state_puts_its_problems_on_the_list() {
 }
 
 #[test]
-fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
+fn a_leaf_in_a_thread_with_no_record_dangles_with_its_fix_and_a_leaf_in_none_lists_nothing() {
     let mut r = replica("a");
     let by = user(1);
     for id in ["loose", "ghostly", "waiting", "parked", "done", "member", "goal", "kid"] {
@@ -119,17 +119,10 @@ fn every_open_leaf_no_thread_holds_is_listed_with_its_fix() {
     edit(&mut r, &ScopeEdit::Member { item: "done".into(), thread: Some("ghost".into()) }, by)
         .unwrap();
     let entries = list(&r);
-    let listed: Vec<(String, String)> = entries
-        .iter()
-        .filter_map(|e| match e {
-            Entry::Unthreaded { item, fix } => Some((item.clone(), fix.clone())),
-            _ => None,
-        })
-        .collect();
     let fix = |id: &str| (id.to_owned(), format!("acyclic item edit {id} --thread <THREAD>"));
-    // Whatever else holds it back; never a parked or done item, a member or a parent.
-    assert_eq!(listed, [fix("loose"), fix("waiting")]);
-    // A leaf in a thread with no record is listed once, as the reference it holds, with the same fix.
+    // A leaf in no thread is a thread of one, so nothing asks for a thread: only the reference that dangles is listed.
+    assert!(entries.iter().all(|e| matches!(e, Entry::Dangling { .. })), "{entries:?}");
+    // A leaf in a thread with no record is listed once, as the reference it holds, with a fix.
     let ghosts: Vec<(&str, Option<&str>)> = entries
         .iter()
         .filter_map(|e| match e {
@@ -461,7 +454,6 @@ fn a_stalled_thread_reaches_needs_you_with_its_last_holder_until_it_is_claimed_r
 
 /// One entry of each kind, with the key and identity it has always had. The identity is the serialized entry and
 /// keys the notified needs on every user's devices, so a change here re-notifies them: it must be deliberate.
-#[expect(clippy::too_many_lines, reason = "one row for each kind")]
 fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
     let s = |text: &str| text.to_owned();
     let v = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
@@ -517,12 +509,6 @@ fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
             "stalled",
             "stalled:t:x",
             r#"{"entry":"stalled","thread":"t","holder":"x","expired_at":"2026-10-21T00:00:00Z"}"#,
-        ),
-        (
-            Entry::Unthreaded { item: s("a"), fix: s("acyclic item edit a --thread <THREAD>") },
-            "unthreaded",
-            "unthreaded:a",
-            r#"{"entry":"unthreaded","item":"a","fix":"acyclic item edit a --thread <THREAD>"}"#,
         ),
         (
             Entry::DoneWaiting { item: s("a"), waits_for: s("b") },
@@ -592,7 +578,6 @@ fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
             "T has a claim to sort out",
             "T has a claim by x that starts in the future",
             "T has stalled: x's claim ran out at 2026-10-21T00:00:00Z",
-            "A needs a thread",
             "A is done but waits for B",
             "A waits for B, which was canceled",
             "A: its thread names t, which doesn't exist",
@@ -664,4 +649,30 @@ fn a_thread_stored_on_a_parent_is_ignored_by_every_reader_and_listed() {
     assert_eq!(readiness.thread("u").unwrap(), crate::ready::ThreadReadiness::NothingReady);
     assert_eq!(claim::covering(&r.state, &model, "p", NOW).unwrap(), Vec::new());
     assert!(crate::delete::delete_thread(&mut r.clone(), "u", by).unwrap());
+}
+
+#[test]
+fn an_emptied_thread_of_one_is_on_the_list_only_while_someone_holds_it() {
+    let mut r = replica("a");
+    let by = user(1);
+    add_item(&mut r, "x", "x", by).unwrap();
+    add_item(&mut r, "kid", "kid", by).unwrap();
+    let one = crate::ids::one("x");
+    claim::claim(&mut r, &one, "session/s", 2, (20_000, 20_000), true).unwrap();
+    model::put(&mut r, &item_key("kid").unwrap(), field::THREAD, Some(&one), by).unwrap();
+    // Two members, and no title: valid to read, and nothing is wrong with it.
+    assert_eq!(list(&r), []);
+    // Both leave: held, the holder lost its work, so the user hears of it; its lease then runs out.
+    for id in ["x", "kid"] {
+        model::put(&mut r, &item_key(id).unwrap(), field::THREAD, None::<&String>, by).unwrap();
+    }
+    assert_eq!(
+        list(&r),
+        [Entry::EmptyThread { thread: one.clone(), fix: format!("acyclic thread release {one}") }]
+    );
+    claim::release(&mut r, &claim::thread_key(&one).unwrap(), "session/s");
+    assert_eq!(list(&r), []);
+    // Entering the list never costs the unclaimed task its own row in the ready threads.
+    let model = Model::read(&r.state).unwrap();
+    assert!(model.thread_exists(&one));
 }

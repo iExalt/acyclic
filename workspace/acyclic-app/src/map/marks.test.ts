@@ -8,7 +8,7 @@ import { buildModel, fallbackStage, visible } from "./model";
 
 const thread = { colour: "#4ec695", ink: "#141a1f" };
 const DARK = PALETTES.dark;
-const STAGES: Stage[] = ["done", "in-progress", "ready", "waiting", "parked", "unthreaded"];
+const STAGES: Stage[] = ["done", "in-progress", "ready", "waiting", "parked"];
 
 describe("markSvg", () => {
   it("draws a different icon for every stage, with the thread's stripe and dot", () => {
@@ -40,16 +40,11 @@ describe("markSvg", () => {
   });
 
   it("draws a ring where a tile with no thread would have its dot", () => {
-    const none = markSvg("unthreaded", null, 200, 48, DARK);
+    const none = markSvg("ready", null, 200, 48, DARK);
     expect(none).toContain("stroke-dasharray");
     expect(none).not.toContain("<rect");
-    // The ring says it once: no stage icon repeats it at the end; a done tile with no thread still ends with its own.
-    expect(none).not.toContain("<g ");
-    expect(markSvg("done", null, 200, 48, DARK)).toContain("<g ");
-  });
-
-  it("leads a box whose tiles all need a thread with the same dashed ring", () => {
-    expect(boxMarkSvg("box", "unthreaded", 300, 400, DARK)).toContain('stroke-dasharray="3 2.4"');
+    // The stage's icon still ends the tile: a task in no thread is a thread of one, ready like any other.
+    expect(none).toContain("<g ");
   });
 
   it("makes each image once for each palette", () => {

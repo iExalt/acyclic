@@ -42,8 +42,6 @@ pub enum Readiness {
         )]
         waiting: BTreeMap<String, Wait>,
     },
-    /// In no thread, or in one with no record, so never ready: threads are the unit of work.
-    Unthreaded,
     /// Its thread is claimed by one holder.
     Claimed {
         /// The winning holder.
@@ -161,7 +159,7 @@ pub struct ReadyThread {
     pub stalled: bool,
 }
 
-/// Where a leaf stands, in eight words that tell all of them apart: what the app draws on each item and counts under
+/// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
 /// each parent. In progress means ready in a thread someone holds; stalled, ready in one whose holder's lease ran out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -176,8 +174,6 @@ pub enum Stage {
     Waiting,
     /// Set aside on purpose, or under a part that is.
     Parked,
-    /// In no thread, so never ready.
-    Unthreaded,
     /// Dropped on purpose, or under a part that is.
     Canceled,
     /// Ready in a thread whose claims have all expired.
@@ -193,7 +189,6 @@ pub struct Stages {
     pub ready: usize,
     pub waiting: usize,
     pub parked: usize,
-    pub unthreaded: usize,
     /// Leaves canceled: not among the others, and not in [`Stages::total`].
     pub canceled: usize,
     /// Leaves ready in a thread whose claims have all expired.
@@ -208,7 +203,6 @@ impl Stages {
             Stage::Ready => &mut self.ready,
             Stage::Waiting => &mut self.waiting,
             Stage::Parked => &mut self.parked,
-            Stage::Unthreaded => &mut self.unthreaded,
             Stage::Canceled => &mut self.canceled,
             Stage::Stalled => &mut self.stalled,
         };
@@ -217,8 +211,8 @@ impl Stages {
 
     /// The stage of a parent with these leaves, `claimed` when a live claim holds the thread of an open leaf under it:
     /// done once every leaf is; before that, in progress once any work
-    /// below has started and some of what is left isn't parked; otherwise stalled, ready, waiting, parked or needs a thread
-    /// by its leaves, in that order. `None` with no leaf to count.
+    /// below has started and some of what is left isn't parked; otherwise stalled, ready, waiting or parked by its
+    /// leaves, in that order. `None` with no leaf to count.
     #[must_use]
     pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
         let finished = self.done;
@@ -229,7 +223,7 @@ impl Stages {
         if finished == self.total() {
             return Some(Stage::Done);
         }
-        let open = self.in_progress + self.stalled + self.ready + self.waiting + self.unthreaded;
+        let open = self.in_progress + self.stalled + self.ready + self.waiting;
         if open > 0 && (self.in_progress > 0 || finished > 0 || claimed) {
             return Some(Stage::InProgress);
         }
@@ -238,7 +232,6 @@ impl Stages {
             (self.ready, Stage::Ready),
             (self.waiting, Stage::Waiting),
             (self.parked, Stage::Parked),
-            (self.unthreaded, Stage::Unthreaded),
         ]
         .into_iter()
         .find_map(|(count, stage)| (count > 0).then_some(stage))
@@ -272,13 +265,7 @@ impl Stages {
     /// The leaves counted, every stage together but canceled.
     #[must_use]
     pub fn total(&self) -> usize {
-        self.done
-            + self.in_progress
-            + self.stalled
-            + self.ready
-            + self.waiting
-            + self.parked
-            + self.unthreaded
+        self.done + self.in_progress + self.stalled + self.ready + self.waiting + self.parked
     }
 }
 
@@ -299,8 +286,8 @@ pub struct ReadinessEvaluator<'a> {
     cyclic: BTreeSet<String>,
     /// Waits-for links' targets by the item they start from.
     links_from: BTreeMap<String, Vec<String>>,
-    /// Each thread's members, built on first use.
-    members: OnceCell<BTreeMap<&'a str, Vec<&'a str>>>,
+    /// Each thread's members, built on first use: a loose task is the one member of its thread of one.
+    members: OnceCell<BTreeMap<String, Vec<&'a str>>>,
     /// Each thread's winning claim, memoized.
     winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
     /// Each thread's claim that ran out last while none holds, memoized.
@@ -438,12 +425,7 @@ impl<'a> ReadinessEvaluator<'a> {
             return Some(Readiness::Parked);
         }
         let waiting = self.waiting(id);
-        if !waiting.is_empty() {
-            return Some(Readiness::Waiting { waiting });
-        }
-        let threaded =
-            self.model.thread_of(id).is_some_and(|thread| self.model.threads.contains_key(thread));
-        (!threaded).then_some(Readiness::Unthreaded)
+        (!waiting.is_empty()).then_some(Readiness::Waiting { waiting })
     }
 
     /// A thread's readiness.
@@ -452,14 +434,14 @@ impl<'a> ReadinessEvaluator<'a> {
     ///
     /// Fails when a claim can't be read.
     pub fn thread(&self, thread: &str) -> Result<ThreadReadiness, Error> {
-        if !self.model.threads.contains_key(thread) {
+        if !self.model.thread_exists(thread) {
             return Ok(ThreadReadiness::Missing);
         }
         let members = self.members.get_or_init(|| {
-            let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+            let mut members: BTreeMap<String, Vec<&str>> = BTreeMap::new();
             for item in self.model.items.values() {
-                if let Some(thread) = self.model.thread_value(item).one() {
-                    members.entry(thread).or_default().push(&item.id);
+                if let Some(thread) = self.model.held_thread(&item.id) {
+                    members.entry(thread.into_owned()).or_default().push(&item.id);
                 }
             }
             members
@@ -518,7 +500,7 @@ impl<'a> ReadinessEvaluator<'a> {
     /// Fails when a claim can't be read.
     pub fn ready(&self, actor: &str) -> Result<Vec<ReadyThread>, Error> {
         let mut ready = Vec::new();
-        for id in self.model.threads.keys() {
+        for id in &self.model.all_threads() {
             let status = self.thread(id)?;
             if !status.claimable_by(actor) || status.items().is_empty() {
                 continue;
@@ -566,7 +548,6 @@ impl<'a> ReadinessEvaluator<'a> {
                         Some(Stage::InProgress)
                     },
                     Readiness::Ready => Some(Stage::Ready),
-                    Readiness::Unthreaded => Some(Stage::Unthreaded),
                     Readiness::Waiting { .. }
                     | Readiness::InCycle
                     | Readiness::Conflicted { .. } => Some(Stage::Waiting),
@@ -657,8 +638,8 @@ impl<'a> ReadinessEvaluator<'a> {
                 if self.claimed_under(child, seen)? {
                     return Ok(true);
                 }
-            } else if let Some(thread) = self.model.thread_of(child)
-                && self.winner(thread)?.is_some()
+            } else if let Some(thread) = self.model.held_thread(child)
+                && self.winner(&thread)?.is_some()
             {
                 return Ok(true);
             }
@@ -710,10 +691,10 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(lapsed)
     }
 
-    /// Whether a ready item sits in a stalled thread: one with a record, whose claims have all expired.
+    /// Whether a ready item sits in a stalled thread: one whose claims have all expired.
     fn stalled(&self, id: &str) -> Result<bool, Error> {
-        match self.model.thread_of(id).filter(|thread| self.model.threads.contains_key(*thread)) {
-            Some(thread) => Ok(self.lapsed(thread)?.is_some()),
+        match self.model.held_thread(id) {
+            Some(thread) => Ok(self.lapsed(&thread)?.is_some()),
             None => Ok(false),
         }
     }

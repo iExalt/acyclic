@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 
-use crate::model::Model;
+use crate::model::{Model, Value};
 
 /// Where a new child of a parent goes, as its siblings and parent say.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +23,15 @@ pub enum Placement {
 /// child it is. No thread further up is ever looked at.
 #[must_use]
 pub fn placement(model: &Model, siblings: &[&str], parent_thread: Option<&str>) -> Placement {
-    let mut threads =
-        siblings.iter().filter_map(|id| model.items.get(*id)).map(|s| model.thread_value(s));
+    // A sibling in its own untitled thread of one, which a claim made, is still loose: that thread is no grouping.
+    let none = Value::None;
+    let mut threads = siblings.iter().filter_map(|id| model.items.get(*id)).map(|s| {
+        let thread = model.thread_value(s);
+        match thread.one() {
+            Some(named) if model.shown_as_task(named) == Some(s.id.as_str()) => &none,
+            _ => thread,
+        }
+    });
     let Some(first) = threads.next() else {
         return parent_thread
             .map_or(Placement::Loose, |thread| Placement::Joins(thread.to_owned()));
