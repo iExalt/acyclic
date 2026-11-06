@@ -31,8 +31,9 @@ Every command's inputs follow these rules, so you can guess a command from its n
    record takes, looking only among records of its kind: the full id in any case; else an exact title (an item's or a
    thread's) or an `owner/name` in any case (a repository's) that one record has; else the end of one record's id, at
    least 6 characters, in any case. A reference that names several records, such as a title two share or a title of
-   one that ends another's id, is refused as `ambiguous` with the `candidates` in its details. Text output names items
-   and threads by the shortest ending of their ids that names them, and repositories by `owner/name`.
+   one that ends another's id, is refused as `ambiguous` with the `candidates` in its details. An ending shorter than
+   6 characters is refused too, as `usage` when one id has it. Text output names items and threads by the shortest
+   ending of their ids that names them, and repositories by `owner/name`.
 6. **Relations are fields.** An item has `--parent`, `--thread`, `--waits-for` and `--state`. Every actor's change
    applies at once; the actor, `--actor` or `ACYCLIC_ACTOR` and else `actor/user`, only labels the write.
 7. **Global options** (`--tracker`, `--actor`, `--output`) are listed under their own heading on every help page.
