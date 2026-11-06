@@ -107,35 +107,42 @@ export function groupRows<T>(
 }
 
 /**
- * The first `limit` rows across `groups`, in order, each group keeping its heading only while it has rows shown: what
- * a list shows before it says how many more. Rows stop where `fits(rows, groups)`, asked of the rows and headings
- * shown with the next row added, says they no longer fit.
+ * At most `limit` rows across `groups`, what a list shows before it says how many more: first one row for each group,
+ * in order, while it still fits, so no populated group drops out; then the rest of each group's rows, in order, up to
+ * the limit. Each group keeps its heading only while it has rows shown, and its rows their order. `fits(rows, groups)`
+ * is asked of the rows and headings shown with the next row added, and stops what no longer fits.
  */
 export function shownGroups<T>(
   groups: readonly Group<T>[],
   limit: number,
   fits: (rows: number, groups: number) => boolean = () => true,
 ): Group<T>[] {
-  const out: Group<T>[] = [];
+  const taken = groups.map(() => 0);
   let rows = 0;
-  for (const group of groups) {
-    const shown: T[] = [];
-    for (const row of group.rows) {
-      if (rows >= limit || !fits(rows + 1, out.length + 1)) break;
-      shown.push(row);
+  let headed = 0;
+  // One row to each group while it fits, then the rest in group order.
+  for (const [at, group] of groups.entries()) {
+    if (group.rows.length === 0 || rows >= limit || !fits(rows + 1, headed + 1)) continue;
+    taken[at] = 1;
+    rows += 1;
+    headed += 1;
+  }
+  for (const [at, group] of groups.entries()) {
+    if ((taken[at] ?? 0) === 0) continue;
+    while ((taken[at] ?? 0) < group.rows.length && rows < limit && fits(rows + 1, headed)) {
+      taken[at] = (taken[at] ?? 0) + 1;
       rows += 1;
     }
-    if (shown.length === 0) break;
-    out.push({ ...group, rows: shown });
-    if (shown.length < group.rows.length) break;
   }
-  return out;
+  return groups.flatMap((group, at) =>
+    (taken[at] ?? 0) === 0 ? [] : [{ ...group, rows: group.rows.slice(0, taken[at]) }],
+  );
 }
 
 /**
  * Whether `rows` rows under `groups` headings of Up next fit the first view at 1280 x 800: measured, each row takes
  * 60 px and each heading 44 px, and eight rows under two headings end at 698 px, so a bottom of at most 770 px (30 px
- * short of the fold) allows eight rows under three headings, or fewer rows under more; the rest is counted in "more".
+ * short of the fold) allows eight rows under three headings, or fewer rows under more, six at most with a heading each; the rest is counted in "more".
  */
 export const fitsFirstView = (rows: number, groups: number) => 60 * rows + 44 * groups <= 640;
 

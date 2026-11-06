@@ -130,33 +130,49 @@ describe("shownGroups", () => {
     { initiative: null, rows: [6] },
   ];
 
-  it("cuts the rows across the groups at the limit, dropping the heading of a group with none left", () => {
+  it("gives each group a row first, then the rest in order up to the limit, dropping the heading of a group with none", () => {
     expect(shownGroups(groups, 4)).toEqual([
-      { initiative: "a", rows: [1, 2, 3] },
+      { initiative: "a", rows: [1, 2] },
+      { initiative: "b", rows: [4] },
+      { initiative: null, rows: [6] },
+    ]);
+    expect(shownGroups(groups, 2)).toEqual([
+      { initiative: "a", rows: [1] },
       { initiative: "b", rows: [4] },
     ]);
-    expect(shownGroups(groups, 3)).toEqual([{ initiative: "a", rows: [1, 2, 3] }]);
     expect(shownGroups(groups, 99)).toEqual(groups);
   });
 
-  it("stops where the rows and headings no longer fit, so Up next stays in the first view however many initiatives", () => {
-    const many = Array.from({ length: 8 }, (_, at) => ({ initiative: `i${at}`, rows: [at] }));
-    const shown = shownGroups(many, 8, fitsFirstView);
-    expect(shown.length).toBeLessThan(8);
-    expect(fitsFirstView(8, 3)).toBe(true);
-    expect(fitsFirstView(8, 4)).toBe(false);
-    expect(fitsFirstView(shown.length, shown.length)).toBe(true);
-    // Eight rows in two groups, as on a real tracker, are all shown.
-    expect(
-      shownGroups(
-        [
-          { initiative: "a", rows: [1, 2, 3, 4, 5] },
-          { initiative: "b", rows: [6, 7, 8] },
-        ],
-        8,
-        fitsFirstView,
-      ),
-    ).toHaveLength(2);
+  describe("within the first view, as Up next bounds it", () => {
+    const group = (initiative: string, count: number) => ({
+      initiative,
+      rows: Array.from({ length: count }, (_, at) => `${initiative}${at}`),
+    });
+    const within = (groups: ReturnType<typeof group>[]) => {
+      const shown = shownGroups(groups, 8, fitsFirstView);
+      const rows = shown.reduce((sum, one) => sum + one.rows.length, 0);
+      expect(fitsFirstView(rows, shown.length)).toBe(true);
+      return shown;
+    };
+
+    it("shows a one-row initiative beside a busy first one, which takes the rest", () => {
+      const shown = within([group("busy", 20), group("small", 1)]);
+      expect(shown.map((one) => [one.initiative, one.rows.length])).toEqual([
+        ["busy", 7],
+        ["small", 1],
+      ]);
+    });
+
+    it("shows all of six populated initiatives, one row each, and eight rows in two", () => {
+      const six = within(Array.from({ length: 6 }, (_, at) => group(`i${at}`, 3)));
+      expect(six.map((one) => one.rows.length)).toEqual([1, 1, 1, 1, 1, 1]);
+      expect(within([group("a", 5), group("b", 3)]).map((one) => one.rows.length)).toEqual([5, 3]);
+    });
+
+    it("counts the initiatives that don't fit, the first ones shown and the bound held", () => {
+      const eight = within(Array.from({ length: 8 }, (_, at) => group(`i${at}`, 2)));
+      expect(eight.map((one) => one.initiative)).toEqual(["i0", "i1", "i2", "i3", "i4", "i5"]);
+    });
   });
 });
 
