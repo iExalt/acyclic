@@ -151,3 +151,29 @@ describe("keyReference", () => {
     expect(keyReference(new Set(Object.keys(SHORTCUTS)), true)[0]?.what).toBe("Next or previous row");
   });
 });
+
+describe("a pick bar waiting for a target", () => {
+  const picking: KeyContext = { ...free, panel: "item", picking: true };
+  it("takes typing as a search, with what was typed, so no shortcut fires", () => {
+    expect(act("m", {}, picking)).toEqual({ kind: "find", text: "m" });
+    expect(act("g", {}, picking)).toEqual({ kind: "find", text: "g" });
+    expect(act("j", {}, picking)).toEqual({ kind: "find", text: "j" });
+    expect(act("W", { shiftKey: true }, picking)).toEqual({ kind: "find", text: "W" });
+  });
+  it("opens an empty search on Enter, / and ?, and leaves chords, space, arrows and held keys alone", () => {
+    expect(act("Enter", {}, picking)).toEqual({ kind: "find", text: "" });
+    // / and ? are the search's and the key list's own keys, so they open it empty rather than seeding it.
+    expect(act("/", {}, picking)).toEqual({ kind: "find", text: "" });
+    expect(act("?", { shiftKey: true }, picking)).toEqual({ kind: "find", text: "" });
+    expect(act("a", { metaKey: true }, picking)).toBeNull();
+    expect(act(" ", {}, picking)).toBeNull();
+    expect(act("ArrowDown", {}, picking)).toBeNull();
+    expect(act("m", { repeat: true }, picking)).toBeNull();
+    expect(act("m", { isComposing: true }, picking)).toBeNull();
+  });
+  it("leaves what the menu or a field has to them, and the shortcuts off stay off", () => {
+    expect(act("m", {}, { ...picking, menu: true })).toBeNull();
+    expect(act("m", {}, { ...picking, typing: true })).toBeNull();
+    expect(act("m", {}, { ...picking, enabled: false })).toBeNull();
+  });
+});

@@ -32,6 +32,8 @@ interface Props {
   entries: readonly Entry[];
   /** What the field asks for. */
   placeholder: string;
+  /** What the field starts with: the key that opened the menu from a pick bar. */
+  initial?: string;
   /** Each entry's single-key shortcut, by key, or null while they're switched off. */
   keys: Readonly<Record<string, string>> | null;
   /** Lists only what has a shortcut, as ? asks. */
@@ -49,6 +51,7 @@ interface Props {
 export function CommandMenu({
   entries,
   placeholder,
+  initial = "",
   keys,
   shortcutsOnly,
   working,
@@ -57,7 +60,7 @@ export function CommandMenu({
   onRun,
   onDismiss,
 }: Props) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initial);
   const keyboardSelection = useRef(
     window.matchMedia("(pointer: fine) and (hover: hover)").matches ||
       document.documentElement.dataset.keyboard === "true",
