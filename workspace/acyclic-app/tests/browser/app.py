@@ -624,6 +624,30 @@ def overview_journey(page, view, name, failures):
     headings = overview.locator(".overview-section h2").all_inner_texts()
     if headings != ["Needs you", "In progress", "Up next", "Projects"]:
         failures.append(f"{name}: the Overview's lists are {headings}")
+    if not view.get("has_touch"):
+        # Up next, whole, sits in the first view at 1280 x 800, with two initiatives' work under their headings.
+        # The initiative in context comes first and the plan's own fills Up next, so the second is put in context to show both.
+        size = page.viewport_size
+        page.set_viewport_size({"width": 1280, "height": 800})
+        switch = page.locator("button.initiative")
+        switch.nth(1).click()
+        page.locator("button.initiative[aria-current=true]").nth(0).wait_for(timeout=5_000)
+        fold = overview.evaluate(
+            """o => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => {
+              const s = o.querySelector('#overview-next').closest('section');
+              done({
+                bottom: Math.max(...[...s.children].map((e) => e.getBoundingClientRect().bottom)),
+                groups: s.querySelectorAll('.group-head').length,
+                height: innerHeight,
+              });
+            })))"""
+        )
+        page.set_viewport_size(size)
+        switch.first.click()
+        if fold["groups"] < 2 or fold["bottom"] > fold["height"]:
+            failures.append(f"{name}: Up next ({fold['groups']} initiatives) ends at {fold['bottom']:.0f} px of {fold['height']}")
+        else:
+            print(f"{name}: Up next, under {fold['groups']} initiatives, ends at {fold['bottom']:.0f} of {fold['height']} px")
     row = overview.locator("[data-overview-thread]").first
     thread = row.get_attribute("data-overview-thread")
     row.click()
@@ -4005,8 +4029,16 @@ def shard_run(shard):
                 remote = directory / f"origin-{items}.git"
                 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
             plan = tracker(directory, env, items, remote, cycles=items < SMALL_TRACKER)
-            # A second initiative, with no work in it, so the switcher has a row to choose that the plan's items don't move to.
-            run(env, "initiative", "add", "--title", "Second initiative")
+            # A second initiative, so the switcher has a row to choose. The small tracker, which the Overview's journey runs on,
+            # gives it ready work, so Up next has two populated initiatives.
+            second = json.loads(run(env, "initiative", "add", "--title", "Second initiative"))["data"]["initiative"]
+            if items < SMALL_TRACKER:
+                epic = json.loads(run(env, "item", "add", "--title", "Second epic", "--parent", second))["data"]["item"]
+                # In a thread of its own, as a task alone would be picked by the Threads journey, whose panel it opens no thread's.
+                thread = json.loads(run(env, "thread", "add", "--title", "Second work"))["data"]["thread"]
+                for number in (1, 2):
+                    run(env, "item", "add", "--title", f"Second task {number}", "--parent", epic, "--thread", thread)
+                plan = Plan(env)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
