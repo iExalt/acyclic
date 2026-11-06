@@ -49,18 +49,8 @@ fn the_state_puts_its_problems_on_the_list() {
     }
     set_parent(&mut a, "kid", Some("p"), by).unwrap();
     model::set_state(&mut a, "p", ItemState::Done, by).unwrap();
-    // A dangling parent and repository, written as if by an older or newer replica.
+    // A dangling parent, written as if by an older or newer replica.
     a.write(&item_key("orphan").unwrap(), field::PARENT, USER, 1, Some(json!("gone"))).unwrap();
-    edit(
-        &mut a,
-        &ScopeEdit::ItemRepository {
-            item: "orphan".into(),
-            repository: "nowhere".into(),
-            present: true,
-        },
-        by,
-    )
-    .unwrap();
     // An unverifiable dependency.
     model::set_state(&mut a, "dep", ItemState::Done, by).unwrap();
     let evidence = model::Evidence {
@@ -104,13 +94,6 @@ fn the_state_puts_its_problems_on_the_list() {
         id: "orphan".into(),
         field: "parent".into(),
         target: "gone".into(),
-        fix: None,
-    });
-    has(&Entry::Dangling {
-        kind: "item".into(),
-        id: "orphan".into(),
-        field: "repository".into(),
-        target: "nowhere".into(),
         fix: None,
     });
 }
@@ -216,7 +199,7 @@ fn kinds_and_fields_no_reader_knows_are_skipped() {
         (x.clone(), "reopened", json!(true), json!(null)),
         (x.clone(), "repository/r", json!(true), json!(false)),
         (Key::new(kind::THREAD, "t").unwrap(), "repository/r", json!(true), json!(false)),
-        (repo.clone(), repository::INSTALLATION, json!("1"), json!("2")),
+        (repo.clone(), "installation", json!("1"), json!("2")),
         (x.clone(), "gate", json!("review"), json!("ship")),
         (x.clone(), "area/app", json!(true), json!(false)),
         (x.clone(), "resource/gpu", json!(true), json!(false)),
@@ -255,11 +238,11 @@ fn a_need_is_known_by_what_it_is_about_not_by_what_changes_while_it_stands() {
     let dangling = |target: &str| Entry::Dangling {
         kind: "item".into(),
         id: "a".into(),
-        field: "repositories".into(),
+        field: "thread".into(),
         target: target.into(),
         fix: None,
     };
-    assert_eq!(dangling("r").key(), "dangling:item:a:repositories:r");
+    assert_eq!(dangling("r").key(), "dangling:item:a:thread:r");
     assert_ne!(dangling("r").key(), dangling("s").key());
     let cycle = Entry::ThreadCycle { threads: vec!["t".into(), "u".into()] };
     assert_eq!(cycle.key(), "thread-cycle:t:u");

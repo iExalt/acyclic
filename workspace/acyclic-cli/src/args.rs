@@ -448,10 +448,6 @@ pub enum ItemCommand {
         /// Its notes.
         #[arg(long)]
         notes: Option<String>,
-        /// A repository it touches; repeat for more.
-        #[arg(short = 'r', long, value_name = "REPOSITORY")]
-        #[serde(default)]
-        repository: Vec<String>,
         /// An item it waits for: it can't start until that one is done; repeat for more.
         #[arg(long, value_name = "ITEM")]
         #[serde(default)]
@@ -530,14 +526,6 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_notes: bool,
-    /// Add a repository it touches; repeat for more.
-    #[arg(short = 'r', long, value_name = "REPOSITORY")]
-    #[serde(default)]
-    pub repository: Vec<String>,
-    /// Remove a repository it touches, even one whose record is gone; repeat for more.
-    #[arg(long, value_name = "REPOSITORY")]
-    #[serde(default)]
-    pub no_repository: Vec<String>,
     /// Make it wait for an item: it can't start until that one is done; repeat for more.
     #[arg(long, value_name = "ITEM")]
     #[serde(default)]
@@ -553,7 +541,6 @@ impl ItemEdit {
         clears("parent", self.parent.is_some(), self.no_parent)?;
         clears("thread", self.thread.is_some(), self.no_thread)?;
         clears("notes", self.notes.is_some(), self.no_notes)?;
-        overlaps("repository", &self.repository, &self.no_repository)?;
         overlaps("waits-for", &self.waits_for, &self.no_waits_for)
     }
 }
@@ -574,12 +561,8 @@ pub enum ThreadCommand {
         /// Its brief.
         #[arg(short = 'b', long)]
         brief: Option<String>,
-        /// A repository it touches beyond its items'; repeat for more.
-        #[arg(short = 'r', long, value_name = "REPOSITORY")]
-        #[serde(default)]
-        repository: Vec<String>,
     },
-    /// Edits a thread: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
+    /// Edits a thread: `--field` sets a field, `--no-field` clears it.
     Edit(ThreadEdit),
     /// Shows threads with their heads and each member's title, state and readiness, as an array in the order given.
     Show {
@@ -633,20 +616,11 @@ pub struct ThreadEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_brief: bool,
-    /// Add a repository it touches beyond its items'; repeat for more.
-    #[arg(short = 'r', long, value_name = "REPOSITORY")]
-    #[serde(default)]
-    pub repository: Vec<String>,
-    /// Remove a repository, even one whose record is gone; repeat for more.
-    #[arg(long, value_name = "REPOSITORY")]
-    #[serde(default)]
-    pub no_repository: Vec<String>,
 }
 
 impl ThreadEdit {
     fn validate(&self) -> Result<(), CliError> {
-        clears("brief", self.brief.is_some(), self.no_brief)?;
-        overlaps("repository", &self.repository, &self.no_repository)
+        clears("brief", self.brief.is_some(), self.no_brief)
     }
 }
 
@@ -678,7 +652,7 @@ pub enum RepositoryCommand {
         #[arg(long)]
         default_branch: Option<String>,
     },
-    /// Shows repository records with the items and threads that name them, as an array in the order given.
+    /// Shows repository records, as an array in the order given.
     Show {
         /// The repositories.
         #[arg(required = true, value_name = "REPOSITORY")]

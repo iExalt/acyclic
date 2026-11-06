@@ -13,8 +13,8 @@ pub mod kind {
     pub const REPOSITORY: &str = "repository";
 }
 
-/// Item fields. Repositories are a set stored a field per element: see [`set`]. Fields older versions wrote and no
-/// longer read, such as `gate` and the `area/` and `resource/` sets, are ignored like any unknown field.
+/// Item fields. Fields older versions wrote and no longer read, such as `gate` and the `area/`, `resource/` and
+/// `repository/` sets, are ignored like any unknown field.
 pub mod item {
     /// A short title.
     pub const TITLE: &str = "title";
@@ -38,13 +38,13 @@ pub const RETIRED: &[(&str, &str)] = &[
     (kind::ITEM, "size"),
     (kind::ITEM, "archived"),
     (kind::ITEM, "reopened"),
-    (kind::REPOSITORY, repository::INSTALLATION),
+    (kind::REPOSITORY, "installation"),
     (kind::ITEM, "gate"),
 ];
 
 /// Prefixes of the sets older versions wrote and no command writes now, on any kind, whose elements lie dormant as
 /// [`RETIRED`] fields do.
-pub const RETIRED_SETS: &[&str] = &["area/", "resource/"];
+pub const RETIRED_SETS: &[&str] = &["area/", "resource/", "repository/"];
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.
 pub mod link {
@@ -68,15 +68,6 @@ pub mod repository {
     pub const NAME: &str = "name";
     /// The default branch.
     pub const DEFAULT_BRANCH: &str = "default-branch";
-    /// The App's installation that reaches it.
-    pub const INSTALLATION: &str = "installation";
-}
-
-/// Prefixes of the fields that hold a set, one field per element with the value `true`. A concurrent add and remove
-/// keeps the add.
-pub mod set {
-    /// Repositories, on items and threads (those added explicitly).
-    pub const REPOSITORY: &str = "repository/";
 }
 
 /// Thread fields.

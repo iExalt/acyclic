@@ -13,14 +13,13 @@ pub(super) fn item(n: u8, state: Option<State>, parent: Option<u8>) -> Item {
         state,
         parent: parent.map(id),
         thread: None,
-        repositories: None,
         waits_for: None,
         evidence: None,
     }
 }
 
-/// Repository 1; items 10, 11 under 10 and 12 done under 10, 11 waiting for 12 and touching 1; thread 20 holding 11
-/// and 12.
+/// Repository 1; items 10, 11 under 10 and 12 done under 10 in repository 1, 11 waiting for 12; thread 20 holding
+/// 11 and 12.
 pub(super) fn valid() -> Import {
     let mut import = Import::new();
     import.repositories.push(Repository {
@@ -33,15 +32,13 @@ pub(super) fn valid() -> Import {
         item(11, Some(State::Backlog), Some(10)),
         item(12, Some(State::Done), Some(10)),
     ];
-    import.items[1].repositories = Some(vec![id(1)]);
     import.items[1].waits_for = Some(vec![id(12)]);
     import.items[2].evidence =
         Some(Evidence { commit: Some(format!("{}@abc1234", id(1))), text: Some("shipped".into()) });
     for member in &mut import.items[1..] {
         member.thread = Some(id(20));
     }
-    import.threads =
-        vec![Thread { id: id(20), title: "Thread".into(), brief: None, repositories: None }];
+    import.threads = vec![Thread { id: id(20), title: "Thread".into(), brief: None }];
     import
 }
 
@@ -92,6 +89,22 @@ fn removed_and_unknown_fields_are_refused() {
     for retired in ["size", "archived"] {
         let err = Import::from_json(&one(&format!(r#","{retired}":"m""#))).unwrap_err();
         assert!(err.to_string().contains(&format!("unknown field `{retired}`")), "{err}");
+    }
+    for (list, record, retired) in [
+        ("items", r#""title":"A","repositories":[]"#, "repositories"),
+        ("threads", r#""title":"T","repositories":[]"#, "repositories"),
+        (
+            "repositories",
+            r#""name":"a/b","default_branch":"main","installation":"1""#,
+            "installation",
+        ),
+    ] {
+        let doc = format!(
+            r#"{{"format":"{FORMAT}","version":3,"{list}":[{{"id":"{}",{record}}}]}}"#,
+            id(1)
+        );
+        let err = Import::from_json(&doc).unwrap_err();
+        assert!(err.to_string().contains(&format!("unknown field `{retired}`")), "{list}: {err}");
     }
     let threads = format!(
         "{{\"format\":\"{FORMAT}\",\"version\":3,\"threads\":[{{\"id\":\"{}\",\"title\":\"T\",\"items\":[]}}]}}",

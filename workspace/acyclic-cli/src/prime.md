@@ -96,8 +96,7 @@ waits-for and thread it belongs with.
 - Times are RFC 3339 in UTC, such as `2026-10-15T09:30:00Z`.
 - Exit codes: 0 done, 1 refused, 2 usage, 3 not found, 4 store (a lock, a lost race or git; retry later),
   5 not set up, 6 unreadable state (run `acyclic doctor`).
-- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which renews its lease, and an
-  edit that explicitly adds a repository the item or thread already holds. That edit records the add again. Any write
+- Writes report `changed`. A repeated command changes nothing, except `thread claim`, which renews its lease. Any write
   can also commit a lease renewal that its own `changed` leaves out.
 - A `clock-jump` refusal means this replica's saved time is more than five minutes ahead of the system clock. Correct
   the clock and wait until it is within five minutes of the saved time. Writes remain stamped at the saved time until
@@ -125,10 +124,10 @@ waits-for and thread it belongs with.
    finishes only what your thread holds, or what is ready, and a parent once its children are done; don't use `--force`
    to finish someone else's work. A parent needs no `item done`: its `progress` reads done once every leaf under it is,
    and work waiting on it waits on those leaves. `acyclic thread release <thread>` once none of its items is left ready.
-4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread and repositories are
-   set with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts,
-   and `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
-   open leaves that nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
+4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread is set with
+   `acyclic item edit --thread`. `acyclic thread list` lists the threads with their counts, and `acyclic thread show
+   <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its open leaves that
+   nothing in the thread orders. Two or more mean they may run in any order; when one needs another,
    make it wait for that one. `thread list` also puts the threads with work left in `waves`, first to last, each after
    the threads its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under
    `anytime`.

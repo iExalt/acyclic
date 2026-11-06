@@ -218,7 +218,6 @@ impl<'a> CommandContext<'a> {
                 thread,
                 state,
                 notes,
-                repository,
                 waits_for,
             }) => {
                 let fields = ItemFields {
@@ -227,7 +226,6 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(thread.clone(), false),
                     state: state.map(StateWord::state),
                     notes: Change::of(notes.clone(), false),
-                    repositories: Delta { add: repository.clone(), remove: Vec::new() },
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
@@ -260,10 +258,6 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
                     notes: Change::of(edit.notes.clone(), edit.no_notes),
-                    repositories: Delta {
-                        add: edit.repository.clone(),
-                        remove: edit.no_repository.clone(),
-                    },
                     waits_for: Delta {
                         add: edit.waits_for.clone(),
                         remove: edit.no_waits_for.clone(),
@@ -358,19 +352,17 @@ impl<'a> CommandContext<'a> {
             },
             Command::Thread(ThreadCommand::List) => self.threads(),
             Command::Thread(ThreadCommand::Show { threads }) => self.show_threads(threads),
-            Command::Thread(ThreadCommand::Add { id: given, title, brief, repository }) => {
+            Command::Thread(ThreadCommand::Add { id: given, title, brief }) => {
                 let fields = ThreadFields {
                     title: Some(title.clone()),
                     brief: Change::of(brief.clone(), false),
-                    repositories: Delta { add: repository.clone(), remove: Vec::new() },
                 };
                 self.write(|replica, by| {
                     let (id, adding) = match given {
                         Some(given) => (edit::given_id(given)?, Adding::Given),
                         None => (acyclic_core::ids::new(), Adding::Minted),
                     };
-                    let outcome = edit::commit(replica, by, None, false, |model| {
-                        let fields = fields.clone().resolve(model, &Records::of(model), None)?;
+                    let outcome = edit::commit(replica, by, None, false, |_| {
                         Ok(edit::thread_changes(&id, &fields, adding))
                     })?;
                     self.remember(&outcome.after);
@@ -381,18 +373,12 @@ impl<'a> CommandContext<'a> {
                 let fields = ThreadFields {
                     title: edit.title.clone(),
                     brief: Change::of(edit.brief.clone(), edit.no_brief),
-                    repositories: Delta {
-                        add: edit.repository.clone(),
-                        remove: edit.no_repository.clone(),
-                    },
                 };
                 let thread = &edit.thread;
                 self.write(|replica, by| {
                     let mut id = String::new();
                     let outcome = edit::commit(replica, by, None, false, |model| {
-                        let records = Records::of(model);
-                        id = records.thread(thread)?;
-                        let fields = fields.clone().resolve(model, &records, Some(&id))?;
+                        id = Records::of(model).thread(thread)?;
                         Ok(edit::thread_changes(&id, &fields, Adding::No))
                     })?;
                     self.remember(&outcome.after);
@@ -662,7 +648,7 @@ impl<'a> CommandContext<'a> {
         let mut shown = Vec::with_capacity(ids.len());
         for reference in ids {
             let id = records.repository(reference)?;
-            shown.push(view::repo_show(&model, &model.repositories[&id]));
+            shown.push(view::repo_row(&model.repositories[&id]));
         }
         Ok(Json::Array(shown))
     }

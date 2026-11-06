@@ -278,17 +278,6 @@ fn dangling(model: &Model, entries: &mut BTreeSet<Entry>) {
                 .then(|| format!("acyclic item edit {id} --thread <THREAD>"));
             add(kind::ITEM, id, "thread", thread, fix);
         }
-        for repository in item.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
-        {
-            add(kind::ITEM, id, "repository", repository, None);
-        }
-    }
-    for (id, thread) in &model.threads {
-        for repository in
-            thread.repositories.iter().filter(|r| !model.repositories.contains_key(*r))
-        {
-            add(kind::THREAD, id, "repository", repository, None);
-        }
     }
     // A waiting item names what it waits for, and can let go of it; a link from an item that is gone is the link's.
     for link in &model.links {

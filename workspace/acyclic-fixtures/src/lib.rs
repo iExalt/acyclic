@@ -81,6 +81,8 @@ struct Generator {
     item_ids: Vec<String>,
     /// Each repository's id: the product, deploy and website repositories.
     repository_ids: Vec<String>,
+    /// Each item's repository, by index into `repository_ids`: the one its evidence names, if it is done.
+    repository: Vec<Option<usize>>,
     total: usize,
     scale: f64,
     import: Import,
@@ -101,6 +103,7 @@ impl Generator {
             made: 0,
             item_ids: Vec::new(),
             repository_ids: Vec::new(),
+            repository: Vec::new(),
             total,
             scale,
             import: Import::new(),
@@ -183,10 +186,10 @@ impl Generator {
             state: Some(State::Backlog),
             parent: parent.map(|p| self.item_ids[p].clone()),
             thread: None,
-            repositories: (depth > 1).then(|| vec![self.repository_ids[repository].clone()]),
             waits_for: None,
             evidence: None,
         });
+        self.repository.push((depth > 1).then_some(repository));
         self.depth.push(depth);
         self.root.push(root);
         self.parent.push(parent);
@@ -267,8 +270,8 @@ impl Generator {
                 if self.rng.chance(0.5) {
                     let (a, b, c) = (self.rng.next_u64(), self.rng.next_u64(), self.rng.next_u64());
                     let sha = format!("{a:016x}{b:016x}{:08x}", c >> 32);
-                    // Only items under a root are done, and each touches a repository.
-                    let repository = item.repositories.iter().flatten().next();
+                    // Only items under a root are done, and each has a repository.
+                    let repository = self.repository[index].map(|r| &self.repository_ids[r]);
                     item.evidence = leaf.then(|| Evidence {
                         commit: repository.map(|repository| format!("{repository}@{sha}")),
                         text: None,
@@ -350,10 +353,8 @@ impl Generator {
             }
         }
 
-        let extras = self.scaled(2.0);
-        for (thread, run) in members.iter_mut().enumerate() {
+        for run in &mut members {
             run.sort_unstable();
-            let repositories = (thread < extras).then(|| vec![self.repository_ids[2].clone()]);
             let title = self.title();
             let id = self.id();
             for &member in run.iter() {
@@ -363,7 +364,6 @@ impl Generator {
                 id,
                 title,
                 brief: Some("A synthetic thread.".to_owned()),
-                repositories,
             });
         }
         owner
@@ -503,7 +503,6 @@ mod tests {
         assert!((0.085..=0.165).contains(&unthreaded), "unthreaded share {unthreaded}: {at}");
 
         assert!(stats.cross_root_threads > 0, "{at}");
-        assert!(stats.multi_repository_threads > 0, "{at}");
 
         assert!((0.07..=0.14).contains(&stats.state_share(State::Done)), "{at}");
         assert!((0.02..=0.06).contains(&stats.state_share(State::Parked)), "{at}");
@@ -544,7 +543,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (149_368, 15_104_859_600_027_612_192));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_368, 8_288_387_897_255_007_585));
     }
 
     #[test]

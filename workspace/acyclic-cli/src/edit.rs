@@ -3,8 +3,8 @@
 //! what it already holds changes nothing while adding it with other values is refused. The core's write module judges
 //! each change set whole, so a refusal anywhere writes nothing at all.
 //!
-//! The fields hold what the command line named until [`ItemFields::resolve`] or [`ThreadFields::resolve`] turns each
-//! reference into the id of the record it names; the writes take ids.
+//! The fields hold what the command line named until [`ItemFields::resolve`] turns each reference into the id of the
+//! record it names; the writes take ids.
 
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
@@ -69,7 +69,6 @@ pub(crate) struct ItemFields {
     pub thread: Change<String>,
     pub state: Option<ItemState>,
     pub notes: Change<String>,
-    pub repositories: Delta,
     pub waits_for: Delta,
 }
 
@@ -78,7 +77,6 @@ pub(crate) struct ItemFields {
 pub(crate) struct ThreadFields {
     pub title: Option<String>,
     pub brief: Change<String>,
-    pub repositories: Delta,
 }
 
 /// What a repository record's `add` or `edit` sets.
@@ -104,22 +102,6 @@ impl Delta {
     }
 }
 
-/// The repositories a removal names: each element `held` that it names by id or ending, else the record the resolver
-/// finds.
-fn removals(
-    records: &Records<'_>,
-    held: &[String],
-    named: &[String],
-) -> Result<Vec<String>, CliError> {
-    named
-        .iter()
-        .map(|name| match resolve::held(held, name) {
-            Some(id) => Ok(id),
-            None => records.repository(name),
-        })
-        .collect()
-}
-
 impl ItemFields {
     /// The fields with every reference resolved to the id of the record it names. `item` is the item they are for,
     /// when it exists: a removal looks among what it holds first, so it finds an element whose record is gone.
@@ -137,26 +119,12 @@ impl ItemFields {
             Change::Set(thread) => Change::Set(records.thread(&thread)?),
             other => other,
         };
-        let held_repositories: Vec<String> = item
-            .and_then(|id| model.items.get(id))
-            .map(|item| item.repositories.iter().cloned().collect())
-            .unwrap_or_default();
         let held_waits: Vec<String> = model
             .links
             .iter()
             .filter(|link| Some(link.from.as_str()) == item)
             .map(|link| link.to.clone())
             .collect();
-        let repositories = Delta {
-            add: self
-                .repositories
-                .add
-                .iter()
-                .map(|r| records.repository(r))
-                .collect::<Result<_, _>>()?,
-            remove: removals(records, &held_repositories, &self.repositories.remove)?,
-        }
-        .disjoint("repository")?;
         let waits_for = Delta {
             add: self.waits_for.add.iter().map(|i| records.item(i)).collect::<Result<_, _>>()?,
             remove: self
@@ -170,34 +138,7 @@ impl ItemFields {
                 .collect::<Result<_, _>>()?,
         }
         .disjoint("waits-for")?;
-        Ok(Self { parent, thread, repositories, waits_for, ..self })
-    }
-}
-
-impl ThreadFields {
-    /// The fields with every repository resolved to the id of its record, a removal looking among what `thread`
-    /// holds first.
-    pub fn resolve(
-        self,
-        model: &Model,
-        records: &Records<'_>,
-        thread: Option<&str>,
-    ) -> Result<Self, CliError> {
-        let held: Vec<String> = thread
-            .and_then(|id| model.threads.get(id))
-            .map(|thread| thread.repositories.iter().cloned().collect())
-            .unwrap_or_default();
-        let repositories = Delta {
-            add: self
-                .repositories
-                .add
-                .iter()
-                .map(|r| records.repository(r))
-                .collect::<Result<_, _>>()?,
-            remove: removals(records, &held, &self.repositories.remove)?,
-        }
-        .disjoint("repository")?;
-        Ok(Self { repositories, ..self })
+        Ok(Self { parent, thread, waits_for, ..self })
     }
 }
 
@@ -298,10 +239,6 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
     for (list, present) in [(&fields.waits_for.remove, false), (&fields.waits_for.add, true)] {
         assigns.extend(list.iter().map(|to| field(ItemAssign::WaitsFor(to.clone(), present))));
     }
-    for (list, present) in [(&fields.repositories.add, true), (&fields.repositories.remove, false)]
-    {
-        assigns.extend(list.iter().map(|r| field(ItemAssign::Repository(r.clone(), present))));
-    }
     changes(Record::Item(id.to_owned()), assigns, adding)
 }
 
@@ -314,10 +251,6 @@ pub(crate) fn thread_changes(id: &str, fields: &ThreadFields, adding: Adding) ->
     }
     if let Some(brief) = fields.brief.given() {
         assigns.push(field(ThreadAssign::Brief(brief.cloned())));
-    }
-    for (list, present) in [(&fields.repositories.add, true), (&fields.repositories.remove, false)]
-    {
-        assigns.extend(list.iter().map(|r| field(ThreadAssign::Repository(r.clone(), present))));
     }
     changes(Record::Thread(id.to_owned()), assigns, adding)
 }
@@ -365,7 +298,7 @@ fn changes(record: Record, assigns: Vec<Assign>, adding: Adding) -> ChangeSet {
 mod tests;
 
 /// The flag that sets a field, as an add's refusal names it, in the order the flags are checked.
-const FLAGS: [(&str, &str); 10] = [
+const FLAGS: [(&str, &str); 9] = [
     ("title", "--title"),
     ("parent", "--parent"),
     ("notes", "--notes"),
@@ -373,7 +306,6 @@ const FLAGS: [(&str, &str); 10] = [
     ("waits-for", "--waits-for"),
     ("thread", "--thread"),
     ("brief", "--brief"),
-    ("repositories", "--repository"),
     ("name", "--name"),
     ("default-branch", "--default-branch"),
 ];

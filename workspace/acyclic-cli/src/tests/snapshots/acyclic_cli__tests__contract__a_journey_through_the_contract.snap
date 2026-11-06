@@ -344,7 +344,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
         ],
         "status": "claimed"
       },
-      "repositories": [],
       "title": "Start"
     }
   ],
@@ -501,7 +500,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "readiness": {
         "status": "ready"
       },
-      "repositories": [],
       "role": "item",
       "stage": "ready",
       "state": "backlog",
@@ -769,7 +767,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
         ],
         "status": "ready"
       },
-      "repositories": [],
       "title": "Work"
     }
   ],
@@ -811,7 +808,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "readiness": {
         "status": "done"
       },
-      "repositories": [],
       "role": "item",
       "stage": "done",
       "state": "done",
@@ -835,7 +831,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "readiness": {
         "status": "ready"
       },
-      "repositories": [],
       "role": "item",
       "stage": "ready",
       "state": "backlog",
@@ -966,17 +961,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository show code
   "ok": false
 }
 
-$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --repository ME/CODE
-# exit 0
-{
-  "data": {
-    "changed": true,
-    "item": "01900000-0000-7000-8000-0000000000a2",
-    "placed": []
-  },
-  "ok": true
-}
-
 $ ACYCLIC_ACTOR=session/mac acyclic repository show me/code
 # exit 0
 {
@@ -984,41 +968,8 @@ $ ACYCLIC_ACTOR=session/mac acyclic repository show me/code
     {
       "default_branch": "trunk",
       "id": "01900000-0000-7000-8000-0000000000e1",
-      "installation": null,
-      "items": [
-        "01900000-0000-7000-8000-0000000000a2"
-      ],
       "name": "code",
-      "owner": "me",
-      "threads": []
-    }
-  ],
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic item edit Second --no-repository me/code
-# exit 0
-{
-  "data": {
-    "changed": true,
-    "item": "01900000-0000-7000-8000-0000000000a2",
-    "placed": []
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic repository show me/code
-# exit 0
-{
-  "data": [
-    {
-      "default_branch": "trunk",
-      "id": "01900000-0000-7000-8000-0000000000e1",
-      "installation": null,
-      "items": [],
-      "name": "code",
-      "owner": "me",
-      "threads": []
+      "owner": "me"
     }
   ],
   "ok": true
@@ -1143,7 +1094,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
       "readiness": {
         "status": "done"
       },
-      "repositories": [],
       "role": "item",
       "stage": "done",
       "state": "done",
@@ -1184,7 +1134,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "readiness": {
         "status": "unthreaded"
       },
-      "repositories": [],
       "role": "item",
       "stage": "unthreaded",
       "state": "backlog",
@@ -1392,7 +1341,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       "readiness": {
         "status": "parent"
       },
-      "repositories": [],
       "role": "project",
       "stage": "done",
       "state": "backlog",

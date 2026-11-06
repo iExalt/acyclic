@@ -196,14 +196,7 @@ fn a_journey_through_the_contract() {
     assert_eq!(sh.run("repository edit nope --default-branch main", AGENT), 3);
     let (code, bare) = sh.output("repository show code", AGENT);
     assert_eq!((code, &bare["error"]["details"]["candidates"][0]["name"]), (3, &json!("me/code")));
-    for (flag, present) in [("--repository ME/CODE", true), ("--no-repository me/code", false)] {
-        let (code, out) = sh.output(&format!("item edit Second {flag}"), AGENT);
-        assert_eq!((code, out["data"]["changed"].as_bool()), (0, Some(true)), "{flag}");
-        assert_eq!(
-            sh.output("repository show me/code", AGENT).1["data"][0]["items"],
-            json!(present.then_some(&a2).into_iter().collect::<Vec<_>>())
-        );
-    }
+    assert_eq!(sh.run("repository show me/code", AGENT), 0);
     assert_eq!(sh.run("repository list", AGENT), 0);
     // A thread is deleted once no item is in it and no one holds it.
     assert_eq!(sh.run(&format!("thread add --id {t3} --title Spare"), AGENT), 0);

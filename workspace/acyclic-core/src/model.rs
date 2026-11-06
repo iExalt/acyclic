@@ -1,6 +1,6 @@
 //! The model: items, links, threads and repositories, read as a typed snapshot of the state. Records are written
 //! through the write module's judge; the per-field writes here serve it, deletes and, with the
-//! `fixtures` feature, tests. Nothing derived is stored: roles, membership, repository sets and cycles are computed on read.
+//! `fixtures` feature, tests. Nothing derived is stored: roles, membership and cycles are computed on read.
 //!
 //! Every field reads as a [`Value`], so a reader sees concurrent writes as a conflict and never silently picks one.
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph;
-use crate::schema::{RETIRED, RETIRED_SETS, item as field, kind, link, repository, set, thread};
+use crate::schema::{RETIRED, RETIRED_SETS, item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
@@ -170,8 +170,6 @@ pub struct Item {
     pub evidence: Value<Evidence>,
     /// The thread the item belongs to.
     pub thread: Value<String>,
-    /// Ids of the repositories the item touches.
-    pub repositories: BTreeSet<String>,
 }
 
 impl Item {
@@ -220,8 +218,6 @@ pub struct Thread {
     pub title: Value<String>,
     /// The brief.
     pub brief: Value<String>,
-    /// Repositories added explicitly, beyond those of its items.
-    pub repositories: BTreeSet<String>,
 }
 
 /// A repository record as read.
@@ -235,8 +231,6 @@ pub struct Repository {
     pub name: Value<String>,
     /// The default branch.
     pub default_branch: Value<String>,
-    /// The App's installation that reaches it.
-    pub installation: Value<String>,
 }
 
 /// A snapshot of the model, read once from a state.
@@ -310,15 +304,14 @@ impl Model {
     }
 
     /// Notes each field of a live entity that holds different values, read or not, so a field a newer version wrote
-    /// still shows; claims contest rather than conflict, a set's elements only ever hold `true`, and a retired field
-    /// lies dormant, since nothing could settle it.
+    /// still shows; claims contest rather than conflict, and a retired field or set lies dormant, since nothing could
+    /// settle it.
     fn note_conflicts(&mut self, key: &Key, entity: &crate::state::Entity) {
         if self.deleted.contains(key) {
             return;
         }
         for (name, register) in entity {
             if name == crate::claim::FIELD
-                || name.starts_with(set::REPOSITORY)
                 || RETIRED.contains(&(key.kind.as_str(), name.as_str()))
                 || RETIRED_SETS.iter().any(|prefix| name.starts_with(prefix))
             {
@@ -371,7 +364,6 @@ impl Model {
                     id: key.id.clone(),
                     title: value(state, key, thread::TITLE)?,
                     brief: value(state, key, thread::BRIEF)?,
-                    repositories: elements(state, key, set::REPOSITORY),
                 };
                 self.threads.insert(key.id.clone(), thread);
             },
@@ -381,7 +373,6 @@ impl Model {
                     owner: value(state, key, repository::OWNER)?,
                     name: value(state, key, repository::NAME)?,
                     default_branch: value(state, key, repository::DEFAULT_BRANCH)?,
-                    installation: value(state, key, repository::INSTALLATION)?,
                 };
                 self.repositories.insert(key.id.clone(), record);
             },
@@ -513,17 +504,6 @@ impl Model {
     #[must_use]
     pub fn thread_of(&self, id: &str) -> Option<&str> {
         self.items.get(id).and_then(|item| item.thread.one()).map(String::as_str)
-    }
-
-    /// A thread's repository set: its items' repositories and those added explicitly.
-    #[must_use]
-    pub fn repository_set(&self, thread: &str) -> BTreeSet<String> {
-        let mut repositories =
-            self.threads.get(thread).map(|t| t.repositories.clone()).unwrap_or_default();
-        for member in self.members(thread) {
-            repositories.extend(self.items[member].repositories.iter().cloned());
-        }
-        repositories
     }
 
     /// The cycles among blocks links, each sorted.
@@ -715,21 +695,6 @@ pub(crate) fn put<T: Serialize>(
     Ok(())
 }
 
-/// Adds an element to a set field, or removes it. Repositories on items and threads are scope edits, made through
-/// `scope::edit`.
-pub(crate) fn put_element(
-    replica: &mut Replica,
-    key: &Key,
-    prefix: &str,
-    element: &str,
-    present: bool,
-    by: By<'_>,
-) -> Result<(), WriteError> {
-    let field = format!("{prefix}{}", name(element)?);
-    replica.write(key, &field, by.actor, by.at, present.then_some(Json::Bool(true)))?;
-    Ok(())
-}
-
 fixture! {
     /// Creates an item with a title, in the backlog.
     ///
@@ -879,7 +844,6 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         parent: value(state, key, field::PARENT)?,
         evidence: value(state, key, field::EVIDENCE)?,
         thread: value(state, key, field::THREAD)?,
-        repositories: elements(state, key, set::REPOSITORY),
     })
 }
 
@@ -903,17 +867,6 @@ pub(crate) fn value<T: DeserializeOwned + PartialEq>(
         1 => values.remove(0).map_or(Value::None, Value::One),
         _ => Value::Conflict(values),
     })
-}
-
-/// The elements of a set field: each field under `prefix` that holds a value.
-fn elements(state: &State, key: &Key, prefix: &str) -> BTreeSet<String> {
-    state
-        .entity(key)
-        .into_iter()
-        .flatten()
-        .filter_map(|(name, _)| name.strip_prefix(prefix))
-        .map(str::to_owned)
-        .collect()
 }
 
 /// Every thread's open members and the ordering links, read once, to find threads' heads.

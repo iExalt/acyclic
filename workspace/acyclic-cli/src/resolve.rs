@@ -14,9 +14,8 @@
 //! a candidate, except a thread items still name: like a thread with no record, it stays one so that `thread show`
 //! finds its members and pretty output can name it, and a write that would move an item into it refuses it as missing.
 //!
-//! A removal (`--no-waits-for`, `--no-repository`) first looks among the ids the record holds, by exact id or an
-//! ending, with [`held`], so it lets go of an element whose record is gone; only when none matches do these rules
-//! apply.
+//! A removal (`--no-waits-for`) first looks among the ids the record holds, by exact id or an ending, with [`held`],
+//! so it lets go of an element whose record is gone; only when none matches do these rules apply.
 //!
 //! Pretty output names items and threads by [`endings`] over the same candidates, lengthened past any other record's
 //! title, so every ending it prints names its record, and repositories by their `owner/name`. The exception is an id

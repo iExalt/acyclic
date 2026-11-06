@@ -17,8 +17,6 @@ pub struct Stats {
     pub unthreaded: usize,
     /// Threads whose items span several roots.
     pub cross_root_threads: usize,
-    /// Threads whose repository set has several repositories.
-    pub multi_repository_threads: usize,
     /// Items per state.
     pub states: BTreeMap<String, usize>,
     /// Waits-for links.
@@ -51,7 +49,7 @@ impl Stats {
             *depths.entry(root(i).1).or_default() += 1;
         }
         let mut threaded = BTreeSet::new();
-        let (mut cross_root_threads, mut multi_repository_threads) = (0, 0);
+        let mut cross_root_threads = 0;
         let mut thread_sizes = Vec::new();
         for thread in &import.threads {
             let members: Vec<usize> = (0..import.items.len())
@@ -60,13 +58,7 @@ impl Stats {
             thread_sizes.push(members.len());
             threaded.extend(members.iter().copied());
             let roots: BTreeSet<usize> = members.iter().map(|&i| root(i).0).collect();
-            let repositories: BTreeSet<&str> = members
-                .iter()
-                .flat_map(|&i| import.items[i].repositories.iter().flatten().map(String::as_str))
-                .chain(thread.repositories.iter().flatten().map(String::as_str))
-                .collect();
             cross_root_threads += usize::from(roots.len() > 1);
-            multi_repository_threads += usize::from(repositories.len() > 1);
         }
         let mut states = BTreeMap::new();
         for item in &import.items {
@@ -78,7 +70,6 @@ impl Stats {
             thread_sizes,
             unthreaded: import.items.len() - threaded.len(),
             cross_root_threads,
-            multi_repository_threads,
             states,
             links: import.items.iter().map(|i| i.waits_for.as_ref().map_or(0, Vec::len)).sum(),
         }

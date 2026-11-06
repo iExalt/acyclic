@@ -1,8 +1,7 @@
-//! Edits to a thread's scope: which items it holds and which repositories it and its items touch. Every actor's edit
-//! applies at once; the actor is an audit label.
+//! Edits to a thread's scope: which items it holds. Every actor's edit applies at once; the actor is an audit label.
 
 use crate::model::{self, By, WriteError};
-use crate::schema::{item as field, kind, set};
+use crate::schema::{item as field, kind};
 use crate::state::{Key, Replica};
 
 /// The user's actor id, and the actor of a write that names none.
@@ -17,24 +16,6 @@ pub enum ScopeEdit {
         item: String,
         /// The thread, or none.
         thread: Option<String>,
-    },
-    /// Adds or removes a repository an item touches.
-    ItemRepository {
-        /// The item.
-        item: String,
-        /// The repository record.
-        repository: String,
-        /// Whether it is added.
-        present: bool,
-    },
-    /// Adds or removes a repository on a thread explicitly.
-    ThreadRepository {
-        /// The thread.
-        thread: String,
-        /// The repository record.
-        repository: String,
-        /// Whether it is added.
-        present: bool,
     },
 }
 
@@ -53,15 +34,6 @@ fixture! {
                 }
                 let key = model::item_key(item)?;
                 model::put(replica, &key, field::THREAD, thread.as_ref(), by)
-            },
-            ScopeEdit::ItemRepository { item, repository, present } => {
-                model::existing(&replica.state, item)?;
-                let key = model::item_key(item)?;
-                model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
-            },
-            ScopeEdit::ThreadRepository { thread, repository, present } => {
-                let key = Key::new(kind::THREAD, thread)?;
-                model::put_element(replica, &key, set::REPOSITORY, repository, *present, by)
             },
         }
     }

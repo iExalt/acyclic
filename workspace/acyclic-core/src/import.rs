@@ -26,28 +26,28 @@ pub const VERSION: u32 = 3;
 /// remove, since JSON has no comments.
 pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every record named by its own UUIDv7 id.
 // `acyclic id 20` prints twenty new ids to name records with. Importing the document again updates the same records.
-// A reference (parent, thread, waits_for, repositories, evidence) is an id, of a record in the document or already
+// A reference (parent, thread, waits_for, evidence) is an id, of a record in the document or already
 // in the tracker. A field left out keeps what the record holds; a new record takes the default.
 // JSON has no comments: remove the lines that start with //.
 {
   "format": "acyclic-import",
   "version": 3,
-  // A code repository that items can name, as "owner/name"; all three fields are required.
+  // A code repository that evidence can name, as "owner/name"; all three fields are required.
   "repositories": [
     {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
   ],
   "items": [
     // Required: id and title. "state" is backlog, parked or done, backlog for a new item.
-    // Optional: parent, thread, notes, repositories, waits_for (the items it can't start before they are done),
+    // Optional: parent, thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
     // given replaces the record's: [] clears it.
     {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds",
-     "thread": "01900000-0000-7000-8000-000000000002", "repositories": ["01900000-0000-7000-8000-000000000001"]},
+     "thread": "01900000-0000-7000-8000-000000000002"},
     {"id": "01900000-0000-7000-8000-000000000004", "title": "Plant the seeds",
      "thread": "01900000-0000-7000-8000-000000000002", "waits_for": ["01900000-0000-7000-8000-000000000003"]}
   ],
   // A thread groups items for one continuing agent conversation; an item joins one with its "thread". Optional:
-  // brief, repositories (beyond those of its items).
+  // brief.
   "threads": [
     {"id": "01900000-0000-7000-8000-000000000002", "title": "Spring planting"}
   ]
@@ -64,7 +64,7 @@ pub struct Import {
     pub format: String,
     /// The format version, [`VERSION`].
     pub version: u32,
-    /// Code repositories that items name.
+    /// Code repositories that evidence names.
     #[serde(default)]
     pub repositories: Vec<Repository>,
     /// Items, in any order.
@@ -125,9 +125,6 @@ pub struct Item {
     /// The thread it is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The repositories it touches: the whole set, replacing the item's own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repositories: Option<Vec<String>>,
     /// The items it waits for, which it can't start until they are done: the whole list, replacing the item's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_for: Option<Vec<String>>,
@@ -147,9 +144,6 @@ pub struct Thread {
     /// The brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
-    /// Repositories added explicitly, beyond those of its items: the whole set, replacing the thread's own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repositories: Option<Vec<String>>,
 }
 
 /// Why a document couldn't be read.
@@ -397,13 +391,11 @@ impl Import {
         }
         for record in &mut self.threads {
             low(&mut record.id);
-            all(&mut record.repositories);
         }
         for item in &mut self.items {
             low(&mut item.id);
             item.parent.iter_mut().for_each(low);
             item.thread.iter_mut().for_each(low);
-            all(&mut item.repositories);
             all(&mut item.waits_for);
             if let Some(commit) = item.evidence.as_mut().and_then(|e| e.commit.as_mut())
                 && let Some((repository, sha)) = commit.rsplit_once('@')
@@ -452,9 +444,6 @@ impl Import {
         }
         for record in &self.threads {
             check("thread id".to_owned(), &record.id);
-            for id in record.repositories.iter().flatten() {
-                check(format!("thread {}, repositories", record.id), id);
-            }
         }
         for item in &self.items {
             check("item id".to_owned(), &item.id);
@@ -463,9 +452,6 @@ impl Import {
                 if let Some(id) = id {
                     check(at(field), id);
                 }
-            }
-            for id in item.repositories.iter().flatten() {
-                check(at("repositories"), id);
             }
             for id in item.waits_for.iter().flatten() {
                 check(at("waits_for"), id);

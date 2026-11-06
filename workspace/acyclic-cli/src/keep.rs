@@ -153,10 +153,6 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
         ItemAssign::Thread(thread) => set("thread", thread),
         ItemAssign::WaitsFor(to, true) => ("waits-for", Flag::Each(to.clone())),
         ItemAssign::WaitsFor(to, false) => ("no-waits-for", Flag::Each(to.clone())),
-        ItemAssign::Repository(repository, true) => ("repository", Flag::Each(repository.clone())),
-        ItemAssign::Repository(repository, false) => {
-            ("no-repository", Flag::Each(repository.clone()))
-        },
         // Not an edit: `keeps` keeps evidence by finishing.
         ItemAssign::Evidence(_) => {
             unreachable!("an edit doesn't write {assign:?}")
@@ -170,12 +166,6 @@ fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
         ThreadAssign::Title(title) => ("title", Flag::Text(title.clone())),
         ThreadAssign::Brief(Some(brief)) => ("brief", Flag::Text(brief.clone())),
         ThreadAssign::Brief(None) => ("no-brief", Flag::On),
-        ThreadAssign::Repository(repository, true) => {
-            ("repository", Flag::Each(repository.clone()))
-        },
-        ThreadAssign::Repository(repository, false) => {
-            ("no-repository", Flag::Each(repository.clone()))
-        },
     };
     Command { words: ["thread", "edit"], subject: ("thread", id.to_owned()), flags: vec![flag] }
 }
@@ -233,7 +223,6 @@ mod identity_tests {
                 owner: Value::One("me".into()),
                 name: Value::One("code".into()),
                 default_branch: Value::One("main".into()),
-                installation: Value::None,
             },
         );
         for (repository, commit, executable) in

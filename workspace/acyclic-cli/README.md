@@ -18,8 +18,8 @@ Every command's inputs follow these rules, so you can guess a command from its n
    and `--no-field` to clear it. A set takes `--field <VALUE>`, repeatable, to add elements and `--no-field <VALUE>`,
    repeatable, to remove them; a removal looks among the elements the record holds first, so it also removes one
    whose record is gone. Naming a field and its `--no-` form together is a usage error. The common flags also
-   take a short form, their initial, and the same one in every command that takes them: `-t` for `--title`, `-r` for
-   `--repository`, `-e` for `--evidence`, and `-n` for `--dry-run` as other tools have it; `-o` is `--output`.
+   take a short form, their initial, and the same one in every command that takes them: `-t` for `--title`, `-e` for
+   `--evidence`, and `-n` for `--dry-run` as other tools have it; `-o` is `--output`.
 4. **`add` and `edit`** take the same fields. `add` creates; adding what exists again with the same values changes
    nothing, and with other values is refused as `already-exists`, naming the fields that differ. `edit` changes an
    existing entity and refuses an unknown one as `not-found`. A write is all or nothing: if any part is refused,
@@ -33,9 +33,8 @@ Every command's inputs follow these rules, so you can guess a command from its n
    least 6 characters, in any case. A reference that names several records, such as a title two share or a title of
    one that ends another's id, is refused as `ambiguous` with the `candidates` in its details. Text output names items
    and threads by the shortest ending of their ids that names them, and repositories by `owner/name`.
-6. **Relations are fields.** An item has `--parent`, `--thread`, `--repository`, `--waits-for` and `--state`; a
-   thread has `--repository`. Every actor's change applies at once; the actor, `--actor` or `ACYCLIC_ACTOR` and else
-   `actor/user`, only labels the write.
+6. **Relations are fields.** An item has `--parent`, `--thread`, `--waits-for` and `--state`. Every actor's change
+   applies at once; the actor, `--actor` or `ACYCLIC_ACTOR` and else `actor/user`, only labels the write.
 7. **Global options** (`--tracker`, `--actor`, `--output`) are listed under their own heading on every help page.
    `acyclic help` and `acyclic help <command> [<subcommand>]` show a command's help.
 8. **Enum-valued inputs** list their values in help, and a wrong value's error lists them again.

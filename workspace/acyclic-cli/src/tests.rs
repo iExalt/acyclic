@@ -369,6 +369,16 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
     assert_eq!(refused(json!({"import": {"schema": true}})), Ok(()));
     assert_eq!(refused(json!({"import": {"file": "p", "dry-run": true}})), Ok(()));
     assert_eq!(refused(json!({"repository": {"show": {"repositories": []}}})), Err("usage"));
+    // The repository sets are gone from the JSON commands as from the flags.
+    for removed in [
+        json!({"item": {"add": {"title": "T", "repository": ["r"]}}}),
+        json!({"item": {"edit": {"item": "a", "no-repository": ["r"]}}}),
+        json!({"thread": {"add": {"title": "T", "repository": ["r"]}}}),
+        json!({"thread": {"edit": {"thread": "t", "repository": ["r"]}}}),
+    ] {
+        let err = serde_json::from_value::<args::Command>(removed.clone()).unwrap_err();
+        assert!(err.to_string().contains("unknown field"), "{removed}: {err}");
+    }
     for lease in [0, 481] {
         assert_eq!(
             refused(json!({"thread": {"claim": {"thread": "t", "lease": lease}}})),
@@ -598,6 +608,12 @@ fn removed_fields_the_link_group_and_the_in_progress_state_are_refused_as_unknow
         "acyclic item edit a --no-gate",
         "acyclic item add -t T --size m",
         "acyclic item edit a --no-size",
+        "acyclic item add -t T -r r",
+        "acyclic item edit a --repository r",
+        "acyclic item edit a --no-repository r",
+        "acyclic thread add -t T -r r",
+        "acyclic thread edit t --repository r",
+        "acyclic thread edit t --no-repository r",
         "acyclic link add a waits-for b",
         "acyclic item edit a --state in-progress",
     ] {
@@ -619,9 +635,7 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --parent b --no-parent",
         "acyclic item edit a --thread t --no-thread",
         "acyclic item edit a --waits-for b --no-waits-for b",
-        "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
-        "acyclic thread edit t --repository r --no-repository r",
     ] {
         assert_eq!(check(line), Err("usage"), "{line}");
     }
@@ -644,7 +658,6 @@ fn readiness_checks_a_repository_against_its_mapped_clone_alone() {
         owner: one(owner),
         name: one(name),
         default_branch: acyclic_core::model::Value::None,
-        installation: acyclic_core::model::Value::None,
     };
     let clones = temp.path().join(".config/acyclic/clones.toml");
     let missing = context::clones(&env(&[("HOME", home)])).unwrap();

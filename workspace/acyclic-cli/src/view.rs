@@ -139,7 +139,6 @@ impl View<'_> {
             json!({
                 "role": model.role(id),
                 "notes": item.notes,
-                "repositories": item.repositories,
                 "children": model.children(id),
                 "links": links(&model.links, id),
                 "claims": claims,
@@ -166,7 +165,6 @@ impl View<'_> {
                 "progress": self.thread_progress(listed)?,
                 "claims": claims,
                 "brief": thread.map(|t| &t.brief),
-                "repositories": self.model.repository_set(id),
                 "members": members,
             }),
         ))
@@ -342,27 +340,6 @@ pub(crate) fn repo_row(record: &acyclic_core::model::Repository) -> Json {
         "name": record.name,
         "default_branch": record.default_branch,
     })
-}
-
-/// A repository in full: its summary, its installation, and the items and threads that touch it.
-pub(crate) fn repo_show(model: &Model, record: &acyclic_core::model::Repository) -> Json {
-    let id = &record.id;
-    let items: Vec<&str> = model
-        .items
-        .values()
-        .filter(|item| item.repositories.contains(id))
-        .map(|item| item.id.as_str())
-        .collect();
-    let threads: Vec<&str> = model
-        .threads
-        .values()
-        .filter(|thread| thread.repositories.contains(id))
-        .map(|thread| thread.id.as_str())
-        .collect();
-    with(
-        repo_row(record),
-        json!({"installation": record.installation, "items": items, "threads": threads}),
-    )
 }
 
 #[cfg(test)]
@@ -644,24 +621,5 @@ mod tests {
                 follows_the_conventions(shown, "needs");
             }
         });
-    }
-
-    #[test]
-    fn a_repository_is_one_row_that_show_extends_with_what_touches_it() {
-        let mut r = tracker();
-        scope::edit(
-            &mut r,
-            &ScopeEdit::ItemRepository { item: "b".into(), repository: "r".into(), present: true },
-            by(USER),
-        )
-        .unwrap();
-        let model = Model::read(r.state()).unwrap();
-        let shown = repo_show(&model, &model.repositories["r"]);
-        assert_eq!(
-            shown,
-            json!({"id": "r", "owner": "me", "name": "code", "default_branch": "main",
-                   "installation": null, "items": ["b"], "threads": []})
-        );
-        follows_the_conventions(&shown, "repository");
     }
 }

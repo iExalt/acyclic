@@ -15,7 +15,7 @@ use crate::model::{
 };
 use crate::place::{Inherited, passed_down};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
-use crate::schema::{item as field, kind, link, repository, set, thread};
+use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error as StateError, Key, Millis, Replica, State};
 
 /// A condition an app write requires to still hold in the tracker's current state.
@@ -384,8 +384,6 @@ pub enum FieldName {
     Name,
     /// A repository's default branch.
     DefaultBranch,
-    /// One repository in an item's or thread's set.
-    Repository(String),
     /// One item an item waits for.
     WaitsFor(String),
 }
@@ -405,7 +403,6 @@ impl FieldName {
             Self::Owner => repository::OWNER,
             Self::Name => repository::NAME,
             Self::DefaultBranch => repository::DEFAULT_BRANCH,
-            Self::Repository(_) => "repositories",
             Self::WaitsFor(_) => "waits-for",
         }
     }
@@ -435,8 +432,6 @@ pub enum ItemAssign {
     Evidence(Option<Evidence>),
     /// Its thread, or none.
     Thread(Option<String>),
-    /// Adds a repository it touches, or removes one.
-    Repository(String, bool),
     /// Makes it wait for an item, or stop.
     WaitsFor(String, bool),
 }
@@ -448,8 +443,6 @@ pub enum ThreadAssign {
     Title(String),
     /// Its brief, or none.
     Brief(Option<String>),
-    /// Adds a repository to it explicitly, or removes one.
-    Repository(String, bool),
 }
 
 /// A value for one of a repository record's fields.
@@ -488,7 +481,6 @@ impl Assign {
                     ItemAssign::Parent(_) => FieldName::Parent,
                     ItemAssign::Evidence(_) => FieldName::Evidence,
                     ItemAssign::Thread(_) => FieldName::Thread,
-                    ItemAssign::Repository(r, _) => FieldName::Repository(r.clone()),
                     ItemAssign::WaitsFor(to, _) => FieldName::WaitsFor(to.clone()),
                 },
             ),
@@ -497,7 +489,6 @@ impl Assign {
                 match assign {
                     ThreadAssign::Title(_) => FieldName::Title,
                     ThreadAssign::Brief(_) => FieldName::Brief,
-                    ThreadAssign::Repository(r, _) => FieldName::Repository(r.clone()),
                 },
             ),
             Self::Repository(id, assign) => (
@@ -525,14 +516,11 @@ impl Assign {
                 ItemAssign::Parent(v) => to_json(v),
                 ItemAssign::Evidence(v) => to_json(v),
                 ItemAssign::Thread(v) => to_json(v),
-                ItemAssign::Repository(_, present) | ItemAssign::WaitsFor(_, present) => {
-                    Json::Bool(*present)
-                },
+                ItemAssign::WaitsFor(_, present) => Json::Bool(*present),
             },
             Self::Thread(_, assign) => match assign {
                 ThreadAssign::Title(v) => to_json(v),
                 ThreadAssign::Brief(v) => to_json(v),
-                ThreadAssign::Repository(_, present) => Json::Bool(*present),
             },
             Self::Repository(_, assign) => match assign {
                 RepositoryAssign::Owner(v)
@@ -929,14 +917,7 @@ impl Judging<'_, '_> {
                     self.refuse(Some(n), Some(at), Rule::RepeatDiffers);
                     continue;
                 }
-                // Scope additions need a fresh dot so an unseen removal cannot erase this explicit intent.
-                let reasserts_scope = repeat.is_none()
-                    && matches!(
-                        assign,
-                        Assign::Item(_, ItemAssign::Repository(_, true))
-                            | Assign::Thread(_, ThreadAssign::Repository(_, true))
-                    );
-                if !holds || !exists || reasserts_scope {
+                if !holds || !exists {
                     self.apply(n, true, Written::Assign(assign.clone()));
                 }
             }
@@ -979,15 +960,9 @@ impl Judging<'_, '_> {
                 self.after.items.insert(id.clone(), empty_item(&id));
             },
             Record::Thread(_) => {
-                self.after.threads.insert(
-                    id.clone(),
-                    Thread {
-                        id,
-                        title: Value::None,
-                        brief: Value::None,
-                        repositories: BTreeSet::new(),
-                    },
-                );
+                self.after
+                    .threads
+                    .insert(id.clone(), Thread { id, title: Value::None, brief: Value::None });
             },
             Record::Repository(_) => {
                 self.after.repositories.insert(
@@ -997,7 +972,6 @@ impl Judging<'_, '_> {
                         owner: Value::None,
                         name: Value::None,
                         default_branch: Value::None,
-                        installation: Value::None,
                     },
                 );
             },
@@ -1146,11 +1120,6 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                 ItemAssign::Thread(Some(thread)) if !after.threads.contains_key(thread) => {
                     refuse(Rule::NoRecord(Record::Thread(thread.clone())));
                 },
-                ItemAssign::Repository(repository, true)
-                    if !after.repositories.contains_key(repository) =>
-                {
-                    refuse(Rule::NoRecord(Record::Repository(repository.clone())));
-                },
                 ItemAssign::WaitsFor(to, true) if !after.items.contains_key(to) => {
                     refuse(Rule::NoRecord(Record::Item(to.clone())));
                 },
@@ -1189,12 +1158,7 @@ fn assign_rules(after: &Model, steps: &[Step]) -> Vec<Violation> {
                 },
                 _ => {},
             },
-            Assign::Thread(_, ThreadAssign::Repository(repository, true))
-                if !after.repositories.contains_key(repository) =>
-            {
-                refuse(Rule::NoRecord(Record::Repository(repository.clone())));
-            },
-            _ => {},
+            Assign::Thread(..) | Assign::Repository(..) => {},
         }
     }
     found
@@ -1428,9 +1392,7 @@ fn holds(model: &Model, assign: &Assign) -> bool {
         Assign::Item(id, assign) => {
             let Some(item) = model.items.get(id) else { return false };
             let name = assign_name(assign);
-            if !matches!(assign, ItemAssign::Repository(..) | ItemAssign::WaitsFor(..))
-                && conflicted(kind::ITEM, id, name)
-            {
+            if !matches!(assign, ItemAssign::WaitsFor(..)) && conflicted(kind::ITEM, id, name) {
                 return false;
             }
             match assign {
@@ -1440,7 +1402,6 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ItemAssign::Parent(v) => item.parent.holds(v.as_ref()),
                 ItemAssign::Evidence(v) => item.evidence.holds(v.as_ref()),
                 ItemAssign::Thread(v) => item.thread.holds(v.as_ref()),
-                ItemAssign::Repository(r, present) => item.repositories.contains(r) == *present,
                 ItemAssign::WaitsFor(to, present) => {
                     model.links.iter().any(|l| l.from == *id && l.to == *to) == *present
                 },
@@ -1455,7 +1416,6 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ThreadAssign::Brief(v) => {
                     !conflicted(kind::THREAD, id, thread::BRIEF) && record.brief.holds(v.as_ref())
                 },
-                ThreadAssign::Repository(r, present) => record.repositories.contains(r) == *present,
             }
         },
         Assign::Repository(id, assign) => {
@@ -1480,7 +1440,6 @@ const fn assign_name(assign: &ItemAssign) -> &'static str {
         ItemAssign::Parent(_) => field::PARENT,
         ItemAssign::Evidence(_) => field::EVIDENCE,
         ItemAssign::Thread(_) => field::THREAD,
-        ItemAssign::Repository(..) => set::REPOSITORY,
         ItemAssign::WaitsFor(..) => link::PRESENT,
     }
 }
@@ -1495,7 +1454,6 @@ fn empty_item(id: &str) -> Item {
         parent: Value::None,
         evidence: Value::None,
         thread: Value::None,
-        repositories: BTreeSet::new(),
     }
 }
 
@@ -1521,14 +1479,6 @@ fn project(model: &mut Model, write: &Written, at: Millis) {
                 ThreadAssign::Brief(v) => {
                     record.brief = one(v.clone());
                     thread::BRIEF
-                },
-                ThreadAssign::Repository(r, present) => {
-                    if *present {
-                        record.repositories.insert(r.clone());
-                    } else {
-                        record.repositories.remove(r);
-                    }
-                    return;
                 },
             };
             settled(model, kind::THREAD, id, name);
@@ -1606,14 +1556,6 @@ fn project_item(model: &mut Model, id: &str, assign: &ItemAssign, at: Millis) {
         ItemAssign::Parent(v) => item.parent = one(v.clone()),
         ItemAssign::Evidence(v) => item.evidence = one(v.clone()),
         ItemAssign::Thread(v) => item.thread = one(v.clone()),
-        ItemAssign::Repository(r, present) => {
-            if *present {
-                item.repositories.insert(r.clone());
-            } else {
-                item.repositories.remove(r);
-            }
-            return;
-        },
         ItemAssign::WaitsFor(..) => unreachable!("handled above"),
     }
     model.conflicts.remove(&(kind::ITEM.to_owned(), id.to_owned(), name.to_owned()));
@@ -1673,10 +1615,6 @@ fn emit(replica: &mut Replica, assign: &Assign, by: By<'_>) -> Result<(), WriteE
                 replica.write(&key, link::PRESENT, by.actor, by.at, None)?;
                 Ok(())
             }
-        },
-        Assign::Item(_, ItemAssign::Repository(r, present))
-        | Assign::Thread(_, ThreadAssign::Repository(r, present)) => {
-            model::put_element(replica, &key, set::REPOSITORY, r, *present, by)
         },
         Assign::Item(_, item) => {
             let value = assign.value();

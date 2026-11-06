@@ -203,30 +203,10 @@ fn link_ids_are_unambiguous() {
 }
 
 #[test]
-fn set_elements_merge_and_a_concurrent_add_beats_a_removal() {
-    let (mut a, mut b) = pair(&["x"]);
-    let key = item_key("x").unwrap();
-    put_element(&mut a, &key, set::REPOSITORY, "ui", true, by(2)).unwrap();
-    put_element(&mut b, &key, set::REPOSITORY, "core", true, by(2)).unwrap();
-    a.join(&b.state).unwrap();
-    b.join(&a.state).unwrap();
-    assert_eq!(model(&a).items["x"].repositories, BTreeSet::from(["core".into(), "ui".into()]));
-    put_element(&mut a, &key, set::REPOSITORY, "ui", false, by(3)).unwrap();
-    put_element(&mut b, &key, set::REPOSITORY, "ui", true, by(3)).unwrap();
-    a.join(&b.state).unwrap();
-    assert!(model(&a).items["x"].repositories.contains("ui"));
-}
-
-#[test]
 fn names_follow_the_id_rule() {
     let mut r = replica("a");
-    items(&mut r, &["x"]);
-    let key = item_key("x").unwrap();
     for bad in ["a/b", "Engine", "", ".hidden"] {
-        assert_eq!(
-            put_element(&mut r, &key, set::REPOSITORY, bad, true, by(2)),
-            Err(WriteError::InvalidName(bad.to_owned()))
-        );
+        assert_eq!(item_key(bad), Err(WriteError::InvalidName(bad.to_owned())));
     }
     let long = "a".repeat(MAX_ID_LEN + 1);
     assert!(matches!(add_item(&mut r, &long, "t", by(2)), Err(WriteError::InvalidName(_))));
@@ -234,14 +214,10 @@ fn names_follow_the_id_rule() {
 }
 
 #[test]
-fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() {
+fn a_conflicted_thread_puts_an_item_in_neither() {
     let (mut a, mut b) = pair(&["x", "y"]);
     let thread_key = |id| Key::new(kind::THREAD, id).unwrap();
     set(&mut a, &thread_key("t1"), thread::TITLE, Some(&"one"), by(2)).unwrap();
-    put_element(&mut a, &thread_key("t1"), set::REPOSITORY, "docs", true, by(2)).unwrap();
-    for (id, repo) in [("x", "code"), ("y", "infra")] {
-        put_element(&mut a, &item_key(id).unwrap(), set::REPOSITORY, repo, true, by(2)).unwrap();
-    }
     put(&mut a, &item_key("x").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
     put(&mut a, &item_key("y").unwrap(), field::THREAD, Some(&"t1"), by(2)).unwrap();
     put(&mut b, &item_key("y").unwrap(), field::THREAD, Some(&"t2"), by(2)).unwrap();
@@ -250,7 +226,6 @@ fn a_conflicted_thread_puts_an_item_in_neither_and_repository_sets_are_unions() 
     assert_eq!(m.members("t1"), vec!["x"]);
     assert_eq!(m.members("t2"), Vec::<&str>::new());
     assert_eq!(m.thread_of("y"), None);
-    assert_eq!(m.repository_set("t1"), BTreeSet::from(["code".into(), "docs".into()]));
 }
 
 #[test]

@@ -14,7 +14,7 @@ fn ids_print_as_the_names_people_use() {
         [(plant, "0000a1"), (beds, "0000b1"), (code, "me/garden")]
             .map(|(id, name)| (id.to_owned(), name.to_owned())),
     );
-    let shown = json!([{"id": plant, "title": "Plant", "repositories": [code],
+    let shown = json!([{"id": plant, "title": "Plant",
         "readiness": {"status": "blocked", "waiting": {beds: {"why": "open"}}},
         "evidence": {"commit": "me/garden@abc1234", "text": null}}]);
     let text = render(&command("item show Plant"), &shown, None, &names);
@@ -73,7 +73,7 @@ fn ready_names_each_thread_once_and_thread_list_shows_counts_and_waves() {
 
 #[test]
 fn records_are_blocks_and_writes_are_one_line() {
-    let shown = json!([{"id": "plant", "title": "Plant", "notes": null, "repositories": [],
+    let shown = json!([{"id": "plant", "title": "Plant", "notes": null,
         "links": {"waits_for": ["beds"], "waited_on_by": []},
         "claims": [{"holder": "session/s", "replica": "mac", "lease_started_at": "2026-10-15T00:00:00Z",
                     "lease_expires_at": "2026-10-15T01:00:00Z"}]}]);
