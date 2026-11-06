@@ -79,8 +79,8 @@ export function step(
   if (press.isComposing || press.keyCode === 229 || press.repeat) return none;
   if (press.ctrlKey || press.metaKey || press.altKey) return none;
   if (context.picking === true) {
-    // Typing is a search for the target, not a shortcut; Enter opens the same search, empty.
-    if (press.key === "Enter") return { pending: null, action: { kind: "find", text: "" } };
+    // Typing is a search for the target, not a shortcut; Enter, / and ? open the same search, empty, as they do anywhere.
+    if (["Enter", "/", "?"].includes(press.key)) return { pending: null, action: { kind: "find", text: "" } };
     return press.key.length === 1 && press.key !== " "
       ? { pending: null, action: { kind: "find", text: press.key } }
       : none;

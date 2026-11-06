@@ -2379,12 +2379,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
     if not page.get_by_test_id("prompt").evaluate(bar_focused):
         failures.append(f"{name}: the link's pick bar didn't take the focus")
     else:
+        # The first key opens the find and the next goes into its field, so the two read as typed.
         page.keyboard.press("m")
         try:
             find = page.get_by_test_id("command-menu").get_by_role("combobox")
             find.wait_for(timeout=5_000)
-            if find.input_value() != "m":
-                failures.append(f"{name}: typing at the pick bar found {find.input_value()!r}, not 'm'")
+            page.keyboard.press("o")
+            if find.input_value() != "mo":
+                failures.append(f"{name}: typing at the pick bar found {find.input_value()!r}, not 'mo'")
             page.keyboard.press("Escape")
             page.get_by_test_id("command-menu").wait_for(state="detached", timeout=5_000)
             if not page.get_by_test_id("prompt").evaluate(bar_focused):
@@ -3160,6 +3162,20 @@ def needs_journey(page, env, plan, thread, name, failures):
     except PlaywrightTimeout:
         failures.append(f"{name}: the Needs you tab showed no list")
         return
+    # J focuses an entry, its ring rounded like the rest and drawn outside it, so the badge at its edge isn't crossed
+    # and the ring isn't cut off at the view's left edge.
+    page.keyboard.press("j")
+    ring = page.evaluate(
+        """() => {
+            const e = document.activeElement;
+            const s = getComputedStyle(e);
+            return { entry: e.matches(".needs > li[data-row]"), radius: s.borderTopLeftRadius,
+                     offset: parseFloat(s.outlineOffset), width: parseFloat(s.outlineWidth),
+                     reach: e.getBoundingClientRect().left - parseFloat(s.outlineOffset) - parseFloat(s.outlineWidth) };
+        }"""
+    )
+    if not ring["entry"] or ring["radius"] != "8px" or ring["offset"] <= 0 or ring["reach"] < 0:
+        failures.append(f"{name}: J's focus ring on a Needs you entry was {ring}, not rounded, outside and uncut")
     # A grouped terminal-only entry opens its details with one tap; its member then returns to the same control.
     disclosure = needs.locator(".need-disclosure-toggle").first
     disclosure.wait_for(timeout=5_000)

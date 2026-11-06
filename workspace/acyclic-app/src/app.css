@@ -97,7 +97,7 @@ p {
 }
 /* A Needs you entry J and K move to is no control either, but where the keys are has to show: a ring at the radius
    of the rest, outside the entry so it clears the badge on its left edge instead of crossing it. */
-li[data-row]:focus-visible {
+.needs > li[data-row]:focus-visible {
   border-radius: var(--radius);
   outline: 2px solid var(--accent);
   outline-offset: 4px;

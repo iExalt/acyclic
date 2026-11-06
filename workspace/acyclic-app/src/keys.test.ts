@@ -159,10 +159,12 @@ describe("a pick bar waiting for a target", () => {
     expect(act("g", {}, picking)).toEqual({ kind: "find", text: "g" });
     expect(act("j", {}, picking)).toEqual({ kind: "find", text: "j" });
     expect(act("W", { shiftKey: true }, picking)).toEqual({ kind: "find", text: "W" });
-    expect(act("?", { shiftKey: true }, picking)).toEqual({ kind: "find", text: "?" });
   });
-  it("opens an empty search on Enter, and leaves chords, space, arrows and held keys alone", () => {
+  it("opens an empty search on Enter, / and ?, and leaves chords, space, arrows and held keys alone", () => {
     expect(act("Enter", {}, picking)).toEqual({ kind: "find", text: "" });
+    // / and ? are the search's and the key list's own keys, so they open it empty rather than seeding it.
+    expect(act("/", {}, picking)).toEqual({ kind: "find", text: "" });
+    expect(act("?", { shiftKey: true }, picking)).toEqual({ kind: "find", text: "" });
     expect(act("a", { metaKey: true }, picking)).toBeNull();
     expect(act(" ", {}, picking)).toBeNull();
     expect(act("ArrowDown", {}, picking)).toBeNull();
