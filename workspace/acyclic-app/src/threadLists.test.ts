@@ -10,6 +10,7 @@ const NONE: Counts = {
   waiting: 0,
   parked: 0,
   unthreaded: 0,
+  canceled: 0,
 };
 describe("the Overview's threads", () => {
   it("lists threads at work, and to start those with an item ready, each by id in natural order", () => {

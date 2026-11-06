@@ -102,7 +102,7 @@ export function ThreadPanel({
       {/* No total beside the counts: they are of its leaves, which a total of every member, parents too, wouldn't add up to. */}
       <div className="thread-summary">
         <div className="progress">
-          {counts === undefined || counts.leaves === 0 ? (
+          {counts === undefined || counts.leaves + counts.canceled === 0 ? (
             <span className="muted">No items shown</span>
           ) : (
             <StageCounts counts={counts} />

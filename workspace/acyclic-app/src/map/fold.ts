@@ -33,7 +33,7 @@ export interface Folded {
 
 /**
  * Folds the finished work in each box of `model`. A thread is finished when every leaf it has is
- * done. Each finished thread with two or more of a box's leaves becomes a box in that box. Those boxes and the box's
+ * done or canceled, and a canceled leaf stays where it is, out of the Done box. Each finished thread with two or more of a box's leaves becomes a box in that box. Those boxes and the box's
  * other done leaves that are finished (a finished thread's last one there, or one in no thread) go into the box's
  * Done box, unless a link inside the box joins them, directly or through each other, to anything else; it
  * forms only when it would hold two or more and leave something beside it. `titleOf` names a thread.
@@ -45,7 +45,9 @@ export function foldDone(model: Model, titleOf: (thread: string) => string | nul
   const finished = new Map<string, boolean>();
   for (const item of model.items.values()) {
     const thread = threadOf(item);
-    if (thread !== null && live(item)) finished.set(thread, (finished.get(thread) ?? true) && item.stage === "done");
+    // Canceled work is finished too, but stays out of the Done box: only done leaves fold.
+    if (thread !== null && live(item))
+      finished.set(thread, (finished.get(thread) ?? true) && (item.stage === "done" || item.stage === "canceled"));
   }
   const doneLeaf = (item: MapItem) => {
     const thread = threadOf(item);
@@ -166,6 +168,7 @@ const NONE: Counts = {
   waiting: 0,
   parked: 0,
   unthreaded: 0,
+  canceled: 0,
 };
 
 /** An item and everything under it. */

@@ -199,7 +199,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit Second --state done
 
 # stderr
 error: invalid value 'done' for '--state <STATE>'
-  [possible values: open, parked]
+  [possible values: open, parked, canceled]
 
   tip: a similar value exists: 'open'
 
@@ -314,6 +314,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
       "notes": null,
       "progress": {
         "counts": {
+          "canceled": 0,
           "done": 1,
           "in_progress": 1,
           "leaves": 2,
@@ -590,6 +591,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "id": "01900000-0000-7000-8000-0000000000f0",
         "progress": {
           "counts": {
+            "canceled": 0,
             "done": 0,
             "in_progress": 0,
             "leaves": 0,
@@ -606,6 +608,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "id": "01900000-0000-7000-8000-0000000000f1",
         "progress": {
           "counts": {
+            "canceled": 0,
             "done": 1,
             "in_progress": 0,
             "leaves": 2,
@@ -700,6 +703,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
       "notes": null,
       "progress": {
         "counts": {
+          "canceled": 0,
           "done": 1,
           "in_progress": 0,
           "leaves": 2,
@@ -1276,6 +1280,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       "parent": null,
       "progress": {
         "counts": {
+          "canceled": 0,
           "done": 1,
           "in_progress": 0,
           "leaves": 1,

@@ -46,7 +46,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
     "details": {
       "hint": "run acyclic doctor"
     },
-    "message": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `open`, `parked`, `done`"
+    "message": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `open`, `parked`, `done`, `canceled`"
   },
   "ok": false
 }
@@ -68,7 +68,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "replica": "mac",
     "unreadable": [
       {
-        "error": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `open`, `parked`, `done`",
+        "error": "unreadable state: invalid state on item 01900000-0000-7000-8000-0000000000a1: unknown variant `in-progress`, expected one of `backlog`, `open`, `parked`, `done`, `canceled`",
         "id": "01900000-0000-7000-8000-0000000000a1",
         "record": "item"
       },

@@ -357,7 +357,9 @@ function ItemStatus({ item }: { item: Item }) {
     return (
       <>
         <span>{item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}</span>
-        {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
+        {item.progress.counts.leaves + item.progress.counts.canceled === 0 ? null : (
+          <StageCounts counts={item.progress.counts} />
+        )}
       </>
     );
   // A leaf core hasn't placed is one drawn before the server has it: its stage comes with the server's read, and its

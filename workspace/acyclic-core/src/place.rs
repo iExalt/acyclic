@@ -39,7 +39,7 @@ fn shared_by_children<'m>(model: &'m Model, parent: &str) -> Option<&'m str> {
     let mut shared = None;
     for child in model.children(parent) {
         let item = &model.items[child];
-        if item.is_done() {
+        if item.is_finished() {
             continue;
         }
         match &item.thread {
@@ -78,7 +78,7 @@ fixture! {
         let mut placed = Vec::new();
         for item in items {
             let Some(found) = model.items.get(item) else { continue };
-            if found.thread != Value::None || found.is_done() {
+            if found.thread != Value::None || found.is_finished() {
                 continue;
             }
             if let Some(thread) = inherited_thread(&model, item) {

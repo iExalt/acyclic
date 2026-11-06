@@ -68,6 +68,8 @@ pub(crate) struct ItemFields {
     pub parent: Change<String>,
     pub thread: Change<String>,
     pub state: Option<ItemState>,
+    /// Cancel it although someone else holds a claim on its work; only an edit's canceling asks.
+    pub force: bool,
     pub notes: Change<String>,
     pub waits_for: Delta,
 }
@@ -230,7 +232,10 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
     if let Some(parent) = fields.parent.given() {
         assigns.push(field(ItemAssign::Parent(parent.cloned())));
     }
-    if let Some(state) = fields.state {
+    let canceling = fields.state == Some(ItemState::Canceled) && adding == Adding::No;
+    if let Some(state) = fields.state
+        && !canceling
+    {
         assigns.push(field(ItemAssign::State(state)));
     }
     if let Some(thread) = fields.thread.given() {
@@ -239,7 +244,11 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
     for (list, present) in [(&fields.waits_for.remove, false), (&fields.waits_for.add, true)] {
         assigns.extend(list.iter().map(|to| field(ItemAssign::WaitsFor(to.clone(), present))));
     }
-    changes(Record::Item(id.to_owned()), assigns, adding)
+    let mut set = changes(Record::Item(id.to_owned()), assigns, adding);
+    if canceling {
+        set.0.push(WriteChange::Cancel { item: id.to_owned(), force: fields.force });
+    }
+    set
 }
 
 /// The change set a thread's fields ask for.
@@ -317,6 +326,23 @@ fn flag(field: &FieldName) -> &'static str {
     FLAGS.iter().find(|(of, _)| *of == name).map_or("--title", |(_, flag)| flag)
 }
 
+/// A refused cancel: the work is done, or someone else holds a claim on it.
+fn cancel_refusal(rule: &Rule, record: Option<&Record>) -> CliError {
+    let id = record.map_or("", Record::id);
+    match rule {
+        Rule::CancelHeld { holder } => CliError::refused(
+            "claimed",
+            format!("{holder} holds a claim on item {id}'s work; pass --force to cancel it anyway"),
+        )
+        .with(json!({"item": id, "holder": holder})),
+        _ => CliError::refused(
+            "done",
+            format!("item {id} is done, so it can't be canceled: `acyclic item reopen {id}` first"),
+        )
+        .with(json!({"item": id})),
+    }
+}
+
 /// One violation as the CLI has always told it: its code, exit status, message and details. `name` is the
 /// `owner/name` a repository write gave, which a taken name repeats as given.
 fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) -> CliError {
@@ -383,6 +409,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
             )
             .with(json!({"item": id}))
         },
+        Rule::CancelDone | Rule::CancelHeld { .. } => cancel_refusal(&violation.rule, record),
         Rule::EvidenceDiffers => {
             let id = record.map_or("", Record::id);
             let evidence = before.items.get(id).map(|item| view::evidence(before, &item.evidence));

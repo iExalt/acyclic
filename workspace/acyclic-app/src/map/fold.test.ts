@@ -54,6 +54,25 @@ describe("foldDone", () => {
     expect(folded.model.depth.get("a1")).toBe(3);
   });
 
+  it("counts canceled leaves as finishing a thread but leaves them out of the Done box", () => {
+    const canceled = (id: string, parent: string, thread: string | null) =>
+      item(id, parent, [], { state: "canceled", stage: "canceled", thread });
+    const folded = fold([
+      item("p"),
+      done("a1", "p", "a"),
+      done("a2", "p", "a"),
+      canceled("a3", "p", "a"),
+      done("b1", "p", "b"),
+      canceled("c1", "p", null),
+      ready("x", "p", null),
+    ]);
+    // a is finished with a canceled leaf, so its two done leaves fold, and the canceled one stays beside the box.
+    expect(kidsOf(folded, "~thread p a")).toEqual(["a1", "a2"]);
+    expect(kidsOf(folded, "p")).toEqual(["a3", "c1", "x", "~done p"]);
+    expect(kidsOf(folded, "~done p")).toEqual(["b1", "~thread p a"]);
+    expect(folded.model.items.get("~thread p a")?.progress).toMatchObject({ done: 2, leaves: 2, canceled: 0 });
+  });
+
   it("keeps finished work out of the Done box when links tie it, through each other, to work left in the box", () => {
     const folded = fold(chained(true));
     expect(folded.model.children.has("~done p")).toBe(false);

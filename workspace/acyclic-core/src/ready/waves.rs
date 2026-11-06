@@ -81,8 +81,8 @@ impl ReadinessEvaluator<'_> {
                 continue;
             }
             left.insert(thread);
-            // Done work waits on nothing, and parked work waits for the user, not for other threads.
-            if item.is_done() || self.stage(id)? == Some(Stage::Parked) {
+            // Finished work waits on nothing, and parked work waits for the user, not for other threads.
+            if item.is_finished() || self.stage(id)? == Some(Stage::Parked) {
                 continue;
             }
             for dependency in self.waiting(id).into_keys() {
@@ -110,9 +110,9 @@ impl ReadinessEvaluator<'_> {
         self.model.thread_of(id).filter(|thread| self.model.threads.contains_key(*thread))
     }
 
-    /// Whether `id` is a leaf with work left: any stage but done.
+    /// Whether `id` is a leaf with work left: any stage but done or canceled.
     fn has_work_left(&self, id: &str) -> Result<bool, Error> {
-        Ok(self.stage(id)?.is_some_and(|stage| stage != Stage::Done))
+        Ok(self.stage(id)?.is_some_and(|stage| !matches!(stage, Stage::Done | Stage::Canceled)))
     }
 
     /// The threads of the unfinished leaves at or under `id`.

@@ -663,6 +663,35 @@ fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
     }
 }
 
+/// The wiring of canceling, which core's tests prove: the flag parses, the item reads `canceled` in state and stage, and
+/// a refusal is a `refused` error with its code and message, `--force` passing the one over a claim.
+#[test]
+fn canceling_parses_reads_back_and_refuses_in_the_clis_words() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let [cut, done, held, work] = ["a1", "a2", "a3", "f1"].map(id);
+    for line in [
+        format!("thread add --id {work} --title Work"),
+        format!("item add --id {cut} --title Cut --thread {work}"),
+        format!("item add --id {done} --title Done --thread {work}"),
+        format!("item add --id {held} --title Held --thread {work}"),
+        format!("item done {done} --evidence shipped --force"),
+        format!("item edit {cut} --state canceled"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    let shown = sh.output(&format!("item show {cut}"), AGENT).1["data"][0].clone();
+    assert_eq!((&shown["state"], &shown["stage"]), (&json!("canceled"), &json!("canceled")));
+    let (code, out) = sh.output(&format!("item edit {done} --state canceled"), &[]);
+    assert_eq!((code, &out["error"]["code"]), (1, &json!("done")), "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("item reopen"), "{out}");
+    assert_eq!(sh.run(&format!("thread claim {work}"), AGENT), 0);
+    let (code, out) = sh.output(&format!("item edit {held} --state canceled"), &[]);
+    assert_eq!((code, &out["error"]["code"]), (1, &json!("claimed")), "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("--force"), "{out}");
+    assert_eq!(sh.run(&format!("item edit {held} --state canceled --force"), &[]), 0);
+}
+
 /// A thread's notes read as `notes` and are written under the older field `brief`, which replicas of older versions
 /// read: from `--notes`, the older `--brief` and `--no-brief`, the app's edit expecting the notes it read (or, as
 /// older clients say, its brief), and an import naming them `notes` or `brief`.
@@ -807,6 +836,15 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
         format!("item add --id {} --title Late --thread {t1}", id("a3")),
         format!("item add --id {} --title Early --thread {t1} --waits-for {}", id("a4"), id("a3")),
         format!("item done {} --commit me/code@abc1234 --force", id("a4")),
+        // Work that waits for canceled work, and an item to be canceled on one replica and done on another.
+        format!("item add --id {} --title Dropped --thread {t1}", id("a5")),
+        format!(
+            "item add --id {} --title Waiting --thread {t1} --waits-for {}",
+            id("a6"),
+            id("a5")
+        ),
+        format!("item add --id {} --title Disputed --thread {t1}", id("a7")),
+        format!("item edit {} --state canceled", id("a5")),
     ] {
         assert_eq!(sh.run(&line, AGENT), 0, "{line}");
     }
@@ -816,6 +854,7 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
     let apart = [
         (key("item", &a1), "title", json!("One"), json!("Two")),
         (key("item", &a1), "state", json!("done"), json!("parked")),
+        (key("item", &id("a7")), "state", json!("done"), json!("canceled")),
         // Stored as `backlog`, shown and kept as `open`.
         (key("item", &p1), "state", json!("backlog"), json!("parked")),
         (key("item", &a1), "parent", json!(p1), json!(null)),

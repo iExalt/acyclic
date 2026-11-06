@@ -4,9 +4,11 @@
 import type { Command, Item } from "./api";
 
 /** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
-export const STATES = ["open", "parked"] as const;
+export const STATES = ["open", "parked", "canceled"] as const;
 /** Explain an open state separately from the status computed for a leaf. */
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
+  if (draft.state === "canceled")
+    return "Canceled work is dropped: it counts as neither done nor open, and work waiting on it needs you. Open undoes it";
   if (!isLeaf || draft.state !== "open") return null;
   return "Open is work still to do. Status also reflects its thread, waits and active claims";
 }

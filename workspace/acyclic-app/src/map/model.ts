@@ -57,7 +57,10 @@ export function buildModel(items: Item[]): Model {
         parent: item.parent,
         thread: item.thread,
         stage: item.stage ?? null,
-        progress: item.progress === undefined || item.progress.counts.leaves === 0 ? null : item.progress.counts,
+        progress:
+          item.progress === undefined || item.progress.counts.leaves + item.progress.counts.canceled === 0
+            ? null
+            : item.progress.counts,
         waitsFor: [...item.links.waits_for],
       },
     ]),
@@ -290,10 +293,10 @@ function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { don
 }
 
 /**
- * A stage for a tile core gives none: a parent with no leaves to count, drawn as a tile. Its own state says what it can: done, parked or started, and nothing otherwise.
+ * A stage for a tile core gives none: a parent with no leaves to count, drawn as a tile. Its own state says what it can: done, parked, canceled or started, and nothing otherwise.
  */
 export function fallbackStage(state: string): Stage | null {
-  return state === "done" || state === "parked" || state === "in-progress" ? state : null;
+  return state === "done" || state === "parked" || state === "canceled" || state === "in-progress" ? state : null;
 }
 
 /**

@@ -665,6 +665,92 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
     assert_eq!(refused(&r, vec![ghost]), [Rule::NoRecord(Record::Item("ghost".into()))]);
 }
 
+/// The rules canceling `id` breaks, judged with readiness as `by(99)`, or none when it is accepted.
+fn canceling(r: &Replica, id: &str, force: bool) -> Vec<Rule> {
+    let before = read(r);
+    let readiness = ReadinessEvaluator::new(&r.state, &before, 99);
+    let cancel = Change::Cancel { item: id.into(), force };
+    judge(&before, &ChangeSet(vec![cancel]), by(99), Some(&readiness))
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|violation| violation.rule)
+        .collect()
+}
+
+#[test]
+fn canceling_refuses_done_work_and_another_holders_claim_unless_forced_and_frees_the_title() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("free", vec![ItemAssign::Thread(Some("t".into()))]),
+            add("done", vec![]),
+            add("parent", vec![]),
+            add("child", vec![ItemAssign::Parent(Some("parent".into()))]),
+        ],
+    );
+    assert_eq!(canceling(&r, "free", false), []);
+    // Done work, and a parent that reads done, are reopened first, forced or not.
+    commit_ok(&mut r, 2, vec![item("done", ItemAssign::State(ItemState::Done))]);
+    assert_eq!(canceling(&r, "done", false), [Rule::CancelDone]);
+    assert_eq!(canceling(&r, "done", true), [Rule::CancelDone]);
+    assert_eq!(canceling(&r, "parent", false), []);
+    commit_ok(&mut r, 3, vec![item("child", ItemAssign::State(ItemState::Done))]);
+    assert_eq!(canceling(&r, "parent", true), [Rule::CancelDone]);
+    // Someone else's claim refuses, on the item or on a parent over it; the actor's own, or force, doesn't.
+    crate::claim::claim(&mut r, "t", "actor/user", 3, (60_000, 60_000), false).unwrap();
+    assert_eq!(canceling(&r, "free", false), []);
+    assert!(crate::claim::release(&mut r, &crate::claim::thread_key("t").unwrap(), "actor/user"));
+    crate::claim::claim(&mut r, "t", "session/other", 4, (60_000, 60_000), false).unwrap();
+    let held = Rule::CancelHeld { holder: "session/other".into() };
+    assert_eq!(canceling(&r, "free", false), [held]);
+    assert_eq!(canceling(&r, "free", true), []);
+    // Canceled, the state is stored as `canceled`, and what it frees is its title.
+    commit_ok(&mut r, 5, vec![Change::Cancel { item: "free".into(), force: true }]);
+    assert_eq!(read(&r).items["free"].state, Value::One(ItemState::Canceled));
+    let stored = |r: &Replica| {
+        let key = crate::model::item_key("free").unwrap();
+        r.state.field(&key, "state").unwrap().values().map(|v| v.value.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(stored(&r), [json!("canceled")]);
+    // Opened again, it is stored as `backlog`, as open always is.
+    commit_ok(&mut r, 5, vec![item("free", ItemAssign::State(ItemState::Backlog))]);
+    assert_eq!(stored(&r), [json!("backlog")]);
+    commit_ok(&mut r, 5, vec![Change::Cancel { item: "free".into(), force: true }]);
+    let minted = Change::Add {
+        record: Record::Item("twin".into()),
+        minted: true,
+        on_repeat: Repeat::Refuse,
+        with: vec![Assign::Item("twin".into(), ItemAssign::Title("FREE".into()))],
+    };
+    assert!(judge(&read(&r), &ChangeSet(vec![minted]), by(6), None).is_ok());
+}
+
+#[test]
+fn canceling_work_that_waits_in_a_thread_someone_else_holds_is_refused_unless_forced() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            thread("t"),
+            add("x", vec![ItemAssign::Thread(Some("t".into()))]),
+            add(
+                "y",
+                vec![ItemAssign::Thread(Some("t".into())), ItemAssign::WaitsFor("x".into(), true)],
+            ),
+        ],
+    );
+    crate::claim::claim(&mut r, "t", "session/other", 2, (60_000, 60_000), false).unwrap();
+    assert_eq!(read(&r).items["y"].state, Value::One(ItemState::Backlog));
+    let held = Rule::CancelHeld { holder: "session/other".into() };
+    assert_eq!(canceling(&r, "y", false), [held]);
+    assert_eq!(canceling(&r, "y", true), []);
+}
+
 #[test]
 fn evidence_must_be_able_to_verify_and_done_work_keeps_what_it_was_finished_with() {
     let mut r = replica("a");

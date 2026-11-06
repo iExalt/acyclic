@@ -73,16 +73,19 @@ describe("needView", () => {
       // Its words are the core's, as sent.
       expect(view.text).toBe(need.summary);
     }
-    const state = needView(field("state"), none);
+    const states = conflicts.filter((need) => need.field === "state");
+    const holding = (value: string) =>
+      states.find((need) => keepsIn(need).some((kept) => kept.value === value && kept.command !== null)) as Need;
+    const state = needView(states.find((need) => keepsIn(need).some((kept) => kept.value === "parked")) as Need, none);
     expect(state.actions.map((one) => one.label)).toEqual(["Use parked"]);
     expect(state.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
     expect(isCollapsible(state)).toBe(false);
     // A state stored as backlog reads, and is kept, as open.
-    const open = conflicts.find((need) => need.field === "state" && need !== field("state"));
-    expect(open === undefined ? [] : needView(open, none).actions.map((one) => one.label)).toEqual([
-      "Use open",
-      "Use parked",
-    ]);
+    expect(needView(holding("open"), none).actions.map((one) => one.label)).toEqual(["Use open", "Use parked"]);
+    // Canceled against done: canceled is kept here, and done in a terminal, where its evidence comes with it.
+    const dropped = needView(holding("canceled"), none);
+    expect(dropped.actions.map((one) => one.label)).toEqual(["Use canceled"]);
+    expect(dropped.note).toMatch(/done: Keep done in a terminal/);
     // Named, and its values too where they are ids, while the command keeps the id.
     const parent = field("parent");
     const titles = (id: string) => (id === parent.id ? "First" : "Parent");
@@ -145,6 +148,10 @@ describe("needView", () => {
       note: "Open it to choose its thread in its editor",
     });
     expect(needView(example("done-waiting"), none).text).toBe("Early is done but waits for Late");
+    expect(needView(example("waits-on-canceled"), none)).toMatchObject({
+      text: "Waiting waits for Dropped, which was canceled",
+      actions: [],
+    });
     // The key is the list's, whatever the entry names.
     expect(needView({ kind: "contest", key: "contest:t", thread: thread("t"), holders: ["x"] }, none).key).toBe(
       "contest:t",

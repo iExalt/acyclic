@@ -37,7 +37,8 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
     {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
   ],
   "items": [
-    // Required: id and title. "state" is open, parked or done, open for a new item.
+    // Required: id and title. "state" is open, parked, done or canceled, open for a new item. Canceled skips the check
+    // for another holder's claim that `item edit --state canceled` makes, as done work skips the one finishing makes.
     // Optional: parent, thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
     // given replaces the record's: [] clears it.
@@ -116,8 +117,8 @@ pub struct Item {
     /// Design notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// The item's state; left out, an existing item keeps its own and a new one is open. `backlog`, as older
-    /// documents say, reads as open.
+    /// The item's state: `open`, `parked`, `done` or `canceled`; left out, an existing item keeps its own and a new
+    /// one is open. `backlog`, as older documents say, reads as open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<State>,
     /// The parent item.
@@ -246,6 +247,8 @@ pub enum ValidationError {
     EvidenceNotDone(String),
     /// Done on an item with children, which reads done once they are.
     DoneParent(String),
+    /// Canceled on an item that is done, or a parent that reads done: it is reopened first.
+    CanceledDone(String),
     /// A repository's name that isn't `owner/name`.
     InvalidRepositoryName {
         /// The repository.
@@ -313,6 +316,9 @@ impl fmt::Display for ValidationError {
                     f,
                     "item {item} has children, so it reads done once they are: leave its state out"
                 )
+            },
+            Self::CanceledDone(item) => {
+                write!(f, "item {item} is done, so it can't be canceled until it is reopened")
             },
             Self::InvalidRepositoryName { repository, name } => {
                 write!(f, "repository {repository}: {name:?} isn't owner/name")

@@ -90,15 +90,17 @@ pub fn command() -> clap::Command {
     command.mut_subcommands(|sub| sub.hide(true)).help_template(template)
 }
 
-/// The parser for `--state`: `open` or `parked`, listed in help and named when a value isn't one. `backlog`, the
+/// The parser for `--state`: `open`, `parked` or `canceled`, listed in help and named when a value isn't one. `backlog`, the
 /// word older versions took, still reads as open but isn't listed.
 fn state_words() -> impl TypedValueParser<Value = StateWord> {
     PossibleValuesParser::new([
         PossibleValue::new(StateWord::OPEN.0.word()).alias("backlog"),
         PossibleValue::new(StateWord::PARKED.0.word()),
+        PossibleValue::new(StateWord::CANCELED.0.word()),
     ])
     .map(|chosen| match chosen.as_str() {
         "parked" => StateWord::PARKED,
+        "canceled" => StateWord::CANCELED,
         _ => StateWord::OPEN,
     })
 }
@@ -383,7 +385,7 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
 }
 
 /// A state a command may set: not `done`, which `acyclic item done` sets with its evidence. It is sent as its word,
-/// `open` or `parked`, and read from either or from `backlog`.
+/// `open`, `parked` or `canceled`, and read from either of the first or from `backlog`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "ItemState")]
 pub struct StateWord(ItemState);
@@ -399,7 +401,7 @@ impl TryFrom<ItemState> for StateWord {
 
     fn try_from(state: ItemState) -> Result<Self, Self::Error> {
         match state {
-            ItemState::Backlog | ItemState::Parked => Ok(Self(state)),
+            ItemState::Backlog | ItemState::Parked | ItemState::Canceled => Ok(Self(state)),
             ItemState::Done => Err("done must be set with `acyclic item done`"),
         }
     }
@@ -414,6 +416,7 @@ impl From<StateWord> for ItemState {
 impl StateWord {
     const OPEN: Self = Self(ItemState::Backlog);
     const PARKED: Self = Self(ItemState::Parked);
+    const CANCELED: Self = Self(ItemState::Canceled);
 
     /// The model's state for the word.
     #[must_use]
@@ -494,6 +497,10 @@ pub enum ItemCommand {
 
 /// What `item edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each `--no-field` and `--force` is a flag of its own"
+)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemEdit {
     /// The item.
@@ -515,9 +522,14 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_thread: bool,
-    /// Set its state: not `done`, which `acyclic item done` sets.
+    /// Set its state: not `done`, which `acyclic item done` sets. `canceled` drops it; `open` undoes that. Done work
+    /// can't be canceled until it is reopened.
     #[arg(short = 's', long, value_parser = state_words())]
     pub state: Option<StateWord>,
+    /// With `--state canceled`, cancel it although someone else holds a claim on its work.
+    #[arg(short = 'f', long)]
+    #[serde(default)]
+    pub force: bool,
     /// New notes.
     #[arg(long)]
     pub notes: Option<String>,

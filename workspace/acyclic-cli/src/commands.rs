@@ -225,6 +225,7 @@ impl<'a> CommandContext<'a> {
                     parent: Change::of(parent.clone(), false),
                     thread: Change::of(thread.clone(), false),
                     state: state.map(StateWord::state),
+                    force: false,
                     notes: Change::of(notes.clone(), false),
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
@@ -257,6 +258,7 @@ impl<'a> CommandContext<'a> {
                     parent: Change::of(edit.parent.clone(), edit.no_parent),
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
+                    force: edit.force,
                     notes: Change::of(edit.notes.clone(), edit.no_notes),
                     waits_for: Delta {
                         add: edit.waits_for.clone(),
@@ -266,7 +268,9 @@ impl<'a> CommandContext<'a> {
                 let item = &edit.item;
                 self.write(|replica, by| {
                     let mut id = String::new();
-                    let outcome = edit::commit(replica, by, None, false, |model| {
+                    // Canceling is judged by the claims on the work, which readiness reads.
+                    let canceling = fields.state == Some(ItemState::Canceled);
+                    let outcome = edit::commit(replica, by, None, canceling, |model| {
                         let records = Records::of(model);
                         id = records.item(item)?;
                         let fields = fields.clone().resolve(model, &records, Some(&id))?;

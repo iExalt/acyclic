@@ -43,9 +43,11 @@ Every command's inputs follow these rules, so you can guess a command from its n
 
 Waits-for reads left to right: `acyclic item edit 'Plant' --waits-for 'Beds'` says Plant can't start until Beds is done,
 and `--no-waits-for 'Beds'` undoes it. `item done <ITEM> --commit <OWNER/NAME>@<SHA>` records the commit that finished
-an item, and `--evidence <TEXT>` words. An item's states are `open`, `parked` and `done`; what is under way is its
-derived `stage`. `--state backlog`, the older word for open, is still taken; the tracker stores open as `backlog`,
-so replicas of older versions keep reading it.
+an item, and `--evidence <TEXT>` words. An item's states are `open`, `parked`, `done` and `canceled`; what is under
+way is its derived `stage`. A canceled leaf is counted under `canceled` in a `progress`, apart from `leaves`, and never
+meets what waits for it: `needs` lists that work as `waits-on-canceled`. Replicas of older versions can't read
+`canceled`, so upgrade every replica before canceling. `--state backlog`, the older word for open, is still taken; the
+tracker stores open as `backlog`, so replicas of older versions keep reading it.
 
 ### Output
 

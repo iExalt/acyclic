@@ -125,6 +125,157 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_leav
 }
 
 #[test]
+fn a_canceled_dependency_never_unblocks_but_an_epic_waits_on_its_other_work() {
+    let mut r = replica("a");
+    items(&mut r, &["dep", "y", "epic", "e1", "e2", "z", "dead", "d1", "w"]);
+    for (child, parent) in [("e1", "epic"), ("e2", "epic"), ("d1", "dead")] {
+        set_parent(&mut r, child, Some(parent), by(2)).unwrap();
+    }
+    for (from, to) in [("y", "dep"), ("z", "epic"), ("w", "dead")] {
+        link(&mut r, from, to, by(2)).unwrap();
+    }
+    set_state(&mut r, "dep", ItemState::Canceled, by(3)).unwrap();
+    assert_eq!(status(&r, "dep"), Readiness::Canceled);
+    assert_eq!(status(&r, "y"), waiting_on(&[("dep", Wait::Canceled)]));
+    // One canceled leaf among others: the epic is waited for as a whole.
+    set_state(&mut r, "e1", ItemState::Canceled, by(3)).unwrap();
+    assert_eq!(status(&r, "z"), waiting_on(&[("epic", Wait::Open)]));
+    done_with(&mut r, "e2", None);
+    assert_eq!(status(&r, "z"), Readiness::Ready);
+    // Nothing but canceled work under it, or canceled by hand, reads canceled.
+    set_state(&mut r, "d1", ItemState::Canceled, by(3)).unwrap();
+    assert_eq!(status(&r, "w"), waiting_on(&[("dead", Wait::Canceled)]));
+    set_state(&mut r, "d1", ItemState::Backlog, by(4)).unwrap();
+    set_state(&mut r, "dead", ItemState::Canceled, by(4)).unwrap();
+    assert_eq!(status(&r, "w"), waiting_on(&[("dead", Wait::Canceled)]));
+    // Canceled work is never ready, and an open leaf under a part canceled by hand counts as canceled.
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    assert_eq!(evaluator.stage("dep").unwrap(), Some(Stage::Canceled));
+    let dead = evaluator.progress("dead").unwrap().unwrap();
+    assert_eq!(
+        (dead.stage, dead.stages.canceled, dead.stages.total()),
+        (Some(Stage::Canceled), 1, 0)
+    );
+    let epic = evaluator.progress("epic").unwrap().unwrap();
+    assert_eq!((epic.stage, epic.stages.canceled, epic.stages.done), (Some(Stage::Done), 1, 1));
+    assert!(!flat(&evaluator.ready("actor/user").unwrap()).contains(&"dep".to_owned()));
+}
+
+#[test]
+fn open_leaves_under_a_part_canceled_by_hand_read_canceled_until_it_is_opened_again() {
+    let mut r = replica("a");
+    items(&mut r, &["part", "leaf", "done", "w"]);
+    for kid in ["leaf", "done"] {
+        set_parent(&mut r, kid, Some("part"), by(2)).unwrap();
+    }
+    link(&mut r, "w", "leaf", by(2)).unwrap();
+    done_with(&mut r, "done", None);
+    let ready = |r: &Replica| {
+        let model = Model::read(&r.state).unwrap();
+        flat(&ReadinessEvaluator::new(&r.state, &model, NOW).ready("actor/user").unwrap())
+    };
+    assert_eq!(ready(&r), ["leaf"]);
+    set_state(&mut r, "part", ItemState::Canceled, by(3)).unwrap();
+    // The open leaf reads canceled and isn't offered; done work stays done; its dependent waits on canceled work.
+    assert_eq!(status(&r, "leaf"), Readiness::Canceled);
+    assert_eq!(status(&r, "done"), Readiness::Done);
+    assert_eq!(ready(&r).len(), 0);
+    assert_eq!(status(&r, "w"), waiting_on(&[("leaf", Wait::Canceled)]));
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    assert_eq!(evaluator.stage("leaf").unwrap(), Some(Stage::Canceled));
+    assert!(model.reads_finished("leaf") && !model.reads_canceled("done"));
+    let needs = crate::needs::needs_you(&r.state, &model, &evaluator, NOW).unwrap();
+    let flagged =
+        crate::needs::Entry::WaitsOnCanceled { item: "w".into(), waits_for: "leaf".into() };
+    assert!(needs.contains(&flagged), "{needs:?}");
+    // Opened again, all of it comes back.
+    set_state(&mut r, "part", ItemState::Backlog, by(4)).unwrap();
+    assert_eq!(status(&r, "leaf"), Readiness::Ready);
+    assert_eq!(status(&r, "w"), waiting_on(&[("leaf", Wait::Open)]));
+    assert_eq!(ready(&r), ["leaf"]);
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    let needs = crate::needs::needs_you(&r.state, &model, &evaluator, NOW).unwrap();
+    assert!(!needs.contains(&flagged));
+}
+
+#[test]
+fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
+    let mut r = replica("a");
+    items(
+        &mut r,
+        &[
+            "top", "cut", "c1", "c2", "mix", "m1", "m2", "all", "a1", "a2", "dn", "d1", "d2", "g",
+            "gc", "gd", "go",
+        ],
+    );
+    for (kid, parent) in [
+        ("cut", "top"),
+        ("c1", "cut"),
+        ("c2", "cut"),
+        ("mix", "top"),
+        ("m1", "mix"),
+        ("m2", "mix"),
+        ("all", "top"),
+        ("a1", "all"),
+        ("a2", "all"),
+        ("dn", "cut"),
+        ("d1", "dn"),
+        ("d2", "dn"),
+        // A grandparent whose only child is canceled by hand, over a done leaf and an open one, reads done.
+        ("gc", "g"),
+        ("gd", "gc"),
+        ("go", "gc"),
+    ] {
+        set_parent(&mut r, kid, Some(parent), by(2)).unwrap();
+    }
+    for (id, state) in [
+        ("cut", ItemState::Canceled),
+        ("m1", ItemState::Canceled),
+        ("m2", ItemState::Done),
+        ("a1", ItemState::Canceled),
+        ("a2", ItemState::Canceled),
+        ("d1", ItemState::Done),
+        ("d2", ItemState::Done),
+        ("gc", ItemState::Canceled),
+        ("gd", ItemState::Done),
+    ] {
+        set_state(&mut r, id, state, by(3)).unwrap();
+    }
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    let mut reading = Vec::new();
+    for id in model.items.keys() {
+        assert_eq!(evaluator.canceled(id), model.reads_canceled(id), "{id}");
+        reading.push((id.as_str(), model.reads_canceled(id)));
+    }
+    // Pinned: a part under one canceled by hand reads canceled unless it reads done; an all-canceled part reads so.
+    let canceled: Vec<&str> = reading.iter().filter(|(_, c)| *c).map(|(id, _)| *id).collect();
+    assert_eq!(canceled, ["a1", "a2", "all", "c1", "c2", "cut", "gc", "go", "m1"]);
+}
+
+#[test]
+fn a_thread_is_finished_when_every_leaf_is_done_or_canceled_and_an_empty_one_is_not() {
+    let mut r = replica("a");
+    items(&mut r, &["x", "y"]);
+    let finished = |r: &Replica| {
+        let model = Model::read(&r.state).unwrap();
+        let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+        Stages::of_leaves(&evaluator, ["x", "y"]).unwrap().is_finished()
+    };
+    assert!(!Stages::default().is_finished());
+    assert!(!finished(&r));
+    set_state(&mut r, "x", ItemState::Canceled, by(3)).unwrap();
+    assert!(!finished(&r));
+    set_state(&mut r, "y", ItemState::Done, by(3)).unwrap();
+    assert!(finished(&r));
+    set_state(&mut r, "y", ItemState::Canceled, by(4)).unwrap();
+    assert!(finished(&r));
+}
+
+#[test]
 fn cycles_conflicts_and_parked_items_are_not_ready() {
     let mut a = replica("a");
     items(&mut a, &["x", "y", "p", "c"]);
@@ -758,6 +909,7 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         waiting,
         parked,
         unthreaded,
+        canceled: 0,
     };
     for (stages, claimed, stage) in [
         (of(0, 0, 0, 0, 0, 0), false, None),
@@ -772,6 +924,10 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         // What is left all parked, by hand or under a parked part, reads parked however much is done.
         (of(2, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
         (of(0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
+        // Canceled leaves are left out; with nothing else the parent reads canceled.
+        (Stages { canceled: 2, ..of(0, 0, 0, 0, 0, 0) }, false, Some(Stage::Canceled)),
+        (Stages { canceled: 2, ..of(1, 0, 0, 0, 0, 0) }, false, Some(Stage::Done)),
+        (Stages { canceled: 1, ..of(0, 0, 1, 0, 0, 0) }, false, Some(Stage::Ready)),
     ] {
         assert_eq!(stages.rolled_up(claimed), stage, "{stages:?} claimed {claimed}");
     }

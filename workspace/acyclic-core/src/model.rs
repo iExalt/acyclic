@@ -99,16 +99,20 @@ pub enum ItemState {
     Parked,
     /// Finished.
     Done,
+    /// Dropped on purpose, so it was never delivered: it counts as neither done nor open. Written only by an
+    /// explicit state edit or an import that says so, and unreadable to replicas older than it.
+    Canceled,
 }
 
 impl ItemState {
-    /// The state as reads show it and commands take it: `open`, `parked` or `done`.
+    /// The state as reads show it and commands take it: `open`, `parked`, `done` or `canceled`.
     #[must_use]
     pub const fn word(self) -> &'static str {
         match self {
             Self::Backlog => "open",
             Self::Parked => "parked",
             Self::Done => "done",
+            Self::Canceled => "canceled",
         }
     }
 }
@@ -204,6 +208,19 @@ impl Item {
         let states = self.state.all();
         !states.is_empty() && states.iter().all(|state| **state == ItemState::Done)
     }
+
+    /// Whether the item is canceled; a conflicted state is canceled only when every value is.
+    #[must_use]
+    pub fn is_canceled(&self) -> bool {
+        let states = self.state.all();
+        !states.is_empty() && states.iter().all(|state| **state == ItemState::Canceled)
+    }
+
+    /// Whether the item is finished: done or canceled. A state in conflict between the two is neither.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.is_done() || self.is_canceled()
+    }
 }
 
 /// A parent's leaves, counted: where its work stands is its stage, from [`crate::ready`].
@@ -211,7 +228,9 @@ impl Item {
 pub struct Progress {
     /// Its leaves that are done.
     pub done: usize,
-    /// Its leaves.
+    /// Its leaves that are canceled, or open under a part canceled by hand; they are not in `total`.
+    pub canceled: usize,
+    /// Its other leaves, done or not.
     pub total: usize,
 }
 
@@ -219,6 +238,7 @@ pub struct Progress {
 #[derive(Default)]
 struct Tally {
     done: usize,
+    canceled: usize,
     total: usize,
 }
 
@@ -472,38 +492,81 @@ impl Model {
             return None;
         }
         let mut tally = Tally::default();
-        self.tally(id, &mut BTreeSet::from([id]), &mut tally);
-        Some(Progress { done: tally.done, total: tally.total })
+        let canceled = self.items[id].state == Value::One(ItemState::Canceled);
+        self.tally(id, canceled, &mut BTreeSet::from([id]), &mut tally);
+        Some(Progress { done: tally.done, canceled: tally.canceled, total: tally.total })
     }
 
-    /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk.
-    fn tally<'a>(&'a self, id: &'a str, seen: &mut BTreeSet<&'a str>, tally: &mut Tally) {
+    /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk. The open leaves of a part
+    /// canceled by hand count as canceled.
+    fn tally<'a>(
+        &'a self,
+        id: &'a str,
+        canceled: bool,
+        seen: &mut BTreeSet<&'a str>,
+        tally: &mut Tally,
+    ) {
         for child in self.children(id) {
             if !seen.insert(child) {
                 continue;
             }
             let Some(item) = self.items.get(child) else { continue };
             if self.children(child).is_empty() {
-                tally.total += 1;
-                tally.done += usize::from(item.is_done());
+                if item.is_canceled() || (canceled && !item.is_done()) {
+                    tally.canceled += 1;
+                } else {
+                    tally.total += 1;
+                    tally.done += usize::from(item.is_done());
+                }
             } else {
                 // A parent's stored done is ignored: its leaves say whether it is done.
-                self.tally(child, seen, tally);
+                let cancels = canceled || item.state == Value::One(ItemState::Canceled);
+                self.tally(child, cancels, seen, tally);
             }
         }
     }
 
-    /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it is, unless it is
-    /// parked by hand.
+    /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it that isn't canceled
+    /// is, and one is, unless it is parked or canceled by hand.
     #[must_use]
     pub fn reads_done(&self, id: &str) -> bool {
         let Some(item) = self.items.get(id) else { return false };
         match self.progress(id) {
             Some(progress) => {
-                progress.done == progress.total && item.state != Value::One(ItemState::Parked)
+                progress.done == progress.total
+                    && progress.done > 0
+                    && item.state != Value::One(ItemState::Parked)
+                    && item.state != Value::One(ItemState::Canceled)
             },
             None => item.is_done(),
         }
+    }
+
+    /// Whether an item reads as canceled, unless it reads done: a leaf by its own state, a parent canceled by hand or
+    /// with every leaf under it canceled, and anything under a part canceled by hand, as that part cancels what is
+    /// open beneath it. A leaf reading canceled has the stage canceled.
+    #[must_use]
+    pub fn reads_canceled(&self, id: &str) -> bool {
+        let Some(item) = self.items.get(id) else { return false };
+        if self.reads_done(id) {
+            return false;
+        }
+        let own = match self.progress(id) {
+            Some(progress) => {
+                item.state == Value::One(ItemState::Canceled)
+                    || (progress.total == 0 && progress.canceled > 0)
+            },
+            None => item.is_canceled(),
+        };
+        own || self.ancestors(id).into_iter().any(|above| {
+            self.items.get(above).is_some_and(|a| a.state == Value::One(ItemState::Canceled))
+        })
+    }
+
+    /// Whether an item reads as finished: done or canceled.
+    #[must_use]
+    pub fn reads_finished(&self, id: &str) -> bool {
+        self.reads_done(id) || self.reads_canceled(id)
     }
 
     /// The items of a thread: those whose thread field is that thread alone. An item with a conflicted thread is in

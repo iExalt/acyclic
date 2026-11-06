@@ -234,10 +234,10 @@ fn usage_errors_and_help_are_text() {
     assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
     assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
     // An enum-valued input lists its values in help, and a wrong one names them.
-    assert!(edit.stdout.contains("[possible values: open, parked]"), "{edit:?}");
+    assert!(edit.stdout.contains("[possible values: open, parked, canceled]"), "{edit:?}");
     let wrong = run("acyclic item edit a --state huge");
     assert_eq!(wrong.code, exit::USAGE);
-    assert!(wrong.stderr.contains("[possible values: open, parked]"), "{wrong:?}");
+    assert!(wrong.stderr.contains("[possible values: open, parked, canceled]"), "{wrong:?}");
 }
 
 #[test]

@@ -272,10 +272,10 @@ fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debu
 
 #[test]
 fn every_variant_of_a_value_enum_round_trips() {
-    let states = [ItemState::Backlog, ItemState::Parked, ItemState::Done];
-    // Stored as older versions read it, and shown as `open`.
-    assert_eq!(names(&states), ["backlog", "parked", "done"]);
-    assert_eq!(states.map(ItemState::word), ["open", "parked", "done"]);
+    let states = [ItemState::Backlog, ItemState::Parked, ItemState::Done, ItemState::Canceled];
+    // Stored as older versions read it, and shown as `open`; `canceled` is new, so older versions can't read it.
+    assert_eq!(names(&states), ["backlog", "parked", "done", "canceled"]);
+    assert_eq!(states.map(ItemState::word), ["open", "parked", "done", "canceled"]);
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_by_hand() {
         set_parent(&mut r, child, Some(parent), by(2)).unwrap();
     }
     let progress = |r: &Replica, id: &str| model(r).progress(id).unwrap();
-    let reads = |done, total| Progress { done, total };
+    let reads = |done, total| Progress { done, canceled: 0, total };
     // Leaves count at every depth, and a leaf has no progress.
     assert_eq!(progress(&r, "top"), reads(0, 3));
     assert_eq!(model(&r).progress("a"), None);
@@ -315,6 +315,40 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_by_hand() {
 }
 
 #[test]
+fn canceled_leaves_leave_the_count_and_a_parent_of_nothing_else_reads_canceled() {
+    let mut r = replica("a");
+    items(&mut r, &["top", "a", "b"]);
+    for child in ["a", "b"] {
+        set_parent(&mut r, child, Some("top"), by(2)).unwrap();
+    }
+    let read = |r: &Replica| model(r);
+    set_state(&mut r, "a", ItemState::Canceled, by(3)).unwrap();
+    assert_eq!(read(&r).progress("top"), Some(Progress { done: 0, canceled: 1, total: 1 }));
+    assert!(read(&r).items["a"].is_canceled() && read(&r).items["a"].is_finished());
+    assert!(!read(&r).items["a"].is_done() && read(&r).reads_finished("a"));
+    // The parent rolls up from its other leaves.
+    assert!(!read(&r).reads_done("top") && !read(&r).reads_canceled("top"));
+    set_state(&mut r, "b", ItemState::Done, by(4)).unwrap();
+    assert!(read(&r).reads_done("top") && !read(&r).reads_canceled("top"));
+    // All canceled reads canceled, never done.
+    set_state(&mut r, "b", ItemState::Canceled, by(5)).unwrap();
+    assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
+    // Canceled by hand, a parent reads canceled whatever its leaves say, and its open leaves count as canceled.
+    set_state(&mut r, "b", ItemState::Backlog, by(6)).unwrap();
+    set_state(&mut r, "top", ItemState::Canceled, by(6)).unwrap();
+    assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
+    assert_eq!(read(&r).progress("top"), Some(Progress { done: 0, canceled: 2, total: 0 }));
+    // A state in conflict between done and canceled is neither.
+    let (mut left, mut right) = pair(&["c"]);
+    set_state(&mut left, "c", ItemState::Done, by(3)).unwrap();
+    set_state(&mut right, "c", ItemState::Canceled, by(3)).unwrap();
+    left.join(&right.state).unwrap();
+    let conflicted = &model(&left).items["c"];
+    assert!(conflicted.state.is_conflict() && !conflicted.is_done() && !conflicted.is_canceled());
+    assert!(!conflicted.is_finished());
+}
+
+#[test]
 fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its_leaves() {
     let (mut a, mut b) = pair(&["p", "x", "y"]);
     for replica in [&mut a, &mut b] {
@@ -327,7 +361,7 @@ fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its
     set_state(&mut b, "y", ItemState::Parked, by(3)).unwrap();
     a.join(&b.state).unwrap();
     assert!(model(&a).items["y"].state.is_conflict());
-    assert_eq!(model(&a).progress("p"), Some(Progress { done: 1, total: 2 }));
+    assert_eq!(model(&a).progress("p"), Some(Progress { done: 1, canceled: 0, total: 2 }));
     // A parent reads as done once its leaves are.
     assert!(!model(&a).reads_done("p"));
     set_state(&mut a, "y", ItemState::Done, by(5)).unwrap();
@@ -363,4 +397,49 @@ fn a_deleted_record_is_gone_from_the_model_but_its_id_is_remembered() {
     assert!(read.is_deleted(&item_key("gone").unwrap()) && read.is_deleted(&thread));
     assert!(!read.is_deleted(&item_key("kept").unwrap()));
     assert_eq!(read.conflicts().count(), 0);
+}
+
+/// `canceled` is a stored value older replicas can't read, so nothing writes it on its own: only the explicit edit
+/// (the CLI's `--state canceled`, which the app's state select sends), an import that says so, and keeping a side of
+/// a conflict. Every file that can name it is listed, so a new writer fails here until it is looked at.
+#[test]
+fn only_the_explicit_paths_name_the_canceled_state() {
+    const MAY_NAME: [&str; 8] = [
+        "acyclic-core/src/model.rs",
+        "acyclic-core/src/ready.rs",
+        "acyclic-core/src/write.rs",
+        "acyclic-core/src/needs.rs",
+        "acyclic-core/src/import.rs",
+        "acyclic-cli/src/args.rs",
+        "acyclic-cli/src/edit.rs",
+        "acyclic-cli/src/commands.rs",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap();
+    let mut named = Vec::new();
+    let mut dirs = vec![root.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().map(Result::unwrap) {
+            let (path, name) = (entry.path(), entry.file_name().to_string_lossy().into_owned());
+            if path.is_dir() {
+                if !matches!(name.as_str(), "target" | "node_modules" | "tests" | ".git") {
+                    dirs.push(path);
+                }
+            } else if path.extension().is_some_and(|ext| ext == "rs") && name != "tests.rs" {
+                let text = std::fs::read_to_string(&path).unwrap();
+                // What follows a file's own test module isn't shipped.
+                let shipped = text.split("#[cfg(test)]").next().unwrap_or_default();
+                if shipped.contains("State::Canceled") {
+                    named.push(path.strip_prefix(&root).unwrap().display().to_string());
+                }
+            }
+        }
+    }
+    named.sort();
+    for file in &named {
+        assert!(
+            MAY_NAME.contains(&file.as_str()),
+            "{file} names the canceled state: only the explicit paths may write it ({named:?})"
+        );
+    }
+    assert!(named.len() > 1, "the guard looked at nothing: {named:?}");
 }

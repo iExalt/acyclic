@@ -345,6 +345,69 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
     );
 }
 
+#[test]
+fn work_waiting_directly_on_canceled_work_goes_on_the_list_and_only_while_unfinished() {
+    let mut r = replica("a");
+    let by = user(1);
+    for id in ["dep", "w", "done", "epic", "e1", "e2", "z"] {
+        add_item(&mut r, id, id, by).unwrap();
+    }
+    for (kid, parent) in [("e1", "epic"), ("e2", "epic")] {
+        set_parent(&mut r, kid, Some(parent), by).unwrap();
+    }
+    for (from, to) in [("w", "dep"), ("done", "dep"), ("z", "epic")] {
+        link(&mut r, from, to, by).unwrap();
+    }
+    model::set_state(&mut r, "done", ItemState::Done, by).unwrap();
+    let waits = |r: &Replica| {
+        list(r).into_iter().filter(|e| e.kind() == "waits-on-canceled").collect::<Vec<_>>()
+    };
+    assert_eq!(waits(&r).len(), 0);
+    // Waiting on canceled work is flagged; finished work that waited on it isn't.
+    model::set_state(&mut r, "dep", ItemState::Canceled, by).unwrap();
+    assert_eq!(waits(&r), [Entry::WaitsOnCanceled { item: "w".into(), waits_for: "dep".into() }]);
+    assert!(list(&r).iter().all(|e| e.kind() != "done-waiting"));
+    // One canceled leaf under an epic leaves its waiters waiting for the epic as a whole.
+    model::set_state(&mut r, "e1", ItemState::Canceled, by).unwrap();
+    assert_eq!(waits(&r).len(), 1);
+    // The epic reads canceled once nothing else is under it, and then its waiter is flagged.
+    model::set_state(&mut r, "e2", ItemState::Canceled, by).unwrap();
+    assert_eq!(waits(&r).len(), 2);
+    // Canceled work waiting on canceled work needs nothing.
+    model::set_state(&mut r, "w", ItemState::Canceled, by).unwrap();
+    assert_eq!(waits(&r), [Entry::WaitsOnCanceled { item: "z".into(), waits_for: "epic".into() }]);
+    assert!(waits(&r)[0].notifies());
+}
+
+#[test]
+fn canceled_written_against_done_on_two_replicas_conflicts_and_each_side_is_offered() {
+    let (mut a, mut b) = (replica("a"), replica("b"));
+    add_item(&mut a, "x", "x", user(1)).unwrap();
+    b.join(&a.state).unwrap();
+    model::set_state(&mut a, "x", ItemState::Done, user(2)).unwrap();
+    model::set_state(&mut b, "x", ItemState::Canceled, user(2)).unwrap();
+    a.join(&b.state).unwrap();
+    b.join(&a.state).unwrap();
+    for r in [&a, &b] {
+        assert!(list(r).iter().any(|e| e.key() == "conflict:item:x:state"));
+        let mut offered = kept(r, kind::ITEM, "x", field::STATE);
+        offered.sort_by_key(|(value, _)| value.to_string());
+        let canceled = crate::write::Change::Set(crate::write::Assign::Item(
+            "x".into(),
+            crate::write::ItemAssign::State(ItemState::Canceled),
+        ));
+        assert_eq!(
+            offered,
+            [
+                (json!("canceled"), Keep::Write(crate::write::ChangeSet(vec![canceled]))),
+                (json!("done"), Keep::Not(Unkept::NeedsEvidence)),
+            ]
+        );
+        // Neither value alone is finished, until the conflict is settled.
+        assert!(!Model::read(&r.state).unwrap().items["x"].is_finished());
+    }
+}
+
 /// One entry of each kind, with the key and identity it has always had. The identity is the serialized entry and
 /// keys the notified needs on every user's devices, so a change here re-notifies them: it must be deliberate.
 fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
@@ -406,6 +469,12 @@ fn each_kind() -> Vec<(Entry, &'static str, &'static str, &'static str)> {
             r#"{"entry":"done-waiting","item":"a","waits_for":"b"}"#,
         ),
         (
+            Entry::WaitsOnCanceled { item: s("a"), waits_for: s("b") },
+            "waits-on-canceled",
+            "waits-on-canceled:a:b",
+            r#"{"entry":"waits-on-canceled","item":"a","waits_for":"b"}"#,
+        ),
+        (
             Entry::Dangling {
                 kind: s("item"),
                 id: s("a"),
@@ -446,6 +515,7 @@ fn every_kind_says_what_it_is_in_one_line_without_stored_names() {
             "T has a claim by x that starts in the future",
             "A needs a thread",
             "A is done but waits for B",
+            "A waits for B, which was canceled",
             "A: its thread names t, which doesn't exist",
         ]
     );
