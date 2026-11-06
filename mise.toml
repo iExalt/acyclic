@@ -20,12 +20,14 @@ node = "26.12.1"
 pnpm = "12.15.0"
 
 [tasks.check]
-description = "Routine check: format, Clippy, every crate's unit tests, the pre-push guard's self-test, and the doc fence, Markdown and workflow lints (budget: 60 seconds on a warm cache)"
+description = "Routine check: format, Clippy (with and without the core's fixtures feature), every crate's unit tests, the pre-push guard's self-test, and the doc fence, Markdown and workflow lints (budget: 60 seconds on a warm cache)"
 run = [
   # Outside CI, a clone without the pre-push guard fails the check, so it never pushes unguarded.
   '[ -n "${CI:-}" ] || [ "$(git config core.hooksPath)" = .githooks ] || { echo "the pre-push guard is not installed: run mise run hooks:install" >&2; exit 1; }',
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  # The core as shipped: no dev-dependencies, so the fixtures feature is off and the fixture! macro's crate-private side is linted.
+  "cargo clippy -p acyclic-core --lib --locked -- -D warnings",
   # The pinned nextest by path: cargo would otherwise prefer any copy in ~/.cargo/bin.
   '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --lib --bins --locked --no-tests=pass',
   "sh scripts/check-doc-fences.sh",
