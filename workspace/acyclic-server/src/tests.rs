@@ -635,4 +635,27 @@ fn every_command_the_app_sends_runs_through_the_api() {
     }
 }
 
+/// The store's HTTPS transport, from a blocking task of the server's runtime, as a sync runs; the one test that reaches
+/// the network, so it runs on request: `cargo nextest run -p acyclic-server --run-ignored only`.
+#[test]
+#[ignore = "reaches github.com over HTTPS"]
+fn an_https_remote_is_asked_from_a_blocking_task_of_the_runtime() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    let found = runtime
+        .block_on(async {
+            tokio::task::spawn_blocking(move || {
+                acyclic_core::store::setup::remote_has_ref(
+                    &path,
+                    "https://github.com/iExalt/gitoxide.git",
+                    "refs/heads/dev",
+                )
+            })
+            .await
+        })
+        .unwrap();
+    assert!(found.unwrap(), "the public repository's dev branch is listed over HTTPS");
+}
+
 mod push;

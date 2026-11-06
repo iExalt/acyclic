@@ -129,6 +129,7 @@ fn every_error_has_a_stable_code_and_exit() {
         StoreError::Config("no replica".into()).into(),
         StoreError::RemoteMoved.into(),
         StoreError::Rejected { reference: "r".into(), reason: "no".into() }.into(),
+        StoreError::ObjectsRefused("error: bad".into()).into(),
         LocateError::Config("bad".into()).into(),
         LocateError::NoRemote.into(),
         LocateError::Git("failed".into()).into(),

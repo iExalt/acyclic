@@ -1358,7 +1358,7 @@ def search_selection_journey(context, origin, plan, name, failures):
         page.screenshot(path=SHOTS / f"app-{name}-search-cold.png")
 
         # Keep the current selected target fully inside the actual open area, but away from its centre.
-        page.get_by_test_id("map").evaluate("m => m.cy.zoom(0.32)")
+        page.get_by_test_id("map").evaluate("m => { m.cy.zoom(0.32); }")
         fit = fit_occlusion(page, lit_only=False)
         if fit is None:
             failures.append(f"{name}: the already-visible Search setup has no open Map area")
@@ -2320,6 +2320,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     ).wait_for(timeout=10_000)
     if page.get_by_test_id("map").get_attribute("data-nodes") != str(base):
         failures.append(f"{name}: a tap on {box}'s title opened or closed it")
+    # Selecting frames the box about 100 ms after its inspector shows, which moves the camera under whatever the journey
+    # centred meanwhile, so the tap below hit another leaf on a loaded machine. Taps wait for the camera to hold still.
+    settled_corner(page, box)
     # Selecting shows the item's notes, as text. The leaf sits above the inspector, as a person would hold it, so the
     # Map need not pan to show what is added inside it.
     tap_middle(page, view, first, rise=0.2)
@@ -2647,6 +2650,10 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     ):
         failures.append(f"{name}: a Notes-only save changed the selected frame: {before} -> {written_notes}")
     show_notice(page).get_by_role("button", name="Undo").click()
+    # An Undo reads the plan before it writes, and is not busy while it reads, so busy alone is not the end of it: its
+    # result is the notice that says so (news), where "Undoing…" and an offer are the notices that last until the next
+    # write. Dismissing before then dismisses "Undoing…", and the write that follows raises its result again.
+    page.locator("[data-testid=notice][data-lasts=news]").wait_for(timeout=10_000)
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, count)
     undone_notes = geometry([project, other, chain[-2]])
@@ -3450,13 +3457,26 @@ def push_journey(context, page, env, origin, name, failures):
     )
 
 
-def report(took, failures):
+# Each shard builds its own tracker and server, so none waits on another: the desktop journeys and WebKit's desktop, the
+# phone journeys with the notifying browser and WebKit's phone, the two small ones, and the 3,500-item one, whose tracker
+# takes a third of its time to build.
+SHARDS = ("desktop", "phone", "small", "large")
+
+
+def relay(shard, stream):
+    for line in stream:
+        print(f"[{shard}] {line}", end="", flush=True)
+
+
+def report(took, failures, walls=None):
     """Prints the run's slowest steps, adds them all to CI's summary, and holds the run to its budget."""
     steps = Counter()
     for label, seconds in TIMES:
         steps[label] += seconds
     rows = steps.most_common()
     print(f"took {took:.1f} s; slowest: " + ", ".join(f"{label} {s:.1f} s" for label, s in rows[:5]))
+    for shard, wall in (walls or {}).items():
+        print(f"shard {shard}: {wall:.1f} s")
     print("All step durations:")
     for label, seconds in rows:
         print(f"  {label}: {seconds:.3f} s")
@@ -3474,7 +3494,7 @@ def report(took, failures):
             out.write(f"### The app's journeys: {took:.1f} s (budget {BUDGET_S} s, limit {LIMIT_S} s)\n\n")
             out.write("| Step | Seconds |\n|---|---|\n")
             out.writelines(f"| {label} | {s:.1f} |\n" for label, s in rows)
-            out.write(f"| everything else | {took - sum(steps.values()):.1f} |\n")
+            out.writelines(f"| shard {shard} (wall) | {wall:.1f} |\n" for shard, wall in (walls or {}).items())
     if took > LIMIT_S:
         failures.append(f"the journeys took {took:.1f} s, past their {LIMIT_S} s limit")
     elif took > BUDGET_S:
@@ -3687,11 +3707,12 @@ def labels_journey(browser, link, ids, titles):
             context.close()
 
 
-def main():
+def shard_run(shard):
+    """Runs one shard of the journeys, and leaves its timings and failures where the driver reads them."""
+    assert shard in SHARDS, f"unknown shard {shard}"
     SHOTS.mkdir(parents=True, exist_ok=True)
     failures = []
     began = time.monotonic()
-    print(f"Journeys optimization override: {os.environ.get('CARGO_PROFILE_JOURNEYS_OPT_LEVEL', 'unset (Cargo config)')}")
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as playwright:
         directory = Path(temp)
         servers = []
@@ -3772,17 +3793,22 @@ def main():
                 + "supercalifragilisticexpialidocious" * 2,
                 "Ordinary item",
             ]
-            root = json.loads(run(env, "item", "add", "--title", titles[0]))["data"][
+            # The Map orders boxes that nothing links by id, in natural order, which for random ids differs from run to run: the
+            # phone's first view holds only the left of the two children, so these ids put the one with the long title there.
+            ids = [f"00000000-0000-7000-8000-00000000000{number}" for number in (1, 2, 3)]
+            root = json.loads(run(env, "item", "add", "--id", ids[0], "--title", titles[0]))["data"][
                 "item"
             ]
             long = json.loads(
-                run(env, "item", "add", "--title", titles[1], "--parent", root)
+                run(env, "item", "add", "--id", ids[1], "--title", titles[1], "--parent", root)
             )["data"]["item"]
             ready = json.loads(
                 run(
                     env,
                     "item",
                     "add",
+                    "--id",
+                    ids[2],
                     "--title",
                     titles[2],
                     "--parent",
@@ -3801,156 +3827,207 @@ def main():
             return server_origin(server), [root, long, ready], titles
 
         try:
-            plan, link, env, remote = serve(350)
-            chromium = playwright.chromium.launch()
-            print(f"Chromium default headless: {chromium.version}")
-            label_link, label_ids, label_titles = serve_labels()
-            labels_journey(chromium, label_link, label_ids, label_titles)
-            hint = None
-            for name, view in VIEWS.items():
-                context, page, origin, errors = open_app(
-                    chromium, view, link, failures, name
+            if shard == "small":
+                chromium = playwright.chromium.launch()
+                label_link, label_ids, label_titles = serve_labels()
+                labels_journey(chromium, label_link, label_ids, label_titles)
+                # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
+                shrink_link, shrink_env, project, other, chain = serve_shrink()
+                context, page, _, errors = open_app(
+                    chromium, VIEWS["phone"], shrink_link, failures, "phone shrink"
                 )
-                # The sidebar counts the plan's items; a phone's bar leaves the count out.
-                counted = page.get_by_test_id("item-count")
-                count = counted.inner_text() if counted.count() else str(len(plan.items))
-                if count != str(len(plan.items)):
-                    failures.append(
-                        f"{name}: the page lists {count} items, expected {len(plan.items)}"
-                    )
-                installable(context, page, origin, name, failures)
-                overview_journey(page, view, name, failures)
+                shrink_undo_journey(
+                    page, VIEWS["phone"], shrink_env, project, other, chain, "phone shrink", failures
+                )
+                if errors:
+                    failures.append(f"phone shrink: the page threw or logged errors: {errors}")
+                context.close()
+
+                chromium.close()
+            elif shard == "large":
+                chromium = playwright.chromium.launch()
+                large, link, _, _ = serve(3500)
+                context, page, _, errors = open_app(
+                    chromium, VIEWS["desktop"], link, failures, "3,500 items"
+                )
                 to_map(page)
-                # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
-                hint = map_journey(page, view, plan, name, failures, hint)
-                outline_journey(page, view, plan, name, failures)
-                threads_journey(page, view, env, name, failures)
-                deep_link_journey(context, origin, view, plan, name, failures)
-                history_journey(context, origin, view, plan, name, failures)
-                command_journey(page, view, origin, plan, name, failures)
-                if name == "desktop":
-                    cross_origin_journey(context, origin, env, name, failures)
-                    keys_journey(page, plan, name, failures)
-                if name == "phone" and hint is not None:
-                    # Edits run once, on the phone the app is used on; the plan is read again after them.
-                    leaf = min(
-                        id for id in plan.children(hint) if not plan.children(id)
-                    )
-                    # Read by the reload edit_journey starts with.
-                    run(env, "item", "edit", leaf, "--notes", HOSTILE)
-                    added = edit_journey(page, view, env, plan, hint, name, failures)
-                    if added is not None:
-                        form_journey(page, view, env, remote, added, name, failures)
-                    failed_add_journey(page, errors, name, failures)
-                    thread_journey(page, env, plan, plan.first_thread, name, failures)
-                    needs_journey(page, env, plan, plan.first_thread, name, failures)
-                    fold_journey(page, view, env, plan, name, failures)
-                    plan = Plan(env)
-                    guarded_undo_race(page, view, env, plan, name, failures, errors)
-                    plan = Plan(env)
-                page.screenshot(path=SHOTS / f"app-{name}.png")
+                start = time.monotonic()
+                wait_drawn(page, len(large.default()), timeout=LARGE_LIMIT_MS)
+                print(
+                    f"3,500 items: drew the default view in {(time.monotonic() - start) * 1000:.0f} ms after the list"
+                )
+                first_view_readable(page, "3,500 items", failures)
+                page.screenshot(path=SHOTS / "app-large.png")
                 if errors:
                     failures.append(
-                        f"{name}: the page threw or logged errors: {errors}"
+                        f"3,500 items: the page threw or logged errors: {errors}"
                     )
                 context.close()
-            # The full build supports push delivery; the journey records display calls before sending a push.
-            notifying = playwright.chromium.launch(channel="chromium")
-            print(f"Chromium full headless: {notifying.version}")
-            context, page, origin, errors = open_app(
-                notifying, VIEWS["phone"], link, failures, "notifying phone"
-            )
-            push_journey(context, page, env, origin, "phone", failures)
-            if errors:
-                failures.append(
-                    f"notifying phone: the page threw or logged errors: {errors}"
-                )
-            context.close()
-            notifying.close()
-            webkit = playwright.webkit.launch()
-            print(f"WebKit headless: {webkit.version}")
-            context, page, origin, errors = open_app(
-                webkit, VIEWS["phone"], link, failures, "webkit phone"
-            )
-            cross_origin_journey(context, origin, env, "webkit phone", failures)
-            to_map(page)
-            wait_drawn(page, len(plan.default()))
-            page.screenshot(path=SHOTS / "app-webkit-phone.png")
-            # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
-            # collapsed box would select it, and open the inspector.
-            target = next(id for id in plan.default() if plan.depth(id) == 1)
-            drawn = page.get_by_test_id("map")
-            before = drawn.get_attribute("data-nodes")
-            page.get_by_test_id("menu").click()
-            tap_middle(page, VIEWS["phone"], target)
-            if (
-                page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open")
-                or page.get_by_test_id("inspector").count()
-                or drawn.get_attribute("data-state") != "drawn"
-                or drawn.get_attribute("data-nodes") != before
-            ):
-                failures.append(
-                    "webkit phone: a tap outside the menu didn't close it alone"
-                )
-            if errors:
-                failures.append(
-                    f"webkit phone: the page threw or logged errors: {errors}"
-                )
-            context.close()
-            # WebKit draws the picked thread's Threads arrows where Chromium does, clear of the tiles.
-            context, page, _, errors = open_app(
-                webkit,
-                {**VIEWS["desktop"], "color_scheme": "light"},
-                link,
-                failures,
-                "webkit desktop",
-            )
-            listed = json.loads(run(env, "thread", "list"))["data"]
-            want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
-            page.locator("[data-view=threads]").click()
-            verify_thread_arrows(page, listed, want, "webkit desktop", failures)
-            if errors:
-                failures.append(
-                    f"webkit desktop: the page threw or logged errors: {errors}"
-                )
-            context.close()
-            webkit.close()
+                chromium.close()
+            else:
+                plan, link, env, remote = serve(350)
+                chromium = playwright.chromium.launch()
+                print(f"Chromium default headless: {chromium.version}")
+                hint = None
+                for name, view in VIEWS.items():
+                    if name != shard:
+                        continue
+                    context, page, origin, errors = open_app(
+                        chromium, view, link, failures, name
+                    )
+                    # The sidebar counts the plan's items; a phone's bar leaves the count out.
+                    counted = page.get_by_test_id("item-count")
+                    count = counted.inner_text() if counted.count() else str(len(plan.items))
+                    if count != str(len(plan.items)):
+                        failures.append(
+                            f"{name}: the page lists {count} items, expected {len(plan.items)}"
+                        )
+                    installable(context, page, origin, name, failures)
+                    overview_journey(page, view, name, failures)
+                    to_map(page)
+                    # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
+                    hint = map_journey(page, view, plan, name, failures, hint)
+                    outline_journey(page, view, plan, name, failures)
+                    threads_journey(page, view, env, name, failures)
+                    deep_link_journey(context, origin, view, plan, name, failures)
+                    history_journey(context, origin, view, plan, name, failures)
+                    command_journey(page, view, origin, plan, name, failures)
+                    if name == "desktop":
+                        cross_origin_journey(context, origin, env, name, failures)
+                        keys_journey(page, plan, name, failures)
+                    if name == "phone" and hint is not None:
+                        # Edits run once, on the phone the app is used on; the plan is read again after them.
+                        leaf = min(
+                            id for id in plan.children(hint) if not plan.children(id)
+                        )
+                        # Read by the reload edit_journey starts with.
+                        run(env, "item", "edit", leaf, "--notes", HOSTILE)
+                        added = edit_journey(page, view, env, plan, hint, name, failures)
+                        if added is not None:
+                            form_journey(page, view, env, remote, added, name, failures)
+                        failed_add_journey(page, errors, name, failures)
+                        thread_journey(page, env, plan, plan.first_thread, name, failures)
+                        needs_journey(page, env, plan, plan.first_thread, name, failures)
+                        fold_journey(page, view, env, plan, name, failures)
+                        plan = Plan(env)
+                        guarded_undo_race(page, view, env, plan, name, failures, errors)
+                        plan = Plan(env)
+                    page.screenshot(path=SHOTS / f"app-{name}.png")
+                    if errors:
+                        failures.append(
+                            f"{name}: the page threw or logged errors: {errors}"
+                        )
+                    context.close()
+                if shard == "phone":
+                    # The full build supports push delivery; the journey records display calls before sending a push.
+                    notifying = playwright.chromium.launch(channel="chromium")
+                    print(f"Chromium full headless: {notifying.version}")
+                    context, page, origin, errors = open_app(
+                        notifying, VIEWS["phone"], link, failures, "notifying phone"
+                    )
+                    push_journey(context, page, env, origin, "phone", failures)
+                    if errors:
+                        failures.append(
+                            f"notifying phone: the page threw or logged errors: {errors}"
+                        )
+                    context.close()
+                    notifying.close()
+                webkit = playwright.webkit.launch()
+                print(f"WebKit headless: {webkit.version}")
+                if shard == "phone":
+                    context, page, origin, errors = open_app(
+                        webkit, VIEWS["phone"], link, failures, "webkit phone"
+                    )
+                    cross_origin_journey(context, origin, env, "webkit phone", failures)
+                    to_map(page)
+                    wait_drawn(page, len(plan.default()))
+                    page.screenshot(path=SHOTS / "app-webkit-phone.png")
+                    # WebKit too closes the menu on a tap outside it, and the tap reaches nothing: a tap that reached this
+                    # collapsed box would select it, and open the inspector.
+                    target = next(id for id in plan.default() if plan.depth(id) == 1)
+                    drawn = page.get_by_test_id("map")
+                    before = drawn.get_attribute("data-nodes")
+                    page.get_by_test_id("menu").click()
+                    tap_middle(page, VIEWS["phone"], target)
+                    if (
+                        page.locator("details.menu:has(> [data-testid=menu])").evaluate("d => d.open")
+                        or page.get_by_test_id("inspector").count()
+                        or drawn.get_attribute("data-state") != "drawn"
+                        or drawn.get_attribute("data-nodes") != before
+                    ):
+                        failures.append(
+                            "webkit phone: a tap outside the menu didn't close it alone"
+                        )
+                    if errors:
+                        failures.append(
+                            f"webkit phone: the page threw or logged errors: {errors}"
+                        )
+                    context.close()
+                if shard == "desktop":
+                    # WebKit draws the picked thread's Threads arrows where Chromium does, clear of the tiles.
+                    context, page, _, errors = open_app(
+                        webkit,
+                        {**VIEWS["desktop"], "color_scheme": "light"},
+                        link,
+                        failures,
+                        "webkit desktop",
+                    )
+                    listed = json.loads(run(env, "thread", "list"))["data"]
+                    want = {id: str(at + 1) for at, ids in enumerate(listed["waves"]) for id in ids}
+                    page.locator("[data-view=threads]").click()
+                    verify_thread_arrows(page, listed, want, "webkit desktop", failures)
+                    if errors:
+                        failures.append(
+                            f"webkit desktop: the page threw or logged errors: {errors}"
+                        )
+                    context.close()
+                webkit.close()
 
-            # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
-            shrink_link, shrink_env, project, other, chain = serve_shrink()
-            context, page, _, errors = open_app(
-                chromium, VIEWS["phone"], shrink_link, failures, "phone shrink"
-            )
-            shrink_undo_journey(
-                page, VIEWS["phone"], shrink_env, project, other, chain, "phone shrink", failures
-            )
-            if errors:
-                failures.append(f"phone shrink: the page threw or logged errors: {errors}")
-            context.close()
-
-            large, link, _, _ = serve(3500)
-            context, page, _, errors = open_app(
-                chromium, VIEWS["desktop"], link, failures, "3,500 items"
-            )
-            to_map(page)
-            start = time.monotonic()
-            wait_drawn(page, len(large.default()), timeout=LARGE_LIMIT_MS)
-            print(
-                f"3,500 items: drew the default view in {(time.monotonic() - start) * 1000:.0f} ms after the list"
-            )
-            first_view_readable(page, "3,500 items", failures)
-            page.screenshot(path=SHOTS / "app-large.png")
-            if errors:
-                failures.append(
-                    f"3,500 items: the page threw or logged errors: {errors}"
-                )
-            context.close()
-            chromium.close()
+                chromium.close()
         finally:
             for server in servers:
                 server.terminate()
                 server.wait(timeout=10)
-    report(time.monotonic() - began, failures)
+    Path(os.environ["JOURNEYS_SHARD_OUT"]).write_text(
+        json.dumps({"wall": time.monotonic() - began, "times": TIMES, "details": DETAILS, "failures": failures})
+    )
+
+
+def main():
+    """Drives the four shards of the journeys at once, each in a process of its own with its own tracker, server and
+    browsers, and reports them as one run. A shard's lines are prefixed with its name, so a failure and its traceback
+    say which shard raised it; its screenshots are named by journey, as before."""
+    if "--shard" in sys.argv:
+        return shard_run(sys.argv[sys.argv.index("--shard") + 1])
+    began = time.monotonic()
+    print(f"Journeys optimization override: {os.environ.get('CARGO_PROFILE_JOURNEYS_OPT_LEVEL', 'unset (Cargo config)')}")
+    failures, walls = [], {}
+    with tempfile.TemporaryDirectory() as temp:
+        running = {}
+        for shard in SHARDS:
+            out = Path(temp) / f"{shard}.json"
+            proc = subprocess.Popen(
+                [sys.executable, __file__, ACYCLIC, FIXTURES, "--shard", shard],
+                env={**os.environ, "JOURNEYS_SHARD_OUT": str(out)},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            pump = threading.Thread(target=relay, args=(shard, proc.stdout))
+            pump.start()
+            running[shard] = (proc, out, pump)
+        for shard, (proc, out, pump) in running.items():
+            proc.wait()
+            pump.join()
+            if not out.exists():
+                failures.append(f"{shard}: the shard exited with {proc.returncode} before it reported")
+                continue
+            data = json.loads(out.read_text())
+            walls[shard] = data["wall"]
+            TIMES.extend((label, seconds) for label, seconds in data["times"])
+            DETAILS.extend((label, seconds) for label, seconds in data["details"])
+            failures.extend(data["failures"])
+    report(time.monotonic() - began, failures, walls)
     if failures:
         sys.exit("\n".join(failures))
 

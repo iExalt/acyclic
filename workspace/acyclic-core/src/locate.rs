@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::store::REPLICA_CONFIG;
+use crate::store::Git;
 
 /// The mapping's file, under the home directory.
 pub const CONFIG_PATH: &str = ".config/acyclic/trackers.toml";
@@ -205,24 +205,10 @@ impl Settings {
     ///
     /// Fails when `repo` isn't a repository or git can't run.
     pub fn read(repo: &Path) -> Result<Self, LocateError> {
-        let pattern = format!(r"^(remote\..*\.url|{})$", REPLICA_CONFIG.replace('.', r"\."));
-        let output = git(repo, &["config", "--local", "--get-regexp", &pattern])?;
-        // Exit status 1 means no key matched; anything else, such as not being a repository, is a failure.
-        if !output.status.success() && output.status.code() != Some(1) {
-            return Err(LocateError::Git(
-                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            ));
-        }
-        let mut tracker = false;
-        let mut remotes: Vec<(String, String)> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let (key, value) = line.split_once(' ').unwrap_or((line, ""));
-                tracker |= key == REPLICA_CONFIG;
-                let name = key.strip_prefix("remote.")?.strip_suffix(".url")?;
-                Some((name.to_owned(), value.to_owned()))
-            })
-            .collect();
+        let (urls, tracker) = Git::new(repo)
+            .local_urls_and_key(("acyclic", "replica"))
+            .map_err(|e| LocateError::Git(e.to_string()))?;
+        let mut remotes = urls;
         remotes.sort_by_key(|(name, _)| (name != "origin", name.clone()));
         let remotes = remotes.into_iter().map(|(_, url)| url).collect();
         Ok(Self { repo: repo.to_owned(), remotes, tracker })
@@ -238,22 +224,8 @@ impl Settings {
         if !self.tracker {
             return Ok(None);
         }
-        let output = git(&self.repo, &["rev-parse", "--show-toplevel"])?;
-        if !output.status.success() {
-            return Err(LocateError::Git(
-                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            ));
-        }
-        Ok(Some(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end())))
+        Git::new(&self.repo).toplevel().map(Some).map_err(|e| LocateError::Git(e.to_string()))
     }
-}
-
-fn git(repo: &Path, args: &[&str]) -> Result<std::process::Output, LocateError> {
-    crate::store::git_at(repo)
-        .args(args)
-        .env("LC_ALL", "C")
-        .output()
-        .map_err(|err| LocateError::Git(format!("git can't run: {err}")))
 }
 
 #[cfg(test)]

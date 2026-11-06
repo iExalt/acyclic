@@ -18,7 +18,7 @@ bundled packages.
 
 ## The server's image
 
-The image adds the binary and these notices to Alpine Linux, with its `git` and `ca-certificates` packages. Alpine's
-packages keep their own licences: among them BusyBox and git are under the GNU General Public License version 2, and
+The image adds the binary and these notices to Alpine Linux, with its `ca-certificates` package. Alpine's
+packages keep their own licences: among them BusyBox is under the GNU General Public License version 2, and
 musl under the MIT License. `/usr/share/acyclic/packages.txt` in the image lists every package and version it holds;
 their sources are in Alpine's aports repository (<https://gitlab.alpinelinux.org/alpine/aports>) and on its mirrors.

@@ -3,11 +3,10 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use crate::model::Repository;
+use crate::store::Git;
 
 /// Whether a commit is on a repository's default branch.
 pub trait Ancestry {
@@ -21,9 +20,8 @@ pub trait Ancestry {
 }
 
 /// Checks ancestry in local code clones, as they were last fetched. Each clone's default branch is looked up once,
-/// with its latest commits, and abbreviated ids are named in full by one git process kept open, so a read with many
-/// done dependencies starts a few git processes rather than two for each. Make one for each read: it doesn't see a
-/// branch move after its first look.
+/// with its latest commits, so a batch with many commits walks each branch once. Make one for each batch: it doesn't
+/// see a branch move after its first look, except through [`refresh`](GitAncestry::refresh).
 pub struct GitAncestry<F> {
     clone_of: F,
     branches: RefCell<BTreeMap<(PathBuf, String), Result<Branch, String>>>,
@@ -33,10 +31,10 @@ pub struct GitAncestry<F> {
 struct Branch {
     target: String,
     commits: Vec<String>,
-    names: Option<Names>,
+    git: Git,
 }
 
-/// The most of a branch's commits looked up at once; an older commit takes a git process of its own.
+/// The most of a branch's commits looked up at once; an older commit is walked to on its own.
 const LATEST: usize = 100_000;
 
 impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
@@ -46,101 +44,24 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
     }
 }
 
-/// Git in `clone`, in the C locale.
-fn git_in(clone: &Path) -> std::process::Command {
-    let mut git = crate::store::git_at(clone);
-    git.env("LC_ALL", "C");
-    git
-}
-
-/// Git's output in `clone`.
-fn git_output(clone: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    git_in(clone).args(args).output().map_err(|e| format!("git can't run: {e}"))
-}
-
 impl Branch {
     /// The ref `clone` reads `branch` from, and its latest commits.
     fn of(clone: &Path, branch: &str) -> Result<Self, String> {
+        let git = Git::new(clone);
         let target = [format!("refs/remotes/origin/{branch}"), format!("refs/heads/{branch}")]
             .into_iter()
-            .find(|candidate| {
-                git_output(
-                    clone,
-                    &["rev-parse", "--verify", "--quiet", &format!("{candidate}^{{commit}}")],
-                )
-                .is_ok_and(|out| out.status.success())
-            })
+            .find_map(|candidate| git.resolve(&candidate).ok().flatten())
             .ok_or_else(|| format!("the clone has no {branch} branch"))?;
         // Without them, every commit is checked on its own, which is slower but no less right.
-        let mut commits =
-            git_output(clone, &["rev-list", &format!("--max-count={LATEST}"), &target])
-                .ok()
-                .filter(|out| out.status.success())
-                .map(|out| {
-                    String::from_utf8_lossy(&out.stdout)
-                        .lines()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+        let mut commits = git.recent_commits(&target, LATEST).unwrap_or_default();
         commits.sort_unstable();
-        Ok(Self { target, commits, names: None })
+        Ok(Self { target, commits, git })
     }
 
-    /// Whether `commit` is among the latest. An abbreviated id is named in full first, as git names it: one that
-    /// names no commit, or several, isn't.
-    fn has(&mut self, clone: &Path, commit: &str) -> bool {
-        let full = if matches!(commit.len(), 40 | 64) {
-            Some(commit.to_ascii_lowercase())
-        } else {
-            self.names.get_or_insert_with(|| Names::start(clone)).full(commit)
-        };
-        full.is_some_and(|full| self.commits.binary_search(&full).is_ok())
-    }
-}
-
-/// A `git cat-file` that names abbreviated commit ids in full, one a line, started on the first.
-struct Names(
-    Option<(std::process::Child, std::process::ChildStdin, BufReader<std::process::ChildStdout>)>,
-);
-
-impl Names {
-    fn start(clone: &Path) -> Self {
-        let started = git_in(clone)
-            .args(["cat-file", "--batch-check"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        Self(started.ok().and_then(|mut child| {
-            let (stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
-            Some((child, stdin, BufReader::new(stdout)))
-        }))
-    }
-
-    /// The commit `id` names, in full, or `None` when it names none, several objects, another kind of object, or git
-    /// failed.
-    fn full(&mut self, id: &str) -> Option<String> {
-        let (_, stdin, stdout) = self.0.as_mut()?;
-        // Bare, as merge-base takes it: an id that also starts another kind of object is ambiguous to both.
-        writeln!(stdin, "{id}").and_then(|()| stdin.flush()).ok()?;
-        let mut line = String::new();
-        stdout.read_line(&mut line).ok()?;
-        // `<id> commit <size>` when found, else the id asked for and why not, such as `missing` or `ambiguous`.
-        match line.split_whitespace().collect::<Vec<_>>()[..] {
-            [full, "commit", _] => Some(full.to_owned()),
-            _ => None,
-        }
-    }
-}
-
-impl Drop for Names {
-    fn drop(&mut self) {
-        if let Some((mut child, stdin, _)) = self.0.take() {
-            // Its input closed, it exits.
-            drop(stdin);
-            let _ = child.wait();
-        }
+    /// The commit `commit` names, in full: an abbreviated id as git names it, so one that names no commit, or several,
+    /// names none.
+    fn full(&self, commit: &str) -> Option<String> {
+        self.git.full_commit(commit)
     }
 }
 
@@ -180,22 +101,16 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
             Ok(found) => found,
             Err(reason) => return Check::NoBranch(reason.clone()),
         };
-        if found.has(&clone, commit) {
+        // An id the clone has no object for is unknown: a typo, or a commit it hasn't fetched.
+        let Some(full) = found.full(commit) else { return Check::UnknownCommit };
+        if found.commits.binary_search(&full).is_ok() {
             return Check::Merged;
         }
-        // Not among the latest: not merged, older than they go, or no commit git knows, which git tells apart.
-        let output = match git_output(
-            &clone,
-            &["merge-base", "--is-ancestor", "--end-of-options", commit, &found.target],
-        ) {
-            Ok(output) => output,
-            Err(reason) => return Check::Unchecked(reason),
-        };
-        match output.status.code() {
-            Some(0) => Check::Merged,
-            Some(1) => Check::NotMerged,
-            _ if !knows(&clone, commit) => Check::UnknownCommit,
-            _ => Check::Unchecked(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
+        // Not among the latest: not merged, or older than they go.
+        match found.git.is_ancestor_checked(&full, &found.target) {
+            Ok(true) => Check::Merged,
+            Ok(false) => Check::NotMerged,
+            Err(error) => Check::Unchecked(error.to_string()),
         }
     }
 
@@ -211,7 +126,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
             repository.default_branch.one().ok_or("the repository has no single default branch")?;
         // Only the remote-tracking ref `Branch::of` reads moves: the checkout and its branches are left alone.
         let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
-        let result = fetch(&clone, &refspec, FETCH_TIMEOUT);
+        let result = fetch(&clone, refspec, FETCH_TIMEOUT);
         self.branches.borrow_mut().remove(&(clone, branch.to_owned()));
         result
     }
@@ -220,43 +135,17 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
 /// How long a fetch may take before the write it serves gives up.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Fetches `refspec` from `origin` into `clone`, never asking for credentials, and gives up after `timeout`.
-fn fetch(clone: &Path, refspec: &str, timeout: std::time::Duration) -> Result<(), String> {
-    let mut git = git_in(clone);
-    git.args(["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", refspec])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
-        git.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
-    }
-    let mut child = git.spawn().map_err(|e| format!("git can't run: {e}"))?;
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut stderr = String::new();
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
-                }
-                return if status.success() { Ok(()) } else { Err(stderr.trim().to_owned()) };
-            },
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("the fetch took longer than {} seconds", timeout.as_secs()));
-            },
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-            Err(error) => return Err(format!("git can't run: {error}")),
-        }
-    }
-}
-
-/// Whether `clone` has the commit `commit` names.
-fn knows(clone: &Path, commit: &str) -> bool {
-    git_output(clone, &["cat-file", "-e", "--end-of-options", &format!("{commit}^{{commit}}")])
-        .is_ok_and(|out| out.status.success())
+/// Fetches `refspec` from `origin` into `clone`, and gives up after `timeout`: the fetch runs on a thread of its own,
+/// left to finish or fail on its own when it takes longer.
+fn fetch(clone: &Path, refspec: String, timeout: std::time::Duration) -> Result<(), String> {
+    let (sent, received) = std::sync::mpsc::channel();
+    let clone = clone.to_owned();
+    std::thread::spawn(move || {
+        let _ = sent.send(Git::new(&clone).fetch("origin", &[refspec]).map_err(|e| e.to_string()));
+    });
+    received.recv_timeout(timeout).unwrap_or_else(|_| {
+        Err(format!("the fetch took longer than {} seconds", timeout.as_secs()))
+    })
 }
 
 impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
