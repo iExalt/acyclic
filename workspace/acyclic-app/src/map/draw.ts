@@ -514,7 +514,8 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
   });
   // Started once the batch has settled, so a tile starts from where it is drawn.
   for (const [id, target] of glides) glideTo(core, id, target, sizes.get(id));
-  for (const added of changes.add) motion.hidden.add(added.data.id);
+  if ([...motion.moving.values()].some((moving) => moving.growing))
+    for (const added of changes.add) motion.hidden.add(added.data.id);
   revealReady(core);
   for (const id of motion.hidden) {
     stopFading(core, id);
