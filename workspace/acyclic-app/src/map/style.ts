@@ -107,11 +107,15 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
     {
       selector: "node.box, node.collapsed",
       style: {
-        "background-image": "data(mark)",
-        "background-fit": "none",
+        "background-image": (node: cytoscape.NodeSingular) => [node.data("mark"), node.data("stageMark") ?? "none"],
+        "background-fit": ["none", "none"],
         "background-clip": "node",
-        "background-position-x": "0px",
-        "background-position-y": "0px",
+        "background-position-x": ["0px", "100%"],
+        "background-offset-x": ["0px", "-12px"],
+        "background-position-y": (node: cytoscape.NodeSingular) => [
+          "0px",
+          `${(node.hasClass("box") ? STRIP / 2 : (Number(node.data("height")) - Number(node.data("reserve") ?? 0)) / 2) - 8}px`,
+        ],
       },
     },
     { selector: "node.box.quiet, node.collapsed.quiet", style: { color: p.muted } },

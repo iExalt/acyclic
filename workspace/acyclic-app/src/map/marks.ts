@@ -139,3 +139,18 @@ function once(mine: Map<string, string>, key: string, svg: () => string): string
   }
   return uri;
 }
+
+/** A fixed-size stage image, anchored to the box's right inset while its frame grows. */
+export function boxStageOf(stage: Stage | null, palette: Palette): string {
+  let mine = made.get(palette);
+  if (mine === undefined) {
+    mine = new Map();
+    made.set(palette, mine);
+  }
+  return once(
+    mine,
+    `stage ${stage}`,
+    () =>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">${stage === null ? "" : iconAt(stage, 0, 8, palette)}</svg>`,
+  );
+}

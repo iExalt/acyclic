@@ -449,6 +449,9 @@ before what went wrong.
 - **Boxes fold.** A box's chevron folds or unfolds it, reaching 44 px for a finger; the box's corner stays where it was,
   and nothing pans to show what it opened. The Map opens with the top level's boxes open and every box below folded,
   and a fold survives the plan being read again.
+  The frame grows down and right over 160 ms with Material Bézier easing (`0.2, 0, 0, 1`), keeping its top-left
+  corner fixed throughout. New contents appear immediately when their growing frames finish, with no fade.
+  Collapse removes the contents immediately, then shrinks the frame. Reduced motion changes both at once.
 - **Finished work folds away** (`src/map/fold.ts`), so what is left reads first (the user: "it's hard to tell what's
   done and what's not done"). In a box, a thread's done items, two or more, are one done box named after the
   thread, its stripe in the thread's colour, its name on two lines over how many are done; finished work that no link

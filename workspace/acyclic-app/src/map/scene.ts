@@ -18,6 +18,7 @@ export interface Selection {
 }
 export interface SceneNode {
   id: string;
+  owner: string | null;
   /** Its displayed label, with item titles clamped and wrapped to fit `textWidth`. */
   label: string;
   textWidth: number;
@@ -78,6 +79,7 @@ export interface SceneEdge {
 /** A dot where a trunk of links leaving one node splits, lit or dimmed with a link that splits there. */
 export interface SceneJunction {
   id: string;
+  owners: string[];
   x: number;
   y: number;
   lit: boolean;
@@ -87,6 +89,7 @@ export interface SceneJunction {
 /** A dashed line in a box between its items aside, which can start any time, and its graph. */
 export interface SceneDivider {
   id: string;
+  owner: string;
   x: number;
   top: number;
   bottom: number;
@@ -147,6 +150,7 @@ export function scene(
     const metrics = measured?.get(node.id) ?? metricsOf(node, fonts, 200);
     nodes.push({
       id: node.id,
+      owner: node.parent,
       label: metrics.lines.join("\n"),
       textWidth: metrics.textWidth,
       header: metrics.header || metrics.height,
@@ -225,6 +229,7 @@ export function scene(
       const was = junctions.get(id);
       junctions.set(id, {
         id,
+        owners: [...new Set([...(was?.owners ?? []), edge.source, edge.target])],
         x: at.x,
         y: at.y,
         lit: edge.lit || (was?.lit ?? false),
@@ -234,7 +239,7 @@ export function scene(
   const dividers: SceneDivider[] = [];
   for (const node of nodes) {
     const line = node.kind === "box" ? placed.dividers.get(node.id) : undefined;
-    if (line !== undefined) dividers.push({ id: `divider ${node.id}`, ...line, layer: node.layer });
+    if (line !== undefined) dividers.push({ id: `divider ${node.id}`, owner: node.id, ...line, layer: node.layer });
   }
   return { nodes, stubs, edges, junctions: [...junctions.values()], dividers, thread };
 }
