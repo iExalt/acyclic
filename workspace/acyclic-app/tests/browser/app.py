@@ -397,7 +397,14 @@ def centre(page, id, rise=0):
 
 def tap_middle(page, view, id, rise=0):
     """Taps the middle of a node where it is drawn, after bringing it to full size, `rise` above the middle."""
+    # Existence is not clickability: a frame-first reveal has already inserted its hidden children.
+    ready = """id => {
+        const m = document.querySelector('[data-testid=map]'), node = m?.cy?.getElementById(id);
+        return m?.dataset.settled === 'true' && node?.nonempty() && node.visible();
+    }"""
+    page.wait_for_function(ready, arg=id)
     centre(page, id, rise)
+    page.wait_for_function(ready, arg=id)
     middle = page.get_by_test_id("map").evaluate(
         "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
         " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
